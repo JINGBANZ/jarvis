@@ -29,6 +29,25 @@ and sees (screen), rather than only answering a hotkey. Everything below is meas
 | **OpenAGI** ([spshulem/openAGI](https://github.com/spshulem/openAGI)) | Yes | Proactive, but **screen-only (no audio)** and brand-new/unproven. Its "Adaptive Scrutiny" interjection gate is a nice reference for *when to speak up*. |
 | **OpenClaw** ([openclaw.ai](https://openclaw.ai/)) | Time-based | A computer-use **task agent** (does things for you); its "heartbeat" is scheduled, not event-driven interjection. Different paradigm. (Not the 1997 game of the same name.) |
 
+## Commercial Interview Copilots (checked 2026-06-13)
+
+Evaluated against the proactive LeetCode-coach goal. All closed-source, paid, and built to *hand
+over answers* (interview "cheating") rather than *coach with short nudges* — opposite philosophy.
+
+| Product | Proactive? | macOS both-sides audio | Coding-specific | Open source | Price |
+|---|---|---|---|---|---|
+| **Final Round AI** | Semi (session-armed, then auto-suggests) | Yes | A vertical | No | Free; ~$25–148/mo |
+| **LockedIn AI** | **Yes — auto-detect by default** | Yes | Coding Copilot + region select | No | Free; $30/$100/$300 mo |
+| **Interview Coder** | No (hotkey/screenshot) | Yes (newer) | **Most coding-specific** | Founder's: No · **AGPL community fork: Yes** | Free; ~$299/mo or $799 lifetime |
+
+- **LockedIn AI** is the best *behavior/UX reference* — it most resembles what we want (auto-detect
+  questions, both-sides audio, screen-region awareness, always-on overlay). Closed, so reference only.
+- **Interview Coder** is the origin story of Cluely (Roy Lee, Columbia suspension, March 2025). An
+  AGPL community fork (`Ornithopter-pilot/interview-coder-withoupaywall-opensource`) exists and has
+  clean screenshot→invisible-overlay plumbing, but it's reactive and answer-dumping, not coaching.
+- **Verdict:** none worth *using*; none change build-vs-fork. Still build. Use LockedIn AI as a
+  behavior reference.
+
 ## Building Blocks Confirmed Available (so we don't reinvent them)
 
 - **Screen capture:** macOS built-in `screencapture` CLI; ScreenCaptureKit (screen + system audio).
