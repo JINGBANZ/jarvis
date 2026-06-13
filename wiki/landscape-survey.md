@@ -33,9 +33,9 @@ and sees (screen), rather than only answering a hotkey. Everything below is meas
 
 - **Screen capture:** macOS built-in `screencapture` CLI; ScreenCaptureKit (screen + system audio).
 - **OCR (if needed):** Apple Vision `RecognizeTextRequest` (on-device).
-- **Transcription:** OpenAI Realtime API (semantic VAD gives turn-end detection for free).
+- **Transcription:** `gpt-realtime-2` on the OpenAI Realtime API (semantic VAD gives turn-end detection for free).
 - **Overlay:** AppKit NSPanel (non-activating, floating, can exclude itself from capture).
-- **Brain:** GPT-5.5 with tool-use.
+- **Brain:** `gpt-5.5` with tool-use + vision.
 
 ## Conclusion
 

@@ -5,25 +5,33 @@
 
 ## 1. Summary
 
-A native Swift/SwiftUI macOS menu-bar app. It transcribes the user's voice continuously, and on
-each conversational turn (or after a silence) it calls GPT-5.5 with two tools — `capture_screen`
-and `speak`. The model decides whether to look at the screen and whether to offer a short LeetCode
-coaching tip, which is rendered in an overlay.
+A native Swift/SwiftUI macOS menu-bar app. It transcribes the user's voice continuously with
+`gpt-realtime-2`, and on each conversational turn (or after a silence) it calls `gpt-5.5` with two
+tools — `capture_screen` and `speak`. The model decides whether to look at the screen and whether
+to offer a short LeetCode coaching tip, which is rendered in an overlay. The model is given timing
+context (timestamped transcript + how long the user has been silent) so it can distinguish
+"thinking productively" from "stuck."
 
 ## 2. The Harness Loop (pseudocode)
 
 ```swift
-// Always-on: stream audio to the Realtime API, maintain a rolling transcript.
-transcriber.onTurnEnd  = { handleTrigger(reason: .turnEnd) }
-transcriber.onSilence  = { handleTrigger(reason: .silence) }   // e.g. 8s of no speech
+// Always-on: stream audio to gpt-realtime-2, maintain a rolling, timestamped transcript.
+transcriber.onTurnEnd = { handleTrigger(.turnEnd) }
+// Silence fires after `silenceTimeoutSeconds`; the actual quiet duration is passed through.
+transcriber.onSilence = { secs in handleTrigger(.silence(secondsQuiet: secs)) }
 
-func handleTrigger(reason: TriggerReason) {
+func handleTrigger(_ reason: TriggerReason) {
     guard !muted else { return }
     guard coachDriver.guardrailsAllow() else { return }   // cooldown + rate cap
 
-    let messages = coachPrompt(transcriptWindow: transcriber.recentWindow(seconds: 90),
-                               reason: reason)
-    // Tool-use loop against GPT-5.5
+    // The model sees a timestamped transcript window plus explicit timing context, so it can
+    // reason about pace — e.g. "they went quiet 18s ago right after reading the constraints."
+    let messages = coachPrompt(
+        transcript: transcriber.recentWindow(seconds: 90),     // each line carries a timestamp
+        context: TriggerContext(reason: reason,                // .turnEnd or .silence(secondsQuiet:)
+                                secondsSinceLastSpeech: transcriber.silenceDuration,
+                                sessionElapsedSeconds: clock.sessionElapsed))
+    // Tool-use loop against gpt-5.5
     var convo = messages
     while true {
         let resp = openAI.chat(model: GPT_5_5,
@@ -47,6 +55,23 @@ func handleTrigger(reason: TriggerReason) {
 
 The loop is deliberately small. All judgment ("do I need to see the screen?", "do I have a useful
 tip?", "should I stay quiet?") lives in the model, not the harness.
+
+### Timing & "stuck" detection
+
+The model must be **time-aware**, because going quiet is a primary signal that the user is stuck —
+but silence is ambiguous (they might be productively thinking). So the harness supplies time, and
+lets the model judge:
+
+- **Timestamped transcript:** every line in the window is prefixed with a relative timestamp
+  (e.g. `[01:42] me: maybe a hash map…`), so the model can see rhythm and gaps.
+- **Silence trigger carries duration:** when `silenceTimeoutSeconds` of quiet elapses, the trigger
+  fires with `secondsQuiet`, and the prompt states it plainly (e.g. "The user has been silent for
+  20 seconds"). The model decides whether that means "offer a nudge" or "let them think."
+- **Session clock:** `sessionElapsedSeconds` lets the model factor in how long they've been on the
+  problem overall.
+
+The harness only *detects and reports* time; it never decides that silence means stuck. That
+judgment is the model's, informed by the timing context above.
 
 ## 3. Tools Exposed to the Model
 
@@ -93,6 +118,11 @@ You are Jarvis, a calm, sharp LeetCode coach sitting beside the user while they 
 You hear them think aloud. You cannot see their screen unless you call capture_screen — do that
 when you need to read the problem or their code to be specific and correct.
 
+You are given timing context: a timestamped transcript, how many seconds the user has been silent,
+and how long they have been on the problem. Use it. A long silence often means they are stuck and
+a gentle nudge would help — but not always; sometimes they are thinking productively and should be
+left alone. Judge from what they last said and how long they have been quiet.
+
 Your job: nudge them toward the solution with short, encouraging, *specific* hints. Never dump the
 full solution unless they are truly stuck and ask for it. Prefer asking a pointed question or
 pointing at the next small step (e.g. "What's the time complexity of that nested loop?").
@@ -105,14 +135,19 @@ do speak, call the speak tool with at most 3 short sentences.
 
 | Key | Default | Notes |
 |---|---|---|
-| `silenceTimeoutSeconds` | 8 | How long of no speech before a "maybe stuck" trigger fires. |
+| `silenceTimeoutSeconds` | 8 | How long of no speech before a "maybe stuck" silence trigger fires. The actual quiet duration is passed to the model. |
 | `cooldownSeconds` | 12 | Minimum gap between spoken responses. |
 | `maxInterjectionsPerMinute` | 4 | Hard rate cap. |
-| `transcriptWindowSeconds` | 90 | How much recent transcript the model sees per turn. |
+| `transcriptWindowSeconds` | 90 | How much recent transcript the model sees per turn (timestamped). |
 | `sentenceDisplaySeconds` | 5 | How long each overlay sentence stays up. |
 | `maxSentences` | 3 | Hard cap on response length. |
-| `model.brain` | GPT-5.5 | Confirm exact model ID against current OpenAI docs at build time. |
-| `model.transcription` | OpenAI Realtime | Confirm exact model ID at build time. |
+| `model.brain` | `gpt-5.5` | Latest flagship (released 2026-04). Vision + tool-use — **required** to read screenshots. Confirm the exact ID against live OpenAI docs at build time. |
+| `model.transcription` | `gpt-realtime-2` | Latest realtime model (released 2026-05), GPT-5-class reasoning; live transcription + semantic turn/intent detection. `gpt-realtime-whisper` is a cheaper STT-only fallback. Target the **GA** Realtime API (the Beta was removed 2026-05-12). |
+
+> **Model note:** realtime voice models have historically been audio/text only. The screenshot
+> from `capture_screen` therefore goes to `gpt-5.5` (vision-capable), not the realtime model. At
+> build time, check whether `gpt-realtime-2` accepts image input — if it does, the two model roles
+> *may* collapse into one, simplifying the harness. Until confirmed, keep them split.
 
 API key is read from the **Keychain**, entered once via the menu bar. Never stored in plaintext or
 committed.

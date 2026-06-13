@@ -12,7 +12,7 @@ screen matters.
 ## Decision
 
 **Expose screen capture as a tool the model calls on demand.** The harness runs a tool-use loop:
-the always-on input is the audio transcript; `capture_screen` is a tool GPT-5.5 invokes only when
+the always-on input is the audio transcript; `capture_screen` is a tool `gpt-5.5` invokes only when
 it judges it needs to see the screen. The harness fulfills the call (a silent screenshot) and
 returns the image into the conversation.
 

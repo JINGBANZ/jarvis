@@ -11,7 +11,7 @@ the problem statement and your code. When it has something genuinely useful to a
 **unprompted** with a short tip rendered in an on-screen overlay.
 
 The guiding belief: **build the harness, not the intelligence.** The intelligence already exists
-(GPT-5.5, the OpenAI Realtime API). The macOS capabilities already exist (ScreenCaptureKit,
+(`gpt-5.5`, the `gpt-realtime-2` model on the OpenAI Realtime API). The macOS capabilities already exist (ScreenCaptureKit,
 AVFoundation, Vision, the built-in `screencapture` tool, NSPanel). Jarvis is the thin layer of
 glue that wires them into a proactive coach. We write the least code possible and reinvent nothing.
 
@@ -21,10 +21,10 @@ glue that wires them into a proactive coach. We write the least code possible an
             ┌──────────────────────────────────────────────────────────────┐
             │                         JARVIS HARNESS                         │
             │                                                                │
-  mic  ─────┤  AudioInput ──► Transcriber (OpenAI Realtime) ──► transcript   │
+  mic  ─────┤  AudioInput ──► Transcriber (gpt-realtime-2) ──► transcript    │
   sys-audio ┤                          │ turn-end / silence events           │
             │                          ▼                                      │
-            │                    CoachDriver ──(GPT-5.5 + tools)──┐           │
+            │                    CoachDriver ──(gpt-5.5 + tools)──┐           │
             │                       ▲   │                         │           │
             │          capture_screen   │ speak(text)             │           │
             │                       │   ▼                         │           │
@@ -43,12 +43,14 @@ moments the model judges worthwhile.
 
 ### The turn
 
-1. The Transcriber emits a **turn-end** event (OpenAI Realtime semantic VAD — "the speaker
-   finished a thought") or a **silence-timeout** fires (you've gone quiet, maybe stuck).
+1. The Transcriber emits a **turn-end** event (`gpt-realtime-2` semantic VAD — "the speaker
+   finished a thought") or a **silence-timeout** fires (you've gone quiet, maybe stuck). The
+   silence event carries *how long* you've been quiet.
 2. The CoachDriver checks its guardrails (mute? within cooldown? under the rate cap?). If
    blocked, it does nothing.
-3. Otherwise it calls **GPT-5.5** with the coach system prompt, the recent transcript window,
-   and the tool set `[capture_screen, speak]`.
+3. Otherwise it calls **`gpt-5.5`** with the coach system prompt, the recent **timestamped**
+   transcript window, the timing context (seconds silent, time on the problem), and the tool set
+   `[capture_screen, speak]`. The timing is what lets the model tell "thinking" from "stuck."
 4. The model may call `capture_screen`. The harness fulfills it (a silent screenshot) and
    returns the image into the conversation. The model may now reason over what's on screen.
 5. The model either calls `speak(text)` — a ≤3-sentence tip — or returns nothing (stay silent).
@@ -59,8 +61,8 @@ moments the model judges worthwhile.
 | Component | Responsibility | Built on (borrowed) |
 |---|---|---|
 | **AudioInput** | Capture mic and (optionally) system audio; stream to the Transcriber. | AVFoundation (mic); ScreenCaptureKit (system audio). |
-| **Transcriber** | Maintain a rolling, speaker-labeled transcript; emit turn-end events. | OpenAI Realtime API (semantic VAD). |
-| **CoachDriver** | The event loop. On triggers, enforce guardrails, call GPT-5.5 with tools, route tool calls. | OpenAI GPT-5.5 (tool-use). |
+| **Transcriber** | Maintain a rolling, speaker-labeled, **timestamped** transcript; emit turn-end events and silence events (with quiet duration). | `gpt-realtime-2` (latest realtime model; semantic VAD). |
+| **CoachDriver** | The event loop. On triggers, enforce guardrails, call the brain with the transcript + timing context and tools, route tool calls. | `gpt-5.5` (vision + tool-use). |
 | **ScreenTool** | Fulfill `capture_screen`: take a silent screenshot of the active display, excluding the overlay window. | macOS `screencapture` CLI / ScreenCaptureKit. |
 | **Overlay** | Render `speak` output: ≤3 sentences, ~5s each, non-activating, always-on-top, excluded from capture. | AppKit NSPanel. |
 | **MenuBar** | On/off, mute, status indicator, one-time API-key entry. | AppKit menu-bar item; Keychain for the key. |
@@ -72,7 +74,7 @@ to tool calls and enforces safety.
 ## 4. Data Flow & Cost Model
 
 - **Continuous (cheap):** audio → Realtime → transcript. This runs the whole session.
-- **Per-turn (cheap):** a text-only GPT-5.5 call on each turn-end/silence event. No image unless
+- **Per-turn (cheap):** a text-only `gpt-5.5` call on each turn-end/silence event. No image unless
   the model asks.
 - **On-demand (expensive):** a screenshot + vision tokens, only when the model calls
   `capture_screen`. A coaching response, only when the model calls `speak`.
@@ -88,8 +90,8 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
   general filesystem access** — Jarvis can see your screen, not your files. The OS enforces this.
 - **API key in the Keychain**, never plaintext on disk.
 - **Built and run in a restricted macOS user account**, limiting blast radius.
-- **Egress is narrow and explicit:** audio to the Realtime API; a screenshot + transcript window
-  to GPT-5.5 *only when the model triggers a capture/response*. No recording to disk in the MVP.
+- **Egress is narrow and explicit:** audio to `gpt-realtime-2`; a screenshot + transcript window
+  to `gpt-5.5` *only when the model triggers a capture/response*. No recording to disk in the MVP.
 - **Behavioral guardrails:** a cooldown after each utterance, a rate cap (max N interjections per
   minute), a global mute hotkey, and a visible "listening" indicator. These directly counter the
   central failure mode of a proactive agent — talking too much or at the wrong moment.

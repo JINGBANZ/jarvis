@@ -15,7 +15,8 @@ then build on the Mac.
 - **Scope:** personal tool first (see [0002](./decisions/0002-personal-tool-first.md)). No
   auth/billing/onboarding. MVP is the whole thing, target < 2 days of autonomous build.
 - **Stack:** native Swift/SwiftUI menu-bar app (see [0003](./decisions/0003-native-swift-stack.md)).
-- **Brain:** GPT-5.5 with tool-use. **Transcription:** OpenAI Realtime API. API-only, no local models.
+- **Brain:** `gpt-5.5` with tool-use + vision (latest flagship). **Transcription:** `gpt-realtime-2`
+  (latest realtime model, on the GA Realtime API). API-only, no local models.
 - **Screen capture is a model-invoked tool** (see [0005](./decisions/0005-model-triggered-screen-capture.md)).
 - **One mode only: LeetCode Coach.** No tiers/mode selector (see [0006](./decisions/0006-single-coach-mode.md)).
 - **Overlay:** at most 3 sentences per response, each shown ~5 seconds.
@@ -25,8 +26,9 @@ then build on the Mac.
 
 ## Open Questions / To Confirm
 
-- Exact OpenAI model IDs for the Realtime transcription leg vs. the GPT-5.5 brain leg (confirm
-  against current API docs at build time).
+- ~~Exact OpenAI model IDs~~ **Resolved:** brain = `gpt-5.5`, transcription = `gpt-realtime-2`.
+  Still re-confirm the exact IDs against live OpenAI docs at build time, and check whether
+  `gpt-realtime-2` accepts image input (if so, the brain and transcription roles may merge).
 - ~~Whether system-audio (both-sides) capture is in the MVP or deferred~~ **Resolved:** system
   audio is **in** the MVP, as long as it doesn't risk the 2-day timeline. Mic remains the critical
   path; system audio rides along via ScreenCaptureKit and is the first thing cut if the budget is
