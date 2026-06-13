@@ -22,13 +22,22 @@ It requests **no** general filesystem entitlement. It cannot read the user's doc
 data, or home directory. The only files it touches are its own sandbox container and transient
 screenshot temp files it creates and deletes.
 
-### 2. Restricted macOS User Account (development & run)
+### 2. Restricted macOS User Account (development & run) — HARD REQUIREMENT
 
-The app is **built and run inside a separate, low-privilege macOS user account**. This bounds the
-blast radius of both the build agent and the running app: even a bug or a bad instruction can't
-reach the primary account's files. This is also the answer to "can development happen on the VPS?"
-— no; it happens on the Mac, in this restricted account (see
+**This is a MUST, not a nice-to-have.** The autonomous build agent must run inside a **separate,
+low-privilege (Standard, non-admin) macOS user account** — never the user's primary account. The
+explicit requirement: *no file on the user's main desktop/account may be readable or writable by
+the build agent.* A separate account is a hard OS boundary that guarantees this; the agent's reach
+is confined to that throwaway account's home folder.
+
+This bounds the blast radius of both the build agent and the running app: even a bug or a bad
+instruction cannot touch the primary account's files. It is also the answer to "can development
+happen on the VPS?" — no; it happens on the Mac, in this restricted account (see
 [decision 0004](./decisions/0004-build-on-mac-not-vps.md)).
+
+**Setup:** System Settings → Users & Groups → add a new **Standard** user (e.g. `jarvisbuild`) →
+log into it → do all building and running there. Delete the account when done. The project repo is
+cloned into that account's home, not the primary account's.
 
 ### 3. Secrets
 

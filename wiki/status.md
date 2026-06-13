@@ -20,9 +20,20 @@ then build on the Mac.
 - **Screen capture is a model-invoked tool** (see [0005](./decisions/0005-model-triggered-screen-capture.md)).
 - **One mode only: LeetCode Coach.** No tiers/mode selector (see [0006](./decisions/0006-single-coach-mode.md)).
 - **Overlay:** at most 3 sentences per response, each shown ~5 seconds.
-- **Where it's built:** on the MacBook, in a restricted macOS user account — *not* on the VPS
-  (see [0004](./decisions/0004-build-on-mac-not-vps.md)). This session/repo (on the VPS) is for
-  design and code authoring; the build + verify loop must run on macOS.
+- **Where it's built:** on the MacBook, in a **separate restricted (Standard, non-admin) macOS
+  user account — a HARD REQUIREMENT** to protect the user's main account/files from the autonomous
+  build agent (see [sandbox.md](./sandbox.md#2-restricted-macos-user-account-development--run--hard-requirement)).
+  *Not* on the VPS (see [0004](./decisions/0004-build-on-mac-not-vps.md)). This session/repo (on the
+  VPS) is for design and code authoring; the build + verify loop must run on macOS.
+
+## Open Decision
+
+- **Fork vs. greenfield.** Evaluated 6 open-source bases at the code level (see
+  [fork-evaluation.md](./fork-evaluation.md)). Top three: Natively (active, already proactive,
+  AGPL, large), Glass (OpenAI-native, stale), Pluely (Tauri/Rust, needs streaming-STT rework).
+  None have model tool-calling. User leans Natively but is reconsidering native Swift
+  ([0003](./decisions/0003-native-swift-stack.md)). Also checking commercial products Final Round
+  AI / LockedIn AI / Interview Coder. **Not yet decided.**
 
 ## Open Questions / To Confirm
 

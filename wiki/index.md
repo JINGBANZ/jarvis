@@ -14,6 +14,7 @@
 - **[specification.md](./specification.md)** — the buildable spec: tool schemas, the coach prompt, config, pseudocode, latency budget, and the self-verification plan. This is the page another agent should be able to one-shot from.
 - **[sandbox.md](./sandbox.md)** — the security/isolation model (file-access restriction, entitlements, egress).
 - **[landscape-survey.md](./landscape-survey.md)** — every tool and product we tried or evaluated, and how each measured up. ("What I tried.")
+- **[fork-evaluation.md](./fork-evaluation.md)** — code-level evaluation of open-source apps as a fork base for the PoC, and why they're all Electron/Tauri rather than native Swift.
 
 ## Decision Log
 
