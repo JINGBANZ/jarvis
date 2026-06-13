@@ -80,7 +80,8 @@ to tool calls and enforces safety.
   `capture_screen`. A coaching response, only when the model calls `speak`.
 
 The model is the cost governor: it spends vision tokens and screen real estate only when it
-judges them worthwhile. This is the point of [decision 0005](./decisions/0005-model-triggered-screen-capture.md).
+judges them worthwhile. That is the whole point of making screen capture a model-invoked tool
+rather than a per-turn screenshot.
 
 ## 5. Safety Model
 

@@ -16,16 +16,10 @@
 - **[landscape-survey.md](./landscape-survey.md)** — every tool and product we tried or evaluated, and how each measured up. ("What I tried.")
 - **[fork-evaluation.md](./fork-evaluation.md)** — code-level evaluation of open-source apps as a fork base for the PoC, and why they're all Electron/Tauri rather than native Swift.
 
-## Decision Log
+## Key Decisions
 
-Architecture Decision Records live in **[decisions/](./decisions/README.md)**:
-
-- [0001 — Build our own vs. use an existing tool](./decisions/0001-build-vs-buy.md) ("Why I'm building my own.")
-- [0002 — Personal tool first, not a product](./decisions/0002-personal-tool-first.md)
-- [0003 — Native Swift menu-bar app](./decisions/0003-native-swift-stack.md)
-- [0004 — Build on the Mac, not the VPS](./decisions/0004-build-on-mac-not-vps.md)
-- [0005 — Model-triggered screen capture (tool-use loop)](./decisions/0005-model-triggered-screen-capture.md)
-- [0006 — Single LeetCode-coach mode (no tiers)](./decisions/0006-single-coach-mode.md)
+There is no formal ADR folder — decisions are recorded as a compact log in
+**[status.md](./status.md#key-decisions)**, with the *rationale* living in the design pages it links to.
 
 ## Meta
 

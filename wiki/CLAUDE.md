@@ -13,10 +13,10 @@ re-deriving anything.
 1. **[index.md](./index.md) is the map.** Every page is reachable from it. Add new pages there.
 2. **[status.md](./status.md) is the front door.** Keep it current — it's what a mid-stream reader
    reads first. Update it whenever the phase or the "next action" changes.
-3. **Decisions are immutable records.** Don't rewrite an ADR to reflect a new choice; write a new
-   ADR that supersedes it, and note the supersession in both. See
-   [0005](./decisions/0005-model-triggered-screen-capture.md) and
-   [0006](./decisions/0006-single-coach-mode.md) for examples.
+3. **No formal ADRs at this stage.** Be conservative about decision ceremony. Record decisions as a
+   compact one-line entry in [status.md](./status.md#key-decisions); put the *rationale* in the
+   relevant design page (architecture / specification / fork-evaluation / sandbox). Reserve heavier
+   decision records for big product decisions, once there's a product.
 4. **Spec changes go in [specification.md](./specification.md).** Keep it buildable: schemas,
    prompts, config, pseudocode, verification. If another agent couldn't implement from it, it's
    incomplete.
@@ -29,13 +29,13 @@ re-deriving anything.
 ```
 wiki/
 ├── index.md              # navigation / single source of truth
-├── status.md             # current phase + next action (read first)
+├── status.md             # current phase, key-decisions log, next action (read first)
 ├── architecture.md       # vision, harness loop, components, principles
 ├── specification.md      # the buildable spec
 ├── sandbox.md            # security / isolation model
 ├── landscape-survey.md   # tools tried & evaluated
-├── CLAUDE.md             # this file
-└── decisions/
-    ├── README.md         # ADR index
-    └── NNNN-title.md     # one decision each
+├── fork-evaluation.md    # code-level eval of fork bases
+├── plan-phase1-poc.md    # Phase 1 implementation plan (fork Natively)
+└── CLAUDE.md             # this file
 ```
+(Generated `*.html` review files and `build_html.py` also live here but are gitignored / tooling.)

@@ -1,7 +1,7 @@
 # Landscape Survey — What I Tried and Evaluated
 
 > The record of existing tools and products considered before deciding to build. The conclusion
-> drawn from this page is captured in [decision 0001](./decisions/0001-build-vs-buy.md).
+> drawn from this page — build our own — is summarized in [status.md](./status.md#key-decisions).
 
 ## The Requirement Being Tested
 
@@ -61,4 +61,4 @@ over answers* (interview "cheating") rather than *coach with short nudges* — o
 No maintained, open-source tool does turnkey proactive, unprompted speak-up from live audio +
 screen. The proactive options are either hardware-bound (Omi), unproven/screen-only (OpenAGI), or
 closed and meeting-oriented (Hedy). The reactive tools are stale or single-purpose. The gap is real
-— and small enough to fill with a thin harness over OpenAI + Apple frameworks. → [0001](./decisions/0001-build-vs-buy.md).
+— and small enough to fill with a thin harness over OpenAI + Apple frameworks. → build it.

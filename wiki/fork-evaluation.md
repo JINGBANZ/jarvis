@@ -2,8 +2,8 @@
 
 > Low-level, code-level evaluation of open-source apps as a fork base for the PoC (a proactive
 > LeetCode coach). Each candidate was inspected at the source level (clone + read). Decision on
-> which base — or whether to stay greenfield native Swift — is tracked in
-> [decisions/](./decisions/README.md). Companion to [landscape-survey.md](./landscape-survey.md).
+> which base — or whether to stay greenfield native Swift — is summarized in
+> [status.md](./status.md#key-decisions). Companion to [landscape-survey.md](./landscape-survey.md).
 
 ## The PoC we're trying to reach by forking
 
@@ -79,8 +79,9 @@ For a **personal, macOS-only** tool, the #1 driver (cross-platform) doesn't appl
 hard capability — both-sides system audio — is a **native OS feature** (ScreenCaptureKit / Core Audio
 taps); Natively literally drops to a Rust native module to reach it because Electron can't. In Swift
 that capability is first-class. So native Swift loses nothing functionally on macOS and wins on
-footprint, latency, and sandbox/permission cleanliness — which is exactly why [ADR 0003](./decisions/0003-native-swift-stack.md)
-chose it. The live tension: **forking buys a fast PoC on someone else's Electron body; native Swift
+footprint, latency, and sandbox/permission cleanliness — which is exactly why we chose it for the
+Phase-2 app (see [architecture.md](./architecture.md)). The live tension: **forking buys a fast PoC
+on someone else's Electron body; native Swift
 is the clean long-term app but slower to first demo.** A middle path is to use Natively's Rust audio
 module + proactive loop as a *reference implementation* while building native Swift.
 

@@ -23,13 +23,7 @@ PAGES = [
     ("specification", "specification.md", "Specification", "Design"),
     ("sandbox", "sandbox.md", "Sandbox & Security", "Design"),
     ("landscape-survey", "landscape-survey.md", "Landscape Survey (tools tried)", "Research"),
-    ("d-readme", "decisions/README.md", "Decision Log", "Decisions"),
-    ("d0001", "decisions/0001-build-vs-buy.md", "0001 Build vs. Buy", "Decisions"),
-    ("d0002", "decisions/0002-personal-tool-first.md", "0002 Personal Tool First", "Decisions"),
-    ("d0003", "decisions/0003-native-swift-stack.md", "0003 Native Swift", "Decisions"),
-    ("d0004", "decisions/0004-build-on-mac-not-vps.md", "0004 Build on Mac", "Decisions"),
-    ("d0005", "decisions/0005-model-triggered-screen-capture.md", "0005 Model-Triggered Capture", "Decisions"),
-    ("d0006", "decisions/0006-single-coach-mode.md", "0006 Single Coach Mode", "Decisions"),
+    ("fork-evaluation", "fork-evaluation.md", "Fork Evaluation", "Research"),
 ]
 
 docs = {}

@@ -32,8 +32,8 @@ is confined to that throwaway account's home folder.
 
 This bounds the blast radius of both the build agent and the running app: even a bug or a bad
 instruction cannot touch the primary account's files. It is also the answer to "can development
-happen on the VPS?" — no; it happens on the Mac, in this restricted account (see
-[decision 0004](./decisions/0004-build-on-mac-not-vps.md)).
+happen on the VPS?" — no; it happens on the Mac, in this restricted account, because the macOS
+capture/permission/overlay APIs cannot be compiled or tested on Linux.
 
 **Setup:** System Settings → Users & Groups → add a new **Standard** user (e.g. `jarvisbuild`) →
 log into it → do all building and running there. Delete the account when done. The project repo is

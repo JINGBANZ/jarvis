@@ -198,6 +198,6 @@ behavior is visible.
 ## 9. Build & Run Constraints
 
 - Built and verified **on the MacBook** (the macOS-native capture, permissions, and overlay cannot
-  be tested on Linux). See [decision 0004](./decisions/0004-build-on-mac-not-vps.md).
+  be tested on Linux). See [sandbox.md](./sandbox.md).
 - Built inside a **restricted macOS user account** (security). See [sandbox.md](./sandbox.md).
 - Target: a working MVP in **< 2 days of autonomous Claude Code build**.
