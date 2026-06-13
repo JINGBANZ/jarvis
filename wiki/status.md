@@ -26,14 +26,17 @@ then build on the Mac.
   *Not* on the VPS (see [0004](./decisions/0004-build-on-mac-not-vps.md)). This session/repo (on the
   VPS) is for design and code authoring; the build + verify loop must run on macOS.
 
-## Open Decision
+## Build Approach — DECIDED: Two-Phase ([0007](./decisions/0007-two-phase-build.md))
 
-- **Fork vs. greenfield.** Evaluated 6 open-source bases at the code level (see
-  [fork-evaluation.md](./fork-evaluation.md)). Top three: Natively (active, already proactive,
-  AGPL, large), Glass (OpenAI-native, stale), Pluely (Tauri/Rust, needs streaming-STT rework).
-  None have model tool-calling. User leans Natively but is reconsidering native Swift
-  ([0003](./decisions/0003-native-swift-stack.md)). Also checking commercial products Final Round
-  AI / LockedIn AI / Interview Coder. **Not yet decided.**
+- **Phase 1 (next):** fork **Natively** for a fast proactive-coach PoC — swap models to
+  `gpt-5.5`/`gpt-realtime-2`, retarget its proactive trigger to LeetCode coaching + timing, add the
+  coach prompt, short ephemeral overlay. Goal: validate the experience in ~a day. The
+  `capture_screen` tool-loop is deferred to Phase 2.
+- **Phase 2 (if validated):** clean native Swift app ([0003](./decisions/0003-native-swift-stack.md))
+  using Natively as a reference, with the proper tool-loop and separate-account sandbox.
+- Basis: fork eval of 6 bases ([fork-evaluation.md](./fork-evaluation.md)) + commercial-product
+  survey ([landscape-survey.md](./landscape-survey.md)). None of the commercial tools are usable
+  (closed, paid, answer-dumping); LockedIn AI is the best behavior reference.
 
 ## Open Questions / To Confirm
 
@@ -48,6 +51,8 @@ then build on the Mac.
 
 ## Next Action
 
-1. User reviews this wiki.
-2. Produce the implementation plan (writing-plans).
-3. Sync the repo to the MacBook and run the autonomous build there.
+1. Produce the **Phase 1 implementation plan** (fork Natively → proactive LeetCode-coach PoC).
+2. On the MacBook: create the separate restricted `jarvisbuild` account, clone Natively there,
+   confirm the base app builds and its both-sides audio + overlay work.
+3. Execute the Phase 1 plan; smoke-test the proactive coaching experience.
+4. Decide whether to proceed to Phase 2 (native Swift).

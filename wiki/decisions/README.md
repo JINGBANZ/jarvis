@@ -11,3 +11,4 @@ the consequences. Newest decisions may supersede older ones; supersession is not
 | [0004](./0004-build-on-mac-not-vps.md) | Build on the Mac, not the VPS | Accepted |
 | [0005](./0005-model-triggered-screen-capture.md) | Model-triggered screen capture (tool-use loop) | Accepted |
 | [0006](./0006-single-coach-mode.md) | Single LeetCode-coach mode (no tiers) | Accepted |
+| [0007](./0007-two-phase-build.md) | Two-phase build: fork PoC first, then native | Accepted |
