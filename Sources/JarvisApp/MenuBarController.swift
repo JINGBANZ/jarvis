@@ -51,7 +51,7 @@ final class MenuBarController: NSObject {
         let alert = NSAlert()
         alert.messageText = "OpenAI API Key"
         alert.informativeText = "Stored in your login Keychain."
-        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 320, height: 24))
+        let field = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 320, height: 24))
         alert.accessoryView = field
         alert.addButton(withTitle: "Save")
         alert.addButton(withTitle: "Cancel")

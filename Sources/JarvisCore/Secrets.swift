@@ -52,6 +52,8 @@ public struct KeychainSecretStore: SecretStore {
         SecItemDelete(base as CFDictionary)
         var add = base
         add[kSecValueData as String] = Data(key.utf8)
+        // Explicit: readable only while unlocked, and never synced to iCloud Keychain.
+        add[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
         return SecItemAdd(add as CFDictionary, nil) == errSecSuccess
     }
 }

@@ -46,8 +46,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let brain = OpenAIBrainClient(apiKey: key, model: config.brainModel,
                                       reasoningEffort: config.reasoningEffort)
         let driver = CoachDriver(config: config, transcript: transcript, guardrails: guardrails,
-                                 brain: brain, screen: ScreenCaptureCLI(), overlay: overlay, clock: clock)
-        driver.onSpoke = { [weak self] in Task { @MainActor in self?.menuBar.noteSpoke() } }
+                                 brain: brain, screen: ScreenCaptureCLI(), overlay: overlay, clock: clock,
+                                 onSpoke: { [weak self] in Task { @MainActor in self?.menuBar.noteSpoke() } })
         self.driver = driver
 
         let transcriber = RealtimeTranscriber(apiKey: key, model: config.transcriptionModel,

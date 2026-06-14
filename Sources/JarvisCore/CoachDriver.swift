@@ -3,6 +3,12 @@ import Foundation
 /// The event loop. On a trigger, enforces guardrails, calls the brain with the timestamped
 /// transcript + timing context and the tool set, and routes tool calls (capture_screen, speak).
 /// All judgment lives in the model; this just wires events to tool calls and enforces safety.
+///
+/// `@unchecked Sendable` is justified: the only mutable state (`isHandling`) is guarded by a lock,
+/// and the injected dependencies are each either immutable or internally synchronized. A single
+/// in-flight turn is enforced by `beginHandling()` — an atomic check-then-set taken before any
+/// `await` — which closes the check-then-act window between `guardrails.allow()` and `noteSpoke()`
+/// that would otherwise let two concurrent triggers double-interject.
 public final class CoachDriver: @unchecked Sendable {
     private let config: Config
     private let transcript: RollingTranscript
@@ -12,15 +18,17 @@ public final class CoachDriver: @unchecked Sendable {
     private let overlay: OverlayRendering
     private let clock: Clock
     private let sessionStart: TimeInterval
-
-    /// Optional hook for the menu-bar session counter.
-    public var onSpoke: (@Sendable () -> Void)?
+    private let onSpoke: (@Sendable () -> Void)?
 
     /// Safety backstop against a pathological model that loops on capture_screen forever.
     private let maxToolIterations = 4
 
+    private let stateLock = NSLock()
+    private var isHandling = false
+
     public init(config: Config, transcript: RollingTranscript, guardrails: Guardrails,
-                brain: BrainClient, screen: ScreenCapturing, overlay: OverlayRendering, clock: Clock) {
+                brain: BrainClient, screen: ScreenCapturing, overlay: OverlayRendering, clock: Clock,
+                onSpoke: (@Sendable () -> Void)? = nil) {
         self.config = config
         self.transcript = transcript
         self.guardrails = guardrails
@@ -29,9 +37,25 @@ public final class CoachDriver: @unchecked Sendable {
         self.overlay = overlay
         self.clock = clock
         self.sessionStart = clock.now()
+        self.onSpoke = onSpoke
+    }
+
+    /// Atomically claim the single in-flight slot; false if a turn is already running.
+    private func beginHandling() -> Bool {
+        stateLock.lock(); defer { stateLock.unlock() }
+        if isHandling { return false }
+        isHandling = true
+        return true
+    }
+
+    private func endHandling() {
+        stateLock.lock(); isHandling = false; stateLock.unlock()
     }
 
     public func handleTrigger(_ reason: TriggerReason) async {
+        guard beginHandling() else { return }   // one interjection at a time
+        defer { endHandling() }
+
         guard guardrails.allow() else { return }
 
         let now = clock.now()
@@ -58,7 +82,9 @@ public final class CoachDriver: @unchecked Sendable {
             do {
                 response = try await brain.respond(messages: convo, tools: coachTools)
             } catch {
-                return // network/model error: fail silent this turn
+                // Don't fail completely silently — a 401/429/network storm is otherwise invisible.
+                NSLog("Jarvis coach: brain request failed on \(reason): \(error.localizedDescription)")
+                return
             }
 
             // No tool call → stay silent.
@@ -66,7 +92,7 @@ public final class CoachDriver: @unchecked Sendable {
 
             switch call {
             case .captureScreen(let callId):
-                // Replay the assistant tool-call turn before the tool result (Chat Completions contract).
+                // Replay the model's function call, then the tool result + the screenshot image.
                 convo.append(.assistantToolCalls(response.rawToolCalls))
                 if let img = screen.capture() {
                     convo.append(.init(role: .tool, text: "screenshot captured", toolCallId: callId))
@@ -77,8 +103,6 @@ public final class CoachDriver: @unchecked Sendable {
                 continue // let the model reason over the image
 
             case .speak(_, let text):
-                // Re-check guardrails right before emitting (state may have changed during await).
-                guard guardrails.allow() else { return }
                 overlay.render(text, maxSentences: config.maxSentences,
                                perSentenceSeconds: config.sentenceDisplaySeconds)
                 guardrails.noteSpoke()

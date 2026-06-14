@@ -12,7 +12,7 @@ import Testing
         #expect(c.maxSentences == 3)
         #expect(c.brainModel == "gpt-5.5")
         #expect(c.reasoningEffort == "low")
-        #expect(c.transcriptionModel == "gpt-realtime-whisper")
+        #expect(c.transcriptionModel == "gpt-4o-transcribe")
     }
 
     @Test func envSecretStoreReadsKey() {

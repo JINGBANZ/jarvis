@@ -2,16 +2,20 @@ import Foundation
 import Testing
 @testable import JarvisCore
 
+private func http(_ code: Int, headers: [String: String]? = nil) -> HTTPURLResponse {
+    HTTPURLResponse(url: URL(string: "https://api.openai.com/v1/responses")!,
+                    statusCode: code, httpVersion: nil, headerFields: headers)!
+}
+
 @Suite struct OpenAIBrainClientTests {
     @Test func decodesSpeakToolCall() async throws {
-        // Responses API: function calls arrive in the `output` array.
         let json = """
         {"output":[
           {"type":"function_call","id":"fc_1","call_id":"call_1","name":"speak","arguments":"{\\"text\\":\\"Try a hash map.\\"}"}
         ]}
         """
         let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
-                                       send: { _ in (Data(json.utf8), 200) })
+                                       send: { _ in (Data(json.utf8), http(200)) })
         let resp = try await client.respond(messages: [.user("hi")], tools: coachTools)
         #expect(resp.toolCalls == [.speak(callId: "call_1", text: "Try a hash map.")])
     }
@@ -23,35 +27,48 @@ import Testing
         ]}
         """
         let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
-                                       send: { _ in (Data(json.utf8), 200) })
+                                       send: { _ in (Data(json.utf8), http(200)) })
         let resp = try await client.respond(messages: [.user("hi")], tools: coachTools)
         #expect(resp.toolCalls == [.captureScreen(callId: "call_9")])
         #expect(resp.rawToolCalls == [RawToolCall(id: "call_9", name: "capture_screen", argumentsJSON: "{}")])
     }
 
     @Test func noToolCallsMeansSilent() async throws {
-        // A plain text message in output, no function_call → stay silent.
         let json = #"{"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"(thinking)"}]}]}"#
         let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
-                                       send: { _ in (Data(json.utf8), 200) })
+                                       send: { _ in (Data(json.utf8), http(200)) })
         let resp = try await client.respond(messages: [.user("hi")], tools: coachTools)
         #expect(resp.toolCalls.isEmpty)
     }
 
     @Test func httpErrorThrows() async {
-        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
-                                       send: { _ in (Data("nope".utf8), 500) })
+        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5", maxRetries: 0,
+                                       send: { _ in (Data("nope".utf8), http(400)) })
         await #expect(throws: (any Error).self) {
             _ = try await client.respond(messages: [.user("hi")], tools: coachTools)
         }
     }
 
-    /// Request body uses the Responses shape: instructions, flat tools, reasoning, and the
-    /// assistant function_call / function_call_output threading (B3).
+    /// 429 is retried with backoff; a subsequent 200 succeeds.
+    @Test func retriesOn429ThenSucceeds() async throws {
+        let attempts = Counter()
+        let ok = #"{"output":[{"type":"function_call","id":"f","call_id":"c","name":"speak","arguments":"{\"text\":\"hi\"}"}]}"#
+        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+                                       maxRetries: 3, backoffBaseSeconds: 0,
+                                       send: { _ in
+            let n = attempts.next()
+            return n < 2 ? (Data("rate".utf8), http(429)) : (Data(ok.utf8), http(200))
+        })
+        let resp = try await client.respond(messages: [.user("hi")], tools: coachTools)
+        #expect(resp.toolCalls == [.speak(callId: "c", text: "hi")])
+        #expect(attempts.value == 3) // two 429s + one 200
+    }
+
+    /// Request body uses the Responses shape + hardening flags.
     @Test func encodesResponsesRequestShape() async throws {
         let box = CapturedBody()
         let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5", reasoningEffort: "low",
-                                       send: { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), 200) })
+                                       send: { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
         let convo: [ChatMessage] = [
             .system("be a coach"),
             .user("transcript"),
@@ -67,7 +84,9 @@ import Testing
         #expect(body.contains("\"call_id\":\"call_1\""))
         #expect(body.contains("\"input_image\""))
         #expect(body.contains("\"reasoning\""))
-        // Flat function tool shape (no nested "function" wrapper key).
+        #expect(body.contains("\"store\":false"))
+        #expect(body.contains("\"max_output_tokens\""))
+        #expect(body.contains("\"parallel_tool_calls\":false"))
         #expect(body.contains("\"name\":\"capture_screen\""))
     }
 }
@@ -78,4 +97,12 @@ final class CapturedBody: @unchecked Sendable {
     private let lock = NSLock()
     func set(_ d: Data?) { lock.lock(); data = d; lock.unlock() }
     func get() -> Data? { lock.lock(); defer { lock.unlock() }; return data }
+}
+
+/// Thread-safe call counter for retry tests.
+final class Counter: @unchecked Sendable {
+    private var n = 0
+    private let lock = NSLock()
+    func next() -> Int { lock.lock(); defer { lock.unlock() }; let v = n; n += 1; return v }
+    var value: Int { lock.lock(); defer { lock.unlock() }; return n }
 }

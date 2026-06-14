@@ -11,12 +11,13 @@ public struct Config: Sendable {
     /// Brain model. `gpt-5.5` confirmed against OpenAI docs (snapshot `gpt-5.5-2026-04-23`);
     /// vision + function calling via the Responses API.
     public var brainModel: String
-    /// Reasoning effort for the Responses API (gpt-5 family): minimal | low | medium | high.
-    /// `low` keeps the turn fast (sub-2s target) while still allowing tool calls.
+    /// Reasoning effort for the Responses API. Valid for gpt-5.5: none | low | medium (default) |
+    /// high | xhigh. `low` keeps the turn fast (sub-2s target) while still allowing tool calls.
     public var reasoningEffort: String
-    /// Realtime transcription model. `gpt-realtime-whisper` — OpenAI's streaming low-latency STT
-    /// model (transcript deltas from live audio). Paired with `server_vad` turn detection so the
-    /// audio buffer auto-commits per utterance. `gpt-4o-transcribe` is an alternative.
+    /// Realtime transcription model. `gpt-4o-transcribe` — supports `server_vad` turn detection,
+    /// so the Realtime server auto-commits the audio buffer at each speech boundary and emits
+    /// `…transcription.completed` (this is what makes the coach loop fire). `gpt-realtime-whisper`
+    /// is lower-latency but has NO server VAD — it would require manual `input_audio_buffer.commit`.
     public var transcriptionModel: String
 
     public init(
@@ -28,7 +29,7 @@ public struct Config: Sendable {
         maxSentences: Int = 3,
         brainModel: String = "gpt-5.5",
         reasoningEffort: String = "low",
-        transcriptionModel: String = "gpt-realtime-whisper"
+        transcriptionModel: String = "gpt-4o-transcribe"
     ) {
         self.silenceTimeoutSeconds = silenceTimeoutSeconds
         self.cooldownSeconds = cooldownSeconds
