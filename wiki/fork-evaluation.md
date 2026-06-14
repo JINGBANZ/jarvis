@@ -87,6 +87,11 @@ module + proactive loop as a *reference implementation* while building native Sw
 
 ## Status
 
-**Decided: two-phase build** — fork Natively for the Phase 1 PoC, then a clean native Swift app for
-Phase 2 if it validates (see [status.md](./status.md#key-decisions)). Whatever the base, the
-`capture_screen` tool-loop (and, except on Natively, the proactive trigger) is net-new.
+> **Superseded (2026-06-14):** the two-phase decision below was dropped. Phase 1 is **skipped** and
+> the native Swift app is built directly; this evaluation now stands only as the *why-build-our-own*
+> and reference-material record. See [status.md](./status.md#key-decisions).
+
+~~**Decided: two-phase build** — fork Natively for the Phase 1 PoC, then a clean native Swift app for
+Phase 2 if it validates~~ (see [status.md](./status.md#key-decisions)). Whatever the base, the
+`capture_screen` tool-loop (and, except on Natively, the proactive trigger) is net-new — confirming
+that building the trigger loop ourselves is unavoidable either way.

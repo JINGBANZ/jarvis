@@ -3,11 +3,10 @@
 > A living document. Describes the vision, the harness loop, the components, and the principles
 > that govern Jarvis. For exact schemas, prompts, and config, see [specification.md](./specification.md).
 
-> **Scope:** This page (and [specification.md](./specification.md)) describe the **eventual Phase-2
-> native Swift app** — the keeper. The thing being built *first* is the **Phase-1 fork PoC** on
-> Natively (Electron), where parts of this are deferred — notably the model-triggered
-> `capture_screen` tool-loop. See [status.md](./status.md#key-decisions) for the two-phase decision
-> and what Phase 1 actually includes.
+> **Scope:** This page (and [specification.md](./specification.md)) describe the **native Swift app**
+> — the thing being built. The earlier two-phase plan (a Natively fork PoC first) was **dropped on
+> 2026-06-14**; we build this directly, including the model-triggered `capture_screen` tool-loop.
+> See [status.md](./status.md#key-decisions) and [plan-phase2-build.md](./plan-phase2-build.md).
 
 ## 1. Vision
 
@@ -93,10 +92,14 @@ rather than a per-turn screenshot.
 
 Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full model. In short:
 
-- **App Sandbox** with only the entitlements it needs (screen recording, audio input). **No
-  general filesystem access** — Jarvis can see your screen, not your files. The OS enforces this.
+- **App Sandbox** with only the entitlements it needs (screen recording, audio input), giving
+  **no general filesystem access** — the hardened posture for a shippable build. *For the current
+  personal build this is relaxed:* the app is ad-hoc signed and unsandboxed, relying on macOS **TCC
+  prompts** for Screen Recording + Microphone. It can therefore technically read the user's files;
+  that tradeoff is accepted for the personal tool. See [sandbox.md](./sandbox.md).
 - **API key in the Keychain**, never plaintext on disk.
-- **Built and run in a restricted macOS user account**, limiting blast radius.
+- **Built and run in the main `forrest` account inside a git worktree** (recoverability). The
+  separate-restricted-account requirement is waived for the personal build; see [sandbox.md](./sandbox.md).
 - **Egress is narrow and explicit:** audio to `gpt-realtime-2`; a screenshot + transcript window
   to `gpt-5.5` *only when the model triggers a capture/response*. No recording to disk in the MVP.
 - **Behavioral guardrails:** a cooldown after each utterance, a rate cap (max N interjections per

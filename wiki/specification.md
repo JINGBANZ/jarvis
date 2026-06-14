@@ -1,13 +1,11 @@
 # Specification
 
-> The buildable spec for the **Phase-2 native Swift app** (the keeper). Another agent should be able
-> to implement it from this page plus [architecture.md](./architecture.md). Normative: where this
-> says "must," it's a requirement.
+> The buildable spec for the **native Swift app**. Another agent should be able to implement it from
+> this page plus [architecture.md](./architecture.md). Normative: where this says "must," it's a
+> requirement.
 
-> **Phase note:** The *first* build is the **Phase-1 fork PoC** on Natively (Electron), which
-> validates the experience and **defers** some of this spec — most importantly the model-triggered
-> `capture_screen` tool-loop. Don't build this native spec as "the MVP" without checking
-> [status.md](./status.md#key-decisions); for Phase 1, follow the parked `plan-phase1-poc.md`.
+> **Build note (2026-06-14):** The two-phase plan (Natively fork PoC first) was **dropped** — this
+> spec is built directly. The implementation plan is [plan-phase2-build.md](./plan-phase2-build.md).
 
 ## 1. Summary
 
@@ -204,6 +202,17 @@ behavior is visible.
 ## 9. Build & Run Constraints
 
 - Built and verified **on the MacBook** (the macOS-native capture, permissions, and overlay cannot
-  be tested on Linux). See [sandbox.md](./sandbox.md).
-- Built inside a **restricted macOS user account** (security). See [sandbox.md](./sandbox.md).
+  be tested on Linux).
+- **Toolchain: SwiftPM + the Command Line Tools — no full Xcode.** Verified that the CLT SDK
+  (`/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk`) ships ScreenCaptureKit, AVFoundation,
+  AppKit, SwiftUI, Vision, CoreAudio, and Security, and that a SwiftUI+ScreenCaptureKit binary
+  compiles and runs with `swiftc`. Build with `swift build`.
+- **Packaging:** the executable is assembled into a `.app` bundle by hand — a minimal
+  `Contents/MacOS/<bin>` + `Contents/Info.plist` carrying `NSMicrophoneUsageDescription` and the
+  bundle identifier — and **ad-hoc signed** with `codesign -s - --deep`. A build script does this.
+- **Permissions: TCC prompts, not entitlements.** Screen Recording and Microphone are granted by
+  the OS on first use (no App-Sandbox entitlement file). The app must be a signed `.app` bundle for
+  the grants to attach and persist.
+- **Account:** built in the main `forrest` account inside a **git worktree** (the restricted-account
+  requirement is waived for the personal build — see [sandbox.md](./sandbox.md)).
 - Target: a working MVP in **< 2 days of autonomous Claude Code build**.
