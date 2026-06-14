@@ -48,7 +48,7 @@ A compact log — the *rationale* for each lives in the linked design page, not 
 | **Proactive, unprompted** coaching is the core differentiator (no hotkey) | [architecture.md](./architecture.md) |
 | **One mode for v1: LeetCode Coach** (no tiers) | [specification.md](./specification.md) |
 | **Model-triggered `capture_screen`** (tool-use loop; cheaper + smarter) | [architecture.md](./architecture.md), [specification.md](./specification.md) |
-| **Models:** `gpt-5.5` brain (vision), `gpt-realtime-2` transcription | [specification.md](./specification.md) |
+| **Models (verified 2026-06):** `gpt-5.5` brain via **Responses API** (vision), `gpt-4o-transcribe` over GA Realtime | [specification.md](./specification.md#5-configuration) |
 | **Coach is time-aware** (timestamped transcript + silence duration) | [specification.md](./specification.md) |
 | **System audio in the MVP** (budget-permitting; mic is the critical path) | [specification.md](./specification.md) |
 | ~~Two-phase build~~ → **Skip Phase 1; build native Swift directly** (2026-06-14) | this page; [fork-evaluation.md](./fork-evaluation.md) |
@@ -58,9 +58,9 @@ A compact log — the *rationale* for each lives in the linked design page, not 
 
 ## Open Questions / To Confirm
 
-- ~~Exact OpenAI model IDs~~ **Resolved:** brain = `gpt-5.5`, transcription = `gpt-realtime-2`.
-  Still re-confirm the exact IDs against live OpenAI docs at build time, and check whether
-  `gpt-realtime-2` accepts image input (if so, the brain and transcription roles may merge).
+- ~~Exact OpenAI model IDs~~ **Resolved & verified against live docs (2026-06):** brain = `gpt-5.5`
+  via the **Responses API**; transcription = `gpt-4o-transcribe` over the GA Realtime API. The
+  earlier `gpt-realtime-2` was not a real ID. See [specification.md §5](./specification.md#5-configuration).
 - ~~Whether system-audio (both-sides) capture is in the MVP or deferred~~ **Resolved:** system
   audio is **in** the MVP, as long as it doesn't risk the 2-day timeline. Mic remains the critical
   path; system audio rides along via ScreenCaptureKit and is the first thing cut if the budget is
@@ -76,11 +76,13 @@ The headless build is done ([plan-phase2-build.md](./plan-phase2-build.md) Tasks
 Remaining is the **human smoke run** — build, run, and validate live:
 
 1. `./scripts/build-app.sh release` → `open ./Jarvis.app`; grant Microphone + Screen Recording.
-2. Set a real `OPENAI_API_KEY` (menu bar or env). **Confirm `gpt-5.5` / `gpt-realtime-2` are real
-   IDs** against live OpenAI docs; if not, edit `Sources/JarvisCore/Config.swift` and rebuild.
+2. Paste your OpenAI key via the menu bar ("Set OpenAI API Key…") — it saves to the Keychain and
+   starts coaching immediately. Model IDs are doc-verified; no edit expected.
 3. Run the **live smoke checklist** ([README](../README.md#live-smoke-checklist-what-to-verify-by-hand)
    / [specification.md §8](./specification.md#8-self-verification-plan)): speak → transcript;
    "I'm stuck on two-sum" → coaching overlay + observed `capture_screen`; overlay excluded from the
    screenshot; rate cap + mute hold.
-4. The most fragile spot is the Realtime websocket event shapes in
-   `Sources/JarvisApp/RealtimeTranscriber.swift` — confirm against current docs.
+4. **Only remaining live unknown:** the GA Realtime transcription-session wiring in
+   `Sources/JarvisApp/RealtimeTranscriber.swift` — the config/events follow current docs, but the
+   bare-WebSocket connect for a transcription-only session is the one thing untested headlessly. If
+   transcription doesn't start, the file documents the `?model=gpt-realtime` fallback to try.

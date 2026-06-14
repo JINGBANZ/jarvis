@@ -17,9 +17,7 @@ No Xcode needed — Swift 6 + Command Line Tools only.
 ## Running Jarvis
 
 1. **Build** the app: `./scripts/build-app.sh release` → produces `Jarvis.app`.
-2. **Set your OpenAI API key**, either:
-   - launch the app and use the menu bar → **"Set OpenAI API Key…"** (stored in your login Keychain), then relaunch; or
-   - export it before launching: `OPENAI_API_KEY=sk-... open ./Jarvis.app`.
+2. **Set your OpenAI API key** via the menu bar → **"Set OpenAI API Key…"**. It saves to your login Keychain and **starts coaching immediately — no relaunch**. (An `OPENAI_API_KEY` env var also works as a headless fallback.)
 3. **Launch**: `open ./Jarvis.app` (or run `./Jarvis.app/Contents/MacOS/JarvisApp` in a terminal to see logs). A 🟢 Jarvis menu-bar item appears; it's a menu-bar-only app (no Dock icon).
 4. **Grant permissions** when macOS prompts: **Microphone** and **Screen Recording** (System Settings → Privacy & Security). Screen Recording has no prompt dialog for the `screencapture` path — add Jarvis under Privacy & Security → Screen Recording if needed.
 
@@ -27,7 +25,7 @@ No Xcode needed — Swift 6 + Command Line Tools only.
 
 These need a human, a real key, and granted permissions — see [`wiki/specification.md` §8](./wiki/specification.md#8-self-verification-plan):
 
-- **Confirm the model IDs are real** (`gpt-5.5`, `gpt-realtime-2`) against live OpenAI docs; if not, edit `Sources/JarvisCore/Config.swift` and rebuild. The Realtime event shapes live in `Sources/JarvisApp/RealtimeTranscriber.swift` — check them against current docs too.
+- Model IDs are **doc-verified** (`gpt-5.5` via the Responses API; `gpt-4o-transcribe` over the GA Realtime API) — no edit expected. The one untested-headlessly piece is the Realtime transcription-session connect in `Sources/JarvisApp/RealtimeTranscriber.swift`; if transcription doesn't start, that file documents a `?model=gpt-realtime` connect fallback.
 - Speak — confirm transcript lines arrive (watch Console / terminal logs).
 - With a LeetCode problem on screen, say *"Jarvis, I'm stuck on two-sum"* — expect a coaching overlay within ~2s, and observe a `capture_screen` call.
 - Confirm the screenshot excludes the overlay window.

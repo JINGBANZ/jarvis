@@ -138,6 +138,16 @@ if m.role == .assistant, let calls = m.toolCalls {
 - `screencapture` add `-D 1` is optional; default already targets the main display.
 - Don't claim response *streaming* (overlay shows pre-split sentences sequentially; the brain call is not streamed). Spec §7's latency lever about streaming is not implemented in this MVP.
 
+### B4 — verified against live OpenAI docs (2026-06, post-build)
+
+After the build, the OpenAI integration was checked against current docs and corrected (the Task 9 / Task 13 bodies above describe the *original* Chat-Completions/`gpt-realtime-2` design; the shipped code uses the following instead):
+
+- **Brain = Responses API** (`POST /v1/responses`). `OpenAIBrainClient` sends flat function tools, the system prompt via `instructions`, the conversation as typed `input` items (`input_text`/`input_image`), the tool loop via `function_call` + `function_call_output`, and `reasoning.effort = low`. Decoding reads the `output` array for `function_call` items. `gpt-5.5` confirmed (snapshot `gpt-5.5-2026-04-23`).
+- **Transcription = `gpt-4o-transcribe`** over the **GA Realtime API** (`gpt-realtime-2` was not a real ID). `RealtimeTranscriber` drops the `OpenAI-Beta` header, configures a `session.type:"transcription"` session with config under `session.audio.input` (`format` audio/pcm 24000, `transcription.model`, `turn_detection` server_vad), and `AudioInput` targets 24 kHz. Turn end = `input_audio_buffer.speech_stopped`; transcript = `conversation.item.input_audio_transcription.completed`.
+- **Key entry** is seamless: the menu "Set OpenAI API Key…" saves to the Keychain and restarts the pipeline immediately (no relaunch).
+
+Sources: OpenAI docs for [gpt-5.5](https://developers.openai.com/api/docs/models/gpt-5.5), [function-calling](https://developers.openai.com/api/docs/guides/function-calling), [realtime-transcription](https://developers.openai.com/api/docs/guides/realtime-transcription).
+
 ---
 
 ## File Structure

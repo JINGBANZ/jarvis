@@ -145,16 +145,30 @@ do speak, call the speak tool with at most 3 short sentences.
 | `transcriptWindowSeconds` | 90 | How much recent transcript the model sees per turn (timestamped). |
 | `sentenceDisplaySeconds` | 5 | How long each overlay sentence stays up. |
 | `maxSentences` | 3 | Hard cap on response length. |
-| `model.brain` | `gpt-5.5` | Latest flagship (released 2026-04). Vision + tool-use — **required** to read screenshots. Confirm the exact ID against live OpenAI docs at build time. |
-| `model.transcription` | `gpt-realtime-2` | Latest realtime model (released 2026-05), GPT-5-class reasoning; live transcription + semantic turn/intent detection. `gpt-realtime-whisper` is a cheaper STT-only fallback. Target the **GA** Realtime API (the Beta was removed 2026-05-12). |
+| `reasoningEffort` | `low` | Responses-API reasoning effort (gpt-5 family: minimal/low/medium/high). `low` keeps the turn fast while still permitting tool calls. |
+| `brainModel` | `gpt-5.5` | **Confirmed** against OpenAI docs (snapshot `gpt-5.5-2026-04-23`). Vision + function calling. Called via the **Responses API**. |
+| `transcriptionModel` | `gpt-4o-transcribe` | **Confirmed** valid transcription model; supports server-VAD turn detection in a transcription session. `gpt-realtime-whisper` is the streaming alternative but needs manual buffer commits (no auto VAD). |
 
-> **Model note:** realtime voice models have historically been audio/text only. The screenshot
-> from `capture_screen` therefore goes to `gpt-5.5` (vision-capable), not the realtime model. At
-> build time, check whether `gpt-realtime-2` accepts image input — if it does, the two model roles
-> *may* collapse into one, simplifying the harness. Until confirmed, keep them split.
+> **Verified against OpenAI docs (2026-06):**
+> - **Brain uses the Responses API** (`POST /v1/responses`), not Chat Completions: for gpt-5.5,
+>   tool calling is the recommended path on Responses (Chat Completions restricts tool calls under
+>   some reasoning modes). Flat function tools; system prompt via `instructions`; the tool loop is
+>   threaded with `function_call` / `function_call_output` items; `reasoning.effort` is set.
+> - **`gpt-realtime-2` was not a real model ID** — the original assumption was wrong. Transcription
+>   uses **`gpt-4o-transcribe`** over the **GA Realtime API** (no `OpenAI-Beta` header; session
+>   configured via `session.update` with `session.type:"transcription"` and config nested under
+>   `session.audio.input`; 24 kHz mono PCM16; `server_vad` turn detection → `speech_stopped`).
+> - The screenshot from `capture_screen` goes to the **brain** (`gpt-5.5`, vision), never the
+>   transcription model. The two roles stay split.
+>
+> Sources: [models/gpt-5.5](https://developers.openai.com/api/docs/models/gpt-5.5),
+> [function-calling](https://developers.openai.com/api/docs/guides/function-calling),
+> [realtime-transcription](https://developers.openai.com/api/docs/guides/realtime-transcription),
+> [migrate-to-responses](https://developers.openai.com/api/docs/guides/migrate-to-responses).
 
-API key is read from the **Keychain**, entered once via the menu bar. Never stored in plaintext or
-committed.
+API key is read from the **Keychain**, entered via the menu bar ("Set OpenAI API Key…"), which
+saves it locally and starts coaching immediately (no relaunch). An `OPENAI_API_KEY` env var is a
+headless fallback. Never stored in plaintext or committed.
 
 ## 6. Audio Sources
 
