@@ -1,68 +1,159 @@
-# jarvis
+# Jarvis
 
-Personal, proactive LeetCode-coaching assistant for macOS.
+**A personal, proactive AI assistant.** It watches and listens alongside you, and — when it judges
+it has something genuinely useful to add — speaks up **unprompted** with a short, well-timed tip.
+No hotkey, no prompting; the assistant decides when to help.
 
-Design & docs live in [`wiki/`](./wiki/index.md) — start with [`wiki/status.md`](./wiki/status.md).
-The implementation plan is [`wiki/plan-phase2-build.md`](./wiki/plan-phase2-build.md).
+The guiding idea is *build the harness, not the intelligence*: the models already exist, so Jarvis
+is the thin layer of glue that wires perception (audio, screen) to a proactive voice.
 
-## Build
+> **Where it is today.** The first concrete capability is a **LeetCode coach on macOS** — it hears
+> you think aloud, looks at your screen on demand, and nudges you toward the solution. macOS and
+> coaching are the *first step*, not the destination; the architecture is meant to grow into a more
+> general assistant. See the design docs in [`wiki/`](./wiki/index.md) (start with
+> [`wiki/status.md`](./wiki/status.md)).
 
-No Xcode needed — Swift 6 + Command Line Tools only.
+## How it works
 
-```bash
-./scripts/run-tests.sh        # run the unit + offline-pipeline tests (36 tests)
-./scripts/make-signing-identity.sh   # one-time: create the stable "Jarvis Dev" signing identity
-./scripts/build-app.sh release       # build + sign Jarvis.app (so TCC permissions persist)
+```
+  mic / system audio ──► Transcriber ──► rolling timestamped transcript
+                                              │  turn-end / silence
+                                              ▼
+                                         CoachDriver ──(brain + tools)──┐
+                                            ▲   │                       │
+                               capture_screen   │ speak(text)           │
+                                            │   ▼                       │
+  screen ◄───────────────── ScreenTool ◄───┘  Overlay (on-screen) ◄─────┘
 ```
 
-Run `make-signing-identity.sh` **once**. It creates a stable self-signed identity so macOS
-Microphone / Screen Recording grants persist across rebuilds; without it `build-app.sh` falls back
-to ad-hoc signing and macOS re-prompts every build.
+Audio streams continuously and cheaply into a transcript. The expensive steps — looking at the
+screen and speaking — happen **only when the model invokes a tool**, so the model itself governs
+cost. Behavioral guardrails (cooldown, rate cap, manual Start/Stop) keep it from talking too much.
+Full design: [`wiki/architecture.md`](./wiki/architecture.md).
 
-## Running Jarvis
+## Project structure
 
-1. **Build** the app: `./scripts/build-app.sh release` → produces `Jarvis.app`.
-2. **Launch via `open`**: `open ./Jarvis.app`. A **⚪️ Jarvis** menu-bar item appears (menu-bar-only app, no Dock icon). Always launch with `open`, *not* the bare binary — launching the executable from a terminal makes macOS attribute the permission grants to the shell, so they look "denied".
-3. **Grant permissions** when macOS prompts (first run only): **Microphone** and **Screen Recording** (System Settings → Privacy & Security). These persist afterward. To recover a stale *denied* state, run `tccutil reset Microphone com.jarvis.coach` (or `ScreenCapture`) and relaunch.
-4. **Set your OpenAI API key** via the menu bar → **"Set OpenAI API Key…"**. It saves to your login Keychain. (An `OPENAI_API_KEY` env var also works as a headless fallback.) Jarvis does **not** auto-start.
-5. **Start / Stop** coaching from the menu bar (**Start Jarvis** / **Stop Jarvis**). The icon shows the only two states: **⚪️ stopped** and **🟢 running**.
-
-### Dev mode — live activity viewer
-
-```bash
-./scripts/run-dev.sh        # rebuild, launch via `open --args --dev`, auto-open the viewer
+```
+.
+├── Package.swift              # SwiftPM manifest (Swift 6, macOS 14+)
+├── Sources/
+│   ├── JarvisCore/            # the testable harness — no UI, runs anywhere
+│   │   ├── CoachDriver.swift      # the event loop: triggers → brain → tool calls
+│   │   ├── OpenAIBrainClient.swift# the brain (Responses API, vision + tool-use)
+│   │   ├── RealtimeSession.swift  # Realtime transcription wire contract
+│   │   ├── Guardrails.swift       # cooldown + rate cap + mute
+│   │   ├── Transcript.swift       # rolling, timestamped transcript window
+│   │   ├── Config / Clock / Trigger / ToolDefs / Secrets / ...
+│   │   └── ActivityLog.swift      # dev-mode live activity viewer (HTML)
+│   └── JarvisApp/             # the macOS app shell — the native, OS-bound parts
+│       ├── main.swift / AppDelegate.swift
+│       ├── MenuBarController.swift # menu-bar item, Start/Stop, key entry
+│       ├── AudioInput.swift        # mic + system-audio capture
+│       ├── RealtimeTranscriber.swift
+│       ├── OverlayPanel.swift      # the on-screen tip overlay (NSPanel)
+│       └── Permissions.swift       # TCC priming (Mic, Screen Recording)
+├── Tests/JarvisCoreTests/     # unit + offline-pipeline tests for the harness
+├── Resources/Info.plist       # bundle id, usage strings
+├── scripts/                   # build / run / test (see below)
+└── wiki/                      # design & decision docs (single source of truth)
 ```
 
-In **dev mode** Jarvis writes a self-contained, auto-refreshing HTML page and opens it in your
-browser so you can *watch it think* without tailing a log file. It reloads every second and
-color-codes each event:
+The split is deliberate: **`JarvisCore`** holds all the logic and is unit-tested on any machine;
+**`JarvisApp`** holds the macOS-only glue (capture, overlay, permissions) verified by a live run.
 
-- 🗣 `heard: "…"` — what you actually said (transcribed) / 🤫 `quiet for 12s` — why it woke
+## Scripts
+
+| Script | What it does |
+|---|---|
+| `./scripts/run-tests.sh` | Build and run the unit + offline-pipeline tests (no key, no permissions needed). |
+| `./scripts/make-signing-identity.sh` | **One-time:** create the stable `Jarvis Dev` self-signed identity so macOS keeps your permission grants across rebuilds. |
+| `./scripts/build-app.sh [release\|debug]` | Build, bundle, and sign `Jarvis.app` (defaults to `release`). |
+| `./scripts/run-dev.sh` | Rebuild, launch in **dev mode**, and auto-open the live activity viewer. |
+
+## Develop locally
+
+No Xcode needed — **Swift 6 + the Command Line Tools** only (the CLT SDK ships ScreenCaptureKit,
+AVFoundation, AppKit, SwiftUI, Vision, and CoreAudio).
+
+```bash
+swift build              # compile
+./scripts/run-tests.sh   # run the test suite (JarvisCore is fully testable here)
+```
+
+All the logic lives in `JarvisCore` precisely so you can iterate and test it without a Mac UI, a
+real API key, or granted permissions.
+
+## Quick start (run it on your Mac)
+
+```bash
+./scripts/make-signing-identity.sh   # once — makes permission grants persist across rebuilds
+./scripts/build-app.sh release       # build + sign Jarvis.app
+open ./Jarvis.app                    # launch it (always via `open`, see below)
+```
+
+Then:
+
+1. **A ⚪️ Jarvis menu-bar item appears** (menu-bar-only app — no Dock icon). Always launch with
+   `open`, *not* the bare binary: running the executable from a terminal makes macOS attribute the
+   permission grants to your shell, so they look "denied".
+2. **Grant permissions** when prompted on first run — **Microphone** and **Screen Recording**
+   (System Settings → Privacy & Security). They persist afterward. To clear a stale *denied* state,
+   run `tccutil reset Microphone com.jarvis.coach` (or `ScreenCapture`) and relaunch.
+3. **Set your OpenAI API key** via the menu bar → **"Set OpenAI API Key…"** (saved to your login
+   Keychain; an `OPENAI_API_KEY` env var works as a headless fallback).
+4. **Start / Stop** coaching from the menu bar. Jarvis does **not** auto-start. The icon shows the
+   only two states: **⚪️ stopped** and **🟢 running**.
+
+> **Why the one-time signing step.** macOS ties a permission grant to the app's code signature +
+> bundle id + path. The stable `Jarvis Dev` identity keeps that signature constant, so Microphone /
+> Screen Recording grants survive rebuilds. Skip it and `build-app.sh` falls back to ad-hoc signing,
+> which changes identity every build and re-prompts each time.
+
+## Dev mode — live activity viewer
+
+```bash
+./scripts/run-dev.sh        # rebuild, launch with --dev, auto-open the viewer
+```
+
+In dev mode Jarvis writes a self-contained, auto-refreshing HTML page and opens it in your browser
+so you can **watch it think** without tailing a log. It reloads every second and color-codes each
+event:
+
+- 🗣 `heard: "…"` — what you said (transcribed) / 🤫 `quiet for 12s` — why it woke
 - 💭 `thinking…` — calling the brain
 - 👁 `looking at your screen` — the model invoked `capture_screen`
 - 💬 `…the tip it spoke…` — a `speak` call rendered to the overlay
-- `… nothing useful to add, staying silent` / `… held back (cooldown or rate cap)`
+- `… staying silent` / `… held back (cooldown or rate cap)` — when it declines
 
-Every `jlog` line (lifecycle, errors, realtime-socket events) is mirrored in too. **File logging is
-dev-only and owner-only:** the activity HTML and `jarvis-debug.log` are written to the `--log-dir`
-(`run-dev.sh` uses a **gitignored `.jarvis/`** in the workspace; default otherwise is a per-user
-`Caches/Jarvis`) with `0600` permissions, truncated fresh each session — never world-readable `/tmp`.
-Outside dev mode nothing is written to a file (just the unified log). Env overrides `JARVIS_LOG` /
-`JARVIS_ACTIVITY_HTML` exist for headless use. To enable on a manual launch:
+**Privacy posture.** File logging is **dev-only and owner-only.** Outside dev mode nothing is
+written to a file (just the unified Console log). In dev mode the activity HTML and
+`jarvis-debug.log` are written to the `--log-dir` (`run-dev.sh` uses a **gitignored `.jarvis/`** in
+the workspace; default otherwise is a per-user `Caches/Jarvis`) with `0600` permissions, truncated
+fresh each session — never world-readable `/tmp`. Env overrides `JARVIS_LOG` / `JARVIS_ACTIVITY_HTML`
+exist for headless use. To enable on a manual launch:
 `open ./Jarvis.app --args --dev --log-dir ./.jarvis`.
 
-### Live smoke checklist (what to verify by hand)
+## Live smoke checklist
 
-These need a human, a real key, and granted permissions — see [`wiki/specification.md` §8](./wiki/specification.md#8-self-verification-plan):
+Some behavior can only be verified by a human with a real key, a mic, and granted permissions — see
+[`wiki/specification.md` §8](./wiki/specification.md#8-self-verification-plan). Run via
+`./scripts/run-dev.sh` and watch the live activity viewer; it shows each step as it happens.
 
-Run with `./scripts/run-dev.sh` and watch the **live activity viewer** (above) — it shows each step below as it happens.
-
-- Model IDs are **doc-verified** (`gpt-5.5` via the Responses API; `gpt-4o-transcribe` over the GA Realtime API) — no edit expected. The connect URL + session payload are unit-tested in `RealtimeSessionTests`. The one thing only a live run can confirm is that the transcription session negotiates end-to-end (a real key + mic); watch for `transcription session ready` and any `error event` lines.
+- Model IDs are **doc-verified** (`gpt-5.5` via the Responses API; `gpt-4o-transcribe` over the GA
+  Realtime API); the connect URL + session payload are unit-tested in `RealtimeSessionTests`. The
+  one thing only a live run confirms is that the transcription session negotiates end-to-end — watch
+  for `transcription session ready` and any `error event` lines.
 - Press **Start Jarvis**, then speak — confirm transcript turns drive 🗣/💭 lines in the viewer.
-- With a LeetCode problem on screen, say *"Jarvis, I'm stuck on two-sum"* — expect a coaching overlay within ~2s, and observe a 👁 `looking at your screen` (`capture_screen`) line.
+- With a LeetCode problem on screen, say *"Jarvis, I'm stuck on two-sum"* — expect a coaching overlay
+  within ~2s and a 👁 `looking at your screen` (`capture_screen`) line.
 - Confirm the screenshot excludes the overlay window.
-- Rapid triggers don't exceed 4 interjections/minute (look for `… held back` lines); **Stop Jarvis** halts the pipeline entirely.
+- Rapid triggers don't exceed 4 interjections/minute (look for `… held back` lines); **Stop Jarvis**
+  halts the pipeline entirely.
 
-### Status of the build
+## Build status
 
-The pure harness (config, transcript, guardrails, the coach tool-loop, the OpenAI client) is **unit-tested and green**. The app shell, overlay, mic capture, and realtime transcriber **compile and launch** but their live behavior is verified only by the checklist above — they were built without a real key or audio device.
+The pure harness (config, transcript, guardrails, the coach tool-loop, the OpenAI client) is
+**unit-tested and green** (36 tests). The app shell, overlay, mic capture, and realtime transcriber
+**compile and launch**, but their live behavior is verified only by the checklist above — they were
+built without a real key or audio device. Current state and next steps live in
+[`wiki/status.md`](./wiki/status.md).
