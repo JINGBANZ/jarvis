@@ -21,7 +21,7 @@ final class AudioInput: @unchecked Sendable {
         let input = engine.inputNode
         let inFormat = input.outputFormat(forBus: 0)
         guard let converter = AVAudioConverter(from: inFormat, to: targetFormat) else {
-            NSLog("Jarvis audio: cannot create converter"); return
+            jlog("Jarvis audio: cannot create converter"); return
         }
         let target = targetFormat
         let sink = onPCM
@@ -40,10 +40,10 @@ final class AudioInput: @unchecked Sendable {
                 status.pointee = .haveData
                 return buffer
             }
-            if let err { NSLog("Jarvis audio convert error: \(err)"); return }
+            if let err { jlog("Jarvis audio convert error: \(err)"); return }
             if let data = out.int16Data() { sink(data) }
         }
-        do { try engine.start() } catch { NSLog("Jarvis audio: engine start failed: \(error)") }
+        do { try engine.start() } catch { jlog("Jarvis audio: engine start failed: \(error)") }
         // System-audio tap (ScreenCaptureKit SCStream with capturesAudio = true) is the documented
         // extension point: feed the same `onPCM` with a `.them` speaker tag. First feature cut if it
         // threatens the timeline (spec §6); mic above is the critical path.

@@ -16,8 +16,19 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_PATH" "$APP/Contents/MacOS/$BIN_NAME"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 
-echo "▶ ad-hoc signing"
-codesign --force --deep --sign - "$APP"
+echo "▶ signing"
+# Prefer a stable self-signed identity so macOS TCC permission grants (Microphone, Screen
+# Recording) persist across rebuilds. Ad-hoc signing changes identity every build, which makes
+# macOS re-prompt for permissions each time. Create the identity once with scripts/make-signing-identity.sh.
+IDENTITY="Jarvis Dev"
+if security find-identity -p codesigning 2>/dev/null | grep -q "$IDENTITY"; then
+  echo "  using stable identity: $IDENTITY"
+  codesign --force --deep --sign "$IDENTITY" "$APP"
+else
+  echo "  '$IDENTITY' not found — falling back to ad-hoc (TCC permissions will reset each build)."
+  echo "  run scripts/make-signing-identity.sh once to fix this."
+  codesign --force --deep --sign - "$APP"
+fi
 codesign --verify --verbose "$APP"
 
 echo "✅ built $APP"

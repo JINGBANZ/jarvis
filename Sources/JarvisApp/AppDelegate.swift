@@ -22,6 +22,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory) // menu-bar app, no Dock icon
 
+        // Ask for Microphone + Screen Recording up front, not lazily mid-session.
+        Permissions.primeAll()
+
         overlay = OverlayPanel()
         menuBar = MenuBarController(guardrails: guardrails, keychain: keychain)
         // Pasting a key in the menu starts coaching immediately — no relaunch.
@@ -31,7 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let key = secrets.apiKey(), !key.isEmpty {
             applyKey(key)
         } else {
-            NSLog("Jarvis: no API key yet — paste it via the menu bar (it saves to your Keychain).")
+            jlog("Jarvis: no API key yet — paste it via the menu bar (it saves to your Keychain).")
         }
     }
 
@@ -63,6 +66,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.audio = audio
         transcriber.connect()
         audio.start()
-        NSLog("Jarvis: coaching started.")
+        jlog("Jarvis: coaching started.")
     }
 }

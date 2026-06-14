@@ -174,7 +174,7 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
                                                       from: Data(args.utf8)))?["text"] ?? ""
                 invocations.append(.speak(callId: callId, text: text))
             default:
-                NSLog("Jarvis coach: ignoring unknown tool '\(name)'")
+                jlog("Jarvis coach: ignoring unknown tool '\(name)'")
             }
         }
         return BrainResponse(toolCalls: invocations, rawToolCalls: raws)

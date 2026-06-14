@@ -55,6 +55,14 @@ final class MenuBarController: NSObject {
         alert.accessoryView = field
         alert.addButton(withTitle: "Save")
         alert.addButton(withTitle: "Cancel")
+        // An accessory (menu-bar-only) app can't reliably become the active/key app, so its modal
+        // won't receive keyboard input or paste. Temporarily promote to a regular foreground app
+        // for the duration of the dialog, then drop back to menu-bar-only.
+        let previousPolicy = NSApp.activationPolicy()
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+        defer { NSApp.setActivationPolicy(previousPolicy) }
+        alert.window.initialFirstResponder = field
         if alert.runModal() == .alertFirstButtonReturn {
             let key = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !key.isEmpty else { return }
