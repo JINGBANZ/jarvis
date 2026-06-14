@@ -1,2 +1,3 @@
-wiki/jarvis-wiki.html
-wiki/jarvis-summary.html
+# Local review tooling — never part of the wiki (markdown is the source of truth)
+wiki/*.html
+wiki/build_html.py
