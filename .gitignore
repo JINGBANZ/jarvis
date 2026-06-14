@@ -1,3 +1,10 @@
 # Local review tooling — never part of the wiki (markdown is the source of truth)
 wiki/*.html
 wiki/build_html.py
+
+# Swift build artifacts
+.build/
+*.app
+*.xcodeproj
+.DS_Store
+secrets.env

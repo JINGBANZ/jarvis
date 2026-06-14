@@ -3,11 +3,10 @@
 > A living document. Describes the vision, the harness loop, the components, and the principles
 > that govern Jarvis. For exact schemas, prompts, and config, see [specification.md](./specification.md).
 
-> **Scope:** This page (and [specification.md](./specification.md)) describe the **eventual Phase-2
-> native Swift app** — the keeper. The thing being built *first* is the **Phase-1 fork PoC** on
-> Natively (Electron), where parts of this are deferred — notably the model-triggered
-> `capture_screen` tool-loop. See [status.md](./status.md#key-decisions) for the two-phase decision
-> and what Phase 1 actually includes.
+> **Scope:** This page (and [specification.md](./specification.md)) describe the **native Swift app**
+> — the thing being built. The earlier two-phase plan (a Natively fork PoC first) was **dropped on
+> 2026-06-14**; we build this directly, including the model-triggered `capture_screen` tool-loop.
+> See [status.md](./status.md#key-decisions) and [plan-phase2-build.md](./plan-phase2-build.md).
 
 ## 1. Vision
 
@@ -17,7 +16,7 @@ the problem statement and your code. When it has something genuinely useful to a
 **unprompted** with a short tip rendered in an on-screen overlay.
 
 The guiding belief: **build the harness, not the intelligence.** The intelligence already exists
-(`gpt-5.5`, the `gpt-realtime-2` model on the OpenAI Realtime API). The macOS capabilities already exist (ScreenCaptureKit,
+(`gpt-5.5`, the `gpt-4o-transcribe` model on the OpenAI Realtime API). The macOS capabilities already exist (ScreenCaptureKit,
 AVFoundation, Vision, the built-in `screencapture` tool, NSPanel). Jarvis is the thin layer of
 glue that wires them into a proactive coach. We write the least code possible and reinvent nothing.
 
@@ -27,7 +26,7 @@ glue that wires them into a proactive coach. We write the least code possible an
             ┌──────────────────────────────────────────────────────────────┐
             │                         JARVIS HARNESS                         │
             │                                                                │
-  mic  ─────┤  AudioInput ──► Transcriber (gpt-realtime-2) ──► transcript    │
+  mic  ─────┤  AudioInput ──► Transcriber (gpt-4o-transcribe) ──► transcript    │
   sys-audio ┤                          │ turn-end / silence events           │
             │                          ▼                                      │
             │                    CoachDriver ──(gpt-5.5 + tools)──┐           │
@@ -49,7 +48,7 @@ moments the model judges worthwhile.
 
 ### The turn
 
-1. The Transcriber emits a **turn-end** event (`gpt-realtime-2` semantic VAD — "the speaker
+1. The Transcriber emits a **turn-end** event (`gpt-4o-transcribe` semantic VAD — "the speaker
    finished a thought") or a **silence-timeout** fires (you've gone quiet, maybe stuck). The
    silence event carries *how long* you've been quiet.
 2. The CoachDriver checks its guardrails (mute? within cooldown? under the rate cap?). If
@@ -67,7 +66,7 @@ moments the model judges worthwhile.
 | Component | Responsibility | Built on (borrowed) |
 |---|---|---|
 | **AudioInput** | Capture mic and (optionally) system audio; stream to the Transcriber. | AVFoundation (mic); ScreenCaptureKit (system audio). |
-| **Transcriber** | Maintain a rolling, speaker-labeled, **timestamped** transcript; emit turn-end events and silence events (with quiet duration). | `gpt-realtime-2` (latest realtime model; semantic VAD). |
+| **Transcriber** | Maintain a rolling, speaker-labeled, **timestamped** transcript; emit turn-end events and silence events (with quiet duration). | `gpt-4o-transcribe` (latest realtime model; semantic VAD). |
 | **CoachDriver** | The event loop. On triggers, enforce guardrails, call the brain with the transcript + timing context and tools, route tool calls. | `gpt-5.5` (vision + tool-use). |
 | **ScreenTool** | Fulfill `capture_screen`: take a silent screenshot of the active display, excluding the overlay window. | macOS `screencapture` CLI / ScreenCaptureKit. |
 | **Overlay** | Render `speak` output: ≤3 sentences, ~5s each, non-activating, always-on-top, excluded from capture. | AppKit NSPanel. |
@@ -93,11 +92,15 @@ rather than a per-turn screenshot.
 
 Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full model. In short:
 
-- **App Sandbox** with only the entitlements it needs (screen recording, audio input). **No
-  general filesystem access** — Jarvis can see your screen, not your files. The OS enforces this.
+- **App Sandbox** with only the entitlements it needs (screen recording, audio input), giving
+  **no general filesystem access** — the hardened posture for a shippable build. *For the current
+  personal build this is relaxed:* the app is ad-hoc signed and unsandboxed, relying on macOS **TCC
+  prompts** for Screen Recording + Microphone. It can therefore technically read the user's files;
+  that tradeoff is accepted for the personal tool. See [sandbox.md](./sandbox.md).
 - **API key in the Keychain**, never plaintext on disk.
-- **Built and run in a restricted macOS user account**, limiting blast radius.
-- **Egress is narrow and explicit:** audio to `gpt-realtime-2`; a screenshot + transcript window
+- **Built and run in the main `forrest` account inside a git worktree** (recoverability). The
+  separate-restricted-account requirement is waived for the personal build; see [sandbox.md](./sandbox.md).
+- **Egress is narrow and explicit:** audio to `gpt-4o-transcribe`; a screenshot + transcript window
   to `gpt-5.5` *only when the model triggers a capture/response*. No recording to disk in the MVP.
 - **Behavioral guardrails:** a cooldown after each utterance, a rate cap (max N interjections per
   minute), a global mute hotkey, and a visible "listening" indicator. These directly counter the

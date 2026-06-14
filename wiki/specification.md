@@ -1,18 +1,16 @@
 # Specification
 
-> The buildable spec for the **Phase-2 native Swift app** (the keeper). Another agent should be able
-> to implement it from this page plus [architecture.md](./architecture.md). Normative: where this
-> says "must," it's a requirement.
+> The buildable spec for the **native Swift app**. Another agent should be able to implement it from
+> this page plus [architecture.md](./architecture.md). Normative: where this says "must," it's a
+> requirement.
 
-> **Phase note:** The *first* build is the **Phase-1 fork PoC** on Natively (Electron), which
-> validates the experience and **defers** some of this spec — most importantly the model-triggered
-> `capture_screen` tool-loop. Don't build this native spec as "the MVP" without checking
-> [status.md](./status.md#key-decisions); for Phase 1, follow the parked `plan-phase1-poc.md`.
+> **Build note (2026-06-14):** The two-phase plan (Natively fork PoC first) was **dropped** — this
+> spec is built directly. The implementation plan is [plan-phase2-build.md](./plan-phase2-build.md).
 
 ## 1. Summary
 
 A native Swift/SwiftUI macOS menu-bar app. It transcribes the user's voice continuously with
-`gpt-realtime-2`, and on each conversational turn (or after a silence) it calls `gpt-5.5` with two
+`gpt-4o-transcribe`, and on each conversational turn (or after a silence) it calls `gpt-5.5` with two
 tools — `capture_screen` and `speak`. The model decides whether to look at the screen and whether
 to offer a short LeetCode coaching tip, which is rendered in an overlay. The model is given timing
 context (timestamped transcript + how long the user has been silent) so it can distinguish
@@ -21,7 +19,7 @@ context (timestamped transcript + how long the user has been silent) so it can d
 ## 2. The Harness Loop (pseudocode)
 
 ```swift
-// Always-on: stream audio to gpt-realtime-2, maintain a rolling, timestamped transcript.
+// Always-on: stream audio to gpt-4o-transcribe, maintain a rolling, timestamped transcript.
 transcriber.onTurnEnd = { handleTrigger(.turnEnd) }
 // Silence fires after `silenceTimeoutSeconds`; the actual quiet duration is passed through.
 transcriber.onSilence = { secs in handleTrigger(.silence(secondsQuiet: secs)) }
@@ -147,16 +145,37 @@ do speak, call the speak tool with at most 3 short sentences.
 | `transcriptWindowSeconds` | 90 | How much recent transcript the model sees per turn (timestamped). |
 | `sentenceDisplaySeconds` | 5 | How long each overlay sentence stays up. |
 | `maxSentences` | 3 | Hard cap on response length. |
-| `model.brain` | `gpt-5.5` | Latest flagship (released 2026-04). Vision + tool-use — **required** to read screenshots. Confirm the exact ID against live OpenAI docs at build time. |
-| `model.transcription` | `gpt-realtime-2` | Latest realtime model (released 2026-05), GPT-5-class reasoning; live transcription + semantic turn/intent detection. `gpt-realtime-whisper` is a cheaper STT-only fallback. Target the **GA** Realtime API (the Beta was removed 2026-05-12). |
+| `reasoningEffort` | `low` | Responses-API reasoning effort (gpt-5 family: minimal/low/medium/high). `low` keeps the turn fast while still permitting tool calls. |
+| `brainModel` | `gpt-5.5` | **Confirmed** against OpenAI docs (snapshot `gpt-5.5-2026-04-23`). Vision + function calling. Called via the **Responses API**. |
+| `transcriptionModel` | `gpt-4o-transcribe` | Supports `server_vad`, so the Realtime server auto-commits the audio buffer per utterance and emits `…transcription.completed` (what fires the coach loop). `gpt-realtime-whisper` is lower-latency but has **no server VAD** — it would need manual `input_audio_buffer.commit`, so it is not used. |
 
-> **Model note:** realtime voice models have historically been audio/text only. The screenshot
-> from `capture_screen` therefore goes to `gpt-5.5` (vision-capable), not the realtime model. At
-> build time, check whether `gpt-realtime-2` accepts image input — if it does, the two model roles
-> *may* collapse into one, simplifying the harness. Until confirmed, keep them split.
+> **Verified against OpenAI docs (2026-06):**
+> - **Brain uses the Responses API** (`POST /v1/responses`), not Chat Completions: for gpt-5.5,
+>   tool calling is the recommended path on Responses (Chat Completions restricts tool calls under
+>   some reasoning modes). Flat function tools; system prompt via `instructions`; the tool loop is
+>   threaded with `function_call` / `function_call_output` items; `reasoning.effort` is set.
+> - **Transcription** uses **`gpt-4o-transcribe`** over the **GA Realtime API**. (`gpt-4o-transcribe`
+>   was never a real ID; `gpt-realtime-whisper` was tried but has no server VAD — it needs manual
+>   commits — so it was dropped.) Connect with **`?intent=transcription`** (no `OpenAI-Beta`
+>   header); `session.update` sets `session.type:"transcription"` with config nested under
+>   `session.audio.input` (24 kHz mono PCM16; `server_vad` → auto-commit). Turn-end fires on
+>   `…transcription.completed`. The connect URL + payload are built by a unit-tested `RealtimeSession`
+>   helper so this wire contract is verified, not just mocked.
+> - **Production hardening:** the brain client retries 429/5xx with backoff (honoring `Retry-After`),
+>   sets a request timeout, `store:false` (no server-side retention of screenshots/transcripts),
+>   `max_output_tokens`, `parallel_tool_calls:false`, and a `prompt_cache_key`. The transcriber
+>   reconnects with backoff + ping keepalive. The coach loop is single-flighted (no double-speak).
+> - The screenshot from `capture_screen` goes to the **brain** (`gpt-5.5`, vision), never the
+>   transcription model. The two roles stay split.
+>
+> Sources: [models/gpt-5.5](https://developers.openai.com/api/docs/models/gpt-5.5),
+> [function-calling](https://developers.openai.com/api/docs/guides/function-calling),
+> [realtime-transcription](https://developers.openai.com/api/docs/guides/realtime-transcription),
+> [migrate-to-responses](https://developers.openai.com/api/docs/guides/migrate-to-responses).
 
-API key is read from the **Keychain**, entered once via the menu bar. Never stored in plaintext or
-committed.
+API key is read from the **Keychain**, entered via the menu bar ("Set OpenAI API Key…"), which
+saves it locally and starts coaching immediately (no relaunch). An `OPENAI_API_KEY` env var is a
+headless fallback. Never stored in plaintext or committed.
 
 ## 6. Audio Sources
 
@@ -204,6 +223,17 @@ behavior is visible.
 ## 9. Build & Run Constraints
 
 - Built and verified **on the MacBook** (the macOS-native capture, permissions, and overlay cannot
-  be tested on Linux). See [sandbox.md](./sandbox.md).
-- Built inside a **restricted macOS user account** (security). See [sandbox.md](./sandbox.md).
+  be tested on Linux).
+- **Toolchain: SwiftPM + the Command Line Tools — no full Xcode.** Verified that the CLT SDK
+  (`/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk`) ships ScreenCaptureKit, AVFoundation,
+  AppKit, SwiftUI, Vision, CoreAudio, and Security, and that a SwiftUI+ScreenCaptureKit binary
+  compiles and runs with `swiftc`. Build with `swift build`.
+- **Packaging:** the executable is assembled into a `.app` bundle by hand — a minimal
+  `Contents/MacOS/<bin>` + `Contents/Info.plist` carrying `NSMicrophoneUsageDescription` and the
+  bundle identifier — and **ad-hoc signed** with `codesign -s - --deep`. A build script does this.
+- **Permissions: TCC prompts, not entitlements.** Screen Recording and Microphone are granted by
+  the OS on first use (no App-Sandbox entitlement file). The app must be a signed `.app` bundle for
+  the grants to attach and persist.
+- **Account:** built in the main `forrest` account inside a **git worktree** (the restricted-account
+  requirement is waived for the personal build — see [sandbox.md](./sandbox.md)).
 - Target: a working MVP in **< 2 days of autonomous Claude Code build**.

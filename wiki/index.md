@@ -7,6 +7,7 @@
 ## Start Here
 
 - **[status.md](./status.md)** — where the project is right now, and what to do next. Read this first.
+- **[plan-phase2-build.md](./plan-phase2-build.md)** — the step-by-step implementation plan driving the current native-Swift build.
 
 ## Core Pages
 

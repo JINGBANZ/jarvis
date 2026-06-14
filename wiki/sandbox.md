@@ -1,7 +1,22 @@
 # Sandbox & Security Model
 
-> Jarvis runs on a personal machine and watches the screen and microphone. Its access must be
-> tightly bounded, and bounded by **enforcement**, not convention.
+> Jarvis runs on a personal machine and watches the screen and microphone. This page describes the
+> **hardened** model (the target for any shippable build) and the **relaxed posture currently in
+> effect** for the personal build.
+
+## Current Posture (personal build, 2026-06-14)
+
+Two layers below are **relaxed** for the personal build, by explicit decision:
+
+- **No App Sandbox.** The app is **ad-hoc signed and unsandboxed**; Screen Recording + Microphone
+  are granted via **TCC prompts** at first run. Consequence: the app *could* read the user's files —
+  accepted for a personal tool. (Hardened model: §1.)
+- **No separate account.** The build and the app run in the **main `forrest` account**, inside a
+  **git worktree** for recoverability, rather than a restricted `jarvisbuild` account. The former
+  HARD REQUIREMENT is **waived** here. (Hardened model: §2.)
+
+Everything else (Keychain for the key, narrow egress, no recording to disk, behavioral guardrails)
+**still holds**. To re-harden for a shippable build, re-enable §1 and §2.
 
 ## Principle
 
@@ -10,7 +25,10 @@ granted; everything else is denied by default.
 
 ## Layers
 
-### 1. App Sandbox (OS-enforced)
+### 1. App Sandbox (OS-enforced) — *hardened model; relaxed in the current build*
+
+> **Current build:** App Sandbox is **off**; the app is ad-hoc signed and relies on TCC prompts.
+> The description below is the target for a shippable version.
 
 The app ships with the macOS App Sandbox enabled and requests **only** the entitlements it needs:
 
@@ -22,22 +40,25 @@ It requests **no** general filesystem entitlement. It cannot read the user's doc
 data, or home directory. The only files it touches are its own sandbox container and transient
 screenshot temp files it creates and deletes.
 
-### 2. Restricted macOS User Account (development & run) — HARD REQUIREMENT
+### 2. Restricted macOS User Account (development & run) — *was HARD; waived in the current build*
 
-**This is a MUST, not a nice-to-have.** The autonomous build agent must run inside a **separate,
-low-privilege (Standard, non-admin) macOS user account** — never the user's primary account. The
-explicit requirement: *no file on the user's main desktop/account may be readable or writable by
-the build agent.* A separate account is a hard OS boundary that guarantees this; the agent's reach
-is confined to that throwaway account's home folder.
+> **Current build (2026-06-14): waived.** Building and running happen in the main `forrest` account
+> inside a **git worktree** (`.claude/worktrees/…`), which gives version-controlled recoverability
+> but **not** an OS file-access boundary. The agent is instructed to confine all writes to the
+> worktree. The description below is the hardened model, recommended before any long *unattended*
+> autonomous run or a shippable build.
 
-This bounds the blast radius of both the build agent and the running app: even a bug or a bad
-instruction cannot touch the primary account's files. It is also the answer to "can development
-happen on the VPS?" — no; it happens on the Mac, in this restricted account, because the macOS
-capture/permission/overlay APIs cannot be compiled or tested on Linux.
+The hardened requirement: run the autonomous build agent inside a **separate, low-privilege
+(Standard, non-admin) macOS user account** — never the user's primary account — so that *no file on
+the user's main account is readable or writable by the build agent*. A separate account is a hard OS
+boundary; the agent's reach is confined to that throwaway account's home folder, bounding the blast
+radius of both the build agent and the running app.
 
-**Setup:** System Settings → Users & Groups → add a new **Standard** user (e.g. `jarvisbuild`) →
-log into it → do all building and running there. Delete the account when done. The project repo is
-cloned into that account's home, not the primary account's.
+A Standard account `dev` already exists on this Mac and could serve, or add a fresh one:
+**System Settings → Users & Groups → add a Standard user (e.g. `jarvisbuild`) →** log in via Fast
+User Switching → run Claude Code there (the session runs *as* that user — true isolation). Note the
+build still needs one-time **admin** setup from `forrest` (TCC grants, any tool installs), since a
+Standard account cannot grant itself Screen Recording.
 
 ### 3. Secrets
 
@@ -48,7 +69,7 @@ written to disk in plaintext, never committed, never logged.
 
 Narrow and explicit. Data leaves the machine only via:
 
-- **Audio → `gpt-realtime-2`** on the OpenAI Realtime API (continuous, for transcription).
+- **Audio → `gpt-4o-transcribe`** on the OpenAI Realtime API (continuous, for transcription).
 - **Screenshot + transcript window → `gpt-5.5`** — and *only* when the model triggers a
   `capture_screen` and/or a coaching turn. No screen content leaves the machine on idle turns.
 
