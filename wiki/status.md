@@ -70,8 +70,9 @@ A compact log — the *rationale* for each lives in the linked design page, not 
   needs macOS 13+. Target **macOS 14+** unless a needed API forces higher.
 - ~~Whether ad-hoc signing lets the TCC Screen-Recording/Microphone grants *persist* across
   rebuilds~~ **Resolved (2026-06-14):** ad-hoc signing does *not* — it changes identity each build,
-  so macOS re-prompts. The fix shipped: build with a **stable self-signed identity (`Jarvis Dev`,
-  via `scripts/make-signing-identity.sh`)** + the fixed bundle id `com.jarvis.coach`. Grants then
+  so macOS re-prompts. The fix shipped: `scripts/build-app.sh` always signs with a **stable
+  self-signed identity (`Jarvis Dev`, created automatically on first build)** + the fixed bundle id
+  `com.jarvis.coach`; there is no ad-hoc fallback. Grants then
   persist across rebuilds/relaunches as long as the `.app` path doesn't move. See
   [specification.md §9](./specification.md#9-build--run-constraints).
 
@@ -88,7 +89,7 @@ Remaining is the **human smoke run** — build, run, and validate live:
 3. Run the **live smoke checklist** ([README](../README.md#live-smoke-checklist-what-to-verify-by-hand)
    / [specification.md §8](./specification.md#8-self-verification-plan)): speak → transcript;
    "I'm stuck on two-sum" → coaching overlay + observed `capture_screen`; overlay excluded from the
-   screenshot; rate cap holds and **Stop Jarvis** halts the pipeline. (Run via `./scripts/run-dev.sh`
+   screenshot; rate cap holds and **Stop Jarvis** halts the pipeline. (Run via `./scripts/build-app.sh --dev`
    to watch each step in the live activity viewer.)
 4. **Only remaining live unknown:** the GA Realtime transcription-session wiring in
    `Sources/JarvisApp/RealtimeTranscriber.swift` — the config/events follow current docs, but the

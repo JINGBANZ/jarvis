@@ -234,12 +234,13 @@ each Start), so runaway behavior is visible.
   `Contents/MacOS/<bin>` + `Contents/Info.plist` carrying `NSMicrophoneUsageDescription` and the
   stable bundle identifier `com.jarvis.coach`. `scripts/build-app.sh` does this.
 - **Signing for permission persistence.** The bundle is signed with a **stable self-signed identity
-  (`Jarvis Dev`)**, created once by `scripts/make-signing-identity.sh`, *not* ad-hoc. This is the
-  crux of permission persistence: macOS TCC keys a grant to the code signature + bundle id + bundle
-  path, so an ad-hoc signature (which changes every build) makes macOS forget Microphone/Screen
-  Recording and re-prompt on each rebuild. With the stable identity, **grants persist across
-  rebuilds and relaunches.** If the identity is missing, `build-app.sh` falls back to ad-hoc and
-  prints a warning — grants will reset each build until you run the identity script once.
+  (`Jarvis Dev`)**, which `scripts/build-app.sh` creates automatically on first build, *not* ad-hoc.
+  This is the crux of permission persistence: macOS TCC keys a grant to the code signature + bundle
+  id + bundle path, so an ad-hoc signature (which changes every build) makes macOS forget
+  Microphone/Screen Recording and re-prompt on each rebuild. With the stable identity, **grants
+  persist across rebuilds and relaunches.** There is no ad-hoc fallback — `build-app.sh` always signs
+  with `Jarvis Dev`. On the first build macOS prompts once to let `codesign` use the new key (click
+  "Always Allow").
 - **Permissions: TCC prompts, not entitlements.** Screen Recording and Microphone are granted by
   the OS on first use (no App-Sandbox entitlement file). `Permissions.primeAll()` requests them at
   launch and is **idempotent**: once a permission is `authorized` it only logs and never re-prompts,
@@ -257,9 +258,9 @@ each Start), so runaway behavior is visible.
 ### Dev mode — live activity viewer
 
 For watching Jarvis reason during development, a **dev mode** is enabled by the launch flag
-`--dev` (`scripts/run-dev.sh` rebuilds and launches via `open ./Jarvis.app --args --dev --log-dir
-"$PWD/.jarvis"`). In dev mode the app writes a **self-contained, auto-refreshing HTML page** and
-opens it in the default browser for the session:
+`--dev` (`scripts/build-app.sh --dev` rebuilds and launches via `open ./Jarvis.app --args --dev
+--log-dir "$PWD/.jarvis"`). In dev mode the app writes a **self-contained, auto-refreshing HTML page**
+and opens it in the default browser for the session:
 
 - `ActivityLog` (in `JarvisCore`) mirrors **every `jlog` line** into the page — so lifecycle,
   errors, realtime-socket events, and the coach's per-turn decisions all appear with no extra
@@ -271,7 +272,7 @@ opens it in the default browser for the session:
 - **Privacy posture (important).** File logging is **off unless dev mode is on** — outside dev mode
   `jlog` writes only to the unified log (Console.app), never a flat file. In dev mode the activity
   HTML *and* `jarvis-debug.log` are written to the `--log-dir` (default per-user `Caches/Jarvis`;
-  `run-dev.sh` points it at a **gitignored `.jarvis/` in the workspace**) with **`0600`** (owner-only)
+  `--dev` points it at a **gitignored `.jarvis/` in the workspace**) with **`0600`** (owner-only)
   permissions, truncated fresh each session. Never `/tmp` (world-readable, shared across users).
   Env overrides `JARVIS_LOG` / `JARVIS_ACTIVITY_HTML` exist for headless/test use. This keeps the
   model's screen-derived tips out of any world-readable or persistent location — see

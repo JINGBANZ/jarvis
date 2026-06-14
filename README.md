@@ -66,9 +66,9 @@ The split is deliberate: **`JarvisCore`** holds all the logic and is unit-tested
 | Script | What it does |
 |---|---|
 | `./scripts/run-tests.sh` | Build and run the unit + offline-pipeline tests (no key, no permissions needed). |
-| `./scripts/make-signing-identity.sh` | **One-time:** create the stable `Jarvis Dev` self-signed identity so macOS keeps your permission grants across rebuilds. |
-| `./scripts/build-app.sh [release\|debug]` | Build, bundle, and sign `Jarvis.app` (defaults to `release`). |
-| `./scripts/run-dev.sh` | Rebuild, launch in **dev mode**, and auto-open the live activity viewer. |
+| `./scripts/build-app.sh [release\|debug]` | Build, bundle, and sign `Jarvis.app` (defaults to `release`). Creates the stable `Jarvis Dev` signing identity automatically on first run. |
+| `./scripts/build-app.sh --dev` | Same build, then launch in **dev mode** and auto-open the live activity viewer. |
+| `./scripts/build-app.sh --run` | Same build, then launch the app normally. |
 
 ## Develop locally
 
@@ -86,10 +86,12 @@ real API key, or granted permissions.
 ## Quick start (run it on your Mac)
 
 ```bash
-./scripts/make-signing-identity.sh   # once — makes permission grants persist across rebuilds
-./scripts/build-app.sh release       # build + sign Jarvis.app
-open ./Jarvis.app                    # launch it (always via `open`, see below)
+./scripts/build-app.sh --run   # build + sign Jarvis.app, then launch it
 ```
+
+(`build-app.sh` creates the stable `Jarvis Dev` signing identity on first run; on that first build
+macOS asks once to let `codesign` use the key — click **"Always Allow"**. Plain
+`./scripts/build-app.sh` just builds; then `open ./Jarvis.app` to launch — always via `open`, see below.)
 
 Then:
 
@@ -104,15 +106,16 @@ Then:
 4. **Start / Stop** coaching from the menu bar. Jarvis does **not** auto-start. The icon shows the
    only two states: **⚪️ stopped** and **🟢 running**.
 
-> **Why the one-time signing step.** macOS ties a permission grant to the app's code signature +
-> bundle id + path. The stable `Jarvis Dev` identity keeps that signature constant, so Microphone /
-> Screen Recording grants survive rebuilds. Skip it and `build-app.sh` falls back to ad-hoc signing,
-> which changes identity every build and re-prompts each time.
+> **Why the stable signing identity.** macOS ties a permission grant to the app's code signature +
+> bundle id + path. `build-app.sh` always signs with the stable `Jarvis Dev` identity (creating it on
+> first run) so that signature stays constant and your Microphone / Screen Recording grants survive
+> rebuilds. There is no ad-hoc fallback — ad-hoc signing changes identity every build, which is
+> exactly what makes macOS forget permissions and re-prompt.
 
 ## Dev mode — live activity viewer
 
 ```bash
-./scripts/run-dev.sh        # rebuild, launch with --dev, auto-open the viewer
+./scripts/build-app.sh --dev   # rebuild, launch with --dev, auto-open the viewer
 ```
 
 In dev mode Jarvis writes a self-contained, auto-refreshing HTML page and opens it in your browser
@@ -127,7 +130,7 @@ event:
 
 **Privacy posture.** File logging is **dev-only and owner-only.** Outside dev mode nothing is
 written to a file (just the unified Console log). In dev mode the activity HTML and
-`jarvis-debug.log` are written to the `--log-dir` (`run-dev.sh` uses a **gitignored `.jarvis/`** in
+`jarvis-debug.log` are written to the `--log-dir` (`--dev` uses a **gitignored `.jarvis/`** in
 the workspace; default otherwise is a per-user `Caches/Jarvis`) with `0600` permissions, truncated
 fresh each session — never world-readable `/tmp`. Env overrides `JARVIS_LOG` / `JARVIS_ACTIVITY_HTML`
 exist for headless use. To enable on a manual launch:
@@ -137,7 +140,7 @@ exist for headless use. To enable on a manual launch:
 
 Some behavior can only be verified by a human with a real key, a mic, and granted permissions — see
 [`wiki/specification.md` §8](./wiki/specification.md#8-self-verification-plan). Run via
-`./scripts/run-dev.sh` and watch the live activity viewer; it shows each step as it happens.
+`./scripts/build-app.sh --dev` and watch the live activity viewer; it shows each step as it happens.
 
 - Model IDs are **doc-verified** (`gpt-5.5` via the Responses API; `gpt-4o-transcribe` over the GA
   Realtime API); the connect URL + session payload are unit-tested in `RealtimeSessionTests`. The
