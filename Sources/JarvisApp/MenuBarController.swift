@@ -13,8 +13,6 @@ final class MenuBarController: NSObject {
     var onMuteChanged: ((Bool) -> Void)?
     /// Fired after a new key is saved to the Keychain, so the app can start coaching immediately.
     var onKeySaved: ((String) -> Void)?
-    /// Fired by "Show Test Tip" — renders a sample coaching overlay with no API call.
-    var onTestTip: (() -> Void)?
 
     init(guardrails: Guardrails, keychain: KeychainSecretStore) {
         self.guardrails = guardrails
@@ -25,17 +23,10 @@ final class MenuBarController: NSObject {
         let mute = NSMenuItem(title: "Mute", action: #selector(toggleMute), keyEquivalent: "m")
         mute.target = self
         menu.addItem(mute)
-        // Primary, reliable path: read the key from the clipboard (no text-field focus issues).
-        let paste = NSMenuItem(title: "Paste API Key from Clipboard", action: #selector(pasteKeyFromClipboard), keyEquivalent: "v")
-        paste.target = self
-        menu.addItem(paste)
-        let key = NSMenuItem(title: "Set OpenAI API Key (type)…", action: #selector(setKey), keyEquivalent: "k")
+        let key = NSMenuItem(title: "Set OpenAI API Key…", action: #selector(setKey), keyEquivalent: "k")
         key.target = self
         menu.addItem(key)
         menu.addItem(.separator())
-        let test = NSMenuItem(title: "Show Test Tip (no API)", action: #selector(showTestTip), keyEquivalent: "t")
-        test.target = self
-        menu.addItem(test)
         menu.addItem(counterItem)
         menu.addItem(.separator())
         let quit = NSMenuItem(title: "Quit Jarvis", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
@@ -48,42 +39,6 @@ final class MenuBarController: NSObject {
         counterItem.title = "Interjections: \(interjections)"
     }
 
-    @objc private func showTestTip() {
-        onTestTip?()
-    }
-
-    /// Reliable key entry: read the key straight from the clipboard — no text-field focus needed.
-    @objc private func pasteKeyFromClipboard() {
-        let token = NSPasteboard.general.string(forType: .string)?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard !token.isEmpty else {
-            confirm("Clipboard is empty",
-                    "Copy your OpenAI API key first (it starts with “sk-”), then choose “Paste API Key from Clipboard” again.")
-            return
-        }
-        let looksLikeKey = token.count >= 20 && !token.contains(where: { $0.isWhitespace })
-        guard looksLikeKey else {
-            confirm("That doesn't look like an API key",
-                    "The clipboard should hold just your OpenAI key — one long token with no spaces. Copy it and try again.")
-            return
-        }
-        keychain.setApiKey(token)
-        statusItem.button?.title = "🟢 Jarvis"
-        onKeySaved?(token)
-        let hint = token.hasPrefix("sk-") ? "" : " (note: it didn’t start with “sk-” — if Jarvis can’t connect, re-copy your key.)"
-        confirm("API key saved", "Stored in your Keychain. Jarvis is starting up — talk through a problem and it will coach you.\(hint)")
-    }
-
-    /// A mouse-clickable confirmation (OK only) — works regardless of keyboard focus.
-    private func confirm(_ title: String, _ info: String) {
-        let a = NSAlert()
-        a.messageText = title
-        a.informativeText = info
-        a.addButton(withTitle: "OK")
-        NSApp.activate(ignoringOtherApps: true)
-        a.runModal()
-    }
-
     @objc private func toggleMute(_ sender: NSMenuItem) {
         let nowMuted = !guardrails.isMuted
         guardrails.setMuted(nowMuted)
@@ -92,28 +47,59 @@ final class MenuBarController: NSObject {
         onMuteChanged?(nowMuted)
     }
 
+    // MARK: - API key dialog
+
+    /// Shows a box to paste the API key. A menu-bar (accessory) app's default modal windows can't
+    /// reliably become the key window, so the paste/typing wouldn't register. The fix: promote the
+    /// app to a regular foreground app for the dialog, use a normal titled NSWindow (which *can*
+    /// become key), and explicitly focus the field — then drop back to menu-bar-only.
     @objc private func setKey() {
-        let alert = NSAlert()
-        alert.messageText = "OpenAI API Key"
-        alert.informativeText = "Stored in your login Keychain."
-        let field = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 320, height: 24))
-        alert.accessoryView = field
-        alert.addButton(withTitle: "Save")
-        alert.addButton(withTitle: "Cancel")
-        // An accessory (menu-bar-only) app can't reliably become the active/key app, so its modal
-        // won't receive keyboard input or paste. Temporarily promote to a regular foreground app
-        // for the duration of the dialog, then drop back to menu-bar-only.
         let previousPolicy = NSApp.activationPolicy()
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         defer { NSApp.setActivationPolicy(previousPolicy) }
-        alert.window.initialFirstResponder = field
-        if alert.runModal() == .alertFirstButtonReturn {
-            let key = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !key.isEmpty else { return }
-            keychain.setApiKey(key)            // saved locally in the login Keychain
-            statusItem.button?.title = "🟢 Jarvis"
-            onKeySaved?(key)                    // start coaching now — no relaunch needed
-        }
+
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 150),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.title = "OpenAI API Key"
+        window.isReleasedWhenClosed = false
+        let content = window.contentView!
+
+        let label = NSTextField(labelWithString: "Paste your OpenAI API key. It’s stored in your Keychain.")
+        label.frame = NSRect(x: 20, y: 104, width: 380, height: 20)
+        content.addSubview(label)
+
+        let field = NSSecureTextField(frame: NSRect(x: 20, y: 64, width: 380, height: 26))
+        field.placeholderString = "sk-…"
+        content.addSubview(field)
+
+        let save = NSButton(title: "Save", target: self, action: #selector(saveKeyDialog))
+        save.frame = NSRect(x: 310, y: 16, width: 92, height: 32)
+        save.bezelStyle = .rounded
+        save.keyEquivalent = "\r"            // Return = Save
+        content.addSubview(save)
+
+        let cancel = NSButton(title: "Cancel", target: self, action: #selector(cancelKeyDialog))
+        cancel.frame = NSRect(x: 210, y: 16, width: 92, height: 32)
+        cancel.bezelStyle = .rounded
+        cancel.keyEquivalent = "\u{1b}"      // Esc = Cancel
+        content.addSubview(cancel)
+
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+        window.makeFirstResponder(field)     // cursor in the field → paste/typing works
+
+        let response = NSApp.runModal(for: window)
+        window.orderOut(nil)
+
+        guard response == .OK else { return }
+        let token = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !token.isEmpty else { return }
+        keychain.setApiKey(token)            // saved locally in the login Keychain
+        statusItem.button?.title = "🟢 Jarvis"
+        onKeySaved?(token)                   // start coaching now — no relaunch needed
     }
+
+    @objc private func saveKeyDialog() { NSApp.stopModal(withCode: .OK) }
+    @objc private func cancelKeyDialog() { NSApp.stopModal(withCode: .cancel) }
 }

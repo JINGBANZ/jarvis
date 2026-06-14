@@ -29,12 +29,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menuBar = MenuBarController(guardrails: guardrails, keychain: keychain)
         // Pasting a key in the menu starts coaching immediately — no relaunch.
         menuBar.onKeySaved = { [weak self] key in self?.applyKey(key) }
-        // Debug: render a sample coaching tip in the overlay, no API call.
-        menuBar.onTestTip = { [weak self] in
-            self?.overlay.render(
-                "Let's check the time complexity. What's the cost of that nested loop? A hash map gets you to O(n).",
-                maxSentences: 3, perSentenceSeconds: 5)
-        }
 
         // Start now if a key is already present (Keychain or OPENAI_API_KEY).
         if let key = secrets.apiKey(), !key.isEmpty {
