@@ -8,3 +8,6 @@ wiki/build_html.py
 *.xcodeproj
 .DS_Store
 secrets.env
+
+# Dev-mode activity/debug logs (screen-derived content — never commit)
+.jarvis/

@@ -56,7 +56,12 @@ public final class CoachDriver: @unchecked Sendable {
         guard beginHandling() else { return }   // one interjection at a time
         defer { endHandling() }
 
-        jlog(triggerLabel(reason))
+        // Stop may have cancelled this turn before it got the slot.
+        if Task.isCancelled { return }
+
+        // Turn-end already shows up as the "🗣 heard:" line from the transcriber; only the silence
+        // trigger needs its own marker.
+        if case .silence(let secs) = reason { jlog("🤫 quiet for \(Int(secs))s") }
 
         guard guardrails.allow() else {
             jlog("… held back (cooldown or rate cap)")
@@ -94,6 +99,9 @@ public final class CoachDriver: @unchecked Sendable {
                 return
             }
 
+            // If Stop fired during the (possibly slow) brain round-trip, don't act on the result.
+            if Task.isCancelled { return }
+
             // No tool call → stay silent.
             guard let call = response.toolCalls.first else {
                 jlog("… nothing useful to add, staying silent")
@@ -121,14 +129,6 @@ public final class CoachDriver: @unchecked Sendable {
                 onSpoke?()
                 return
             }
-        }
-    }
-
-    /// A short, human-readable marker for why the loop woke up — shown in the activity viewer.
-    private func triggerLabel(_ reason: TriggerReason) -> String {
-        switch reason {
-        case .turnEnd:               return "🗣 you finished a thought"
-        case .silence(let secs):     return "🤫 quiet for \(Int(secs))s"
         }
     }
 }

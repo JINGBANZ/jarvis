@@ -46,8 +46,15 @@ final class MenuBarController: NSObject {
         counterItem.title = "Interjections: \(interjections)"
     }
 
-    /// Reflect the pipeline's running state in the menu (e.g. when a start attempt fails because
-    /// no API key is set yet, or when the app stops the pipeline on its own).
+    /// Reset the per-session interjection count (called on each Start).
+    func resetCounter() {
+        interjections = 0
+        counterItem.title = "Interjections: 0"
+    }
+
+    /// The single source of truth for running state. The app calls this for state it drives itself
+    /// (a failed/asynchronously-dead Start, a key-save restart, a terminal socket failure), and
+    /// `toggleStartStop` routes through it too — so the menu can never disagree with the pipeline.
     func setRunning(_ running: Bool) {
         isRunning = running
         refreshUI()
@@ -56,23 +63,16 @@ final class MenuBarController: NSObject {
     @objc private func toggleStartStop() {
         if isRunning {
             onStop?()
-            isRunning = false
+            setRunning(false)
         } else {
-            isRunning = onStart?() ?? false
+            setRunning(onStart?() ?? false)
         }
-        refreshUI()
     }
 
     /// Single source of truth for the status title and the start/stop label.
     private func refreshUI() {
         startStopItem.title = isRunning ? "Stop Jarvis" : "Start Jarvis"
-        let icon: String
-        if !isRunning {
-            icon = "⚪️"                                   // stopped
-        } else {
-            icon = "🟢"                                   // running, listening
-        }
-        statusItem.button?.title = "\(icon) Jarvis"
+        statusItem.button?.title = isRunning ? "🟢 Jarvis" : "⚪️ Jarvis"
     }
 
     // MARK: - API key dialog
@@ -125,9 +125,16 @@ final class MenuBarController: NSObject {
         guard !token.isEmpty else { return }
         keychain.setApiKey(token)            // saved locally in the login Keychain
         onKeySaved?(token)                   // stored; user presses Start when ready (no auto-start)
-        refreshUI()
+        flashConfirmation()                  // visible acknowledgement that the key registered
     }
 
     @objc private func saveKeyDialog() { NSApp.stopModal(withCode: .OK) }
     @objc private func cancelKeyDialog() { NSApp.stopModal(withCode: .cancel) }
+
+    /// Briefly show a checkmark in the menu-bar title so the user sees the key save took effect,
+    /// then restore the normal ⚪️/🟢 state.
+    private func flashConfirmation() {
+        statusItem.button?.title = "✓ Key saved"
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.refreshUI() }
+    }
 }

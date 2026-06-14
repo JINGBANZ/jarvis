@@ -16,7 +16,11 @@ import JarvisCore
 final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @unchecked Sendable {
     var onTurnEnd: (@Sendable () -> Void)?
     var onSilence: (@Sendable (TimeInterval) -> Void)?
+    /// Fired when reconnection is abandoned after `maxReconnects` consecutive failures (e.g. a bad
+    /// key / quota), so the app can flip the menu back to ⚪️ stopped instead of lying green.
+    var onTerminalFailure: (@Sendable () -> Void)?
 
+    private let maxReconnects = 6
     private let apiKey: String
     private let model: String
     private let transcript: RollingTranscript
@@ -25,6 +29,7 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
     private let silenceTimeout: TimeInterval
 
     private let lock = NSLock()
+    private var session: URLSession?     // retained so stop() can invalidate it (URLSession holds its delegate)
     private var task: URLSessionWebSocketTask?
     private var silenceTimer: Timer?
     private var pingTimer: Timer?
@@ -53,7 +58,11 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         let session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
         let task = session.webSocketTask(with: req)
-        lock.lock(); self.task = task; isReconnecting = false; lock.unlock()
+        lock.lock()
+        self.session?.invalidateAndCancel()   // release the previous session's delegate retain
+        self.session = session
+        self.task = task; isReconnecting = false
+        lock.unlock()
         task.resume()
         configureSession()
         receiveLoop()
@@ -67,8 +76,10 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         silenceTimer?.invalidate(); silenceTimer = nil
         pingTimer?.invalidate(); pingTimer = nil
         let t = task; task = nil
+        let s = session; session = nil
         lock.unlock()
         t?.cancel(with: .goingAway, reason: nil)
+        s?.invalidateAndCancel()             // breaks the URLSession→delegate(self)→closures→driver retain chain
     }
 
     private func configureSession() {
@@ -113,6 +124,7 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
             if let transcriptText = obj["transcript"] as? String, !transcriptText.isEmpty {
                 let at = clock.now() - sessionStart
                 transcript.append(.init(speaker: .me, text: transcriptText, at: at))
+                jlog("🗣 heard: \"\(transcriptText)\"")   // show what was actually said in the viewer
                 resetSilenceTimer()
                 onTurnEnd?()
             }
@@ -140,9 +152,15 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
     private func scheduleReconnect() {
         lock.lock()
         if stopped || isReconnecting { lock.unlock(); return }
+        if reconnectAttempt >= maxReconnects {
+            lock.unlock()
+            jlog("Jarvis realtime: giving up after \(maxReconnects) reconnect attempts — stopping")
+            onTerminalFailure?()
+            return
+        }
         isReconnecting = true
         let attempt = reconnectAttempt
-        reconnectAttempt = min(attempt + 1, 6)
+        reconnectAttempt = attempt + 1
         lock.unlock()
 
         let delay = min(30.0, pow(2.0, Double(attempt)))   // 1, 2, 4, 8, 16, 30…

@@ -10,7 +10,7 @@ The implementation plan is [`wiki/plan-phase2-build.md`](./wiki/plan-phase2-buil
 No Xcode needed — Swift 6 + Command Line Tools only.
 
 ```bash
-./scripts/run-tests.sh        # run the unit + offline-pipeline tests (30 tests)
+./scripts/run-tests.sh        # run the unit + offline-pipeline tests (36 tests)
 ./scripts/make-signing-identity.sh   # one-time: create the stable "Jarvis Dev" signing identity
 ./scripts/build-app.sh release       # build + sign Jarvis.app (so TCC permissions persist)
 ```
@@ -37,16 +37,19 @@ In **dev mode** Jarvis writes a self-contained, auto-refreshing HTML page and op
 browser so you can *watch it think* without tailing a log file. It reloads every second and
 color-codes each event:
 
-- 🗣 `you finished a thought` / 🤫 `quiet for 12s` — why the coach loop woke up
+- 🗣 `heard: "…"` — what you actually said (transcribed) / 🤫 `quiet for 12s` — why it woke
 - 💭 `thinking…` — calling the brain
 - 👁 `looking at your screen` — the model invoked `capture_screen`
 - 💬 `…the tip it spoke…` — a `speak` call rendered to the overlay
 - `… nothing useful to add, staying silent` / `… held back (cooldown or rate cap)`
 
-Every `jlog` line (lifecycle, errors, realtime-socket events) is mirrored in too. The page is
-written to `/tmp/jarvis-activity.html` (override with the `JARVIS_ACTIVITY_HTML` env var); it's
-regenerated fresh each session. To enable the viewer on a manual launch, add the flag yourself:
-`open ./Jarvis.app --args --dev`.
+Every `jlog` line (lifecycle, errors, realtime-socket events) is mirrored in too. **File logging is
+dev-only and owner-only:** the activity HTML and `jarvis-debug.log` are written to the `--log-dir`
+(`run-dev.sh` uses a **gitignored `.jarvis/`** in the workspace; default otherwise is a per-user
+`Caches/Jarvis`) with `0600` permissions, truncated fresh each session — never world-readable `/tmp`.
+Outside dev mode nothing is written to a file (just the unified log). Env overrides `JARVIS_LOG` /
+`JARVIS_ACTIVITY_HTML` exist for headless use. To enable on a manual launch:
+`open ./Jarvis.app --args --dev --log-dir ./.jarvis`.
 
 ### Live smoke checklist (what to verify by hand)
 

@@ -200,7 +200,8 @@ The build agent must produce and run these. (See the development goal: the agent
 
 **Unit tests (pure logic, run anywhere):**
 - CoachDriver guardrails: cooldown suppresses a second response inside the window; rate cap blocks
-  the (N+1)th interjection in a minute; mute suppresses all output.
+  the (N+1)th interjection in a minute; the latent mute flag (still in `Guardrails`, not exposed in
+  the menu) suppresses all output.
 - Overlay formatting: a 5-sentence input renders exactly 3 sentences; sentence splitting is correct.
 
 **Offline pipeline test (mock OpenAI client, run anywhere):**
@@ -218,8 +219,8 @@ The build agent must produce and run these. (See the development goal: the agent
 5. Guardrails hold: rapid triggers do not produce more than `maxInterjectionsPerMinute` responses;
    **Stop Jarvis** halts the pipeline entirely.
 
-**Guardrail / cost guard:** a session token-and-call counter surfaced in the menu bar, so runaway
-behavior is visible.
+**Guardrail / cost guard:** a session **interjection** counter surfaced in the menu bar (reset on
+each Start), so runaway behavior is visible.
 
 ## 9. Build & Run Constraints
 
@@ -256,17 +257,22 @@ behavior is visible.
 ### Dev mode — live activity viewer
 
 For watching Jarvis reason during development, a **dev mode** is enabled by the launch flag
-`--dev` (`scripts/run-dev.sh` rebuilds and launches with it via `open ./Jarvis.app --args --dev`).
-In dev mode the app writes a **self-contained, auto-refreshing HTML page** and opens it in the
-default browser for the session:
+`--dev` (`scripts/run-dev.sh` rebuilds and launches via `open ./Jarvis.app --args --dev --log-dir
+"$PWD/.jarvis"`). In dev mode the app writes a **self-contained, auto-refreshing HTML page** and
+opens it in the default browser for the session:
 
 - `ActivityLog` (in `JarvisCore`) mirrors **every `jlog` line** into the page — so lifecycle,
   errors, realtime-socket events, and the coach's per-turn decisions all appear with no extra
   wiring. The page reloads every second (`<meta http-equiv="refresh">`), color-codes events, and
-  scrolls to the newest line. No server — it works straight off `file://`.
-- The `CoachDriver` emits human-readable decision markers the viewer keys on: 🗣 turn-end / 🤫
-  silence (why it woke), 💭 thinking, 👁 `capture_screen`, 💬 the spoken tip, and `… staying
-  silent` / `… held back` when it declines.
-- Output path defaults to `/tmp/jarvis-activity.html`, overridable with `JARVIS_ACTIVITY_HTML`;
-  it's reset fresh at the start of each dev session. The viewer is **dev-only** — normal launches
-  don't open it (though `ActivityLog` still maintains the file).
+  keeps your scroll position unless you're pinned to the bottom. No server — it works off `file://`.
+- The viewer keys on human-readable markers: 🗣 `heard: "…"` (your transcribed speech, logged by
+  the transcriber) / 🤫 silence (why it woke), 💭 thinking, 👁 `capture_screen`, 💬 the spoken tip,
+  and `… staying silent` / `… held back` when the coach declines.
+- **Privacy posture (important).** File logging is **off unless dev mode is on** — outside dev mode
+  `jlog` writes only to the unified log (Console.app), never a flat file. In dev mode the activity
+  HTML *and* `jarvis-debug.log` are written to the `--log-dir` (default per-user `Caches/Jarvis`;
+  `run-dev.sh` points it at a **gitignored `.jarvis/` in the workspace**) with **`0600`** (owner-only)
+  permissions, truncated fresh each session. Never `/tmp` (world-readable, shared across users).
+  Env overrides `JARVIS_LOG` / `JARVIS_ACTIVITY_HTML` exist for headless/test use. This keeps the
+  model's screen-derived tips out of any world-readable or persistent location — see
+  [sandbox.md](./sandbox.md).

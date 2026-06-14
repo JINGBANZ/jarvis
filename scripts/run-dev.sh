@@ -14,5 +14,9 @@ cd "$(dirname "$0")/.."
 pkill -f "Jarvis.app/Contents/MacOS/JarvisApp" 2>/dev/null || true
 sleep 1
 
-echo "▶ launching Jarvis (dev mode) — activity viewer will open in your browser"
-open ./Jarvis.app --args --dev
+# Logs go to a gitignored .jarvis/ in the workspace (owner-only, 0600, fresh each session) so the
+# model's screen-derived tips never land in world-readable /tmp or in git.
+LOGDIR="$PWD/.jarvis"
+mkdir -p "$LOGDIR"
+echo "▶ launching Jarvis (dev mode) — activity viewer will open in your browser; logs in $LOGDIR"
+open ./Jarvis.app --args --dev --log-dir "$LOGDIR"
