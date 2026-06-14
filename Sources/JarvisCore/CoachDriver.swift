@@ -83,7 +83,7 @@ public final class CoachDriver: @unchecked Sendable {
                 response = try await brain.respond(messages: convo, tools: coachTools)
             } catch {
                 // Don't fail completely silently — a 401/429/network storm is otherwise invisible.
-                NSLog("Jarvis coach: brain request failed on \(reason): \(error.localizedDescription)")
+                jlog("Jarvis coach: brain request failed on \(reason): \(error.localizedDescription)")
                 return
             }
 

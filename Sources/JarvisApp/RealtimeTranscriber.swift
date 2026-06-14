@@ -83,7 +83,7 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         guard let data = try? JSONSerialization.data(withJSONObject: json),
               let str = String(data: data, encoding: .utf8) else { return }
         lock.lock(); let t = task; lock.unlock()
-        t?.send(.string(str)) { err in if let err { NSLog("Jarvis realtime send error: \(err)") } }
+        t?.send(.string(str)) { err in if let err { jlog("Jarvis realtime send error: \(err)") } }
     }
 
     private func receiveLoop() {
@@ -92,7 +92,7 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
             guard let self else { return }
             switch result {
             case .failure(let err):
-                NSLog("Jarvis realtime receive failed: \(err)")
+                jlog("Jarvis realtime receive failed: \(err)")
                 self.scheduleReconnect()
             case .success(let message):
                 self.lock.lock(); self.reconnectAttempt = 0; self.lock.unlock() // healthy
@@ -121,9 +121,9 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
             // handled on the completed event above. Just refresh the silence timer here.
             resetSilenceTimer()
         case "session.created", "transcription_session.created":
-            NSLog("Jarvis realtime: transcription session ready")
+            jlog("Jarvis realtime: transcription session ready")
         case "error":
-            NSLog("Jarvis realtime error event: \(text)")
+            jlog("Jarvis realtime error event: \(text)")
         default:
             break
         }
@@ -133,7 +133,7 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
 
     func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask,
                     didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
-        NSLog("Jarvis realtime socket closed: code \(closeCode.rawValue)")
+        jlog("Jarvis realtime socket closed: code \(closeCode.rawValue)")
         scheduleReconnect()
     }
 
@@ -150,7 +150,7 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
             guard let self else { return }
             self.lock.lock(); let stop = self.stopped; self.lock.unlock()
             guard !stop else { return }
-            NSLog("Jarvis realtime: reconnecting (attempt \(attempt + 1))")
+            jlog("Jarvis realtime: reconnecting (attempt \(attempt + 1))")
             self.openSocket()
         }
     }
@@ -162,7 +162,7 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
             self.pingTimer = Timer.scheduledTimer(withTimeInterval: 20, repeats: true) { [weak self] _ in
                 guard let self else { return }
                 self.lock.lock(); let t = self.task; self.lock.unlock()
-                t?.sendPing { err in if let err { NSLog("Jarvis realtime ping error: \(err)") } }
+                t?.sendPing { err in if let err { jlog("Jarvis realtime ping error: \(err)") } }
             }
             self.lock.unlock()
         }
