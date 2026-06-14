@@ -70,7 +70,7 @@ moments the model judges worthwhile.
 | **CoachDriver** | The event loop. On triggers, enforce guardrails, call the brain with the transcript + timing context and tools, route tool calls. | `gpt-5.5` (vision + tool-use). |
 | **ScreenTool** | Fulfill `capture_screen`: take a silent screenshot of the active display, excluding the overlay window. | macOS `screencapture` CLI / ScreenCaptureKit. |
 | **Overlay** | Render `speak` output: ≤3 sentences, ~5s each, non-activating, always-on-top, excluded from capture. | AppKit NSPanel. |
-| **MenuBar** | On/off, mute, status indicator, one-time API-key entry. | AppKit menu-bar item; Keychain for the key. |
+| **MenuBar** | Manual **Start/Stop** of the pipeline (two states: ⚪️ stopped / 🟢 running — no auto-start), status indicator, one-time API-key entry. | AppKit menu-bar item; Keychain for the key. |
 
 Each component has one job and a narrow interface. The CoachDriver is the only place the
 "intelligence" lives, and even there the intelligence is the model — the driver just wires events
@@ -94,8 +94,9 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
 
 - **App Sandbox** with only the entitlements it needs (screen recording, audio input), giving
   **no general filesystem access** — the hardened posture for a shippable build. *For the current
-  personal build this is relaxed:* the app is ad-hoc signed and unsandboxed, relying on macOS **TCC
-  prompts** for Screen Recording + Microphone. It can therefore technically read the user's files;
+  personal build this is relaxed:* the app is unsandboxed and signed with a stable self-signed
+  identity (`Jarvis Dev`, so grants persist), relying on macOS **TCC prompts** for Screen Recording
+  + Microphone. It can therefore technically read the user's files;
   that tradeoff is accepted for the personal tool. See [sandbox.md](./sandbox.md).
 - **API key in the Keychain**, never plaintext on disk.
 - **Built and run in the main `forrest` account inside a git worktree** (recoverability). The
@@ -103,8 +104,11 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
 - **Egress is narrow and explicit:** audio to `gpt-4o-transcribe`; a screenshot + transcript window
   to `gpt-5.5` *only when the model triggers a capture/response*. No recording to disk in the MVP.
 - **Behavioral guardrails:** a cooldown after each utterance, a rate cap (max N interjections per
-  minute), a global mute hotkey, and a visible "listening" indicator. These directly counter the
-  central failure mode of a proactive agent — talking too much or at the wrong moment.
+  minute), and a visible "listening" indicator. The user also has a hard **Start/Stop** in the menu
+  bar — coaching never runs until explicitly started, and stopping tears the pipeline down entirely
+  (a stronger control than the earlier mute, which is no longer exposed in the menu; the latent mute
+  flag remains in `Guardrails`). These directly counter the central failure mode of a proactive
+  agent — talking too much or at the wrong moment.
 
 ## 6. Non-Goals (v1)
 

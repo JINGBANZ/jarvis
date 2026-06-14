@@ -32,4 +32,6 @@ fi
 codesign --verify --verbose "$APP"
 
 echo "✅ built $APP"
-echo "   run: open ./$APP   (or ./$APP/Contents/MacOS/$BIN_NAME for console logs)"
+echo "   run: open ./$APP        (always via 'open' — launching the bare binary makes macOS"
+echo "                            attribute Mic/Screen-Recording grants to the shell, not Jarvis)"
+echo "   dev: ./scripts/run-dev.sh   (dev mode + live activity viewer; logs to ./.jarvis/)"

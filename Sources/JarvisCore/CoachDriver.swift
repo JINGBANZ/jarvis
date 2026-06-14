@@ -56,7 +56,17 @@ public final class CoachDriver: @unchecked Sendable {
         guard beginHandling() else { return }   // one interjection at a time
         defer { endHandling() }
 
-        guard guardrails.allow() else { return }
+        // Stop may have cancelled this turn before it got the slot.
+        if Task.isCancelled { return }
+
+        // Turn-end already shows up as the "🗣 heard:" line from the transcriber; only the silence
+        // trigger needs its own marker.
+        if case .silence(let secs) = reason { jlog("🤫 quiet for \(Int(secs))s") }
+
+        guard guardrails.allow() else {
+            jlog("… held back (cooldown or rate cap)")
+            return
+        }
 
         let now = clock.now()
         let ctx = TriggerContext(
@@ -75,6 +85,8 @@ public final class CoachDriver: @unchecked Sendable {
             """),
         ]
 
+        jlog("💭 thinking…")
+
         var iterations = 0
         while iterations < maxToolIterations {
             iterations += 1
@@ -87,11 +99,18 @@ public final class CoachDriver: @unchecked Sendable {
                 return
             }
 
+            // If Stop fired during the (possibly slow) brain round-trip, don't act on the result.
+            if Task.isCancelled { return }
+
             // No tool call → stay silent.
-            guard let call = response.toolCalls.first else { return }
+            guard let call = response.toolCalls.first else {
+                jlog("… nothing useful to add, staying silent")
+                return
+            }
 
             switch call {
             case .captureScreen(let callId):
+                jlog("👁 looking at your screen")
                 // Replay the model's function call, then the tool result + the screenshot image.
                 convo.append(.assistantToolCalls(response.rawToolCalls))
                 if let img = screen.capture() {
@@ -103,6 +122,7 @@ public final class CoachDriver: @unchecked Sendable {
                 continue // let the model reason over the image
 
             case .speak(_, let text):
+                jlog("💬 \(text)")
                 overlay.render(text, maxSentences: config.maxSentences,
                                perSentenceSeconds: config.sentenceDisplaySeconds)
                 guardrails.noteSpoke()

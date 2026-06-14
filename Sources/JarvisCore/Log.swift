@@ -1,24 +1,53 @@
 import Foundation
 
-/// Lightweight logger: writes to the unified log (Console) AND appends to a file, so logs are
-/// readable no matter how the app is launched (LaunchServices `open` vs. direct exec). The file
-/// path can be overridden with the `JARVIS_LOG` env var; defaults to /tmp/jarvis-debug.log.
+/// Dev-only file logging config. By default `jlog` writes ONLY to the unified log (Console.app);
+/// no flat file is created. In dev mode the app calls `JarvisLog.enableFileLogging(directory:)`,
+/// after which `jlog` also appends to `<directory>/jarvis-debug.log` (created `0600`, truncated
+/// fresh for the session). This keeps screen-derived coaching text out of any world-readable or
+/// persistent file outside dev mode — see wiki/sandbox.md ("no recording to disk").
+public enum JarvisLog {
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var directory: URL?   // guarded by `lock`
+
+    public static func enableFileLogging(directory dir: URL) {
+        lock.lock(); directory = dir; lock.unlock()
+        // Fresh, owner-only file for the session.
+        let url = dir.appendingPathComponent("jarvis-debug.log")
+        FileManager.default.createFile(atPath: url.path, contents: Data(),
+                                       attributes: [.posixPermissions: 0o600])
+    }
+
+    /// The debug-log file, or nil when file logging is disabled.
+    static var debugLogURL: URL? {
+        lock.lock(); let dir = directory; lock.unlock()
+        if let dir { return dir.appendingPathComponent("jarvis-debug.log") }
+        // Headless/test override.
+        if let p = ProcessInfo.processInfo.environment["JARVIS_LOG"] { return URL(fileURLWithPath: p) }
+        return nil
+    }
+}
+
+/// Lightweight logger: always writes to the unified log (Console) and mirrors into the dev activity
+/// viewer; additionally appends to the dev debug file when file logging is enabled.
 public func jlog(_ message: String) {
     NSLog("%@", message)
-    let path = ProcessInfo.processInfo.environment["JARVIS_LOG"] ?? "/tmp/jarvis-debug.log"
-    let line = "\(Self_timestamp()) \(message)\n"
+    ActivityLog.shared.record(message)        // dev-only HTML viewer (no-op when disabled)
+
+    guard let url = JarvisLog.debugLogURL else { return }
+    let line = "\(logTimestamp()) \(message)\n"
     guard let data = line.data(using: .utf8) else { return }
-    let url = URL(fileURLWithPath: path)
     if let fh = try? FileHandle(forWritingTo: url) {
         defer { try? fh.close() }
         _ = try? fh.seekToEnd()
         try? fh.write(contentsOf: data)
     } else {
-        try? data.write(to: url)
+        // First write of the session (or after enable truncated it): create owner-only.
+        FileManager.default.createFile(atPath: url.path, contents: data,
+                                       attributes: [.posixPermissions: 0o600])
     }
 }
 
-private func Self_timestamp() -> String {
+private func logTimestamp() -> String {
     let f = DateFormatter()
     f.dateFormat = "HH:mm:ss.SSS"
     return f.string(from: Date())
