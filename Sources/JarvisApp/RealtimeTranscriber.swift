@@ -7,13 +7,17 @@ import JarvisCore
 ///
 /// Verified against OpenAI docs (2026-06): GA drops the `OpenAI-Beta` header; the transcription
 /// session is configured via `session.update` with `session.type = "transcription"` and config
-/// nested under `session.audio.input`; transcription model `gpt-4o-transcribe` supports server-VAD
-/// turn detection. Audio is 24 kHz mono PCM16.
+/// nested under `session.audio.input`. Transcription model is `gpt-realtime-whisper` (streaming,
+/// low-latency transcript deltas), paired with `server_vad` so the audio buffer auto-commits per
+/// utterance. Audio is 24 kHz mono PCM16.
+///
+/// Turn-end fires on `conversation.item.input_audio_transcription.completed` (the authoritative
+/// "we have the user's words" signal) so the coach loop works whether or not the server also emits
+/// `speech_stopped` — and without depending on manual buffer commits.
 ///
 /// RESIDUAL UNCERTAINTY (confirm on the live smoke run): the bare WebSocket connect for a
 /// transcription-only session — if the server requires a model query param, append
-/// `?model=gpt-realtime`. Event names below (`input_audio_buffer.speech_stopped`,
-/// `conversation.item.input_audio_transcription.completed`) are the documented GA names.
+/// `?model=gpt-realtime`.
 final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @unchecked Sendable {
     var onTurnEnd: (@Sendable () -> Void)?
     var onSilence: (@Sendable (TimeInterval) -> Void)?
@@ -105,14 +109,17 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
 
         switch type {
         case "conversation.item.input_audio_transcription.completed":
+            // A completed utterance: record it AND treat it as turn-end (authoritative for whisper,
+            // which may not emit speech_stopped). The model now has the user's words to react to.
             if let transcriptText = obj["transcript"] as? String, !transcriptText.isEmpty {
                 let at = clock.now() - sessionStart
                 transcript.append(.init(speaker: .me, text: transcriptText, at: at))
                 resetSilenceTimer()
+                onTurnEnd?()
             }
         case "input_audio_buffer.speech_stopped":
-            // Server VAD detected end of a spoken turn.
-            onTurnEnd?()
+            // Server VAD detected end of speech; just reset the silence timer. The actionable
+            // turn-end (with transcript) is handled on the completed event above.
             resetSilenceTimer()
         case "error":
             NSLog("Jarvis realtime error event: \(text)")

@@ -147,7 +147,7 @@ do speak, call the speak tool with at most 3 short sentences.
 | `maxSentences` | 3 | Hard cap on response length. |
 | `reasoningEffort` | `low` | Responses-API reasoning effort (gpt-5 family: minimal/low/medium/high). `low` keeps the turn fast while still permitting tool calls. |
 | `brainModel` | `gpt-5.5` | **Confirmed** against OpenAI docs (snapshot `gpt-5.5-2026-04-23`). Vision + function calling. Called via the **Responses API**. |
-| `transcriptionModel` | `gpt-4o-transcribe` | **Confirmed** valid transcription model; supports server-VAD turn detection in a transcription session. `gpt-realtime-whisper` is the streaming alternative but needs manual buffer commits (no auto VAD). |
+| `transcriptionModel` | `gpt-realtime-whisper` | OpenAI's [streaming low-latency STT model](https://developers.openai.com/api/docs/models/gpt-realtime-whisper) (transcript deltas from live audio), paired with `server_vad` so the buffer auto-commits per utterance. `gpt-4o-transcribe` is a higher-accuracy alternative (one-line swap). |
 
 > **Verified against OpenAI docs (2026-06):**
 > - **Brain uses the Responses API** (`POST /v1/responses`), not Chat Completions: for gpt-5.5,
@@ -155,9 +155,10 @@ do speak, call the speak tool with at most 3 short sentences.
 >   some reasoning modes). Flat function tools; system prompt via `instructions`; the tool loop is
 >   threaded with `function_call` / `function_call_output` items; `reasoning.effort` is set.
 > - **`gpt-realtime-2` was not a real model ID** — the original assumption was wrong. Transcription
->   uses **`gpt-4o-transcribe`** over the **GA Realtime API** (no `OpenAI-Beta` header; session
->   configured via `session.update` with `session.type:"transcription"` and config nested under
->   `session.audio.input`; 24 kHz mono PCM16; `server_vad` turn detection → `speech_stopped`).
+>   uses **`gpt-realtime-whisper`** (streaming STT) over the **GA Realtime API** (no `OpenAI-Beta`
+>   header; session configured via `session.update` with `session.type:"transcription"` and config
+>   nested under `session.audio.input`; 24 kHz mono PCM16; `server_vad` auto-commit). Turn-end fires
+>   on `…transcription.completed` so the loop never depends on manual buffer commits.
 > - The screenshot from `capture_screen` goes to the **brain** (`gpt-5.5`, vision), never the
 >   transcription model. The two roles stay split.
 >

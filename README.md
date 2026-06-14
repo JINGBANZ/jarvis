@@ -25,7 +25,7 @@ No Xcode needed — Swift 6 + Command Line Tools only.
 
 These need a human, a real key, and granted permissions — see [`wiki/specification.md` §8](./wiki/specification.md#8-self-verification-plan):
 
-- Model IDs are **doc-verified** (`gpt-5.5` via the Responses API; `gpt-4o-transcribe` over the GA Realtime API) — no edit expected. The one untested-headlessly piece is the Realtime transcription-session connect in `Sources/JarvisApp/RealtimeTranscriber.swift`; if transcription doesn't start, that file documents a `?model=gpt-realtime` connect fallback.
+- Model IDs are **doc-verified** (`gpt-5.5` via the Responses API; `gpt-realtime-whisper` over the GA Realtime API) — no edit expected. The one untested-headlessly piece is the Realtime transcription-session connect in `Sources/JarvisApp/RealtimeTranscriber.swift`; if transcription doesn't start, that file documents a `?model=gpt-realtime` connect fallback.
 - Speak — confirm transcript lines arrive (watch Console / terminal logs).
 - With a LeetCode problem on screen, say *"Jarvis, I'm stuck on two-sum"* — expect a coaching overlay within ~2s, and observe a `capture_screen` call.
 - Confirm the screenshot excludes the overlay window.
