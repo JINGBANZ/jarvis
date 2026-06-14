@@ -35,7 +35,5 @@ wiki/
 ├── sandbox.md            # security / isolation model
 ├── landscape-survey.md   # tools tried & evaluated
 ├── fork-evaluation.md    # code-level eval of fork bases
-├── plan-phase1-poc.md    # Phase 1 implementation plan (fork Natively)
 └── CLAUDE.md             # this file
 ```
-(Generated `*.html` review files and `build_html.py` also live here but are gitignored / tooling.)

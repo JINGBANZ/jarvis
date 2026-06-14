@@ -87,5 +87,6 @@ module + proactive loop as a *reference implementation* while building native Sw
 
 ## Status
 
-Decision pending (user leans Natively, reconsidering native Swift). Whatever we pick, the
-`capture_screen` tool-loop and (except on Natively) the proactive trigger are net-new.
+**Decided: two-phase build** — fork Natively for the Phase 1 PoC, then a clean native Swift app for
+Phase 2 if it validates (see [status.md](./status.md#key-decisions)). Whatever the base, the
+`capture_screen` tool-loop (and, except on Natively, the proactive trigger) is net-new.

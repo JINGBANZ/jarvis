@@ -1,7 +1,13 @@
 # Specification
 
-> The buildable spec. Another agent should be able to implement Jarvis's MVP from this page plus
-> [architecture.md](./architecture.md). Normative: where this says "must," it's a requirement.
+> The buildable spec for the **Phase-2 native Swift app** (the keeper). Another agent should be able
+> to implement it from this page plus [architecture.md](./architecture.md). Normative: where this
+> says "must," it's a requirement.
+
+> **Phase note:** The *first* build is the **Phase-1 fork PoC** on Natively (Electron), which
+> validates the experience and **defers** some of this spec — most importantly the model-triggered
+> `capture_screen` tool-loop. Don't build this native spec as "the MVP" without checking
+> [status.md](./status.md#key-decisions); for Phase 1, follow the parked `plan-phase1-poc.md`.
 
 ## 1. Summary
 

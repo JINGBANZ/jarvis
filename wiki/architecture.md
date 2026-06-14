@@ -3,6 +3,12 @@
 > A living document. Describes the vision, the harness loop, the components, and the principles
 > that govern Jarvis. For exact schemas, prompts, and config, see [specification.md](./specification.md).
 
+> **Scope:** This page (and [specification.md](./specification.md)) describe the **eventual Phase-2
+> native Swift app** — the keeper. The thing being built *first* is the **Phase-1 fork PoC** on
+> Natively (Electron), where parts of this are deferred — notably the model-triggered
+> `capture_screen` tool-loop. See [status.md](./status.md#key-decisions) for the two-phase decision
+> and what Phase 1 actually includes.
+
 ## 1. Vision
 
 Jarvis is a personal, always-on macOS assistant that **coaches you through a LeetCode problem**.
