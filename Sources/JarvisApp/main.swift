@@ -1,4 +1,6 @@
-import Foundation
+import AppKit
 
-// Real bootstrap arrives in Task 10. For now, prove the target links.
-print("Jarvis starting…")
+let app = NSApplication.shared
+let delegate = AppDelegate()
+app.delegate = delegate
+app.run()
