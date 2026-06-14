@@ -13,6 +13,8 @@ final class MenuBarController: NSObject {
     var onMuteChanged: ((Bool) -> Void)?
     /// Fired after a new key is saved to the Keychain, so the app can start coaching immediately.
     var onKeySaved: ((String) -> Void)?
+    /// Fired by "Show Test Tip" — renders a sample coaching overlay with no API call.
+    var onTestTip: (() -> Void)?
 
     init(guardrails: Guardrails, keychain: KeychainSecretStore) {
         self.guardrails = guardrails
@@ -23,10 +25,17 @@ final class MenuBarController: NSObject {
         let mute = NSMenuItem(title: "Mute", action: #selector(toggleMute), keyEquivalent: "m")
         mute.target = self
         menu.addItem(mute)
-        let key = NSMenuItem(title: "Set OpenAI API Key…", action: #selector(setKey), keyEquivalent: "k")
+        // Primary, reliable path: read the key from the clipboard (no text-field focus issues).
+        let paste = NSMenuItem(title: "Paste API Key from Clipboard", action: #selector(pasteKeyFromClipboard), keyEquivalent: "v")
+        paste.target = self
+        menu.addItem(paste)
+        let key = NSMenuItem(title: "Set OpenAI API Key (type)…", action: #selector(setKey), keyEquivalent: "k")
         key.target = self
         menu.addItem(key)
         menu.addItem(.separator())
+        let test = NSMenuItem(title: "Show Test Tip (no API)", action: #selector(showTestTip), keyEquivalent: "t")
+        test.target = self
+        menu.addItem(test)
         menu.addItem(counterItem)
         menu.addItem(.separator())
         let quit = NSMenuItem(title: "Quit Jarvis", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
@@ -37,6 +46,42 @@ final class MenuBarController: NSObject {
     func noteSpoke() {
         interjections += 1
         counterItem.title = "Interjections: \(interjections)"
+    }
+
+    @objc private func showTestTip() {
+        onTestTip?()
+    }
+
+    /// Reliable key entry: read the key straight from the clipboard — no text-field focus needed.
+    @objc private func pasteKeyFromClipboard() {
+        let token = NSPasteboard.general.string(forType: .string)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !token.isEmpty else {
+            confirm("Clipboard is empty",
+                    "Copy your OpenAI API key first (it starts with “sk-”), then choose “Paste API Key from Clipboard” again.")
+            return
+        }
+        let looksLikeKey = token.count >= 20 && !token.contains(where: { $0.isWhitespace })
+        guard looksLikeKey else {
+            confirm("That doesn't look like an API key",
+                    "The clipboard should hold just your OpenAI key — one long token with no spaces. Copy it and try again.")
+            return
+        }
+        keychain.setApiKey(token)
+        statusItem.button?.title = "🟢 Jarvis"
+        onKeySaved?(token)
+        let hint = token.hasPrefix("sk-") ? "" : " (note: it didn’t start with “sk-” — if Jarvis can’t connect, re-copy your key.)"
+        confirm("API key saved", "Stored in your Keychain. Jarvis is starting up — talk through a problem and it will coach you.\(hint)")
+    }
+
+    /// A mouse-clickable confirmation (OK only) — works regardless of keyboard focus.
+    private func confirm(_ title: String, _ info: String) {
+        let a = NSAlert()
+        a.messageText = title
+        a.informativeText = info
+        a.addButton(withTitle: "OK")
+        NSApp.activate(ignoringOtherApps: true)
+        a.runModal()
     }
 
     @objc private func toggleMute(_ sender: NSMenuItem) {
