@@ -4,10 +4,11 @@ import Testing
 
 @Suite struct OpenAIBrainClientTests {
     @Test func decodesSpeakToolCall() async throws {
+        // Responses API: function calls arrive in the `output` array.
         let json = """
-        {"choices":[{"message":{"tool_calls":[
-          {"id":"call_1","type":"function","function":{"name":"speak","arguments":"{\\"text\\":\\"Try a hash map.\\"}"}}
-        ]}}]}
+        {"output":[
+          {"type":"function_call","id":"fc_1","call_id":"call_1","name":"speak","arguments":"{\\"text\\":\\"Try a hash map.\\"}"}
+        ]}
         """
         let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
                                        send: { _ in (Data(json.utf8), 200) })
@@ -17,19 +18,20 @@ import Testing
 
     @Test func decodesCaptureScreenToolCall() async throws {
         let json = """
-        {"choices":[{"message":{"tool_calls":[
-          {"id":"c9","type":"function","function":{"name":"capture_screen","arguments":"{}"}}
-        ]}}]}
+        {"output":[
+          {"type":"function_call","id":"fc_9","call_id":"call_9","name":"capture_screen","arguments":"{}"}
+        ]}
         """
         let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
                                        send: { _ in (Data(json.utf8), 200) })
         let resp = try await client.respond(messages: [.user("hi")], tools: coachTools)
-        #expect(resp.toolCalls == [.captureScreen(callId: "c9")])
-        #expect(resp.rawToolCalls == [RawToolCall(id: "c9", name: "capture_screen", argumentsJSON: "{}")])
+        #expect(resp.toolCalls == [.captureScreen(callId: "call_9")])
+        #expect(resp.rawToolCalls == [RawToolCall(id: "call_9", name: "capture_screen", argumentsJSON: "{}")])
     }
 
     @Test func noToolCallsMeansSilent() async throws {
-        let json = #"{"choices":[{"message":{"content":"(thinking)"}}]}"#
+        // A plain text message in output, no function_call → stay silent.
+        let json = #"{"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"(thinking)"}]}]}"#
         let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
                                        send: { _ in (Data(json.utf8), 200) })
         let resp = try await client.respond(messages: [.user("hi")], tools: coachTools)
@@ -44,19 +46,29 @@ import Testing
         }
     }
 
-    /// B3: an assistant tool-call message encodes as role:assistant with tool_calls.
-    @Test func encodesAssistantToolCallsTurn() async throws {
+    /// Request body uses the Responses shape: instructions, flat tools, reasoning, and the
+    /// assistant function_call / function_call_output threading (B3).
+    @Test func encodesResponsesRequestShape() async throws {
         let box = CapturedBody()
-        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
-                                       send: { req in box.set(req.httpBody); return (Data(#"{"choices":[{"message":{}}]}"#.utf8), 200) })
+        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5", reasoningEffort: "low",
+                                       send: { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), 200) })
         let convo: [ChatMessage] = [
-            .assistantToolCalls([RawToolCall(id: "c1", name: "capture_screen", argumentsJSON: "{}")]),
-            .init(role: .tool, text: "screenshot captured", toolCallId: "c1"),
+            .system("be a coach"),
+            .user("transcript"),
+            .assistantToolCalls([RawToolCall(id: "call_1", name: "capture_screen", argumentsJSON: "{}")]),
+            .init(role: .tool, text: "screenshot captured", toolCallId: "call_1"),
+            .userImage("ZmFrZQ=="),
         ]
         _ = try await client.respond(messages: convo, tools: coachTools)
         let body = String(data: box.get() ?? Data(), encoding: .utf8) ?? ""
-        #expect(body.contains("\"tool_calls\""))
-        #expect(body.contains("\"tool_call_id\":\"c1\""))
+        #expect(body.contains("\"instructions\""))
+        #expect(body.contains("\"function_call\""))
+        #expect(body.contains("\"function_call_output\""))
+        #expect(body.contains("\"call_id\":\"call_1\""))
+        #expect(body.contains("\"input_image\""))
+        #expect(body.contains("\"reasoning\""))
+        // Flat function tool shape (no nested "function" wrapper key).
+        #expect(body.contains("\"name\":\"capture_screen\""))
     }
 }
 

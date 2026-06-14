@@ -1,15 +1,16 @@
 @preconcurrency import AVFoundation
 import JarvisCore
 
-/// Mic capture via AVAudioEngine, downsampled to 16 kHz mono PCM16, delivered as Data chunks.
-/// System-audio capture (the "them" side) is a documented follow-on; mic is the critical path
-/// (spec §6). Live behavior is validated by the human smoke run.
+/// Mic capture via AVAudioEngine, resampled to 24 kHz mono PCM16, delivered as Data chunks.
+/// 24 kHz matches the Realtime API input format (audio/pcm rate 24000). System-audio capture
+/// (the "them" side) is a documented follow-on; mic is the critical path (spec §6). Live behavior
+/// is validated by the human smoke run.
 final class AudioInput: @unchecked Sendable {
     private let engine = AVAudioEngine()
     private let onPCM: @Sendable (Data) -> Void
     private let captureSystemAudio: Bool
     private let targetFormat = AVAudioFormat(commonFormat: .pcmFormatInt16,
-                                             sampleRate: 16_000, channels: 1, interleaved: true)!
+                                             sampleRate: 24_000, channels: 1, interleaved: true)!
 
     init(captureSystemAudio: Bool, onPCM: @escaping @Sendable (Data) -> Void) {
         self.onPCM = onPCM

@@ -1,20 +1,27 @@
 import Foundation
 
+/// Brain client over the OpenAI **Responses API** (`POST /v1/responses`) — the recommended
+/// endpoint for tool use with gpt-5.5 (Chat Completions restricts tool calls under some reasoning
+/// modes). System text is passed via `instructions`; the conversation is sent as typed `input`
+/// items; function calls are threaded with `function_call` / `function_call_output`.
 public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
     public typealias Sender = @Sendable (URLRequest) async throws -> (Data, Int)
 
     private let apiKey: String
     private let model: String
+    private let reasoningEffort: String
     private let endpoint: URL
     private let send: Sender
 
     /// `send` defaults to URLSession; tests inject a stub returning (body, statusCode).
     public init(apiKey: String,
                 model: String,
-                endpoint: URL = URL(string: "https://api.openai.com/v1/chat/completions")!,
+                reasoningEffort: String = "low",
+                endpoint: URL = URL(string: "https://api.openai.com/v1/responses")!,
                 send: Sender? = nil) {
         self.apiKey = apiKey
         self.model = model
+        self.reasoningEffort = reasoningEffort
         self.endpoint = endpoint
         self.send = send ?? { request in
             let (data, response) = try await URLSession.shared.data(for: request)
@@ -38,86 +45,102 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
         return try decode(data)
     }
 
-    // MARK: - Encoding
+    // MARK: - Encoding (Responses API)
 
     private func encodeBody(messages: [ChatMessage], tools: [ToolDef]) throws -> Data {
-        var msgs: [[String: Any]] = []
+        var instructions: [String] = []
+        var input: [[String: Any]] = []
+
         for m in messages {
-            // Assistant message replaying tool calls (B3): must precede any tool result.
-            if m.role == .assistant, let calls = m.toolCalls {
-                msgs.append([
-                    "role": "assistant",
-                    "content": NSNull(),
-                    "tool_calls": calls.map { [
-                        "id": $0.id,
-                        "type": "function",
-                        "function": ["name": $0.name, "arguments": $0.argumentsJSON],
-                    ] },
-                ])
-                continue
-            }
             switch m.role {
-            case .system, .assistant:
-                msgs.append(["role": m.role.rawValue, "content": m.text ?? ""])
+            case .system:
+                if let t = m.text { instructions.append(t) }
+
             case .user:
                 if let img = m.imageBase64JPEG {
-                    msgs.append([
+                    input.append([
                         "role": "user",
-                        "content": [["type": "image_url",
-                                     "image_url": ["url": "data:image/jpeg;base64,\(img)"]]],
+                        "content": [["type": "input_image",
+                                     "image_url": "data:image/jpeg;base64,\(img)"]],
                     ])
                 } else {
-                    msgs.append(["role": "user", "content": m.text ?? ""])
+                    input.append([
+                        "role": "user",
+                        "content": [["type": "input_text", "text": m.text ?? ""]],
+                    ])
                 }
+
+            case .assistant:
+                // Replay the model's function calls as `function_call` input items (B3).
+                if let calls = m.toolCalls {
+                    for c in calls {
+                        input.append([
+                            "type": "function_call",
+                            "call_id": c.id,
+                            "name": c.name,
+                            "arguments": c.argumentsJSON,
+                        ])
+                    }
+                } else if let t = m.text {
+                    input.append(["role": "assistant",
+                                  "content": [["type": "output_text", "text": t]]])
+                }
+
             case .tool:
-                msgs.append(["role": "tool",
-                             "tool_call_id": m.toolCallId ?? "",
-                             "content": m.text ?? ""])
+                input.append([
+                    "type": "function_call_output",
+                    "call_id": m.toolCallId ?? "",
+                    "output": m.text ?? "",
+                ])
             }
         }
+
         let toolsJSON: [[String: Any]] = try tools.map { t in
             let params = try JSONSerialization.jsonObject(with: Data(t.parametersJSON.utf8))
-            return ["type": "function",
-                    "function": ["name": t.name, "description": t.description, "parameters": params]]
+            // Responses API uses a FLAT function tool shape (no nested "function").
+            return ["type": "function", "name": t.name, "description": t.description, "parameters": params]
         }
-        let body: [String: Any] = [
+
+        var body: [String: Any] = [
             "model": model,
-            "messages": msgs,
+            "input": input,
             "tools": toolsJSON,
             "tool_choice": "auto",
+            "reasoning": ["effort": reasoningEffort],
         ]
+        if !instructions.isEmpty {
+            body["instructions"] = instructions.joined(separator: "\n\n")
+        }
         return try JSONSerialization.data(withJSONObject: body)
     }
 
-    // MARK: - Decoding
+    // MARK: - Decoding (Responses API)
 
     private struct Response: Decodable {
-        struct Choice: Decodable { let message: Message }
-        struct Message: Decodable { let tool_calls: [ToolCall]? }
-        struct ToolCall: Decodable {
-            let id: String
-            let function: Function
+        struct Item: Decodable {
+            let type: String
+            let call_id: String?
+            let name: String?
+            let arguments: String?
         }
-        struct Function: Decodable { let name: String; let arguments: String }
-        let choices: [Choice]
+        let output: [Item]
     }
 
     private func decode(_ data: Data) throws -> BrainResponse {
         let decoded = try JSONDecoder().decode(Response.self, from: data)
-        guard let calls = decoded.choices.first?.message.tool_calls else {
-            return BrainResponse(toolCalls: [])
-        }
         var invocations: [ToolInvocation] = []
         var raws: [RawToolCall] = []
-        for c in calls {
-            raws.append(RawToolCall(id: c.id, name: c.function.name, argumentsJSON: c.function.arguments))
-            switch c.function.name {
+        for item in decoded.output where item.type == "function_call" {
+            guard let callId = item.call_id, let name = item.name else { continue }
+            let args = item.arguments ?? "{}"
+            raws.append(RawToolCall(id: callId, name: name, argumentsJSON: args))
+            switch name {
             case "capture_screen":
-                invocations.append(.captureScreen(callId: c.id))
+                invocations.append(.captureScreen(callId: callId))
             case "speak":
                 let text = (try? JSONDecoder().decode([String: String].self,
-                                                      from: Data(c.function.arguments.utf8)))?["text"] ?? ""
-                invocations.append(.speak(callId: c.id, text: text))
+                                                      from: Data(args.utf8)))?["text"] ?? ""
+                invocations.append(.speak(callId: callId, text: text))
             default:
                 break
             }

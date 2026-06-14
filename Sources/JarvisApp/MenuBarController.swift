@@ -11,6 +11,8 @@ final class MenuBarController: NSObject {
     private var interjections = 0
 
     var onMuteChanged: ((Bool) -> Void)?
+    /// Fired after a new key is saved to the Keychain, so the app can start coaching immediately.
+    var onKeySaved: ((String) -> Void)?
 
     init(guardrails: Guardrails, keychain: KeychainSecretStore) {
         self.guardrails = guardrails
@@ -54,7 +56,11 @@ final class MenuBarController: NSObject {
         alert.addButton(withTitle: "Save")
         alert.addButton(withTitle: "Cancel")
         if alert.runModal() == .alertFirstButtonReturn {
-            keychain.setApiKey(field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines))
+            let key = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !key.isEmpty else { return }
+            keychain.setApiKey(key)            // saved locally in the login Keychain
+            statusItem.button?.title = "🟢 Jarvis"
+            onKeySaved?(key)                    // start coaching now — no relaunch needed
         }
     }
 }

@@ -8,7 +8,15 @@ public struct Config: Sendable {
     public var transcriptWindowSeconds: TimeInterval
     public var sentenceDisplaySeconds: TimeInterval
     public var maxSentences: Int
+    /// Brain model. `gpt-5.5` confirmed against OpenAI docs (snapshot `gpt-5.5-2026-04-23`);
+    /// vision + function calling via the Responses API.
     public var brainModel: String
+    /// Reasoning effort for the Responses API (gpt-5 family): minimal | low | medium | high.
+    /// `low` keeps the turn fast (sub-2s target) while still allowing tool calls.
+    public var reasoningEffort: String
+    /// Realtime transcription model. `gpt-4o-transcribe` (confirmed valid; supports server-VAD
+    /// turn detection in a transcription session). `gpt-realtime-whisper` is the streaming
+    /// alternative but requires manual buffer commits (no auto VAD).
     public var transcriptionModel: String
 
     public init(
@@ -19,7 +27,8 @@ public struct Config: Sendable {
         sentenceDisplaySeconds: TimeInterval = 5,
         maxSentences: Int = 3,
         brainModel: String = "gpt-5.5",
-        transcriptionModel: String = "gpt-realtime-2"
+        reasoningEffort: String = "low",
+        transcriptionModel: String = "gpt-4o-transcribe"
     ) {
         self.silenceTimeoutSeconds = silenceTimeoutSeconds
         self.cooldownSeconds = cooldownSeconds
@@ -28,6 +37,7 @@ public struct Config: Sendable {
         self.sentenceDisplaySeconds = sentenceDisplaySeconds
         self.maxSentences = maxSentences
         self.brainModel = brainModel
+        self.reasoningEffort = reasoningEffort
         self.transcriptionModel = transcriptionModel
     }
 

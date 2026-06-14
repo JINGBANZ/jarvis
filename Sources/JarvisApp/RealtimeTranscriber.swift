@@ -1,14 +1,19 @@
 import Foundation
 import JarvisCore
 
-/// Minimal client for the OpenAI Realtime API (GA). Sends PCM16 audio and parses transcription +
-/// turn-detection events, appending lines to the RollingTranscript and firing turn/silence events.
+/// Client for the OpenAI Realtime API (GA) used as a **transcription session**. Streams PCM16
+/// audio, configures server-VAD turn detection, and parses transcription + speech events — adding
+/// lines to the RollingTranscript and firing turn/silence events.
 ///
-/// HONEST LIMITATION: the exact Realtime event names, the auth/beta header, and the model id
-/// (`gpt-realtime-2`) follow the documented GA shapes but were last confirmed pre-cutoff. They are
-/// isolated to this one file and must be checked against live OpenAI docs during the smoke run.
-/// If `gpt-realtime-2` accepts image input, a future simplification merges the brain + transcriber
-/// (spec §5 note) — out of scope here.
+/// Verified against OpenAI docs (2026-06): GA drops the `OpenAI-Beta` header; the transcription
+/// session is configured via `session.update` with `session.type = "transcription"` and config
+/// nested under `session.audio.input`; transcription model `gpt-4o-transcribe` supports server-VAD
+/// turn detection. Audio is 24 kHz mono PCM16.
+///
+/// RESIDUAL UNCERTAINTY (confirm on the live smoke run): the bare WebSocket connect for a
+/// transcription-only session — if the server requires a model query param, append
+/// `?model=gpt-realtime`. Event names below (`input_audio_buffer.speech_stopped`,
+/// `conversation.item.input_audio_transcription.completed`) are the documented GA names.
 final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @unchecked Sendable {
     var onTurnEnd: (@Sendable () -> Void)?
     var onSilence: (@Sendable (TimeInterval) -> Void)?
@@ -35,10 +40,9 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
     }
 
     func connect() {
-        var req = URLRequest(url: URL(string: "wss://api.openai.com/v1/realtime?model=\(model)")!)
+        // GA: no OpenAI-Beta header. Transcription session is selected via session.update below.
+        var req = URLRequest(url: URL(string: "wss://api.openai.com/v1/realtime")!)
         req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        // Header name per Realtime docs; confirm against live docs at run time.
-        req.setValue("realtime=v1", forHTTPHeaderField: "OpenAI-Beta")
         let session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
         let task = session.webSocketTask(with: req)
         self.task = task
@@ -48,14 +52,25 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         resetSilenceTimer()
     }
 
-    /// Enable input-audio transcription + server turn detection.
+    func stop() {
+        silenceTimer?.invalidate()
+        task?.cancel(with: .goingAway, reason: nil)
+        task = nil
+    }
+
+    /// GA transcription session config: type + nested audio.input (format / transcription / VAD).
     private func configureSession() {
         send(json: [
             "type": "session.update",
             "session": [
-                "input_audio_format": "pcm16",
-                "input_audio_transcription": ["model": model],
-                "turn_detection": ["type": "server_vad"],
+                "type": "transcription",
+                "audio": [
+                    "input": [
+                        "format": ["type": "audio/pcm", "rate": 24_000],
+                        "transcription": ["model": model, "language": "en"],
+                        "turn_detection": ["type": "server_vad"],
+                    ],
+                ],
             ],
         ])
     }
@@ -95,14 +110,18 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
                 transcript.append(.init(speaker: .me, text: transcriptText, at: at))
                 resetSilenceTimer()
             }
-        case "input_audio_buffer.speech_stopped", "response.done":
+        case "input_audio_buffer.speech_stopped":
+            // Server VAD detected end of a spoken turn.
             onTurnEnd?()
             resetSilenceTimer()
+        case "error":
+            NSLog("Jarvis realtime error event: \(text)")
         default:
             break
         }
     }
 
+    /// Fires the "maybe stuck" silence trigger after `silenceTimeout` of no new transcription.
     private func resetSilenceTimer() {
         let timeout = silenceTimeout
         DispatchQueue.main.async { [weak self] in
