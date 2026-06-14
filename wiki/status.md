@@ -4,10 +4,14 @@
 
 ## Phase
 
-**Building — Phase 2 native Swift app, directly.** The Phase-1 Natively fork PoC was **skipped**
-(decision 2026-06-14): we build the keeper once. An implementation plan
-([plan-phase2-build.md](./plan-phase2-build.md)) drives an autonomous Claude Code build running on
-the Mac.
+**Build complete (headless) — awaiting the live smoke run.** Phase 1 was **skipped** (2026-06-14)
+and the native Swift app was built directly per [plan-phase2-build.md](./plan-phase2-build.md). The
+tested harness (config, transcript, guardrails, coach tool-loop, OpenAI client) is **green: 26
+tests pass**; the signed `Jarvis.app` builds, ad-hoc signs, and launches. The app shell, overlay,
+mic capture, and realtime transcriber **compile and launch** but their *live* behavior (real mic,
+websocket, TCC grants, real `OPENAI_API_KEY`, real model IDs) is verified only by the human smoke
+checklist in [specification.md §8](./specification.md#8-self-verification-plan) / the
+[README](../README.md#live-smoke-checklist-what-to-verify-by-hand).
 
 ## What's Decided
 
@@ -68,12 +72,15 @@ A compact log — the *rationale* for each lives in the linked design page, not 
 
 ## Next Action
 
-The build is driven by [plan-phase2-build.md](./plan-phase2-build.md):
+The headless build is done ([plan-phase2-build.md](./plan-phase2-build.md) Tasks 0–14 complete).
+Remaining is the **human smoke run** — build, run, and validate live:
 
-1. Scaffold the SwiftPM package + test harness; implement components TDD-first (Transcriber,
-   CoachDriver + guardrails, tools, Overlay, AudioInput, MenuBar).
-2. Run unit + offline-pipeline tests (mock OpenAI client); confirm the `.app` bundle builds,
-   ad-hoc signs, and launches.
-3. **Human-in-the-loop (deferred to Forrest):** enter a real OpenAI key, grant Screen-Recording +
-   Microphone at first run, and run the **live smoke checklist**
-   ([specification.md §8](./specification.md#8-self-verification-plan)).
+1. `./scripts/build-app.sh release` → `open ./Jarvis.app`; grant Microphone + Screen Recording.
+2. Set a real `OPENAI_API_KEY` (menu bar or env). **Confirm `gpt-5.5` / `gpt-realtime-2` are real
+   IDs** against live OpenAI docs; if not, edit `Sources/JarvisCore/Config.swift` and rebuild.
+3. Run the **live smoke checklist** ([README](../README.md#live-smoke-checklist-what-to-verify-by-hand)
+   / [specification.md §8](./specification.md#8-self-verification-plan)): speak → transcript;
+   "I'm stuck on two-sum" → coaching overlay + observed `capture_screen`; overlay excluded from the
+   screenshot; rate cap + mute hold.
+4. The most fragile spot is the Realtime websocket event shapes in
+   `Sources/JarvisApp/RealtimeTranscriber.swift` — confirm against current docs.
