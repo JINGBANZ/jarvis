@@ -9,7 +9,7 @@
 
 Continuous transcription of mic + **both sides** of a call → a **proactive** decision to speak
 (no hotkey; silence/timing-aware) → the model calls a **`capture_screen` tool on demand** →
-short coaching tips (≤3 sentences) in an overlay. Brain `gpt-5.5`, transcription `gpt-realtime-2`.
+short coaching tips (≤3 sentences) in an overlay. Brain `gpt-5.5`, transcription `gpt-4o-transcribe`.
 
 ## Universal findings (true of every candidate)
 
@@ -55,7 +55,7 @@ binary + native rebuilds still work on current macOS; GPL-3.0.
 Tauri (Rust core + React), ~10 MB, a real **NSPanel** overlay (non-activating float + content
 protection — literally our spec), Core Audio process tap for system audio. **Cons:** its STT is
 batch/segment (Whisper-style upload), not streaming — so the realtime leg needs replacing for
-`gpt-realtime-2`; no proactive layer; ~5 months stale against fast-moving Rust deps.
+`gpt-4o-transcribe`; no proactive layer; ~5 months stale against fast-moving Rust deps.
 
 ### Why the lower three are out
 - **cheating-daddy / cheating-owo:** Gemini-fused single-session brain with no provider abstraction

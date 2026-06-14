@@ -10,7 +10,7 @@
 ## 1. Summary
 
 A native Swift/SwiftUI macOS menu-bar app. It transcribes the user's voice continuously with
-`gpt-realtime-2`, and on each conversational turn (or after a silence) it calls `gpt-5.5` with two
+`gpt-4o-transcribe`, and on each conversational turn (or after a silence) it calls `gpt-5.5` with two
 tools — `capture_screen` and `speak`. The model decides whether to look at the screen and whether
 to offer a short LeetCode coaching tip, which is rendered in an overlay. The model is given timing
 context (timestamped transcript + how long the user has been silent) so it can distinguish
@@ -19,7 +19,7 @@ context (timestamped transcript + how long the user has been silent) so it can d
 ## 2. The Harness Loop (pseudocode)
 
 ```swift
-// Always-on: stream audio to gpt-realtime-2, maintain a rolling, timestamped transcript.
+// Always-on: stream audio to gpt-4o-transcribe, maintain a rolling, timestamped transcript.
 transcriber.onTurnEnd = { handleTrigger(.turnEnd) }
 // Silence fires after `silenceTimeoutSeconds`; the actual quiet duration is passed through.
 transcriber.onSilence = { secs in handleTrigger(.silence(secondsQuiet: secs)) }
@@ -147,18 +147,24 @@ do speak, call the speak tool with at most 3 short sentences.
 | `maxSentences` | 3 | Hard cap on response length. |
 | `reasoningEffort` | `low` | Responses-API reasoning effort (gpt-5 family: minimal/low/medium/high). `low` keeps the turn fast while still permitting tool calls. |
 | `brainModel` | `gpt-5.5` | **Confirmed** against OpenAI docs (snapshot `gpt-5.5-2026-04-23`). Vision + function calling. Called via the **Responses API**. |
-| `transcriptionModel` | `gpt-realtime-whisper` | OpenAI's [streaming low-latency STT model](https://developers.openai.com/api/docs/models/gpt-realtime-whisper) (transcript deltas from live audio), paired with `server_vad` so the buffer auto-commits per utterance. `gpt-4o-transcribe` is a higher-accuracy alternative (one-line swap). |
+| `transcriptionModel` | `gpt-4o-transcribe` | Supports `server_vad`, so the Realtime server auto-commits the audio buffer per utterance and emits `…transcription.completed` (what fires the coach loop). `gpt-realtime-whisper` is lower-latency but has **no server VAD** — it would need manual `input_audio_buffer.commit`, so it is not used. |
 
 > **Verified against OpenAI docs (2026-06):**
 > - **Brain uses the Responses API** (`POST /v1/responses`), not Chat Completions: for gpt-5.5,
 >   tool calling is the recommended path on Responses (Chat Completions restricts tool calls under
 >   some reasoning modes). Flat function tools; system prompt via `instructions`; the tool loop is
 >   threaded with `function_call` / `function_call_output` items; `reasoning.effort` is set.
-> - **`gpt-realtime-2` was not a real model ID** — the original assumption was wrong. Transcription
->   uses **`gpt-realtime-whisper`** (streaming STT) over the **GA Realtime API** (no `OpenAI-Beta`
->   header; session configured via `session.update` with `session.type:"transcription"` and config
->   nested under `session.audio.input`; 24 kHz mono PCM16; `server_vad` auto-commit). Turn-end fires
->   on `…transcription.completed` so the loop never depends on manual buffer commits.
+> - **Transcription** uses **`gpt-4o-transcribe`** over the **GA Realtime API**. (`gpt-4o-transcribe`
+>   was never a real ID; `gpt-realtime-whisper` was tried but has no server VAD — it needs manual
+>   commits — so it was dropped.) Connect with **`?intent=transcription`** (no `OpenAI-Beta`
+>   header); `session.update` sets `session.type:"transcription"` with config nested under
+>   `session.audio.input` (24 kHz mono PCM16; `server_vad` → auto-commit). Turn-end fires on
+>   `…transcription.completed`. The connect URL + payload are built by a unit-tested `RealtimeSession`
+>   helper so this wire contract is verified, not just mocked.
+> - **Production hardening:** the brain client retries 429/5xx with backoff (honoring `Retry-After`),
+>   sets a request timeout, `store:false` (no server-side retention of screenshots/transcripts),
+>   `max_output_tokens`, `parallel_tool_calls:false`, and a `prompt_cache_key`. The transcriber
+>   reconnects with backoff + ping keepalive. The coach loop is single-flighted (no double-speak).
 > - The screenshot from `capture_screen` goes to the **brain** (`gpt-5.5`, vision), never the
 >   transcription model. The two roles stay split.
 >

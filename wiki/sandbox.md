@@ -69,7 +69,7 @@ written to disk in plaintext, never committed, never logged.
 
 Narrow and explicit. Data leaves the machine only via:
 
-- **Audio → `gpt-realtime-2`** on the OpenAI Realtime API (continuous, for transcription).
+- **Audio → `gpt-4o-transcribe`** on the OpenAI Realtime API (continuous, for transcription).
 - **Screenshot + transcript window → `gpt-5.5`** — and *only* when the model triggers a
   `capture_screen` and/or a coaching turn. No screen content leaves the machine on idle turns.
 

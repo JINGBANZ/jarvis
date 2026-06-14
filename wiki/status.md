@@ -17,7 +17,7 @@ checklist in [specification.md §8](./specification.md#8-self-verification-plan)
 
 - **What it is:** a personal LeetCode-coaching "Jarvis" for macOS. Hears you think aloud,
   watches your screen *on demand*, proactively offers short coaching tips via an overlay.
-- **Brain:** `gpt-5.5` with tool-use + vision. **Transcription:** `gpt-realtime-2` (GA Realtime
+- **Brain:** `gpt-5.5` with tool-use + vision. **Transcription:** `gpt-4o-transcribe` (GA Realtime
   API). API-only, no local models.
 - **Overlay:** at most 3 sentences per response, each shown ~5 seconds.
 - **Build approach: native Swift, directly.** The two-phase plan (fork Natively first, then native)
@@ -60,7 +60,7 @@ A compact log — the *rationale* for each lives in the linked design page, not 
 
 - ~~Exact OpenAI model IDs~~ **Resolved & verified against live docs (2026-06):** brain = `gpt-5.5`
   via the **Responses API**; transcription = `gpt-4o-transcribe` over the GA Realtime API. The
-  earlier `gpt-realtime-2` was not a real ID. See [specification.md §5](./specification.md#5-configuration).
+  earlier `gpt-4o-transcribe` was not a real ID. See [specification.md §5](./specification.md#5-configuration).
 - ~~Whether system-audio (both-sides) capture is in the MVP or deferred~~ **Resolved:** system
   audio is **in** the MVP, as long as it doesn't risk the 2-day timeline. Mic remains the critical
   path; system audio rides along via ScreenCaptureKit and is the first thing cut if the budget is
