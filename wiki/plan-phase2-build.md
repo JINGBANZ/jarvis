@@ -10,7 +10,133 @@
 
 **Source of truth:** [specification.md](./specification.md), [architecture.md](./architecture.md), [sandbox.md](./sandbox.md). This plan implements them.
 
-**Scope of autonomous verification:** Tasks 0–9 and 14 are fully verifiable headless (build + `swift test` + bundle/sign/launch). Tasks 10–13 (overlay, audio, realtime transcriber, screen capture) **compile and launch** but their *live behavior* needs a human (mic input, TCC grants, a real `OPENAI_API_KEY`, models that actually exist). Those are validated by the **Live Smoke Checklist** in [specification.md §8](./specification.md#8-self-verification-plan), deferred to the user.
+**Scope of autonomous verification:** Tasks 0–9 and 14 are fully verifiable headless (build + tests + bundle/sign/launch). Tasks 10–13 (overlay, audio, realtime transcriber, screen capture) **compile and launch** but their *live behavior* needs a human (mic input, TCC grants, a real `OPENAI_API_KEY`, models that actually exist). Those are validated by the **Live Smoke Checklist** in [specification.md §8](./specification.md#8-self-verification-plan), deferred to the user.
+
+---
+
+## Review Amendments (B1–B3) — apply throughout
+
+A fresh-agent review (2026-06-14) compile-tested the plan on this exact machine and found three blockers. These corrections override the task bodies below wherever they conflict.
+
+### B1 — Tests use **swift-testing**, not XCTest (no XCTest in CLT-only)
+
+`import XCTest` fails with "no such module" under Command Line Tools. Use the bundled **swift-testing** framework, run via a wrapper script that adds its search paths.
+
+- **Create `scripts/run-tests.sh`** (Task 0) and use `./scripts/run-tests.sh` **everywhere** the tasks say `swift test`:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+FW=/Library/Developer/CommandLineTools/Library/Developer/Frameworks
+IOP=/Library/Developer/CommandLineTools/Library/Developer/usr/lib
+exec swift test \
+  -Xswiftc -F -Xswiftc "$FW" \
+  -Xlinker -F -Xlinker "$FW" \
+  -Xlinker -rpath -Xlinker "$FW" \
+  -Xlinker -rpath -Xlinker "$IOP" \
+  "$@"
+```
+
+- **Convert every test file** from XCTest to swift-testing using this mapping:
+  - `import XCTest` → `import Testing`
+  - `final class FooTests: XCTestCase { func testBar() {...} }` → `@Suite struct FooTests { @Test func bar() {...} }`
+  - `XCTAssertEqual(a, b)` → `#expect(a == b)`; `XCTAssertTrue(x)` → `#expect(x)`; `XCTAssertFalse(x)` → `#expect(!x)`; `XCTAssertNil(x)` → `#expect(x == nil)`
+  - accuracy form `XCTAssertEqual(a, b, accuracy: 0.001)` → `#expect(abs(a - b) < 0.001)`
+  - async stays `@Test func bar() async {...}`; throwing → `@Test func bar() async throws {...}`
+  - error expectation `do { _ = try await …; XCTFail() } catch {}` → `await #expect(throws: (any Error).self) { _ = try await … }`
+  - Mocks/fakes stay plain classes (no XCTestCase). Filtering: `./scripts/run-tests.sh --filter FooTests` still works.
+
+### B2 — Swift 6 strict concurrency: annotate AppKit classes `@MainActor` (Tasks 10, 12, 13)
+
+`swift-tools-version:6.0` enables full data-race checking; AppKit types are `@MainActor`. Apply:
+
+- `@MainActor final class OverlayPanel`, `@MainActor final class MenuBarController`, `@MainActor final class AppDelegate`, `@MainActor final class AudioInput`.
+- In `OverlayPanel`, make the protocol witness **nonisolated** and hop to the main actor:
+
+```swift
+nonisolated func render(_ text: String, maxSentences: Int, perSentenceSeconds: TimeInterval) {
+    let sentences = splitIntoSentences(text, maxSentences: maxSentences)
+    guard !sentences.isEmpty else { return }
+    Task { @MainActor in self.show(sentences, each: perSentenceSeconds) }
+}
+```
+
+- Replace every `DispatchQueue.main.async { … }` in the App target with `Task { @MainActor in … }`.
+- In `MenuBarController.noteSpoke()` (now `@MainActor`), update the counter directly (no dispatch).
+- In `AppDelegate.startTranscription()`, **capture the driver locally** (it's `@unchecked Sendable`) so the transcriber callbacks don't capture `@MainActor self`:
+
+```swift
+let driver = self.driver!
+transcriber.onTurnEnd = { Task { await driver.handleTrigger(.turnEnd) } }
+transcriber.onSilence = { secs in Task { await driver.handleTrigger(.silence(secondsQuiet: secs)) } }
+driver.onSpoke = { [weak self] in Task { @MainActor in self?.menuBar.noteSpoke() } }
+```
+
+- Make `RealtimeTranscriber.onTurnEnd`/`onSilence` `@Sendable`: `var onTurnEnd: (@Sendable () -> Void)?`, `var onSilence: (@Sendable (TimeInterval) -> Void)?`. Make `AudioInput.onPCM` `@Sendable (Data) -> Void`. Resolve any residual tap-closure `Sendable` warnings at compile time (mark the transcriber `@unchecked Sendable` if needed for the audio callback).
+
+### B3 — Tool-loop must replay the assistant `tool_calls` turn (Tasks 6, 8, 9)
+
+The Chat Completions API rejects a `role:tool` message unless the preceding `assistant` message carried the matching `tool_calls`. Thread it through:
+
+- **Brain.swift** — add a raw tool-call type, a field on `ChatMessage`, a factory, and a field on `BrainResponse`:
+
+```swift
+public struct RawToolCall: Sendable {
+    public let id: String, name: String, argumentsJSON: String
+    public init(id: String, name: String, argumentsJSON: String) {
+        self.id = id; self.name = name; self.argumentsJSON = argumentsJSON
+    }
+}
+// add to ChatMessage:
+//   public let toolCalls: [RawToolCall]?   (init param, default nil; include in the memberwise init)
+//   static func assistantToolCalls(_ calls: [RawToolCall]) -> ChatMessage {
+//       .init(role: .assistant, toolCalls: calls) }
+// add to BrainResponse:
+//   public let rawToolCalls: [RawToolCall]    (init param)
+```
+
+- **CoachDriver.swift** — on `.captureScreen`, append the assistant turn before the tool result:
+
+```swift
+case .captureScreen(let callId):
+    convo.append(.assistantToolCalls(response.rawToolCalls))
+    if let img = screen.capture() {
+        convo.append(.init(role: .tool, text: "screenshot captured", toolCallId: callId))
+        convo.append(.userImage(img))
+    } else {
+        convo.append(.init(role: .tool, text: "screenshot failed", toolCallId: callId))
+    }
+    continue
+```
+
+- **OpenAIBrainClient.swift** — `decode` populates `rawToolCalls` (id, name, arguments) alongside the parsed `toolCalls`; `encodeBody` emits assistant messages with `tool_calls`:
+
+```swift
+// in encodeBody, for an assistant ChatMessage with toolCalls:
+if m.role == .assistant, let calls = m.toolCalls {
+    msgs.append([
+        "role": "assistant",
+        "content": NSNull(),
+        "tool_calls": calls.map { ["id": $0.id, "type": "function",
+            "function": ["name": $0.name, "arguments": $0.argumentsJSON]] },
+    ])
+    continue
+}
+```
+
+- **CoachDriverPipelineTests** — `ScriptedBrain`'s capture response must include `rawToolCalls`, and add an assertion that the second brain call's conversation contains an assistant message with non-nil `toolCalls`:
+
+```swift
+// script[0]: .init(toolCalls: [.captureScreen(callId: "c1")],
+//                   rawToolCalls: [RawToolCall(id: "c1", name: "capture_screen", argumentsJSON: "{}")])
+// assert: #expect(brain.calls[1].contains { $0.toolCalls != nil })
+```
+
+### Minor (apply opportunistically)
+
+- `screencapture` add `-D 1` is optional; default already targets the main display.
+- Don't claim response *streaming* (overlay shows pre-split sentences sequentially; the brain call is not streamed). Spec §7's latency lever about streaming is not implemented in this MVP.
 
 ---
 
