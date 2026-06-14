@@ -8,7 +8,9 @@
 
 Two layers below are **relaxed** for the personal build, by explicit decision:
 
-- **No App Sandbox.** The app is **ad-hoc signed and unsandboxed**; Screen Recording + Microphone
+- **No App Sandbox.** The app is **unsandboxed**, signed with a **stable self-signed identity
+  (`Jarvis Dev`)** — not ad-hoc, so TCC grants persist across rebuilds (see
+  [specification.md §9](./specification.md#9-build--run-constraints)). Screen Recording + Microphone
   are granted via **TCC prompts** at first run. Consequence: the app *could* read the user's files —
   accepted for a personal tool. (Hardened model: §1.)
 - **No separate account.** The build and the app run in the **main `forrest` account**, inside a
@@ -27,8 +29,8 @@ granted; everything else is denied by default.
 
 ### 1. App Sandbox (OS-enforced) — *hardened model; relaxed in the current build*
 
-> **Current build:** App Sandbox is **off**; the app is ad-hoc signed and relies on TCC prompts.
-> The description below is the target for a shippable version.
+> **Current build:** App Sandbox is **off**; the app is signed with a stable self-signed identity
+> (`Jarvis Dev`) and relies on TCC prompts. The description below is the target for a shippable version.
 
 The app ships with the macOS App Sandbox enabled and requests **only** the entitlements it needs:
 
@@ -80,7 +82,9 @@ database. Temp screenshots are deleted after use.
 
 - **Cooldown** between spoken responses.
 - **Rate cap** (max interjections per minute).
-- **Global mute** hotkey.
+- **Manual Start/Stop** in the menu bar — coaching never runs until started, and Stop tears the
+  pipeline down entirely (replaces the earlier user-facing mute; the latent mute flag remains in
+  `Guardrails` but is no longer exposed in the menu).
 - **Visible "listening" indicator** — the user always knows when Jarvis is active (also a consent cue).
 - **Session counter** of tokens/calls in the menu bar, so runaway behavior is visible immediately.
 

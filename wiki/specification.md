@@ -174,8 +174,9 @@ do speak, call the speak tool with at most 3 short sentences.
 > [migrate-to-responses](https://developers.openai.com/api/docs/guides/migrate-to-responses).
 
 API key is read from the **Keychain**, entered via the menu bar ("Set OpenAI API Key…"), which
-saves it locally and starts coaching immediately (no relaunch). An `OPENAI_API_KEY` env var is a
-headless fallback. Never stored in plaintext or committed.
+saves it locally. Jarvis does **not** auto-start — the user presses **Start Jarvis** in the menu
+bar to begin (and **Stop Jarvis** to halt); the menu bar shows two states only, ⚪️ stopped and
+🟢 running. An `OPENAI_API_KEY` env var is a headless fallback. Never stored in plaintext or committed.
 
 ## 6. Audio Sources
 
@@ -215,7 +216,7 @@ The build agent must produce and run these. (See the development goal: the agent
    `capture_screen`.
 4. `capture_screen` returns a valid image and the overlay window is absent from it.
 5. Guardrails hold: rapid triggers do not produce more than `maxInterjectionsPerMinute` responses;
-   mute silences output.
+   **Stop Jarvis** halts the pipeline entirely.
 
 **Guardrail / cost guard:** a session token-and-call counter surfaced in the menu bar, so runaway
 behavior is visible.
@@ -230,10 +231,42 @@ behavior is visible.
   compiles and runs with `swiftc`. Build with `swift build`.
 - **Packaging:** the executable is assembled into a `.app` bundle by hand — a minimal
   `Contents/MacOS/<bin>` + `Contents/Info.plist` carrying `NSMicrophoneUsageDescription` and the
-  bundle identifier — and **ad-hoc signed** with `codesign -s - --deep`. A build script does this.
+  stable bundle identifier `com.jarvis.coach`. `scripts/build-app.sh` does this.
+- **Signing for permission persistence.** The bundle is signed with a **stable self-signed identity
+  (`Jarvis Dev`)**, created once by `scripts/make-signing-identity.sh`, *not* ad-hoc. This is the
+  crux of permission persistence: macOS TCC keys a grant to the code signature + bundle id + bundle
+  path, so an ad-hoc signature (which changes every build) makes macOS forget Microphone/Screen
+  Recording and re-prompt on each rebuild. With the stable identity, **grants persist across
+  rebuilds and relaunches.** If the identity is missing, `build-app.sh` falls back to ad-hoc and
+  prints a warning — grants will reset each build until you run the identity script once.
 - **Permissions: TCC prompts, not entitlements.** Screen Recording and Microphone are granted by
-  the OS on first use (no App-Sandbox entitlement file). The app must be a signed `.app` bundle for
-  the grants to attach and persist.
+  the OS on first use (no App-Sandbox entitlement file). `Permissions.primeAll()` requests them at
+  launch and is **idempotent**: once a permission is `authorized` it only logs and never re-prompts,
+  and Start/Stop never touches permissions. Persistence holds as long as three things stay fixed:
+  the **stable signing identity**, the **bundle id** (`com.jarvis.coach`), and the **bundle path**
+  (moving `Jarvis.app` re-prompts). Recover a stale *denied* state — which macOS won't re-prompt for
+  — with `tccutil reset Microphone com.jarvis.coach` (or `ScreenCapture`), then relaunch and Allow.
 - **Account:** built in the main `forrest` account inside a **git worktree** (the restricted-account
   requirement is waived for the personal build — see [sandbox.md](./sandbox.md)).
+- **Always launch with `open ./Jarvis.app`**, never the bare binary. Running the executable from a
+  terminal makes TCC attribute the grants to the shell, so the app reports Microphone/Screen
+  Recording as "denied" even when they're granted. To pass flags, use `open ./Jarvis.app --args …`.
 - Target: a working MVP in **< 2 days of autonomous Claude Code build**.
+
+### Dev mode — live activity viewer
+
+For watching Jarvis reason during development, a **dev mode** is enabled by the launch flag
+`--dev` (`scripts/run-dev.sh` rebuilds and launches with it via `open ./Jarvis.app --args --dev`).
+In dev mode the app writes a **self-contained, auto-refreshing HTML page** and opens it in the
+default browser for the session:
+
+- `ActivityLog` (in `JarvisCore`) mirrors **every `jlog` line** into the page — so lifecycle,
+  errors, realtime-socket events, and the coach's per-turn decisions all appear with no extra
+  wiring. The page reloads every second (`<meta http-equiv="refresh">`), color-codes events, and
+  scrolls to the newest line. No server — it works straight off `file://`.
+- The `CoachDriver` emits human-readable decision markers the viewer keys on: 🗣 turn-end / 🤫
+  silence (why it woke), 💭 thinking, 👁 `capture_screen`, 💬 the spoken tip, and `… staying
+  silent` / `… held back` when it declines.
+- Output path defaults to `/tmp/jarvis-activity.html`, overridable with `JARVIS_ACTIVITY_HTML`;
+  it's reset fresh at the start of each dev session. The viewer is **dev-only** — normal launches
+  don't open it (though `ActivityLog` still maintains the file).

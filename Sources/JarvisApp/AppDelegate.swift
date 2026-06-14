@@ -19,32 +19,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var transcriber: RealtimeTranscriber?
     private var audio: AudioInput?
 
+    /// Dev mode (`open ./Jarvis.app --args --dev`): auto-opens the live activity HTML for the session.
+    private let devMode = CommandLine.arguments.contains("--dev")
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory) // menu-bar app, no Dock icon
+
+        if devMode {
+            ActivityLog.shared.reset()                       // fresh page for this session
+            NSWorkspace.shared.open(ActivityLog.shared.htmlURL)
+            jlog("Jarvis: dev mode — live activity viewer opened in your browser.")
+        }
 
         // Ask for Microphone + Screen Recording up front, not lazily mid-session.
         Permissions.primeAll()
 
         overlay = OverlayPanel()
-        menuBar = MenuBarController(guardrails: guardrails, keychain: keychain)
-        // Pasting a key in the menu starts coaching immediately — no relaunch.
-        menuBar.onKeySaved = { [weak self] key in self?.applyKey(key) }
+        menuBar = MenuBarController(keychain: keychain)
+        // The menu drives the pipeline lifecycle. Jarvis does NOT auto-start; the user presses Start.
+        menuBar.onStart = { [weak self] in self?.start() ?? false }
+        menuBar.onStop = { [weak self] in self?.stop() }
+        // A pasted key is stored but does not auto-start; restart only if already running.
+        menuBar.onKeySaved = { [weak self] _ in
+            guard let self, self.transcriber != nil else { return }
+            self.stop(); _ = self.start()
+        }
 
-        // Start now if a key is already present (Keychain or OPENAI_API_KEY).
-        if let key = secrets.apiKey(), !key.isEmpty {
-            applyKey(key)
+        if secrets.apiKey()?.isEmpty == false {
+            jlog("Jarvis: ready — press Start in the menu bar to begin coaching.")
         } else {
-            jlog("Jarvis: no API key yet — paste it via the menu bar (it saves to your Keychain).")
+            jlog("Jarvis: no API key yet — paste it via the menu bar, then press Start.")
         }
     }
 
-    /// (Re)build the brain + driver for `key` and (re)start the transcription pipeline.
-    private func applyKey(_ key: String) {
-        // Tear down any existing pipeline so a new key replaces it cleanly.
-        transcriber?.stop()
-        audio?.stop()
-        transcriber = nil
-        audio = nil
+    /// Build the brain + driver and start the transcription pipeline. Returns `false` (and stays
+    /// stopped) if no API key is available yet.
+    @discardableResult
+    private func start() -> Bool {
+        guard let key = secrets.apiKey(), !key.isEmpty else {
+            jlog("Jarvis: can't start — no API key. Use “Set OpenAI API Key…” first.")
+            return false
+        }
+        stop() // tear down any existing pipeline so we start cleanly
 
         let brain = OpenAIBrainClient(apiKey: key, model: config.brainModel,
                                       reasoningEffort: config.reasoningEffort)
@@ -67,5 +83,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         transcriber.connect()
         audio.start()
         jlog("Jarvis: coaching started.")
+        return true
+    }
+
+    /// Stop and tear down the transcription pipeline. Safe to call when already stopped.
+    private func stop() {
+        let wasRunning = transcriber != nil
+        transcriber?.stop()
+        audio?.stop()
+        transcriber = nil
+        audio = nil
+        driver = nil
+        if wasRunning { jlog("Jarvis: stopped.") }
     }
 }

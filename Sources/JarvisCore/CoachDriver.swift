@@ -56,7 +56,12 @@ public final class CoachDriver: @unchecked Sendable {
         guard beginHandling() else { return }   // one interjection at a time
         defer { endHandling() }
 
-        guard guardrails.allow() else { return }
+        jlog(triggerLabel(reason))
+
+        guard guardrails.allow() else {
+            jlog("… held back (cooldown or rate cap)")
+            return
+        }
 
         let now = clock.now()
         let ctx = TriggerContext(
@@ -75,6 +80,8 @@ public final class CoachDriver: @unchecked Sendable {
             """),
         ]
 
+        jlog("💭 thinking…")
+
         var iterations = 0
         while iterations < maxToolIterations {
             iterations += 1
@@ -88,10 +95,14 @@ public final class CoachDriver: @unchecked Sendable {
             }
 
             // No tool call → stay silent.
-            guard let call = response.toolCalls.first else { return }
+            guard let call = response.toolCalls.first else {
+                jlog("… nothing useful to add, staying silent")
+                return
+            }
 
             switch call {
             case .captureScreen(let callId):
+                jlog("👁 looking at your screen")
                 // Replay the model's function call, then the tool result + the screenshot image.
                 convo.append(.assistantToolCalls(response.rawToolCalls))
                 if let img = screen.capture() {
@@ -103,12 +114,21 @@ public final class CoachDriver: @unchecked Sendable {
                 continue // let the model reason over the image
 
             case .speak(_, let text):
+                jlog("💬 \(text)")
                 overlay.render(text, maxSentences: config.maxSentences,
                                perSentenceSeconds: config.sentenceDisplaySeconds)
                 guardrails.noteSpoke()
                 onSpoke?()
                 return
             }
+        }
+    }
+
+    /// A short, human-readable marker for why the loop woke up — shown in the activity viewer.
+    private func triggerLabel(_ reason: TriggerReason) -> String {
+        switch reason {
+        case .turnEnd:               return "🗣 you finished a thought"
+        case .silence(let secs):     return "🤫 quiet for \(Int(secs))s"
         }
     }
 }

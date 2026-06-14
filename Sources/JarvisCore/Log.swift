@@ -5,6 +5,7 @@ import Foundation
 /// path can be overridden with the `JARVIS_LOG` env var; defaults to /tmp/jarvis-debug.log.
 public func jlog(_ message: String) {
     NSLog("%@", message)
+    ActivityLog.shared.record(message)        // mirror into the live HTML viewer
     let path = ProcessInfo.processInfo.environment["JARVIS_LOG"] ?? "/tmp/jarvis-debug.log"
     let line = "\(Self_timestamp()) \(message)\n"
     guard let data = line.data(using: .utf8) else { return }
