@@ -101,12 +101,11 @@ real API key, or granted permissions.
 ## Quick start (run it on your Mac)
 
 ```bash
-./scripts/build-app.sh --run   # build + sign Jarvis.app, then launch it
+./scripts/build-app.sh --run   # build, sign, and launch Jarvis.app
 ```
 
-(`build-app.sh` creates the stable `Jarvis Dev` signing identity on first run; on that first build
-macOS asks once to let `codesign` use the key — click **"Always Allow"**. Plain
-`./scripts/build-app.sh` just builds; then `open ./Jarvis.app` to launch — always via `open`, see below.)
+On the **first** build macOS asks once to let `codesign` use a new key — click **"Always Allow"**.
+(Plain `./scripts/build-app.sh` builds without launching; then `open ./Jarvis.app`.)
 
 Then:
 
@@ -121,11 +120,8 @@ Then:
 4. **Start / Stop** coaching from the menu bar. Jarvis does **not** auto-start. The icon shows the
    only two states: **⚪️ stopped** and **🟢 running**.
 
-> **Why the stable signing identity.** macOS ties a permission grant to the app's code signature +
-> bundle id + path. `build-app.sh` always signs with the stable `Jarvis Dev` identity (creating it on
-> first run) so that signature stays constant and your Microphone / Screen Recording grants survive
-> rebuilds. There is no ad-hoc fallback — ad-hoc signing changes identity every build, which is
-> exactly what makes macOS forget permissions and re-prompt.
+Permissions persist across rebuilds automatically (the app always signs with a stable identity); the
+mechanics are in [`wiki/specification.md` §9](./wiki/specification.md#9-build--run-constraints).
 
 ## Dev mode — live activity viewer
 
