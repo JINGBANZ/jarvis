@@ -103,6 +103,29 @@ First live run confirmed direct-address, mid-sentence, and Stop fixes. Three fol
   into the new session on reconnect** — a mid-sentence drop no longer loses the user's words. Also
   recovers the first words spoken before the very first "session ready".
 
+## Conversation-state rework (2026-06-15, after the 2nd live run)
+
+The first server-side-conversation cut had four critical bugs (a multi-angle review + the live run
+caught them): a timestamp/epoch domain mismatch meant the model **never saw the user's words**;
+speech was lost on barge-in; forced `tool_choice` blocked `capture_screen` on a direct ask; and an
+unanswered `speak` call **poisoned the conversation** (`No tool output found for function call …`).
+Reworked the design to be stable, keeping server-side continuity:
+
+- **Index delta, not timestamps.** Track `sentCount` (lines already sent) and send
+  `RollingTranscript.renderFrom(index:)`; advance the index **only after a successful send**, so a
+  cancelled/failed turn re-sends its speech. No clock-domain bug possible.
+- **No forced tool.** Always `tool_choice:"auto"` — the prompt makes the model decide (reply, look at
+  the screen, or stay quiet). The wake-word still bypasses the cooldown; `directAddressFallback()` is
+  the safety net so a direct address is never met with silence. Fixes "Jarvis, check my screen".
+- **Answer `speak` lazily.** A `speak` call's tool-result is sent on the **next** turn (bundled with
+  the new speech), so the conversation never dangles — without an extra round-trip per reply.
+- **Coalesce, don't cancel.** A trigger arriving mid-turn is recorded as pending; the running turn
+  runs it next, and the batched speech rides along via the sent-index. Nothing dropped, no pile-up.
+  `TurnTaskBox` no longer cancels-previous (only `cancelAll` on Stop).
+- Plus: quiet barge-in cancellation; first-connect audio flush no longer logs "after reconnect";
+  audio flushed **before** `connected` flips (no live/replay interleave); `createConversation` failure
+  no longer retries every turn.
+
 ## Decisions
 
 - **Respond when addressed** is the behavior gap behind issues 1 & 3 — Jarvis was *correctly* silent

@@ -209,25 +209,66 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(overlay.rendered.isEmpty)
     }
 
-    /// Direct address forces the speak tool; ambient triggers leave the choice on auto.
-    @Test func directAddressForcesSpeakToolChoice() async {
+    /// No forcing: every turn (direct address included) uses tool_choice auto so the model picks the
+    /// right tool from the prompt — e.g. capture_screen on "Jarvis, check my screen".
+    @Test func everyTurnUsesAutoToolChoice() async {
         let clock = ManualClock(now: 0)
         let guardrails = Guardrails(cooldownSeconds: 12, maxInterjectionsPerMinute: 4, clock: clock)
         let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s1", text: "hi")])])
         let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(),
                                      clock: clock, guardrails: guardrails)
         await driver.handleTrigger(.directAddress)
-        #expect(brain.toolChoices.last == .force("speak"))
-
-        let brain2 = ScriptedBrain(script: [.init(toolCalls: [])])
-        let (driver2, _) = makeDriver(brain: brain2, screen: FakeScreen(), overlay: FakeOverlay(),
-                                      clock: clock, guardrails: Guardrails(cooldownSeconds: 12, maxInterjectionsPerMinute: 4, clock: clock))
-        await driver2.handleTrigger(.turnEnd)
-        #expect(brain2.toolChoices.last == .auto)
+        #expect(brain.toolChoices.last == .auto)
     }
 
-    /// A direct address must NEVER be left unanswered: if the forced-speak turn truncates (zero
-    /// tool calls), the driver renders a spoken fallback rather than going silent.
+    /// A `speak` call is closed lazily on the NEXT turn: its tool-result is prepended to the next
+    /// request (bundled with the new speech), so the server-side conversation never dangles.
+    @Test func nextTurnAnswersPriorSpeak() async {
+        let clock = ManualClock(now: 0)
+        let guardrails = Guardrails(cooldownSeconds: 0, maxInterjectionsPerMinute: 99, clock: clock)
+        let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "spk1", text: "hi")])])
+        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(),
+                                     clock: clock, guardrails: guardrails)
+        await driver.handleTrigger(.turnEnd)          // speaks, stashes spk1 to close next turn
+        await driver.handleTrigger(.turnEnd)
+        // The second request must include the tool-result that closes spk1.
+        #expect(brain.calls[1].contains { $0.role == .tool && $0.toolCallId == "spk1" })
+    }
+
+    /// Index-based delta in the PRODUCTION time domain (lines stamped session-relative): turn 1 must
+    /// carry the user's actual words; turn 2 carries only the NEW words, not the old ones.
+    @Test func indexDeltaSendsOnlyNewLinesAcrossTurns() async {
+        let clock = ManualClock(now: 0)
+        let guardrails = Guardrails(cooldownSeconds: 0, maxInterjectionsPerMinute: 99, clock: clock)
+        let brain = ScriptedBrain(script: [.init(toolCalls: [])])   // stays silent → one call per turn
+        let (driver, transcript) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(),
+                                              clock: clock, guardrails: guardrails)
+        transcript.append(.init(speaker: .me, text: "two sum brute force", at: 1))
+        await driver.handleTrigger(.turnEnd)
+        #expect(brain.calls[0].contains { ($0.text ?? "").contains("two sum brute force") })
+
+        transcript.append(.init(speaker: .me, text: "maybe a hash map", at: 5))
+        await driver.handleTrigger(.turnEnd)
+        let secondUserText = brain.calls[1].compactMap { $0.text }.joined(separator: " ")
+        #expect(secondUserText.contains("maybe a hash map"))
+        #expect(!secondUserText.contains("two sum brute force"))   // already sent last turn
+    }
+
+    /// Speech is NOT marked sent on a failed turn — it is re-sent next turn (advance-on-success).
+    @Test func unsentSpeechResentAfterBrainError() async {
+        let clock = ManualClock(now: 0)
+        let guardrails = Guardrails(cooldownSeconds: 0, maxInterjectionsPerMinute: 99, clock: clock)
+        let brain = FlakyBrain(throwsOnFirst: true)
+        let (driver, transcript) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(),
+                                              clock: clock, guardrails: guardrails)
+        transcript.append(.init(speaker: .me, text: "important words", at: 1))
+        #expect(await driver.handleTrigger(.turnEnd) == .brainError)   // first call throws, not sent
+        await driver.handleTrigger(.turnEnd)
+        #expect(brain.lastMessages.contains { ($0.text ?? "").contains("important words") })   // re-sent
+    }
+
+    /// A direct address must NEVER be left unanswered: if the turn produces no spoken reply (e.g. it
+    /// truncates), the driver renders a spoken fallback rather than going silent.
     @Test func directAddressTruncationFallsBackToSpoken() async {
         let clock = ManualClock(now: 0)
         let guardrails = Guardrails(cooldownSeconds: 12, maxInterjectionsPerMinute: 4, clock: clock)
@@ -254,87 +295,38 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
     /// While one turn is in flight, a second concurrent trigger must be reported as `.busy`
     /// (the single-in-flight drop is now observable, not silent).
-    @Test func busyOutcomeWhenTurnInFlight() async {
+    /// A trigger arriving while a turn runs is reported `.busy` AND coalesced: the running turn picks
+    /// it up and runs it too, so nothing is dropped (vs. the old cancel-the-previous behavior).
+    @Test func concurrentTriggerIsBusyThenCoalesced() async {
         let clock = ManualClock(now: 0)
-        let guardrails = Guardrails(cooldownSeconds: 12, maxInterjectionsPerMinute: 4, clock: clock)
+        let guardrails = Guardrails(cooldownSeconds: 0, maxInterjectionsPerMinute: 99, clock: clock)
         let gate = AsyncGate()
         let brain = GatedBrain(gate: gate, response: .init(toolCalls: [.speak(callId: "s1", text: "hi")]))
         let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(),
                                      clock: clock, guardrails: guardrails)
-        // First turn parks inside the brain call, holding the in-flight slot.
-        async let first = driver.handleTrigger(.turnEnd)
+        async let first = driver.handleTrigger(.turnEnd)   // parks in the brain call, holds the slot
         await gate.waitUntilEntered()
-        // Second trigger arrives while the first is parked → must be reported busy.
-        let second = await driver.handleTrigger(.turnEnd)
+        let second = await driver.handleTrigger(.turnEnd)  // busy → queued as pending
         #expect(second == .busy)
         await gate.release()
-        #expect(await first == .spoke)
+        _ = await first
+        #expect(brain.callCount >= 2)                      // the original AND the coalesced turn ran
     }
 }
 
-@Suite struct TurnTaskBoxTests {
-    /// The barge-in regression test: while T1 is parked in the brain call (holding the single
-    /// in-flight slot), fresh speech arrives via run(cancelPrevious:true). The replacement turn MUST
-    /// actually run (.spoke), not be dropped as .busy. Verifies the deterministic handoff.
-    @Test func cancelPreviousLetsReplacementRun() async {
-        let clock = ManualClock(now: 0)
-        let guardrails = Guardrails(cooldownSeconds: 12, maxInterjectionsPerMinute: 4, clock: clock)
-        let gate = AsyncGate()
-        let brain = GatedBrain(gate: gate, response: .init(toolCalls: [.speak(callId: "s1", text: "hi")]))
-        let transcript = RollingTranscript()
-        let driver = CoachDriver(config: .default, transcript: transcript, guardrails: guardrails,
-                                 brain: brain, screen: FakeScreen(), overlay: FakeOverlay(), clock: clock)
-        let outcomes = OutcomeBox()
-        let box = TurnTaskBox()
-
-        box.run(cancelPrevious: false) { await outcomes.set(.first, driver.handleTrigger(.turnEnd)) }
-        await gate.waitUntilEntered()              // T1 is parked inside the brain call
-        box.run(cancelPrevious: true) { await outcomes.set(.second, driver.handleTrigger(.directAddress)) }
-        await gate.release()                       // let both unwind
-
-        #expect(await outcomes.await(.second) == .spoke)   // replacement actually ran
-        #expect(await outcomes.await(.first) == .cancelled) // predecessor was cancelled, didn't render
-    }
-
-    /// run(cancelPrevious:false) (a silence tick) must NOT cancel an in-flight turn.
-    @Test func silenceDoesNotCancelInFlight() async {
-        let clock = ManualClock(now: 0)
-        let guardrails = Guardrails(cooldownSeconds: 12, maxInterjectionsPerMinute: 4, clock: clock)
-        let gate = AsyncGate()
-        let brain = GatedBrain(gate: gate, response: .init(toolCalls: [.speak(callId: "s1", text: "hi")]))
-        let transcript = RollingTranscript()
-        let driver = CoachDriver(config: .default, transcript: transcript, guardrails: guardrails,
-                                 brain: brain, screen: FakeScreen(), overlay: FakeOverlay(), clock: clock)
-        let outcomes = OutcomeBox()
-        let box = TurnTaskBox()
-        box.run(cancelPrevious: false) { await outcomes.set(.first, driver.handleTrigger(.turnEnd)) }
-        await gate.waitUntilEntered()
-        box.run(cancelPrevious: false) { await outcomes.set(.second, driver.handleTrigger(.silence(secondsQuiet: 8)) ) }
-        await gate.release()
-        #expect(await outcomes.await(.first) == .spoke)   // first was NOT cancelled
-    }
-}
-
-/// Records two turn outcomes and lets a test await whichever it needs.
-actor OutcomeBox {
-    enum Slot { case first, second }
-    private var first: TurnOutcome?
-    private var second: TurnOutcome?
-    private var firstWaiters: [CheckedContinuation<TurnOutcome, Never>] = []
-    private var secondWaiters: [CheckedContinuation<TurnOutcome, Never>] = []
-
-    func set(_ slot: Slot, _ value: TurnOutcome) {
-        switch slot {
-        case .first: first = value; firstWaiters.forEach { $0.resume(returning: value) }; firstWaiters.removeAll()
-        case .second: second = value; secondWaiters.forEach { $0.resume(returning: value) }; secondWaiters.removeAll()
-        }
-    }
-
-    func await(_ slot: Slot) async -> TurnOutcome {
-        switch slot {
-        case .first: if let first { return first }; return await withCheckedContinuation { firstWaiters.append($0) }
-        case .second: if let second { return second }; return await withCheckedContinuation { secondWaiters.append($0) }
-        }
+/// A brain that throws on its first call then succeeds (silent), recording the last messages it saw —
+/// to verify speech un-sent on a failed turn is re-sent on the next.
+final class FlakyBrain: BrainClient, @unchecked Sendable {
+    private var calls = 0
+    private let throwsOnFirst: Bool
+    private(set) var lastMessages: [ChatMessage] = []
+    init(throwsOnFirst: Bool) { self.throwsOnFirst = throwsOnFirst }
+    func respond(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice,
+                 conversationId: String?) async throws -> BrainResponse {
+        calls += 1
+        lastMessages = messages
+        if throwsOnFirst && calls == 1 { throw NSError(domain: "test", code: 500) }
+        return .init(toolCalls: [])
     }
 }
 
@@ -351,9 +343,14 @@ final class ThrowingBrain: BrainClient, @unchecked Sendable {
 final class GatedBrain: BrainClient, @unchecked Sendable {
     private let gate: AsyncGate
     private let response: BrainResponse
+    private let lock = NSLock()
+    private var _callCount = 0
+    var callCount: Int { lock.lock(); defer { lock.unlock() }; return _callCount }
+    private func bump() { lock.lock(); _callCount += 1; lock.unlock() }
     init(gate: AsyncGate, response: BrainResponse) { self.gate = gate; self.response = response }
     func respond(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice,
                  conversationId: String?) async throws -> BrainResponse {
+        bump()
         await gate.enter()
         return response
     }

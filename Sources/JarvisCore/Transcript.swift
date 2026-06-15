@@ -29,6 +29,12 @@ public final class RollingTranscript: @unchecked Sendable {
         lines.append(line)
     }
 
+    /// Number of lines recorded — used as the index boundary for server-side delta sending.
+    public var count: Int {
+        lock.lock(); defer { lock.unlock() }
+        return lines.count
+    }
+
     public var lastSpeechTime: TimeInterval? {
         lock.lock(); defer { lock.unlock() }
         return lines.last?.at
@@ -50,12 +56,14 @@ public final class RollingTranscript: @unchecked Sendable {
             .joined(separator: "\n")
     }
 
-    /// Lines strictly after `t`, formatted like `renderWindow`. Used to send only NEW speech when a
-    /// server-side conversation already holds the earlier turns.
-    public func renderSince(after t: TimeInterval, now: TimeInterval) -> String {
+    /// Lines from `index` onward, formatted like `renderWindow`. Used to send only the NEW lines when
+    /// a server-side conversation already holds the earlier ones — tracked by index, so there is no
+    /// clock-domain ambiguity. The index is clamped to a valid range (defensive against a stale
+    /// caller index).
+    public func renderFrom(index: Int) -> String {
         lock.lock(); let snapshot = lines; lock.unlock()
-        return snapshot
-            .filter { $0.at > t }
+        let start = min(max(0, index), snapshot.count)
+        return snapshot[start...]
             .map { "[\(Self.stamp($0.at))] \($0.speaker.rawValue): \($0.text)" }
             .joined(separator: "\n")
     }

@@ -44,6 +44,7 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
     private var isReconnecting = false
     private var stopped = false
     private var connected = false        // true only between "session ready" and the next drop/close
+    private var everConnected = false    // distinguishes the first connect from a reconnect
 
     init(apiKey: String, model: String, transcript: RollingTranscript, clock: Clock,
          silenceTimeout: TimeInterval = 8, silenceDurationMs: Int = 1000,
@@ -124,10 +125,13 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
     }
 
     /// Replay any audio captured while disconnected into the freshly-ready session, then resume live.
-    private func flushBufferedAudio() {
+    /// On the FIRST connect this is just the brief connect-handshake gap, so it's flushed silently;
+    /// only a true reconnect logs the replay (the first-start "replayed … after reconnect" line was
+    /// misleading).
+    private func flushBufferedAudio(isReconnect: Bool) {
         let chunks = audioBuffer.drain()
         guard !chunks.isEmpty else { return }
-        jlog("⏩ replayed \(chunks.count) buffered audio chunks after reconnect")
+        if isReconnect { jlog("⏩ replayed \(chunks.count) buffered audio chunks after reconnect") }
         for chunk in chunks {
             send(json: RealtimeSession.appendAudio(base64PCM: chunk.base64EncodedString()))
         }
@@ -189,9 +193,12 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
             // handled on the completed event above. Just refresh the silence timer here.
             resetSilenceTimer()
         case "session.created", "transcription_session.created":
-            lock.lock(); connected = true; lock.unlock()
+            lock.lock(); let wasReconnect = everConnected; everConnected = true; lock.unlock()
             jlog("Jarvis realtime: transcription session ready")
-            flushBufferedAudio()   // replay anything captured during the connect/reconnect gap
+            // Flush buffered audio BEFORE marking connected, so live mic audio (which keeps buffering
+            // while !connected) can't be sent ahead of the older buffered chunks and scramble order.
+            flushBufferedAudio(isReconnect: wasReconnect)
+            lock.lock(); connected = true; lock.unlock()
         case "error":
             jlog("Jarvis realtime error event: \(text)")
         default:

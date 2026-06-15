@@ -85,13 +85,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                               turnDebounce: config.turnDebounceSeconds,
                                               maxBufferedAudioSeconds: config.maxBufferedAudioSeconds)
         // CoachDriver is @unchecked Sendable; capture it (not @MainActor self) in the callbacks.
-        // Route turns through TurnTaskBox so Stop can cancel an in-flight one. Fresh user speech
-        // (a turn-end or a direct address) CANCELS any in-flight turn — stale coaching about a moment
-        // the user already moved past is worse than a dropped turn. A silence tick does not cancel.
+        // Route turns through TurnTaskBox so Stop can cancel an in-flight one. Concurrent triggers are
+        // coalesced inside CoachDriver (the running turn batches them in), so we don't cancel here.
         let turns = TurnTaskBox()
-        transcriber.onTurnEnd = { turns.run(cancelPrevious: true) { await driver.handleTrigger(.turnEnd) } }
-        transcriber.onDirectAddress = { turns.run(cancelPrevious: true) { await driver.handleTrigger(.directAddress) } }
-        transcriber.onSilence = { secs in turns.run(cancelPrevious: false) { await driver.handleTrigger(.silence(secondsQuiet: secs)) } }
+        transcriber.onTurnEnd = { turns.run { await driver.handleTrigger(.turnEnd) } }
+        transcriber.onDirectAddress = { turns.run { await driver.handleTrigger(.directAddress) } }
+        transcriber.onSilence = { secs in turns.run { await driver.handleTrigger(.silence(secondsQuiet: secs)) } }
         // Reconnect gave up (bad key / quota): stop cleanly and correct the menu instead of lying 🟢.
         transcriber.onTerminalFailure = { [weak self] in
             Task { @MainActor in self?.stop(); self?.menuBar.setRunning(false) }

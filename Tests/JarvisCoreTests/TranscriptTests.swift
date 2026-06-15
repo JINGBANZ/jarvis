@@ -22,20 +22,29 @@ import Testing
         #expect(abs(t.silenceDuration(now: 70) - 0) < 0.001)
     }
 
-    /// For server-side conversation state we send only NEW speech each turn (the rest is already in
-    /// the conversation): renderSince returns only lines strictly after the given time.
-    @Test func renderSinceReturnsOnlyNewerLines() {
+    /// For server-side conversation state we send only NEW lines each turn (the rest is already in
+    /// the conversation), tracked by line INDEX — no clock-domain confusion possible.
+    @Test func renderFromReturnsOnlyLinesAtOrAfterIndex() {
         let t = RollingTranscript()
-        t.append(.init(speaker: .me, text: "older line", at: 10))
-        t.append(.init(speaker: .me, text: "newer line", at: 30))
-        let rendered = t.renderSince(after: 20, now: 40)
-        #expect(!rendered.contains("older line"))
-        #expect(rendered.contains("[00:30] me: newer line"))
+        t.append(.init(speaker: .me, text: "first", at: 10))
+        t.append(.init(speaker: .me, text: "second", at: 30))
+        #expect(t.count == 2)
+        let rendered = t.renderFrom(index: 1)
+        #expect(!rendered.contains("first"))
+        #expect(rendered.contains("[00:30] me: second"))
     }
 
-    @Test func renderSinceEmptyWhenNothingNewer() {
+    @Test func renderFromEmptyWhenCaughtUp() {
         let t = RollingTranscript()
-        t.append(.init(speaker: .me, text: "only line", at: 10))
-        #expect(t.renderSince(after: 20, now: 40).isEmpty)
+        t.append(.init(speaker: .me, text: "only", at: 10))
+        #expect(t.renderFrom(index: t.count).isEmpty)
+    }
+
+    /// Out-of-range indices are clamped, not a crash (defensive against a stale sentCount).
+    @Test func renderFromClampsOutOfRange() {
+        let t = RollingTranscript()
+        t.append(.init(speaker: .me, text: "only", at: 10))
+        #expect(t.renderFrom(index: 99).isEmpty)
+        #expect(t.renderFrom(index: -5).contains("only"))
     }
 }

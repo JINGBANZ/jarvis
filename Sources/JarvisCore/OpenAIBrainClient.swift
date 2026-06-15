@@ -3,8 +3,10 @@ import Foundation
 /// Brain client over the OpenAI **Responses API** (`POST /v1/responses`) — the recommended
 /// endpoint for tool use with gpt-5.5. System text is passed via `instructions`; the conversation
 /// is sent as typed `input` items; function calls are threaded with `function_call` /
-/// `function_call_output`. Includes bounded retry-with-backoff on 429/5xx (honoring `Retry-After`),
-/// a request timeout, and `store:false` so screenshots/transcripts aren't retained server-side.
+/// `function_call_output`. Includes bounded retry-with-backoff on 429/5xx (honoring `Retry-After`)
+/// and a request timeout. Uses `store:true` + a per-session `conversation` for multi-turn continuity
+/// (this DOES retain transcripts/screenshots server-side — a documented quality-first choice; see
+/// wiki/sandbox.md).
 public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
     /// Injected transport; returns the body and the HTTP response (for status + headers).
     public typealias Sender = @Sendable (URLRequest) async throws -> (Data, HTTPURLResponse?)
