@@ -10,7 +10,7 @@
 #   ./scripts/build-app.sh                build + sign (release)
 #   ./scripts/build-app.sh debug          build + sign (debug)
 #   ./scripts/build-app.sh --run          ...then launch it
-#   ./scripts/build-app.sh --dev          ...then launch in dev mode + open the live activity viewer
+#   ./scripts/build-app.sh --dev          ...then launch in dev mode (open the log viewer from the menu bar)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -98,7 +98,7 @@ case "$LAUNCH" in
     # screen-derived tips never land in world-readable /tmp or in git.
     LOGDIR="$PWD/.jarvis"
     mkdir -p "$LOGDIR"
-    echo "▶ launching Jarvis (dev mode) — the activity viewer opens in your browser; logs in $LOGDIR"
+    echo "▶ launching Jarvis (dev mode) — pick “Open Log Viewer” from the menu bar; per-session logs in $LOGDIR/<session>"
     open ./"$APP" --args --dev --log-dir "$LOGDIR"
     ;;
   "")

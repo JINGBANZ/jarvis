@@ -21,27 +21,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// after the user pressed Stop).
     private var turns: TurnTaskBox?
 
-    /// Dev mode (`open ./Jarvis.app --args --dev`): enables owner-only file logging and auto-opens
-    /// the live activity HTML for the session.
+    /// Dev mode (`open ./Jarvis.app --args --dev`): enables owner-only file logging for the session.
+    /// The activity HTML is opened on demand from the menu bar, not auto-opened on launch.
     private let devMode = CommandLine.arguments.contains("--dev")
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory) // menu-bar app, no Dock icon
 
         if devMode {
-            let dir = devLogDirectory()
+            // Each dev-mode launch is its own session: nest logs under a unique per-launch
+            // subdirectory so each debug/dev run keeps its own separated logs.
+            let dir = devLogDirectory().appendingPathComponent(newSessionID())
             try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             JarvisLog.enableFileLogging(directory: dir)     // <dir>/jarvis-debug.log, 0600, fresh
             ActivityLog.shared.enable(directory: dir)        // <dir>/jarvis-activity.html, 0600, fresh
-            if let url = ActivityLog.shared.htmlURL { NSWorkspace.shared.open(url) }
-            jlog("Jarvis: dev mode — activity viewer opened (\(dir.path)).")
+            jlog("Jarvis: dev mode — session \(dir.lastPathComponent) (\(dir.path)).")
+            jlog("Jarvis: pick “Open Log Viewer” from the menu bar to watch this session.")
         }
 
         // Ask for Microphone + Screen Recording up front, not lazily mid-session.
         Permissions.primeAll()
 
         overlay = OverlayPanel()
-        menuBar = MenuBarController(keychain: keychain)
+        menuBar = MenuBarController(keychain: keychain, showLogViewer: devMode)
+        // Dev mode: open this session's activity HTML on demand.
+        menuBar.onOpenLogViewer = { if let url = ActivityLog.shared.htmlURL { NSWorkspace.shared.open(url) } }
         // The menu drives the pipeline lifecycle. Jarvis does NOT auto-start; the user presses Start.
         menuBar.onStart = { [weak self] in self?.start() ?? false }
         menuBar.onStop = { [weak self] in self?.stop() }
@@ -121,8 +125,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.runModal()
     }
 
+    /// A unique id for this dev-mode launch, used as the session's log subdirectory name. Sortable
+    /// timestamp + a short random suffix so two launches in the same second don't collide.
+    private func newSessionID() -> String {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd_HH-mm-ss"
+        let suffix = String(UUID().uuidString.prefix(4))
+        return "\(f.string(from: Date()))_\(suffix)"
+    }
+
     /// Where dev-mode logs go: `--log-dir <path>` (run-dev.sh passes the workspace `.jarvis/`),
     /// else a per-user Caches/Jarvis directory. Never `/tmp` (world-readable, shared across users).
+    /// Each launch nests a per-session subdirectory under this base (see `newSessionID`).
     private func devLogDirectory() -> URL {
         let args = CommandLine.arguments
         if let i = args.firstIndex(of: "--log-dir"), i + 1 < args.count {
