@@ -82,7 +82,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                               transcript: transcript, clock: clock,
                                               silenceTimeout: config.silenceTimeoutSeconds,
                                               silenceDurationMs: config.vadSilenceDurationMs,
-                                              turnDebounce: config.turnDebounceSeconds)
+                                              turnDebounce: config.turnDebounceSeconds,
+                                              maxBufferedAudioSeconds: config.maxBufferedAudioSeconds)
         // CoachDriver is @unchecked Sendable; capture it (not @MainActor self) in the callbacks.
         // Route turns through TurnTaskBox so Stop can cancel an in-flight one. Fresh user speech
         // (a turn-end or a direct address) CANCELS any in-flight turn — stale coaching about a moment

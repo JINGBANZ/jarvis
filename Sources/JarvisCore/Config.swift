@@ -29,6 +29,10 @@ public struct Config: Sendable {
     /// A looser per-minute ceiling for direct-address replies (which bypass the normal cooldown), so
     /// a stuck/false-positive wake match still can't spam the overlay.
     public var maxDirectAddressesPerMinute: Int
+    /// How many seconds of mic audio to buffer while the realtime socket is down, flushed into the
+    /// new session on reconnect so a mid-sentence drop isn't lost. Capped so a long outage can't grow
+    /// memory without bound (the oldest audio is evicted past the cap).
+    public var maxBufferedAudioSeconds: TimeInterval
 
     public init(
         silenceTimeoutSeconds: TimeInterval = 8,
@@ -42,7 +46,8 @@ public struct Config: Sendable {
         transcriptionModel: String = "gpt-4o-transcribe",
         vadSilenceDurationMs: Int = 1000,
         turnDebounceSeconds: TimeInterval = 0.4,
-        maxDirectAddressesPerMinute: Int = 8
+        maxDirectAddressesPerMinute: Int = 8,
+        maxBufferedAudioSeconds: TimeInterval = 60
     ) {
         self.silenceTimeoutSeconds = silenceTimeoutSeconds
         self.cooldownSeconds = cooldownSeconds
@@ -56,6 +61,7 @@ public struct Config: Sendable {
         self.vadSilenceDurationMs = vadSilenceDurationMs
         self.turnDebounceSeconds = turnDebounceSeconds
         self.maxDirectAddressesPerMinute = maxDirectAddressesPerMinute
+        self.maxBufferedAudioSeconds = maxBufferedAudioSeconds
     }
 
     public static let `default` = Config()

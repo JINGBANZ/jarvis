@@ -39,6 +39,7 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
     private var pingTimer: Timer?
     private var debounceTimer: Timer?         // coalesces rapid fragments into one trigger
     private let pending = UtteranceBuffer()   // fragments heard since the last fired trigger
+    private let audioBuffer: PCMBuffer        // mic audio captured while the socket is down
     private var reconnectAttempt = 0
     private var isReconnecting = false
     private var stopped = false
@@ -46,7 +47,7 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
 
     init(apiKey: String, model: String, transcript: RollingTranscript, clock: Clock,
          silenceTimeout: TimeInterval = 8, silenceDurationMs: Int = 1000,
-         turnDebounce: TimeInterval = 0.4) {
+         turnDebounce: TimeInterval = 0.4, maxBufferedAudioSeconds: TimeInterval = 60) {
         self.apiKey = apiKey
         self.model = model
         self.transcript = transcript
@@ -55,6 +56,9 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         self.silenceTimeout = silenceTimeout
         self.silenceDurationMs = silenceDurationMs
         self.turnDebounce = turnDebounce
+        // PCM16 mono at the realtime sample rate → 2 bytes/sample.
+        let bytesPerSecond = RealtimeSession.sampleRate * 2
+        self.audioBuffer = PCMBuffer(maxBytes: Int(maxBufferedAudioSeconds) * bytesPerSecond)
         super.init()
     }
 
@@ -95,6 +99,7 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         // could let a stray timer fire onSilence on a torn-down pipeline.
         DispatchQueue.main.async { st?.invalidate(); pt?.invalidate(); db?.invalidate() }
         pending.clear()
+        audioBuffer.clear()   // a user Stop discards buffered audio; don't replay it on a later Start
         // A user-initiated Stop is a normal closure (1000), not "going away" (1001).
         t?.cancel(with: .normalClosure, reason: nil)
         s?.invalidateAndCancel()             // breaks the URLSession→delegate(self)→closures→driver retain chain
@@ -105,13 +110,27 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
     }
 
     func sendAudio(_ pcm: Data) {
-        // Audio streams continuously from the mic tap. When the socket has dropped (and until the
-        // reconnect's session is ready) there is nowhere to send it — drop it SILENTLY rather than
-        // firing a failed send per chunk, which previously flooded the log with hundreds of
-        // "send error: Operation canceled" lines on a single disconnect.
-        lock.lock(); let canSend = connected && !stopped; lock.unlock()
-        guard canSend else { return }
-        send(json: RealtimeSession.appendAudio(base64PCM: pcm.base64EncodedString()))
+        // Audio streams continuously from the mic tap. While the socket is down (between a drop and
+        // the reconnect's "session ready"), BUFFER it instead of discarding, so a mid-sentence drop
+        // doesn't lose the user's words — it's flushed into the new session on reconnect. We still
+        // never log a failed send, so the disconnect stays quiet.
+        lock.lock(); let isConnected = connected; let isStopped = stopped; lock.unlock()
+        if isStopped { return }
+        if isConnected {
+            send(json: RealtimeSession.appendAudio(base64PCM: pcm.base64EncodedString()))
+        } else {
+            audioBuffer.append(pcm)
+        }
+    }
+
+    /// Replay any audio captured while disconnected into the freshly-ready session, then resume live.
+    private func flushBufferedAudio() {
+        let chunks = audioBuffer.drain()
+        guard !chunks.isEmpty else { return }
+        jlog("⏩ replayed \(chunks.count) buffered audio chunks after reconnect")
+        for chunk in chunks {
+            send(json: RealtimeSession.appendAudio(base64PCM: chunk.base64EncodedString()))
+        }
     }
 
     private func send(json: [String: Any]) {
@@ -172,6 +191,7 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         case "session.created", "transcription_session.created":
             lock.lock(); connected = true; lock.unlock()
             jlog("Jarvis realtime: transcription session ready")
+            flushBufferedAudio()   // replay anything captured during the connect/reconnect gap
         case "error":
             jlog("Jarvis realtime error event: \(text)")
         default:

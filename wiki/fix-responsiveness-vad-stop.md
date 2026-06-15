@@ -94,8 +94,14 @@ First live run confirmed direct-address, mid-sentence, and Stop fixes. Three fol
 - **Screen-on-request** — added a prompt rule so "can you check my screen?" triggers `capture_screen`
   even without the wake word.
 - **Error storm** — a mid-session socket drop flooded the log with hundreds of `send error` lines
-  (audio kept streaming to a dead socket). Added a `connected` flag: audio is dropped silently while
-  disconnected/reconnecting, the ping is gated, and per-send failures are no longer logged.
+  (audio kept streaming to a dead socket). Added a `connected` flag: the ping is gated and per-send
+  failures are no longer logged.
+- **No lost audio on a drop** — the realtime session can't be resumed (OpenAI: "if the connection
+  drops, the session is lost"), and a long-lived socket *will* drop (network blips, the 60-min
+  session cap, server resets). So rather than discard mic audio during the reconnect gap, it's
+  buffered (`PCMBuffer`, capped at `maxBufferedAudioSeconds` = 60s, oldest evicted) and **flushed
+  into the new session on reconnect** — a mid-sentence drop no longer loses the user's words. Also
+  recovers the first words spoken before the very first "session ready".
 
 ## Decisions
 
