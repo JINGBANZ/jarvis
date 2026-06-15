@@ -126,6 +126,25 @@ Reworked the design to be stable, keeping server-side continuity:
   audio flushed **before** `connected` flips (no live/replay interleave); `createConversation` failure
   no longer retries every turn.
 
+## Rework hardening (review round 2)
+
+A second multi-angle review of the rework found **4 more bugs I'd introduced** — two of them
+re-created the conversation-poisoning the rework existed to kill. All fixed test-first:
+
+- **A `capture_screen` on the final tool iteration dangled the conversation** (its result was never
+  sent → every later turn 400s). Now any unanswered capture at the cap is stashed and closed next turn.
+- **A `speak` call's result was consumed before the send**, so a failed/cancelled *next* turn stranded
+  it and bricked the conversation. Now the close callId is **retained until the send provably
+  succeeds** (mirrors the sent-index advance-on-success).
+- **Lost-trigger race:** "take next pending" and "release the slot" were separate critical sections, so
+  a trigger arriving in the gap was orphaned. Now `claimOrPend` / `finishTurnOrTakeNext` are each a
+  single atomic section — a trigger is never dropped.
+- **Stateless fallback starved the model:** it sent only the per-turn delta with no server history, and
+  one transient `createConversation` blip latched the whole session stateless forever. Now stateless
+  turns send a full context **window**, and conversation creation **retries after a backoff**.
+- Plus: single-snapshot transcript delta (no duplicate-on-concurrent-append); audio flush drains in a
+  loop before `connected` flips; stale comments fixed.
+
 ## Decisions
 
 - **Respond when addressed** is the behavior gap behind issues 1 & 3 — Jarvis was *correctly* silent

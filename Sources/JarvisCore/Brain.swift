@@ -77,10 +77,10 @@ public struct BrainResponse: Sendable {
     }
 }
 
-/// How the model may use tools on a given turn. `auto` lets it call zero, one, or many (the
-/// silence-by-default coaching default); `force(name)` requires it to call exactly that function
-/// (used to GUARANTEE a reply on a direct address — a bare "required" would let it satisfy the
-/// constraint by calling capture_screen and looping instead of speaking).
+/// How the model may use tools on a given turn. `auto` lets it call zero, one, or many — the coach
+/// always uses `auto` and lets the prompt decide. `force(name)` (require exactly that function) is
+/// retained for the encoder contract / future use but is NOT currently used by the coach (the rework
+/// replaced forcing a reply with a strong prompt + a spoken fallback).
 public enum ToolChoice: Sendable, Equatable {
     case auto
     case force(String)

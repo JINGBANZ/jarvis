@@ -30,21 +30,22 @@ import Testing
         t.append(.init(speaker: .me, text: "second", at: 30))
         #expect(t.count == 2)
         let rendered = t.renderFrom(index: 1)
-        #expect(!rendered.contains("first"))
-        #expect(rendered.contains("[00:30] me: second"))
+        #expect(!rendered.text.contains("first"))
+        #expect(rendered.text.contains("[00:30] me: second"))
+        #expect(rendered.upTo == 2)   // the count rendered up to, from the same snapshot
     }
 
     @Test func renderFromEmptyWhenCaughtUp() {
         let t = RollingTranscript()
         t.append(.init(speaker: .me, text: "only", at: 10))
-        #expect(t.renderFrom(index: t.count).isEmpty)
+        #expect(t.renderFrom(index: t.count).text.isEmpty)
     }
 
     /// Out-of-range indices are clamped, not a crash (defensive against a stale sentCount).
     @Test func renderFromClampsOutOfRange() {
         let t = RollingTranscript()
         t.append(.init(speaker: .me, text: "only", at: 10))
-        #expect(t.renderFrom(index: 99).isEmpty)
-        #expect(t.renderFrom(index: -5).contains("only"))
+        #expect(t.renderFrom(index: 99).text.isEmpty)
+        #expect(t.renderFrom(index: -5).text.contains("only"))
     }
 }

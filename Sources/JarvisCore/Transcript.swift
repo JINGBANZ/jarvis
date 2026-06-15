@@ -56,16 +56,17 @@ public final class RollingTranscript: @unchecked Sendable {
             .joined(separator: "\n")
     }
 
-    /// Lines from `index` onward, formatted like `renderWindow`. Used to send only the NEW lines when
-    /// a server-side conversation already holds the earlier ones — tracked by index, so there is no
-    /// clock-domain ambiguity. The index is clamped to a valid range (defensive against a stale
-    /// caller index).
-    public func renderFrom(index: Int) -> String {
+    /// Lines from `index` onward, formatted like `renderWindow`, AND the line count rendered up to —
+    /// returned together from a SINGLE locked snapshot so the caller's "advance to" index exactly
+    /// matches the lines actually rendered (no duplicate-on-concurrent-append race). The index is
+    /// clamped to a valid range (defensive against a stale caller index).
+    public func renderFrom(index: Int) -> (text: String, upTo: Int) {
         lock.lock(); let snapshot = lines; lock.unlock()
         let start = min(max(0, index), snapshot.count)
-        return snapshot[start...]
+        let text = snapshot[start...]
             .map { "[\(Self.stamp($0.at))] \($0.speaker.rawValue): \($0.text)" }
             .joined(separator: "\n")
+        return (text, snapshot.count)
     }
 
     static func stamp(_ t: TimeInterval) -> String {

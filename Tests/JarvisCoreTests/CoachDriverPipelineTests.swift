@@ -3,13 +3,17 @@ import Testing
 @testable import JarvisCore
 
 /// Mock brain: replays a script of responses and records the messages + tool-choice + conversation.
+/// `failConversation` makes createConversation throw, to exercise the stateless fallback.
 final class ScriptedBrain: BrainClient, @unchecked Sendable {
     private(set) var calls: [[ChatMessage]] = []
     private(set) var toolChoices: [ToolChoice] = []
     private(set) var conversationIds: [String?] = []
     private(set) var createConversationCount = 0
     let script: [BrainResponse]
-    init(script: [BrainResponse]) { self.script = script }
+    let failConversation: Bool
+    init(script: [BrainResponse], failConversation: Bool = false) {
+        self.script = script; self.failConversation = failConversation
+    }
     func respond(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice,
                  conversationId: String?) async throws -> BrainResponse {
         calls.append(messages)
@@ -19,7 +23,24 @@ final class ScriptedBrain: BrainClient, @unchecked Sendable {
     }
     func createConversation() async throws -> String {
         createConversationCount += 1
+        if failConversation { throw NSError(domain: "test", code: 503) }
         return "conv_test"
+    }
+}
+
+/// A brain whose per-call script can be a response OR a throw (nil), recording the messages it saw —
+/// to verify a tool-result survives a failed/cancelled turn and is re-sent on the next.
+final class ScriptedThrowBrain: BrainClient, @unchecked Sendable {
+    private(set) var calls: [[ChatMessage]] = []
+    private var idx = 0
+    let script: [BrainResponse?]
+    init(script: [BrainResponse?]) { self.script = script }
+    func respond(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice,
+                 conversationId: String?) async throws -> BrainResponse {
+        calls.append(messages)
+        let r = script[min(idx, script.count - 1)]; idx += 1
+        guard let r else { throw NSError(domain: "test", code: 500) }
+        return r
     }
 }
 
@@ -113,6 +134,64 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         await driver.handleTrigger(.turnEnd)
         #expect(brain.createConversationCount == 1)               // created once for the session
         #expect(brain.conversationIds == ["conv_test", "conv_test"]) // reused on every call
+    }
+
+    // MARK: - Conversation-state rework regressions (review must-fixes)
+
+    /// A capture_screen on the FINAL tool iteration (loop cap) must not be left dangling: its tool
+    /// result is closed on the next turn, or the conversation 400s forever.
+    @Test func captureOnFinalIterationIsClosedNextTurn() async {
+        let clock = ManualClock(now: 0)
+        let guardrails = Guardrails(cooldownSeconds: 0, maxInterjectionsPerMinute: 99, clock: clock)
+        let brain = ScriptedBrain(script: [
+            .init(toolCalls: [.captureScreen(callId: "cap")],
+                  rawToolCalls: [RawToolCall(id: "cap", name: "capture_screen", argumentsJSON: "{}")]),
+        ])  // repeats capture every iteration → turn 1 exhausts with an unanswered capture
+        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(),
+                                     clock: clock, guardrails: guardrails)
+        #expect(await driver.handleTrigger(.turnEnd) == .exhausted)
+        let afterTurn1 = brain.calls.count
+        await driver.handleTrigger(.turnEnd)
+        // The follow-up turn's FIRST request must close the dangling capture.
+        #expect(brain.calls[afterTurn1].contains { $0.role == .tool && $0.toolCallId == "cap" })
+    }
+
+    /// A prior speak's tool-result must NOT be lost if the very next turn fails before sending — it
+    /// stays pending and is carried on the turn after.
+    @Test func speakCallRetainedWhenNextTurnFails() async {
+        let clock = ManualClock(now: 0)
+        let guardrails = Guardrails(cooldownSeconds: 0, maxInterjectionsPerMinute: 99, clock: clock)
+        let brain = ScriptedThrowBrain(script: [
+            .init(toolCalls: [.speak(callId: "spk1", text: "hi")]),   // turn 1: speak → stash spk1
+            nil,                                                        // turn 2: throws before sending
+            .init(toolCalls: []),                                       // turn 3: silent
+        ])
+        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(),
+                                     clock: clock, guardrails: guardrails)
+        await driver.handleTrigger(.turnEnd)
+        #expect(await driver.handleTrigger(.turnEnd) == .brainError)
+        await driver.handleTrigger(.turnEnd)
+        #expect(brain.calls.last!.contains { $0.role == .tool && $0.toolCallId == "spk1" })
+    }
+
+    /// When the conversation can't be created, turns run statelessly — and must still carry a CONTEXT
+    /// WINDOW (not just the per-turn delta), or the model loses the problem statement.
+    @Test func statelessTurnCarriesContextWindowAndSpeaks() async {
+        let clock = ManualClock(now: 0)
+        let guardrails = Guardrails(cooldownSeconds: 0, maxInterjectionsPerMinute: 99, clock: clock)
+        let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s", text: "hi")])],
+                                  failConversation: true)
+        let (driver, transcript) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(),
+                                              clock: clock, guardrails: guardrails)
+        transcript.append(.init(speaker: .me, text: "the whole problem context", at: 1))
+        #expect(await driver.handleTrigger(.turnEnd) == .spoke)
+        #expect(brain.conversationIds.last! == nil)           // ran stateless
+        transcript.append(.init(speaker: .me, text: "new utterance", at: 5))
+        await driver.handleTrigger(.turnEnd)
+        let lastUser = brain.calls.last!.compactMap { $0.text }.joined(separator: " ")
+        #expect(lastUser.contains("the whole problem context"))   // window keeps prior context
+        #expect(lastUser.contains("new utterance"))
+        #expect(brain.createConversationCount == 1)               // failure flag prevents re-POST every turn
     }
 
     // MARK: - Observability: structured turn outcomes (Workstream B)
@@ -312,6 +391,25 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         _ = await first
         #expect(brain.callCount >= 2)                      // the original AND the coalesced turn ran
     }
+
+    /// When several triggers queue while busy, a direct address wins the coalesced slot over an
+    /// ambient one — so a user's direct question isn't lost to a later silence/turn-end nudge.
+    @Test func directAddressWinsCoalescePriority() async {
+        let clock = ManualClock(now: 0)
+        let guardrails = Guardrails(cooldownSeconds: 0, maxInterjectionsPerMinute: 99, clock: clock)
+        let gate = AsyncGate()
+        let brain = GatedBrain(gate: gate, response: .init(toolCalls: [.speak(callId: "s1", text: "hi")]))
+        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(),
+                                     clock: clock, guardrails: guardrails)
+        async let first = driver.handleTrigger(.turnEnd)   // parks, holds the slot
+        await gate.waitUntilEntered()
+        _ = await driver.handleTrigger(.directAddress)     // queued as pending (direct)
+        _ = await driver.handleTrigger(.silence(secondsQuiet: 8))  // queued after — must NOT displace direct
+        await gate.release()
+        _ = await first
+        // The coalesced second turn ran as the DIRECT address (its prompt line says so).
+        #expect(brain.lastMessages.contains { ($0.text ?? "").contains("DIRECTLY") })
+    }
 }
 
 /// A brain that throws on its first call then succeeds (silent), recording the last messages it saw —
@@ -345,12 +443,14 @@ final class GatedBrain: BrainClient, @unchecked Sendable {
     private let response: BrainResponse
     private let lock = NSLock()
     private var _callCount = 0
+    private var _lastMessages: [ChatMessage] = []
     var callCount: Int { lock.lock(); defer { lock.unlock() }; return _callCount }
-    private func bump() { lock.lock(); _callCount += 1; lock.unlock() }
+    var lastMessages: [ChatMessage] { lock.lock(); defer { lock.unlock() }; return _lastMessages }
+    private func record(_ m: [ChatMessage]) { lock.lock(); _callCount += 1; _lastMessages = m; lock.unlock() }
     init(gate: AsyncGate, response: BrainResponse) { self.gate = gate; self.response = response }
     func respond(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice,
                  conversationId: String?) async throws -> BrainResponse {
-        bump()
+        record(messages)
         await gate.enter()
         return response
     }

@@ -129,12 +129,19 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
     /// only a true reconnect logs the replay (the first-start "replayed … after reconnect" line was
     /// misleading).
     private func flushBufferedAudio(isReconnect: Bool) {
-        let chunks = audioBuffer.drain()
-        guard !chunks.isEmpty else { return }
-        if isReconnect { jlog("⏩ replayed \(chunks.count) buffered audio chunks after reconnect") }
-        for chunk in chunks {
-            send(json: RealtimeSession.appendAudio(base64PCM: chunk.base64EncodedString()))
+        // Drain-and-send in a loop while `connected` is still false (so live mic audio keeps buffering
+        // and can't be sent ahead of these older chunks). Each pass catches audio that arrived during
+        // the previous send; a small cap prevents spinning if the mic streams continuously.
+        var total = 0
+        for _ in 0..<8 {
+            let chunks = audioBuffer.drain()
+            if chunks.isEmpty { break }
+            total += chunks.count
+            for chunk in chunks {
+                send(json: RealtimeSession.appendAudio(base64PCM: chunk.base64EncodedString()))
+            }
         }
+        if isReconnect && total > 0 { jlog("⏩ replayed \(total) buffered audio chunks after reconnect") }
     }
 
     private func send(json: [String: Any]) {
