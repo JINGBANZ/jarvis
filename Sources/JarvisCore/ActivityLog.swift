@@ -9,9 +9,18 @@ import Foundation
 public final class ActivityLog: @unchecked Sendable {
     public static let shared = ActivityLog()
 
+    /// One rendered row: a timestamped message, optionally with a screenshot thumbnail. `imageFile`
+    /// is the relative filename of the saved JPEG (e.g. `shot-3.jpg`), or nil for a plain text line.
+    struct Entry {
+        let time: String
+        let message: String
+        let imageFile: String?
+    }
+
     private let maxLines = 400
     private let queue = DispatchQueue(label: "jarvis.activitylog")   // serializes state + disk writes
-    private var lines: [(time: String, message: String)] = []
+    private var entries: [Entry] = []
+    private var shotSeq = 0       // monotonic id for saved screenshot files this session
     private let df: DateFormatter
     private var fileURL: URL?     // nil ⇒ disabled (no disk writes)
 
@@ -30,26 +39,50 @@ public final class ActivityLog: @unchecked Sendable {
     public func enable(directory: URL) {
         queue.sync {
             fileURL = directory.appendingPathComponent("jarvis-activity.html")
-            lines.removeAll()
+            entries.removeAll()
+            shotSeq = 0
             writeHTML()
         }
+    }
+
+    /// Turn the viewer back off (no further disk writes). Mainly for tests that drive the shared
+    /// singleton and need to reset it afterwards so they don't leak state into other tests.
+    func disable() {
+        queue.sync { fileURL = nil; entries.removeAll(); shotSeq = 0 }
     }
 
     /// The HTML page to open in a browser, or nil when logging is disabled.
     public var htmlURL: URL? { queue.sync { fileURL } }
 
     /// Append a line and rewrite the HTML. No-op (and no disk write) when disabled.
-    public func record(_ message: String, at date: Date = Date()) {
+    ///
+    /// When `imageBase64` is a base64-encoded JPEG (a screenshot the model just looked at), it's
+    /// saved next to the HTML as an owner-only `shot-N.jpg` and shown as a clickable thumbnail —
+    /// so the activity log captures the *visual* part of the interaction, not just the text.
+    public func record(_ message: String, imageBase64: String? = nil, at date: Date = Date()) {
         queue.async { [self] in
-            guard fileURL != nil else { return }
-            lines.append((df.string(from: date), message))
-            if lines.count > maxLines { lines.removeFirst(lines.count - maxLines) }
+            guard let dir = fileURL?.deletingLastPathComponent() else { return }
+            let imageFile = imageBase64.flatMap { saveShot($0, in: dir) }
+            entries.append(Entry(time: df.string(from: date), message: message, imageFile: imageFile))
+            if entries.count > maxLines { entries.removeFirst(entries.count - maxLines) }
             writeHTML()
         }
     }
 
+    /// Decode a base64 JPEG and write it as the next owner-only `shot-N.jpg` in `dir`. Returns the
+    /// relative filename to reference from the HTML, or nil if the payload wasn't valid. Must run on
+    /// `queue` (mutates `shotSeq`).
+    private func saveShot(_ base64: String, in dir: URL) -> String? {
+        guard let data = Data(base64Encoded: base64) else { return nil }
+        shotSeq += 1
+        let name = "shot-\(shotSeq).jpg"
+        FileManager.default.createFile(atPath: dir.appendingPathComponent(name).path,
+                                       contents: data, attributes: [.posixPermissions: 0o600])
+        return name
+    }
+
     private func writeHTML() {
-        guard let url = fileURL, let data = Self.renderHTML(lines).data(using: .utf8) else { return }
+        guard let url = fileURL, let data = Self.renderHTML(entries).data(using: .utf8) else { return }
         // createFile (not atomic write) so we can set 0600 in one step — owner-only, never 0644.
         FileManager.default.createFile(atPath: url.path, contents: data,
                                        attributes: [.posixPermissions: 0o600])
@@ -57,12 +90,19 @@ public final class ActivityLog: @unchecked Sendable {
 
     // MARK: - Pure rendering (testable without disk)
 
-    static func renderHTML(_ lines: [(time: String, message: String)]) -> String {
+    static func renderHTML(_ entries: [Entry]) -> String {
         var rows = ""
-        for line in lines {
-            rows += "<div class=\"row \(cssClass(for: line.message))\">"
-            rows += "<span class=\"t\">\(esc(line.time))</span>"
-            rows += "<span class=\"m\">\(esc(line.message))</span></div>\n"
+        for entry in entries {
+            rows += "<div class=\"row \(cssClass(for: entry.message))\">"
+            rows += "<span class=\"t\">\(esc(entry.time))</span>"
+            rows += "<span class=\"m\">\(esc(entry.message))"
+            if let file = entry.imageFile {
+                // Thumbnail links to the full-size JPEG in a new tab — the activity page reloads
+                // every 1s, so an inline lightbox would collapse; a separate tab survives.
+                rows += "<a class=\"shot\" href=\"\(esc(file))\" target=\"_blank\" rel=\"noopener\">"
+                rows += "<img src=\"\(esc(file))\" alt=\"screenshot\" loading=\"lazy\"></a>"
+            }
+            rows += "</span></div>\n"
         }
         return """
         <!doctype html><html lang="en"><head>
@@ -85,8 +125,11 @@ public final class ActivityLog: @unchecked Sendable {
           .hear .m { color: #58a6ff; }   /* heard you          */
           .think .m{ color: #8b949e; }   /* thinking / silent  */
           .err .m  { color: #f85149; }   /* error              */
+          .shot { display: block; margin-top: 4px; width: fit-content; }
+          .shot img { display: block; max-height: 140px; max-width: 280px;
+                      border: 1px solid #30363d; border-radius: 6px; cursor: zoom-in; }
         </style></head><body>
-        <header>Jarvis — activity log <span class="count">(\(lines.count) lines)</span></header>
+        <header>Jarvis — activity log <span class="count">(\(entries.count) lines)</span></header>
         <main>\(rows)</main>
         <script>
           // Keep scrollback usable across the 1s reload: only stick to the bottom if the user was

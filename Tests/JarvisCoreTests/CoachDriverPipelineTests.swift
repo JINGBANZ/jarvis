@@ -65,6 +65,56 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(brain.calls[1].contains { $0.role == .assistant && $0.toolCalls != nil })
     }
 
+    /// End-to-end: a real capture→speak turn through the production `CoachDriver` with the activity
+    /// log enabled (as dev mode does). Proves the screenshot the model looked at lands in the
+    /// activity log as a genuine, owner-only JPEG rendered as a clickable thumbnail linked to the
+    /// full image — the behaviour verified by hand, now automated against regressions.
+    ///
+    /// `.serialized` + `disable()` teardown because it drives the shared `ActivityLog` singleton.
+    @Test(.serialized) func screenshotLandsInActivityLogAsValidJpeg() async throws {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("jarvis-e2e-\(ProcessInfo.processInfo.globallyUniqueString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { ActivityLog.shared.disable(); try? FileManager.default.removeItem(at: dir) }
+        ActivityLog.shared.enable(directory: dir)
+
+        let clock = ManualClock(now: 100)
+        let guardrails = Guardrails(cooldownSeconds: 12, maxInterjectionsPerMinute: 4, clock: clock)
+        let brain = ScriptedBrain(script: [
+            .init(toolCalls: [.captureScreen(callId: "c1")],
+                  rawToolCalls: [RawToolCall(id: "c1", name: "capture_screen", argumentsJSON: "{}")]),
+            .init(toolCalls: [.speak(callId: "s1", text: "Watch the off-by-one there.")],
+                  rawToolCalls: [RawToolCall(id: "s1", name: "speak",
+                                             argumentsJSON: #"{"text":"Watch the off-by-one there."}"#)]),
+        ])
+        let screen = FakeScreen(payload: TestFixtures.tinyJpegBase64)   // a real JPEG, like screencapture
+        let (driver, transcript) = makeDriver(brain: brain, screen: screen, overlay: FakeOverlay(),
+                                              clock: clock, guardrails: guardrails)
+        transcript.append(.init(speaker: .me, text: "here's my solution", at: 100))
+
+        await driver.handleTrigger(.turnEnd)
+
+        // Reading htmlURL drains the activity log's serial write queue (a sync barrier after the
+        // async record() calls), so everything is on disk before we assert.
+        let html = try String(contentsOf: try #require(ActivityLog.shared.htmlURL), encoding: .utf8)
+        #expect(html.contains("looking at your screen"))   // the capture line
+        #expect(html.contains("<img src=\"shot-"))          // rendered thumbnail
+        #expect(html.contains("target=\"_blank\""))         // click → full image in a new tab
+
+        // Find the saved screenshot and prove it round-tripped as a genuine JPEG (SOI/EOI intact),
+        // owner-only. Scan rather than hard-code shot-1 so a concurrent test sharing the singleton
+        // can't break us.
+        let shots = try FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)
+            .filter { $0.lastPathComponent.hasPrefix("shot-") && $0.pathExtension == "jpg" }
+        let shot = try #require(try shots.first { url in
+            let d = try Data(contentsOf: url)
+            return d.prefix(2) == Data([0xFF, 0xD8]) && d.suffix(2) == Data([0xFF, 0xD9])
+        }, "expected a valid-JPEG screenshot in the activity log dir")
+        #expect(try Data(contentsOf: shot) == TestFixtures.tinyJpeg)   // bytes preserved exactly
+        let perms = try FileManager.default.attributesOfItem(atPath: shot.path)[.posixPermissions] as? NSNumber
+        #expect(perms?.int16Value == 0o600)
+    }
+
     @Test func staySilentRendersNothing() async {
         let clock = ManualClock(now: 0)
         let guardrails = Guardrails(cooldownSeconds: 12, maxInterjectionsPerMinute: 4, clock: clock)

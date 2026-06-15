@@ -29,9 +29,11 @@ public enum JarvisLog {
 
 /// Lightweight logger: always writes to the unified log (Console) and mirrors into the dev activity
 /// viewer; additionally appends to the dev debug file when file logging is enabled.
-public func jlog(_ message: String) {
+/// `image`, when set, is a base64-encoded JPEG screenshot to show as a thumbnail in the dev activity
+/// viewer (the file log and unified log stay text-only).
+public func jlog(_ message: String, image base64JPEG: String? = nil) {
     NSLog("%@", message)
-    ActivityLog.shared.record(message)        // dev-only HTML viewer (no-op when disabled)
+    ActivityLog.shared.record(message, imageBase64: base64JPEG)  // dev-only HTML viewer (no-op when disabled)
 
     guard let url = JarvisLog.debugLogURL else { return }
     let line = "\(logTimestamp()) \(message)\n"
