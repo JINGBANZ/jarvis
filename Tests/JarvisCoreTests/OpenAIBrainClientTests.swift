@@ -61,6 +61,27 @@ private func http(_ code: Int, headers: [String: String]? = nil) -> HTTPURLRespo
         #expect(resp.incompleteReason == nil)
     }
 
+    /// When a conversation id is supplied, it's sent as the Responses `conversation` field, and
+    /// state is stored server-side (store:true).
+    @Test func encodesConversationAndStore() async throws {
+        let box = CapturedBody()
+        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+                                       send: { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
+        _ = try await client.respond(messages: [.user("hi")], tools: coachTools,
+                                     toolChoice: .auto, conversationId: "conv_abc")
+        let body = String(data: box.get() ?? Data(), encoding: .utf8) ?? ""
+        #expect(body.contains("\"conversation\":\"conv_abc\""))
+        #expect(body.contains("\"store\":true"))
+    }
+
+    /// createConversation POSTs to the conversations endpoint and returns the new id.
+    @Test func createConversationParsesId() async throws {
+        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+                                       send: { _ in (Data(#"{"id":"conv_new123"}"#.utf8), http(200)) })
+        let id = try await client.createConversation()
+        #expect(id == "conv_new123")
+    }
+
     @Test func httpErrorThrows() async {
         let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5", maxRetries: 0,
                                        send: { _ in (Data("nope".utf8), http(400)) })
@@ -104,7 +125,7 @@ private func http(_ code: Int, headers: [String: String]? = nil) -> HTTPURLRespo
         #expect(body.contains("\"call_id\":\"call_1\""))
         #expect(body.contains("\"input_image\""))
         #expect(body.contains("\"reasoning\""))
-        #expect(body.contains("\"store\":false"))
+        #expect(body.contains("\"store\":true"))   // server-side conversation continuity
         #expect(body.contains("\"max_output_tokens\""))
         #expect(body.contains("\"parallel_tool_calls\":false"))
         #expect(body.contains("\"name\":\"capture_screen\""))

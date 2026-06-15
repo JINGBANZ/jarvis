@@ -2,16 +2,24 @@ import Foundation
 import Testing
 @testable import JarvisCore
 
-/// Mock brain: replays a script of responses and records the messages + tool-choice it saw.
+/// Mock brain: replays a script of responses and records the messages + tool-choice + conversation.
 final class ScriptedBrain: BrainClient, @unchecked Sendable {
     private(set) var calls: [[ChatMessage]] = []
     private(set) var toolChoices: [ToolChoice] = []
+    private(set) var conversationIds: [String?] = []
+    private(set) var createConversationCount = 0
     let script: [BrainResponse]
     init(script: [BrainResponse]) { self.script = script }
-    func respond(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice) async throws -> BrainResponse {
+    func respond(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice,
+                 conversationId: String?) async throws -> BrainResponse {
         calls.append(messages)
         toolChoices.append(toolChoice)
+        conversationIds.append(conversationId)
         return script[min(calls.count - 1, script.count - 1)]
+    }
+    func createConversation() async throws -> String {
+        createConversationCount += 1
+        return "conv_test"
     }
 }
 
@@ -63,8 +71,10 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(brain.calls.count == 2)
         // Second brain call must contain the screenshot image we fed back...
         #expect(brain.calls[1].contains { $0.imageBase64JPEG != nil })
-        // ...and the assistant tool-call turn that precedes the tool result (B3).
-        #expect(brain.calls[1].contains { $0.role == .assistant && $0.toolCalls != nil })
+        // ...and the tool-result message answering the capture_screen call. With a server-side
+        // conversation the model's function_call lives in the conversation, so it is NOT replayed.
+        #expect(brain.calls[1].contains { $0.role == .tool && $0.toolCallId == "c1" })
+        #expect(!brain.calls[1].contains { $0.role == .assistant && $0.toolCalls != nil })
     }
 
     @Test func staySilentRendersNothing() async {
@@ -88,6 +98,21 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
                                      clock: clock, guardrails: guardrails)
         await driver.handleTrigger(.turnEnd)
         #expect(overlay.rendered.isEmpty)
+    }
+
+    // MARK: - Server-side conversation state (Workstream G)
+
+    /// One conversation is created per session and reused across triggers (consistent id).
+    @Test func createsConversationOnceAndThreadsId() async {
+        let clock = ManualClock(now: 0)
+        let guardrails = Guardrails(cooldownSeconds: 0, maxInterjectionsPerMinute: 99, clock: clock)
+        let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s", text: "hi")])])
+        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(),
+                                     clock: clock, guardrails: guardrails)
+        await driver.handleTrigger(.turnEnd)
+        await driver.handleTrigger(.turnEnd)
+        #expect(brain.createConversationCount == 1)               // created once for the session
+        #expect(brain.conversationIds == ["conv_test", "conv_test"]) // reused on every call
     }
 
     // MARK: - Observability: structured turn outcomes (Workstream B)
@@ -315,7 +340,8 @@ actor OutcomeBox {
 
 /// A brain that always throws, to exercise the `.brainError` outcome.
 final class ThrowingBrain: BrainClient, @unchecked Sendable {
-    func respond(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice) async throws -> BrainResponse {
+    func respond(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice,
+                 conversationId: String?) async throws -> BrainResponse {
         throw NSError(domain: "test", code: 401)
     }
 }
@@ -326,7 +352,8 @@ final class GatedBrain: BrainClient, @unchecked Sendable {
     private let gate: AsyncGate
     private let response: BrainResponse
     init(gate: AsyncGate, response: BrainResponse) { self.gate = gate; self.response = response }
-    func respond(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice) async throws -> BrainResponse {
+    func respond(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice,
+                 conversationId: String?) async throws -> BrainResponse {
         await gate.enter()
         return response
     }

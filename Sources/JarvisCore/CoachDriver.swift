@@ -25,6 +25,12 @@ public final class CoachDriver: @unchecked Sendable {
 
     private let stateLock = NSLock()
     private var isHandling = false
+    /// One server-side conversation per coaching session (this driver is rebuilt on each Start), so
+    /// the model keeps continuity — its own prior replies included — across triggers.
+    private var conversationId: String?
+    /// Transcript time already sent to the model; each turn sends only newer speech (the conversation
+    /// holds the rest). Starts at the session origin so the first turn sends what's been said so far.
+    private var lastReadTime: TimeInterval
 
     public init(config: Config, transcript: RollingTranscript, guardrails: Guardrails,
                 brain: BrainClient, screen: ScreenCapturing, overlay: OverlayRendering, clock: Clock,
@@ -37,7 +43,31 @@ public final class CoachDriver: @unchecked Sendable {
         self.overlay = overlay
         self.clock = clock
         self.sessionStart = clock.now()
+        self.lastReadTime = clock.now()
         self.onSpoke = onSpoke
+    }
+
+    // Synchronous lock accessors — NSLock can't be held across an `await`, so all critical sections
+    // live in non-async helpers.
+    private func currentConversationId() -> String? {
+        stateLock.lock(); defer { stateLock.unlock() }; return conversationId
+    }
+    private func storeConversationId(_ id: String?) {
+        stateLock.lock(); conversationId = id; stateLock.unlock()
+    }
+    /// Return the prior read time and advance it to `now` (so the next turn sends only newer speech).
+    private func advanceReadTime(to now: TimeInterval) -> TimeInterval {
+        stateLock.lock(); defer { stateLock.unlock() }
+        let since = lastReadTime; lastReadTime = now; return since
+    }
+
+    /// Lazily create the session's conversation (once). Returns nil if creation fails, in which case
+    /// the turn proceeds statelessly rather than blocking coaching.
+    private func ensureConversation() async -> String? {
+        if let existing = currentConversationId() { return existing }
+        let id = try? await brain.createConversation()
+        storeConversationId(id)
+        return id
     }
 
     /// Atomically claim the single in-flight slot; false if a turn is already running.
@@ -92,11 +122,17 @@ public final class CoachDriver: @unchecked Sendable {
             sessionElapsedSeconds: now - sessionStart
         )
 
+        // Server-side conversation holds the running history (the user's earlier speech AND Jarvis's
+        // own prior replies), so we send only the NEW speech since the last turn.
+        let convId = await ensureConversation()
+        let since = advanceReadTime(to: now)
+        let newSpeech = transcript.renderSince(after: since, now: now)
+
         var convo: [ChatMessage] = [
             .system(coachSystemPrompt),
             .user("""
-            Recent transcript (timestamped):
-            \(transcript.renderWindow(seconds: config.transcriptWindowSeconds, now: now))
+            New since last turn (timestamped):
+            \(newSpeech.isEmpty ? "(nothing new)" : newSpeech)
 
             \(ctx.promptLine)
             """),
@@ -113,7 +149,8 @@ public final class CoachDriver: @unchecked Sendable {
             iterations += 1
             let response: BrainResponse
             do {
-                response = try await brain.respond(messages: convo, tools: coachTools, toolChoice: toolChoice)
+                response = try await brain.respond(messages: convo, tools: coachTools,
+                                                   toolChoice: toolChoice, conversationId: convId)
             } catch {
                 // Don't fail completely silently — a 401/429/network storm is otherwise invisible.
                 jlog("Jarvis coach: brain request failed on \(reason): \(error.localizedDescription)")
@@ -143,17 +180,31 @@ public final class CoachDriver: @unchecked Sendable {
             switch call {
             case .captureScreen(let callId):
                 jlog("👁 looking at your screen")
-                // Replay the model's function call, then the tool result + the screenshot image.
-                convo.append(.assistantToolCalls(response.rawToolCalls))
                 // ScreenCaptureCLI shells out to `screencapture` and blocks for 100s of ms; run it
                 // off the cooperative pool so it doesn't stall a pool thread while holding the
                 // single in-flight slot.
                 let screen = self.screen
-                if let img = await Task.detached(priority: .userInitiated, operation: { screen.capture() }).value {
-                    convo.append(.init(role: .tool, text: "screenshot captured", toolCallId: callId))
-                    convo.append(.userImage(img))
+                let img = await Task.detached(priority: .userInitiated, operation: { screen.capture() }).value
+                if convId == nil {
+                    // Stateless fallback: replay the model's call + the tool result + image.
+                    convo.append(.assistantToolCalls(response.rawToolCalls))
+                    if let img {
+                        convo.append(.init(role: .tool, text: "screenshot captured", toolCallId: callId))
+                        convo.append(.userImage(img))
+                    } else {
+                        convo.append(.init(role: .tool, text: "screenshot failed", toolCallId: callId))
+                    }
                 } else {
-                    convo.append(.init(role: .tool, text: "screenshot failed", toolCallId: callId))
+                    // The conversation already holds the model's function_call; send only the tool
+                    // result (+ image) as the next input.
+                    var next: [ChatMessage] = [.system(coachSystemPrompt)]
+                    if let img {
+                        next.append(.init(role: .tool, text: "screenshot captured", toolCallId: callId))
+                        next.append(.userImage(img))
+                    } else {
+                        next.append(.init(role: .tool, text: "screenshot failed", toolCallId: callId))
+                    }
+                    convo = next
                 }
                 continue // let the model reason over the image
 

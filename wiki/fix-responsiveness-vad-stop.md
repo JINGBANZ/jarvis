@@ -80,6 +80,23 @@ in the first cut — fixed before merge:
 - **Dead config** (`maxDirectAddressesPerMinute`) is now wired into `Guardrails`; the coalescing
   logic was extracted to a testable `UtteranceBuffer`.
 
+## Live-test round (2026-06-15)
+
+First live run confirmed direct-address, mid-sentence, and Stop fixes. Three follow-ups:
+
+- **Conversation quality** — the brain had no memory of its *own* prior replies (the transcript only
+  stored user speech), so it couldn't follow up (e.g. "can you check my screen?" said after a reply
+  was ignored). Adopted the OpenAI **Conversations API**: one `conv_…` per coaching session
+  (`CoachDriver.ensureConversation`), `store:true`, and we send only the **new** speech each turn
+  (`RollingTranscript.renderSince`) — the conversation holds the rest, Jarvis's replies included.
+  This reverses the no-server-retention stance (documented in [sandbox.md](./sandbox.md)) as a
+  deliberate quality-first choice.
+- **Screen-on-request** — added a prompt rule so "can you check my screen?" triggers `capture_screen`
+  even without the wake word.
+- **Error storm** — a mid-session socket drop flooded the log with hundreds of `send error` lines
+  (audio kept streaming to a dead socket). Added a `connected` flag: audio is dropped silently while
+  disconnected/reconnecting, the ping is gated, and per-send failures are no longer logged.
+
 ## Decisions
 
 - **Respond when addressed** is the behavior gap behind issues 1 & 3 — Jarvis was *correctly* silent

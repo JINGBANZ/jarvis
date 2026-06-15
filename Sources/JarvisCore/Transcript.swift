@@ -50,6 +50,16 @@ public final class RollingTranscript: @unchecked Sendable {
             .joined(separator: "\n")
     }
 
+    /// Lines strictly after `t`, formatted like `renderWindow`. Used to send only NEW speech when a
+    /// server-side conversation already holds the earlier turns.
+    public func renderSince(after t: TimeInterval, now: TimeInterval) -> String {
+        lock.lock(); let snapshot = lines; lock.unlock()
+        return snapshot
+            .filter { $0.at > t }
+            .map { "[\(Self.stamp($0.at))] \($0.speaker.rawValue): \($0.text)" }
+            .joined(separator: "\n")
+    }
+
     static func stamp(_ t: TimeInterval) -> String {
         let total = Int(t.rounded(.down))
         return String(format: "%02d:%02d", total / 60, total % 60)

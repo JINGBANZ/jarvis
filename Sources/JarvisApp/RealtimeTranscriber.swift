@@ -42,6 +42,7 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
     private var reconnectAttempt = 0
     private var isReconnecting = false
     private var stopped = false
+    private var connected = false        // true only between "session ready" and the next drop/close
 
     init(apiKey: String, model: String, transcript: RollingTranscript, clock: Clock,
          silenceTimeout: TimeInterval = 8, silenceDurationMs: Int = 1000,
@@ -71,7 +72,7 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         lock.lock()
         self.session?.invalidateAndCancel()   // release the previous session's delegate retain
         self.session = session
-        self.task = task; isReconnecting = false
+        self.task = task; isReconnecting = false; connected = false
         lock.unlock()
         task.resume()
         configureSession()
@@ -82,7 +83,7 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
 
     func stop() {
         lock.lock()
-        stopped = true
+        stopped = true; connected = false
         let st = silenceTimer; silenceTimer = nil
         let pt = pingTimer; pingTimer = nil
         let db = debounceTimer; debounceTimer = nil
@@ -104,6 +105,12 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
     }
 
     func sendAudio(_ pcm: Data) {
+        // Audio streams continuously from the mic tap. When the socket has dropped (and until the
+        // reconnect's session is ready) there is nowhere to send it — drop it SILENTLY rather than
+        // firing a failed send per chunk, which previously flooded the log with hundreds of
+        // "send error: Operation canceled" lines on a single disconnect.
+        lock.lock(); let canSend = connected && !stopped; lock.unlock()
+        guard canSend else { return }
         send(json: RealtimeSession.appendAudio(base64PCM: pcm.base64EncodedString()))
     }
 
@@ -111,7 +118,9 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         guard let data = try? JSONSerialization.data(withJSONObject: json),
               let str = String(data: data, encoding: .utf8) else { return }
         lock.lock(); let t = task; lock.unlock()
-        t?.send(.string(str)) { err in if let err { jlog("Jarvis realtime send error: \(err)") } }
+        // Don't log send failures: they're non-actionable and arrive in bulk on a drop; the
+        // receive/close paths are what detect the disconnect and drive reconnect.
+        t?.send(.string(str)) { _ in }
     }
 
     private func receiveLoop() {
@@ -122,7 +131,7 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
             case .failure(let err):
                 // A failed pending receive is the EXPECTED artifact of an intentional Stop
                 // (cancel → ENOTCONN/POSIX 57). Suppress it then; only a live failure reconnects.
-                self.lock.lock(); let isStopped = self.stopped; self.lock.unlock()
+                self.lock.lock(); let isStopped = self.stopped; self.connected = false; self.lock.unlock()
                 if isStopped { return }
                 jlog("Jarvis realtime receive failed: \(err)")
                 self.scheduleReconnect()
@@ -161,6 +170,7 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
             // handled on the completed event above. Just refresh the silence timer here.
             resetSilenceTimer()
         case "session.created", "transcription_session.created":
+            lock.lock(); connected = true; lock.unlock()
             jlog("Jarvis realtime: transcription session ready")
         case "error":
             jlog("Jarvis realtime error event: \(text)")
@@ -212,7 +222,7 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
     func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask,
                     didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
         // An intentional Stop closes the socket on purpose; don't alarm the user with it.
-        lock.lock(); let isStopped = stopped; lock.unlock()
+        lock.lock(); let isStopped = stopped; connected = false; lock.unlock()
         if isStopped { return }
         jlog("Jarvis realtime socket closed: code \(closeCode.rawValue)")
         scheduleReconnect()
@@ -248,8 +258,9 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
             self.lock.lock(); self.pingTimer?.invalidate()
             self.pingTimer = Timer.scheduledTimer(withTimeInterval: 20, repeats: true) { [weak self] _ in
                 guard let self else { return }
-                self.lock.lock(); let t = self.task; self.lock.unlock()
-                t?.sendPing { err in if let err { jlog("Jarvis realtime ping error: \(err)") } }
+                self.lock.lock(); let t = self.task; let isConnected = self.connected; self.lock.unlock()
+                guard isConnected else { return }   // no keepalive on a dropped/reconnecting socket
+                t?.sendPing { _ in }                // a failed ping is handled by the receive/close path
             }
             self.lock.unlock()
         }

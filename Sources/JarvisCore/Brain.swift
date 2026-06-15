@@ -88,12 +88,24 @@ public enum ToolChoice: Sendable, Equatable {
 
 /// Abstraction over the brain model so CoachDriver is testable with a mock.
 public protocol BrainClient: Sendable {
-    func respond(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice) async throws -> BrainResponse
+    /// `conversationId`, when non-nil, ties this turn into a server-side conversation so the model
+    /// remembers prior turns (its own replies included) without re-sending them — the caller sends
+    /// only the NEW input each turn.
+    func respond(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice,
+                 conversationId: String?) async throws -> BrainResponse
+    /// Create a server-side conversation and return its id. Default: a local stub (no server state),
+    /// so mocks/tests need not implement it.
+    func createConversation() async throws -> String
 }
 
 public extension BrainClient {
-    /// Convenience for the common `auto` case so callers/tests need not pass a tool choice.
+    func createConversation() async throws -> String { "conv_local" }
+
+    /// Convenience overloads so callers/tests need not pass every argument.
+    func respond(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice) async throws -> BrainResponse {
+        try await respond(messages: messages, tools: tools, toolChoice: toolChoice, conversationId: nil)
+    }
     func respond(messages: [ChatMessage], tools: [ToolDef]) async throws -> BrainResponse {
-        try await respond(messages: messages, tools: tools, toolChoice: .auto)
+        try await respond(messages: messages, tools: tools, toolChoice: .auto, conversationId: nil)
     }
 }

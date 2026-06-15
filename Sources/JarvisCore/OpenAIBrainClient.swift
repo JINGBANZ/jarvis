@@ -46,12 +46,13 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
     }
 
     public func respond(messages: [ChatMessage], tools: [ToolDef],
-                        toolChoice: ToolChoice) async throws -> BrainResponse {
+                        toolChoice: ToolChoice, conversationId: String?) async throws -> BrainResponse {
         var request = URLRequest(url: endpoint, timeoutInterval: timeout)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        request.httpBody = try encodeBody(messages: messages, tools: tools, toolChoice: toolChoice)
+        request.httpBody = try encodeBody(messages: messages, tools: tools, toolChoice: toolChoice,
+                                          conversationId: conversationId)
 
         var attempt = 0
         while true {
@@ -74,9 +75,29 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
         }
     }
 
+    /// Create a server-side conversation (one per coaching session) so the model keeps continuity —
+    /// including its own prior replies — across triggers. Returns the `conv_…` id.
+    public func createConversation() async throws -> String {
+        let url = URL(string: endpoint.absoluteString.replacingOccurrences(of: "/responses", with: "/conversations")) ?? endpoint
+        var request = URLRequest(url: url, timeoutInterval: timeout)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.httpBody = Data("{}".utf8)
+        let (data, http) = try await send(request)
+        let status = http?.statusCode ?? 0
+        guard (200..<300).contains(status) else {
+            throw NSError(domain: "OpenAIBrainClient", code: status,
+                          userInfo: [NSLocalizedDescriptionKey: String(data: data, encoding: .utf8) ?? "http \(status)"])
+        }
+        struct Conversation: Decodable { let id: String }
+        return try JSONDecoder().decode(Conversation.self, from: data).id
+    }
+
     // MARK: - Encoding (Responses API)
 
-    private func encodeBody(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice) throws -> Data {
+    private func encodeBody(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice,
+                            conversationId: String?) throws -> Data {
         var instructions: [String] = []
         var input: [[String: Any]] = []
 
@@ -145,9 +166,15 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
             "parallel_tool_calls": false,      // the coach loop consumes one tool call per turn
             "reasoning": ["effort": reasoningEffort],
             "max_output_tokens": maxOutputTokens,
-            "store": false,                    // don't retain screenshots/transcripts server-side
+            // store:true is required for server-side conversation continuity (the model remembers
+            // prior turns, its own replies included). This DOES retain transcripts/screenshots
+            // server-side — a deliberate quality-over-retention choice; see wiki/sandbox.md.
+            "store": true,
             "prompt_cache_key": promptCacheKey, // stable system prompt → better cache routing
         ]
+        if let conversationId {
+            body["conversation"] = conversationId
+        }
         if !instructions.isEmpty {
             body["instructions"] = instructions.joined(separator: "\n\n")
         }

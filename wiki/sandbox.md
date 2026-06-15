@@ -78,7 +78,16 @@ Narrow and explicit. Data leaves the machine only via:
 In the MVP there is **no recording to disk** — no rolling screen/audio archive, no "recall"
 database. Temp screenshots are deleted after use. This guarantee covers the **sensitive captured
 streams** (mic audio, screenshots, and the transcript derived from them): audio streams to the API
-and is dropped, the transcript lives in memory, and nothing is persisted in normal operation.
+and is dropped, the transcript lives in memory, and nothing is persisted *on this machine* in normal
+operation.
+
+> **Temporary exception (2026-06-15) — server-side retention for conversation quality.** To give the
+> coach real multi-turn memory, the brain now uses the OpenAI **Conversations API** (`store:true`,
+> one `conv_…` per coaching session). This **does** retain the transcript and the screenshots sent to
+> the model server-side at OpenAI (≈30-day TTL). This is a deliberate *quality-over-retention* choice
+> made for now; revisiting it (encrypted reasoning items / ephemeral conversations / client-side
+> history) is tracked as a future privacy item. See
+> [fix-responsiveness-vad-stop.md](./fix-responsiveness-vad-stop.md).
 
 **Dev-mode logging is the one bounded exception, and it is hardened to not break the guarantee.**
 File logging (the activity HTML + `jarvis-debug.log`, which include the model's spoken tips and the
