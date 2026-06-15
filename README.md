@@ -7,11 +7,26 @@ No hotkey, no prompting; the assistant decides when to help.
 The guiding idea is *build the harness, not the intelligence*: the models already exist, so Jarvis
 is the thin layer of glue that wires perception (audio, screen) to a proactive voice.
 
-> **Where it is today.** The first concrete capability is a **LeetCode coach on macOS** — it hears
-> you think aloud, looks at your screen on demand, and nudges you toward the solution. macOS and
-> coaching are the *first step*, not the destination; the architecture is meant to grow into a more
-> general assistant. See the design docs in [`wiki/`](./wiki/index.md) (start with
-> [`wiki/status.md`](./wiki/status.md)).
+## Use cases
+
+Jarvis is a general proactive-assistant harness; each concrete capability is a **use case** built on
+top of it. Today there is one. The list is meant to grow — the harness (perception → judgement → a
+proactive, unprompted voice) is designed to be reused across future use cases.
+
+### LeetCode coach (macOS) — *current focus*
+
+Jarvis hears you think aloud while you solve a problem, looks at your screen on demand to read the
+problem and your code, and proactively nudges you toward the solution with short overlay tips —
+asking a pointed question or pointing at the next small step rather than dumping the answer. This is
+the first capability and what the current build targets; macOS and coaching are the *first step*,
+not the destination.
+
+Design docs live in [`wiki/`](./wiki/index.md) (start with [`wiki/status.md`](./wiki/status.md)).
+
+### More to come
+
+The same harness is meant to extend to other proactive scenarios; new use cases will be added here
+as they are designed and built.
 
 ## How it works
 
