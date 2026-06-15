@@ -16,6 +16,26 @@ import Testing
         #expect(DirectAddress.isAddressed("jarvus help me out"))
     }
 
+    /// A trailing vocative is one of the most common ways people address an assistant.
+    @Test func detectsTrailingVocative() {
+        #expect(DirectAddress.isAddressed("Can you check this, Jarvis?"))
+        #expect(DirectAddress.isAddressed("what do you think jarvis"))
+        #expect(DirectAddress.isAddressed("so, uh, ok jarvis"))
+    }
+
+    /// Disfluency/greeting prefixes ("um, hey there Jarvis") must still be detected.
+    @Test func detectsThroughFillerAndCarrier() {
+        #expect(DirectAddress.isAddressed("um, hey there jarvis"))
+        #expect(DirectAddress.isAddressed("hey there Jarvis, what's the complexity?"))
+        #expect(DirectAddress.isAddressed("uh jarvis can you help"))
+    }
+
+    /// A discourse-marker prefix is narration, not an address — must NOT force a reply.
+    @Test func ignoresDiscourseMarkerNarration() {
+        #expect(!DirectAddress.isAddressed("So Jarvis told me to refactor the loop"))
+        #expect(!DirectAddress.isAddressed("Well Jarvis was right about the complexity"))
+    }
+
     @Test func ignoresAmbientThinkingAloud() {
         #expect(!DirectAddress.isAddressed("I'll brute-force two-sum with a double loop"))
         #expect(!DirectAddress.isAddressed("what's the time complexity of that nested loop"))

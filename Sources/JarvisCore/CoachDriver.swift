@@ -129,8 +129,13 @@ public final class CoachDriver: @unchecked Sendable {
             guard let call = response.toolCalls.first else {
                 if let reasonText = response.incompleteReason {
                     jlog("⚠️ response truncated (\(reasonText)) — not deliberate silence")
+                    // Forcing `speak` only constrains WHICH tool, not that output is emitted: a
+                    // reasoning model can still truncate to zero items. Never leave a direct address
+                    // unanswered — fall back to a spoken acknowledgement.
+                    if reason.isDirectAddress { return directAddressFallback() }
                     return .truncated
                 }
+                if reason.isDirectAddress { return directAddressFallback() }
                 jlog("… nothing useful to add, staying silent")
                 return .silentByModel
             }
@@ -164,7 +169,20 @@ public final class CoachDriver: @unchecked Sendable {
             }
         }
         jlog("… tool loop exhausted without speaking")
+        if reason.isDirectAddress { return directAddressFallback() }
         return .exhausted
+    }
+
+    /// Last-resort spoken reply so a direct address is never met with silence (e.g. the model
+    /// truncated or looped without speaking). Counts toward the direct ceiling, not the cooldown.
+    private func directAddressFallback() -> TurnOutcome {
+        let text = "Sorry — I didn't catch that. Could you say it again?"
+        jlog("💬 \(text)")
+        overlay.render(text, maxSentences: config.maxSentences,
+                       perSentenceSeconds: config.sentenceDisplaySeconds)
+        guardrails.noteDirectAddress()
+        onSpoke?()
+        return .spokeFallback
     }
 }
 
@@ -173,6 +191,7 @@ public final class CoachDriver: @unchecked Sendable {
 /// these fired.
 public enum TurnOutcome: Sendable, Equatable {
     case spoke            // rendered a coaching tip
+    case spokeFallback    // direct address that the model didn't answer → canned spoken reply
     case silentByModel    // model deliberately called no tool
     case truncated        // response cut off by the token cap (NOT a real silence decision)
     case heldBack         // guardrail blocked: cooldown, rate cap, or mute

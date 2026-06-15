@@ -132,6 +132,21 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(await driver.handleTrigger(.turnEnd) == .heldBack) // within 12s → blocked
     }
 
+    /// A model that loops on capture_screen forever hits the iteration cap and reports `.exhausted`.
+    @Test func exhaustedOutcomeWhenModelLoopsOnCapture() async {
+        let clock = ManualClock(now: 0)
+        let guardrails = Guardrails(cooldownSeconds: 12, maxInterjectionsPerMinute: 4, clock: clock)
+        let brain = ScriptedBrain(script: [
+            .init(toolCalls: [.captureScreen(callId: "c")],
+                  rawToolCalls: [RawToolCall(id: "c", name: "capture_screen", argumentsJSON: "{}")]),
+        ])  // ScriptedBrain repeats the last response, so every iteration captures again
+        let overlay = FakeOverlay()
+        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: overlay,
+                                     clock: clock, guardrails: guardrails)
+        #expect(await driver.handleTrigger(.turnEnd) == .exhausted)
+        #expect(overlay.rendered.isEmpty)
+    }
+
     @Test func brainErrorOutcome() async {
         let clock = ManualClock(now: 0)
         let guardrails = Guardrails(cooldownSeconds: 12, maxInterjectionsPerMinute: 4, clock: clock)
@@ -186,6 +201,32 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(brain2.toolChoices.last == .auto)
     }
 
+    /// A direct address must NEVER be left unanswered: if the forced-speak turn truncates (zero
+    /// tool calls), the driver renders a spoken fallback rather than going silent.
+    @Test func directAddressTruncationFallsBackToSpoken() async {
+        let clock = ManualClock(now: 0)
+        let guardrails = Guardrails(cooldownSeconds: 12, maxInterjectionsPerMinute: 4, clock: clock)
+        let brain = ScriptedBrain(script: [.init(toolCalls: [], rawToolCalls: [], incompleteReason: "max_output_tokens")])
+        let overlay = FakeOverlay()
+        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: overlay,
+                                     clock: clock, guardrails: guardrails)
+        #expect(await driver.handleTrigger(.directAddress) == .spokeFallback)
+        #expect(overlay.rendered.count == 1)
+        #expect(!overlay.rendered[0].isEmpty)
+    }
+
+    /// An AMBIENT truncated turn stays `.truncated` (no fallback chatter when not addressed).
+    @Test func ambientTruncationDoesNotFallBack() async {
+        let clock = ManualClock(now: 0)
+        let guardrails = Guardrails(cooldownSeconds: 12, maxInterjectionsPerMinute: 4, clock: clock)
+        let brain = ScriptedBrain(script: [.init(toolCalls: [], rawToolCalls: [], incompleteReason: "max_output_tokens")])
+        let overlay = FakeOverlay()
+        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: overlay,
+                                     clock: clock, guardrails: guardrails)
+        #expect(await driver.handleTrigger(.turnEnd) == .truncated)
+        #expect(overlay.rendered.isEmpty)
+    }
+
     /// While one turn is in flight, a second concurrent trigger must be reported as `.busy`
     /// (the single-in-flight drop is now observable, not silent).
     @Test func busyOutcomeWhenTurnInFlight() async {
@@ -203,6 +244,72 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(second == .busy)
         await gate.release()
         #expect(await first == .spoke)
+    }
+}
+
+@Suite struct TurnTaskBoxTests {
+    /// The barge-in regression test: while T1 is parked in the brain call (holding the single
+    /// in-flight slot), fresh speech arrives via run(cancelPrevious:true). The replacement turn MUST
+    /// actually run (.spoke), not be dropped as .busy. Verifies the deterministic handoff.
+    @Test func cancelPreviousLetsReplacementRun() async {
+        let clock = ManualClock(now: 0)
+        let guardrails = Guardrails(cooldownSeconds: 12, maxInterjectionsPerMinute: 4, clock: clock)
+        let gate = AsyncGate()
+        let brain = GatedBrain(gate: gate, response: .init(toolCalls: [.speak(callId: "s1", text: "hi")]))
+        let transcript = RollingTranscript()
+        let driver = CoachDriver(config: .default, transcript: transcript, guardrails: guardrails,
+                                 brain: brain, screen: FakeScreen(), overlay: FakeOverlay(), clock: clock)
+        let outcomes = OutcomeBox()
+        let box = TurnTaskBox()
+
+        box.run(cancelPrevious: false) { await outcomes.set(.first, driver.handleTrigger(.turnEnd)) }
+        await gate.waitUntilEntered()              // T1 is parked inside the brain call
+        box.run(cancelPrevious: true) { await outcomes.set(.second, driver.handleTrigger(.directAddress)) }
+        await gate.release()                       // let both unwind
+
+        #expect(await outcomes.await(.second) == .spoke)   // replacement actually ran
+        #expect(await outcomes.await(.first) == .cancelled) // predecessor was cancelled, didn't render
+    }
+
+    /// run(cancelPrevious:false) (a silence tick) must NOT cancel an in-flight turn.
+    @Test func silenceDoesNotCancelInFlight() async {
+        let clock = ManualClock(now: 0)
+        let guardrails = Guardrails(cooldownSeconds: 12, maxInterjectionsPerMinute: 4, clock: clock)
+        let gate = AsyncGate()
+        let brain = GatedBrain(gate: gate, response: .init(toolCalls: [.speak(callId: "s1", text: "hi")]))
+        let transcript = RollingTranscript()
+        let driver = CoachDriver(config: .default, transcript: transcript, guardrails: guardrails,
+                                 brain: brain, screen: FakeScreen(), overlay: FakeOverlay(), clock: clock)
+        let outcomes = OutcomeBox()
+        let box = TurnTaskBox()
+        box.run(cancelPrevious: false) { await outcomes.set(.first, driver.handleTrigger(.turnEnd)) }
+        await gate.waitUntilEntered()
+        box.run(cancelPrevious: false) { await outcomes.set(.second, driver.handleTrigger(.silence(secondsQuiet: 8)) ) }
+        await gate.release()
+        #expect(await outcomes.await(.first) == .spoke)   // first was NOT cancelled
+    }
+}
+
+/// Records two turn outcomes and lets a test await whichever it needs.
+actor OutcomeBox {
+    enum Slot { case first, second }
+    private var first: TurnOutcome?
+    private var second: TurnOutcome?
+    private var firstWaiters: [CheckedContinuation<TurnOutcome, Never>] = []
+    private var secondWaiters: [CheckedContinuation<TurnOutcome, Never>] = []
+
+    func set(_ slot: Slot, _ value: TurnOutcome) {
+        switch slot {
+        case .first: first = value; firstWaiters.forEach { $0.resume(returning: value) }; firstWaiters.removeAll()
+        case .second: second = value; secondWaiters.forEach { $0.resume(returning: value) }; secondWaiters.removeAll()
+        }
+    }
+
+    func await(_ slot: Slot) async -> TurnOutcome {
+        switch slot {
+        case .first: if let first { return first }; return await withCheckedContinuation { firstWaiters.append($0) }
+        case .second: if let second { return second }; return await withCheckedContinuation { secondWaiters.append($0) }
+        }
     }
 }
 

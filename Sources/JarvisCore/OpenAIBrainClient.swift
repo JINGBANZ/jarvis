@@ -27,7 +27,7 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
                 timeout: TimeInterval = 15,
                 maxRetries: Int = 2,
                 backoffBaseSeconds: Double = 0.5,
-                maxOutputTokens: Int = 400,
+                maxOutputTokens: Int = 768,   // headroom so reasoning + a short tool call don't truncate
                 promptCacheKey: String = "jarvis-coach-v1",
                 send: Sender? = nil) {
         self.apiKey = apiKey

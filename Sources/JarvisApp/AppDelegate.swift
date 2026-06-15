@@ -10,6 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private lazy var guardrails = Guardrails(
         cooldownSeconds: config.cooldownSeconds,
         maxInterjectionsPerMinute: config.maxInterjectionsPerMinute,
+        maxDirectAddressesPerMinute: config.maxDirectAddressesPerMinute,
         clock: clock)
     private lazy var secrets = ChainedSecretStore([keychain, EnvSecretStore()])
 
@@ -117,6 +118,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if wasRunning { jlog("Jarvis: stopped.") }
     }
 
+
     private func warnNoKey() {
         NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
@@ -136,30 +138,5 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSTemporaryDirectory())
         return caches.appendingPathComponent("Jarvis")
-    }
-}
-
-/// Tracks the unstructured Tasks spawned per transcription trigger so Stop can cancel any in-flight
-/// coaching turn. `@unchecked Sendable`: all access to `tasks` is guarded by the lock.
-private final class TurnTaskBox: @unchecked Sendable {
-    private let lock = NSLock()
-    private var tasks: [Task<Void, Never>] = []
-
-    func run(cancelPrevious: Bool = false, _ op: @escaping @Sendable () async -> Void) {
-        lock.lock()
-        if cancelPrevious {
-            // Fresh user speech makes any in-flight turn stale — cancel it so the new context wins.
-            tasks.forEach { $0.cancel() }
-            tasks.removeAll()
-        }
-        tasks.removeAll { $0.isCancelled }
-        let task = Task { await op() }
-        tasks.append(task)
-        lock.unlock()
-    }
-
-    func cancelAll() {
-        lock.lock(); let snapshot = tasks; tasks.removeAll(); lock.unlock()
-        snapshot.forEach { $0.cancel() }
     }
 }

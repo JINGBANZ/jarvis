@@ -38,8 +38,7 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
     private var silenceTimer: Timer?
     private var pingTimer: Timer?
     private var debounceTimer: Timer?         // coalesces rapid fragments into one trigger
-    private var pendingText = ""              // text heard since the last fired trigger
-    private var pendingFragments = 0          // fragment count, for the VAD diagnostic
+    private let pending = UtteranceBuffer()   // fragments heard since the last fired trigger
     private var reconnectAttempt = 0
     private var isReconnecting = false
     private var stopped = false
@@ -87,7 +86,6 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         let st = silenceTimer; silenceTimer = nil
         let pt = pingTimer; pingTimer = nil
         let db = debounceTimer; debounceTimer = nil
-        pendingText = ""; pendingFragments = 0
         let t = task; task = nil
         let s = session; session = nil
         lock.unlock()
@@ -95,6 +93,7 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         // from an off-main Stop (e.g. the onTerminalFailure Task) would silently fail to cancel and
         // could let a stray timer fire onSilence on a torn-down pipeline.
         DispatchQueue.main.async { st?.invalidate(); pt?.invalidate(); db?.invalidate() }
+        pending.clear()
         // A user-initiated Stop is a normal closure (1000), not "going away" (1001).
         t?.cancel(with: .normalClosure, reason: nil)
         s?.invalidateAndCancel()             // breaks the URLSession→delegate(self)→closures→driver retain chain
@@ -136,6 +135,10 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
     }
 
     private func handle(_ text: String) {
+        // A buffered message can still arrive after an intentional Stop; don't mutate the transcript
+        // or log on a torn-down pipeline (mirrors the failure/close-path gates).
+        lock.lock(); let isStopped = stopped; lock.unlock()
+        if isStopped { return }
         guard let data = text.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let type = obj["type"] as? String else { return }
@@ -149,10 +152,7 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
                 let at = clock.now() - sessionStart
                 transcript.append(.init(speaker: .me, text: transcriptText, at: at))
                 jlog("🗣 heard: \"\(transcriptText)\"")   // show what was actually said in the viewer
-                lock.lock()
-                pendingText += (pendingText.isEmpty ? "" : " ") + transcriptText
-                pendingFragments += 1
-                lock.unlock()
+                pending.append(transcriptText)
                 resetSilenceTimer()
                 scheduleTurnDebounce()
             }
@@ -178,22 +178,21 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.lock.lock()
+            defer { self.lock.unlock() }
+            guard !self.stopped else { return }   // a block queued before stop() must not re-arm a timer
             self.debounceTimer?.invalidate()
             self.debounceTimer = Timer.scheduledTimer(withTimeInterval: window, repeats: false) { [weak self] _ in
                 self?.fireTurn()
             }
-            self.lock.unlock()
         }
     }
 
     private func fireTurn() {
         lock.lock()
         if stopped { lock.unlock(); return }
-        let utterance = pendingText
-        let fragments = pendingFragments
-        pendingText = ""; pendingFragments = 0
         debounceTimer?.invalidate(); debounceTimer = nil
         lock.unlock()
+        let (utterance, fragments) = pending.flush()
 
         if fragments > 1 {
             // VAD diagnostic: if this is frequently > 1, the silence window is still too short.

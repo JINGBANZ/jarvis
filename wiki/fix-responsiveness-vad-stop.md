@@ -63,6 +63,23 @@ Built test-first, sequenced so observability lands before behavior changes.
 - **F — Stale-turn cancellation + config.** Cancel an in-flight (now-stale) coaching turn on fresh
   user speech instead of dropping it; move new tunables into `Config.swift`.
 
+## Post-review hardening
+
+A multi-angle review of the PR (5 dimensions, each finding adversarially verified) caught real bugs
+in the first cut — fixed before merge:
+
+- **Barge-in was broken.** `cancelPrevious` cancelled the in-flight turn but the replacement hit the
+  single-in-flight guard and was dropped `.busy` — fresh speech got *no* reply. Fixed by a
+  deterministic handoff: `TurnTaskBox` (moved to JarvisCore) makes the replacement `await` the
+  cancelled predecessor so the slot is free first. Now unit-tested end-to-end.
+- **Wake-word missed trailing vocatives.** "Can you check this, Jarvis?" wasn't detected (the anchor
+  only scanned the first three tokens). `DirectAddress` now accepts leading *and* trailing vocatives,
+  strips disfluency fillers, and still rejects discourse-marker narration ("So Jarvis told me…").
+- **A forced direct-address reply could still truncate to silence** — added a spoken fallback
+  (`.spokeFallback`) so a direct address is never unanswered, plus more token headroom.
+- **Dead config** (`maxDirectAddressesPerMinute`) is now wired into `Guardrails`; the coalescing
+  logic was extracted to a testable `UtteranceBuffer`.
+
 ## Decisions
 
 - **Respond when addressed** is the behavior gap behind issues 1 & 3 — Jarvis was *correctly* silent
