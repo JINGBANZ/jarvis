@@ -41,6 +41,26 @@ private func http(_ code: Int, headers: [String: String]? = nil) -> HTTPURLRespo
         #expect(resp.toolCalls.isEmpty)
     }
 
+    /// A token-truncated response (status=incomplete, max_output_tokens) must surface its reason
+    /// so an empty tool-call list isn't mistaken for deliberate silence.
+    @Test func decodeFlagsIncompleteResponse() async throws {
+        let json = #"{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"output":[]}"#
+        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+                                       send: { _ in (Data(json.utf8), http(200)) })
+        let resp = try await client.respond(messages: [.user("hi")], tools: coachTools)
+        #expect(resp.toolCalls.isEmpty)
+        #expect(resp.incompleteReason == "max_output_tokens")
+    }
+
+    /// A normal completed response carries no incomplete reason.
+    @Test func decodeCompletedResponseHasNoIncompleteReason() async throws {
+        let json = #"{"status":"completed","output":[{"type":"function_call","id":"f","call_id":"c","name":"speak","arguments":"{\"text\":\"hi\"}"}]}"#
+        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+                                       send: { _ in (Data(json.utf8), http(200)) })
+        let resp = try await client.respond(messages: [.user("hi")], tools: coachTools)
+        #expect(resp.incompleteReason == nil)
+    }
+
     @Test func httpErrorThrows() async {
         let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5", maxRetries: 0,
                                        send: { _ in (Data("nope".utf8), http(400)) })
@@ -88,6 +108,28 @@ private func http(_ code: Int, headers: [String: String]? = nil) -> HTTPURLRespo
         #expect(body.contains("\"max_output_tokens\""))
         #expect(body.contains("\"parallel_tool_calls\":false"))
         #expect(body.contains("\"name\":\"capture_screen\""))
+    }
+
+    /// Default tool choice is "auto".
+    @Test func defaultToolChoiceIsAuto() async throws {
+        let box = CapturedBody()
+        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+                                       send: { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
+        _ = try await client.respond(messages: [.user("hi")], tools: coachTools)
+        let body = String(data: box.get() ?? Data(), encoding: .utf8) ?? ""
+        #expect(body.contains("\"tool_choice\":\"auto\""))
+    }
+
+    /// Forcing a specific function encodes the Responses tool_choice object shape.
+    @Test func forceToolChoiceEncodesFunctionObject() async throws {
+        let box = CapturedBody()
+        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+                                       send: { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
+        _ = try await client.respond(messages: [.user("hi")], tools: coachTools, toolChoice: .force("speak"))
+        let body = String(data: box.get() ?? Data(), encoding: .utf8) ?? ""
+        #expect(body.contains("\"tool_choice\""))
+        #expect(body.contains("\"type\":\"function\""))
+        #expect(body.contains("\"name\":\"speak\""))
     }
 }
 

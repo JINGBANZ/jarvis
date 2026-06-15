@@ -19,6 +19,16 @@ public struct Config: Sendable {
     /// `…transcription.completed` (this is what makes the coach loop fire). `gpt-realtime-whisper`
     /// is lower-latency but has NO server VAD — it would require manual `input_audio_buffer.commit`.
     public var transcriptionModel: String
+    /// Server-VAD silence window: how long a pause must last before the server ends the turn.
+    /// Raised above the ~500 ms server default so a mid-thought pause doesn't split a sentence.
+    public var vadSilenceDurationMs: Int
+    /// Client-side coalescing window: rapid `…transcription.completed` fragments arriving within this
+    /// window are merged into one coaching trigger, so even residual VAD fragmentation doesn't drive
+    /// multiple brain calls for one spoken sentence.
+    public var turnDebounceSeconds: TimeInterval
+    /// A looser per-minute ceiling for direct-address replies (which bypass the normal cooldown), so
+    /// a stuck/false-positive wake match still can't spam the overlay.
+    public var maxDirectAddressesPerMinute: Int
 
     public init(
         silenceTimeoutSeconds: TimeInterval = 8,
@@ -29,7 +39,10 @@ public struct Config: Sendable {
         maxSentences: Int = 3,
         brainModel: String = "gpt-5.5",
         reasoningEffort: String = "low",
-        transcriptionModel: String = "gpt-4o-transcribe"
+        transcriptionModel: String = "gpt-4o-transcribe",
+        vadSilenceDurationMs: Int = 1000,
+        turnDebounceSeconds: TimeInterval = 0.4,
+        maxDirectAddressesPerMinute: Int = 8
     ) {
         self.silenceTimeoutSeconds = silenceTimeoutSeconds
         self.cooldownSeconds = cooldownSeconds
@@ -40,6 +53,9 @@ public struct Config: Sendable {
         self.brainModel = brainModel
         self.reasoningEffort = reasoningEffort
         self.transcriptionModel = transcriptionModel
+        self.vadSilenceDurationMs = vadSilenceDurationMs
+        self.turnDebounceSeconds = turnDebounceSeconds
+        self.maxDirectAddressesPerMinute = maxDirectAddressesPerMinute
     }
 
     public static let `default` = Config()

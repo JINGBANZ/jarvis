@@ -1,0 +1,74 @@
+# Fix: Responsiveness, Turn-Detection & Graceful Stop
+
+> Root-cause analysis and fix plan for four issues found in the first live smoke run (2026-06-15),
+> verified from five independent angles (code-grounding, OpenAI docs, RFC 6455 / Apple URLSession,
+> voice-UX best practice, adversarial red-team). This is the *why*; the change lands on branch
+> `fix/coach-responsiveness-vad-stop`.
+
+## The four reported symptoms
+
+From the live activity log:
+
+1. **Addressing Jarvis directly does nothing.** "Hello Jarvis, please respond" → `staying silent`.
+2. **It cuts the user off mid-sentence.** One spoken sentence arrives as several fragments.
+3. **It stays silent generally.** Every trigger logged `… nothing useful to add, staying silent`.
+4. **Stop logs errors.** `socket closed: code 1001` + `receive failed … POSIX 57` on every Stop.
+
+## Root causes (verified)
+
+| # | Root cause | Verdict |
+|---|---|---|
+| 1 & 3 | **Not a plumbing bug.** The pipeline works; `staying silent` (`CoachDriver.swift:107`) is the *zero-tool-call* branch — gpt-5.5 legitimately chose silence because the prompt (`ToolDefs.swift:18`) is silent-by-default with **no concept of direct address**. | Confirmed (high) |
+| 2 | `RealtimeSession.sessionUpdate` sets `turn_detection` to bare `server_vad` with no params → server default `silence_duration_ms: 500` ends a turn on a ~0.5 s mid-thought pause. | Confirmed (high) |
+| 4 | Stop is **graceful in substance** (no reconnect storm) but **noisy**: `stop()` calls `cancel(with: .goingAway)` (close code 1001); the `didCloseWith` and `receive` `.failure` callbacks **log before checking `stopped`**. | Confirmed (high) |
+
+### Corrections the verification forced
+
+- **Claim 1 is not the *sole* cause of "Jarvis ignores me."** Three other silent-failure modes exist
+  and a prompt-only fix can't touch them: (a) `beginHandling()` **silently drops** back-to-back
+  triggers with no log when a turn is in flight; (b) `max_output_tokens: 400` + reasoning can return
+  `status: incomplete` with zero tool calls — **truncation masquerading as silence** (the decoder
+  never inspects `response.status`); (c) a mid-turn `brain.respond` failure (401/quota) logs once and
+  returns, looking like "ignored." → We add **observability on every quiet path first**.
+- **Do _not_ switch to `semantic_vad`.** It is reported intermittently broken in *transcription-only*
+  mode (`speech_started` with no `completed` → **no `onTurnEnd` at all**, worse than fragmentation).
+  Primary fix is **tuned `server_vad`** (`silence_duration_ms ~1000`) plus a **client-side debounce**
+  at `onTurnEnd`. Fragmentation is partly cosmetic anyway — `RollingTranscript` concatenates the
+  window, so the model already sees the whole sentence; the real defect is *premature firing*.
+- **Stop hides a latent bug.** `silenceTimer`/`pingTimer` are scheduled on the main runloop but
+  invalidated synchronously from whatever thread calls `stop()`; `Timer.invalidate()` must run on the
+  scheduling thread, so an off-main `stop()` (reachable via the `onTerminalFailure` Task) can leave a
+  **stray timer firing `onSilence` on a torn-down pipeline.** Gating the logs would mask it.
+
+## The fix plan
+
+Built test-first, sequenced so observability lands before behavior changes.
+
+- **B — Observability.** Log the `beginHandling` drop and `Task.isCancelled` returns; inspect
+  `response.status`/`incomplete_details` and log the finish reason; make `brain.respond` failures
+  distinct; counters for guardrail / model-silence / dropped.
+- **A — Direct address.** New `TriggerReason.directAddress`; **hardened** wake-word ("jarvis" anchored
+  / fuzzy variants, not a naive substring); bypass the cooldown/rate-cap (still honoring **mute**),
+  with a separate looser direct-address ceiling; force `tool_choice:{"type":"function","name":"speak"}`
+  on those turns only; prompt rewrite (must-reply-when-addressed + restrained ambient coaching).
+- **C — Turn detection.** Tuned `server_vad` (`silence_duration_ms`, Config-driven) + client-side
+  `onTurnEnd` debounce; log `speech_started/stopped/completed` counts.
+- **D — Graceful stop.** Gate both log sites on a single locked `stopped` read; fix the timer
+  thread-affinity bug; reset `reconnectAttempt`/`isReconnecting` in `connect()`; `.goingAway` →
+  `.normalClosure` (1000) for wire correctness.
+- **E — Proactive screen on silence (prompt-driven).** The model decides — an explicit, directive
+  prompt nudge to call `capture_screen` on prolonged silence (the user's preferred design over a
+  deterministic pre-capture, which the red-team showed had two holes). Ensure the overlay is excluded
+  from capture; run the blocking `ScreenCaptureCLI` off the cooperative pool.
+- **F — Stale-turn cancellation + config.** Cancel an in-flight (now-stale) coaching turn on fresh
+  user speech instead of dropping it; move new tunables into `Config.swift`.
+
+## Decisions
+
+- **Respond when addressed** is the behavior gap behind issues 1 & 3 — Jarvis was *correctly* silent
+  per a prompt that never modeled direct address. Output stays **text-overlay only** for now (no TTS).
+- **Wake-word + prompt**, not prompt-only: the cooldown and the silent-drop paths mean a pure prompt
+  edit would still drop direct questions.
+- **Tuned `server_vad` + debounce**, not `semantic_vad`: reliability over the "finished-a-thought"
+  ideal, given the documented transcription-mode breakage.
+- **Model decides when to look** at the screen on silence (prompt nudge), not a deterministic capture.

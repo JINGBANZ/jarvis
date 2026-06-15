@@ -79,12 +79,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let transcriber = RealtimeTranscriber(apiKey: key, model: config.transcriptionModel,
                                               transcript: transcript, clock: clock,
-                                              silenceTimeout: config.silenceTimeoutSeconds)
+                                              silenceTimeout: config.silenceTimeoutSeconds,
+                                              silenceDurationMs: config.vadSilenceDurationMs,
+                                              turnDebounce: config.turnDebounceSeconds)
         // CoachDriver is @unchecked Sendable; capture it (not @MainActor self) in the callbacks.
-        // Route turns through TurnTaskBox so Stop can cancel an in-flight one.
+        // Route turns through TurnTaskBox so Stop can cancel an in-flight one. Fresh user speech
+        // (a turn-end or a direct address) CANCELS any in-flight turn — stale coaching about a moment
+        // the user already moved past is worse than a dropped turn. A silence tick does not cancel.
         let turns = TurnTaskBox()
-        transcriber.onTurnEnd = { turns.run { await driver.handleTrigger(.turnEnd) } }
-        transcriber.onSilence = { secs in turns.run { await driver.handleTrigger(.silence(secondsQuiet: secs)) } }
+        transcriber.onTurnEnd = { turns.run(cancelPrevious: true) { await driver.handleTrigger(.turnEnd) } }
+        transcriber.onDirectAddress = { turns.run(cancelPrevious: true) { await driver.handleTrigger(.directAddress) } }
+        transcriber.onSilence = { secs in turns.run(cancelPrevious: false) { await driver.handleTrigger(.silence(secondsQuiet: secs)) } }
         // Reconnect gave up (bad key / quota): stop cleanly and correct the menu instead of lying 🟢.
         transcriber.onTerminalFailure = { [weak self] in
             Task { @MainActor in self?.stop(); self?.menuBar.setRunning(false) }
@@ -140,10 +145,15 @@ private final class TurnTaskBox: @unchecked Sendable {
     private let lock = NSLock()
     private var tasks: [Task<Void, Never>] = []
 
-    func run(_ op: @escaping @Sendable () async -> Void) {
-        let task = Task { await op() }
+    func run(cancelPrevious: Bool = false, _ op: @escaping @Sendable () async -> Void) {
         lock.lock()
+        if cancelPrevious {
+            // Fresh user speech makes any in-flight turn stale — cancel it so the new context wins.
+            tasks.forEach { $0.cancel() }
+            tasks.removeAll()
+        }
         tasks.removeAll { $0.isCancelled }
+        let task = Task { await op() }
         tasks.append(task)
         lock.unlock()
     }

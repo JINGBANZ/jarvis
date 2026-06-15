@@ -15,7 +15,14 @@ public enum RealtimeSession {
     /// The `session.update` payload: `session.type:"transcription"` with config nested under
     /// `session.audio.input` (format / transcription model / server-VAD turn detection).
     /// `server_vad` requires a VAD-capable model such as `gpt-4o-transcribe`.
-    public static func sessionUpdate(model: String, language: String = "en") -> [String: Any] {
+    ///
+    /// `silenceDurationMs` tunes how long a pause must last before the server ends the turn. The
+    /// server default (~500 ms) ends a turn on a brief mid-thought pause and chops one spoken
+    /// sentence into several utterances; ~1000 ms lets a "thinking aloud" coder finish. We keep
+    /// `server_vad` rather than `semantic_vad`, which is reported flaky in transcription-only mode
+    /// (it can stop emitting completed events entirely). See wiki/fix-responsiveness-vad-stop.md.
+    public static func sessionUpdate(model: String, language: String = "en",
+                                     silenceDurationMs: Int = 1000) -> [String: Any] {
         [
             "type": "session.update",
             "session": [
@@ -24,7 +31,10 @@ public enum RealtimeSession {
                     "input": [
                         "format": ["type": "audio/pcm", "rate": sampleRate],
                         "transcription": ["model": model, "language": language],
-                        "turn_detection": ["type": "server_vad"],
+                        "turn_detection": [
+                            "type": "server_vad",
+                            "silence_duration_ms": silenceDurationMs,
+                        ],
                     ],
                 ],
             ],

@@ -20,7 +20,19 @@ import Testing
         let input = (session["audio"] as! [String: Any])["input"] as! [String: Any]
         #expect(((input["format"] as! [String: Any])["rate"] as? Int) == 24_000)
         #expect(((input["transcription"] as! [String: Any])["model"] as? String) == "gpt-4o-transcribe")
-        #expect(((input["turn_detection"] as! [String: Any])["type"] as? String) == "server_vad")
+        let td = input["turn_detection"] as! [String: Any]
+        #expect((td["type"] as? String) == "server_vad")
+        // Tuned: a longer silence window so a mid-thought pause doesn't end the turn mid-sentence.
+        #expect((td["silence_duration_ms"] as? Int) == 1000)
+    }
+
+    /// The silence window is configurable (so it can be tuned per mic/acoustics).
+    @Test func sessionUpdateHonorsConfiguredSilenceWindow() throws {
+        let payload = RealtimeSession.sessionUpdate(model: "gpt-4o-transcribe", silenceDurationMs: 700)
+        let data = try JSONSerialization.data(withJSONObject: payload)
+        let obj = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        let input = (((obj["session"] as! [String: Any])["audio"] as! [String: Any])["input"] as! [String: Any])
+        #expect((((input["turn_detection"] as! [String: Any])["silence_duration_ms"]) as? Int) == 700)
     }
 
     @Test func appendAudioShape() {

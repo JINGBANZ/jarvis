@@ -45,12 +45,13 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
         }
     }
 
-    public func respond(messages: [ChatMessage], tools: [ToolDef]) async throws -> BrainResponse {
+    public func respond(messages: [ChatMessage], tools: [ToolDef],
+                        toolChoice: ToolChoice) async throws -> BrainResponse {
         var request = URLRequest(url: endpoint, timeoutInterval: timeout)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        request.httpBody = try encodeBody(messages: messages, tools: tools)
+        request.httpBody = try encodeBody(messages: messages, tools: tools, toolChoice: toolChoice)
 
         var attempt = 0
         while true {
@@ -75,7 +76,7 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
 
     // MARK: - Encoding (Responses API)
 
-    private func encodeBody(messages: [ChatMessage], tools: [ToolDef]) throws -> Data {
+    private func encodeBody(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice) throws -> Data {
         var instructions: [String] = []
         var input: [[String: Any]] = []
 
@@ -129,11 +130,18 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
             return ["type": "function", "name": t.name, "description": t.description, "parameters": params]
         }
 
+        // Responses tool_choice: the string "auto", or a {type:function,name} object to force one.
+        let toolChoiceJSON: Any
+        switch toolChoice {
+        case .auto: toolChoiceJSON = "auto"
+        case .force(let name): toolChoiceJSON = ["type": "function", "name": name]
+        }
+
         var body: [String: Any] = [
             "model": model,
             "input": input,
             "tools": toolsJSON,
-            "tool_choice": "auto",
+            "tool_choice": toolChoiceJSON,
             "parallel_tool_calls": false,      // the coach loop consumes one tool call per turn
             "reasoning": ["effort": reasoningEffort],
             "max_output_tokens": maxOutputTokens,
@@ -155,7 +163,10 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
             let name: String?
             let arguments: String?
         }
+        struct IncompleteDetails: Decodable { let reason: String? }
         let output: [Item]
+        let status: String?
+        let incomplete_details: IncompleteDetails?
     }
 
     private func decode(_ data: Data) throws -> BrainResponse {
@@ -177,6 +188,12 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
                 jlog("Jarvis coach: ignoring unknown tool '\(name)'")
             }
         }
-        return BrainResponse(toolCalls: invocations, rawToolCalls: raws)
+        // A truncated run (`status:"incomplete"`, e.g. reasoning+output exceeding max_output_tokens)
+        // can carry zero tool calls — surface the reason so the coach loop doesn't mistake it for
+        // a deliberate stay-silent. Prefer the explicit reason; fall back to "incomplete".
+        let incompleteReason = decoded.status == "incomplete"
+            ? (decoded.incomplete_details?.reason ?? "incomplete")
+            : nil
+        return BrainResponse(toolCalls: invocations, rawToolCalls: raws, incompleteReason: incompleteReason)
     }
 }

@@ -65,13 +65,35 @@ public enum ToolInvocation: Sendable, Equatable {
 public struct BrainResponse: Sendable {
     public let toolCalls: [ToolInvocation]
     public let rawToolCalls: [RawToolCall]
-    public init(toolCalls: [ToolInvocation], rawToolCalls: [RawToolCall] = []) {
+    /// Non-nil when the model run did NOT finish cleanly (Responses `status:"incomplete"`), carrying
+    /// the reason (e.g. `"max_output_tokens"`). An empty `toolCalls` with a non-nil reason is
+    /// *truncation*, not a deliberate decision to stay silent — the coach loop distinguishes them.
+    public let incompleteReason: String?
+    public init(toolCalls: [ToolInvocation], rawToolCalls: [RawToolCall] = [],
+                incompleteReason: String? = nil) {
         self.toolCalls = toolCalls
         self.rawToolCalls = rawToolCalls
+        self.incompleteReason = incompleteReason
     }
+}
+
+/// How the model may use tools on a given turn. `auto` lets it call zero, one, or many (the
+/// silence-by-default coaching default); `force(name)` requires it to call exactly that function
+/// (used to GUARANTEE a reply on a direct address — a bare "required" would let it satisfy the
+/// constraint by calling capture_screen and looping instead of speaking).
+public enum ToolChoice: Sendable, Equatable {
+    case auto
+    case force(String)
 }
 
 /// Abstraction over the brain model so CoachDriver is testable with a mock.
 public protocol BrainClient: Sendable {
-    func respond(messages: [ChatMessage], tools: [ToolDef]) async throws -> BrainResponse
+    func respond(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice) async throws -> BrainResponse
+}
+
+public extension BrainClient {
+    /// Convenience for the common `auto` case so callers/tests need not pass a tool choice.
+    func respond(messages: [ChatMessage], tools: [ToolDef]) async throws -> BrainResponse {
+        try await respond(messages: messages, tools: tools, toolChoice: .auto)
+    }
 }
