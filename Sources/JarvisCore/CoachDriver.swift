@@ -110,13 +110,14 @@ public final class CoachDriver: @unchecked Sendable {
 
             switch call {
             case .captureScreen(let callId):
-                jlog("👁 looking at your screen")
                 // Replay the model's function call, then the tool result + the screenshot image.
                 convo.append(.assistantToolCalls(response.rawToolCalls))
                 if let img = screen.capture() {
+                    jlog("👁 looking at your screen", image: img)   // thumbnail in the dev activity viewer
                     convo.append(.init(role: .tool, text: "screenshot captured", toolCallId: callId))
                     convo.append(.userImage(img))
                 } else {
+                    jlog("👁 screenshot failed")
                     convo.append(.init(role: .tool, text: "screenshot failed", toolCallId: callId))
                 }
                 continue // let the model reason over the image
