@@ -1,0 +1,28 @@
+name: CI
+
+# Test-only CI: compiles and runs the JarvisCore test suite. It deliberately does NOT build or sign
+# the .app bundle — a CI runner can't grant the interactive TCC permissions (Microphone, Screen
+# Recording) or exercise the live capture pipeline, so a bundled artifact would carry no extra
+# signal. Bundling/signing stays a local step (scripts/build-app.sh).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel superseded runs on the same ref so a quick succession of pushes doesn't pile up.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: swift --version
+
+      - name: Run tests
+        run: ./scripts/run-tests.sh
