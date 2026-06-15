@@ -82,7 +82,7 @@ The split is deliberate: **`JarvisCore`** holds all the logic and is unit-tested
 |---|---|
 | `./scripts/run-tests.sh` | Build and run the unit + offline-pipeline tests (no key, no permissions needed). |
 | `./scripts/build-app.sh [release\|debug]` | Build, bundle, and sign `Jarvis.app` (defaults to `release`). Creates the stable `Jarvis Dev` signing identity automatically on first run. |
-| `./scripts/build-app.sh --dev` | Same build, then launch in **dev mode** and auto-open the live activity viewer. |
+| `./scripts/build-app.sh --dev` | Same build, then launch in **dev mode** (open the activity viewer on demand from the menu bar). |
 | `./scripts/build-app.sh --run` | Same build, then launch the app normally. |
 
 ## Develop locally
@@ -123,29 +123,32 @@ mechanics are in [`wiki/specification.md` §9](./wiki/specification.md#9-build--
 ## Dev mode — live activity viewer
 
 ```bash
-./scripts/build-app.sh --dev   # rebuild, launch with --dev, auto-open the viewer
+./scripts/build-app.sh --dev   # rebuild, launch with --dev
 ```
 
-In dev mode Jarvis writes a self-contained, auto-refreshing HTML page and opens it in your browser
-so you can **watch it think** without tailing a log. It reloads every second and color-codes each
-event:
+In dev mode Jarvis writes a self-contained, auto-refreshing HTML page so you can **watch it think**
+without tailing a log. It doesn't pop open on launch — choose **Open Log Viewer** from the menu bar
+when you want it (each launch is its own session, so you open the current one on demand). The page
+reloads every second and color-codes each event:
 
 - 🗣 `heard: "…"` — what you said (transcribed) / 🤫 `quiet for 12s` — why it woke
 - 💭 `thinking…` — calling the brain
-- 👁 `looking at your screen` — the model invoked `capture_screen`
+- 👁 `looking at your screen` — the model invoked `capture_screen`; the captured frame appears as a
+  thumbnail you can click to open full size
 - 💬 `…the tip it spoke…` — a `speak` call rendered to the overlay
 - `… staying silent` / `… held back (cooldown or rate cap)` — when it declines
 
 **Privacy posture.** File logging is dev-only — outside dev mode nothing is written to disk (just the
-unified Console log). In dev mode the logs go to a gitignored, owner-only `.jarvis/` in the workspace,
-fresh each session. Log-path and env-override details are in
+unified Console log). In dev mode the logs (and the screenshot thumbnails) go to a gitignored,
+owner-only `.jarvis/<session>/` in the workspace — one fresh subdirectory per launch. Log-path and
+env-override details are in
 [`wiki/specification.md`](./wiki/specification.md#dev-mode--live-activity-viewer).
 
 ## Live smoke checklist
 
 Some behavior can only be verified by a human with a real key, a mic, and granted permissions — see
 [`wiki/specification.md` §8](./wiki/specification.md#8-self-verification-plan). Run via
-`./scripts/build-app.sh --dev` and watch the live activity viewer; it shows each step as it happens.
+`./scripts/build-app.sh --dev`, then open the activity viewer from the menu bar; it shows each step as it happens.
 
 - Confirm the transcription session connects end-to-end — watch for `transcription session ready`
   (and any `error event` lines). This is the main thing only a live run can verify.

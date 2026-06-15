@@ -51,6 +51,9 @@ public func jlog(_ message: String, image base64JPEG: String? = nil) {
 
 private func logTimestamp() -> String {
     let f = DateFormatter()
+    // Fixed-format: pin locale + calendar so output is stable across locales/calendars (QA1480).
+    f.locale = Locale(identifier: "en_US_POSIX")
+    f.calendar = Calendar(identifier: .gregorian)
     f.dateFormat = "HH:mm:ss.SSS"
     return f.string(from: Date())
 }

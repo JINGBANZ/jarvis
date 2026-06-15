@@ -259,8 +259,9 @@ each Start), so runaway behavior is visible.
 
 For watching Jarvis reason during development, a **dev mode** is enabled by the launch flag
 `--dev` (`scripts/build-app.sh --dev` rebuilds and launches via `open ./Jarvis.app --args --dev
---log-dir "$PWD/.jarvis"`). In dev mode the app writes a **self-contained, auto-refreshing HTML page**
-and opens it in the default browser for the session:
+--log-dir "$PWD/.jarvis"`). In dev mode the app writes a **self-contained, auto-refreshing HTML page**;
+it does **not** auto-open — choose **Open Log Viewer** from the menu bar to open the current session's
+page on demand:
 
 - `ActivityLog` (in `JarvisCore`) mirrors **every `jlog` line** into the page — so lifecycle,
   errors, realtime-socket events, and the coach's per-turn decisions all appear with no extra
@@ -268,12 +269,16 @@ and opens it in the default browser for the session:
   keeps your scroll position unless you're pinned to the bottom. No server — it works off `file://`.
 - The viewer keys on human-readable markers: 🗣 `heard: "…"` (your transcribed speech, logged by
   the transcriber) / 🤫 silence (why it woke), 💭 thinking, 👁 `capture_screen`, 💬 the spoken tip,
-  and `… staying silent` / `… held back` when the coach declines.
+  and `… staying silent` / `… held back` when the coach declines. A `capture_screen` is saved as an
+  owner-only JPEG next to the HTML and rendered inline as a **clickable thumbnail** (opens full size
+  in a new tab) — so the log shows the visual part of the interaction, not just text.
 - **Privacy posture (important).** File logging is **off unless dev mode is on** — outside dev mode
   `jlog` writes only to the unified log (Console.app), never a flat file. In dev mode the activity
-  HTML *and* `jarvis-debug.log` are written to the `--log-dir` (default per-user `Caches/Jarvis`;
-  `--dev` points it at a **gitignored `.jarvis/` in the workspace**) with **`0600`** (owner-only)
-  permissions, truncated fresh each session. Never `/tmp` (world-readable, shared across users).
+  HTML, `jarvis-debug.log`, *and* the screenshot JPEGs are written to a **per-launch session
+  subdirectory** under the `--log-dir` (default per-user `Caches/Jarvis`; `--dev` points it at a
+  **gitignored `.jarvis/` in the workspace**). Files are **`0600`** and the session directory
+  **`0700`** (both owner-only); each launch is a fresh subdirectory. Never `/tmp` (world-readable,
+  shared across users).
   Env overrides `JARVIS_LOG` / `JARVIS_ACTIVITY_HTML` exist for headless/test use. This keeps the
   model's screen-derived tips out of any world-readable or persistent location — see
   [sandbox.md](./sandbox.md).
