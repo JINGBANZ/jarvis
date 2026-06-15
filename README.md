@@ -87,8 +87,7 @@ The split is deliberate: **`JarvisCore`** holds all the logic and is unit-tested
 
 ## Develop locally
 
-No Xcode needed — **Swift 6 + the Command Line Tools** only (the CLT SDK ships ScreenCaptureKit,
-AVFoundation, AppKit, SwiftUI, Vision, and CoreAudio).
+No Xcode needed — **Swift 6 + the Command Line Tools** only.
 
 ```bash
 swift build              # compile
@@ -109,12 +108,10 @@ On the **first** build macOS asks once to let `codesign` use a new key — click
 
 Then:
 
-1. **A ⚪️ Jarvis menu-bar item appears** (menu-bar-only app — no Dock icon). Always launch with
-   `open`, *not* the bare binary: running the executable from a terminal makes macOS attribute the
-   permission grants to your shell, so they look "denied".
-2. **Grant permissions** when prompted on first run — **Microphone** and **Screen Recording**
-   (System Settings → Privacy & Security). They persist afterward. To clear a stale *denied* state,
-   run `tccutil reset Microphone com.jarvis.coach` (or `ScreenCapture`) and relaunch.
+1. **A ⚪️ Jarvis menu-bar item appears** (menu-bar-only app — no Dock icon). Always launch via
+   `open`, never the bare binary, or macOS misattributes the permission grants and they look "denied".
+2. **Grant Microphone and Screen Recording** when prompted on first run (System Settings → Privacy &
+   Security). They persist afterward.
 3. **Set your OpenAI API key** via the menu bar → **"Set OpenAI API Key…"** (saved to your login
    Keychain; an `OPENAI_API_KEY` env var works as a headless fallback).
 4. **Start / Stop** coaching from the menu bar. Jarvis does **not** auto-start. The icon shows the
@@ -139,13 +136,10 @@ event:
 - 💬 `…the tip it spoke…` — a `speak` call rendered to the overlay
 - `… staying silent` / `… held back (cooldown or rate cap)` — when it declines
 
-**Privacy posture.** File logging is **dev-only and owner-only.** Outside dev mode nothing is
-written to a file (just the unified Console log). In dev mode the activity HTML and
-`jarvis-debug.log` are written to the `--log-dir` (`--dev` uses a **gitignored `.jarvis/`** in
-the workspace; default otherwise is a per-user `Caches/Jarvis`) with `0600` permissions, truncated
-fresh each session — never world-readable `/tmp`. Env overrides `JARVIS_LOG` / `JARVIS_ACTIVITY_HTML`
-exist for headless use. To enable on a manual launch:
-`open ./Jarvis.app --args --dev --log-dir ./.jarvis`.
+**Privacy posture.** File logging is dev-only — outside dev mode nothing is written to disk (just the
+unified Console log). In dev mode the logs go to a gitignored, owner-only `.jarvis/` in the workspace,
+fresh each session. Log-path and env-override details are in
+[`wiki/specification.md`](./wiki/specification.md#dev-mode--live-activity-viewer).
 
 ## Live smoke checklist
 
@@ -153,10 +147,8 @@ Some behavior can only be verified by a human with a real key, a mic, and grante
 [`wiki/specification.md` §8](./wiki/specification.md#8-self-verification-plan). Run via
 `./scripts/build-app.sh --dev` and watch the live activity viewer; it shows each step as it happens.
 
-- Model IDs are **doc-verified** (`gpt-5.5` via the Responses API; `gpt-4o-transcribe` over the GA
-  Realtime API); the connect URL + session payload are unit-tested in `RealtimeSessionTests`. The
-  one thing only a live run confirms is that the transcription session negotiates end-to-end — watch
-  for `transcription session ready` and any `error event` lines.
+- Confirm the transcription session connects end-to-end — watch for `transcription session ready`
+  (and any `error event` lines). This is the main thing only a live run can verify.
 - Press **Start Jarvis**, then speak — confirm transcript turns drive 🗣/💭 lines in the viewer.
 - With a LeetCode problem on screen, say *"Jarvis, I'm stuck on two-sum"* — expect a coaching overlay
   within ~2s and a 👁 `looking at your screen` (`capture_screen`) line.
