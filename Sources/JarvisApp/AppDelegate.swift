@@ -32,7 +32,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Each dev-mode launch is its own session: nest logs under a unique per-launch
             // subdirectory so each debug/dev run keeps its own separated logs.
             let dir = devLogDirectory().appendingPathComponent(newSessionID())
-            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            // 0700: the screenshots/logs inside are 0600, so the directory holding them must be
+            // owner-only too — otherwise a 0755 dir leaks file names/counts/timestamps to other
+            // local users (CWE-732). Applies to the created session dir and any intermediates.
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true,
+                                                     attributes: [.posixPermissions: 0o700])
             JarvisLog.enableFileLogging(directory: dir)     // <dir>/jarvis-debug.log, 0600, fresh
             ActivityLog.shared.enable(directory: dir)        // <dir>/jarvis-activity.html, 0600, fresh
             jlog("Jarvis: dev mode — session \(dir.lastPathComponent) (\(dir.path)).")
@@ -45,7 +49,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         overlay = OverlayPanel()
         menuBar = MenuBarController(keychain: keychain, showLogViewer: devMode)
         // Dev mode: open this session's activity HTML on demand.
-        menuBar.onOpenLogViewer = { if let url = ActivityLog.shared.htmlURL { NSWorkspace.shared.open(url) } }
+        menuBar.onOpenLogViewer = {
+            guard let url = ActivityLog.shared.htmlURL else { jlog("Jarvis: no activity log to open yet."); return }
+            if !NSWorkspace.shared.open(url) { jlog("Jarvis: couldn't open the activity log viewer (\(url.path)).") }
+        }
         // The menu drives the pipeline lifecycle. Jarvis does NOT auto-start; the user presses Start.
         menuBar.onStart = { [weak self] in self?.start() ?? false }
         menuBar.onStop = { [weak self] in self?.stop() }
@@ -129,6 +136,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// timestamp + a short random suffix so two launches in the same second don't collide.
     private func newSessionID() -> String {
         let f = DateFormatter()
+        // Fixed-format timestamp: pin locale + calendar so the name is always Gregorian yyyy-MM-dd
+        // and lexically sortable, regardless of the user's locale or system calendar (Apple QA1480).
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.calendar = Calendar(identifier: .gregorian)
         f.dateFormat = "yyyy-MM-dd_HH-mm-ss"
         let suffix = String(UUID().uuidString.prefix(4))
         return "\(f.string(from: Date()))_\(suffix)"

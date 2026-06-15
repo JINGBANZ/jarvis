@@ -27,6 +27,10 @@ public final class ActivityLog: @unchecked Sendable {
     /// Internal so tests can spin up an isolated instance; the app uses `.shared`.
     init() {
         df = DateFormatter()
+        // Fixed-format formatter: pin to en_US_POSIX + Gregorian so output is stable regardless of
+        // the user's locale or system calendar (Apple QA1480).
+        df.locale = Locale(identifier: "en_US_POSIX")
+        df.calendar = Calendar(identifier: .gregorian)
         df.dateFormat = "HH:mm:ss"
         // Headless/test override: a full file path enables logging immediately.
         if let p = ProcessInfo.processInfo.environment["JARVIS_ACTIVITY_HTML"] {
@@ -73,11 +77,16 @@ public final class ActivityLog: @unchecked Sendable {
     /// relative filename to reference from the HTML, or nil if the payload wasn't valid. Must run on
     /// `queue` (mutates `shotSeq`).
     private func saveShot(_ base64: String, in dir: URL) -> String? {
-        guard let data = Data(base64Encoded: base64) else { return nil }
+        // .ignoreUnknownCharacters tolerates any line-wrapped/whitespace base64 the capture source
+        // might emit; the in-process encoder is single-line today, so this is just future-proofing.
+        guard let data = Data(base64Encoded: base64, options: .ignoreUnknownCharacters) else { return nil }
         shotSeq += 1
         let name = "shot-\(shotSeq).jpg"
-        FileManager.default.createFile(atPath: dir.appendingPathComponent(name).path,
-                                       contents: data, attributes: [.posixPermissions: 0o600])
+        // Only return the filename if the write actually succeeded — otherwise the HTML would point
+        // at a missing file (broken thumbnail). On failure the line still renders as plain text.
+        guard FileManager.default.createFile(atPath: dir.appendingPathComponent(name).path,
+                                             contents: data, attributes: [.posixPermissions: 0o600])
+        else { return nil }
         return name
     }
 
@@ -100,7 +109,10 @@ public final class ActivityLog: @unchecked Sendable {
                 // Thumbnail links to the full-size JPEG in a new tab — the activity page reloads
                 // every 1s, so an inline lightbox would collapse; a separate tab survives.
                 rows += "<a class=\"shot\" href=\"\(esc(file))\" target=\"_blank\" rel=\"noopener\">"
-                rows += "<img src=\"\(esc(file))\" alt=\"screenshot\" loading=\"lazy\"></a>"
+                // Eager (not lazy) load: the page hard-reloads every 1s, and a lazy image scrolled
+                // above the viewport collapses to 0 height and may never load — so older screenshots
+                // in scrollback would silently vanish. These are tiny local files; eager is fine.
+                rows += "<img src=\"\(esc(file))\" alt=\"screenshot of the user's screen\"></a>"
             }
             rows += "</span></div>\n"
         }
@@ -168,9 +180,14 @@ public final class ActivityLog: @unchecked Sendable {
         return ""
     }
 
+    /// Escapes for both text content and double-quoted attribute contexts (the screenshot `href`/
+    /// `src`). Quotes are escaped too so the attribute can't be broken out of — defense-in-depth,
+    /// since `imageFile` is currently an internally-generated `shot-N.jpg` with no external input.
     static func esc(_ s: String) -> String {
         s.replacingOccurrences(of: "&", with: "&amp;")
          .replacingOccurrences(of: "<", with: "&lt;")
          .replacingOccurrences(of: ">", with: "&gt;")
+         .replacingOccurrences(of: "\"", with: "&quot;")
+         .replacingOccurrences(of: "'", with: "&#39;")
     }
 }

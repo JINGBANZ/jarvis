@@ -57,12 +57,10 @@ import Foundation
         let pixel = Data([0xFF, 0xD8, 0xFF, 0xD9]).base64EncodedString()  // stand-in JPEG bytes
         log.record("👁 looking at your screen", imageBase64: pixel)
 
-        // record() writes asynchronously on its serial queue; drain it before asserting.
+        // record() writes asynchronously on its serial queue; a sync read (htmlURL) is FIFO-ordered
+        // after it on that queue, so it deterministically drains the pending write — no polling.
+        _ = log.htmlURL
         let shot = dir.appendingPathComponent("shot-1.jpg")
-        var waited = 0
-        while !FileManager.default.fileExists(atPath: shot.path) && waited < 200 {
-            usleep(10_000); waited += 1
-        }
         #expect(FileManager.default.fileExists(atPath: shot.path))
         let perms = try FileManager.default.attributesOfItem(atPath: shot.path)[.posixPermissions] as? NSNumber
         #expect(perms?.int16Value == 0o600)

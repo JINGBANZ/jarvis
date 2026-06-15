@@ -70,8 +70,14 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     /// activity log as a genuine, owner-only JPEG rendered as a clickable thumbnail linked to the
     /// full image — the behaviour verified by hand, now automated against regressions.
     ///
-    /// `.serialized` + `disable()` teardown because it drives the shared `ActivityLog` singleton.
-    @Test(.serialized) func screenshotLandsInActivityLogAsValidJpeg() async throws {
+    /// This drives the shared `ActivityLog` singleton (the real production path: CoachDriver → jlog →
+    /// ActivityLog.shared). Peer tests in this suite also call jlog() and can write into this dir
+    /// while it's the active sink — `.serialized` does NOT prevent that (swift-testing's serialization
+    /// doesn't isolate a test from its peers). Robustness instead comes from: (1) selecting the shot
+    /// by exact byte-match to our fixture, so another test's screenshot can't be mistaken for ours,
+    /// and (2) writeHTML() re-rendering the full entry list, so our row survives interleaved writes.
+    /// `disable()` in defer resets the singleton afterwards.
+    @Test func screenshotLandsInActivityLogAsValidJpeg() async throws {
         let dir = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("jarvis-e2e-\(ProcessInfo.processInfo.globallyUniqueString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -101,16 +107,16 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(html.contains("<img src=\"shot-"))          // rendered thumbnail
         #expect(html.contains("target=\"_blank\""))         // click → full image in a new tab
 
-        // Find the saved screenshot and prove it round-tripped as a genuine JPEG (SOI/EOI intact),
-        // owner-only. Scan rather than hard-code shot-1 so a concurrent test sharing the singleton
-        // can't break us.
+        // Find OUR screenshot by exact byte-match to the fixture (not just "first valid JPEG"), so a
+        // peer test sharing the singleton can't be mistaken for ours. This proves the capture
+        // round-tripped to disk unchanged. Then assert it's owner-only.
         let shots = try FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)
             .filter { $0.lastPathComponent.hasPrefix("shot-") && $0.pathExtension == "jpg" }
-        let shot = try #require(try shots.first { url in
-            let d = try Data(contentsOf: url)
-            return d.prefix(2) == Data([0xFF, 0xD8]) && d.suffix(2) == Data([0xFF, 0xD9])
-        }, "expected a valid-JPEG screenshot in the activity log dir")
-        #expect(try Data(contentsOf: shot) == TestFixtures.tinyJpeg)   // bytes preserved exactly
+        let shot = try #require(try shots.first { try Data(contentsOf: $0) == TestFixtures.tinyJpeg },
+                                "expected our screenshot (byte-exact) in the activity log dir")
+        // Sanity: the matched bytes really are a JPEG (SOI/EOI markers intact).
+        let bytes = try Data(contentsOf: shot)
+        #expect(bytes.prefix(2) == Data([0xFF, 0xD8]) && bytes.suffix(2) == Data([0xFF, 0xD9]))
         let perms = try FileManager.default.attributesOfItem(atPath: shot.path)[.posixPermissions] as? NSNumber
         #expect(perms?.int16Value == 0o600)
     }
