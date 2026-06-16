@@ -58,26 +58,36 @@ final class ActivityViewer: NSObject, WKNavigationDelegate, NSWindowDelegate {
         win.center()
         let content = win.contentView!
 
-        // Header bar: session picker on the left, "Clear history" on the right.
-        let header = NSView(frame: NSRect(x: 0, y: content.bounds.height - 36, width: content.bounds.width, height: 36))
+        // Header bar: a labelled session picker on the left, "Clear history" on the right. Use the
+        // system header material (not a hand-painted near-black) so standard AppKit controls keep
+        // their normal contrast and read as interactive.
+        let header = NSVisualEffectView(frame: NSRect(x: 0, y: content.bounds.height - 44, width: content.bounds.width, height: 44))
         header.autoresizingMask = [.width, .minYMargin]
-        header.wantsLayer = true
-        header.layer?.backgroundColor = NSColor(calibratedRed: 0.086, green: 0.106, blue: 0.133, alpha: 1).cgColor
+        header.material = .headerView
+        header.blendingMode = .withinWindow
+        header.state = .active
 
-        let pop = NSPopUpButton(frame: NSRect(x: 12, y: 6, width: 320, height: 24))
+        let sessionLabel = NSTextField(labelWithString: "Session")
+        sessionLabel.frame = NSRect(x: 14, y: 13, width: 60, height: 18)
+        sessionLabel.textColor = .secondaryLabelColor
+        header.addSubview(sessionLabel)
+
+        let pop = NSPopUpButton(frame: NSRect(x: 76, y: 8, width: 360, height: 26))
         pop.target = self
         pop.action = #selector(sessionChanged)
+        pop.toolTip = "Switch between this and previous dev sessions"
         pop.autoresizingMask = [.maxXMargin]
         header.addSubview(pop)
         self.picker = pop
 
         let clear = NSButton(title: "Clear history", target: self, action: #selector(clearHistoryTapped))
         clear.bezelStyle = .rounded
-        clear.frame = NSRect(x: content.bounds.width - 140, y: 4, width: 128, height: 28)
+        clear.toolTip = "Delete all previous sessions (keeps the current one)"
+        clear.frame = NSRect(x: content.bounds.width - 146, y: 8, width: 132, height: 28)
         clear.autoresizingMask = [.minXMargin]
         header.addSubview(clear)
 
-        let wv = WKWebView(frame: NSRect(x: 0, y: 0, width: content.bounds.width, height: content.bounds.height - 36))
+        let wv = WKWebView(frame: NSRect(x: 0, y: 0, width: content.bounds.width, height: content.bounds.height - 44))
         wv.autoresizingMask = [.width, .height]
         wv.navigationDelegate = self
 
