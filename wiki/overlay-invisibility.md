@@ -100,6 +100,30 @@ its own small `JarvisOverlay` library target (not the executable) so the tests b
    Run it from a terminal that has Screen Recording permission. This is the automated form of the
    manual verification recorded above — run it after major macOS updates to catch OS-level drift.
 
+### Why the capture test isn't in hosted CI
+
+A deliberate, researched choice that matches what every comparable project does:
+
+- **No public API grants Screen Recording non-interactively.** Apple provides no entitlement or
+  test-only bypass for `kTCCServiceScreenCapture`; `CGRequestScreenCaptureAccess()` shows a prompt and
+  a grant needs a relaunch. A PPPC/MDM profile can only *deny* Screen Recording, never silently allow
+  it (Apple Platform Deployment).
+- **Hosted GitHub runners can't do it reliably.** `kTCCServiceScreenCapture` lives in the
+  SIP-protected system `TCC.db`; editing it works only because the macos-13/14 runner images happen to
+  ship with SIP disabled — undocumented and removable. Even when granted, hosted runners return
+  blank/incomplete capture frames (`actions/runner-images#8951`, open), so the test would be flaky or
+  falsely fail. (The runners *do* have a window server, which is why the property tests above run fine
+  in CI.)
+- **Everyone asserts the flag, not the pixels, in CI.** Electron added a private `isContentProtected()`
+  getter specifically to unit-test that the flag is set without capturing — exactly what our
+  `overlaySetsCaptureExclusionAtInit` test does. OBS and alt-tab-macos never pixel-test capture in CI.
+
+So: **flag/property tests gate CI; the pixel-level capture test is opt-in and runs locally** (or on a
+self-hosted Mac with auto-login + a one-time manual grant, if continuous pixel verification is ever
+needed). A capture-test *failure* on a future macOS is a **true signal worth investigating** — it
+means the OS stopped honoring `.none` (as reported on some macOS 15 builds), i.e. the overlay would be
+exposed — not a flaky test.
+
 > Toolchain note: the tests use swift-testing but the async ones are nonisolated `@Test`s that `await`
 > a `@MainActor` helper. A direct `@MainActor async @Test` miscompiles on the Command-Line-Tools
 > swift-testing ("must be a compile-time constant to use @section"), and XCTest isn't available CLT-only.
