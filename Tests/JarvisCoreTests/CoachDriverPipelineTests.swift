@@ -60,10 +60,10 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
 @Suite struct CoachDriverPipelineTests {
     private func makeDriver(brain: BrainClient, screen: ScreenCapturing, overlay: OverlayRendering,
-                            clock: Clock, guardrails: Guardrails) -> (CoachDriver, RollingTranscript) {
+                            clock: Clock) -> (CoachDriver, RollingTranscript) {
         let transcript = RollingTranscript()
         let driver = CoachDriver(
-            config: .default, transcript: transcript, guardrails: guardrails,
+            config: .default, transcript: transcript,
             brain: brain, screen: screen, overlay: overlay, clock: clock
         )
         return (driver, transcript)
@@ -71,7 +71,6 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
     @Test func captureThenSpeakPipeline() async {
         let clock = ManualClock(now: 100)
-        let guardrails = Guardrails(cooldownSeconds: 12, maxInterjectionsPerMinute: 4, clock: clock)
         let brain = ScriptedBrain(script: [
             .init(toolCalls: [.captureScreen(callId: "c1")],
                   rawToolCalls: [RawToolCall(id: "c1", name: "capture_screen", argumentsJSON: "{}")]),
@@ -81,8 +80,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         ])
         let screen = FakeScreen()
         let overlay = FakeOverlay()
-        let (driver, transcript) = makeDriver(brain: brain, screen: screen, overlay: overlay,
-                                              clock: clock, guardrails: guardrails)
+        let (driver, transcript) = makeDriver(brain: brain, screen: screen, overlay: overlay, clock: clock)
         transcript.append(.init(speaker: .me, text: "I'll brute-force two-sum with a double loop", at: 100))
 
         await driver.handleTrigger(.turnEnd)
@@ -118,7 +116,6 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         ActivityLog.shared.enable(directory: dir)
 
         let clock = ManualClock(now: 100)
-        let guardrails = Guardrails(cooldownSeconds: 12, maxInterjectionsPerMinute: 4, clock: clock)
         let brain = ScriptedBrain(script: [
             .init(toolCalls: [.captureScreen(callId: "c1")],
                   rawToolCalls: [RawToolCall(id: "c1", name: "capture_screen", argumentsJSON: "{}")]),
@@ -127,8 +124,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
                                              argumentsJSON: #"{"text":"Watch the off-by-one there."}"#)]),
         ])
         let screen = FakeScreen(payload: TestFixtures.tinyJpegBase64)   // a real JPEG, like screencapture
-        let (driver, transcript) = makeDriver(brain: brain, screen: screen, overlay: FakeOverlay(),
-                                              clock: clock, guardrails: guardrails)
+        let (driver, transcript) = makeDriver(brain: brain, screen: screen, overlay: FakeOverlay(), clock: clock)
         transcript.append(.init(speaker: .me, text: "here's my solution", at: 100))
 
         await driver.handleTrigger(.turnEnd)
@@ -156,23 +152,9 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
     @Test func staySilentRendersNothing() async {
         let clock = ManualClock(now: 0)
-        let guardrails = Guardrails(cooldownSeconds: 12, maxInterjectionsPerMinute: 4, clock: clock)
         let brain = ScriptedBrain(script: [.init(toolCalls: [])])
         let overlay = FakeOverlay()
-        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: overlay,
-                                     clock: clock, guardrails: guardrails)
-        await driver.handleTrigger(.turnEnd)
-        #expect(overlay.rendered.isEmpty)
-    }
-
-    @Test func muteSuppressesPipeline() async {
-        let clock = ManualClock(now: 0)
-        let guardrails = Guardrails(cooldownSeconds: 12, maxInterjectionsPerMinute: 4, clock: clock)
-        guardrails.setMuted(true)
-        let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s1", text: "hi")])])
-        let overlay = FakeOverlay()
-        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: overlay,
-                                     clock: clock, guardrails: guardrails)
+        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: overlay, clock: clock)
         await driver.handleTrigger(.turnEnd)
         #expect(overlay.rendered.isEmpty)
     }
@@ -182,10 +164,8 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     /// One conversation is created per session and reused across triggers (consistent id).
     @Test func createsConversationOnceAndThreadsId() async {
         let clock = ManualClock(now: 0)
-        let guardrails = Guardrails(cooldownSeconds: 0, maxInterjectionsPerMinute: 99, clock: clock)
         let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s", text: "hi")])])
-        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(),
-                                     clock: clock, guardrails: guardrails)
+        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(), clock: clock)
         await driver.handleTrigger(.turnEnd)
         await driver.handleTrigger(.turnEnd)
         #expect(brain.createConversationCount == 1)               // created once for the session
@@ -198,13 +178,11 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     /// result is closed on the next turn, or the conversation 400s forever.
     @Test func captureOnFinalIterationIsClosedNextTurn() async {
         let clock = ManualClock(now: 0)
-        let guardrails = Guardrails(cooldownSeconds: 0, maxInterjectionsPerMinute: 99, clock: clock)
         let brain = ScriptedBrain(script: [
             .init(toolCalls: [.captureScreen(callId: "cap")],
                   rawToolCalls: [RawToolCall(id: "cap", name: "capture_screen", argumentsJSON: "{}")]),
         ])  // repeats capture every iteration → turn 1 exhausts with an unanswered capture
-        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(),
-                                     clock: clock, guardrails: guardrails)
+        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(), clock: clock)
         #expect(await driver.handleTrigger(.turnEnd) == .exhausted)
         let afterTurn1 = brain.calls.count
         await driver.handleTrigger(.turnEnd)
@@ -216,14 +194,12 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     /// stays pending and is carried on the turn after.
     @Test func speakCallRetainedWhenNextTurnFails() async {
         let clock = ManualClock(now: 0)
-        let guardrails = Guardrails(cooldownSeconds: 0, maxInterjectionsPerMinute: 99, clock: clock)
         let brain = ScriptedThrowBrain(script: [
             .init(toolCalls: [.speak(callId: "spk1", text: "hi")]),   // turn 1: speak → stash spk1
             nil,                                                        // turn 2: throws before sending
             .init(toolCalls: []),                                       // turn 3: silent
         ])
-        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(),
-                                     clock: clock, guardrails: guardrails)
+        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(), clock: clock)
         await driver.handleTrigger(.turnEnd)
         #expect(await driver.handleTrigger(.turnEnd) == .brainError)
         await driver.handleTrigger(.turnEnd)
@@ -234,11 +210,9 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     /// WINDOW (not just the per-turn delta), or the model loses the problem statement.
     @Test func statelessTurnCarriesContextWindowAndSpeaks() async {
         let clock = ManualClock(now: 0)
-        let guardrails = Guardrails(cooldownSeconds: 0, maxInterjectionsPerMinute: 99, clock: clock)
         let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s", text: "hi")])],
                                   failConversation: true)
-        let (driver, transcript) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(),
-                                              clock: clock, guardrails: guardrails)
+        let (driver, transcript) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(), clock: clock)
         transcript.append(.init(speaker: .me, text: "the whole problem context", at: 1))
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
         #expect(brain.conversationIds.last! == nil)           // ran stateless
@@ -254,105 +228,57 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
     @Test func spokeOutcome() async {
         let clock = ManualClock(now: 0)
-        let guardrails = Guardrails(cooldownSeconds: 12, maxInterjectionsPerMinute: 4, clock: clock)
         let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s1", text: "hi")])])
-        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(),
-                                     clock: clock, guardrails: guardrails)
+        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(), clock: clock)
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
     }
 
     @Test func silentByModelOutcomeWhenNoToolCalls() async {
         let clock = ManualClock(now: 0)
-        let guardrails = Guardrails(cooldownSeconds: 12, maxInterjectionsPerMinute: 4, clock: clock)
         let brain = ScriptedBrain(script: [.init(toolCalls: [])])
-        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(),
-                                     clock: clock, guardrails: guardrails)
+        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(), clock: clock)
         #expect(await driver.handleTrigger(.turnEnd) == .silentByModel)
     }
 
     /// A token-truncated response (zero tool calls but status=incomplete) must be reported as
-    /// `.truncated`, NOT mistaken for deliberate `.silentByModel`.
+    /// `.truncated`, NOT mistaken for deliberate `.silentByModel`, and must render nothing.
     @Test func truncatedOutcomeWhenResponseIncomplete() async {
         let clock = ManualClock(now: 0)
-        let guardrails = Guardrails(cooldownSeconds: 12, maxInterjectionsPerMinute: 4, clock: clock)
         let brain = ScriptedBrain(script: [.init(toolCalls: [], rawToolCalls: [],
                                                  incompleteReason: "max_output_tokens")])
-        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(),
-                                     clock: clock, guardrails: guardrails)
+        let overlay = FakeOverlay()
+        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: overlay, clock: clock)
         #expect(await driver.handleTrigger(.turnEnd) == .truncated)
-    }
-
-    @Test func heldBackOutcomeDuringCooldown() async {
-        let clock = ManualClock(now: 100)
-        let guardrails = Guardrails(cooldownSeconds: 12, maxInterjectionsPerMinute: 4, clock: clock)
-        let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s1", text: "first")])])
-        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(),
-                                     clock: clock, guardrails: guardrails)
-        #expect(await driver.handleTrigger(.turnEnd) == .spoke)   // starts the cooldown
-        #expect(await driver.handleTrigger(.turnEnd) == .heldBack) // within 12s → blocked
+        #expect(overlay.rendered.isEmpty)
     }
 
     /// A model that loops on capture_screen forever hits the iteration cap and reports `.exhausted`.
     @Test func exhaustedOutcomeWhenModelLoopsOnCapture() async {
         let clock = ManualClock(now: 0)
-        let guardrails = Guardrails(cooldownSeconds: 12, maxInterjectionsPerMinute: 4, clock: clock)
         let brain = ScriptedBrain(script: [
             .init(toolCalls: [.captureScreen(callId: "c")],
                   rawToolCalls: [RawToolCall(id: "c", name: "capture_screen", argumentsJSON: "{}")]),
         ])  // ScriptedBrain repeats the last response, so every iteration captures again
         let overlay = FakeOverlay()
-        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: overlay,
-                                     clock: clock, guardrails: guardrails)
+        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: overlay, clock: clock)
         #expect(await driver.handleTrigger(.turnEnd) == .exhausted)
         #expect(overlay.rendered.isEmpty)
     }
 
     @Test func brainErrorOutcome() async {
         let clock = ManualClock(now: 0)
-        let guardrails = Guardrails(cooldownSeconds: 12, maxInterjectionsPerMinute: 4, clock: clock)
         let brain = ThrowingBrain()
-        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(),
-                                     clock: clock, guardrails: guardrails)
+        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(), clock: clock)
         #expect(await driver.handleTrigger(.turnEnd) == .brainError)
     }
 
-    // MARK: - Direct address (Workstream A)
-
-    /// A direct address must reach the user even within the cooldown window.
-    @Test func directAddressBypassesCooldown() async {
-        let clock = ManualClock(now: 100)
-        let guardrails = Guardrails(cooldownSeconds: 12, maxInterjectionsPerMinute: 4, clock: clock)
-        let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s1", text: "hi there")])])
-        let overlay = FakeOverlay()
-        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: overlay,
-                                     clock: clock, guardrails: guardrails)
-        #expect(await driver.handleTrigger(.turnEnd) == .spoke)          // starts the cooldown
-        #expect(await driver.handleTrigger(.directAddress) == .spoke)     // bypasses it
-        #expect(overlay.rendered.count == 2)
-    }
-
-    /// Direct address still honors an explicit mute.
-    @Test func directAddressHonorsMute() async {
-        let clock = ManualClock(now: 0)
-        let guardrails = Guardrails(cooldownSeconds: 12, maxInterjectionsPerMinute: 4, clock: clock)
-        guardrails.setMuted(true)
-        let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s1", text: "hi")])])
-        let overlay = FakeOverlay()
-        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: overlay,
-                                     clock: clock, guardrails: guardrails)
-        #expect(await driver.handleTrigger(.directAddress) == .heldBack)
-        #expect(overlay.rendered.isEmpty)
-    }
-
-    /// No forcing: every turn (direct address included) uses tool_choice auto so the model picks the
-    /// right tool from the prompt — e.g. capture_screen on "Jarvis, check my screen".
+    /// No forcing: every turn uses tool_choice auto so the model picks the right tool from the
+    /// prompt — reply, look at the screen, or stay silent.
     @Test func everyTurnUsesAutoToolChoice() async {
         let clock = ManualClock(now: 0)
-        let guardrails = Guardrails(cooldownSeconds: 12, maxInterjectionsPerMinute: 4, clock: clock)
         let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s1", text: "hi")])])
-        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(),
-                                     clock: clock, guardrails: guardrails)
-        await driver.handleTrigger(.directAddress)
+        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(), clock: clock)
+        await driver.handleTrigger(.turnEnd)
         #expect(brain.toolChoices.last == .auto)
     }
 
@@ -360,10 +286,8 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     /// request (bundled with the new speech), so the server-side conversation never dangles.
     @Test func nextTurnAnswersPriorSpeak() async {
         let clock = ManualClock(now: 0)
-        let guardrails = Guardrails(cooldownSeconds: 0, maxInterjectionsPerMinute: 99, clock: clock)
         let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "spk1", text: "hi")])])
-        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(),
-                                     clock: clock, guardrails: guardrails)
+        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(), clock: clock)
         await driver.handleTrigger(.turnEnd)          // speaks, stashes spk1 to close next turn
         await driver.handleTrigger(.turnEnd)
         // The second request must include the tool-result that closes spk1.
@@ -374,10 +298,8 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     /// carry the user's actual words; turn 2 carries only the NEW words, not the old ones.
     @Test func indexDeltaSendsOnlyNewLinesAcrossTurns() async {
         let clock = ManualClock(now: 0)
-        let guardrails = Guardrails(cooldownSeconds: 0, maxInterjectionsPerMinute: 99, clock: clock)
         let brain = ScriptedBrain(script: [.init(toolCalls: [])])   // stays silent → one call per turn
-        let (driver, transcript) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(),
-                                              clock: clock, guardrails: guardrails)
+        let (driver, transcript) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(), clock: clock)
         transcript.append(.init(speaker: .me, text: "two sum brute force", at: 1))
         await driver.handleTrigger(.turnEnd)
         #expect(brain.calls[0].contains { ($0.text ?? "").contains("two sum brute force") })
@@ -392,53 +314,22 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     /// Speech is NOT marked sent on a failed turn — it is re-sent next turn (advance-on-success).
     @Test func unsentSpeechResentAfterBrainError() async {
         let clock = ManualClock(now: 0)
-        let guardrails = Guardrails(cooldownSeconds: 0, maxInterjectionsPerMinute: 99, clock: clock)
         let brain = FlakyBrain(throwsOnFirst: true)
-        let (driver, transcript) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(),
-                                              clock: clock, guardrails: guardrails)
+        let (driver, transcript) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(), clock: clock)
         transcript.append(.init(speaker: .me, text: "important words", at: 1))
         #expect(await driver.handleTrigger(.turnEnd) == .brainError)   // first call throws, not sent
         await driver.handleTrigger(.turnEnd)
         #expect(brain.lastMessages.contains { ($0.text ?? "").contains("important words") })   // re-sent
     }
 
-    /// A direct address must NEVER be left unanswered: if the turn produces no spoken reply (e.g. it
-    /// truncates), the driver renders a spoken fallback rather than going silent.
-    @Test func directAddressTruncationFallsBackToSpoken() async {
-        let clock = ManualClock(now: 0)
-        let guardrails = Guardrails(cooldownSeconds: 12, maxInterjectionsPerMinute: 4, clock: clock)
-        let brain = ScriptedBrain(script: [.init(toolCalls: [], rawToolCalls: [], incompleteReason: "max_output_tokens")])
-        let overlay = FakeOverlay()
-        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: overlay,
-                                     clock: clock, guardrails: guardrails)
-        #expect(await driver.handleTrigger(.directAddress) == .spokeFallback)
-        #expect(overlay.rendered.count == 1)
-        #expect(!overlay.rendered[0].isEmpty)
-    }
-
-    /// An AMBIENT truncated turn stays `.truncated` (no fallback chatter when not addressed).
-    @Test func ambientTruncationDoesNotFallBack() async {
-        let clock = ManualClock(now: 0)
-        let guardrails = Guardrails(cooldownSeconds: 12, maxInterjectionsPerMinute: 4, clock: clock)
-        let brain = ScriptedBrain(script: [.init(toolCalls: [], rawToolCalls: [], incompleteReason: "max_output_tokens")])
-        let overlay = FakeOverlay()
-        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: overlay,
-                                     clock: clock, guardrails: guardrails)
-        #expect(await driver.handleTrigger(.turnEnd) == .truncated)
-        #expect(overlay.rendered.isEmpty)
-    }
-
-    /// While one turn is in flight, a second concurrent trigger must be reported as `.busy`
-    /// (the single-in-flight drop is now observable, not silent).
-    /// A trigger arriving while a turn runs is reported `.busy` AND coalesced: the running turn picks
-    /// it up and runs it too, so nothing is dropped (vs. the old cancel-the-previous behavior).
+    /// While one turn is in flight, a second concurrent trigger must be reported as `.busy` AND
+    /// coalesced: the running turn picks it up and runs it too, so nothing is dropped (vs. the old
+    /// cancel-the-previous behavior).
     @Test func concurrentTriggerIsBusyThenCoalesced() async {
         let clock = ManualClock(now: 0)
-        let guardrails = Guardrails(cooldownSeconds: 0, maxInterjectionsPerMinute: 99, clock: clock)
         let gate = AsyncGate()
         let brain = GatedBrain(gate: gate, response: .init(toolCalls: [.speak(callId: "s1", text: "hi")]))
-        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(),
-                                     clock: clock, guardrails: guardrails)
+        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(), clock: clock)
         async let first = driver.handleTrigger(.turnEnd)   // parks in the brain call, holds the slot
         await gate.waitUntilEntered()
         let second = await driver.handleTrigger(.turnEnd)  // busy → queued as pending
@@ -446,25 +337,6 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         await gate.release()
         _ = await first
         #expect(brain.callCount >= 2)                      // the original AND the coalesced turn ran
-    }
-
-    /// When several triggers queue while busy, a direct address wins the coalesced slot over an
-    /// ambient one — so a user's direct question isn't lost to a later silence/turn-end nudge.
-    @Test func directAddressWinsCoalescePriority() async {
-        let clock = ManualClock(now: 0)
-        let guardrails = Guardrails(cooldownSeconds: 0, maxInterjectionsPerMinute: 99, clock: clock)
-        let gate = AsyncGate()
-        let brain = GatedBrain(gate: gate, response: .init(toolCalls: [.speak(callId: "s1", text: "hi")]))
-        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(),
-                                     clock: clock, guardrails: guardrails)
-        async let first = driver.handleTrigger(.turnEnd)   // parks, holds the slot
-        await gate.waitUntilEntered()
-        _ = await driver.handleTrigger(.directAddress)     // queued as pending (direct)
-        _ = await driver.handleTrigger(.silence(secondsQuiet: 8))  // queued after — must NOT displace direct
-        await gate.release()
-        _ = await first
-        // The coalesced second turn ran as the DIRECT address (its prompt line says so).
-        #expect(brain.lastMessages.contains { ($0.text ?? "").contains("DIRECTLY") })
     }
 }
 

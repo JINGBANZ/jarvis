@@ -16,8 +16,6 @@ import JarvisCore
 final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @unchecked Sendable {
     var onTurnEnd: (@Sendable () -> Void)?
     var onSilence: (@Sendable (TimeInterval) -> Void)?
-    /// Fired when the just-finished utterance addressed Jarvis by name — the coach must reply.
-    var onDirectAddress: (@Sendable () -> Void)?
     /// Fired when reconnection is abandoned after `maxReconnects` consecutive failures (e.g. a bad
     /// key / quota), so the app can flip the menu back to ⚪️ stopped instead of lying green.
     var onTerminalFailure: (@Sendable () -> Void)?
@@ -29,6 +27,7 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
     private let clock: Clock
     private let sessionStart: TimeInterval
     private let silenceTimeout: TimeInterval
+    private let silenceMaxInterval: TimeInterval
     private let silenceDurationMs: Int
     private let turnDebounce: TimeInterval
 
@@ -36,6 +35,9 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
     private var session: URLSession?     // retained so stop() can invalidate it (URLSession holds its delegate)
     private var task: URLSessionWebSocketTask?
     private var silenceTimer: Timer?
+    /// Backs off the proactive silence-check interval across a long quiet stretch. Mutated only on
+    /// the main queue (where the silence timer is scheduled and fires), so it needs no extra lock.
+    private var silenceBackoff: SilenceBackoff
     private var pingTimer: Timer?
     private var debounceTimer: Timer?         // coalesces rapid fragments into one trigger
     private let pending = UtteranceBuffer()   // fragments heard since the last fired trigger
@@ -47,7 +49,8 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
     private var everConnected = false    // distinguishes the first connect from a reconnect
 
     init(apiKey: String, model: String, transcript: RollingTranscript, clock: Clock,
-         silenceTimeout: TimeInterval = 8, silenceDurationMs: Int = 1000,
+         silenceTimeout: TimeInterval = 30, silenceMaxInterval: TimeInterval = 240,
+         silenceDurationMs: Int = 1000,
          turnDebounce: TimeInterval = 0.4, maxBufferedAudioSeconds: TimeInterval = 60) {
         self.apiKey = apiKey
         self.model = model
@@ -55,6 +58,8 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         self.clock = clock
         self.sessionStart = clock.now()
         self.silenceTimeout = silenceTimeout
+        self.silenceMaxInterval = silenceMaxInterval
+        self.silenceBackoff = SilenceBackoff(base: silenceTimeout, maxInterval: silenceMaxInterval)
         self.silenceDurationMs = silenceDurationMs
         self.turnDebounce = turnDebounce
         // PCM16 mono at the realtime sample rate → 2 bytes/sample.
@@ -214,9 +219,8 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
     }
 
     /// Coalesce rapid completed-fragments: (re)start a short timer on each fragment; when it settles
-    /// we fire ONE trigger for the whole utterance — a direct address if the user named Jarvis,
-    /// otherwise an ordinary turn-end. This both fixes residual VAD fragmentation and lets the
-    /// wake-word check see the full sentence ("hey jarvis, what's …") rather than a first fragment.
+    /// we fire ONE turn-end trigger for the whole utterance. This fixes residual VAD fragmentation so
+    /// one spoken sentence drives one brain turn, not several.
     private func scheduleTurnDebounce() {
         let window = turnDebounce
         DispatchQueue.main.async { [weak self] in
@@ -236,19 +240,14 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         if stopped { lock.unlock(); return }
         debounceTimer?.invalidate(); debounceTimer = nil
         lock.unlock()
-        let (utterance, fragments) = pending.flush()
+        let (_, fragments) = pending.flush()
 
         if fragments > 1 {
             // VAD diagnostic: if this is frequently > 1, the silence window is still too short.
             jlog("🧩 coalesced \(fragments) fragments into one turn")
         }
 
-        if DirectAddress.isAddressed(utterance) {
-            jlog("📣 direct address detected")
-            onDirectAddress?()
-        } else {
-            onTurnEnd?()
-        }
+        onTurnEnd?()
     }
 
     // MARK: - Reconnect / keepalive
@@ -300,20 +299,31 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         }
     }
 
-    /// Fires the "maybe stuck" silence trigger after `silenceTimeout` of no new transcription.
+    /// (Re)start the proactive silence check from its base interval — called on connect and whenever
+    /// speech is heard, so a fresh quiet stretch always begins at `silenceTimeout` before backing off.
     private func resetSilenceTimer() {
-        let timeout = silenceTimeout
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            self.lock.lock(); self.silenceTimer?.invalidate()
-            self.silenceTimer = Timer.scheduledTimer(withTimeInterval: timeout, repeats: false) { [weak self] _ in
-                guard let self else { return }
-                self.lock.lock(); let isStopped = self.stopped; self.lock.unlock()
-                guard !isStopped else { return }   // don't drive a coaching turn on a torn-down pipeline
-                let quiet = self.transcript.silenceDuration(now: self.clock.now() - self.sessionStart)
-                self.onSilence?(max(timeout, quiet))
-            }
-            self.lock.unlock()
+            self.silenceBackoff.reset()
+            self.armSilenceTimer()
         }
+    }
+
+    /// Schedule the next "maybe stuck" silence check using the current backoff interval. When it fires
+    /// (no speech in the meantime) it reports how long the user has been quiet, then re-arms with the
+    /// next, longer interval — so a long silence is gently re-checked (e.g. 30s, 60s, 120s, …) rather
+    /// than nudged once and never again. Must be called on the main queue.
+    private func armSilenceTimer() {
+        let interval = silenceBackoff.next()
+        lock.lock(); silenceTimer?.invalidate()
+        silenceTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
+            guard let self else { return }
+            self.lock.lock(); let isStopped = self.stopped; self.lock.unlock()
+            guard !isStopped else { return }   // don't drive a coaching turn on a torn-down pipeline
+            let quiet = self.transcript.silenceDuration(now: self.clock.now() - self.sessionStart)
+            self.onSilence?(max(interval, quiet))
+            self.armSilenceTimer()             // re-arm with the next (backed-off) interval
+        }
+        lock.unlock()
     }
 }

@@ -1,18 +1,18 @@
 import Foundation
 
-/// The event loop. On a trigger, enforces guardrails, calls the brain with the timestamped
-/// transcript + timing context and the tool set, and routes tool calls (capture_screen, speak).
-/// All judgment lives in the model; this just wires events to tool calls and enforces safety.
+/// The event loop. On a trigger, calls the brain with the timestamped transcript + timing context
+/// and the tool set, and routes tool calls (capture_screen, speak). All judgment lives in the
+/// model — including when to stay quiet and when to answer a direct address — so this just wires
+/// events to tool calls. There is no cooldown or rate cap: every utterance reaches the brain and
+/// the brain decides whether it has anything worth saying (the system prompt carries that restraint).
 ///
-/// `@unchecked Sendable` is justified: the only mutable state (`isHandling`) is guarded by a lock,
-/// and the injected dependencies are each either immutable or internally synchronized. A single
-/// in-flight turn is enforced by `beginHandling()` — an atomic check-then-set taken before any
-/// `await` — which closes the check-then-act window between `guardrails.allow()` and `noteSpoke()`
-/// that would otherwise let two concurrent triggers double-interject.
+/// `@unchecked Sendable` is justified: the only mutable state is guarded by a lock, and the injected
+/// dependencies are each either immutable or internally synchronized. A single in-flight turn is
+/// enforced by `claimOrPend()` — an atomic check-then-set taken before any `await` — so two
+/// concurrent triggers can't run overlapping turns; the second is coalesced into the first.
 public final class CoachDriver: @unchecked Sendable {
     private let config: Config
     private let transcript: RollingTranscript
-    private let guardrails: Guardrails
     private let brain: BrainClient
     private let screen: ScreenCapturing
     private let overlay: OverlayRendering
@@ -45,12 +45,11 @@ public final class CoachDriver: @unchecked Sendable {
     /// nothing is dropped and turns don't pile up (a direct address wins over an ambient trigger).
     private var pendingTrigger: TriggerReason?
 
-    public init(config: Config, transcript: RollingTranscript, guardrails: Guardrails,
+    public init(config: Config, transcript: RollingTranscript,
                 brain: BrainClient, screen: ScreenCapturing, overlay: OverlayRendering, clock: Clock,
                 onSpoke: (@Sendable () -> Void)? = nil) {
         self.config = config
         self.transcript = transcript
-        self.guardrails = guardrails
         self.brain = brain
         self.screen = screen
         self.overlay = overlay
@@ -83,11 +82,12 @@ public final class CoachDriver: @unchecked Sendable {
 
     /// Atomically claim the single in-flight slot, OR (if busy) record the trigger as pending. One
     /// critical section so a trigger can never slip between "am I busy?" and "set pending" and be lost.
-    /// Returns true if this call now owns the turn loop.
+    /// Returns true if this call now owns the turn loop. The first pending trigger is kept; the
+    /// coalesced speech rides along regardless, so a later trigger needn't displace it.
     private func claimOrPend(_ reason: TriggerReason) -> Bool {
         stateLock.lock(); defer { stateLock.unlock() }
         if isHandling {
-            if pendingTrigger == nil || reason.isDirectAddress { pendingTrigger = reason }
+            if pendingTrigger == nil { pendingTrigger = reason }
             return false
         }
         isHandling = true
@@ -157,20 +157,6 @@ public final class CoachDriver: @unchecked Sendable {
         // trigger needs its own marker.
         if case .silence(let secs) = reason { jlog("🤫 quiet for \(Int(secs))s") }
 
-        // Direct address bypasses the ambient cooldown/rate-cap (honoring only mute + its own looser
-        // ceiling); all other triggers go through the full guardrail gate.
-        if reason.isDirectAddress {
-            guard guardrails.allowDirect() else {
-                jlog("… held back (muted or direct-address rate cap)")
-                return .heldBack
-            }
-        } else {
-            guard guardrails.allow() else {
-                jlog("… held back (cooldown or rate cap)")
-                return .heldBack
-            }
-        }
-
         let now = clock.now()
         let ctx = TriggerContext(
             reason: reason,
@@ -217,8 +203,8 @@ public final class CoachDriver: @unchecked Sendable {
             let response: BrainResponse
             do {
                 // No forcing: the model picks the tool from the prompt (reply, look at the screen, or
-                // stay quiet). The wake-word already guarantees a direct address gets THROUGH the
-                // cooldown, and directAddressFallback() guarantees it's never met with total silence.
+                // stay quiet). The system prompt tells it to answer when addressed and stay silent
+                // otherwise — that judgment lives in the model, not in a guardrail here.
                 response = try await brain.respond(messages: convo, tools: coachTools,
                                                    toolChoice: .auto, conversationId: convId)
             } catch {
@@ -244,10 +230,8 @@ public final class CoachDriver: @unchecked Sendable {
             guard let call = response.toolCalls.first else {
                 if let reasonText = response.incompleteReason {
                     jlog("⚠️ response truncated (\(reasonText)) — not deliberate silence")
-                    if reason.isDirectAddress { return directAddressFallback() }
                     return .truncated
                 }
-                if reason.isDirectAddress { return directAddressFallback() }
                 jlog("… nothing useful to add, staying silent")
                 return .silentByModel
             }
@@ -289,9 +273,6 @@ public final class CoachDriver: @unchecked Sendable {
                 jlog("💬 \(text)")
                 overlay.render(text, maxSentences: config.maxSentences,
                                perSentenceSeconds: config.sentenceDisplaySeconds)
-                // Direct replies count toward the direct ceiling but don't start the ambient cooldown
-                // (a reply shouldn't mute the next coaching nudge); ambient tips do.
-                if reason.isDirectAddress { guardrails.noteDirectAddress() } else { guardrails.noteSpoke() }
                 onSpoke?()
                 // `speak` is terminal; its tool-result is sent on the next turn so the conversation
                 // stays valid without an extra round-trip now.
@@ -302,32 +283,17 @@ public final class CoachDriver: @unchecked Sendable {
         jlog("… tool loop exhausted without speaking")
         // Don't leave a final-iteration capture dangling — close it on the next turn.
         if convId != nil, let cap = unansweredCaptureCallId { setPendingCloseCallId(cap) }
-        if reason.isDirectAddress { return directAddressFallback() }
         return .exhausted
-    }
-
-    /// Last-resort spoken reply so a direct address is never met with silence (e.g. the model
-    /// truncated or looped without speaking). Counts toward the direct ceiling, not the cooldown.
-    private func directAddressFallback() -> TurnOutcome {
-        let text = "Sorry — I didn't catch that. Could you say it again?"
-        jlog("💬 \(text)")
-        overlay.render(text, maxSentences: config.maxSentences,
-                       perSentenceSeconds: config.sentenceDisplaySeconds)
-        guardrails.noteDirectAddress()
-        onSpoke?()
-        return .spokeFallback
     }
 }
 
 /// The terminal outcome of a coaching turn — surfaced so every "quiet" path is observable instead
-/// of a silent `return`. Tuning cooldown / VAD / silence thresholds depends on knowing WHICH of
-/// these fired.
+/// of a silent `return`. Tuning VAD / silence-backoff thresholds depends on knowing WHICH of these
+/// fired.
 public enum TurnOutcome: Sendable, Equatable {
     case spoke            // rendered a coaching tip
-    case spokeFallback    // direct address that the model didn't answer → canned spoken reply
     case silentByModel    // model deliberately called no tool
     case truncated        // response cut off by the token cap (NOT a real silence decision)
-    case heldBack         // guardrail blocked: cooldown, rate cap, or mute
     case busy             // a turn was in flight; this trigger was coalesced into it (not dropped)
     case cancelled        // Stop cancelled the turn
     case brainError       // the brain request threw (401/429/network)

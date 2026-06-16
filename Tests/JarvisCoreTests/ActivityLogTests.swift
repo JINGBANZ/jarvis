@@ -15,7 +15,7 @@ import Foundation
         #expect(ActivityLog.cssClass(for: "🗣 heard: \"hello\"") == "hear")
         #expect(ActivityLog.cssClass(for: "🤫 quiet for 8s") == "hear")
         #expect(ActivityLog.cssClass(for: "💭 thinking…") == "think")
-        #expect(ActivityLog.cssClass(for: "… held back (cooldown or rate cap)") == "think")
+        #expect(ActivityLog.cssClass(for: "… nothing useful to add, staying silent") == "think")
         #expect(ActivityLog.cssClass(for: "Jarvis realtime error event: oops") == "err")
         #expect(ActivityLog.cssClass(for: "Jarvis: coaching started.") == "")
     }

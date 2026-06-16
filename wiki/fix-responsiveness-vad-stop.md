@@ -1,5 +1,12 @@
 # Fix: Responsiveness, Turn-Detection & Graceful Stop
 
+> **Partly superseded (2026-06-16).** The **direct-address detector** described here (issue A,
+> `DirectAddress`, `TriggerReason.directAddress`, `directAddressFallback`, `maxDirectAddressesPerMinute`)
+> was later **removed**, along with the whole cooldown/rate-cap guardrail layer — the brain now
+> self-gates speaking and reads "Jarvis" straight from the transcript. The VAD/debounce and graceful-Stop
+> fixes (issues B–D) still stand. See the 2026-06-16 entry in [status.md](./status.md#key-decisions)
+> and [architecture.md §5](./architecture.md#5-safety-model). Kept below as historical record.
+
 > Root-cause analysis and fix plan for four issues found in the first live smoke run (2026-06-15),
 > verified from five independent angles (code-grounding, OpenAI docs, RFC 6455 / Apple URLSession,
 > voice-UX best practice, adversarial red-team). This is the *why*; the change lands on branch

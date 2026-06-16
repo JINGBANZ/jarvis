@@ -6,7 +6,7 @@
 
 **Build complete (headless) — awaiting the live smoke run.** Phase 1 was **skipped** (2026-06-14)
 and the native Swift app was built directly per [plan-phase2-build.md](./plan-phase2-build.md). The
-tested harness (config, transcript, guardrails, coach tool-loop, OpenAI client, activity log) is **green: 36
+tested harness (config, transcript, silence backoff, coach tool-loop, OpenAI client, activity log) is **green: 70
 tests pass**; `Jarvis.app` builds, signs with the stable `Jarvis Dev` identity, and launches. The app shell, overlay,
 mic capture, and realtime transcriber **compile and launch** but their *live* behavior (real mic,
 websocket, TCC grants, real `OPENAI_API_KEY`, real model IDs) is verified only by the human smoke
@@ -57,6 +57,7 @@ A compact log — the *rationale* for each lives in the linked design page, not 
 | **Toolchain: SwiftPM + Command Line Tools** (no full Xcode; manual bundle + stable self-signed `Jarvis Dev` identity so TCC grants persist; TCC prompts) | [specification.md](./specification.md#9-build--run-constraints) |
 | ~~Build in a separate restricted account (HARD)~~ → **build in main `forrest` account, in a git worktree; hard requirement waived for the personal build** (2026-06-14) | [sandbox.md](./sandbox.md) |
 | **Respond when addressed; tuned `server_vad`+debounce (not `semantic_vad`); quiet graceful Stop** — fixes from first live smoke run (2026-06-15) | [fix-responsiveness-vad-stop.md](./fix-responsiveness-vad-stop.md) |
+| **Cut the guardrail layer: no cooldown/rate cap, no wake-word detector; brain self-gates speaking; silence check backs off (30s→240s)** — simplify the flow, cut log noise, natural conversation (2026-06-16) | [architecture.md](./architecture.md#5-safety-model), [specification.md](./specification.md) |
 
 ## Open Questions / To Confirm
 
