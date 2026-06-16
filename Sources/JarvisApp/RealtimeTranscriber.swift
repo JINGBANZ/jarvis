@@ -26,8 +26,6 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
     private let transcript: RollingTranscript
     private let clock: Clock
     private let sessionStart: TimeInterval
-    private let silenceTimeout: TimeInterval
-    private let silenceMaxInterval: TimeInterval
     private let silenceDurationMs: Int
     private let turnDebounce: TimeInterval
 
@@ -57,8 +55,6 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         self.transcript = transcript
         self.clock = clock
         self.sessionStart = clock.now()
-        self.silenceTimeout = silenceTimeout
-        self.silenceMaxInterval = silenceMaxInterval
         self.silenceBackoff = SilenceBackoff(base: silenceTimeout, maxInterval: silenceMaxInterval)
         self.silenceDurationMs = silenceDurationMs
         self.turnDebounce = turnDebounce
@@ -300,7 +296,7 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
     }
 
     /// (Re)start the proactive silence check from its base interval — called on connect and whenever
-    /// speech is heard, so a fresh quiet stretch always begins at `silenceTimeout` before backing off.
+    /// speech is heard, so a fresh quiet stretch always begins at the base interval before backing off.
     private func resetSilenceTimer() {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }

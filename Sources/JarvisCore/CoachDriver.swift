@@ -42,7 +42,8 @@ public final class CoachDriver: @unchecked Sendable {
     /// reaches the server, so a failed/cancelled next turn can't strand it and dangle the conversation.
     private var pendingCloseCallId: String?
     /// A trigger that arrived while a turn was running — coalesced into the running turn's follow-up so
-    /// nothing is dropped and turns don't pile up (a direct address wins over an ambient trigger).
+    /// nothing is dropped and turns don't pile up. The first such trigger is kept and the batched
+    /// speech rides along via the sent-index, so a later trigger needn't displace it.
     private var pendingTrigger: TriggerReason?
 
     public init(config: Config, transcript: RollingTranscript,

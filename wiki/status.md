@@ -91,7 +91,8 @@ Remaining is the **human smoke run** — build, run, and validate live:
 3. Run the **live smoke checklist** ([README](../README.md#live-smoke-checklist-what-to-verify-by-hand)
    / [specification.md §8](./specification.md#8-self-verification-plan)): speak → transcript;
    "I'm stuck on two-sum" → coaching overlay + observed `capture_screen`; overlay excluded from the
-   screenshot; rate cap holds and **Stop Jarvis** halts the pipeline. (Run via `./scripts/build-app.sh --dev`,
+   screenshot; while you talk steadily Jarvis stays mostly quiet (model restraint, not a rate cap)
+   and **Stop Jarvis** halts the pipeline. (Run via `./scripts/build-app.sh --dev`,
    then open the activity viewer from the menu bar to watch each step.)
 4. **Only remaining live unknown:** the GA Realtime transcription-session wiring in
    `Sources/JarvisApp/RealtimeTranscriber.swift` — the config/events follow current docs, but the

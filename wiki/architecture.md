@@ -127,7 +127,7 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
 1. **Build the harness, not the intelligence.** If a model or an OS framework can do it, we don't write it.
 2. **Least code wins.** Prefer a borrowed tool (`screencapture`, an Apple framework, an OpenAI API) over custom code, every time.
 3. **The model is the cost governor.** Expensive actions (vision, speaking) happen only when the model opts in.
-4. **Proactive, but disciplined.** Speaking up unprompted is the whole point; guardrails keep it from being annoying.
+4. **Proactive, but disciplined.** Speaking up unprompted is the whole point; the model's own restraint (a tuned system prompt) keeps it from being annoying.
 5. **Sees the screen, not the disk.** Security is enforced by the sandbox, not by good intentions.
 6. **Self-verifying.** Every build ships with tests and a smoke checklist the agent can run to prove it works.
 7. **One mode, done well.** Ship the coach; expand later.

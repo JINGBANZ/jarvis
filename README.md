@@ -162,8 +162,8 @@ Some behavior can only be verified by a human with a real key, a mic, and grante
 
 ## Build status
 
-The pure harness (config, transcript, guardrails, the coach tool-loop, the OpenAI client) is
-**unit-tested and green** (36 tests). The app shell, overlay, mic capture, and realtime transcriber
+The pure harness (config, transcript, silence backoff, the coach tool-loop, the OpenAI client) is
+**unit-tested and green** (70 tests). The app shell, overlay, mic capture, and realtime transcriber
 **compile and launch**, but their live behavior is verified only by the checklist above — they were
 built without a real key or audio device. Current state and next steps live in
 [`wiki/status.md`](./wiki/status.md).
