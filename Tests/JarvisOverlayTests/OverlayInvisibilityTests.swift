@@ -1,6 +1,9 @@
 import Testing
 import AppKit
-import ScreenCaptureKit
+// @preconcurrency: on the Xcode toolchain (used by CI) ScreenCaptureKit's async results are
+// non-Sendable and would otherwise error when crossing back to the @MainActor helper. The CLT
+// toolchain is laxer; this keeps both green.
+@preconcurrency import ScreenCaptureKit
 @testable import JarvisOverlay
 
 /// Regression tests for the overlay's screen-capture invisibility (see wiki/overlay-invisibility.md).
