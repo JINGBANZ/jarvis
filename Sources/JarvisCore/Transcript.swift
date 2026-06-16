@@ -29,6 +29,12 @@ public final class RollingTranscript: @unchecked Sendable {
         lines.append(line)
     }
 
+    /// Number of lines recorded — used as the index boundary for server-side delta sending.
+    public var count: Int {
+        lock.lock(); defer { lock.unlock() }
+        return lines.count
+    }
+
     public var lastSpeechTime: TimeInterval? {
         lock.lock(); defer { lock.unlock() }
         return lines.last?.at
@@ -48,6 +54,19 @@ public final class RollingTranscript: @unchecked Sendable {
             .filter { $0.at >= cutoff }
             .map { "[\(Self.stamp($0.at))] \($0.speaker.rawValue): \($0.text)" }
             .joined(separator: "\n")
+    }
+
+    /// Lines from `index` onward, formatted like `renderWindow`, AND the line count rendered up to —
+    /// returned together from a SINGLE locked snapshot so the caller's "advance to" index exactly
+    /// matches the lines actually rendered (no duplicate-on-concurrent-append race). The index is
+    /// clamped to a valid range (defensive against a stale caller index).
+    public func renderFrom(index: Int) -> (text: String, upTo: Int) {
+        lock.lock(); let snapshot = lines; lock.unlock()
+        let start = min(max(0, index), snapshot.count)
+        let text = snapshot[start...]
+            .map { "[\(Self.stamp($0.at))] \($0.speaker.rawValue): \($0.text)" }
+            .joined(separator: "\n")
+        return (text, snapshot.count)
     }
 
     static func stamp(_ t: TimeInterval) -> String {

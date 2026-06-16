@@ -44,4 +44,37 @@ import Testing
         g.setMuted(false)
         #expect(g.allow())
     }
+
+    // MARK: - Direct-address ceiling (Workstream A)
+
+    /// Direct address ignores the cooldown but has its own looser per-minute ceiling.
+    @Test func directAddressCeilingBlocksSpam() {
+        let clock = ManualClock(now: 0)
+        let g = Guardrails(cooldownSeconds: 12, maxInterjectionsPerMinute: 4,
+                           maxDirectAddressesPerMinute: 3, clock: clock)
+        for _ in 0..<3 {
+            #expect(g.allowDirect())
+            g.noteDirectAddress()
+            clock.advance(by: 1)            // no cooldown applies to direct address
+        }
+        #expect(!g.allowDirect())            // 4th within the rolling minute is blocked
+        clock.advance(by: 60)
+        #expect(g.allowDirect())             // window slides
+    }
+
+    @Test func directAddressStillHonorsMute() {
+        let clock = ManualClock(now: 0)
+        let g = makeGuardrails(clock)
+        g.setMuted(true)
+        #expect(!g.allowDirect())
+    }
+
+    /// A direct-address reply must NOT start the normal cooldown (it shouldn't suppress the next
+    /// ambient coaching nudge).
+    @Test func noteDirectAddressDoesNotStartCooldown() {
+        let clock = ManualClock(now: 0)
+        let g = makeGuardrails(clock)
+        g.noteDirectAddress()
+        #expect(g.allow())                   // ambient interjection still permitted right after
+    }
 }

@@ -3,8 +3,10 @@ import Foundation
 /// Brain client over the OpenAI **Responses API** (`POST /v1/responses`) — the recommended
 /// endpoint for tool use with gpt-5.5. System text is passed via `instructions`; the conversation
 /// is sent as typed `input` items; function calls are threaded with `function_call` /
-/// `function_call_output`. Includes bounded retry-with-backoff on 429/5xx (honoring `Retry-After`),
-/// a request timeout, and `store:false` so screenshots/transcripts aren't retained server-side.
+/// `function_call_output`. Includes bounded retry-with-backoff on 429/5xx (honoring `Retry-After`)
+/// and a request timeout. Uses `store:true` + a per-session `conversation` for multi-turn continuity
+/// (this DOES retain transcripts/screenshots server-side — a documented quality-first choice; see
+/// wiki/sandbox.md).
 public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
     /// Injected transport; returns the body and the HTTP response (for status + headers).
     public typealias Sender = @Sendable (URLRequest) async throws -> (Data, HTTPURLResponse?)
@@ -27,7 +29,7 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
                 timeout: TimeInterval = 15,
                 maxRetries: Int = 2,
                 backoffBaseSeconds: Double = 0.5,
-                maxOutputTokens: Int = 400,
+                maxOutputTokens: Int = 768,   // headroom so reasoning + a short tool call don't truncate
                 promptCacheKey: String = "jarvis-coach-v1",
                 send: Sender? = nil) {
         self.apiKey = apiKey
@@ -45,12 +47,14 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
         }
     }
 
-    public func respond(messages: [ChatMessage], tools: [ToolDef]) async throws -> BrainResponse {
+    public func respond(messages: [ChatMessage], tools: [ToolDef],
+                        toolChoice: ToolChoice, conversationId: String?) async throws -> BrainResponse {
         var request = URLRequest(url: endpoint, timeoutInterval: timeout)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        request.httpBody = try encodeBody(messages: messages, tools: tools)
+        request.httpBody = try encodeBody(messages: messages, tools: tools, toolChoice: toolChoice,
+                                          conversationId: conversationId)
 
         var attempt = 0
         while true {
@@ -73,9 +77,29 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
         }
     }
 
+    /// Create a server-side conversation (one per coaching session) so the model keeps continuity —
+    /// including its own prior replies — across triggers. Returns the `conv_…` id.
+    public func createConversation() async throws -> String {
+        let url = URL(string: endpoint.absoluteString.replacingOccurrences(of: "/responses", with: "/conversations")) ?? endpoint
+        var request = URLRequest(url: url, timeoutInterval: timeout)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.httpBody = Data("{}".utf8)
+        let (data, http) = try await send(request)
+        let status = http?.statusCode ?? 0
+        guard (200..<300).contains(status) else {
+            throw NSError(domain: "OpenAIBrainClient", code: status,
+                          userInfo: [NSLocalizedDescriptionKey: String(data: data, encoding: .utf8) ?? "http \(status)"])
+        }
+        struct Conversation: Decodable { let id: String }
+        return try JSONDecoder().decode(Conversation.self, from: data).id
+    }
+
     // MARK: - Encoding (Responses API)
 
-    private func encodeBody(messages: [ChatMessage], tools: [ToolDef]) throws -> Data {
+    private func encodeBody(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice,
+                            conversationId: String?) throws -> Data {
         var instructions: [String] = []
         var input: [[String: Any]] = []
 
@@ -129,17 +153,30 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
             return ["type": "function", "name": t.name, "description": t.description, "parameters": params]
         }
 
+        // Responses tool_choice: the string "auto", or a {type:function,name} object to force one.
+        let toolChoiceJSON: Any
+        switch toolChoice {
+        case .auto: toolChoiceJSON = "auto"
+        case .force(let name): toolChoiceJSON = ["type": "function", "name": name]
+        }
+
         var body: [String: Any] = [
             "model": model,
             "input": input,
             "tools": toolsJSON,
-            "tool_choice": "auto",
+            "tool_choice": toolChoiceJSON,
             "parallel_tool_calls": false,      // the coach loop consumes one tool call per turn
             "reasoning": ["effort": reasoningEffort],
             "max_output_tokens": maxOutputTokens,
-            "store": false,                    // don't retain screenshots/transcripts server-side
+            // store:true is required for server-side conversation continuity (the model remembers
+            // prior turns, its own replies included). This DOES retain transcripts/screenshots
+            // server-side — a deliberate quality-over-retention choice; see wiki/sandbox.md.
+            "store": true,
             "prompt_cache_key": promptCacheKey, // stable system prompt → better cache routing
         ]
+        if let conversationId {
+            body["conversation"] = conversationId
+        }
         if !instructions.isEmpty {
             body["instructions"] = instructions.joined(separator: "\n\n")
         }
@@ -155,7 +192,10 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
             let name: String?
             let arguments: String?
         }
+        struct IncompleteDetails: Decodable { let reason: String? }
         let output: [Item]
+        let status: String?
+        let incomplete_details: IncompleteDetails?
     }
 
     private func decode(_ data: Data) throws -> BrainResponse {
@@ -177,6 +217,12 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
                 jlog("Jarvis coach: ignoring unknown tool '\(name)'")
             }
         }
-        return BrainResponse(toolCalls: invocations, rawToolCalls: raws)
+        // A truncated run (`status:"incomplete"`, e.g. reasoning+output exceeding max_output_tokens)
+        // can carry zero tool calls — surface the reason so the coach loop doesn't mistake it for
+        // a deliberate stay-silent. Prefer the explicit reason; fall back to "incomplete".
+        let incompleteReason = decoded.status == "incomplete"
+            ? (decoded.incomplete_details?.reason ?? "incomplete")
+            : nil
+        return BrainResponse(toolCalls: invocations, rawToolCalls: raws, incompleteReason: incompleteReason)
     }
 }

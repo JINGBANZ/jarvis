@@ -16,6 +16,7 @@
 - **[sandbox.md](./sandbox.md)** — the security/isolation model (file-access restriction, entitlements, egress).
 - **[landscape-survey.md](./landscape-survey.md)** — every tool and product we tried or evaluated, and how each measured up. ("What I tried.")
 - **[fork-evaluation.md](./fork-evaluation.md)** — code-level evaluation of open-source apps as a fork base for the PoC, and why they're all Electron/Tauri rather than native Swift.
+- **[fix-responsiveness-vad-stop.md](./fix-responsiveness-vad-stop.md)** — root-cause analysis (verified from five angles) and fix plan for the first live smoke run's issues: direct-address responsiveness, mid-sentence turn-detection, and noisy Stop.
 
 ## Key Decisions
 

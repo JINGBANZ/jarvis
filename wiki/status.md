@@ -56,6 +56,7 @@ A compact log — the *rationale* for each lives in the linked design page, not 
 | **Native Swift app** (cleanest sandbox/footprint on macOS) | [architecture.md](./architecture.md), [fork-evaluation.md](./fork-evaluation.md) |
 | **Toolchain: SwiftPM + Command Line Tools** (no full Xcode; manual bundle + stable self-signed `Jarvis Dev` identity so TCC grants persist; TCC prompts) | [specification.md](./specification.md#9-build--run-constraints) |
 | ~~Build in a separate restricted account (HARD)~~ → **build in main `forrest` account, in a git worktree; hard requirement waived for the personal build** (2026-06-14) | [sandbox.md](./sandbox.md) |
+| **Respond when addressed; tuned `server_vad`+debounce (not `semantic_vad`); quiet graceful Stop** — fixes from first live smoke run (2026-06-15) | [fix-responsiveness-vad-stop.md](./fix-responsiveness-vad-stop.md) |
 
 ## Open Questions / To Confirm
 

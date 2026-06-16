@@ -10,6 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private lazy var guardrails = Guardrails(
         cooldownSeconds: config.cooldownSeconds,
         maxInterjectionsPerMinute: config.maxInterjectionsPerMinute,
+        maxDirectAddressesPerMinute: config.maxDirectAddressesPerMinute,
         clock: clock)
     private lazy var secrets = ChainedSecretStore([keychain, EnvSecretStore()])
 
@@ -90,11 +91,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let transcriber = RealtimeTranscriber(apiKey: key, model: config.transcriptionModel,
                                               transcript: transcript, clock: clock,
-                                              silenceTimeout: config.silenceTimeoutSeconds)
+                                              silenceTimeout: config.silenceTimeoutSeconds,
+                                              silenceDurationMs: config.vadSilenceDurationMs,
+                                              turnDebounce: config.turnDebounceSeconds,
+                                              maxBufferedAudioSeconds: config.maxBufferedAudioSeconds)
         // CoachDriver is @unchecked Sendable; capture it (not @MainActor self) in the callbacks.
-        // Route turns through TurnTaskBox so Stop can cancel an in-flight one.
+        // Route turns through TurnTaskBox so Stop can cancel an in-flight one. Concurrent triggers are
+        // coalesced inside CoachDriver (the running turn batches them in), so we don't cancel here.
         let turns = TurnTaskBox()
         transcriber.onTurnEnd = { turns.run { await driver.handleTrigger(.turnEnd) } }
+        transcriber.onDirectAddress = { turns.run { await driver.handleTrigger(.directAddress) } }
         transcriber.onSilence = { secs in turns.run { await driver.handleTrigger(.silence(secondsQuiet: secs)) } }
         // Reconnect gave up (bad key / quota): stop cleanly and correct the menu instead of lying 🟢.
         transcriber.onTerminalFailure = { [weak self] in
@@ -122,6 +128,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         audio = nil
         if wasRunning { jlog("Jarvis: stopped.") }
     }
+
 
     private func warnNoKey() {
         NSApp.activate(ignoringOtherApps: true)
@@ -156,25 +163,5 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSTemporaryDirectory())
         return caches.appendingPathComponent("Jarvis")
-    }
-}
-
-/// Tracks the unstructured Tasks spawned per transcription trigger so Stop can cancel any in-flight
-/// coaching turn. `@unchecked Sendable`: all access to `tasks` is guarded by the lock.
-private final class TurnTaskBox: @unchecked Sendable {
-    private let lock = NSLock()
-    private var tasks: [Task<Void, Never>] = []
-
-    func run(_ op: @escaping @Sendable () async -> Void) {
-        let task = Task { await op() }
-        lock.lock()
-        tasks.removeAll { $0.isCancelled }
-        tasks.append(task)
-        lock.unlock()
-    }
-
-    func cancelAll() {
-        lock.lock(); let snapshot = tasks; tasks.removeAll(); lock.unlock()
-        snapshot.forEach { $0.cancel() }
     }
 }
