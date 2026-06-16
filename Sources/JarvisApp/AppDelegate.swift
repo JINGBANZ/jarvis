@@ -1,5 +1,6 @@
 import AppKit
 import JarvisCore
+import JarvisOverlay
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
