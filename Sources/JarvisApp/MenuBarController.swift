@@ -9,6 +9,7 @@ final class MenuBarController: NSObject {
     private let keychain: KeychainSecretStore
     private let counterItem = NSMenuItem(title: "Interjections: 0", action: nil, keyEquivalent: "")
     private let startStopItem = NSMenuItem(title: "Start Jarvis", action: nil, keyEquivalent: "s")
+    private let logViewerItem = NSMenuItem(title: "Open Log Viewer", action: nil, keyEquivalent: "l")
     private var interjections = 0
     /// Whether the listen/coach pipeline is currently running.
     private(set) var isRunning = false
@@ -21,8 +22,13 @@ final class MenuBarController: NSObject {
     /// Fired after a new key is saved to the Keychain. The app does *not* auto-start; the user
     /// presses Start when ready.
     var onKeySaved: ((String) -> Void)?
+    /// Fired when the user picks "Open Log Viewer" (dev mode only). Opens the session's activity
+    /// HTML on demand instead of auto-opening it on launch.
+    var onOpenLogViewer: (() -> Void)?
 
-    init(keychain: KeychainSecretStore) {
+    /// - Parameter showLogViewer: in dev mode, add an "Open Log Viewer" item so the activity HTML
+    ///   can be opened on demand rather than auto-opening every launch.
+    init(keychain: KeychainSecretStore, showLogViewer: Bool = false) {
         self.keychain = keychain
         super.init()
         let menu = NSMenu()
@@ -32,6 +38,11 @@ final class MenuBarController: NSObject {
         let key = NSMenuItem(title: "Set OpenAI API Key…", action: #selector(setKey), keyEquivalent: "k")
         key.target = self
         menu.addItem(key)
+        if showLogViewer {
+            logViewerItem.target = self
+            logViewerItem.action = #selector(openLogViewer)
+            menu.addItem(logViewerItem)
+        }
         menu.addItem(.separator())
         menu.addItem(counterItem)
         menu.addItem(.separator())
@@ -59,6 +70,8 @@ final class MenuBarController: NSObject {
         isRunning = running
         refreshUI()
     }
+
+    @objc private func openLogViewer() { onOpenLogViewer?() }
 
     @objc private func toggleStartStop() {
         if isRunning {

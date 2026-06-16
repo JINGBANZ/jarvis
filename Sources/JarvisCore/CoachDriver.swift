@@ -254,11 +254,12 @@ public final class CoachDriver: @unchecked Sendable {
 
             switch call {
             case .captureScreen(let callId):
-                jlog("👁 looking at your screen")
                 // ScreenCaptureCLI shells out to `screencapture` and blocks for 100s of ms; run it
                 // off the cooperative pool so it doesn't stall a pool thread while holding the slot.
                 let screen = self.screen
                 let img = await Task.detached(priority: .userInitiated, operation: { screen.capture() }).value
+                if let img { jlog("👁 looking at your screen", image: img) }   // thumbnail in the dev viewer
+                else { jlog("👁 screenshot failed") }
                 if convId == nil {
                     // Stateless fallback: replay the model's call + the tool result + image.
                     convo.append(.assistantToolCalls(response.rawToolCalls))

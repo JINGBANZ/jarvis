@@ -9,15 +9,28 @@ import Foundation
 public final class ActivityLog: @unchecked Sendable {
     public static let shared = ActivityLog()
 
+    /// One rendered row: a timestamped message, optionally with a screenshot thumbnail. `imageFile`
+    /// is the relative filename of the saved JPEG (e.g. `shot-3.jpg`), or nil for a plain text line.
+    struct Entry {
+        let time: String
+        let message: String
+        let imageFile: String?
+    }
+
     private let maxLines = 400
     private let queue = DispatchQueue(label: "jarvis.activitylog")   // serializes state + disk writes
-    private var lines: [(time: String, message: String)] = []
+    private var entries: [Entry] = []
+    private var shotSeq = 0       // monotonic id for saved screenshot files this session
     private let df: DateFormatter
     private var fileURL: URL?     // nil ⇒ disabled (no disk writes)
 
     /// Internal so tests can spin up an isolated instance; the app uses `.shared`.
     init() {
         df = DateFormatter()
+        // Fixed-format formatter: pin to en_US_POSIX + Gregorian so output is stable regardless of
+        // the user's locale or system calendar (Apple QA1480).
+        df.locale = Locale(identifier: "en_US_POSIX")
+        df.calendar = Calendar(identifier: .gregorian)
         df.dateFormat = "HH:mm:ss"
         // Headless/test override: a full file path enables logging immediately.
         if let p = ProcessInfo.processInfo.environment["JARVIS_ACTIVITY_HTML"] {
@@ -30,26 +43,55 @@ public final class ActivityLog: @unchecked Sendable {
     public func enable(directory: URL) {
         queue.sync {
             fileURL = directory.appendingPathComponent("jarvis-activity.html")
-            lines.removeAll()
+            entries.removeAll()
+            shotSeq = 0
             writeHTML()
         }
+    }
+
+    /// Turn the viewer back off (no further disk writes). Mainly for tests that drive the shared
+    /// singleton and need to reset it afterwards so they don't leak state into other tests.
+    func disable() {
+        queue.sync { fileURL = nil; entries.removeAll(); shotSeq = 0 }
     }
 
     /// The HTML page to open in a browser, or nil when logging is disabled.
     public var htmlURL: URL? { queue.sync { fileURL } }
 
     /// Append a line and rewrite the HTML. No-op (and no disk write) when disabled.
-    public func record(_ message: String, at date: Date = Date()) {
+    ///
+    /// When `imageBase64` is a base64-encoded JPEG (a screenshot the model just looked at), it's
+    /// saved next to the HTML as an owner-only `shot-N.jpg` and shown as a clickable thumbnail —
+    /// so the activity log captures the *visual* part of the interaction, not just the text.
+    public func record(_ message: String, imageBase64: String? = nil, at date: Date = Date()) {
         queue.async { [self] in
-            guard fileURL != nil else { return }
-            lines.append((df.string(from: date), message))
-            if lines.count > maxLines { lines.removeFirst(lines.count - maxLines) }
+            guard let dir = fileURL?.deletingLastPathComponent() else { return }
+            let imageFile = imageBase64.flatMap { saveShot($0, in: dir) }
+            entries.append(Entry(time: df.string(from: date), message: message, imageFile: imageFile))
+            if entries.count > maxLines { entries.removeFirst(entries.count - maxLines) }
             writeHTML()
         }
     }
 
+    /// Decode a base64 JPEG and write it as the next owner-only `shot-N.jpg` in `dir`. Returns the
+    /// relative filename to reference from the HTML, or nil if the payload wasn't valid. Must run on
+    /// `queue` (mutates `shotSeq`).
+    private func saveShot(_ base64: String, in dir: URL) -> String? {
+        // .ignoreUnknownCharacters tolerates any line-wrapped/whitespace base64 the capture source
+        // might emit; the in-process encoder is single-line today, so this is just future-proofing.
+        guard let data = Data(base64Encoded: base64, options: .ignoreUnknownCharacters) else { return nil }
+        shotSeq += 1
+        let name = "shot-\(shotSeq).jpg"
+        // Only return the filename if the write actually succeeded — otherwise the HTML would point
+        // at a missing file (broken thumbnail). On failure the line still renders as plain text.
+        guard FileManager.default.createFile(atPath: dir.appendingPathComponent(name).path,
+                                             contents: data, attributes: [.posixPermissions: 0o600])
+        else { return nil }
+        return name
+    }
+
     private func writeHTML() {
-        guard let url = fileURL, let data = Self.renderHTML(lines).data(using: .utf8) else { return }
+        guard let url = fileURL, let data = Self.renderHTML(entries).data(using: .utf8) else { return }
         // createFile (not atomic write) so we can set 0600 in one step — owner-only, never 0644.
         FileManager.default.createFile(atPath: url.path, contents: data,
                                        attributes: [.posixPermissions: 0o600])
@@ -57,12 +99,22 @@ public final class ActivityLog: @unchecked Sendable {
 
     // MARK: - Pure rendering (testable without disk)
 
-    static func renderHTML(_ lines: [(time: String, message: String)]) -> String {
+    static func renderHTML(_ entries: [Entry]) -> String {
         var rows = ""
-        for line in lines {
-            rows += "<div class=\"row \(cssClass(for: line.message))\">"
-            rows += "<span class=\"t\">\(esc(line.time))</span>"
-            rows += "<span class=\"m\">\(esc(line.message))</span></div>\n"
+        for entry in entries {
+            rows += "<div class=\"row \(cssClass(for: entry.message))\">"
+            rows += "<span class=\"t\">\(esc(entry.time))</span>"
+            rows += "<span class=\"m\">\(esc(entry.message))"
+            if let file = entry.imageFile {
+                // Thumbnail links to the full-size JPEG in a new tab — the activity page reloads
+                // every 1s, so an inline lightbox would collapse; a separate tab survives.
+                rows += "<a class=\"shot\" href=\"\(esc(file))\" target=\"_blank\" rel=\"noopener\">"
+                // Eager (not lazy) load: the page hard-reloads every 1s, and a lazy image scrolled
+                // above the viewport collapses to 0 height and may never load — so older screenshots
+                // in scrollback would silently vanish. These are tiny local files; eager is fine.
+                rows += "<img src=\"\(esc(file))\" alt=\"screenshot of the user's screen\"></a>"
+            }
+            rows += "</span></div>\n"
         }
         return """
         <!doctype html><html lang="en"><head>
@@ -85,8 +137,11 @@ public final class ActivityLog: @unchecked Sendable {
           .hear .m { color: #58a6ff; }   /* heard you          */
           .think .m{ color: #8b949e; }   /* thinking / silent  */
           .err .m  { color: #f85149; }   /* error              */
+          .shot { display: block; margin-top: 4px; width: fit-content; }
+          .shot img { display: block; max-height: 140px; max-width: 280px;
+                      border: 1px solid #30363d; border-radius: 6px; cursor: zoom-in; }
         </style></head><body>
-        <header>Jarvis — activity log <span class="count">(\(lines.count) lines)</span></header>
+        <header>Jarvis — activity log <span class="count">(\(entries.count) lines)</span></header>
         <main>\(rows)</main>
         <script>
           // Keep scrollback usable across the 1s reload: only stick to the bottom if the user was
@@ -125,9 +180,14 @@ public final class ActivityLog: @unchecked Sendable {
         return ""
     }
 
+    /// Escapes for both text content and double-quoted attribute contexts (the screenshot `href`/
+    /// `src`). Quotes are escaped too so the attribute can't be broken out of — defense-in-depth,
+    /// since `imageFile` is currently an internally-generated `shot-N.jpg` with no external input.
     static func esc(_ s: String) -> String {
         s.replacingOccurrences(of: "&", with: "&amp;")
          .replacingOccurrences(of: "<", with: "&lt;")
          .replacingOccurrences(of: ">", with: "&gt;")
+         .replacingOccurrences(of: "\"", with: "&quot;")
+         .replacingOccurrences(of: "'", with: "&#39;")
     }
 }
