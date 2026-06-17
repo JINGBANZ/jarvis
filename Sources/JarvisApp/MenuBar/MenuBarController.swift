@@ -87,9 +87,7 @@ final class MenuBarController: NSObject {
     private func refreshUI() {
         startStopItem.title = isRunning ? "Stop Jarvis" : "Start Jarvis"
         guard let button = statusItem.button else { return }
-        let icon = isRunning ? MenuBarIcon.running : MenuBarIcon.stopped
-        icon.isTemplate = false              // keep our own colours/greys; don't tint to the label colour
-        button.image = icon
+        button.image = isRunning ? MenuBarIcon.running : MenuBarIcon.stopped
         button.title = ""
     }
 
