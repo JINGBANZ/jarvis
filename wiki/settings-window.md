@@ -85,4 +85,4 @@ change appearance and don't touch `sharingType`. See [overlay-invisibility.md](.
 ## Related Pages
 
 - [overlay-invisibility.md](./overlay-invisibility.md) — capture exclusion re-assert during preview
-- [activity-viewer.md](./activity-viewer.md) — the embedded activity log (dev mode only)
+- [build-and-run.md](./build-and-run.md) — the embedded dev-mode activity log

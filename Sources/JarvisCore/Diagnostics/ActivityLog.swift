@@ -6,7 +6,7 @@ import Foundation
 /// `enable(directory:)` is called, `record(_:)` is a no-op and nothing is written.
 ///
 /// This type is UI-free (Foundation only): it generates the page HTML and the per-row JS as plain
-/// strings; the WebView lives in JarvisApp. See wiki/activity-viewer.md.
+/// strings; the WebView lives in JarvisApp. See wiki/build-and-run.md.
 public final class ActivityLog: @unchecked Sendable {
     public static let shared = ActivityLog()
 

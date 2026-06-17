@@ -1,8 +1,9 @@
 import AppKit
 
 /// Menu-bar status item: start/stop, a "Settings…" item, and a session interjection counter.
-/// Exactly two states: ⚪️ stopped and 🟢 running. All settings (API key, overlay appearance, the
-/// dev activity log) live in the unified Settings window, opened via `onOpenSettings`.
+/// Two states, shown as the robot emoji icon: desaturated (black-and-white) when stopped, full
+/// colour when running. All settings (API key, overlay appearance, the dev activity log) live in
+/// the unified Settings window, opened via `onOpenSettings`.
 @MainActor
 final class MenuBarController: NSObject {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -65,9 +66,11 @@ final class MenuBarController: NSObject {
         }
     }
 
-    /// Single source of truth for the status title and the start/stop label.
+    /// Single source of truth for the status icon and the start/stop label.
     private func refreshUI() {
         startStopItem.title = isRunning ? "Stop Jarvis" : "Start Jarvis"
-        statusItem.button?.title = isRunning ? "🟢 Jarvis" : "⚪️ Jarvis"
+        guard let button = statusItem.button else { return }
+        button.image = isRunning ? MenuBarIcon.running : MenuBarIcon.stopped
+        button.title = ""
     }
 }

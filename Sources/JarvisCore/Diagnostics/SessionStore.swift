@@ -4,7 +4,7 @@ import Foundation
 /// Foundation-only and stateless beyond its two URLs. All operations are bounded to immediate
 /// subdirectories of `base` whose name matches the session-id shape, so a stray `--log-dir` or a
 /// malformed persisted filename can't make it touch anything outside the log tree. See
-/// wiki/activity-viewer.md.
+/// wiki/build-and-run.md.
 public struct SessionStore: Sendable {
     public struct Session: Sendable, Equatable {
         public let id: String        // directory name, e.g. "2026-06-16_10-00-00_aaaa"
