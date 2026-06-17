@@ -13,15 +13,21 @@ import JarvisCore
 /// `excludesCurrentProcessAudio = true` drops any audio Jarvis itself plays (precautionary — the
 /// coach is a text overlay today, but it keeps a future TTS path from feeding back in).
 /// Live behavior is validated by the human smoke run (SCK can't be unit-tested without a display).
-final class SystemAudioInput: NSObject, SCStreamOutput, @unchecked Sendable {
+final class SystemAudioInput: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
     private let onPCM: @Sendable (Data) -> Void
+    /// Fired if SCK tears the stream down mid-session (Screen Recording revoked, display change, OS
+    /// error) — the only way to learn the "them" side went deaf, since an idle socket won't fail.
+    /// AppDelegate wires this to the same graceful-degradation path as the socket's terminal failure.
+    var onTerminalFailure: (@Sendable () -> Void)?
     private let sampleQueue = DispatchQueue(label: "jarvis.systemaudio.samples")
     private let lock = NSLock()
     private var stream: SCStream?
     private var stopped = false
     private var started = false   // true once startCapture() has returned (gates a safe stop())
-    /// Built lazily from the first sample buffer's REAL format (typically 48 kHz deinterleaved
-    /// float); `AudioPCM` resamples whatever it is down to the 24 kHz PCM16 wire format.
+    /// Source format + converter, built once from the first sample buffer's REAL format (typically
+    /// 48 kHz deinterleaved float) and reused on every callback — `AudioPCM` resamples whatever it is
+    /// down to the 24 kHz PCM16 wire format. Cached so the hot per-buffer path allocates neither.
+    private var sourceFormat: AVAudioFormat?
     private var converter: AVAudioConverter?
 
     init(onPCM: @escaping @Sendable (Data) -> Void) {
@@ -62,7 +68,9 @@ final class SystemAudioInput: NSObject, SCStreamOutput, @unchecked Sendable {
             config.height = 2
             config.minimumFrameInterval = CMTime(value: 1, timescale: 1)
 
-            let stream = SCStream(filter: filter, configuration: config, delegate: nil)
+            // delegate: self so we hear stream(_:didStopWithError:) — SCK's only signal that the
+            // stream died out-of-band (permission revoked, display change, internal error).
+            let stream = SCStream(filter: filter, configuration: config, delegate: self)
             try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: sampleQueue)
 
             // stop() may race ahead of this slow async startup; only proceed if we're still wanted.
@@ -104,6 +112,21 @@ final class SystemAudioInput: NSObject, SCStreamOutput, @unchecked Sendable {
         s?.stopCapture { _ in }
     }
 
+    // MARK: - SCStreamDelegate
+
+    func stream(_ stream: SCStream, didStopWithError error: Error) {
+        // SCK stopped the stream out-of-band. If we didn't ask for it (stop() sets `stopped`), the
+        // "them" side has gone deaf with no other signal — surface it and degrade gracefully. Mark
+        // stopped so a later stop() is a no-op and we only fire once.
+        lock.lock()
+        if stopped { lock.unlock(); return }
+        stopped = true; self.stream = nil
+        let fire = onTerminalFailure
+        lock.unlock()
+        jlog("Jarvis system audio: capture stopped mid-session (\(error)); 'them' side off, mic still active")
+        fire?()
+    }
+
     // MARK: - SCStreamOutput
 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer,
@@ -111,13 +134,17 @@ final class SystemAudioInput: NSObject, SCStreamOutput, @unchecked Sendable {
         guard type == .audio, CMSampleBufferDataIsReady(sampleBuffer),
               let asbd = sampleBuffer.formatDescription?.audioStreamBasicDescription else { return }
         // The no-copy PCM buffer is only valid inside this closure, so convert synchronously here.
+        // Build the source format + converter once (the format is stable); reuse them every callback.
         let data: Data? = try? sampleBuffer.withAudioBufferList { abl, _ in
-            guard let format = AVAudioFormat(standardFormatWithSampleRate: asbd.mSampleRate,
-                                             channels: asbd.mChannelsPerFrame),
-                  let pcm = AVAudioPCMBuffer(pcmFormat: format, bufferListNoCopy: abl.unsafePointer)
+            if converter == nil {
+                guard let format = AVAudioFormat(standardFormatWithSampleRate: asbd.mSampleRate,
+                                                 channels: asbd.mChannelsPerFrame) else { return nil }
+                sourceFormat = format
+                converter = AVAudioConverter(from: format, to: AudioPCM.target)
+            }
+            guard let sourceFormat, let converter,
+                  let pcm = AVAudioPCMBuffer(pcmFormat: sourceFormat, bufferListNoCopy: abl.unsafePointer)
             else { return nil }
-            if converter == nil { converter = AVAudioConverter(from: format, to: AudioPCM.target) }
-            guard let converter else { return nil }
             return AudioPCM.pcm16Data(from: pcm, using: converter)
         }
         if let data { onPCM(data) }

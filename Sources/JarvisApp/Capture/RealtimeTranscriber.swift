@@ -324,7 +324,18 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
             self.lock.lock(); let isStopped = self.stopped; self.lock.unlock()
             guard !isStopped else { return }   // don't drive a coaching turn on a torn-down pipeline
             let quiet = self.transcript.silenceDuration(now: self.clock.now() - self.sessionStart)
-            self.onSilence?(max(interval, quiet))
+            // Only nudge on GENUINE conversational silence. The transcript is shared with the "them"
+            // (system-audio) socket, so `quiet` reflects the last line from EITHER side. If the other
+            // party spoke within this interval the user isn't stuck — they're listening — so suppress
+            // the nudge and restart the backoff, so a fresh quiet stretch begins at the base interval
+            // once the conversation actually goes quiet. (Mic speech resets via resetSilenceTimer; this
+            // covers the them side, which only feeds the shared transcript and doesn't reset the timer.)
+            guard quiet >= interval else {
+                self.silenceBackoff.reset()
+                self.armSilenceTimer()
+                return
+            }
+            self.onSilence?(quiet)
             self.armSilenceTimer()             // re-arm with the next (backed-off) interval
         }
         lock.unlock()

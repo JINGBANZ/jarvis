@@ -138,6 +138,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let audio = AudioInput { [weak transcriber] pcm in transcriber?.sendAudio(pcm) }
         let systemAudio = SystemAudioInput { [weak themTranscriber] pcm in themTranscriber?.sendAudio(pcm) }
+        // If the SCStream dies mid-session (permission revoked, display change), degrade the same way
+        // as a "them" socket failure: drop the system-audio side, keep the mic coaching.
+        systemAudio.onTerminalFailure = onThemTerminalFailure
         self.transcriber = transcriber
         self.themTranscriber = themTranscriber
         self.audio = audio

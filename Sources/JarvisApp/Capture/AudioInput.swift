@@ -21,7 +21,13 @@ final class AudioInput: @unchecked Sendable {
         // same protection every reference impl applies to its mic. Best-effort: if the audio route
         // can't support it, we log and fall back to a plain tap rather than failing to capture.
         do { try input.setVoiceProcessingEnabled(true) }
-        catch { jlog("Jarvis audio: voice processing (AEC) unavailable, using raw mic: \(error)") }
+        catch {
+            // Loud on purpose: without AEC and without headphones, the other side's voice will leak
+            // into the mic and be transcribed a second time on the "me" socket, mis-attributing their
+            // words to the user. Recommend headphones in this state.
+            jlog("⚠️ Jarvis audio: echo cancellation (AEC) unavailable — USE HEADPHONES, or the other "
+                 + "side's audio may be double-transcribed as you. Falling back to raw mic: \(error)")
+        }
         let inFormat = input.outputFormat(forBus: 0)
         guard let converter = AVAudioConverter(from: inFormat, to: AudioPCM.target) else {
             jlog("Jarvis audio: cannot create converter"); return
