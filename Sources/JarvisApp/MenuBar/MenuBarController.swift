@@ -2,7 +2,8 @@ import AppKit
 import JarvisCore
 
 /// Menu-bar status item: start/stop, API-key entry, and a session interjection counter.
-/// Exactly two states: ⚪️ stopped and 🟢 running.
+/// Exactly two states, shown as the robot emoji: desaturated (black-and-white) when stopped,
+/// full colour when running.
 @MainActor
 final class MenuBarController: NSObject {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -82,10 +83,12 @@ final class MenuBarController: NSObject {
         }
     }
 
-    /// Single source of truth for the status title and the start/stop label.
+    /// Single source of truth for the status icon and the start/stop label.
     private func refreshUI() {
         startStopItem.title = isRunning ? "Stop Jarvis" : "Start Jarvis"
-        statusItem.button?.title = isRunning ? "🟢 Jarvis" : "⚪️ Jarvis"
+        guard let button = statusItem.button else { return }
+        button.image = isRunning ? MenuBarIcon.running : MenuBarIcon.stopped
+        button.title = ""
     }
 
     // MARK: - API key dialog
@@ -145,8 +148,9 @@ final class MenuBarController: NSObject {
     @objc private func cancelKeyDialog() { NSApp.stopModal(withCode: .cancel) }
 
     /// Briefly show a checkmark in the menu-bar title so the user sees the key save took effect,
-    /// then restore the normal ⚪️/🟢 state.
+    /// then restore the normal robot icon.
     private func flashConfirmation() {
+        statusItem.button?.image = nil
         statusItem.button?.title = "✓ Key saved"
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.refreshUI() }
     }
