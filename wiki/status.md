@@ -64,7 +64,7 @@ A compact log — the *rationale* for each lives in the linked design page, not 
 
 - Minimum macOS version target. Build host is macOS 26.5; ScreenCaptureKit screen+audio capture
   needs macOS 13+. Target **macOS 14+** unless a needed API forces higher.
-- The **live Realtime transcription wiring** in `Sources/JarvisApp/RealtimeTranscriber.swift` is the
+- The **live Realtime transcription wiring** in `Sources/JarvisApp/Capture/RealtimeTranscriber.swift` is the
   one thing untested headlessly — the connect/config follow current docs but the bare-WebSocket
   connect for a transcription-only session is unverified until the live run (see Next Action).
 
