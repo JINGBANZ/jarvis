@@ -106,7 +106,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     /// while it's the active sink — `.serialized` does NOT prevent that (swift-testing's serialization
     /// doesn't isolate a test from its peers). Robustness instead comes from: (1) selecting the shot
     /// by exact byte-match to our fixture, so another test's screenshot can't be mistaken for ours,
-    /// and (2) writeHTML() re-rendering the full entry list, so our row survives interleaved writes.
+    /// and (2) the append-only `jarvis-activity.jsonl`, so our line survives interleaved writes.
     /// `disable()` in defer resets the singleton afterwards.
     @Test func screenshotLandsInActivityLogAsValidJpeg() async throws {
         let dir = URL(fileURLWithPath: NSTemporaryDirectory())
@@ -129,12 +129,12 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
         await driver.handleTrigger(.turnEnd)
 
-        // Reading htmlURL drains the activity log's serial write queue (a sync barrier after the
-        // async record() calls), so everything is on disk before we assert.
-        let html = try String(contentsOf: try #require(ActivityLog.shared.htmlURL), encoding: .utf8)
-        #expect(html.contains("looking at your screen"))   // the capture line
-        #expect(html.contains("<img src=\"shot-"))          // rendered thumbnail
-        #expect(html.contains("target=\"_blank\""))         // click → full image in a new tab
+        // attach() runs on the activity log's serial queue (a sync barrier after the async record()
+        // calls), so everything is persisted before we assert.
+        _ = ActivityLog.shared.attach { _ in }
+        let jsonl = try String(contentsOf: dir.appendingPathComponent("jarvis-activity.jsonl"), encoding: .utf8)
+        #expect(jsonl.contains("looking at your screen"))   // the capture line
+        #expect(jsonl.contains("shot-"))                     // line references the saved screenshot
 
         // Find OUR screenshot by exact byte-match to the fixture (not just "first valid JPEG"), so a
         // peer test sharing the singleton can't be mistaken for ours. This proves the capture

@@ -23,6 +23,11 @@ re-deriving anything.
 5. **Match the house style:** lowercase-hyphenated filenames; blockquote preamble; H2/H3 headers;
    tables for enumerable facts; inline code for paths/identifiers; cross-link with `[text](./file.md)`.
 6. **No secrets, ever** — not in pages, not in examples.
+7. **The wiki holds final state, not intermediate scaffolding.** Persist the design and the
+   decisions; do **not** keep build-time artifacts like step-by-step implementation plans once the
+   work has shipped — fold anything still true into the relevant design page and delete the plan.
+   (Brainstorm/plan docs are fine to write *while building*; they just don't live in the wiki
+   afterward.)
 
 ## Layout
 

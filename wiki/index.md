@@ -14,9 +14,11 @@
 - **[architecture.md](./architecture.md)** — the vision, the harness loop, components, data flow, safety, and design principles.
 - **[specification.md](./specification.md)** — the buildable spec: tool schemas, the coach prompt, config, pseudocode, latency budget, and the self-verification plan. This is the page another agent should be able to one-shot from.
 - **[sandbox.md](./sandbox.md)** — the security/isolation model (file-access restriction, entitlements, egress).
+- **[overlay-invisibility.md](./overlay-invisibility.md)** — how the coaching overlay stays out of screen recordings and screen shares (the `sharingType = .none` mechanism), with empirical verification on macOS 26.5 and the limits.
 - **[landscape-survey.md](./landscape-survey.md)** — every tool and product we tried or evaluated, and how each measured up. ("What I tried.")
 - **[fork-evaluation.md](./fork-evaluation.md)** — code-level evaluation of open-source apps as a fork base for the PoC, and why they're all Electron/Tauri rather than native Swift.
 - **[fix-responsiveness-vad-stop.md](./fix-responsiveness-vad-stop.md)** — root-cause analysis (verified from five angles) and fix plan for the first live smoke run's issues: direct-address responsiveness, mid-sentence turn-detection, and noisy Stop.
+- **[activity-viewer.md](./activity-viewer.md)** — design for the dev-mode activity viewer: an in-app `WKWebView` live log window with a screenshot lightbox and browsable session history (replaces the `file://` + meta-refresh HTML viewer).
 
 ## Key Decisions
 
