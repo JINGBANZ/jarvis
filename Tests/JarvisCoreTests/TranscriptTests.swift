@@ -51,6 +51,17 @@ import Testing
         #expect(rendered.upTo == 2)   // the count rendered up to, from the same snapshot
     }
 
+    /// The conversation-mode delta (renderFrom) must use the same spoken-order rendering as the full
+    /// window, so the brain never sees the two paths disagree. `them` (at:5) is appended AFTER `me`
+    /// (at:8), so this fails if renderFrom rendered in append order.
+    @Test func renderFromOrdersBySpokenTime() {
+        let t = RollingTranscript()
+        t.append(.init(speaker: .me, text: "two pointers", at: 8))
+        t.append(.init(speaker: .them, text: "reverse a list?", at: 5))
+        let text = t.renderFrom(index: 0).text
+        #expect(text.range(of: "them:")!.lowerBound < text.range(of: "me:")!.lowerBound)
+    }
+
     @Test func renderFromEmptyWhenCaughtUp() {
         let t = RollingTranscript()
         t.append(.init(speaker: .me, text: "only", at: 10))

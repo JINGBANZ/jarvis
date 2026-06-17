@@ -46,19 +46,12 @@ public final class RollingTranscript: @unchecked Sendable {
         return max(0, now - last)
     }
 
-    /// A timestamped window: lines within `seconds` of `now`, each `[mm:ss] speaker: text`.
-    /// Sorted by timestamp: the two transcription sockets (mic/"me", system audio/"them") append
-    /// independently and a slow utterance can complete — and so be appended — after a later one, so
-    /// insertion order isn't time order. We sort by `.at` (stable on ties via the original index) so
-    /// the coach always sees the conversation in the order it was actually spoken.
+    /// A timestamped window: lines within `seconds` of `now`, each `[mm:ss] speaker: text`,
+    /// rendered in spoken order (see `render`).
     public func renderWindow(seconds: TimeInterval, now: TimeInterval) -> String {
         lock.lock(); let snapshot = lines; lock.unlock()
         let cutoff = now - seconds
-        return snapshot.enumerated()
-            .filter { $0.element.at >= cutoff }
-            .sorted { $0.element.at != $1.element.at ? $0.element.at < $1.element.at : $0.offset < $1.offset }
-            .map { "[\(Self.stamp($0.element.at))] \($0.element.speaker.rawValue): \($0.element.text)" }
-            .joined(separator: "\n")
+        return Self.render(snapshot.filter { $0.at >= cutoff })
     }
 
     /// Lines from `index` onward, formatted like `renderWindow`, AND the line count rendered up to —
@@ -68,10 +61,20 @@ public final class RollingTranscript: @unchecked Sendable {
     public func renderFrom(index: Int) -> (text: String, upTo: Int) {
         lock.lock(); let snapshot = lines; lock.unlock()
         let start = min(max(0, index), snapshot.count)
-        let text = snapshot[start...]
-            .map { "[\(Self.stamp($0.at))] \($0.speaker.rawValue): \($0.text)" }
+        // Same spoken-order rendering as renderWindow, so the conversation-mode delta and the full
+        // window agree on ordering (the two sockets can append out of time order).
+        return (Self.render(snapshot[start...]), snapshot.count)
+    }
+
+    /// Render lines as `[mm:ss] speaker: text`, one per line, in SPOKEN order. The two transcription
+    /// sockets (mic/"me", system audio/"them") append independently and a slow utterance can complete
+    /// — and so be appended — after a later one, so insertion order isn't time order. We sort by `.at`
+    /// (stable on ties via the original index) so the coach always sees the order things were said.
+    private static func render<S: Sequence>(_ lines: S) -> String where S.Element == TranscriptLine {
+        lines.enumerated()
+            .sorted { $0.element.at != $1.element.at ? $0.element.at < $1.element.at : $0.offset < $1.offset }
+            .map { "[\(stamp($0.element.at))] \($0.element.speaker.rawValue): \($0.element.text)" }
             .joined(separator: "\n")
-        return (text, snapshot.count)
     }
 
     static func stamp(_ t: TimeInterval) -> String {

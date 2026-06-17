@@ -33,9 +33,9 @@ enum AudioPCM {
 }
 
 /// One-shot flag for the AVAudioConverter input block (avoids mutating a captured var).
-final class ConvertOnce: @unchecked Sendable { var consumed = false }
+private final class ConvertOnce: @unchecked Sendable { var consumed = false }
 
-extension AVAudioPCMBuffer {
+private extension AVAudioPCMBuffer {
     /// Raw little-endian PCM16 bytes for the filled frames.
     func int16Data() -> Data? {
         guard let ch = int16ChannelData else { return nil }

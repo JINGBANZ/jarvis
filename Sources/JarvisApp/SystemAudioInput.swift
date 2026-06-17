@@ -19,6 +19,7 @@ final class SystemAudioInput: NSObject, SCStreamOutput, @unchecked Sendable {
     private let lock = NSLock()
     private var stream: SCStream?
     private var stopped = false
+    private var started = false   // true once startCapture() has returned (gates a safe stop())
     /// Built lazily from the first sample buffer's REAL format (typically 48 kHz deinterleaved
     /// float); `AudioPCM` resamples whatever it is down to the 24 kHz PCM16 wire format.
     private var converter: AVAudioConverter?
@@ -67,6 +68,10 @@ final class SystemAudioInput: NSObject, SCStreamOutput, @unchecked Sendable {
             // stop() may race ahead of this slow async startup; only proceed if we're still wanted.
             guard claim(stream) else { return }
             try await stream.startCapture()
+            // SCStream requires startCapture() to COMPLETE before stopCapture() — they must not run
+            // concurrently. So stop() defers the actual teardown of a not-yet-started stream to here:
+            // if stop() raced in during the await above, we stop the stream now, after start finished.
+            if markStartedOrShouldStop() { stream.stopCapture { _ in }; return }
             jlog("Jarvis system audio: capturing 'them' side via ScreenCaptureKit")
         } catch {
             jlog("Jarvis system audio: capture unavailable (\(error)); mic ('me') side still active")
@@ -82,8 +87,20 @@ final class SystemAudioInput: NSObject, SCStreamOutput, @unchecked Sendable {
         return true
     }
 
+    /// Called once startCapture() has returned. Marks the stream live so stop() may tear it down.
+    /// Returns true if stop() raced in DURING startup — in that case stop() deliberately skipped the
+    /// teardown (the stream wasn't started yet), so this continuation must do it instead.
+    private func markStartedOrShouldStop() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        if stopped { return true }
+        started = true
+        return false
+    }
+
     func stop() {
-        lock.lock(); stopped = true; let s = stream; stream = nil; lock.unlock()
+        // Only tear down a stream that has finished starting; if it's still mid-startCapture, leave
+        // teardown to the startup continuation (markStartedOrShouldStop) so start/stop stay sequenced.
+        lock.lock(); stopped = true; let s = started ? stream : nil; stream = nil; lock.unlock()
         s?.stopCapture { _ in }
     }
 

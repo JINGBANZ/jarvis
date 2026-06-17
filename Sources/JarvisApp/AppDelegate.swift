@@ -96,9 +96,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Route turns through TurnTaskBox so Stop can cancel an in-flight one. Concurrent triggers are
         // coalesced inside CoachDriver (the running turn batches them in), so we don't cancel here.
         let turns = TurnTaskBox()
-        // Reconnect gave up (bad key / quota): stop cleanly and correct the menu instead of lying 🟢.
-        let onTerminalFailure: @Sendable () -> Void = { [weak self] in
+        // Mic socket gave up (bad key / quota): coaching can't continue, so stop cleanly and correct
+        // the menu instead of lying 🟢.
+        let onMicTerminalFailure: @Sendable () -> Void = { [weak self] in
             Task { @MainActor in self?.stop(); self?.menuBar.setRunning(false) }
+        }
+        // "Them" socket gave up: degrade gracefully — tear down ONLY the system-audio side and keep
+        // the mic running (matches the SystemAudioInput contract). The menu stays 🟢.
+        let onThemTerminalFailure: @Sendable () -> Void = { [weak self] in
+            Task { @MainActor in
+                self?.themTranscriber?.stop(); self?.themTranscriber = nil
+                self?.systemAudio?.stop(); self?.systemAudio = nil
+                jlog("Jarvis: 'them' (system audio) socket gave up — mic side still active")
+            }
         }
 
         // "Me" side: the mic. Drives turn-end / direct-address / silence ("are you stuck?").
@@ -111,7 +121,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         transcriber.onTurnEnd = { turns.run { await driver.handleTrigger(.turnEnd) } }
         transcriber.onDirectAddress = { turns.run { await driver.handleTrigger(.directAddress) } }
         transcriber.onSilence = { secs in turns.run { await driver.handleTrigger(.silence(secondsQuiet: secs)) } }
-        transcriber.onTerminalFailure = onTerminalFailure
+        transcriber.onTerminalFailure = onMicTerminalFailure
 
         // "Them" side: system audio (remote participants). Drives turn-end / direct-address so Jarvis
         // can react when the other side finishes (e.g. asks you something), but NOT silence — the
@@ -124,7 +134,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                                   maxBufferedAudioSeconds: config.maxBufferedAudioSeconds)
         themTranscriber.onTurnEnd = { turns.run { await driver.handleTrigger(.turnEnd) } }
         themTranscriber.onDirectAddress = { turns.run { await driver.handleTrigger(.directAddress) } }
-        themTranscriber.onTerminalFailure = onTerminalFailure
+        themTranscriber.onTerminalFailure = onThemTerminalFailure
 
         let audio = AudioInput { [weak transcriber] pcm in transcriber?.sendAudio(pcm) }
         let systemAudio = SystemAudioInput { [weak themTranscriber] pcm in themTranscriber?.sendAudio(pcm) }

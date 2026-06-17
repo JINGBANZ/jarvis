@@ -306,6 +306,9 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
 
     /// Fires the "maybe stuck" silence trigger after `silenceTimeout` of no new transcription.
     private func resetSilenceTimer() {
+        // The "them" transcriber leaves onSilence nil (only the mic owns the "are you stuck?" prompt);
+        // skip arming a timer that would just no-op, avoiding per-utterance main-queue/Timer churn.
+        guard onSilence != nil else { return }
         let timeout = silenceTimeout
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
