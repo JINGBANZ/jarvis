@@ -7,6 +7,15 @@ private func http(_ code: Int, headers: [String: String]? = nil) -> HTTPURLRespo
                     statusCode: code, httpVersion: nil, headerFields: headers)!
 }
 
+/// Build a Responses body carrying one `speak` function_call whose raw `arguments` string is exactly
+/// `arguments`. JSONSerialization handles the wire-escaping, so the test can pass `{}` / `not json`
+/// verbatim without hand-escaping quotes.
+private func speakResponseBody(arguments: String) -> Data {
+    let item: [String: Any] = ["type": "function_call", "id": "f", "call_id": "c",
+                               "name": "speak", "arguments": arguments]
+    return try! JSONSerialization.data(withJSONObject: ["output": [item]])
+}
+
 @Suite struct OpenAIBrainClientTests {
     /// The model returns the overlay lines already split, in a `lines` array — so a line that contains
     /// internal periods/code (e.g. `Array.from(...)`) survives intact as ONE element. This is the
@@ -43,6 +52,20 @@ private func http(_ code: Int, headers: [String: String]? = nil) -> HTTPURLRespo
                                        send: { _ in (Data(json.utf8), http(200)) })
         let resp = try await client.respond(messages: [.user("hi")], tools: coachTools)
         #expect(resp.toolCalls.isEmpty)
+    }
+
+    /// `strict:true` makes malformed `speak` arguments unlikely, but the decode must still degrade
+    /// gracefully to an EMPTY `lines` array (never nil/throw/dropped call) for every off-contract
+    /// shape: a missing key, a non-array value, an explicitly empty array, or broken JSON. Pin that
+    /// fallback so a future refactor can't silently change it.
+    @Test func speakDecodeFallsBackToEmptyLinesOnOffContractArguments() async throws {
+        for args in [#"{}"#, #"{"lines":"hi"}"#, #"{"lines":[]}"#, "not json"] {
+            let body = speakResponseBody(arguments: args)
+            let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+                                           send: { _ in (body, http(200)) })
+            let resp = try await client.respond(messages: [.user("hi")], tools: coachTools)
+            #expect(resp.toolCalls == [.speak(callId: "c", lines: [])], "args=\(args)")
+        }
     }
 
     /// A token-truncated response (status=incomplete, max_output_tokens) must surface its reason

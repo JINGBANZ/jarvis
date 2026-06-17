@@ -151,6 +151,18 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(perms?.int16Value == 0o600)
     }
 
+    /// A `speak` with an empty `lines` array (the decode fallback, or a model returning []) is passed
+    /// straight through: the real overlay no-ops on it, but the turn still reports `.spoke` and closes
+    /// the tool call. Pin this so the empty-speak contract stays intentional, not incidental.
+    @Test func emptySpeakLinesStillReportsSpoke() async {
+        let clock = ManualClock(now: 0)
+        let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s", lines: [])])])
+        let overlay = FakeOverlay()
+        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: overlay, clock: clock)
+        #expect(await driver.handleTrigger(.turnEnd) == .spoke)
+        #expect(overlay.rendered == [[]])
+    }
+
     @Test func staySilentRendersNothing() async {
         let clock = ManualClock(now: 0)
         let brain = ScriptedBrain(script: [.init(toolCalls: [])])
