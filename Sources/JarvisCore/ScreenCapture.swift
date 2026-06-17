@@ -7,7 +7,7 @@ public protocol ScreenCapturing: Sendable {
 
 /// Uses the built-in `screencapture -x -t jpg` (silent). The main display only.
 /// NOTE: excluding Jarvis's own overlay window is handled by the overlay being a non-capturable
-/// panel (sharingType = .none) in JarvisApp; see OverlayPanel and wiki/overlay-invisibility.md
+/// panel (sharingType = .none) in JarvisOverlay; see OverlayPanel and wiki/overlay-invisibility.md
 /// (verified: the overlay never appears in this CLI's output on macOS 26.5).
 public struct ScreenCaptureCLI: ScreenCapturing {
     public init() {}

@@ -62,22 +62,24 @@ Full design: [`wiki/architecture.md`](./wiki/architecture.md).
 │   │   ├── Config / Clock / Trigger / ToolDefs / Secrets / ...
 │   │   ├── ActivityLog.swift      # dev-mode activity model (rows pushed to the viewer)
 │   │   └── SessionStore.swift     # persisted dev-session history (JSONL + screenshots)
+│   ├── JarvisOverlay/         # the on-screen tip overlay, as its own library (so tests can import it)
+│   │   └── OverlayPanel.swift     # NSPanel overlay, excluded from screen capture
 │   └── JarvisApp/             # the macOS app shell — the native, OS-bound parts
 │       ├── main.swift / AppDelegate.swift
 │       ├── MenuBarController.swift # menu-bar item, Start/Stop, key entry
 │       ├── AudioInput.swift        # mic + system-audio capture
 │       ├── RealtimeTranscriber.swift
-│       ├── OverlayPanel.swift      # the on-screen tip overlay (NSPanel)
 │       ├── ActivityViewer.swift    # dev-mode in-app WKWebView live viewer
 │       └── Permissions.swift       # TCC priming (Mic, Screen Recording)
-├── Tests/JarvisCoreTests/     # unit + offline-pipeline tests for the harness
-├── Resources/Info.plist       # bundle id, usage strings
+├── Tests/                     # JarvisCoreTests, JarvisOverlayTests, JarvisViewerTests
+├── Resources/Info.plist       # bundle id, mic usage string
 ├── scripts/                   # build / run / test (see below)
 └── wiki/                      # design & decision docs (single source of truth)
 ```
 
 The split is deliberate: **`JarvisCore`** holds all the logic and is unit-tested on any machine;
-**`JarvisApp`** holds the macOS-only glue (capture, overlay, permissions) verified by a live run.
+**`JarvisOverlay`** is the overlay as its own library so tests can import it; **`JarvisApp`** holds
+the macOS-only glue (capture, mic, permissions) verified by a live run.
 
 ## Scripts
 

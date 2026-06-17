@@ -11,12 +11,13 @@ The Command Line Tools SDK (`/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk
 ScreenCaptureKit, AVFoundation, AppKit, SwiftUI, Vision, CoreAudio, and Security — everything Jarvis
 needs — so a SwiftUI + ScreenCaptureKit binary builds with plain `swift build`. No `.xcodeproj`.
 
-- **Two-target split (load-bearing for testability):** `JarvisCore` holds all pure, deterministic
-  logic behind protocols (config, transcript, silence backoff, the coach tool-loop, the OpenAI
-  client, screen-capture wrapper) and is fully unit-tested with mocks on **any** machine — no Mac UI,
-  key, or permissions needed. `JarvisApp` is the thin executable that wires `JarvisCore` to the
-  side-effectful macOS frameworks (NSPanel overlay, AVFoundation mic, ScreenCaptureKit, the realtime
-  websocket, the menu bar). The split is what lets most of the system be verified headless.
+- **Three-target split (load-bearing for testability):** `JarvisCore` holds the pure, deterministic
+  logic behind protocols (config, transcript, the coach loop, the OpenAI client, …) and is
+  unit-tested with mocks on **any** machine — no Mac UI, key, or permissions needed. `JarvisOverlay`
+  is a small library holding just the `NSPanel` overlay, split out so `JarvisOverlayTests` can import
+  it to verify screen-capture invisibility headlessly. `JarvisApp` is the thin executable that wires
+  the other two to the side-effectful macOS frameworks (mic, ScreenCaptureKit, the realtime websocket,
+  the menu bar). That split is what lets most of the system be verified headless.
 - **Tests use swift-testing, not XCTest.** `import XCTest` fails with "no such module" under
   CLT-only. Run the suite via **`./scripts/run-tests.sh`**, which adds the swift-testing framework
   search/rpath flags that plain `swift test` lacks CLT-only. (One sharp edge: a direct
@@ -25,9 +26,8 @@ needs — so a SwiftUI + ScreenCaptureKit binary builds with plain `swift build`
 
 ## Packaging & signing — why permission grants persist
 
-The executable is assembled into a `.app` bundle **by hand**: `Contents/MacOS/<bin>` +
-`Contents/Info.plist` carrying the usage strings and the stable bundle id `com.jarvis.coach`.
-`scripts/build-app.sh` does this.
+`scripts/build-app.sh` assembles the executable into a hand-built `.app` bundle (the bundle layout
+and the stable bundle id live in the script and `Resources/Info.plist`).
 
 **Permission persistence is a signing problem.** macOS TCC keys a Screen-Recording/Microphone grant
 to **code signature + bundle id + bundle path**. An ad-hoc signature changes every build, so macOS

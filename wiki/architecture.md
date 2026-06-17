@@ -73,7 +73,7 @@ moments the model judges worthwhile.
 | **AudioInput** | Capture mic and (optionally) system audio; stream to the Transcriber. | AVFoundation (mic); ScreenCaptureKit (system audio). |
 | **Transcriber** | Maintain a rolling, speaker-labeled, **timestamped** transcript; emit turn-end events and backing-off silence checks (with quiet duration). | `gpt-4o-transcribe` (Realtime API; tuned `server_vad`). |
 | **CoachDriver** | The event loop. On every trigger, call the brain with the transcript + timing context and tools, route tool calls. No cooldown/rate cap — restraint is the model's. | `gpt-5.5` (vision + tool-use). |
-| **ScreenTool** | Fulfill `capture_screen`: take a silent screenshot of the active display, excluding the overlay window. | macOS `screencapture` CLI / ScreenCaptureKit. |
+| **ScreenTool** | Fulfill `capture_screen`: take a silent screenshot of the active display, excluding the overlay window. | macOS `screencapture` CLI. |
 | **Overlay** | Render `speak` output: ≤3 sentences, ~5s each, non-activating, always-on-top, excluded from capture. | AppKit NSPanel. |
 | **MenuBar** | Manual **Start/Stop** of the pipeline (two states: ⚪️ stopped / 🟢 running — no auto-start), status indicator, one-time API-key entry. | AppKit menu-bar item; Keychain for the key. |
 
@@ -101,8 +101,10 @@ rather than a per-turn screenshot.
 - **Per-session memory — the Conversations API.** The coach needs to remember its *own* prior
   replies (the transcript only holds user speech), so the brain opens one server-side conversation
   per Start (`store:true`) and sends only the **new** transcript lines each turn — the server holds
-  the rest. The retention tradeoff this creates (transcript + screenshots retained ~30 days at
-  OpenAI) is a deliberate quality-over-privacy choice, documented in [sandbox.md](./sandbox.md).
+  the rest. (If the conversation can't be created, `CoachDriver` falls back to a **stateless** mode
+  that re-sends a recent transcript *window* every turn.) The retention tradeoff this creates
+  (transcript + screenshots retained ~30 days at OpenAI) is a deliberate quality-over-privacy choice,
+  documented in [sandbox.md](./sandbox.md).
 - **Transcription — `gpt-4o-transcribe` over the GA Realtime API** with **tuned `server_vad`** (not
   `semantic_vad`, which is reported flaky in transcription-only mode — it can stop emitting
   `…transcription.completed` entirely). Turn-end fires on `…transcription.completed`, plus a
@@ -111,8 +113,10 @@ rather than a per-turn screenshot.
 ### Latency
 
 Target: **turn-end → first overlay sentence < 2s.** It holds because transcription is continuous
-(no STT latency at trigger time), most turns are text-only (no `capture_screen`), and the response
-is streamed so the first sentence renders before the third is generated.
+(no STT latency at trigger time) and most turns are text-only (no `capture_screen`), so the brain
+call is a single short round-trip. The overlay then reveals the already-returned sentences one at a
+time (~5s each), so the first tip appears immediately — note the brain response itself is **not**
+streamed (one buffered request; the overlay just paces the display).
 
 ### Resilience
 

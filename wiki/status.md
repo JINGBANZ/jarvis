@@ -82,6 +82,7 @@ The headless build is done. Remaining is the **human smoke run** — build, run,
    excluded from the screenshot; while you talk steadily Jarvis stays mostly quiet (model restraint,
    not a rate cap) and **Stop Jarvis** halts the pipeline. (Run via `./scripts/build-app.sh --dev`,
    then open the activity viewer from the menu bar to watch each step.)
-4. **Only remaining live unknown:** the GA Realtime transcription-session wiring in
-   `RealtimeTranscriber.swift` — if transcription doesn't start, the file documents the
-   `?model=gpt-realtime` fallback to try.
+4. **Only remaining live unknown:** the bare-WebSocket connect for a transcription-only Realtime
+   session. The connect contract (`?intent=transcription`, the `session.update` payload) lives in
+   `RealtimeSession.swift`; if the live connect fails, that's the file to adjust (e.g. swap
+   `transcriptionModel` in `Config.swift`).
