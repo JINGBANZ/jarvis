@@ -2,9 +2,13 @@ import Foundation
 
 /// All tunables from specification.md §5. Plain values; tune freely.
 public struct Config: Sendable {
+    /// Base quiet interval before the first proactive "are you stuck?" silence check. Subsequent
+    /// checks back off exponentially (see `silenceMaxIntervalSeconds` and `SilenceBackoff`); any
+    /// speech resets to this base.
     public var silenceTimeoutSeconds: TimeInterval
-    public var cooldownSeconds: TimeInterval
-    public var maxInterjectionsPerMinute: Int
+    /// Upper bound on the silence-check interval as it backs off, so a long silence still gets an
+    /// occasional gentle check rather than going dark forever.
+    public var silenceMaxIntervalSeconds: TimeInterval
     public var transcriptWindowSeconds: TimeInterval
     public var sentenceDisplaySeconds: TimeInterval
     public var maxSentences: Int
@@ -26,18 +30,14 @@ public struct Config: Sendable {
     /// window are merged into one coaching trigger, so even residual VAD fragmentation doesn't drive
     /// multiple brain calls for one spoken sentence.
     public var turnDebounceSeconds: TimeInterval
-    /// A looser per-minute ceiling for direct-address replies (which bypass the normal cooldown), so
-    /// a stuck/false-positive wake match still can't spam the overlay.
-    public var maxDirectAddressesPerMinute: Int
     /// How many seconds of mic audio to buffer while the realtime socket is down, flushed into the
     /// new session on reconnect so a mid-sentence drop isn't lost. Capped so a long outage can't grow
     /// memory without bound (the oldest audio is evicted past the cap).
     public var maxBufferedAudioSeconds: TimeInterval
 
     public init(
-        silenceTimeoutSeconds: TimeInterval = 8,
-        cooldownSeconds: TimeInterval = 12,
-        maxInterjectionsPerMinute: Int = 4,
+        silenceTimeoutSeconds: TimeInterval = 30,
+        silenceMaxIntervalSeconds: TimeInterval = 240,
         transcriptWindowSeconds: TimeInterval = 90,
         sentenceDisplaySeconds: TimeInterval = 5,
         maxSentences: Int = 3,
@@ -46,12 +46,10 @@ public struct Config: Sendable {
         transcriptionModel: String = "gpt-4o-transcribe",
         vadSilenceDurationMs: Int = 1000,
         turnDebounceSeconds: TimeInterval = 0.4,
-        maxDirectAddressesPerMinute: Int = 8,
         maxBufferedAudioSeconds: TimeInterval = 60
     ) {
         self.silenceTimeoutSeconds = silenceTimeoutSeconds
-        self.cooldownSeconds = cooldownSeconds
-        self.maxInterjectionsPerMinute = maxInterjectionsPerMinute
+        self.silenceMaxIntervalSeconds = silenceMaxIntervalSeconds
         self.transcriptWindowSeconds = transcriptWindowSeconds
         self.sentenceDisplaySeconds = sentenceDisplaySeconds
         self.maxSentences = maxSentences
@@ -60,7 +58,6 @@ public struct Config: Sendable {
         self.transcriptionModel = transcriptionModel
         self.vadSilenceDurationMs = vadSilenceDurationMs
         self.turnDebounceSeconds = turnDebounceSeconds
-        self.maxDirectAddressesPerMinute = maxDirectAddressesPerMinute
         self.maxBufferedAudioSeconds = maxBufferedAudioSeconds
     }
 

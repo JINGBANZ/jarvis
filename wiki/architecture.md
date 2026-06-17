@@ -49,12 +49,14 @@ moments the model judges worthwhile.
 ### The turn
 
 1. The Transcriber emits a **turn-end** event (`gpt-4o-transcribe` semantic VAD — "the speaker
-   finished a thought") or a **silence-timeout** fires (you've gone quiet, maybe stuck). The
-   silence event carries *how long* you've been quiet.
-2. The CoachDriver checks its guardrails (mute? within cooldown? under the rate cap?). If
-   blocked, it does nothing.
-3. Otherwise it calls **`gpt-5.5`** with the coach system prompt, the recent **timestamped**
-   transcript window, the timing context (seconds silent, time on the problem), and the tool set
+   finished a thought") or a **silence check** fires (you've gone quiet, maybe stuck). The silence
+   check carries *how long* you've been quiet and backs off across a long silence (e.g. 30s, 60s,
+   120s, …), resetting on speech.
+2. The CoachDriver calls the brain on **every** trigger — there is no cooldown, rate cap, or
+   wake-word gate. Whether to speak (and whether the user just addressed Jarvis) is the model's
+   call, governed by the system prompt; the only hard gate is the user's Start/Stop.
+3. It calls **`gpt-5.5`** with the coach system prompt, the recent **timestamped** transcript
+   window, the timing context (seconds silent, time on the problem), and the tool set
    `[capture_screen, speak]`. The timing is what lets the model tell "thinking" from "stuck."
 4. The model may call `capture_screen`. The harness fulfills it (a silent screenshot) and
    returns the image into the conversation. The model may now reason over what's on screen.
@@ -66,8 +68,8 @@ moments the model judges worthwhile.
 | Component | Responsibility | Built on (borrowed) |
 |---|---|---|
 | **AudioInput** | Capture mic and (optionally) system audio; stream to the Transcriber. | AVFoundation (mic); ScreenCaptureKit (system audio). |
-| **Transcriber** | Maintain a rolling, speaker-labeled, **timestamped** transcript; emit turn-end events and silence events (with quiet duration). | `gpt-4o-transcribe` (latest realtime model; semantic VAD). |
-| **CoachDriver** | The event loop. On triggers, enforce guardrails, call the brain with the transcript + timing context and tools, route tool calls. | `gpt-5.5` (vision + tool-use). |
+| **Transcriber** | Maintain a rolling, speaker-labeled, **timestamped** transcript; emit turn-end events and backing-off silence checks (with quiet duration). | `gpt-4o-transcribe` (latest realtime model; semantic VAD). |
+| **CoachDriver** | The event loop. On every trigger, call the brain with the transcript + timing context and tools, route tool calls. No cooldown/rate cap — restraint is the model's. | `gpt-5.5` (vision + tool-use). |
 | **ScreenTool** | Fulfill `capture_screen`: take a silent screenshot of the active display, excluding the overlay window. | macOS `screencapture` CLI / ScreenCaptureKit. |
 | **Overlay** | Render `speak` output: ≤3 sentences, ~5s each, non-activating, always-on-top, excluded from capture. | AppKit NSPanel. |
 | **MenuBar** | Manual **Start/Stop** of the pipeline (two states: ⚪️ stopped / 🟢 running — no auto-start), status indicator, one-time API-key entry. | AppKit menu-bar item; Keychain for the key. |
@@ -103,19 +105,20 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
   separate-restricted-account requirement is waived for the personal build; see [sandbox.md](./sandbox.md).
 - **Egress is narrow and explicit:** audio to `gpt-4o-transcribe`; a screenshot + transcript window
   to `gpt-5.5` *only when the model triggers a capture/response*. No recording to disk in the MVP.
-- **Behavioral guardrails:** a cooldown after each utterance, a rate cap (max N interjections per
-  minute), and a visible "listening" indicator. The user also has a hard **Start/Stop** in the menu
-  bar — coaching never runs until explicitly started, and stopping tears the pipeline down entirely
-  (a stronger control than the earlier mute, which is no longer exposed in the menu; the latent mute
-  flag remains in `Guardrails`). These directly counter the central failure mode of a proactive
-  agent — talking too much or at the wrong moment.
+- **Behavioral restraint (model-governed):** there is **no cooldown or rate cap** in code. Every
+  utterance reaches the brain, and the brain decides whether it has anything worth saying — that
+  restraint lives in the system prompt ("stay silent unless genuinely useful"). This keeps
+  conversation natural: a follow-up question is never stranded behind a timer. The hard control is
+  the menu-bar **Start/Stop** — coaching never runs until explicitly started, and stopping tears the
+  pipeline down entirely. A session interjection counter in the menu bar makes over-talking visible;
+  cost is accepted as tracking usage for now (a future improvement, not a v1 guardrail).
 
 ## 6. Non-Goals (v1)
 
 - Multiple modes / a tiered sensitivity dial. (One mode: LeetCode Coach.)
 - Continuous OCR or recording the screen/audio to disk ("recall").
-- A dedicated wake-word engine. (Direct address, if needed, is just the word "Jarvis" appearing
-  in the transcript, plus a summon hotkey.)
+- A dedicated wake-word engine. Direct address is just the word "Jarvis" (or a question) appearing
+  in the transcript, which the brain reads and answers — there is no separate detector or hotkey.
 - Productization: auth, billing, onboarding, multi-provider.
 - Windows / cross-platform.
 
@@ -124,7 +127,7 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
 1. **Build the harness, not the intelligence.** If a model or an OS framework can do it, we don't write it.
 2. **Least code wins.** Prefer a borrowed tool (`screencapture`, an Apple framework, an OpenAI API) over custom code, every time.
 3. **The model is the cost governor.** Expensive actions (vision, speaking) happen only when the model opts in.
-4. **Proactive, but disciplined.** Speaking up unprompted is the whole point; guardrails keep it from being annoying.
+4. **Proactive, but disciplined.** Speaking up unprompted is the whole point; the model's own restraint (a tuned system prompt) keeps it from being annoying.
 5. **Sees the screen, not the disk.** Security is enforced by the sandbox, not by good intentions.
 6. **Self-verifying.** Every build ships with tests and a smoke checklist the agent can run to prove it works.
 7. **One mode, done well.** Ship the coach; expand later.

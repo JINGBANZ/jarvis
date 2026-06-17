@@ -8,11 +8,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let config = Config.default
     private let transcript = RollingTranscript()
     private let keychain = KeychainSecretStore()
-    private lazy var guardrails = Guardrails(
-        cooldownSeconds: config.cooldownSeconds,
-        maxInterjectionsPerMinute: config.maxInterjectionsPerMinute,
-        maxDirectAddressesPerMinute: config.maxDirectAddressesPerMinute,
-        clock: clock)
     private lazy var secrets = ChainedSecretStore([keychain, EnvSecretStore()])
 
     private var overlay: OverlayPanel!
@@ -47,7 +42,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             activityViewer = ActivityViewer(log: .shared,
                                             store: SessionStore(base: devLogDirectory(), current: dir))
             jlog("Jarvis: dev mode — session \(dir.lastPathComponent) (\(dir.path)).")
-            jlog("Jarvis: pick “Open Log Viewer” from the menu bar to watch this session.")
         }
 
         // Ask for Microphone + Screen Recording up front, not lazily mid-session.
@@ -91,13 +85,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let brain = OpenAIBrainClient(apiKey: key, model: config.brainModel,
                                       reasoningEffort: config.reasoningEffort)
-        let driver = CoachDriver(config: config, transcript: transcript, guardrails: guardrails,
+        let driver = CoachDriver(config: config, transcript: transcript,
                                  brain: brain, screen: ScreenCaptureCLI(), overlay: overlay, clock: clock,
                                  onSpoke: { [weak self] in Task { @MainActor in self?.menuBar.noteSpoke() } })
 
         let transcriber = RealtimeTranscriber(apiKey: key, model: config.transcriptionModel,
                                               transcript: transcript, clock: clock,
                                               silenceTimeout: config.silenceTimeoutSeconds,
+                                              silenceMaxInterval: config.silenceMaxIntervalSeconds,
                                               silenceDurationMs: config.vadSilenceDurationMs,
                                               turnDebounce: config.turnDebounceSeconds,
                                               maxBufferedAudioSeconds: config.maxBufferedAudioSeconds)
@@ -106,7 +101,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // coalesced inside CoachDriver (the running turn batches them in), so we don't cancel here.
         let turns = TurnTaskBox()
         transcriber.onTurnEnd = { turns.run { await driver.handleTrigger(.turnEnd) } }
-        transcriber.onDirectAddress = { turns.run { await driver.handleTrigger(.directAddress) } }
         transcriber.onSilence = { secs in turns.run { await driver.handleTrigger(.silence(secondsQuiet: secs)) } }
         // Reconnect gave up (bad key / quota): stop cleanly and correct the menu instead of lying 🟢.
         transcriber.onTerminalFailure = { [weak self] in

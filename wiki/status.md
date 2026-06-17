@@ -6,8 +6,9 @@
 
 **Build complete (headless) — awaiting the live smoke run.** Phase 1 was **skipped** (2026-06-14)
 and the native Swift app was built directly per [plan-phase2-build.md](./plan-phase2-build.md). The
-tested harness (config, transcript, guardrails, coach tool-loop, OpenAI client, activity log) is **green: 36
-tests pass**; `Jarvis.app` builds, signs with the stable `Jarvis Dev` identity, and launches. The app shell, overlay,
+tested harness (config, transcript, silence backoff, coach tool-loop, OpenAI client, activity log + viewer,
+session store, overlay invisibility) is **green: 82 tests pass**; `Jarvis.app` builds, signs with the stable
+`Jarvis Dev` identity, and launches. The app shell, overlay,
 mic capture, and realtime transcriber **compile and launch** but their *live* behavior (real mic,
 websocket, TCC grants, real `OPENAI_API_KEY`, real model IDs) is verified only by the human smoke
 checklist in [specification.md §8](./specification.md#8-self-verification-plan) / the
@@ -59,6 +60,7 @@ A compact log — the *rationale* for each lives in the linked design page, not 
 | **Respond when addressed; tuned `server_vad`+debounce (not `semantic_vad`); quiet graceful Stop** — fixes from first live smoke run (2026-06-15) | [fix-responsiveness-vad-stop.md](./fix-responsiveness-vad-stop.md) |
 | **Dev activity viewer → in-app `WKWebView`** (live push, no meta-refresh; screenshot lightbox; persisted JSONL session history + clear-history) — design reviewed from 6 angles + adversarial verify, no surviving blockers; headless `WKWebView` test harness empirically validated on CLT (2026-06-16) | [activity-viewer.md](./activity-viewer.md) |
 | **Overlay hidden from screen capture/sharing via `sharingType = .none`** — already at parity with every alternative (it's the only mechanism); verified on macOS 26.5 incl. live `SCStream`; re-asserted on `show()` as defense-in-depth (2026-06-16) | [overlay-invisibility.md](./overlay-invisibility.md) |
+| **Cut the guardrail layer: no cooldown/rate cap, no wake-word detector; brain self-gates speaking; silence check backs off (30s→240s)** — simplify the flow, cut log noise, natural conversation (2026-06-16) | [architecture.md](./architecture.md#5-safety-model), [specification.md](./specification.md) |
 
 ## Open Questions / To Confirm
 
@@ -92,7 +94,8 @@ Remaining is the **human smoke run** — build, run, and validate live:
 3. Run the **live smoke checklist** ([README](../README.md#live-smoke-checklist-what-to-verify-by-hand)
    / [specification.md §8](./specification.md#8-self-verification-plan)): speak → transcript;
    "I'm stuck on two-sum" → coaching overlay + observed `capture_screen`; overlay excluded from the
-   screenshot; rate cap holds and **Stop Jarvis** halts the pipeline. (Run via `./scripts/build-app.sh --dev`,
+   screenshot; while you talk steadily Jarvis stays mostly quiet (model restraint, not a rate cap)
+   and **Stop Jarvis** halts the pipeline. (Run via `./scripts/build-app.sh --dev`,
    then open the activity viewer from the menu bar to watch each step.)
 4. **Only remaining live unknown:** the GA Realtime transcription-session wiring in
    `Sources/JarvisApp/RealtimeTranscriber.swift` — the config/events follow current docs, but the

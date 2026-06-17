@@ -4,9 +4,8 @@ import Testing
 @Suite struct ConfigTests {
     @Test func defaults() {
         let c = Config.default
-        #expect(c.silenceTimeoutSeconds == 8)
-        #expect(c.cooldownSeconds == 12)
-        #expect(c.maxInterjectionsPerMinute == 4)
+        #expect(c.silenceTimeoutSeconds == 30)
+        #expect(c.silenceMaxIntervalSeconds == 240)
         #expect(c.transcriptWindowSeconds == 90)
         #expect(c.sentenceDisplaySeconds == 5)
         #expect(c.maxSentences == 3)
@@ -15,7 +14,6 @@ import Testing
         #expect(c.transcriptionModel == "gpt-4o-transcribe")
         #expect(c.vadSilenceDurationMs == 1000)
         #expect(c.turnDebounceSeconds == 0.4)
-        #expect(c.maxDirectAddressesPerMinute == 8)
         #expect(c.maxBufferedAudioSeconds == 60)
     }
 

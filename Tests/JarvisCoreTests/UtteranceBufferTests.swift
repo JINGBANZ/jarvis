@@ -25,13 +25,12 @@ import Testing
         #expect(b.flush().fragments == 1)
     }
 
-    /// The point of coalescing: a wake word split across fragments is detected on the JOINED text,
-    /// not on the first fragment alone.
-    @Test func wakeWordDetectedOnCoalescedUtterance() {
+    /// The point of coalescing: fragments of one spoken sentence join into a single utterance, so a
+    /// sentence split across VAD fragments drives one turn, not several.
+    @Test func joinsAcrossFragments() {
         let b = UtteranceBuffer()
-        b.append("hey")                       // not an address by itself
-        b.append("jarvis can you help")
-        #expect(!DirectAddress.isAddressed("hey"))
-        #expect(DirectAddress.isAddressed(b.flush().text))
+        b.append("hey")
+        b.append("can you help")
+        #expect(b.flush().text == "hey can you help")
     }
 }

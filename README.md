@@ -43,7 +43,8 @@ as they are designed and built.
 
 Audio streams continuously and cheaply into a transcript. The expensive steps — looking at the
 screen and speaking — happen **only when the model invokes a tool**, so the model itself governs
-cost. Behavioral guardrails (cooldown, rate cap, manual Start/Stop) keep it from talking too much.
+cost. There's no cooldown or rate cap: every utterance reaches the brain and the brain decides
+whether to speak (restraint lives in the prompt); the manual Start/Stop is the only hard gate.
 Full design: [`wiki/architecture.md`](./wiki/architecture.md).
 
 ## Project structure
@@ -56,7 +57,7 @@ Full design: [`wiki/architecture.md`](./wiki/architecture.md).
 │   │   ├── CoachDriver.swift      # the event loop: triggers → brain → tool calls
 │   │   ├── OpenAIBrainClient.swift# the brain (Responses API, vision + tool-use)
 │   │   ├── RealtimeSession.swift  # Realtime transcription wire contract
-│   │   ├── Guardrails.swift       # cooldown + rate cap + mute
+│   │   ├── SilenceBackoff.swift   # exponential backoff for the proactive silence check
 │   │   ├── Transcript.swift       # rolling, timestamped transcript window
 │   │   ├── Config / Clock / Trigger / ToolDefs / Secrets / ...
 │   │   └── ActivityLog.swift      # dev-mode live activity viewer (HTML)
@@ -131,12 +132,12 @@ without tailing a log. It doesn't pop open on launch — choose **Open Log Viewe
 when you want it (each launch is its own session, so you open the current one on demand). The page
 reloads every second and color-codes each event:
 
-- 🗣 `heard: "…"` — what you said (transcribed) / 🤫 `quiet for 12s` — why it woke
+- 🗣 `heard: "…"` — what you said (transcribed) / 🤫 `quiet for 30s` — why it woke
 - 💭 `thinking…` — calling the brain
 - 👁 `looking at your screen` — the model invoked `capture_screen`; the captured frame appears as a
   thumbnail you can click to open full size
 - 💬 `…the tip it spoke…` — a `speak` call rendered to the overlay
-- `… staying silent` / `… held back (cooldown or rate cap)` — when it declines
+- `… staying silent` — when the model declines to speak
 
 **Privacy posture.** File logging is dev-only — outside dev mode nothing is written to disk (just the
 unified Console log). In dev mode the logs (and the screenshot thumbnails) go to a gitignored,
@@ -156,13 +157,13 @@ Some behavior can only be verified by a human with a real key, a mic, and grante
 - With a LeetCode problem on screen, say *"Jarvis, I'm stuck on two-sum"* — expect a coaching overlay
   within ~2s and a 👁 `looking at your screen` (`capture_screen`) line.
 - Confirm the screenshot excludes the overlay window.
-- Rapid triggers don't exceed 4 interjections/minute (look for `… held back` lines); **Stop Jarvis**
-  halts the pipeline entirely.
+- While you talk steadily, Jarvis stays mostly quiet (restraint is the model's, not a rate cap);
+  **Stop Jarvis** halts the pipeline entirely.
 
 ## Build status
 
-The pure harness (config, transcript, guardrails, the coach tool-loop, the OpenAI client) is
-**unit-tested and green** (36 tests). The app shell, overlay, mic capture, and realtime transcriber
+The pure harness (config, transcript, silence backoff, the coach tool-loop, the OpenAI client) is
+**unit-tested and green** (82 tests). The app shell, overlay, mic capture, and realtime transcriber
 **compile and launch**, but their live behavior is verified only by the checklist above — they were
 built without a real key or audio device. Current state and next steps live in
 [`wiki/status.md`](./wiki/status.md).
