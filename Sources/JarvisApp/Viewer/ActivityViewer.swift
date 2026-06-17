@@ -97,6 +97,64 @@ final class ActivityViewer: NSObject, WKNavigationDelegate, NSWindowDelegate {
         self.webView = wv
     }
 
+    // MARK: - Embeddable content view (unified Settings window)
+
+    /// Build the viewer's content (header + WKWebView) as a standalone view for embedding in the
+    /// Settings window's Activity tab. Starts live updates and loads the current session. The host
+    /// window owns lifecycle; call `teardown()` when it closes. Reuses all the loading/session logic
+    /// below unchanged.
+    func makeContentView() -> NSView {
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: 900, height: 596))
+        content.autoresizingMask = [.width, .height]
+
+        let header = NSVisualEffectView(frame: NSRect(x: 0, y: content.bounds.height - 44, width: content.bounds.width, height: 44))
+        header.autoresizingMask = [.width, .minYMargin]
+        header.material = .headerView
+        header.blendingMode = .withinWindow
+        header.state = .active
+
+        let sessionLabel = NSTextField(labelWithString: "Session")
+        sessionLabel.frame = NSRect(x: 14, y: 13, width: 60, height: 18)
+        sessionLabel.textColor = .secondaryLabelColor
+        header.addSubview(sessionLabel)
+
+        let pop = NSPopUpButton(frame: NSRect(x: 76, y: 8, width: 360, height: 26))
+        pop.target = self
+        pop.action = #selector(sessionChanged)
+        pop.toolTip = "Switch between this and previous dev sessions"
+        pop.autoresizingMask = [.maxXMargin]
+        header.addSubview(pop)
+        self.picker = pop
+
+        let clear = NSButton(title: "Clear history", target: self, action: #selector(clearHistoryTapped))
+        clear.bezelStyle = .rounded
+        clear.toolTip = "Delete all previous sessions (keeps the current one)"
+        clear.frame = NSRect(x: content.bounds.width - 146, y: 8, width: 132, height: 28)
+        clear.autoresizingMask = [.minXMargin]
+        header.addSubview(clear)
+
+        let wv = WKWebView(frame: NSRect(x: 0, y: 0, width: content.bounds.width, height: content.bounds.height - 44))
+        wv.autoresizingMask = [.width, .height]
+        wv.navigationDelegate = self
+
+        content.addSubview(wv)
+        content.addSubview(header)
+        self.webView = wv
+
+        populatePicker()
+        loadCurrent()
+        return content
+    }
+
+    /// Stop receiving live rows and release the WebView. Called by the host when the window closes.
+    func teardown() {
+        log.detach()
+        webView = nil
+        loaded = false
+        pending = []
+        snapshotRows = []
+    }
+
     // MARK: - Session list
 
     private func populatePicker() {
