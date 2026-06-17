@@ -12,6 +12,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var overlay: OverlayPanel!
     private var menuBar: MenuBarController!
+    private var settingsWindow: SettingsWindow!
+    private let appearance = OverlayAppearance()
     private var activityViewer: ActivityViewer?    // dev mode only; the in-app activity log window
     private var transcriber: RealtimeTranscriber?
     private var audio: AudioInput?
@@ -48,21 +50,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Permissions.primeAll()
 
         overlay = OverlayPanel()
-        menuBar = MenuBarController(keychain: keychain, showLogViewer: devMode)
-        // Dev mode: open this session's activity in the in-app viewer window on demand.
-        menuBar.onOpenLogViewer = { [weak self] in
-            guard let viewer = self?.activityViewer else { jlog("Jarvis: no activity log to open yet."); return }
-            viewer.show()
+        overlay.setFontSize(appearance.fontSize)
+        overlay.setBackgroundOpacity(appearance.backgroundOpacity)
+
+        menuBar = MenuBarController()
+
+        // Unified Settings window: API key + overlay appearance always; the dev activity log only
+        // in dev mode. A pasted key is stored but does not auto-start; restart only if already
+        // running, reflecting the real outcome back into the menu state.
+        var sections: [SettingsSection] = [
+            APIKeySection(keychain: keychain, onKeySaved: { [weak self] _ in
+                guard let self, self.transcriber != nil else { return }
+                self.menuBar.setRunning(self.start())
+            }),
+            OverlaySection(appearance: appearance, applying: overlay),
+        ]
+        if let viewer = activityViewer {
+            sections.append(ActivitySection(viewer: viewer))
         }
+        settingsWindow = SettingsWindow(sections: sections)
+        menuBar.onOpenSettings = { [weak self] in self?.settingsWindow.show() }
+
         // The menu drives the pipeline lifecycle. Jarvis does NOT auto-start; the user presses Start.
         menuBar.onStart = { [weak self] in self?.start() ?? false }
         menuBar.onStop = { [weak self] in self?.stop() }
-        // A pasted key is stored but does not auto-start; restart only if already running, and
-        // reflect the real outcome back into the menu state.
-        menuBar.onKeySaved = { [weak self] _ in
-            guard let self, self.transcriber != nil else { return }
-            self.menuBar.setRunning(self.start())
-        }
 
         if secrets.apiKey()?.isEmpty == false {
             jlog("Jarvis: ready — press Start in the menu bar to begin coaching.")
@@ -134,7 +145,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
         alert.messageText = "No OpenAI API key set"
-        alert.informativeText = "Choose “Set OpenAI API Key…” from the Jarvis menu, then press Start."
+        alert.informativeText = "Open \u{201C}Settings\u{2026}\u{201D} from the Jarvis menu, paste your key, then press Start."
         alert.alertStyle = .informational
         alert.runModal()
     }
