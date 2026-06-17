@@ -20,7 +20,7 @@ public final class OverlayPanel: NSObject, OverlayRendering, OverlayAppearanceAp
         panel.level = .floating
         panel.isFloatingPanel = true
         panel.hidesOnDeactivate = false
-        panel.backgroundColor = NSColor.black.withAlphaComponent(0.78)
+        panel.backgroundColor = NSColor.black.withAlphaComponent(CGFloat(Config.overlayOpacityDefault))
         panel.isOpaque = false
         panel.hasShadow = true
         panel.ignoresMouseEvents = true
@@ -36,7 +36,7 @@ public final class OverlayPanel: NSObject, OverlayRendering, OverlayAppearanceAp
 
         label = NSTextField(wrappingLabelWithString: "")
         label.textColor = .white
-        label.font = .systemFont(ofSize: 18, weight: .medium)
+        label.font = .systemFont(ofSize: CGFloat(Config.overlayFontSizeDefault), weight: .medium)
         label.alignment = .center
         label.translatesAutoresizingMaskIntoConstraints = false
         label.backgroundColor = .clear
