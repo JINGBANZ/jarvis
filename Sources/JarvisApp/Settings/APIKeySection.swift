@@ -27,6 +27,7 @@ final class APIKeySection: NSObject, SettingsSection {
 
         let field = NSSecureTextField(frame: NSRect(x: 24, y: 322, width: 512, height: 26))
         field.placeholderString = "sk-…"
+        field.setAccessibilityLabel("OpenAI API key")
         view.addSubview(field)
         self.field = field
 

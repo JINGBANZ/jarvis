@@ -24,6 +24,15 @@ import Testing
         #expect(Config.overlayOpacityRange == 0.40...1.0)
     }
 
+    /// Invariants the rest of the code relies on, independent of the exact literals above:
+    /// each default must sit inside its range, and each range must be non-empty.
+    @Test func overlayAppearanceConstantsAreCoherent() {
+        #expect(Config.overlayFontSizeRange.contains(Config.overlayFontSizeDefault))
+        #expect(Config.overlayOpacityRange.contains(Config.overlayOpacityDefault))
+        #expect(Config.overlayFontSizeRange.lowerBound < Config.overlayFontSizeRange.upperBound)
+        #expect(Config.overlayOpacityRange.lowerBound < Config.overlayOpacityRange.upperBound)
+    }
+
     @Test func envSecretStoreReadsKey() {
         let store = EnvSecretStore(environment: ["OPENAI_API_KEY": "sk-test"])
         #expect(store.apiKey() == "sk-test")

@@ -11,6 +11,8 @@ final class OverlaySection: NSObject, SettingsSection {
 
     private let appearance: OverlayAppearance
     private let applying: OverlayAppearanceApplying
+    private var sizeSlider: NSSlider?
+    private var opacitySlider: NSSlider?
     private var sizeReadout: NSTextField?
     private var opacityReadout: NSTextField?
 
@@ -31,7 +33,9 @@ final class OverlaySection: NSObject, SettingsSection {
                                   maxValue: Config.overlayFontSizeRange.upperBound,
                                   target: self, action: #selector(sizeChanged))
         sizeSlider.frame = NSRect(x: 24, y: 342, width: 440, height: 24)
+        sizeSlider.setAccessibilityLabel("Text size")
         view.addSubview(sizeSlider)
+        self.sizeSlider = sizeSlider
 
         let sizeReadout = NSTextField(labelWithString: "")
         sizeReadout.frame = NSRect(x: 472, y: 344, width: 64, height: 20)
@@ -47,7 +51,9 @@ final class OverlaySection: NSObject, SettingsSection {
                                      maxValue: Config.overlayOpacityRange.upperBound,
                                      target: self, action: #selector(opacityChanged))
         opacitySlider.frame = NSRect(x: 24, y: 262, width: 440, height: 24)
+        opacitySlider.setAccessibilityLabel("Background opacity")
         view.addSubview(opacitySlider)
+        self.opacitySlider = opacitySlider
 
         let opacityReadout = NSTextField(labelWithString: "")
         opacityReadout.frame = NSRect(x: 472, y: 264, width: 64, height: 20)
@@ -61,19 +67,25 @@ final class OverlaySection: NSObject, SettingsSection {
 
     @objc private func sizeChanged(_ sender: NSSlider) {
         appearance.fontSize = sender.doubleValue.rounded()   // whole points: readout == stored == applied
+        sender.doubleValue = appearance.fontSize             // snap the thumb to the rounded value
         applying.setFontSize(appearance.fontSize)
         updateReadouts()
     }
 
     @objc private func opacityChanged(_ sender: NSSlider) {
         appearance.backgroundOpacity = (sender.doubleValue * 100).rounded() / 100   // whole percent
+        sender.doubleValue = appearance.backgroundOpacity    // snap the thumb to the rounded value
         applying.setBackgroundOpacity(appearance.backgroundOpacity)
         updateReadouts()
     }
 
     private func updateReadouts() {
-        sizeReadout?.stringValue = "\(Int(appearance.fontSize)) pt"
-        opacityReadout?.stringValue = "\(Int(appearance.backgroundOpacity * 100))%"
+        let pt = Int(appearance.fontSize.rounded())
+        let pct = Int((appearance.backgroundOpacity * 100).rounded())
+        sizeReadout?.stringValue = "\(pt) pt"
+        opacityReadout?.stringValue = "\(pct)%"
+        sizeSlider?.setAccessibilityValueDescription("\(pt) points")
+        opacitySlider?.setAccessibilityValueDescription("\(pct) percent")
     }
 
     func windowWillClose() {

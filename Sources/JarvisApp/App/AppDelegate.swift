@@ -14,7 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var menuBar: MenuBarController!
     private var settingsWindow: SettingsWindow!
     private let appearance = OverlayAppearance()
-    private var activityViewer: ActivityViewer?    // dev mode only; the in-app activity log window
+    private var activityViewer: ActivityViewer?    // dev mode only; embedded as the Settings Activity tab
     private var transcriber: RealtimeTranscriber?
     private var audio: AudioInput?
     /// In-flight coaching turns, so Stop can cancel one mid-brain-call (otherwise it could speak

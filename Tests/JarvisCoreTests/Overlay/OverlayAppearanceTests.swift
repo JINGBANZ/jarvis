@@ -38,4 +38,17 @@ import Foundation
         #expect(a.fontSize == Config.overlayFontSizeRange.lowerBound)
         #expect(a.backgroundOpacity == Config.overlayOpacityRange.lowerBound)
     }
+
+    @Test func nonFiniteInputFallsBackToFinite() {
+        // A corrupted plist value (NaN/±inf) must never reach systemFont(ofSize:)/withAlphaComponent:.
+        let a = OverlayAppearance(defaults: freshDefaults())
+        for bad in [Double.nan, .infinity, -.infinity] {
+            a.fontSize = bad
+            a.backgroundOpacity = bad
+            #expect(a.fontSize.isFinite)
+            #expect(a.backgroundOpacity.isFinite)
+            #expect(Config.overlayFontSizeRange.contains(a.fontSize))
+            #expect(Config.overlayOpacityRange.contains(a.backgroundOpacity))
+        }
+    }
 }

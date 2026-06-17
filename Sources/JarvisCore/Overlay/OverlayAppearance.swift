@@ -31,8 +31,11 @@ public final class OverlayAppearance {
         set { defaults.set(Self.clamp(newValue, to: Config.overlayOpacityRange), forKey: Key.opacity) }
     }
 
+    /// Clamp into `r`. Non-finite input (NaN/±inf — e.g. a corrupted plist value) falls back to the
+    /// lower bound rather than propagating to `systemFont(ofSize:)` / `withAlphaComponent(:)`.
     private static func clamp(_ v: Double, to r: ClosedRange<Double>) -> Double {
-        min(max(v, r.lowerBound), r.upperBound)
+        guard v.isFinite else { return r.lowerBound }
+        return min(max(v, r.lowerBound), r.upperBound)
     }
 }
 

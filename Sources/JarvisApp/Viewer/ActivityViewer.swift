@@ -35,7 +35,9 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
     /// window owns lifecycle; call `teardown()` when it closes. Reuses all the loading/session logic
     /// below unchanged.
     func makeContentView() -> NSView {
-        let content = NSView(frame: NSRect(x: 0, y: 0, width: 900, height: 596))
+        // Sized to the Settings window's content region (the NSTabView resizes this to fit), not the
+        // old standalone-window dimensions — so the header controls don't overlap.
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: 560, height: 420))
         content.autoresizingMask = [.width, .height]
 
         let header = NSVisualEffectView(frame: NSRect(x: 0, y: content.bounds.height - 44, width: content.bounds.width, height: 44))
@@ -49,7 +51,7 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         sessionLabel.textColor = .secondaryLabelColor
         header.addSubview(sessionLabel)
 
-        let pop = NSPopUpButton(frame: NSRect(x: 76, y: 8, width: 360, height: 26))
+        let pop = NSPopUpButton(frame: NSRect(x: 76, y: 8, width: 280, height: 26))
         pop.target = self
         pop.action = #selector(sessionChanged)
         pop.toolTip = "Switch between this and previous dev sessions"
@@ -60,7 +62,7 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         let clear = NSButton(title: "Clear history", target: self, action: #selector(clearHistoryTapped))
         clear.bezelStyle = .rounded
         clear.toolTip = "Delete all previous sessions (keeps the current one)"
-        clear.frame = NSRect(x: content.bounds.width - 146, y: 8, width: 132, height: 28)
+        clear.frame = NSRect(x: content.bounds.width - 134, y: 8, width: 120, height: 28)
         clear.autoresizingMask = [.minXMargin]
         header.addSubview(clear)
 

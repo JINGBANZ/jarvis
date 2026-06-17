@@ -10,6 +10,9 @@ public final class OverlayPanel: NSObject, OverlayRendering, OverlayAppearanceAp
     private let panel: NSPanel
     private let label: NSTextField
     private var hideWorkItem: DispatchWorkItem?
+    /// Whether the panel is currently showing the Settings live preview (vs. a real coaching tip).
+    /// Lets `showAppearancePreview(false)` avoid tearing down a genuine tip when Settings closes.
+    private var isPreviewing = false
     /// Test hook (internal): counts how many times `show()` has re-asserted capture exclusion.
     private(set) var captureExclusionReassertCount = 0
 
@@ -74,6 +77,7 @@ public final class OverlayPanel: NSObject, OverlayRendering, OverlayAppearanceAp
         // macOS versions/configs. Cheap insurance against a silent, high-impact regression — the
         // overlay becoming visible to a screen share with no signal. See wiki/overlay-invisibility.md.
         reassertCaptureExclusion()
+        isPreviewing = false   // a real tip takes over the panel from any Settings preview
         hideWorkItem?.cancel()
         var idx = 0
         func next() {
@@ -113,14 +117,18 @@ public final class OverlayPanel: NSObject, OverlayRendering, OverlayAppearanceAp
 
     /// Show a sample tip (on) or clear it (off). Cancels any pending auto-hide so a live coaching
     /// tip doesn't yank the preview away mid-adjust, and re-asserts capture exclusion (same
-    /// defense-in-depth as `show()`; an activation-policy flip can drop `sharingType`).
+    /// defense-in-depth as `show()`; an activation-policy flip can drop `sharingType`). Turning the
+    /// preview off only hides the panel if a preview is actually up — so closing Settings never
+    /// tears down a genuine coaching tip that `show()` put on screen in the meantime.
     public func showAppearancePreview(_ on: Bool) {
         if on {
             hideWorkItem?.cancel()
             reassertCaptureExclusion()
+            isPreviewing = true
             label.stringValue = Self.previewText
             panel.orderFrontRegardless()
-        } else {
+        } else if isPreviewing {
+            isPreviewing = false
             hide()
         }
     }

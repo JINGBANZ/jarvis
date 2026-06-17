@@ -1,5 +1,12 @@
 import AppKit
 
+/// A titled settings window that also closes on Escape (and Cmd-.), matching the dismissal the old
+/// API-key modal offered and standard macOS settings-window behavior. A plain `NSWindow` ignores
+/// `cancelOperation(_:)`.
+private final class EscapableWindow: NSWindow {
+    override func cancelOperation(_ sender: Any?) { performClose(sender) }
+}
+
 /// One window hosting all settings sections as tabs. Non-modal: it promotes the accessory app to
 /// `.regular` while open (so secure/text fields can become first responder and accept paste) and
 /// drops back to `.accessory` on close — the lesson the old API-key dialog and activity viewer
@@ -27,8 +34,8 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
     }
 
     private func build() {
-        let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 460),
-                           styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        let win = EscapableWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 460),
+                                  styleMask: [.titled, .closable], backing: .buffered, defer: false)
         win.title = "Jarvis Settings"
         win.isReleasedWhenClosed = false
         win.delegate = self
