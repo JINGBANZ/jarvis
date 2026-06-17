@@ -6,7 +6,9 @@ import CoreImage
 /// and stripped of saturation. Both variants are rendered once and cached.
 ///
 /// OS-bound (AppKit + CoreImage), so it lives in `JarvisApp` rather than Core and is verified by a
-/// live run, not unit tests.
+/// live run, not unit tests. Main-actor-isolated: `NSImage` isn't `Sendable`, and the icons are only
+/// ever touched from the `@MainActor` `MenuBarController`.
+@MainActor
 enum MenuBarIcon {
     private static let emoji = "🤖"
     /// Point size that renders to roughly an 18pt-tall glyph — comfortable in the ~22pt menu bar.
