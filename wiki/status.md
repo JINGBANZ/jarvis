@@ -12,7 +12,7 @@ session store, overlay invisibility) is **green: 83 tests pass**; `Jarvis.app` b
 mic capture, and realtime transcriber **compile and launch** but their *live* behavior (real mic,
 websocket, TCC grants, real `OPENAI_API_KEY`, real model IDs) is verified only by the human smoke
 checklist in [specification.md §8](./specification.md#8-self-verification-plan) / the
-[README](../README.md#live-smoke-checklist-what-to-verify-by-hand).
+[README](../README.md#live-smoke-checklist).
 
 ## What's Decided
 
@@ -91,13 +91,13 @@ Remaining is the **human smoke run** — build, run, and validate live:
 2. Paste your OpenAI key via the menu bar ("Set OpenAI API Key…") — it saves to the Keychain. Jarvis
    does **not** auto-start; press **Start Jarvis** in the menu to begin (⚪️ stopped → 🟢 running),
    **Stop Jarvis** to halt. Model IDs are doc-verified; no edit expected.
-3. Run the **live smoke checklist** ([README](../README.md#live-smoke-checklist-what-to-verify-by-hand)
+3. Run the **live smoke checklist** ([README](../README.md#live-smoke-checklist)
    / [specification.md §8](./specification.md#8-self-verification-plan)): speak → transcript;
    "I'm stuck on two-sum" → coaching overlay + observed `capture_screen`; overlay excluded from the
    screenshot; while you talk steadily Jarvis stays mostly quiet (model restraint, not a rate cap)
    and **Stop Jarvis** halts the pipeline. (Run via `./scripts/build-app.sh --dev`,
    then open the activity viewer from the menu bar to watch each step.)
 4. **Only remaining live unknown:** the GA Realtime transcription-session wiring in
-   `Sources/JarvisApp/RealtimeTranscriber.swift` — the config/events follow current docs, but the
+   `Sources/JarvisApp/Capture/RealtimeTranscriber.swift` — the config/events follow current docs, but the
    bare-WebSocket connect for a transcription-only session is the one thing untested headlessly. If
    transcription doesn't start, the file documents the `?model=gpt-realtime` fallback to try.
