@@ -65,8 +65,9 @@ moments the model judges worthwhile.
 
 | Component | Responsibility | Built on (borrowed) |
 |---|---|---|
-| **AudioInput** | Capture mic and (optionally) system audio; stream to the Transcriber. | AVFoundation (mic); ScreenCaptureKit (system audio). |
-| **Transcriber** | Maintain a rolling, speaker-labeled, **timestamped** transcript; emit turn-end events and silence events (with quiet duration). | `gpt-4o-transcribe` (latest realtime model; semantic VAD). |
+| **AudioInput** | Capture the mic (`me`) with AEC; stream 24 kHz PCM16 to its Transcriber. | AVFoundation (`VoiceProcessingIO`). |
+| **SystemAudioInput** | Capture the other side (`them`) — system output audio; stream the same 24 kHz PCM16 to its own Transcriber. Degrades gracefully without the Screen-Recording grant. | ScreenCaptureKit (`SCStream`, `capturesAudio`, `excludesCurrentProcessAudio`). |
+| **Transcriber** | Maintain a rolling, speaker-labeled, **timestamped** transcript; emit turn-end events and silence events (with quiet duration). Two instances run in parallel — one per side — tagging lines `me`/`them` into one shared transcript. | `gpt-4o-transcribe` (latest realtime model; server VAD). |
 | **CoachDriver** | The event loop. On triggers, enforce guardrails, call the brain with the transcript + timing context and tools, route tool calls. | `gpt-5.5` (vision + tool-use). |
 | **ScreenTool** | Fulfill `capture_screen`: take a silent screenshot of the active display, excluding the overlay window. | macOS `screencapture` CLI / ScreenCaptureKit. |
 | **Overlay** | Render `speak` output: ≤3 sentences, ~5s each, non-activating, always-on-top, excluded from capture. | AppKit NSPanel. |

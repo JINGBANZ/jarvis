@@ -180,11 +180,21 @@ bar to begin (and **Stop Jarvis** to halt); the menu bar shows two states only, 
 
 ## 6. Audio Sources
 
-- **Mic (critical path):** the user thinking aloud. AVFoundation → Realtime. Must work in MVP.
-- **System audio (in MVP, budget-permitting):** the "other side" of a call (e.g. a mock
-  interviewer on Zoom). ScreenCaptureKit audio capture, labeled as a distinct speaker. It is part
-  of the MVP and rides along with the screen-capture entitlement; it is the **first feature cut if
-  it threatens the 2-day budget**, but the intent is to ship it. The design must not preclude it.
+- **Mic (critical path):** the user thinking aloud. AVFoundation → Realtime, tagged `me`. Mic now
+  runs with `VoiceProcessingIO` (AEC) so the other side's audio over speakers doesn't bleed in and
+  get double-transcribed (best-effort; falls back to a raw tap if the route can't support it).
+- **System audio (implemented 2026-06-16):** the "other side" of a call (e.g. a mock interviewer on
+  Zoom). Captured by `SystemAudioInput` via ScreenCaptureKit (`SCStream`, `capturesAudio = true`,
+  `channelCount = 1`, `sampleRate = 48000` resampled to the 24 kHz wire format, `excludesCurrent
+  ProcessAudio = true` so Jarvis never hears its own TTS). It rides on the Screen-Recording grant
+  already primed at launch — no new prompt — and degrades gracefully (mic keeps working) if that
+  grant is missing. Two `RealtimeTranscriber` sockets feed one `RollingTranscript`: mic → `me`,
+  system audio → `them`. The `them` side drives turn-end / direct-address triggers (so Jarvis reacts
+  when the other side asks something) but NOT the silence "are you stuck?" timer, which the mic owns.
+  Source-level design references (studied 2026-06-16): Glass's `SystemAudioDump` and cheating-daddy's
+  `sohzm/systemAudioDump` (same SCK recipe) and Natively's SCK fallback (`sck.rs`) — see
+  [fork-evaluation.md](./fork-evaluation.md). Natively's Core Audio process-tap path (macOS 14.4+,
+  per-app capture) is the documented future alternative if app-specific capture is ever needed.
 
 ## 7. Latency Budget
 

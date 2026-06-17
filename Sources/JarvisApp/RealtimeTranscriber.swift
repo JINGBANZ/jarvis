@@ -25,6 +25,9 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
     private let maxReconnects = 6
     private let apiKey: String
     private let model: String
+    /// Who this socket is transcribing: `.me` (mic) or `.them` (system audio). Two transcribers run
+    /// in parallel — one per side — feeding the same `RollingTranscript`, so the coach sees both.
+    private let speaker: Speaker
     private let transcript: RollingTranscript
     private let clock: Clock
     private let sessionStart: TimeInterval
@@ -46,11 +49,12 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
     private var connected = false        // true only between "session ready" and the next drop/close
     private var everConnected = false    // distinguishes the first connect from a reconnect
 
-    init(apiKey: String, model: String, transcript: RollingTranscript, clock: Clock,
+    init(apiKey: String, model: String, speaker: Speaker = .me, transcript: RollingTranscript, clock: Clock,
          silenceTimeout: TimeInterval = 8, silenceDurationMs: Int = 1000,
          turnDebounce: TimeInterval = 0.4, maxBufferedAudioSeconds: TimeInterval = 60) {
         self.apiKey = apiKey
         self.model = model
+        self.speaker = speaker
         self.transcript = transcript
         self.clock = clock
         self.sessionStart = clock.now()
@@ -189,8 +193,8 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
             // sentence coalesce into a single trigger.
             if let transcriptText = obj["transcript"] as? String, !transcriptText.isEmpty {
                 let at = clock.now() - sessionStart
-                transcript.append(.init(speaker: .me, text: transcriptText, at: at))
-                jlog("🗣 heard: \"\(transcriptText)\"")   // show what was actually said in the viewer
+                transcript.append(.init(speaker: speaker, text: transcriptText, at: at))
+                jlog("🗣 heard (\(speaker.rawValue)): \"\(transcriptText)\"")   // show side + what was said
                 pending.append(transcriptText)
                 resetSilenceTimer()
                 scheduleTurnDebounce()

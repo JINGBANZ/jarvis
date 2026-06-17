@@ -63,10 +63,11 @@ A compact log — the *rationale* for each lives in the linked design page, not 
 - ~~Exact OpenAI model IDs~~ **Resolved & verified against live docs (2026-06):** brain = `gpt-5.5`
   via the **Responses API**; transcription = `gpt-4o-transcribe` over the GA Realtime API. The
   earlier `gpt-4o-transcribe` was not a real ID. See [specification.md §5](./specification.md#5-configuration).
-- ~~Whether system-audio (both-sides) capture is in the MVP or deferred~~ **Resolved:** system
-  audio is **in** the MVP, as long as it doesn't risk the 2-day timeline. Mic remains the critical
-  path; system audio rides along via ScreenCaptureKit and is the first thing cut if the budget is
-  threatened. See [specification.md](./specification.md#6-audio-sources).
+- ~~Whether system-audio (both-sides) capture is in the MVP or deferred~~ **Resolved & shipped
+  (2026-06-16):** system audio is implemented — `SystemAudioInput` (ScreenCaptureKit) feeds a second
+  `them`-tagged `RealtimeTranscriber` alongside the mic's `me` socket, both into one transcript.
+  Mic also gained `VoiceProcessingIO` AEC to stop speaker bleed. Build + tests green; live SCK
+  capture pending a human smoke run in a real call. See [specification.md](./specification.md#6-audio-sources).
 - Minimum macOS version target. Build host is macOS 26.5; ScreenCaptureKit screen+audio capture
   needs macOS 13+. Target **macOS 14+** unless a needed API forces higher.
 - ~~Whether ad-hoc signing lets the TCC Screen-Recording/Microphone grants *persist* across

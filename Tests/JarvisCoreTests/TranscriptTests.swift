@@ -11,6 +11,19 @@ import Testing
         #expect(rendered.contains("[01:42] me: maybe a hash map"))
     }
 
+    /// Both sides of a call render with their own speaker tag, interleaved in time order, so the
+    /// coach sees a two-sided conversation (mic → `me`, system audio → `them`).
+    @Test func windowRendersBothSpeakers() {
+        let t = RollingTranscript()
+        t.append(.init(speaker: .them, text: "how would you reverse a list?", at: 5))
+        t.append(.init(speaker: .me, text: "I'd use two pointers", at: 8))
+        let rendered = t.renderWindow(seconds: 90, now: 10)
+        #expect(rendered.contains("[00:05] them: how would you reverse a list?"))
+        #expect(rendered.contains("[00:08] me: I'd use two pointers"))
+        // Time order preserved: them (00:05) before me (00:08).
+        #expect(rendered.range(of: "them:")!.lowerBound < rendered.range(of: "me:")!.lowerBound)
+    }
+
     @Test func silenceDurationFromLastLine() {
         let t = RollingTranscript()
         t.append(.init(speaker: .me, text: "hmm", at: 50))

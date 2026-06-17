@@ -16,8 +16,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var overlay: OverlayPanel!
     private var menuBar: MenuBarController!
-    private var transcriber: RealtimeTranscriber?
+    /// Two transcription sockets feeding one shared transcript: mic → `.me`, system audio → `.them`.
+    private var transcriber: RealtimeTranscriber?       // "me" (mic)
+    private var themTranscriber: RealtimeTranscriber?   // "them" (system audio)
     private var audio: AudioInput?
+    private var systemAudio: SystemAudioInput?
     /// In-flight coaching turns, so Stop can cancel one mid-brain-call (otherwise it could speak
     /// after the user pressed Stop).
     private var turns: TurnTaskBox?
@@ -89,32 +92,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                  brain: brain, screen: ScreenCaptureCLI(), overlay: overlay, clock: clock,
                                  onSpoke: { [weak self] in Task { @MainActor in self?.menuBar.noteSpoke() } })
 
-        let transcriber = RealtimeTranscriber(apiKey: key, model: config.transcriptionModel,
-                                              transcript: transcript, clock: clock,
-                                              silenceTimeout: config.silenceTimeoutSeconds,
-                                              silenceDurationMs: config.vadSilenceDurationMs,
-                                              turnDebounce: config.turnDebounceSeconds,
-                                              maxBufferedAudioSeconds: config.maxBufferedAudioSeconds)
         // CoachDriver is @unchecked Sendable; capture it (not @MainActor self) in the callbacks.
         // Route turns through TurnTaskBox so Stop can cancel an in-flight one. Concurrent triggers are
         // coalesced inside CoachDriver (the running turn batches them in), so we don't cancel here.
         let turns = TurnTaskBox()
+        // Reconnect gave up (bad key / quota): stop cleanly and correct the menu instead of lying 🟢.
+        let onTerminalFailure: @Sendable () -> Void = { [weak self] in
+            Task { @MainActor in self?.stop(); self?.menuBar.setRunning(false) }
+        }
+
+        // "Me" side: the mic. Drives turn-end / direct-address / silence ("are you stuck?").
+        let transcriber = RealtimeTranscriber(apiKey: key, model: config.transcriptionModel,
+                                              speaker: .me, transcript: transcript, clock: clock,
+                                              silenceTimeout: config.silenceTimeoutSeconds,
+                                              silenceDurationMs: config.vadSilenceDurationMs,
+                                              turnDebounce: config.turnDebounceSeconds,
+                                              maxBufferedAudioSeconds: config.maxBufferedAudioSeconds)
         transcriber.onTurnEnd = { turns.run { await driver.handleTrigger(.turnEnd) } }
         transcriber.onDirectAddress = { turns.run { await driver.handleTrigger(.directAddress) } }
         transcriber.onSilence = { secs in turns.run { await driver.handleTrigger(.silence(secondsQuiet: secs)) } }
-        // Reconnect gave up (bad key / quota): stop cleanly and correct the menu instead of lying 🟢.
-        transcriber.onTerminalFailure = { [weak self] in
-            Task { @MainActor in self?.stop(); self?.menuBar.setRunning(false) }
-        }
-        let audio = AudioInput(captureSystemAudio: true) { [weak transcriber] pcm in
-            transcriber?.sendAudio(pcm)
-        }
+        transcriber.onTerminalFailure = onTerminalFailure
+
+        // "Them" side: system audio (remote participants). Drives turn-end / direct-address so Jarvis
+        // can react when the other side finishes (e.g. asks you something), but NOT silence — the
+        // "are you stuck?" prompt is about the *user*, so only the mic owns that timer.
+        let themTranscriber = RealtimeTranscriber(apiKey: key, model: config.transcriptionModel,
+                                                  speaker: .them, transcript: transcript, clock: clock,
+                                                  silenceTimeout: config.silenceTimeoutSeconds,
+                                                  silenceDurationMs: config.vadSilenceDurationMs,
+                                                  turnDebounce: config.turnDebounceSeconds,
+                                                  maxBufferedAudioSeconds: config.maxBufferedAudioSeconds)
+        themTranscriber.onTurnEnd = { turns.run { await driver.handleTrigger(.turnEnd) } }
+        themTranscriber.onDirectAddress = { turns.run { await driver.handleTrigger(.directAddress) } }
+        themTranscriber.onTerminalFailure = onTerminalFailure
+
+        let audio = AudioInput { [weak transcriber] pcm in transcriber?.sendAudio(pcm) }
+        let systemAudio = SystemAudioInput { [weak themTranscriber] pcm in themTranscriber?.sendAudio(pcm) }
         self.transcriber = transcriber
+        self.themTranscriber = themTranscriber
         self.audio = audio
+        self.systemAudio = systemAudio
         self.turns = turns
         transcriber.connect()
+        themTranscriber.connect()
         audio.start()
-        jlog("Jarvis: coaching started.")
+        systemAudio.start()
+        jlog("Jarvis: coaching started (mic + system audio).")
         return true
     }
 
