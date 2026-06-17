@@ -55,7 +55,7 @@ private func checkReassertOnShow() async {
     let overlay = OverlayPanel()
     let before = overlay.captureExclusionReassertCount
 
-    overlay.render("Stay hidden. Even after a reset.", maxSentences: 3, perSentenceSeconds: 0.05)
+    overlay.render(["Stay hidden.", "Even after a reset."], perLineSeconds: 0.05)
     try? await Task.sleep(nanoseconds: 300_000_000)   // real await → lets render's main-actor hop run
 
     #expect(overlay.captureExclusionReassertCount > before, "render() must re-assert capture exclusion")

@@ -7,13 +7,19 @@ import Testing
         #expect(speakTool.name == "speak")
     }
 
-    @Test func speakToolRequiresText() {
-        #expect(speakTool.parametersJSON.contains("\"text\""))
+    /// `speak` returns the overlay lines pre-split in a strict `lines` array (Structured Outputs),
+    /// so the client no longer splits a free-form string.
+    @Test func speakToolReturnsStrictLinesArray() {
+        #expect(speakTool.parametersJSON.contains("\"lines\""))
+        #expect(speakTool.parametersJSON.contains("\"array\""))
         #expect(speakTool.parametersJSON.contains("\"required\""))
+        // strict mode requires additionalProperties:false on every object in the schema.
+        #expect(speakTool.parametersJSON.contains("\"additionalProperties\":false"))
     }
 
     @Test func coachPromptMentionsCaptureAndBrevity() {
         #expect(coachSystemPrompt.contains("capture_screen"))
         #expect(coachSystemPrompt.contains("3"))
+        #expect(coachSystemPrompt.contains("line"))   // brevity is now framed as overlay lines
     }
 }
