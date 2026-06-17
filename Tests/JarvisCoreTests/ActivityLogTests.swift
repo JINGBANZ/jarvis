@@ -3,12 +3,6 @@ import Foundation
 @testable import JarvisCore
 
 @Suite struct ActivityLogTests {
-    @Test func escapesHtmlMetacharacters() {
-        #expect(ActivityLog.esc("a & b < c > d") == "a &amp; b &lt; c &gt; d")
-        // & must be escaped first so we don't double-escape the entities we just inserted.
-        #expect(ActivityLog.esc("<&>") == "&lt;&amp;&gt;")
-    }
-
     @Test func cssClassKeysOnLeadingMarker() {
         #expect(ActivityLog.cssClass(for: "💬 use a hash map") == "say")
         #expect(ActivityLog.cssClass(for: "👁 looking at your screen") == "see")
@@ -18,76 +12,91 @@ import Foundation
         #expect(ActivityLog.cssClass(for: "… held back (cooldown or rate cap)") == "think")
         #expect(ActivityLog.cssClass(for: "Jarvis realtime error event: oops") == "err")
         #expect(ActivityLog.cssClass(for: "Jarvis: coaching started.") == "")
-    }
-
-    @Test func coachingTipContainingFailedIsNotMiscolouredAsError() {
-        // A spoken tip can legitimately contain the word "failed"; it must stay a 💬 say line.
+        // A spoken tip can legitimately contain "failed"; it must stay a 💬 say line.
         #expect(ActivityLog.cssClass(for: "💬 your test failed because the loop is off-by-one") == "say")
     }
 
-    @Test func renderHtmlEscapesContentAndCountsLines() {
-        let html = ActivityLog.renderHTML([
-            .init(time: "10:00:00", message: "💬 a < b & c", imageFile: nil),
-            .init(time: "10:00:01", message: "🗣 heard: \"hi\"", imageFile: nil),
-        ])
-        #expect(html.contains("a &lt; b &amp; c"))     // content escaped
-        #expect(!html.contains("a < b & c"))           // raw content not present
-        #expect(html.contains("(2 lines)"))            // line count rendered
-        #expect(html.contains("class=\"row say\""))    // 💬 routed to say
-        #expect(html.contains("http-equiv=\"refresh\""))
+    @Test func rowScriptEncodesTextSafelyAndOmitsImageWhenNil() throws {
+        let js = ActivityLog.rowScript(time: "10:00:00", message: "a < b & \"c\" </script>", imageBase64: nil)
+        #expect(js.hasPrefix("appendRow("))
+        #expect(js.hasSuffix(");"))
+        #expect(!js.contains("data:image"))            // no image payload when nil
+        // The object inside appendRow(...) must be valid JSON with the raw (JSON-escaped) message.
+        let inner = String(js.dropFirst("appendRow(".count).dropLast(");".count))
+        let obj = try #require(try JSONSerialization.jsonObject(with: Data(inner.utf8)) as? [String: Any])
+        #expect(obj["message"] as? String == "a < b & \"c\" </script>")
+        #expect(obj["time"] as? String == "10:00:00")
+        #expect(obj["cls"] as? String == "")           // no leading marker
+        #expect(obj["img"] == nil)                      // key omitted, not null
     }
 
-    @Test func renderHtmlEmbedsScreenshotThumbnailLinkedToFullImage() {
-        let html = ActivityLog.renderHTML([
-            .init(time: "10:00:00", message: "👁 looking at your screen", imageFile: "shot-1.jpg"),
-        ])
-        #expect(html.contains("href=\"shot-1.jpg\""))       // click → full image
-        #expect(html.contains("<img src=\"shot-1.jpg\""))   // thumbnail
-        #expect(html.contains("target=\"_blank\""))         // opens in a new tab (survives 1s reload)
+    @Test func rowScriptBuildsDataURIWhenImagePresent() {
+        let js = ActivityLog.rowScript(time: "10:00:01", message: "👁 looked", imageBase64: "QUJD")
+        #expect(js.contains("data:image/jpeg;base64,QUJD"))
+        #expect(js.contains("\"cls\":\"see\"") || js.contains("\"cls\": \"see\""))
     }
 
-    @Test func recordSavesScreenshotAsOwnerOnlyFile() throws {
-        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("jarvis-test-\(ProcessInfo.processInfo.globallyUniqueString)")
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: dir) }
+    @Test func recordPersistsJsonlAndShotThenNotifiesObserver() throws {
+        let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
+        let log = ActivityLog(); log.enable(directory: dir)
+        var pushed: [String] = []
+        let snap = log.attach { pushed.append($0) }
+        #expect(snap.rows.isEmpty)                       // empty session
+        #expect(snap.total == 0)
+        let pixel = Data([0xFF, 0xD8, 0xFF, 0xD9]).base64EncodedString()
+        log.record("👁 looking", imageBase64: pixel)
+        log.record("💬 tip")
+        _ = log.attach { _ in }                          // sync barrier: drains the serial queue
 
-        let log = ActivityLog()
-        log.enable(directory: dir)
-        let pixel = Data([0xFF, 0xD8, 0xFF, 0xD9]).base64EncodedString()  // stand-in JPEG bytes
-        log.record("👁 looking at your screen", imageBase64: pixel)
-
-        // record() writes asynchronously on its serial queue; a sync read (htmlURL) is FIFO-ordered
-        // after it on that queue, so it deterministically drains the pending write — no polling.
-        _ = log.htmlURL
+        let jsonl = try String(contentsOf: dir.appendingPathComponent("jarvis-activity.jsonl"), encoding: .utf8)
+        #expect(jsonl.split(separator: "\n").count == 2)
         let shot = dir.appendingPathComponent("shot-1.jpg")
         #expect(FileManager.default.fileExists(atPath: shot.path))
         let perms = try FileManager.default.attributesOfItem(atPath: shot.path)[.posixPermissions] as? NSNumber
         #expect(perms?.int16Value == 0o600)
-        // The HTML now references the saved thumbnail.
-        let html = try String(contentsOf: try #require(log.htmlURL), encoding: .utf8)
-        #expect(html.contains("shot-1.jpg"))
+        #expect(pushed.count == 2)
+        #expect(pushed[0].contains("data:image/jpeg;base64,"))
+        #expect(pushed[1].contains("appendRow("))
     }
 
-    @Test func enableWritesOwnerOnlyFileSynchronously() throws {
-        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("jarvis-test-\(ProcessInfo.processInfo.globallyUniqueString)")
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: dir) }
+    @Test func attachSnapshotReplaysExistingEntriesWithImageBytes() throws {
+        let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
+        let log = ActivityLog(); log.enable(directory: dir)
+        let pixel = Data([0xFF, 0xD8, 0xFF, 0xD9]).base64EncodedString()
+        log.record("👁 looking", imageBase64: pixel)
+        log.record("💬 tip")
+        let snap = log.attach { _ in }                   // late attach: snapshot must contain prior rows
+        #expect(snap.rows.count == 2)
+        #expect(snap.shown == 2)
+        #expect(snap.total == 2)
+        #expect(snap.rows[0].contains("data:image/jpeg;base64,"))   // image bytes re-read from disk
+        #expect(snap.shellHTML.contains("appendRow"))               // shell carries the JS
+    }
 
-        let log = ActivityLog()                 // isolated instance, not the shared singleton
-        log.enable(directory: dir)
-
-        let url = try #require(log.htmlURL)
-        #expect(FileManager.default.fileExists(atPath: url.path))  // exists synchronously after enable()
+    @Test func enableCreatesJsonlImmediately() throws {
+        let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
+        let log = ActivityLog(); log.enable(directory: dir)
+        _ = log.attach { _ in }
+        let url = dir.appendingPathComponent("jarvis-activity.jsonl")
+        #expect(FileManager.default.fileExists(atPath: url.path))
         let perms = try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? NSNumber
-        #expect(perms?.int16Value == 0o600)     // owner-only, never world-readable
+        #expect(perms?.int16Value == 0o600)
     }
 
     @Test func recordIsNoOpWhenDisabled() {
-        let log = ActivityLog()                 // never enabled, no env override
-        #expect(log.htmlURL == nil)
+        let log = ActivityLog()                          // never enabled
         log.record("💬 should not crash or write anything")
-        #expect(log.htmlURL == nil)
+        let snap = log.attach { _ in }
+        #expect(snap.total == 0)
+        #expect(snap.rows.isEmpty)
+    }
+
+    /// Shared temp-dir helper (also used by SessionStoreTests). Owner-only dir, like the real app.
+    static func tmp() -> URL {
+        let d = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("jarvis-test-\(ProcessInfo.processInfo.globallyUniqueString)")
+        try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true,
+                                                 attributes: [.posixPermissions: 0o700])
+        return d
     }
 }
