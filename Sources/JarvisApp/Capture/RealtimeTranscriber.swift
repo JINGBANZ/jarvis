@@ -188,11 +188,12 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
               let type = obj["type"] as? String else { return }
 
         switch type {
-        case "conversation.item.input_audio_transcription.completed":
+        case RealtimeSession.completedTranscriptionType:
             // A completed utterance fragment: record it immediately (so the model's context is
             // whole), but DON'T fire the coach yet — debounce so rapid fragments of one spoken
-            // sentence coalesce into a single trigger.
-            if let transcriptText = obj["transcript"] as? String, !transcriptText.isEmpty {
+            // sentence coalesce into a single trigger. The wire→text parse lives in RealtimeSession
+            // (pure + unit-tested).
+            if let transcriptText = RealtimeSession.completedTranscript(from: obj) {
                 let at = clock.now() - sessionStart
                 transcript.append(.init(speaker: speaker, text: transcriptText, at: at))
                 jlog("🗣 heard (\(speaker.rawValue)): \"\(transcriptText)\"")   // show side + what was said
