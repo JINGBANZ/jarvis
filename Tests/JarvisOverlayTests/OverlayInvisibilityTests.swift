@@ -17,10 +17,12 @@ import AppKit
 ///      Needs a GUI session + Screen Recording permission, which CI can't grant, so it is opt-in:
 ///      run with `JARVIS_RUN_CAPTURE_TESTS=1 ./scripts/run-tests.sh`. Otherwise it returns early.
 ///
-/// Note: the bundled swift-testing toolchain miscompiles `@MainActor` + `async` `@Test`
-/// ("global variable must be a compile-time constant to use @section"), and XCTest isn't available on
-/// a Command-Line-Tools-only install. So the async tests are nonisolated `@Test`s that `await` a
-/// `@MainActor` helper, which keeps the AppKit work on the main actor while sidestepping the bug.
+/// Note: only the `@MainActor` + `async` `@Test` *combination* miscompiles on the bundled
+/// swift-testing toolchain ("global variable must be a compile-time constant to use @section"); a
+/// synchronous `@MainActor @Test` (like `overlaySetsCaptureExclusionAtInit` below) is fine. And
+/// XCTest isn't available on a Command-Line-Tools-only install. So the *async* tests are nonisolated
+/// `@Test`s that `await` a `@MainActor` helper — keeping the AppKit work on the main actor while
+/// sidestepping the bug.
 @Suite struct OverlayInvisibilityTests {
 
     @MainActor @Test
@@ -34,11 +36,11 @@ import AppKit
         await checkReassertOnShow()
     }
 
-    @Test
+    // Condition trait so opting out reports as *skipped* (not a green pass) — important for a
+    // security-adjacent test where "skipped" and "passed" must be distinguishable.
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["JARVIS_RUN_CAPTURE_TESTS"] == "1",
+                   "opt-in: set JARVIS_RUN_CAPTURE_TESTS=1 and grant Screen Recording to run the live capture test"))
     func protectedWindowIsExcludedFromScreenCaptureKit() async {
-        guard ProcessInfo.processInfo.environment["JARVIS_RUN_CAPTURE_TESTS"] == "1" else {
-            return   // not opted in — skip silently (see the suite doc comment for how to run it)
-        }
         await checkScreenCaptureKitExclusion()
     }
 }
@@ -93,6 +95,8 @@ private func checkScreenCaptureKitExclusion() async {
         cfg.height = display.height
         let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: cfg)
 
+        // tolerance 40 deliberately wide: the capture round-trips through the display profile
+        // (sRGB fill → deviceRGB scan), so exact RGB drifts. Don't tighten it without re-checking.
         let counts = countMatchingPixels(image, targets: [protectedColor, controlColor], tolerance: 40, step: 3)
         let protectedCount = counts[0]
         let controlCount = counts[1]
@@ -101,8 +105,9 @@ private func checkScreenCaptureKitExclusion() async {
         #expect(controlCount > 500,
                 "control window not found in capture (\(controlCount) px) — capture or display mapping is wrong")
         // The real assertion: the .none window must be essentially absent. A leak would produce a
-        // pixel count comparable to the control (same size); exclusion produces ~0.
-        #expect(protectedCount * 20 < controlCount,
+        // pixel count comparable to the control (same size); exclusion produces ~0. Phrased as
+        // "control dominates" (control is >20x protected, i.e. protected is <5%).
+        #expect(controlCount > protectedCount * 20,
                 "sharingType=.none window LEAKED into ScreenCaptureKit (protected=\(protectedCount) px, control=\(controlCount) px) — the overlay would be visible in a screen share")
     } catch {
         Issue.record("ScreenCaptureKit capture failed: \(error)")
