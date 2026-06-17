@@ -13,7 +13,7 @@ That overlay must be invisible to two distinct audiences:
 1. **Other apps capturing the screen** — the interviewer's Zoom/Meet/Teams share, a QuickTime/OBS
    recording, the macOS screenshot tool.
 2. **Jarvis's own `capture_screen`** — otherwise the brain would read its own coaching text back in
-   the next screenshot (a feedback loop). See [`ScreenCapture.swift`](../Sources/JarvisCore/ScreenCapture.swift).
+   the next screenshot (a feedback loop). See [`ScreenCapture.swift`](../Sources/JarvisCore/Screen/ScreenCapture.swift).
 
 Both are solved by the *same* single flag.
 
@@ -73,7 +73,7 @@ used was a handful of standalone Swift programs driving `NSPanel` + ScreenCaptur
   construction.
 - It **re-asserts** `.none` at the top of `show()` every time a coaching response is displayed.
   This is defense-in-depth, taken from Natively's documented lesson: flipping `NSApp` activation
-  policy — which Jarvis does in the API-key dialog ([`MenuBarController.setKey()`](../Sources/JarvisApp/MenuBarController.swift))
+  policy — which Jarvis does in the API-key dialog ([`MenuBarController.setKey()`](../Sources/JarvisApp/MenuBar/MenuBarController.swift))
   — can, on some OS versions/configs, make WindowServer drop the flag. It does **not** reproduce on
   macOS 26.5, but the failure would be silent and high-impact (the overlay would become visible to an
   interviewer with no signal), so re-asserting on every show is cheap insurance.

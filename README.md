@@ -52,30 +52,39 @@ Full design: [`wiki/architecture.md`](./wiki/architecture.md).
 ```
 .
 ├── Package.swift              # SwiftPM manifest (Swift 6, macOS 14+)
+├── CLAUDE.md                  # development rules for agents/humans working in the repo
 ├── Sources/
-│   ├── JarvisCore/            # the testable harness — no UI, runs anywhere
-│   │   ├── CoachDriver.swift      # the event loop: triggers → brain → tool calls
-│   │   ├── OpenAIBrainClient.swift# the brain (Responses API, vision + tool-use)
-│   │   ├── RealtimeSession.swift  # Realtime transcription wire contract
-│   │   ├── SilenceBackoff.swift   # exponential backoff for the proactive silence check
-│   │   ├── Transcript.swift       # rolling, timestamped transcript window
-│   │   ├── Config / Clock / Trigger / ToolDefs / Secrets / ...
-│   │   └── ActivityLog.swift      # dev-mode live activity viewer (HTML)
+│   ├── JarvisCore/            # the testable harness — Foundation-only, runs anywhere
+│   │   ├── Audio/                 # PCM + utterance buffering
+│   │   ├── Transcription/         # realtime session wire contract + rolling transcript
+│   │   ├── Coach/                 # the event loop: CoachDriver, brain client, tool defs
+│   │   ├── Triggers/              # turn / silence detection + silence backoff
+│   │   ├── Screen/                # screen-capture tool contract
+│   │   ├── Overlay/               # overlay text model (the rendered tip)
+│   │   ├── Config/                # config + Keychain secrets
+│   │   ├── Diagnostics/           # logging, activity log, session-history store
+│   │   └── Support/               # small primitives (Clock, TurnTaskBox)
+│   ├── JarvisOverlay/         # the on-screen NSPanel overlay — own target so it's unit-testable
+│   │   └── OverlayPanel.swift
 │   └── JarvisApp/             # the macOS app shell — the native, OS-bound parts
-│       ├── main.swift / AppDelegate.swift
-│       ├── MenuBarController.swift # menu-bar item, Start/Stop, key entry
-│       ├── AudioInput.swift        # mic + system-audio capture
-│       ├── RealtimeTranscriber.swift
-│       ├── OverlayPanel.swift      # the on-screen tip overlay (NSPanel)
-│       └── Permissions.swift       # TCC priming (Mic, Screen Recording)
-├── Tests/JarvisCoreTests/     # unit + offline-pipeline tests for the harness
+│       ├── App/                   # main.swift, AppDelegate
+│       ├── MenuBar/               # menu-bar item, Start/Stop, key entry
+│       ├── Capture/               # mic + system-audio capture, realtime transcriber, TCC priming
+│       └── Viewer/                # dev-mode WKWebView activity viewer
+├── Tests/
+│   ├── JarvisCoreTests/      # unit + offline-pipeline tests (mirrors the Core subsystems)
+│   ├── JarvisOverlayTests/   # overlay screen-capture-invisibility checks
+│   └── JarvisViewerTests/    # WebKit end-to-end tests of the viewer HTML/JS
 ├── Resources/Info.plist       # bundle id, usage strings
 ├── scripts/                   # build / run / test (see below)
 └── wiki/                      # design & decision docs (single source of truth)
 ```
 
-The split is deliberate: **`JarvisCore`** holds all the logic and is unit-tested on any machine;
-**`JarvisApp`** holds the macOS-only glue (capture, overlay, permissions) verified by a live run.
+The split is deliberate: **`JarvisCore`** holds all the logic (Foundation-only) and is unit-tested on
+any machine; **`JarvisOverlay`** is the AppKit overlay, split into its own target so its behavior is
+testable; **`JarvisApp`** is the thin macOS glue (menu bar, capture, permissions, dev viewer) verified
+by a live run. Folders are grouped **by subsystem**, following
+[`wiki/architecture.md`](./wiki/architecture.md). Working rules live in [`CLAUDE.md`](./CLAUDE.md).
 
 ## Scripts
 
@@ -163,7 +172,7 @@ Some behavior can only be verified by a human with a real key, a mic, and grante
 ## Build status
 
 The pure harness (config, transcript, silence backoff, the coach tool-loop, the OpenAI client) is
-**unit-tested and green** (82 tests). The app shell, overlay, mic capture, and realtime transcriber
+**unit-tested and green** (83 tests). The app shell, overlay, mic capture, and realtime transcriber
 **compile and launch**, but their live behavior is verified only by the checklist above — they were
 built without a real key or audio device. Current state and next steps live in
 [`wiki/status.md`](./wiki/status.md).
