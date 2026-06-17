@@ -8,7 +8,6 @@
 
 - **[status.md](./status.md)** — where the project is right now, and what to do next. Read this first.
 - **[plan-phase2-build.md](./plan-phase2-build.md)** — the step-by-step implementation plan driving the current native-Swift build.
-- **[plan-activity-viewer.md](./plan-activity-viewer.md)** — TDD implementation plan for the in-app `WKWebView` activity viewer + session history (design: [activity-viewer.md](./activity-viewer.md)).
 
 ## Core Pages
 
