@@ -16,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var overlay: OverlayPanel!
     private var menuBar: MenuBarController!
+    private var activityViewer: ActivityViewer?    // dev mode only; the in-app activity log window
     private var transcriber: RealtimeTranscriber?
     private var audio: AudioInput?
     /// In-flight coaching turns, so Stop can cancel one mid-brain-call (otherwise it could speak
@@ -39,7 +40,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true,
                                                      attributes: [.posixPermissions: 0o700])
             JarvisLog.enableFileLogging(directory: dir)     // <dir>/jarvis-debug.log, 0600, fresh
-            ActivityLog.shared.enable(directory: dir)        // <dir>/jarvis-activity.html, 0600, fresh
+            ActivityLog.shared.enable(directory: dir)        // <dir>/jarvis-activity.jsonl, 0600, fresh
+            // The viewer can browse every past session under the base log dir; clear-history spares
+            // this one.
+            activityViewer = ActivityViewer(log: .shared,
+                                            store: SessionStore(base: devLogDirectory(), current: dir))
             jlog("Jarvis: dev mode — session \(dir.lastPathComponent) (\(dir.path)).")
             jlog("Jarvis: pick “Open Log Viewer” from the menu bar to watch this session.")
         }
@@ -49,10 +54,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         overlay = OverlayPanel()
         menuBar = MenuBarController(keychain: keychain, showLogViewer: devMode)
-        // Dev mode: open this session's activity HTML on demand.
-        menuBar.onOpenLogViewer = {
-            guard let url = ActivityLog.shared.htmlURL else { jlog("Jarvis: no activity log to open yet."); return }
-            if !NSWorkspace.shared.open(url) { jlog("Jarvis: couldn't open the activity log viewer (\(url.path)).") }
+        // Dev mode: open this session's activity in the in-app viewer window on demand.
+        menuBar.onOpenLogViewer = { [weak self] in
+            guard let viewer = self?.activityViewer else { jlog("Jarvis: no activity log to open yet."); return }
+            viewer.show()
         }
         // The menu drives the pipeline lifecycle. Jarvis does NOT auto-start; the user presses Start.
         menuBar.onStart = { [weak self] in self?.start() ?? false }
