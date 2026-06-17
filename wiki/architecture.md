@@ -1,12 +1,15 @@
 # Architecture
 
 > A living document. Describes the vision, the harness loop, the components, and the principles
-> that govern Jarvis. For exact schemas, prompts, and config, see [specification.md](./specification.md).
+> that govern Jarvis. Exact schemas, prompts, and config are not duplicated here — they live in
+> `Sources/JarvisCore/` (`ToolDefs.swift`, `Config.swift`, `CoachDriver.swift`).
 
-> **Scope:** This page (and [specification.md](./specification.md)) describe the **native Swift app**
-> — the thing being built. The earlier two-phase plan (a Natively fork PoC first) was **dropped on
-> 2026-06-14**; we build this directly, including the model-triggered `capture_screen` tool-loop.
-> See [status.md](./status.md#key-decisions) and [plan-phase2-build.md](./plan-phase2-build.md).
+> **Scope:** This page describes the **native Swift app** — the thing being built. The earlier
+> two-phase plan (a Natively fork PoC first) was **dropped on 2026-06-14**; we build this directly,
+> including the model-triggered `capture_screen` tool-loop. See [status.md](./status.md#key-decisions).
+> Exact schemas, the coach prompt, and config are **not duplicated here** — they live in code
+> (`Sources/JarvisCore/`, esp. `ToolDefs.swift`, `Config.swift`, `CoachDriver.swift`); this page is
+> the *why*, the code is the *what*.
 
 ## 1. Vision
 
@@ -48,8 +51,8 @@ moments the model judges worthwhile.
 
 ### The turn
 
-1. The Transcriber emits a **turn-end** event (`gpt-4o-transcribe` semantic VAD — "the speaker
-   finished a thought") or a **silence check** fires (you've gone quiet, maybe stuck). The silence
+1. The Transcriber emits a **turn-end** event (`gpt-4o-transcribe` server VAD ends the turn after a
+   tuned silence window) or a **silence check** fires (you've gone quiet, maybe stuck). The silence
    check carries *how long* you've been quiet and backs off across a long silence (e.g. 30s, 60s,
    120s, …), resetting on speech.
 2. The CoachDriver calls the brain on **every** trigger — there is no cooldown, rate cap, or
@@ -69,9 +72,9 @@ moments the model judges worthwhile.
 |---|---|---|
 | **AudioInput** | Capture the mic (`me`) with AEC; stream 24 kHz PCM16 to its Transcriber. | AVFoundation (`VoiceProcessingIO`). |
 | **SystemAudioInput** | Capture the other side (`them`) — system output audio; stream the same 24 kHz PCM16 to its own Transcriber. Degrades gracefully without the Screen-Recording grant. | ScreenCaptureKit (`SCStream`, `capturesAudio`, `excludesCurrentProcessAudio`). |
-| **Transcriber** | Maintain a rolling, speaker-labeled, **timestamped** transcript; emit turn-end events and backing-off silence checks (with quiet duration). Two instances run in parallel — one per side — tagging lines `me`/`them` into one shared transcript. | `gpt-4o-transcribe` (latest realtime model; server VAD). |
+| **Transcriber** | Maintain a rolling, speaker-labeled, **timestamped** transcript; emit turn-end events and backing-off silence checks (with quiet duration). Two instances run in parallel — one per side — tagging lines `me`/`them` into one shared transcript. | `gpt-4o-transcribe` (Realtime API; tuned `server_vad`). |
 | **CoachDriver** | The event loop. On every trigger, call the brain with the transcript + timing context and tools, route tool calls. No cooldown/rate cap — restraint is the model's. | `gpt-5.5` (vision + tool-use). |
-| **ScreenTool** | Fulfill `capture_screen`: take a silent screenshot of the active display, excluding the overlay window. | macOS `screencapture` CLI / ScreenCaptureKit. |
+| **ScreenTool** | Fulfill `capture_screen`: take a silent screenshot of the active display, excluding the overlay window. | macOS `screencapture` CLI. |
 | **Overlay** | Render `speak` output: ≤3 sentences, ~5s each, non-activating, always-on-top, excluded from capture. | AppKit NSPanel. |
 | **MenuBar** | Manual **Start/Stop** of the pipeline (two states: ⚪️ stopped / 🟢 running — no auto-start), status indicator, one-time API-key entry. | AppKit menu-bar item; Keychain for the key. |
 
@@ -91,6 +94,44 @@ The model is the cost governor: it spends vision tokens and screen real estate o
 judges them worthwhile. That is the whole point of making screen capture a model-invoked tool
 rather than a per-turn screenshot.
 
+### Models and APIs
+
+- **Brain — `gpt-5.5` via the OpenAI Responses API** (`POST /v1/responses`), not Chat Completions:
+  for the gpt-5 family, function/tool calling is the recommended (and least restricted) path on
+  Responses. The tool loop is threaded with `function_call` / `function_call_output` items.
+- **Per-session memory — the Conversations API.** The coach needs to remember its *own* prior
+  replies (the transcript only holds user speech), so the brain opens one server-side conversation
+  per Start (`store:true`) and sends only the **new** transcript lines each turn — the server holds
+  the rest. (If the conversation can't be created, `CoachDriver` falls back to a **stateless** mode
+  that re-sends a recent transcript *window* every turn.) The retention tradeoff this creates
+  (transcript + screenshots retained ~30 days at OpenAI) is a deliberate quality-over-privacy choice,
+  documented in [sandbox.md](./sandbox.md).
+- **Transcription — `gpt-4o-transcribe` over the GA Realtime API** with **tuned `server_vad`** (not
+  `semantic_vad`, which is reported flaky in transcription-only mode — it can stop emitting
+  `…transcription.completed` entirely). Turn-end fires on `…transcription.completed`, plus a
+  client-side debounce so a brief mid-thought pause doesn't fragment one sentence into several turns.
+
+### Latency
+
+Target: **turn-end → first overlay sentence < 2s.** It holds because transcription is continuous
+(no STT latency at trigger time) and most turns are text-only (no `capture_screen`), so the brain
+call is a single short round-trip. The overlay then reveals the already-returned sentences one at a
+time (~5s each), so the first tip appears immediately — note the brain response itself is **not**
+streamed (one buffered request; the overlay just paces the display).
+
+### Resilience
+
+The always-on legs are built to survive transient failure rather than die on it:
+
+- **The realtime transcription socket *will* drop** (network blips, server resets, the ~60-min
+  session cap) and a Realtime session **cannot be resumed** — a dropped connection means a new
+  session. So instead of discarding mic audio during the reconnect gap, the transcriber **buffers it**
+  (`PCMBuffer`, capped at `maxBufferedAudioSeconds`, oldest evicted) and **flushes it into the new
+  session on reconnect** — a mid-sentence drop no longer loses the user's words. Reconnect uses
+  capped exponential backoff with a ping keepalive.
+- **The brain call** retries 429/5xx with bounded backoff (honoring `Retry-After`) under a request
+  timeout, and the coach loop is single-flighted so a turn can't double-speak.
+
 ## 5. Safety Model
 
 Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full model. In short:
@@ -105,7 +146,9 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
 - **Built and run in the main `forrest` account inside a git worktree** (recoverability). The
   separate-restricted-account requirement is waived for the personal build; see [sandbox.md](./sandbox.md).
 - **Egress is narrow and explicit:** audio to `gpt-4o-transcribe`; a screenshot + transcript window
-  to `gpt-5.5` *only when the model triggers a capture/response*. No recording to disk in the MVP.
+  to `gpt-5.5` *only when the model triggers a capture/response*. Nothing is recorded to **local**
+  disk in the MVP; the per-session OpenAI conversation does retain transcript + screenshots
+  server-side (see [sandbox.md](./sandbox.md)).
 - **Behavioral restraint (model-governed):** there is **no cooldown or rate cap** in code. Every
   utterance reaches the brain, and the brain decides whether it has anything worth saying — that
   restraint lives in the system prompt ("stay silent unless genuinely useful"). This keeps
@@ -132,3 +175,6 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
 5. **Sees the screen, not the disk.** Security is enforced by the sandbox, not by good intentions.
 6. **Self-verifying.** Every build ships with tests and a smoke checklist the agent can run to prove it works.
 7. **One mode, done well.** Ship the coach; expand later.
+
+How Jarvis is built, signed, tested, and run — and the dev-mode activity viewer — is its own
+operational page: [build-and-run.md](./build-and-run.md).
