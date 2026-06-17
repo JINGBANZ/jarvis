@@ -41,9 +41,11 @@ import AppKit
     }
 
     @MainActor @Test
-    func previewKeepsCaptureExclusion() {
+    func previewReassertsCaptureExclusion() {
         let overlay = OverlayPanel()
+        let before = overlay.captureExclusionReassertCount
         overlay.showAppearancePreview(true)
+        #expect(overlay.captureExclusionReassertCount > before, "showAppearancePreview must re-assert capture exclusion")
         #expect(overlay.currentSharingType == .none)
         overlay.showAppearancePreview(false)
         #expect(overlay.currentSharingType == .none)

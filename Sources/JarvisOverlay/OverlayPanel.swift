@@ -73,8 +73,7 @@ public final class OverlayPanel: NSObject, OverlayRendering, OverlayAppearanceAp
         // API-key dialog in MenuBarController.setKey) can make WindowServer drop sharingType on some
         // macOS versions/configs. Cheap insurance against a silent, high-impact regression — the
         // overlay becoming visible to a screen share with no signal. See wiki/overlay-invisibility.md.
-        panel.sharingType = .none
-        captureExclusionReassertCount += 1
+        reassertCaptureExclusion()
         hideWorkItem?.cancel()
         var idx = 0
         func next() {
@@ -90,6 +89,14 @@ public final class OverlayPanel: NSObject, OverlayRendering, OverlayAppearanceAp
     }
 
     private func hide() { panel.orderOut(nil) }
+
+    /// Re-apply screen-capture exclusion and count it, so tests can prove the re-assert ran (on
+    /// macOS 26 the OS normalizes `sharingType`, so asserting `== .none` alone can't tell a real
+    /// re-assert from the value set at init). See wiki/overlay-invisibility.md.
+    private func reassertCaptureExclusion() {
+        panel.sharingType = .none
+        captureExclusionReassertCount += 1
+    }
 
     // MARK: - OverlayAppearanceApplying
 
@@ -110,7 +117,7 @@ public final class OverlayPanel: NSObject, OverlayRendering, OverlayAppearanceAp
     public func showAppearancePreview(_ on: Bool) {
         if on {
             hideWorkItem?.cancel()
-            panel.sharingType = .none
+            reassertCaptureExclusion()
             label.stringValue = Self.previewText
             panel.orderFrontRegardless()
         } else {
