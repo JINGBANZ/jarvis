@@ -47,12 +47,17 @@ public final class RollingTranscript: @unchecked Sendable {
     }
 
     /// A timestamped window: lines within `seconds` of `now`, each `[mm:ss] speaker: text`.
+    /// Sorted by timestamp: the two transcription sockets (mic/"me", system audio/"them") append
+    /// independently and a slow utterance can complete — and so be appended — after a later one, so
+    /// insertion order isn't time order. We sort by `.at` (stable on ties via the original index) so
+    /// the coach always sees the conversation in the order it was actually spoken.
     public func renderWindow(seconds: TimeInterval, now: TimeInterval) -> String {
         lock.lock(); let snapshot = lines; lock.unlock()
         let cutoff = now - seconds
-        return snapshot
-            .filter { $0.at >= cutoff }
-            .map { "[\(Self.stamp($0.at))] \($0.speaker.rawValue): \($0.text)" }
+        return snapshot.enumerated()
+            .filter { $0.element.at >= cutoff }
+            .sorted { $0.element.at != $1.element.at ? $0.element.at < $1.element.at : $0.offset < $1.offset }
+            .map { "[\(Self.stamp($0.element.at))] \($0.element.speaker.rawValue): \($0.element.text)" }
             .joined(separator: "\n")
     }
 

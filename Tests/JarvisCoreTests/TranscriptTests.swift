@@ -11,16 +11,19 @@ import Testing
         #expect(rendered.contains("[01:42] me: maybe a hash map"))
     }
 
-    /// Both sides of a call render with their own speaker tag, interleaved in time order, so the
-    /// coach sees a two-sided conversation (mic → `me`, system audio → `them`).
-    @Test func windowRendersBothSpeakers() {
+    /// Both sides of a call render with their own speaker tag (mic → `me`, system audio → `them`),
+    /// and the window is ordered by SPOKEN time, not append order. Here the `me` line is appended
+    /// FIRST but spoken LATER (at:8) than the `them` line (at:5) — mimicking a slow "them"
+    /// transcription completing after a quicker "me" one across the two concurrent sockets — so this
+    /// fails unless renderWindow sorts by `.at`.
+    @Test func windowRendersBothSpeakersInSpokenOrder() {
         let t = RollingTranscript()
-        t.append(.init(speaker: .them, text: "how would you reverse a list?", at: 5))
-        t.append(.init(speaker: .me, text: "I'd use two pointers", at: 8))
+        t.append(.init(speaker: .me, text: "I'd use two pointers", at: 8))      // appended first…
+        t.append(.init(speaker: .them, text: "how would you reverse a list?", at: 5)) // …but spoken earlier
         let rendered = t.renderWindow(seconds: 90, now: 10)
         #expect(rendered.contains("[00:05] them: how would you reverse a list?"))
         #expect(rendered.contains("[00:08] me: I'd use two pointers"))
-        // Time order preserved: them (00:05) before me (00:08).
+        // them (00:05) renders before me (00:08) despite the reversed append order.
         #expect(rendered.range(of: "them:")!.lowerBound < rendered.range(of: "me:")!.lowerBound)
     }
 

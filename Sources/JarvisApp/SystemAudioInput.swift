@@ -10,7 +10,8 @@ import JarvisCore
 /// Reuses the Screen Recording permission already primed at launch (no new prompt). If that grant
 /// is missing — or there's no display to attach to — SCK throws and we log + degrade gracefully:
 /// the mic side keeps working, Jarvis just won't hear the other side until the grant is fixed.
-/// `excludesCurrentProcessAudio = true` keeps Jarvis from transcribing its own spoken output.
+/// `excludesCurrentProcessAudio = true` drops any audio Jarvis itself plays (precautionary — the
+/// coach is a text overlay today, but it keeps a future TTS path from feeding back in).
 /// Live behavior is validated by the human smoke run (SCK can't be unit-tested without a display).
 final class SystemAudioInput: NSObject, SCStreamOutput, @unchecked Sendable {
     private let onPCM: @Sendable (Data) -> Void
@@ -49,7 +50,11 @@ final class SystemAudioInput: NSObject, SCStreamOutput, @unchecked Sendable {
             // format, so we're correct whatever the OS actually hands back.
             config.sampleRate = 48_000
             config.channelCount = 1                               // let SCK mix down to mono for us
-            config.excludesCurrentProcessAudio = true             // never transcribe Jarvis's own TTS
+            config.excludesCurrentProcessAudio = true             // precautionary: don't capture any
+                                                                  // audio Jarvis itself plays. Today
+                                                                  // the coach is a text overlay (no
+                                                                  // sound), but this keeps a future
+                                                                  // TTS path from feeding back in.
             config.queueDepth = 8                                 // headroom so audio frames aren't dropped
             // We don't consume the video stream; make it as cheap as possible (tiny, slow frames).
             config.width = 2
