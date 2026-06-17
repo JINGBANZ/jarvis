@@ -73,10 +73,16 @@ used was a handful of standalone Swift programs driving `NSPanel` + ScreenCaptur
   construction.
 - It **re-asserts** `.none` at the top of `show()` every time a coaching response is displayed.
   This is defense-in-depth, taken from Natively's documented lesson: flipping `NSApp` activation
-  policy — which Jarvis does in the API-key dialog ([`MenuBarController.setKey()`](../Sources/JarvisApp/MenuBar/MenuBarController.swift))
-  — can, on some OS versions/configs, make WindowServer drop the flag. It does **not** reproduce on
-  macOS 26.5, but the failure would be silent and high-impact (the overlay would become visible to an
-  interviewer with no signal), so re-asserting on every show is cheap insurance.
+  policy — which Jarvis does when opening the [Settings window](./settings-window.md)
+  (`SettingsWindow.show()`) — can, on some OS versions/configs, make WindowServer drop the flag. It
+  does **not** reproduce on macOS 26.5, but the failure would be silent and high-impact (the overlay
+  would become visible to an interviewer with no signal), so re-asserting on every show is cheap
+  insurance.
+- `showAppearancePreview(_:)` and the appearance setters (`setFontSize`, `setBackgroundOpacity`)
+  invoked from the [Settings window's](./settings-window.md) overlay controls also route through the
+  counted `reassertCaptureExclusion()` helper, so the live preview stays capture-excluded during
+  adjustment. The re-assert is regression-tested via `captureExclusionReassertCount`
+  (`previewReassertsCaptureExclusion` in `JarvisOverlayTests`).
 
 That is the entire implementation: no package, no entitlement, no private API. `OverlayPanel` lives in
 its own small `JarvisOverlay` library target (not the executable) so the tests below can import it.

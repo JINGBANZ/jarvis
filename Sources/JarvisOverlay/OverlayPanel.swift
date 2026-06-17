@@ -69,8 +69,8 @@ public final class OverlayPanel: NSObject, OverlayRendering, OverlayAppearanceAp
     }
 
     private func show(_ sentences: [String], each: TimeInterval) {
-        // Re-assert capture exclusion on every display: an NSApp activation-policy flip (e.g. the
-        // API-key dialog in MenuBarController.setKey) can make WindowServer drop sharingType on some
+        // Re-assert capture exclusion on every display: an NSApp activation-policy flip (e.g. opening
+        // the Settings window in SettingsWindow.show) can make WindowServer drop sharingType on some
         // macOS versions/configs. Cheap insurance against a silent, high-impact regression — the
         // overlay becoming visible to a screen share with no signal. See wiki/overlay-invisibility.md.
         reassertCaptureExclusion()

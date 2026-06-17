@@ -1,8 +1,10 @@
 # Dev Activity Viewer — Design
 
-> Design page for the dev-mode activity viewer: an in-app live log window with a screenshot
-> lightbox and browsable session history. Dev-mode only. Supersedes the original
-> `file://` + `<meta refresh>` HTML viewer described historically in [sandbox.md](./sandbox.md).
+> Design page for the dev-mode activity viewer: an in-app `WKWebView` live log embedded as the
+> **Activity tab of the unified [Settings window](./settings-window.md)** (dev mode only). It vends
+> its content via `makeContentView()` and is torn down via `teardown()` when the Settings window
+> closes — it is no longer a standalone window. Supersedes the original `file://` + `<meta refresh>`
+> HTML viewer described historically in [sandbox.md](./sandbox.md).
 
 ## Why
 
@@ -120,16 +122,15 @@ Given the **base** log directory and the current session dir:
 
 ### `ActivityViewer` (JarvisApp — `@MainActor`, thin)
 
-- Owns one `NSWindow` + `WKWebView` + a header bar holding a **session picker**
-  (`NSPopUpButton` — least code, no split-view) + a **Clear history** button.
+- Vends a content view via **`makeContentView()`** — a header bar (`NSVisualEffectView`) holding a
+  **session picker** (`NSPopUpButton`) + a **Clear history** button, plus a `WKWebView` below — for
+  embedding in the [Settings window's](./settings-window.md) Activity tab. The host window owns
+  lifecycle; **`teardown()`** is called when the Settings window closes (detaches the log observer
+  and nils `webView` + `picker`).
 - **`WKWebView` configuration (defense-in-depth):** loaded only via `loadHTMLString`; the navigation
   delegate **denies every navigation except the initial `about:blank`/in-memory load** (any
   `data:`/link click/redirect is cancelled), so pushed screen-derived text or a `data:` image can't
   navigate out or exfiltrate. No network is needed or permitted.
-- **`show()`** — lazily create the window; reopen brings it forward. Because the app runs as
-  `.accessory`, `show()` must **promote activation** so the window becomes key and front — follow
-  the existing pattern in `MenuBarController`/`AppDelegate` (`NSApp.activate(...)`, temporary
-  `.regular` policy), otherwise the window opens behind everything.
 - **Live (current) session** → `attach` to `ActivityLog`, `loadHTMLString(snapshot.shellHTML)`,
   replay `snapshot.rows`, wire `onAppend`. **Buffering contract:** `onAppend` hops to the main
   thread and appends to a **main-thread-confined pending buffer**; before `didFinish` nothing is
@@ -140,17 +141,19 @@ Given the **base** log directory and the current session dir:
   `appendRow` each (text-only row when a shot is missing/invalid).
 - **State transitions (defined):** first open → show the live session; switching past→live →
   re-`attach` and re-snapshot; selecting a session that no longer exists (e.g. just cleared) →
-  fall back to the live session; reopen after window close → recreate and re-snapshot.
+  fall back to the live session.
 - **Clear history** → confirmation dialog (destructive, irreversible) → `SessionStore.clearHistory()`
   → refresh the picker (and fall back to live if the viewed session was deleted). Deletes the entire
   past-session directories (activity, screenshots, **and** their debug logs), keeping only the live
   session.
 
-### Wiring (`AppDelegate`, `MenuBarController`)
+### Wiring (`AppDelegate`, `ActivitySection`)
 
-- Dev mode: `ActivityLog.shared.enable(directory: sessionDir)` (as today) and construct
+- Dev mode: `ActivityLog.shared.enable(directory: sessionDir)` and construct
   `SessionStore(base: devLogDirectory(), current: sessionDir)`.
-- The menu's **Open Log Viewer** calls `viewer.show()` instead of `NSWorkspace.open(url)`.
+- `AppDelegate` wraps the viewer in an `ActivitySection` and appends it to the `SettingsWindow`
+  sections (dev mode only). `ActivitySection` calls `viewer.makeContentView()` when the Settings
+  window builds its tab and `viewer.teardown()` when the window closes.
 
 ## Rendering & safety
 

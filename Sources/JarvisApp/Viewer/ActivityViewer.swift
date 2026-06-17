@@ -7,11 +7,10 @@ import JarvisCore
 /// past sessions via `SessionStore`. Thin by design — the rendering logic and its tests live in
 /// JarvisCore (`htmlShell`/`rowScript`) and `JarvisViewerTests`. See wiki/activity-viewer.md.
 @MainActor
-final class ActivityViewer: NSObject, WKNavigationDelegate, NSWindowDelegate {
+final class ActivityViewer: NSObject, WKNavigationDelegate {
     private let log: ActivityLog
     private let store: SessionStore
 
-    private var window: NSWindow?
     private var webView: WKWebView?
     private var picker: NSPopUpButton?
     private var sessions: [SessionStore.Session] = []
@@ -27,74 +26,6 @@ final class ActivityViewer: NSObject, WKNavigationDelegate, NSWindowDelegate {
     init(log: ActivityLog, store: SessionStore) {
         self.log = log
         self.store = store
-    }
-
-    /// Open the viewer (creating it on first use) and bring it to the front. Promotes the accessory
-    /// app to `.regular` while the window is open so it can become key (same lesson as the API-key
-    /// dialog); restored to `.accessory` on close.
-    func show() {
-        if let window {
-            NSApp.activate(ignoringOtherApps: true)
-            window.makeKeyAndOrderFront(nil)
-            return
-        }
-        build()
-        NSApp.setActivationPolicy(.regular)
-        NSApp.activate(ignoringOtherApps: true)
-        window?.makeKeyAndOrderFront(nil)
-        populatePicker()
-        loadCurrent()
-    }
-
-    // MARK: - Build
-
-    private func build() {
-        let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 640),
-                           styleMask: [.titled, .closable, .miniaturizable, .resizable],
-                           backing: .buffered, defer: false)
-        win.title = "Jarvis — Activity"
-        win.isReleasedWhenClosed = false
-        win.delegate = self
-        win.center()
-        let content = win.contentView!
-
-        // Header bar: a labelled session picker on the left, "Clear history" on the right. Use the
-        // system header material (not a hand-painted near-black) so standard AppKit controls keep
-        // their normal contrast and read as interactive.
-        let header = NSVisualEffectView(frame: NSRect(x: 0, y: content.bounds.height - 44, width: content.bounds.width, height: 44))
-        header.autoresizingMask = [.width, .minYMargin]
-        header.material = .headerView
-        header.blendingMode = .withinWindow
-        header.state = .active
-
-        let sessionLabel = NSTextField(labelWithString: "Session")
-        sessionLabel.frame = NSRect(x: 14, y: 13, width: 60, height: 18)
-        sessionLabel.textColor = .secondaryLabelColor
-        header.addSubview(sessionLabel)
-
-        let pop = NSPopUpButton(frame: NSRect(x: 76, y: 8, width: 360, height: 26))
-        pop.target = self
-        pop.action = #selector(sessionChanged)
-        pop.toolTip = "Switch between this and previous dev sessions"
-        pop.autoresizingMask = [.maxXMargin]
-        header.addSubview(pop)
-        self.picker = pop
-
-        let clear = NSButton(title: "Clear history", target: self, action: #selector(clearHistoryTapped))
-        clear.bezelStyle = .rounded
-        clear.toolTip = "Delete all previous sessions (keeps the current one)"
-        clear.frame = NSRect(x: content.bounds.width - 146, y: 8, width: 132, height: 28)
-        clear.autoresizingMask = [.minXMargin]
-        header.addSubview(clear)
-
-        let wv = WKWebView(frame: NSRect(x: 0, y: 0, width: content.bounds.width, height: content.bounds.height - 44))
-        wv.autoresizingMask = [.width, .height]
-        wv.navigationDelegate = self
-
-        content.addSubview(wv)
-        content.addSubview(header)
-        self.window = win
-        self.webView = wv
     }
 
     // MARK: - Embeddable content view (unified Settings window)
@@ -150,6 +81,7 @@ final class ActivityViewer: NSObject, WKNavigationDelegate, NSWindowDelegate {
     func teardown() {
         log.detach()
         webView = nil
+        picker = nil
         loaded = false
         pending = []
         snapshotRows = []
@@ -248,18 +180,6 @@ final class ActivityViewer: NSObject, WKNavigationDelegate, NSWindowDelegate {
         store.clearHistory()
         populatePicker()
         loadCurrent()   // the viewed session may be gone; fall back to the live one
-    }
-
-    // MARK: - NSWindowDelegate
-
-    func windowWillClose(_ notification: Notification) {
-        log.detach()
-        NSApp.setActivationPolicy(.accessory)   // back to menu-bar-only
-        window = nil
-        webView = nil
-        loaded = false
-        pending = []
-        snapshotRows = []
     }
 
     /// Encode a Swift string as a JS string literal (for `setMeta`).

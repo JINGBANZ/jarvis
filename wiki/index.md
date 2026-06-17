@@ -19,6 +19,7 @@
 - **[fork-evaluation.md](./fork-evaluation.md)** — code-level evaluation of open-source apps as a fork base for the PoC, and why they're all Electron/Tauri rather than native Swift.
 - **[fix-responsiveness-vad-stop.md](./fix-responsiveness-vad-stop.md)** — root-cause analysis (verified from five angles) and fix plan for the first live smoke run's issues: direct-address responsiveness, mid-sentence turn-detection, and noisy Stop.
 - **[activity-viewer.md](./activity-viewer.md)** — design for the dev-mode activity viewer: an in-app `WKWebView` live log window with a screenshot lightbox and browsable session history (replaces the `file://` + meta-refresh HTML viewer).
+- **[settings-window.md](./settings-window.md)** — the unified Settings window: one menu item → `SettingsWindow` hosting `APIKeySection`, `OverlaySection`, and (dev mode) `ActivitySection`; overlay text size + background opacity persisted via `OverlayAppearance`.
 
 ## Key Decisions
 

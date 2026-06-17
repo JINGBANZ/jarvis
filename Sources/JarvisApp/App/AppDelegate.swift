@@ -22,7 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var turns: TurnTaskBox?
 
     /// Dev mode (`open ./Jarvis.app --args --dev`): enables owner-only file logging for the session.
-    /// The activity HTML is opened on demand from the menu bar, not auto-opened on launch.
+    /// The activity log is available on demand from the Activity tab in Settings (dev mode only).
     private let devMode = CommandLine.arguments.contains("--dev")
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -78,7 +78,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if secrets.apiKey()?.isEmpty == false {
             jlog("Jarvis: ready — press Start in the menu bar to begin coaching.")
         } else {
-            jlog("Jarvis: no API key yet — paste it via the menu bar, then press Start.")
+            jlog("Jarvis: no API key yet — paste it in Settings, then press Start.")
         }
     }
 

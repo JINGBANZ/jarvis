@@ -61,6 +61,7 @@ A compact log — the *rationale* for each lives in the linked design page, not 
 | **Dev activity viewer → in-app `WKWebView`** (live push, no meta-refresh; screenshot lightbox; persisted JSONL session history + clear-history) — design reviewed from 6 angles + adversarial verify, no surviving blockers; headless `WKWebView` test harness empirically validated on CLT (2026-06-16) | [activity-viewer.md](./activity-viewer.md) |
 | **Overlay hidden from screen capture/sharing via `sharingType = .none`** — already at parity with every alternative (it's the only mechanism); verified on macOS 26.5 incl. live `SCStream`; re-asserted on `show()` as defense-in-depth (2026-06-16) | [overlay-invisibility.md](./overlay-invisibility.md) |
 | **Cut the guardrail layer: no cooldown/rate cap, no wake-word detector; brain self-gates speaking; silence check backs off (30s→240s)** — simplify the flow, cut log noise, natural conversation (2026-06-16) | [architecture.md](./architecture.md#5-safety-model), [specification.md](./specification.md) |
+| **Unified Settings window** replaces the separate API-key dialog and log-viewer menu item; overlay text size (12–32 pt, default 18) + background opacity (40–100%, default 78%) are now user-adjustable and persisted via `OverlayAppearance` (UserDefaults) (2026-06-17) | [settings-window.md](./settings-window.md) |
 
 ## Open Questions / To Confirm
 
