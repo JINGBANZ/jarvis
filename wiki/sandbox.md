@@ -17,8 +17,8 @@ Two layers below are **relaxed** for the personal build, by explicit decision:
   **git worktree** for recoverability, rather than a restricted `jarvisbuild` account. The former
   HARD REQUIREMENT is **waived** here. (Hardened model: §2.)
 
-Everything else (Keychain for the key, narrow egress, no recording to disk, behavioral guardrails)
-**still holds**. To re-harden for a shippable build, re-enable §1 and §2.
+Everything else (Keychain for the key, narrow egress, no recording to disk, model-governed behavioral
+restraint) **still holds**. To re-harden for a shippable build, re-enable §1 and §2.
 
 ## Principle
 

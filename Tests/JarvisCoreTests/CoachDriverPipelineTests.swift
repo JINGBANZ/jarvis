@@ -240,6 +240,19 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(await driver.handleTrigger(.turnEnd) == .silentByModel)
     }
 
+    /// No cooldown: two back-to-back turns both reach the brain and both speak (the inverse of the
+    /// old rate-cap behavior, which suppressed the second).
+    @Test func consecutiveTurnsBothReachBrain() async {
+        let clock = ManualClock(now: 100)
+        let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s1", text: "first")])])
+        let overlay = FakeOverlay()
+        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: overlay, clock: clock)
+        #expect(await driver.handleTrigger(.turnEnd) == .spoke)
+        #expect(await driver.handleTrigger(.turnEnd) == .spoke)   // immediately again — not held back
+        #expect(brain.calls.count == 2)
+        #expect(overlay.rendered.count == 2)
+    }
+
     /// A token-truncated response (zero tool calls but status=incomplete) must be reported as
     /// `.truncated`, NOT mistaken for deliberate `.silentByModel`, and must render nothing.
     @Test func truncatedOutcomeWhenResponseIncomplete() async {
