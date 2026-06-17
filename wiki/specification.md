@@ -21,15 +21,14 @@ context (timestamped transcript + how long the user has been silent) so it can d
 ```swift
 // Always-on: stream audio to gpt-4o-transcribe, maintain a rolling, timestamped transcript.
 transcriber.onTurnEnd = { handleTrigger(.turnEnd) }
-// Silence fires after `silenceTimeoutSeconds`; the actual quiet duration is passed through.
+// Silence fires after the current backoff interval (base `silenceTimeoutSeconds`, doubling while
+// still quiet up to `silenceMaxIntervalSeconds`); the actual quiet duration is passed through.
 transcriber.onSilence = { secs in handleTrigger(.silence(secondsQuiet: secs)) }
 
 func handleTrigger(_ reason: TriggerReason) {
-    guard !muted else { return }
-    guard coachDriver.guardrailsAllow() else { return }   // cooldown + rate cap
-
-    // The model sees a timestamped transcript window plus explicit timing context, so it can
-    // reason about pace — e.g. "they went quiet 18s ago right after reading the constraints."
+    // No cooldown, no rate cap, no wake-word gate: every utterance reaches the brain, and the
+    // brain decides whether it has anything worth saying. That restraint lives in the prompt, not
+    // in a guardrail — including answering when the user addresses Jarvis by name.
     let messages = coachPrompt(
         transcript: transcriber.recentWindow(seconds: 90),     // each line carries a timestamp
         context: TriggerContext(reason: reason,                // .turnEnd or .silence(secondsQuiet:)
@@ -48,7 +47,6 @@ func handleTrigger(_ reason: TriggerReason) {
             continue                                     // let the model reason over the image
         case .speak(let text):
             overlay.render(text)                         // <=3 sentences, 5s each
-            coachDriver.noteSpoke()                      // start cooldown
             return
         case .none:
             return                                       // model chose to stay silent
@@ -58,7 +56,8 @@ func handleTrigger(_ reason: TriggerReason) {
 ```
 
 The loop is deliberately small. All judgment ("do I need to see the screen?", "do I have a useful
-tip?", "should I stay quiet?") lives in the model, not the harness.
+tip?", "should I stay quiet?", "was I just addressed?") lives in the model, not the harness. The
+**Start/Stop** control is the only hard gate; coaching never runs until explicitly started.
 
 ### Timing & "stuck" detection
 
@@ -68,9 +67,13 @@ lets the model judge:
 
 - **Timestamped transcript:** every line in the window is prefixed with a relative timestamp
   (e.g. `[01:42] me: maybe a hash map…`), so the model can see rhythm and gaps.
-- **Silence trigger carries duration:** when `silenceTimeoutSeconds` of quiet elapses, the trigger
-  fires with `secondsQuiet`, and the prompt states it plainly (e.g. "The user has been silent for
-  20 seconds"). The model decides whether that means "offer a nudge" or "let them think."
+- **Silence trigger carries duration:** when the current silence interval of quiet elapses, the
+  trigger fires with `secondsQuiet`, and the prompt states it plainly (e.g. "The user has been
+  silent for 30 seconds"). The model decides whether that means "offer a nudge" or "let them think."
+  The interval **backs off** — base `silenceTimeoutSeconds`, doubling while the user stays quiet up
+  to `silenceMaxIntervalSeconds`, and resetting to the base on any speech — so a long silence is
+  re-checked occasionally (e.g. 30s, 60s, 120s, …) rather than nudged once or pestered every few
+  seconds.
 - **Session clock:** `sessionElapsedSeconds` lets the model factor in how long they've been on the
   problem overall.
 
@@ -115,7 +118,10 @@ judgment is the model's, informed by the timing context above.
 
 ## 4. Coach System Prompt (MVP)
 
-> Stored as a constant; tune freely. Encodes the *only* behavior in the MVP.
+> Stored as a constant (`coachSystemPrompt`); tune freely. Since there is **no cooldown or rate
+> cap**, this prompt is the *only* thing governing how much Jarvis talks — the restraint must live
+> here. It also carries direct-address handling: the model decides it was addressed by reading
+> "Jarvis" / a question in the transcript, so there is no separate wake-word detector.
 
 ```
 You are Jarvis, a calm, sharp LeetCode coach sitting beside the user while they solve a problem.
@@ -123,25 +129,34 @@ You hear them think aloud. You cannot see their screen unless you call capture_s
 when you need to read the problem or their code to be specific and correct.
 
 You are given timing context: a timestamped transcript, how many seconds the user has been silent,
-and how long they have been on the problem. Use it. A long silence often means they are stuck and
-a gentle nudge would help — but not always; sometimes they are thinking productively and should be
-left alone. Judge from what they last said and how long they have been quiet.
+and how long they have been on the problem. Use it.
 
-Your job: nudge them toward the solution with short, encouraging, *specific* hints. Never dump the
-full solution unless they are truly stuck and ask for it. Prefer asking a pointed question or
-pointing at the next small step (e.g. "What's the time complexity of that nested loop?").
+WHEN THE USER ADDRESSES YOU DIRECTLY (says your name "Jarvis", asks you a question, or tells you to
+do something), you MUST reply — call the speak tool with a brief, helpful answer. Never ignore a
+direct address; even a simple greeting deserves a short spoken reply. This overrides the
+stay-quiet-by-default behavior below.
 
-Speak only when it helps. If they are making good progress, stay silent — call no tool. When you
-do speak, call the speak tool with at most 3 short sentences.
+OTHERWISE, when the user is just thinking aloud, be a restrained, proactive coach. Nudge them toward
+the solution with short, encouraging, specific hints. Never dump the full solution unless they are
+truly stuck and ask for it. Prefer a pointed question or the next small step (e.g. "What's the time
+complexity of that nested loop?"). If they are making good progress, stay silent — call no tool.
+
+IF THE USER ASKS YOU TO LOOK AT OR CHECK THEIR SCREEN, call capture_screen right away — even if they
+didn't say your name — then answer based on what you see.
+
+WHEN THE USER HAS BEEN SILENT FOR A WHILE, prefer to call capture_screen to read their current
+problem and code before deciding whether a nudge would help. A long silence often means they are
+stuck; but if the screen shows steady progress, stay silent and leave them alone.
+
+When you do speak, call the speak tool with at most 3 short sentences.
 ```
 
 ## 5. Configuration
 
 | Key | Default | Notes |
 |---|---|---|
-| `silenceTimeoutSeconds` | 8 | How long of no speech before a "maybe stuck" silence trigger fires. The actual quiet duration is passed to the model. |
-| `cooldownSeconds` | 12 | Minimum gap between spoken responses. |
-| `maxInterjectionsPerMinute` | 4 | Hard rate cap. |
+| `silenceTimeoutSeconds` | 30 | Base quiet interval before the first "maybe stuck" silence check. The actual quiet duration is passed to the model. |
+| `silenceMaxIntervalSeconds` | 240 | Upper bound on the silence-check interval as it backs off (30s → 60s → 120s → 240s, then holds), so a long silence is re-checked occasionally instead of once or constantly. Resets to the base on any speech. |
 | `transcriptWindowSeconds` | 90 | How much recent transcript the model sees per turn (timestamped). |
 | `sentenceDisplaySeconds` | 5 | How long each overlay sentence stays up. |
 | `maxSentences` | 3 | Hard cap on response length. |
@@ -209,9 +224,10 @@ Target: **turn-end → first overlay sentence < 2 seconds.** Levers:
 The build agent must produce and run these. (See the development goal: the agent verifies its own work.)
 
 **Unit tests (pure logic, run anywhere):**
-- CoachDriver guardrails: cooldown suppresses a second response inside the window; rate cap blocks
-  the (N+1)th interjection in a minute; the latent mute flag (still in `Guardrails`, not exposed in
-  the menu) suppresses all output.
+- CoachDriver turn outcomes: a turn routes capture→speak; staying silent renders nothing; a
+  truncated response is reported as `.truncated` (not silence); a concurrent trigger is coalesced.
+- Silence backoff (`SilenceBackoff`): the check interval starts at the base, doubles while quiet up
+  to the cap, and resets to the base on speech.
 - Overlay formatting: a 5-sentence input renders exactly 3 sentences; sentence splitting is correct.
 
 **Offline pipeline test (mock OpenAI client, run anywhere):**
@@ -226,11 +242,12 @@ The build agent must produce and run these. (See the development goal: the agent
    produces a coaching overlay within the latency budget, and the model is observed to call
    `capture_screen`.
 4. `capture_screen` returns a valid image and the overlay window is absent from it.
-5. Guardrails hold: rapid triggers do not produce more than `maxInterjectionsPerMinute` responses;
-   **Stop Jarvis** halts the pipeline entirely.
+5. Restraint holds: while the user talks steadily, Jarvis stays mostly quiet (the model's judgment,
+   not a rate cap); **Stop Jarvis** halts the pipeline entirely.
 
-**Guardrail / cost guard:** a session **interjection** counter surfaced in the menu bar (reset on
-each Start), so runaway behavior is visible.
+**Cost guard:** a session **interjection** counter surfaced in the menu bar (reset on each Start),
+so runaway behavior is visible. There is no hard rate cap in code — cost tracks usage, and the
+counter is the visible signal if the model ever over-talks (tighten the prompt if so).
 
 ## 9. Build & Run Constraints
 
@@ -279,7 +296,7 @@ page on demand:
   keeps your scroll position unless you're pinned to the bottom. No server — it works off `file://`.
 - The viewer keys on human-readable markers: 🗣 `heard: "…"` (your transcribed speech, logged by
   the transcriber) / 🤫 silence (why it woke), 💭 thinking, 👁 `capture_screen`, 💬 the spoken tip,
-  and `… staying silent` / `… held back` when the coach declines. A `capture_screen` is saved as an
+  and `… staying silent` when the model declines to speak. A `capture_screen` is saved as an
   owner-only JPEG next to the HTML and rendered inline as a **clickable thumbnail** (opens full size
   in a new tab) — so the log shows the visual part of the interaction, not just text.
 - **Privacy posture (important).** File logging is **off unless dev mode is on** — outside dev mode

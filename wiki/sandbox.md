@@ -17,8 +17,8 @@ Two layers below are **relaxed** for the personal build, by explicit decision:
   **git worktree** for recoverability, rather than a restricted `jarvisbuild` account. The former
   HARD REQUIREMENT is **waived** here. (Hardened model: §2.)
 
-Everything else (Keychain for the key, narrow egress, no recording to disk, behavioral guardrails)
-**still holds**. To re-harden for a shippable build, re-enable §1 and §2.
+Everything else (Keychain for the key, narrow egress, no recording to disk, model-governed behavioral
+restraint) **still holds**. To re-harden for a shippable build, re-enable §1 and §2.
 
 ## Principle
 
@@ -98,15 +98,17 @@ permissions, **truncated fresh each session** — never `/tmp` (which is world-r
 across user accounts). So even the dev affordance produces no world-readable or persistent record.
 See [specification.md §9](./specification.md#9-build--run-constraints).
 
-## Behavioral Guardrails (anti-annoyance = anti-misbehavior)
+## Behavioral Restraint (anti-annoyance = anti-misbehavior)
 
-- **Cooldown** between spoken responses.
-- **Rate cap** (max interjections per minute).
-- **Manual Start/Stop** in the menu bar — coaching never runs until started, and Stop tears the
-  pipeline down entirely (replaces the earlier user-facing mute; the latent mute flag remains in
-  `Guardrails` but is no longer exposed in the menu).
+- **Model-governed restraint.** There is **no cooldown, rate cap, or mute** in code (the
+  `Guardrails` type was removed). Every utterance reaches the brain, which decides whether it has
+  anything worth saying — that restraint lives in the system prompt. This keeps conversation natural
+  (a follow-up question is never stranded behind a timer). See [architecture.md §5](./architecture.md#5-safety-model).
+- **Manual Start/Stop** in the menu bar — the only hard gate. Coaching never runs until started, and
+  Stop tears the pipeline down entirely.
 - **Visible "listening" indicator** — the user always knows when Jarvis is active (also a consent cue).
-- **Session interjection counter** in the menu bar (reset on each Start), so runaway behavior is visible immediately.
+- **Session interjection counter** in the menu bar (reset on each Start), so over-talking is visible
+  immediately. Cost is accepted as tracking usage for now (a future improvement, not a v1 guardrail).
 
 ## Consent Note
 

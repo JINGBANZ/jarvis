@@ -1,5 +1,6 @@
 import AppKit
 import JarvisCore
+import JarvisOverlay
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -7,15 +8,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let config = Config.default
     private let transcript = RollingTranscript()
     private let keychain = KeychainSecretStore()
-    private lazy var guardrails = Guardrails(
-        cooldownSeconds: config.cooldownSeconds,
-        maxInterjectionsPerMinute: config.maxInterjectionsPerMinute,
-        maxDirectAddressesPerMinute: config.maxDirectAddressesPerMinute,
-        clock: clock)
     private lazy var secrets = ChainedSecretStore([keychain, EnvSecretStore()])
 
     private var overlay: OverlayPanel!
     private var menuBar: MenuBarController!
+    private var activityViewer: ActivityViewer?    // dev mode only; the in-app activity log window
     /// Two transcription sockets feeding one shared transcript: mic → `.me`, system audio → `.them`.
     private var transcriber: RealtimeTranscriber?       // "me" (mic)
     private var themTranscriber: RealtimeTranscriber?   // "them" (system audio)
@@ -42,9 +39,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true,
                                                      attributes: [.posixPermissions: 0o700])
             JarvisLog.enableFileLogging(directory: dir)     // <dir>/jarvis-debug.log, 0600, fresh
-            ActivityLog.shared.enable(directory: dir)        // <dir>/jarvis-activity.html, 0600, fresh
+            ActivityLog.shared.enable(directory: dir)        // <dir>/jarvis-activity.jsonl, 0600, fresh
+            // The viewer can browse every past session under the base log dir; clear-history spares
+            // this one.
+            activityViewer = ActivityViewer(log: .shared,
+                                            store: SessionStore(base: devLogDirectory(), current: dir))
             jlog("Jarvis: dev mode — session \(dir.lastPathComponent) (\(dir.path)).")
-            jlog("Jarvis: pick “Open Log Viewer” from the menu bar to watch this session.")
         }
 
         // Ask for Microphone + Screen Recording up front, not lazily mid-session.
@@ -52,10 +52,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         overlay = OverlayPanel()
         menuBar = MenuBarController(keychain: keychain, showLogViewer: devMode)
-        // Dev mode: open this session's activity HTML on demand.
-        menuBar.onOpenLogViewer = {
-            guard let url = ActivityLog.shared.htmlURL else { jlog("Jarvis: no activity log to open yet."); return }
-            if !NSWorkspace.shared.open(url) { jlog("Jarvis: couldn't open the activity log viewer (\(url.path)).") }
+        // Dev mode: open this session's activity in the in-app viewer window on demand.
+        menuBar.onOpenLogViewer = { [weak self] in
+            guard let viewer = self?.activityViewer else { jlog("Jarvis: no activity log to open yet."); return }
+            viewer.show()
         }
         // The menu drives the pipeline lifecycle. Jarvis does NOT auto-start; the user presses Start.
         menuBar.onStart = { [weak self] in self?.start() ?? false }
@@ -88,7 +88,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let brain = OpenAIBrainClient(apiKey: key, model: config.brainModel,
                                       reasoningEffort: config.reasoningEffort)
-        let driver = CoachDriver(config: config, transcript: transcript, guardrails: guardrails,
+        let driver = CoachDriver(config: config, transcript: transcript,
                                  brain: brain, screen: ScreenCaptureCLI(), overlay: overlay, clock: clock,
                                  onSpoke: { [weak self] in Task { @MainActor in self?.menuBar.noteSpoke() } })
 
@@ -111,29 +111,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        // "Me" side: the mic. Drives turn-end / direct-address / silence ("are you stuck?").
+        // "Me" side: the mic. Drives turn-end and the backing-off silence check ("are you stuck?").
         let transcriber = RealtimeTranscriber(apiKey: key, model: config.transcriptionModel,
                                               speaker: .me, transcript: transcript, clock: clock,
                                               silenceTimeout: config.silenceTimeoutSeconds,
+                                              silenceMaxInterval: config.silenceMaxIntervalSeconds,
                                               silenceDurationMs: config.vadSilenceDurationMs,
                                               turnDebounce: config.turnDebounceSeconds,
                                               maxBufferedAudioSeconds: config.maxBufferedAudioSeconds)
         transcriber.onTurnEnd = { turns.run { await driver.handleTrigger(.turnEnd) } }
-        transcriber.onDirectAddress = { turns.run { await driver.handleTrigger(.directAddress) } }
         transcriber.onSilence = { secs in turns.run { await driver.handleTrigger(.silence(secondsQuiet: secs)) } }
         transcriber.onTerminalFailure = onMicTerminalFailure
 
-        // "Them" side: system audio (remote participants). Drives turn-end / direct-address so Jarvis
-        // can react when the other side finishes (e.g. asks you something), but NOT silence — the
-        // "are you stuck?" prompt is about the *user*, so only the mic owns that timer.
+        // "Them" side: system audio (remote participants). Drives turn-end so Jarvis can react when the
+        // other side finishes (e.g. asks you something), but NOT the silence check — the "are you
+        // stuck?" prompt is about the *user*, so only the mic owns that timer.
         let themTranscriber = RealtimeTranscriber(apiKey: key, model: config.transcriptionModel,
                                                   speaker: .them, transcript: transcript, clock: clock,
                                                   silenceTimeout: config.silenceTimeoutSeconds,
+                                                  silenceMaxInterval: config.silenceMaxIntervalSeconds,
                                                   silenceDurationMs: config.vadSilenceDurationMs,
                                                   turnDebounce: config.turnDebounceSeconds,
                                                   maxBufferedAudioSeconds: config.maxBufferedAudioSeconds)
         themTranscriber.onTurnEnd = { turns.run { await driver.handleTrigger(.turnEnd) } }
-        themTranscriber.onDirectAddress = { turns.run { await driver.handleTrigger(.directAddress) } }
         themTranscriber.onTerminalFailure = onThemTerminalFailure
 
         let audio = AudioInput { [weak transcriber] pcm in transcriber?.sendAudio(pcm) }
