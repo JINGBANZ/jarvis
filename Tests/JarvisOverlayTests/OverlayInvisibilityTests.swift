@@ -31,6 +31,24 @@ import AppKit
         #expect(overlay.currentSharingType == .none)
     }
 
+    @MainActor @Test
+    func settersChangeFontAndOpacity() {
+        let overlay = OverlayPanel()
+        overlay.setFontSize(26)
+        overlay.setBackgroundOpacity(0.5)
+        #expect(overlay.currentFontPointSize == 26)
+        #expect(abs(overlay.currentBackgroundAlpha - 0.5) < 0.001)
+    }
+
+    @MainActor @Test
+    func previewKeepsCaptureExclusion() {
+        let overlay = OverlayPanel()
+        overlay.showAppearancePreview(true)
+        #expect(overlay.currentSharingType == .none)
+        overlay.showAppearancePreview(false)
+        #expect(overlay.currentSharingType == .none)
+    }
+
     @Test
     func overlayReassertsExclusionWhenShown() async {
         await checkReassertOnShow()

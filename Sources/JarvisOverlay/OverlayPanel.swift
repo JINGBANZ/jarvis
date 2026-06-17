@@ -6,7 +6,7 @@ import JarvisCore
 /// overlay stays invisible in anyone else's screen share or recording (Zoom/Meet/Teams/QuickTime).
 /// See `init` and wiki/overlay-invisibility.md.
 @MainActor
-public final class OverlayPanel: NSObject, OverlayRendering {
+public final class OverlayPanel: NSObject, OverlayRendering, OverlayAppearanceApplying {
     private let panel: NSPanel
     private let label: NSTextField
     private var hideWorkItem: DispatchWorkItem?
@@ -91,8 +91,41 @@ public final class OverlayPanel: NSObject, OverlayRendering {
 
     private func hide() { panel.orderOut(nil) }
 
+    // MARK: - OverlayAppearanceApplying
+
+    /// Live preview sample shown while the Settings window is open.
+    private static let previewText = "Sample overlay text"
+
+    public func setFontSize(_ points: Double) {
+        label.font = .systemFont(ofSize: CGFloat(points), weight: .medium)
+    }
+
+    public func setBackgroundOpacity(_ opacity: Double) {
+        panel.backgroundColor = NSColor.black.withAlphaComponent(CGFloat(opacity))
+    }
+
+    /// Show a sample tip (on) or clear it (off). Cancels any pending auto-hide so a live coaching
+    /// tip doesn't yank the preview away mid-adjust, and re-asserts capture exclusion (same
+    /// defense-in-depth as `show()`; an activation-policy flip can drop `sharingType`).
+    public func showAppearancePreview(_ on: Bool) {
+        if on {
+            hideWorkItem?.cancel()
+            panel.sharingType = .none
+            label.stringValue = Self.previewText
+            panel.orderFrontRegardless()
+        } else {
+            hide()
+        }
+    }
+
     // MARK: - Test hooks (internal; reached via `@testable import JarvisOverlay`)
 
     /// The panel's current capture-sharing type. `.none` means excluded from screen capture.
     var currentSharingType: NSWindow.SharingType { panel.sharingType }
+
+    /// The label's current font point size.
+    var currentFontPointSize: CGFloat { label.font?.pointSize ?? 0 }
+
+    /// The panel background's current alpha (the opacity the user picked).
+    var currentBackgroundAlpha: CGFloat { panel.backgroundColor.alphaComponent }
 }
