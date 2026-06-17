@@ -60,13 +60,13 @@ final class OverlaySection: NSObject, SettingsSection {
     }
 
     @objc private func sizeChanged(_ sender: NSSlider) {
-        appearance.fontSize = sender.doubleValue
+        appearance.fontSize = sender.doubleValue.rounded()   // whole points: readout == stored == applied
         applying.setFontSize(appearance.fontSize)
         updateReadouts()
     }
 
     @objc private func opacityChanged(_ sender: NSSlider) {
-        appearance.backgroundOpacity = sender.doubleValue
+        appearance.backgroundOpacity = (sender.doubleValue * 100).rounded() / 100   // whole percent
         applying.setBackgroundOpacity(appearance.backgroundOpacity)
         updateReadouts()
     }
