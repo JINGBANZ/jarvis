@@ -7,7 +7,7 @@
 **Build complete (headless) — awaiting the live smoke run.** Phase 1 was **skipped** (2026-06-14)
 and the native Swift app was built directly per [plan-phase2-build.md](./plan-phase2-build.md). The
 tested harness (config, transcript, silence backoff, coach tool-loop, OpenAI client, activity log + viewer,
-session store, overlay invisibility) is **green: 82 tests pass**; `Jarvis.app` builds, signs with the stable
+session store, overlay invisibility) is **green: 83 tests pass**; `Jarvis.app` builds, signs with the stable
 `Jarvis Dev` identity, and launches. The app shell, overlay,
 mic capture, and realtime transcriber **compile and launch** but their *live* behavior (real mic,
 websocket, TCC grants, real `OPENAI_API_KEY`, real model IDs) is verified only by the human smoke
