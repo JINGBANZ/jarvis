@@ -15,11 +15,13 @@ re-deriving anything.
    reads first. Update it whenever the phase or the "next action" changes.
 3. **No formal ADRs at this stage.** Be conservative about decision ceremony. Record decisions as a
    compact one-line entry in [status.md](./status.md#key-decisions); put the *rationale* in the
-   relevant design page (architecture / specification / fork-evaluation / sandbox). Reserve heavier
-   decision records for big product decisions, once there's a product.
-4. **Spec changes go in [specification.md](./specification.md).** Keep it buildable: schemas,
-   prompts, config, pseudocode, verification. If another agent couldn't implement from it, it's
-   incomplete.
+   relevant design page (architecture / fork-evaluation / sandbox). Reserve heavier decision records
+   for big product decisions, once there's a product.
+4. **Don't document what the code already states.** Schemas, prompts, config values, and pseudocode
+   live in `Sources/` (`ToolDefs.swift`, `Config.swift`, `CoachDriver.swift`, …) — do **not** copy
+   them into the wiki, or they drift. The wiki holds the *why* (rationale, tradeoffs, decisions); for
+   the *what*, link to the source file. New design rationale goes in
+   [architecture.md](./architecture.md).
 5. **Match the house style:** lowercase-hyphenated filenames; blockquote preamble; H2/H3 headers;
    tables for enumerable facts; inline code for paths/identifiers; cross-link with `[text](./file.md)`.
 6. **No secrets, ever** — not in pages, not in examples.
@@ -33,12 +35,13 @@ re-deriving anything.
 
 ```
 wiki/
-├── index.md              # navigation / single source of truth
-├── status.md             # current phase, key-decisions log, next action (read first)
-├── architecture.md       # vision, harness loop, components, principles
-├── specification.md      # the buildable spec
-├── sandbox.md            # security / isolation model
-├── landscape-survey.md   # tools tried & evaluated
-├── fork-evaluation.md    # code-level eval of fork bases
-└── CLAUDE.md             # this file
+├── index.md                 # navigation / single source of truth
+├── status.md                # current phase, key-decisions log, next action (read first)
+├── architecture.md          # vision, harness loop, components, models/APIs, resilience, safety
+├── build-and-run.md         # operational: toolchain, signing/TCC, running, dev-mode viewer
+├── sandbox.md               # security / isolation model
+├── overlay-invisibility.md  # hiding the overlay from screen capture (`sharingType = .none`)
+├── landscape-survey.md      # tools tried & evaluated
+├── fork-evaluation.md       # code-level eval of fork bases
+└── CLAUDE.md                # this file
 ```

@@ -60,13 +60,15 @@ Full design: [`wiki/architecture.md`](./wiki/architecture.md).
 │   │   ├── SilenceBackoff.swift   # exponential backoff for the proactive silence check
 │   │   ├── Transcript.swift       # rolling, timestamped transcript window
 │   │   ├── Config / Clock / Trigger / ToolDefs / Secrets / ...
-│   │   └── ActivityLog.swift      # dev-mode live activity viewer (HTML)
+│   │   ├── ActivityLog.swift      # dev-mode activity model (rows pushed to the viewer)
+│   │   └── SessionStore.swift     # persisted dev-session history (JSONL + screenshots)
 │   └── JarvisApp/             # the macOS app shell — the native, OS-bound parts
 │       ├── main.swift / AppDelegate.swift
 │       ├── MenuBarController.swift # menu-bar item, Start/Stop, key entry
 │       ├── AudioInput.swift        # mic + system-audio capture
 │       ├── RealtimeTranscriber.swift
 │       ├── OverlayPanel.swift      # the on-screen tip overlay (NSPanel)
+│       ├── ActivityViewer.swift    # dev-mode in-app WKWebView live viewer
 │       └── Permissions.swift       # TCC priming (Mic, Screen Recording)
 ├── Tests/JarvisCoreTests/     # unit + offline-pipeline tests for the harness
 ├── Resources/Info.plist       # bundle id, usage strings
@@ -119,7 +121,7 @@ Then:
    only two states: **⚪️ stopped** and **🟢 running**.
 
 Permissions persist across rebuilds automatically (the app always signs with a stable identity); the
-mechanics are in [`wiki/specification.md` §9](./wiki/specification.md#9-build--run-constraints).
+mechanics are in [`wiki/build-and-run.md`](./wiki/build-and-run.md).
 
 ## Dev mode — live activity viewer
 
@@ -127,10 +129,10 @@ mechanics are in [`wiki/specification.md` §9](./wiki/specification.md#9-build--
 ./scripts/build-app.sh --dev   # rebuild, launch with --dev
 ```
 
-In dev mode Jarvis writes a self-contained, auto-refreshing HTML page so you can **watch it think**
-without tailing a log. It doesn't pop open on launch — choose **Open Log Viewer** from the menu bar
-when you want it (each launch is its own session, so you open the current one on demand). The page
-reloads every second and color-codes each event:
+In dev mode Jarvis opens an **in-app live viewer** (a `WKWebView` it pushes events into) so you can
+**watch it think** without tailing a log. It doesn't pop open on launch — choose **Open Log Viewer**
+from the menu bar when you want it (each launch is its own session; you can also browse past sessions
+or clear the history). New events stream in live — no reload — and are color-coded:
 
 - 🗣 `heard: "…"` — what you said (transcribed) / 🤫 `quiet for 30s` — why it woke
 - 💭 `thinking…` — calling the brain
@@ -141,15 +143,15 @@ reloads every second and color-codes each event:
 
 **Privacy posture.** File logging is dev-only — outside dev mode nothing is written to disk (just the
 unified Console log). In dev mode the logs (and the screenshot thumbnails) go to a gitignored,
-owner-only `.jarvis/<session>/` in the workspace — one fresh subdirectory per launch. Log-path and
-env-override details are in
-[`wiki/specification.md`](./wiki/specification.md#dev-mode--live-activity-viewer).
+owner-only `.jarvis/<session>/` in the workspace — one fresh subdirectory per launch. The posture and
+build/run mechanics are in [`wiki/build-and-run.md`](./wiki/build-and-run.md)
+and [`wiki/sandbox.md`](./wiki/sandbox.md).
 
 ## Live smoke checklist
 
-Some behavior can only be verified by a human with a real key, a mic, and granted permissions — see
-[`wiki/specification.md` §8](./wiki/specification.md#8-self-verification-plan). Run via
-`./scripts/build-app.sh --dev`, then open the activity viewer from the menu bar; it shows each step as it happens.
+Some behavior can only be verified by a human with a real key, a mic, and granted permissions. Run
+via `./scripts/build-app.sh --dev`, then open the activity viewer from the menu bar; it shows each
+step as it happens.
 
 - Confirm the transcription session connects end-to-end — watch for `transcription session ready`
   (and any `error event` lines). This is the main thing only a live run can verify.
@@ -163,7 +165,7 @@ Some behavior can only be verified by a human with a real key, a mic, and grante
 ## Build status
 
 The pure harness (config, transcript, silence backoff, the coach tool-loop, the OpenAI client) is
-**unit-tested and green** (82 tests). The app shell, overlay, mic capture, and realtime transcriber
+**unit-tested and green**. The app shell, overlay, mic capture, and realtime transcriber
 **compile and launch**, but their live behavior is verified only by the checklist above — they were
 built without a real key or audio device. Current state and next steps live in
 [`wiki/status.md`](./wiki/status.md).

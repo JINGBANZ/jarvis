@@ -14,7 +14,7 @@ public let speakTool = ToolDef(
 
 public let coachTools: [ToolDef] = [captureScreenTool, speakTool]
 
-/// The only behavior in the MVP (specification.md §4).
+/// The coach system prompt — the only place response behavior is governed (no code-side guardrail).
 public let coachSystemPrompt = """
 You are Jarvis, a calm, sharp LeetCode coach sitting beside the user while they solve a problem.
 You hear them think aloud. You cannot see their screen unless you call capture_screen — do that
