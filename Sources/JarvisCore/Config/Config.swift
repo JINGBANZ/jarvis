@@ -61,5 +61,12 @@ public struct Config: Sendable {
         self.maxBufferedAudioSeconds = maxBufferedAudioSeconds
     }
 
+    // Overlay appearance: defaults + allowed ranges. The persisted values live in UserDefaults via
+    // OverlayAppearance; these are the single source of the defaults and the clamp bounds.
+    public static let overlayFontSizeRange: ClosedRange<Double> = 12...32
+    public static let overlayFontSizeDefault: Double = 18
+    public static let overlayOpacityRange: ClosedRange<Double> = 0.40...1.0
+    public static let overlayOpacityDefault: Double = 0.78
+
     public static let `default` = Config()
 }
