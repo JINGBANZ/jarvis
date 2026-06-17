@@ -19,6 +19,7 @@ closes.
 ### `SettingsSection` protocol
 
 ```swift
+@MainActor
 protocol SettingsSection: AnyObject {
     var title: String { get }
     func makeView() -> NSView
@@ -55,17 +56,18 @@ ranges defined in `Config`:
 
 | Property | Default | Range | UserDefaults key |
 |---|---|---|---|
-| Font size | 18 pt | 12–32 pt | `overlayFontSize` |
-| Background opacity | 0.78 (78%) | 0.40–1.00 (40–100%) | `overlayBackgroundOpacity` |
+| Font size | 18 pt | 12–32 pt | `overlay.fontSize` |
+| Background opacity | 0.78 (78%) | 0.40–1.00 (40–100%) | `overlay.backgroundOpacity` |
 
 `OverlaySection` applies changes live to the overlay via the `OverlayAppearanceApplying` protocol
 (`setFontSize(_:)` / `setBackgroundOpacity(_:)` / `showAppearancePreview(_:)`), with no direct
 dependency on `OverlayPanel`. Changes are round-tripped through `OverlayAppearance` so they survive
 an app relaunch.
 
-Both setters and `showAppearancePreview` route through `reassertCaptureExclusion()` inside
-`OverlayPanel`, keeping the live-preview tip capture-excluded during adjustment — same
-defense-in-depth as the coaching display path. See [overlay-invisibility.md](./overlay-invisibility.md).
+`showAppearancePreview(_:)` re-asserts capture exclusion via the counted `reassertCaptureExclusion()`
+helper inside `OverlayPanel` so the live preview stays hidden from screen capture — same
+defense-in-depth as the coaching display path. The `setFontSize`/`setBackgroundOpacity` setters only
+change appearance and don't touch `sharingType`. See [overlay-invisibility.md](./overlay-invisibility.md).
 
 ## Key Files
 
@@ -76,8 +78,8 @@ defense-in-depth as the coaching display path. See [overlay-invisibility.md](./o
 | `Sources/JarvisApp/Settings/APIKeySection.swift` | API-key tab |
 | `Sources/JarvisApp/Settings/OverlaySection.swift` | Overlay-appearance tab |
 | `Sources/JarvisApp/Settings/ActivitySection.swift` | Dev-mode activity tab |
-| `Sources/JarvisCore/Config.swift` | `overlayFontSizeRange`, `overlayOpacityRange`, defaults |
-| `Sources/JarvisCore/OverlayAppearance.swift` | UserDefaults persistence |
+| `Sources/JarvisCore/Config/Config.swift` | `overlayFontSizeRange`, `overlayOpacityRange`, defaults |
+| `Sources/JarvisCore/Overlay/OverlayAppearance.swift` | UserDefaults persistence |
 | `Sources/JarvisOverlay/OverlayPanel.swift` | `OverlayAppearanceApplying` conformance |
 
 ## Related Pages

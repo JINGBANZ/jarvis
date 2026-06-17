@@ -78,11 +78,11 @@ used was a handful of standalone Swift programs driving `NSPanel` + ScreenCaptur
   does **not** reproduce on macOS 26.5, but the failure would be silent and high-impact (the overlay
   would become visible to an interviewer with no signal), so re-asserting on every show is cheap
   insurance.
-- `showAppearancePreview(_:)` and the appearance setters (`setFontSize`, `setBackgroundOpacity`)
-  invoked from the [Settings window's](./settings-window.md) overlay controls also route through the
-  counted `reassertCaptureExclusion()` helper, so the live preview stays capture-excluded during
-  adjustment. The re-assert is regression-tested via `captureExclusionReassertCount`
-  (`previewReassertsCaptureExclusion` in `JarvisOverlayTests`).
+- `OverlayPanel.showAppearancePreview(_:)` (the live preview shown while the Settings window is
+  open) routes its capture-exclusion re-assert through the counted `reassertCaptureExclusion()`
+  helper, so the preview stays excluded from screen capture. This is regression-tested via the
+  `captureExclusionReassertCount` hook (`previewReassertsCaptureExclusion`). The plain setters
+  `setFontSize`/`setBackgroundOpacity` only change font/alpha and don't touch `sharingType`.
 
 That is the entire implementation: no package, no entitlement, no private API. `OverlayPanel` lives in
 its own small `JarvisOverlay` library target (not the executable) so the tests below can import it.

@@ -2,7 +2,7 @@ import AppKit
 import WebKit
 import JarvisCore
 
-/// The dev-mode activity viewer window: an in-app `WKWebView` that live-appends log rows pushed from
+/// The dev-mode activity viewer view: an in-app `WKWebView` that live-appends log rows pushed from
 /// `ActivityLog` (no reload), shows screenshots in an in-page lightbox, and lets you browse and clear
 /// past sessions via `SessionStore`. Thin by design — the rendering logic and its tests live in
 /// JarvisCore (`htmlShell`/`rowScript`) and `JarvisViewerTests`. See wiki/activity-viewer.md.
