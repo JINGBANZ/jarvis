@@ -37,7 +37,10 @@ public final class RollingTranscript: @unchecked Sendable {
 
     public var lastSpeechTime: TimeInterval? {
         lock.lock(); defer { lock.unlock() }
-        return lines.last?.at
+        // Latest by SPOKEN time, not last-appended: the two sockets append out of time order (a slow
+        // "them" utterance can land after a later "me" line), so `lines.last.at` can be stale. Using
+        // the true latest keeps silenceDuration — and the "are you stuck?" guard built on it — honest.
+        return lines.map(\.at).max()
     }
 
     /// Seconds since the last spoken line (0 if none).

@@ -38,6 +38,17 @@ import Testing
         #expect(abs(t.silenceDuration(now: 70) - 0) < 0.001)
     }
 
+    /// Silence is measured from the latest SPOKEN time, not the last appended line. The two sockets
+    /// append out of time order, so a `them` line spoken earlier (at:95) can land after a `me` line
+    /// spoken later (at:100); silenceDuration must use 100, else it overstates quiet and can fire a
+    /// spurious "are you stuck?" nudge.
+    @Test func silenceDurationUsesLatestSpokenNotLastAppended() {
+        let t = RollingTranscript()
+        t.append(.init(speaker: .me, text: "later", at: 100))     // appended first, spoken later
+        t.append(.init(speaker: .them, text: "earlier", at: 95))  // appended last, spoken earlier
+        #expect(abs(t.silenceDuration(now: 120) - 20) < 0.001)    // 120 - 100, not 120 - 95
+    }
+
     /// For server-side conversation state we send only NEW lines each turn (the rest is already in
     /// the conversation), tracked by line INDEX — no clock-domain confusion possible.
     @Test func renderFromReturnsOnlyLinesAtOrAfterIndex() {

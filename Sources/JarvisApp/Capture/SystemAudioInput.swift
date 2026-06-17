@@ -132,7 +132,10 @@ final class SystemAudioInput: NSObject, SCStreamOutput, SCStreamDelegate, @unche
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer,
                 of type: SCStreamOutputType) {
         guard type == .audio, CMSampleBufferDataIsReady(sampleBuffer),
-              let asbd = sampleBuffer.formatDescription?.audioStreamBasicDescription else { return }
+              let asbd = sampleBuffer.formatDescription?.audioStreamBasicDescription,
+              // config pins mono; bail rather than risk a non-interleaved/interleaved layout mismatch
+              // in bufferListNoCopy if SCK ever handed back a multichannel buffer.
+              asbd.mChannelsPerFrame == 1 else { return }
         // The no-copy PCM buffer is only valid inside this closure, so convert synchronously here.
         // Build the source format + converter once (the format is stable); reuse them every callback.
         let data: Data? = try? sampleBuffer.withAudioBufferList { abl, _ in

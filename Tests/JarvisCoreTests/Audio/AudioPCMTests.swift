@@ -42,13 +42,22 @@ import Testing
         #expect(data.count % 2 == 0)              // whole Int16 samples
         let outFrames = data.count / 2
         #expect(outFrames >= 400 && outFrames <= 520)   // ~480 (= 960 / 2), with resampler slack
+        // Values, not just length: a constant 0.25 input must resample to a near-constant
+        // ~0.25·full-scale, so a regression that preserved frame count but corrupted amplitude
+        // (wrong channel/endianness/buffer) is caught. Skip edge frames for resampler priming.
+        let s = samples(data)
+        let mid = Array(s.dropFirst(8).dropLast(8))
+        let expected = Int(0.25 * Float(Int16.max))
+        #expect(!mid.isEmpty)
+        #expect(mid.allSatisfy { abs(Int($0) - expected) <= 400 })
     }
 
-    /// A zero-length buffer yields empty (not nil/crash) — the callback simply forwards nothing.
+    /// A zero-length buffer yields NON-NIL empty data (distinct from the nil-on-error path) — the
+    /// callback simply forwards nothing.
     @Test func emptyBufferProducesEmptyData() throws {
         let src = floatBuffer(sampleRate: 24_000, frames: 0, value: 0)
         let converter = try #require(AVAudioConverter(from: src.format, to: AudioPCM.target))
-        let data = AudioPCM.pcm16Data(from: src, using: converter)
-        #expect(data?.isEmpty ?? true)
+        let data = try #require(AudioPCM.pcm16Data(from: src, using: converter))   // non-nil…
+        #expect(data.isEmpty)                                                       // …and empty
     }
 }
