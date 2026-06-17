@@ -13,16 +13,22 @@ unit.
 
 ## Current state
 
-- `MenuBarController.swift` — menu items: Start/Stop, "Set OpenAI API Key…" (inline blocking modal,
-  lines 97–142), optional "Open Log Viewer" (dev mode), counter, Quit.
-- `ActivityViewer.swift` — standalone resizable `NSWindow` + `WKWebView`, **dev-mode only**, with
-  live append, session picker, clear-history. Handles its own accessory→regular activation-policy
-  switch.
-- `OverlayPanel.swift` — `NSPanel` + `NSTextField`. Font size set once at line 39
-  (`.systemFont(ofSize: 18, weight: .medium)`); background at line 23
-  (`NSColor.black.withAlphaComponent(0.78)`). `sharingType = .none` (capture invisibility) is
-  re-asserted in `show()`.
-- No preferences storage exists. `Config.swift` holds compile-time tunables (not persisted).
+> Paths reflect the subsystem layout from `Organize sources by subsystem` (#11). Subfolders under
+> `Sources/<Target>/` are organization only — SPM globs each target into one module, so adding files
+> or subfolders needs no `Package.swift` edit.
+
+- `Sources/JarvisApp/MenuBar/MenuBarController.swift` — menu items: Start/Stop, "Set OpenAI API
+  Key…" (inline blocking modal), optional "Open Log Viewer" (dev mode), counter, Quit.
+- `Sources/JarvisApp/Viewer/ActivityViewer.swift` — standalone resizable `NSWindow` + `WKWebView`,
+  **dev-mode only**, with live append, session picker, clear-history. Handles its own
+  accessory→regular activation-policy switch.
+- `Sources/JarvisApp/App/AppDelegate.swift` — wiring hub: creates the overlay + menu bar, owns the
+  pipeline lifecycle.
+- `Sources/JarvisOverlay/OverlayPanel.swift` — `NSPanel` + `NSTextField`. Font size set once
+  (`.systemFont(ofSize: 18, weight: .medium)`); background (`NSColor.black.withAlphaComponent(0.78)`).
+  `sharingType = .none` (capture invisibility) is re-asserted in `show()`.
+- `Sources/JarvisCore/Config/Config.swift` — compile-time tunables (not persisted). No preferences
+  storage exists anywhere yet.
 
 ## Architecture
 
@@ -39,14 +45,20 @@ nothing about the individual panels.
 
 ### Components
 
-| Unit | Module | Responsibility |
-|------|--------|----------------|
-| `SettingsSection` | JarvisApp | Protocol: tab title + content view + close hook |
-| `SettingsWindow` | JarvisApp | Owns one `NSWindow` + `NSTabView`; builds one tab per section; owns the accessory→regular activation-policy switch on open/close. Takes `[SettingsSection]`. |
-| `APIKeySection` | JarvisApp | Secure field + Save + status line. Writes to `KeychainSecretStore`, fires `onKeySaved`. (Logic moved out of `MenuBarController`.) |
-| `OverlaySection` | JarvisApp | Text Size + Background Opacity sliders with live numeric readouts. Reads/writes `OverlayAppearance`; pushes live changes via an `OverlayAppearanceApplying` protocol (not a direct `OverlayPanel` dependency). |
-| `ActivitySection` | JarvisApp | Dev-mode only. Wraps `ActivityViewer`'s vended content view. |
-| `OverlayAppearance` | JarvisCore | `UserDefaults`-backed store for `fontSize` + `backgroundOpacity`, defaults sourced from `Config`. Clamps to valid ranges. |
+New UI units live in a new `Sources/JarvisApp/Settings/` subfolder (a new subsystem — settings is
+distinct from `MenuBar/` and `Viewer/`). The Foundation-only appearance store lives in
+`Sources/JarvisCore/Overlay/` alongside the existing overlay text model and `OverlayRendering`
+protocol — it must stay AppKit-free so it's unit-testable in `JarvisCore`.
+
+| Unit | Path | Responsibility |
+|------|------|----------------|
+| `SettingsSection` | `JarvisApp/Settings/SettingsSection.swift` | Protocol: tab title + content view + close hook (default no-op via extension). |
+| `SettingsWindow` | `JarvisApp/Settings/SettingsWindow.swift` | Owns one `NSWindow` + `NSTabView`; builds one tab per section; owns the accessory→regular activation-policy switch on open/close. Takes `[SettingsSection]`. |
+| `APIKeySection` | `JarvisApp/Settings/APIKeySection.swift` | Secure field + Save + status line. Writes to `KeychainSecretStore`, fires `onKeySaved`. (Logic moved out of `MenuBarController`.) |
+| `OverlaySection` | `JarvisApp/Settings/OverlaySection.swift` | Text Size + Background Opacity sliders with live numeric readouts. Reads/writes `OverlayAppearance`; pushes live changes via an `OverlayAppearanceApplying` protocol (not a direct `OverlayPanel` dependency). |
+| `ActivitySection` | `JarvisApp/Settings/ActivitySection.swift` | Dev-mode only. Wraps `ActivityViewer`'s vended content view. |
+| `OverlayAppearance` | `JarvisCore/Overlay/OverlayAppearance.swift` | `UserDefaults`-backed store for `fontSize` + `backgroundOpacity`, defaults sourced from `Config`. Clamps to valid ranges. Foundation-only. |
+| `OverlayAppearanceApplying` | `JarvisCore/Overlay/OverlayAppearance.swift` | Protocol (`setFontSize`/`setBackgroundOpacity`) the overlay conforms to, so `OverlaySection` depends on an abstraction, not `OverlayPanel`. AppKit-free signatures. |
 
 ### Changes to existing units
 
@@ -89,10 +101,11 @@ nothing about the individual panels.
 ## Testing
 
 - `OverlayAppearance` — persistence round-trip; clamping out-of-range values; defaults from `Config`.
-  (JarvisCore, no AppKit.)
+  New `Tests/JarvisCoreTests/Overlay/OverlayAppearanceTests.swift` (no AppKit; uses an isolated
+  `UserDefaults(suiteName:)`).
 - `OverlayPanel` setters — font size and background alpha actually change; `sharingType == .none`
-  survives a setter call. Extends `OverlayInvisibilityTests`.
-- Existing `ActivityViewer`/`JarvisViewerTests` rendering tests stay green (logic untouched by the
+  survives a setter call. Extends `Tests/JarvisOverlayTests/OverlayInvisibilityTests.swift`.
+- Existing `Tests/JarvisViewerTests/` rendering tests stay green (logic untouched by the
   view-extraction refactor).
 
 ## Reuse summary
