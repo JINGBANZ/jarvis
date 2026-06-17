@@ -10,7 +10,7 @@ Two layers below are **relaxed** for the personal build, by explicit decision:
 
 - **No App Sandbox.** The app is **unsandboxed**, signed with a **stable self-signed identity
   (`Jarvis Dev`)** — not ad-hoc, so TCC grants persist across rebuilds (see
-  [specification.md §9](./specification.md#9-build--run-constraints)). Screen Recording + Microphone
+  [build-and-run.md](./build-and-run.md)). Screen Recording + Microphone
   are granted via **TCC prompts** at first run. Consequence: the app *could* read the user's files —
   accepted for a personal tool. (Hardened model: §1.)
 - **No separate account.** The build and the app run in the **main `forrest` account**, inside a
@@ -81,13 +81,13 @@ streams** (mic audio, screenshots, and the transcript derived from them): audio 
 and is dropped, the transcript lives in memory, and nothing is persisted *on this machine* in normal
 operation.
 
-> **Temporary exception (2026-06-15) — server-side retention for conversation quality.** To give the
-> coach real multi-turn memory, the brain now uses the OpenAI **Conversations API** (`store:true`,
-> one `conv_…` per coaching session). This **does** retain the transcript and the screenshots sent to
-> the model server-side at OpenAI (≈30-day TTL). This is a deliberate *quality-over-retention* choice
-> made for now; revisiting it (encrypted reasoning items / ephemeral conversations / client-side
-> history) is tracked as a future privacy item. See
-> [fix-responsiveness-vad-stop.md](./fix-responsiveness-vad-stop.md).
+> **Server-side retention for conversation quality (current behavior).** To give the coach real
+> multi-turn memory — so it remembers its *own* prior replies, not just the user's speech — the brain
+> uses the OpenAI **Conversations API** (`store:true`, one `conv_…` per coaching session;
+> `OpenAIBrainClient.swift`). This **does** retain the transcript and the screenshots sent to the
+> model server-side at OpenAI (≈30-day TTL), so the no-local-retention guarantee above does **not**
+> extend to OpenAI's servers. A deliberate *quality-over-retention* choice; revisiting it (encrypted
+> reasoning items / ephemeral conversations / client-side history) is tracked as a future privacy item.
 
 **Dev-mode logging is the one bounded exception, and it is hardened to not break the guarantee.**
 File logging (the activity HTML + `jarvis-debug.log`, which include the model's spoken tips and the
@@ -96,7 +96,7 @@ solely to the unified log, never a flat file. When on, the files go to the `--lo
 **gitignored `.jarvis/` in the workspace**, or a per-user `Caches/Jarvis`) with **`0600`** owner-only
 permissions, **truncated fresh each session** — never `/tmp` (which is world-readable and shared
 across user accounts). So even the dev affordance produces no world-readable or persistent record.
-See [specification.md §9](./specification.md#9-build--run-constraints).
+See [build-and-run.md](./build-and-run.md).
 
 ## Behavioral Restraint (anti-annoyance = anti-misbehavior)
 

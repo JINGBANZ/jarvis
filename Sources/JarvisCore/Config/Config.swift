@@ -1,6 +1,6 @@
 import Foundation
 
-/// All tunables from specification.md §5. Plain values; tune freely.
+/// All harness tunables in one place. Plain values; tune freely. (Rationale: wiki/architecture.md.)
 public struct Config: Sendable {
     /// Base quiet interval before the first proactive "are you stuck?" silence check. Subsequent
     /// checks back off exponentially (see `silenceMaxIntervalSeconds` and `SilenceBackoff`); any

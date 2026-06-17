@@ -20,7 +20,7 @@ public enum RealtimeSession {
     /// server default (~500 ms) ends a turn on a brief mid-thought pause and chops one spoken
     /// sentence into several utterances; ~1000 ms lets a "thinking aloud" coder finish. We keep
     /// `server_vad` rather than `semantic_vad`, which is reported flaky in transcription-only mode
-    /// (it can stop emitting completed events entirely). See wiki/fix-responsiveness-vad-stop.md.
+    /// (it can stop emitting completed events entirely). See wiki/architecture.md (Models and APIs).
     public static func sessionUpdate(model: String, language: String = "en",
                                      silenceDurationMs: Int = 1000) -> [String: Any] {
         [
