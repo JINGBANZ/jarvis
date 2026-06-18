@@ -79,7 +79,7 @@ final class SystemAudioInput: NSObject, SCStreamOutput, SCStreamDelegate, @unche
             // SCStream requires startCapture() to COMPLETE before stopCapture() — they must not run
             // concurrently. So stop() defers the actual teardown of a not-yet-started stream to here:
             // if stop() raced in during the await above, we stop the stream now, after start finished.
-            if markStartedOrShouldStop() { stream.stopCapture { _ in }; return }
+            if markStartedOrShouldStop() { try? await stream.stopCapture(); return }
             jlog("Jarvis system audio: capturing 'them' side via ScreenCaptureKit")
         } catch {
             jlog("Jarvis system audio: capture unavailable (\(error)); mic ('me') side still active")
