@@ -17,12 +17,14 @@ final class AudioInput: @unchecked Sendable {
         let input = engine.inputNode
         // Acoustic echo cancellation via VoiceProcessingIO is deliberately NOT enabled here. It came
         // up "successfully" (no throw) yet left the mic silent — the SCStream we start moments later
-        // for system audio appears to change the audio route out from under the VPIO unit, and it
-        // never recovers. A plain tap is robust. Trade-off: without AEC the other side's voice over
-        // the speakers can bleed into the mic and be transcribed a second time on the "me" socket —
-        // USE HEADPHONES. (Jarvis's own audio is already excluded on the system-audio side via
-        // excludesCurrentProcessAudio.) Reviving AEC needs a setup that survives the SCStream route
-        // change without silencing the mic; tracked as a follow-on.
+        // for system audio changes the audio route out from under the VPIO unit, and it never
+        // recovers (VPIO is also documented to duck the very SCStream audio we capture). A plain tap
+        // is robust on any route. The reason AEC existed — the other side's voice bleeding off the
+        // speakers into the mic and being transcribed a second time as "me" — is instead handled
+        // where it actually matters, in the transcript: `RollingTranscript` drops a `me` line that
+        // near-duplicates a recent `them` line (see its speaker-bleed section). The coach only ever
+        // reads the transcript, so that fully removes the mis-attribution with no fragile audio
+        // plumbing and no headphone requirement. Reference-based AEC stays the escalation if needed.
         let inFormat = input.outputFormat(forBus: 0)
         guard let converter = AVAudioConverter(from: inFormat, to: AudioPCM.target) else {
             jlog("Jarvis audio: cannot create converter"); return

@@ -65,15 +65,17 @@ A compact log — the *rationale* for each lives in the linked design page, not 
 | **Unified Settings window** replaces the separate API-key dialog and log-viewer menu item; overlay text size (12–32 pt, default 18) + background opacity (40–100%, default 78%) are now user-adjustable and persisted via `OverlayAppearance` (UserDefaults) (2026-06-17) | [settings-window.md](./settings-window.md) |
 | **Tuned overlay/silence timing + sharpened coach prompt** — longer per-line overlay display, later first silence nudge over a wider backoff ramp, plain-language hints for interview stress, explicit `me`/`them` speaker handling; overlay now **queues** tips so a newer one never cuts off the current (2026-06-18) | [architecture.md §2](./architecture.md#2-core-loop) |
 | **Overlay is never-interrupt + never-drop, not show-freshest** — direct-reply queue-priority/preemption considered and **rejected**: in a live interview the user never addresses Jarvis aloud, so overlay traffic is all proactive coaching with no latency-critical reply to jump the queue (2026-06-18) | [architecture.md §2](./architecture.md#2-core-loop) |
-| **AEC reverted — mic was silent** — `VoiceProcessingIO` came up without throwing, but the `SCStream` starting ~150 ms later changed the audio route out from under it and the mic went silent (RMS 0); reverted to a plain `AVAudioEngine` tap. Without AEC the other side over speakers can be double-transcribed as `me` — **use headphones**. Reviving AEC so it survives the SCStream route change is the follow-on (2026-06-18) | [architecture.md §3](./architecture.md#3-components) |
+| **AEC reverted — mic was silent** — `VoiceProcessingIO` came up without throwing, but the `SCStream` starting ~150 ms later changed the audio route out from under it and the mic went silent (RMS 0); reverted to a plain `AVAudioEngine` tap (2026-06-18) | [architecture.md §3](./architecture.md#3-components) |
+| **Speaker bleed handled in the transcript, not the audio — no headphones needed** — instead of acoustic echo cancellation, `RollingTranscript` drops a `me` line that near-duplicates a recent `them` line (the mic re-capturing the speakers). The coach only reads the transcript, so this removes the mis-attribution with no fragile audio plumbing and works on speakers. Chosen over software AEC (speexdsp, Glass-style) and over a Core Audio process tap + VPIO for stability + minimum code; reference-based AEC is the documented escalation if real use needs cleaner audio (2026-06-18) | [architecture.md §3](./architecture.md#3-components) |
 
 ## Open Questions / To Confirm
 
-- **Revive AEC without silencing the mic.** `VoiceProcessingIO` died when the `SCStream` changed the
-  audio route; needs a setup that survives it (reorder mic vs. SCK startup, or rebuild the tap on
-  `AVAudioEngineConfigurationChange`). Until then the mic runs a plain tap with no echo cancellation.
-  Related: surface a **user-visible "use headphones" notice** at Start when mic + system audio are
-  both live — today the constraint lives only in a code comment, invisible to a menu-bar user.
+- **Speaker bleed escalation (only if needed).** Bleed is handled in the transcript today (drop a
+  `me` line that near-duplicates a recent `them` line). If real use shows that's not enough — e.g.
+  the mic's degraded copy transcribes too differently to match, or cleaner `me` audio is wanted
+  during talk-over — escalate to reference-based AEC (feed the captured system audio as the far-end
+  reference into speexdsp/WebRTC AEC3; Glass does exactly this). The hard part there is two-clock
+  delay/drift alignment, which is why we did the transcript fix first.
 - Minimum macOS version target. Build host is macOS 26.5; ScreenCaptureKit screen+audio capture
   needs macOS 13+. Target **macOS 14+** unless a needed API forces higher.
 - The **live Realtime transcription wiring** in `Sources/JarvisApp/Capture/RealtimeTranscriber.swift` is the
