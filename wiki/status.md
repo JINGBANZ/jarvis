@@ -19,7 +19,8 @@ by the human smoke checklist in the [README](../README.md#live-smoke-checklist).
 - **Brain:** `gpt-5.5` (Responses API, tool-use + vision), with a server-side conversation per
   session for multi-turn memory. **Transcription:** `gpt-4o-transcribe` over the GA Realtime API.
   API-only, no local models. Rationale: [architecture.md](./architecture.md#4-data-flow--cost-model).
-- **Overlay:** at most 3 sentences per response, each shown ~5 seconds.
+- **Overlay:** the brain returns the tip as a pre-split `lines` array (Structured Outputs); the
+  overlay shows up to ~3 short lines per response, one at a time, ~5 seconds each.
 - **Build approach: native Swift, directly.** The two-phase plan (fork Natively first, then native)
   was dropped: **Phase 1 is skipped** and we build the clean native Swift app now. The fork
   evaluation and survey still stand as the *why-build-our-own* basis ([fork evaluation](./fork-evaluation.md),
@@ -50,7 +51,7 @@ A compact log — the *rationale* for each lives in the linked design page, not 
 | **Models (verified 2026-06):** `gpt-5.5` brain via Responses API (vision), `gpt-4o-transcribe` over GA Realtime | [architecture.md](./architecture.md#models-and-apis) |
 | **Server-side conversation per session** (Conversations API, `store:true`) for the coach's own memory — quality over local-only retention | [architecture.md](./architecture.md#models-and-apis), [sandbox.md](./sandbox.md) |
 | **Coach is time-aware** (timestamped transcript + silence duration) | [architecture.md](./architecture.md#2-core-loop) |
-| **System audio in the MVP** (budget-permitting; mic is the critical path) | [architecture.md](./architecture.md#3-components) |
+| **System audio shipped** — `SystemAudioInput` (ScreenCaptureKit) → a second `them`-tagged transcriber beside the mic's `me`, one shared transcript; mic runs `VoiceProcessingIO` AEC to stop speaker bleed (2026-06-16; live SCK run still pending) | [architecture.md](./architecture.md#3-components) |
 | ~~Two-phase build~~ → **Skip Phase 1; build native Swift directly** (2026-06-14) | this page; [fork-evaluation.md](./fork-evaluation.md) |
 | **Native Swift app** (cleanest sandbox/footprint on macOS) | [architecture.md](./architecture.md), [fork-evaluation.md](./fork-evaluation.md) |
 | **Toolchain: SwiftPM + Command Line Tools** (no full Xcode; manual bundle + stable self-signed `Jarvis Dev` identity so TCC grants persist; TCC prompts) | [build-and-run.md](./build-and-run.md) |
@@ -59,6 +60,7 @@ A compact log — the *rationale* for each lives in the linked design page, not 
 | **Dev activity viewer = in-app `WKWebView`** (live push, no meta-refresh; screenshot lightbox; persisted JSONL session history + clear-history) | [build-and-run.md](./build-and-run.md) |
 | **Overlay hidden from screen capture/sharing via `sharingType = .none`** — verified on macOS 26.5 incl. live `SCStream`; re-asserted on `show()` as defense-in-depth | [overlay-invisibility.md](./overlay-invisibility.md) |
 | **Cut the guardrail layer: no cooldown/rate cap, no wake-word detector; brain self-gates speaking; silence check backs off (30s→240s)** — simplify the flow, cut log noise, natural conversation (2026-06-16) | [architecture.md §5](./architecture.md#5-safety-model) |
+| **`speak` returns a `lines` array via Structured Outputs (`strict:true`), not a free-form string** — the model splits the tip into overlay lines, so the client no longer splits prose on `.`/`!`/`?` (which shattered code like `Array.from(...)`) (2026-06-17) | [architecture.md §2](./architecture.md#2-core-loop) |
 | **Unified Settings window** replaces the separate API-key dialog and log-viewer menu item; overlay text size (12–32 pt, default 18) + background opacity (40–100%, default 78%) are now user-adjustable and persisted via `OverlayAppearance` (UserDefaults) (2026-06-17) | [settings-window.md](./settings-window.md) |
 
 ## Open Questions / To Confirm

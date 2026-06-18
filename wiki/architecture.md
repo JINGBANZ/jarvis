@@ -34,7 +34,7 @@ glue that wires them into a proactive coach. We write the least code possible an
             │                          ▼                                      │
             │                    CoachDriver ──(gpt-5.5 + tools)──┐           │
             │                       ▲   │                         │           │
-            │          capture_screen   │ speak(text)             │           │
+            │          capture_screen   │ speak(lines)            │           │
             │                       │   ▼                         │           │
   screen ◄──┤   ScreenTool ◄────────┘  Overlay (NSPanel) ◄────────┘           │
             │                                                                │
@@ -63,18 +63,21 @@ moments the model judges worthwhile.
    `[capture_screen, speak]`. The timing is what lets the model tell "thinking" from "stuck."
 4. The model may call `capture_screen`. The harness fulfills it (a silent screenshot) and
    returns the image into the conversation. The model may now reason over what's on screen.
-5. The model either calls `speak(text)` — a ≤3-sentence tip — or returns nothing (stay silent).
-6. `speak` renders to the **Overlay**, one sentence at a time, ~5 seconds each.
+5. The model either calls `speak(lines)` — a tip of up to ~3 short lines, returned **already split**
+   into an array (Structured Outputs / `strict:true`), so the client never splits prose on
+   punctuation — or returns nothing (stay silent).
+6. `speak` renders to the **Overlay**, one line at a time, ~5 seconds each.
 
 ## 3. Components
 
 | Component | Responsibility | Built on (borrowed) |
 |---|---|---|
-| **AudioInput** | Capture mic and (optionally) system audio; stream to the Transcriber. | AVFoundation (mic); ScreenCaptureKit (system audio). |
-| **Transcriber** | Maintain a rolling, speaker-labeled, **timestamped** transcript; emit turn-end events and backing-off silence checks (with quiet duration). | `gpt-4o-transcribe` (Realtime API; tuned `server_vad`). |
+| **AudioInput** | Capture the mic (`me`) with AEC; stream 24 kHz PCM16 to its Transcriber. | AVFoundation (`VoiceProcessingIO`). |
+| **SystemAudioInput** | Capture the other side (`them`) — system output audio; stream the same 24 kHz PCM16 to its own Transcriber. Degrades gracefully without the Screen-Recording grant. | ScreenCaptureKit (`SCStream`, `capturesAudio`, `excludesCurrentProcessAudio`). |
+| **Transcriber** | Maintain a rolling, speaker-labeled, **timestamped** transcript; emit turn-end events and backing-off silence checks (with quiet duration). Two instances run in parallel — one per side — tagging lines `me`/`them` into one shared transcript. | `gpt-4o-transcribe` (Realtime API; tuned `server_vad`). |
 | **CoachDriver** | The event loop. On every trigger, call the brain with the transcript + timing context and tools, route tool calls. No cooldown/rate cap — restraint is the model's. | `gpt-5.5` (vision + tool-use). |
 | **ScreenTool** | Fulfill `capture_screen`: take a silent screenshot of the active display, excluding the overlay window. | macOS `screencapture` CLI. |
-| **Overlay** | Render `speak` output: ≤3 sentences, ~5s each, non-activating, always-on-top, excluded from capture. | AppKit NSPanel. |
+| **Overlay** | Render `speak` output: up to ~3 short lines (model-split), ~5s each, non-activating, always-on-top, excluded from capture. | AppKit NSPanel. |
 | **MenuBar** | Manual **Start/Stop** of the pipeline (two states: ⚪️ stopped / 🟢 running — no auto-start), status indicator, one-time API-key entry. | AppKit menu-bar item; Keychain for the key. |
 
 Each component has one job and a narrow interface. The CoachDriver is the only place the
@@ -112,9 +115,9 @@ rather than a per-turn screenshot.
 
 ### Latency
 
-Target: **turn-end → first overlay sentence < 2s.** It holds because transcription is continuous
+Target: **turn-end → first overlay line < 2s.** It holds because transcription is continuous
 (no STT latency at trigger time) and most turns are text-only (no `capture_screen`), so the brain
-call is a single short round-trip. The overlay then reveals the already-returned sentences one at a
+call is a single short round-trip. The overlay then reveals the already-returned lines one at a
 time (~5s each), so the first tip appears immediately — note the brain response itself is **not**
 streamed (one buffered request; the overlay just paces the display).
 

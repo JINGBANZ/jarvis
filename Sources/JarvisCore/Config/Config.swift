@@ -10,8 +10,9 @@ public struct Config: Sendable {
     /// occasional gentle check rather than going dark forever.
     public var silenceMaxIntervalSeconds: TimeInterval
     public var transcriptWindowSeconds: TimeInterval
-    public var sentenceDisplaySeconds: TimeInterval
-    public var maxSentences: Int
+    /// How long each overlay line is shown before advancing to the next. The brain returns the lines
+    /// pre-split (the `speak` tool's `lines` array); there is no client-side cap on how many.
+    public var lineDisplaySeconds: TimeInterval
     /// Brain model. `gpt-5.5` confirmed against OpenAI docs (snapshot `gpt-5.5-2026-04-23`);
     /// vision + function calling via the Responses API.
     public var brainModel: String
@@ -39,8 +40,7 @@ public struct Config: Sendable {
         silenceTimeoutSeconds: TimeInterval = 30,
         silenceMaxIntervalSeconds: TimeInterval = 240,
         transcriptWindowSeconds: TimeInterval = 90,
-        sentenceDisplaySeconds: TimeInterval = 5,
-        maxSentences: Int = 3,
+        lineDisplaySeconds: TimeInterval = 5,
         brainModel: String = "gpt-5.5",
         reasoningEffort: String = "low",
         transcriptionModel: String = "gpt-4o-transcribe",
@@ -51,8 +51,7 @@ public struct Config: Sendable {
         self.silenceTimeoutSeconds = silenceTimeoutSeconds
         self.silenceMaxIntervalSeconds = silenceMaxIntervalSeconds
         self.transcriptWindowSeconds = transcriptWindowSeconds
-        self.sentenceDisplaySeconds = sentenceDisplaySeconds
-        self.maxSentences = maxSentences
+        self.lineDisplaySeconds = lineDisplaySeconds
         self.brainModel = brainModel
         self.reasoningEffort = reasoningEffort
         self.transcriptionModel = transcriptionModel

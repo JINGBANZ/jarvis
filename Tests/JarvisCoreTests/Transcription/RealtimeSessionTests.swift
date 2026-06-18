@@ -3,6 +3,24 @@ import Testing
 @testable import JarvisCore
 
 @Suite struct RealtimeSessionTests {
+    /// A completed-transcription wire event (the same JSON the socket delivers) yields its text —
+    /// this is the parse the two speaker-tagged transcribers depend on.
+    @Test func completedTranscriptParsesCompletedEvent() throws {
+        let wire = "{\"type\":\"\(RealtimeSession.completedTranscriptionType)\",\"transcript\":\"two pointers\"}"
+        let obj = try #require(try JSONSerialization.jsonObject(with: Data(wire.utf8)) as? [String: Any])
+        #expect(RealtimeSession.completedTranscript(from: obj) == "two pointers")
+    }
+
+    /// Non-completed events, empty text, and a missing transcript field all yield nil (no line gets
+    /// appended / no speaker tagged for them).
+    @Test func completedTranscriptIgnoresNonCompletedAndEmpty() {
+        let type = RealtimeSession.completedTranscriptionType
+        #expect(RealtimeSession.completedTranscript(from: ["type": "input_audio_buffer.speech_stopped"]) == nil)
+        #expect(RealtimeSession.completedTranscript(from: ["type": type, "transcript": ""]) == nil)
+        #expect(RealtimeSession.completedTranscript(from: ["type": type]) == nil)
+        #expect(RealtimeSession.completedTranscript(from: [:]) == nil)
+    }
+
     /// The connect URL MUST select a transcription session via intent (not ?model=).
     @Test func connectURLUsesIntentTranscription() {
         let url = RealtimeSession.connectURL().absoluteString

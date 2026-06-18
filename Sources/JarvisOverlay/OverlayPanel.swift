@@ -65,13 +65,14 @@ public final class OverlayPanel: NSObject, OverlayRendering, OverlayAppearanceAp
     }
 
     /// OverlayRendering witness — nonisolated so it satisfies the protocol; hops to the main actor.
-    public nonisolated func render(_ text: String, maxSentences: Int, perSentenceSeconds: TimeInterval) {
-        let sentences = splitIntoSentences(text, maxSentences: maxSentences)
-        guard !sentences.isEmpty else { return }
-        Task { @MainActor in self.show(sentences, each: perSentenceSeconds) }
+    /// The brain already split the tip into lines; we just trim and drop any empties before showing.
+    public nonisolated func render(_ lines: [String], perLineSeconds: TimeInterval) {
+        let cleaned = lines.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        guard !cleaned.isEmpty else { return }
+        Task { @MainActor in self.show(cleaned, each: perLineSeconds) }
     }
 
-    private func show(_ sentences: [String], each: TimeInterval) {
+    private func show(_ lines: [String], each: TimeInterval) {
         // Re-assert capture exclusion on every display: an NSApp activation-policy flip (e.g. opening
         // the Settings window in SettingsWindow.show) can make WindowServer drop sharingType on some
         // macOS versions/configs. Cheap insurance against a silent, high-impact regression — the
@@ -81,8 +82,8 @@ public final class OverlayPanel: NSObject, OverlayRendering, OverlayAppearanceAp
         hideWorkItem?.cancel()
         var idx = 0
         func next() {
-            guard idx < sentences.count else { hide(); return }
-            label.stringValue = sentences[idx]
+            guard idx < lines.count else { hide(); return }
+            label.stringValue = lines[idx]
             panel.orderFrontRegardless()
             idx += 1
             let work = DispatchWorkItem { MainActor.assumeIsolated { next() } }

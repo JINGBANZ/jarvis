@@ -52,9 +52,10 @@ final class FakeScreen: ScreenCapturing, @unchecked Sendable {
 }
 
 final class FakeOverlay: OverlayRendering, @unchecked Sendable {
-    var rendered: [String] = []
-    func render(_ text: String, maxSentences: Int, perSentenceSeconds: TimeInterval) {
-        rendered.append(text)
+    /// One entry per `render` call: the lines the brain returned, passed straight through (no splitting).
+    var rendered: [[String]] = []
+    func render(_ lines: [String], perLineSeconds: TimeInterval) {
+        rendered.append(lines)
     }
 }
 
@@ -74,9 +75,9 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let brain = ScriptedBrain(script: [
             .init(toolCalls: [.captureScreen(callId: "c1")],
                   rawToolCalls: [RawToolCall(id: "c1", name: "capture_screen", argumentsJSON: "{}")]),
-            .init(toolCalls: [.speak(callId: "s1", text: "What's the complexity of that nested loop?")],
+            .init(toolCalls: [.speak(callId: "s1", lines: ["What's the complexity of that nested loop?"])],
                   rawToolCalls: [RawToolCall(id: "s1", name: "speak",
-                                             argumentsJSON: #"{"text":"What's the complexity of that nested loop?"}"#)]),
+                                             argumentsJSON: #"{"lines":["What's the complexity of that nested loop?"]}"#)]),
         ])
         let screen = FakeScreen()
         let overlay = FakeOverlay()
@@ -86,7 +87,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         await driver.handleTrigger(.turnEnd)
 
         #expect(screen.captureCount == 1)
-        #expect(overlay.rendered == ["What's the complexity of that nested loop?"])
+        #expect(overlay.rendered == [["What's the complexity of that nested loop?"]])
         #expect(brain.calls.count == 2)
         // Second brain call must contain the screenshot image we fed back...
         #expect(brain.calls[1].contains { $0.imageBase64JPEG != nil })
@@ -119,9 +120,9 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let brain = ScriptedBrain(script: [
             .init(toolCalls: [.captureScreen(callId: "c1")],
                   rawToolCalls: [RawToolCall(id: "c1", name: "capture_screen", argumentsJSON: "{}")]),
-            .init(toolCalls: [.speak(callId: "s1", text: "Watch the off-by-one there.")],
+            .init(toolCalls: [.speak(callId: "s1", lines: ["Watch the off-by-one there."])],
                   rawToolCalls: [RawToolCall(id: "s1", name: "speak",
-                                             argumentsJSON: #"{"text":"Watch the off-by-one there."}"#)]),
+                                             argumentsJSON: #"{"lines":["Watch the off-by-one there."]}"#)]),
         ])
         let screen = FakeScreen(payload: TestFixtures.tinyJpegBase64)   // a real JPEG, like screencapture
         let (driver, transcript) = makeDriver(brain: brain, screen: screen, overlay: FakeOverlay(), clock: clock)
@@ -150,6 +151,18 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(perms?.int16Value == 0o600)
     }
 
+    /// A `speak` with an empty `lines` array (the decode fallback, or a model returning []) is passed
+    /// straight through: the real overlay no-ops on it, but the turn still reports `.spoke` and closes
+    /// the tool call. Pin this so the empty-speak contract stays intentional, not incidental.
+    @Test func emptySpeakLinesStillReportsSpoke() async {
+        let clock = ManualClock(now: 0)
+        let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s", lines: [])])])
+        let overlay = FakeOverlay()
+        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: overlay, clock: clock)
+        #expect(await driver.handleTrigger(.turnEnd) == .spoke)
+        #expect(overlay.rendered == [[]])
+    }
+
     @Test func staySilentRendersNothing() async {
         let clock = ManualClock(now: 0)
         let brain = ScriptedBrain(script: [.init(toolCalls: [])])
@@ -164,7 +177,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     /// One conversation is created per session and reused across triggers (consistent id).
     @Test func createsConversationOnceAndThreadsId() async {
         let clock = ManualClock(now: 0)
-        let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s", text: "hi")])])
+        let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s", lines: ["hi"])])])
         let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(), clock: clock)
         await driver.handleTrigger(.turnEnd)
         await driver.handleTrigger(.turnEnd)
@@ -195,7 +208,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     @Test func speakCallRetainedWhenNextTurnFails() async {
         let clock = ManualClock(now: 0)
         let brain = ScriptedThrowBrain(script: [
-            .init(toolCalls: [.speak(callId: "spk1", text: "hi")]),   // turn 1: speak → stash spk1
+            .init(toolCalls: [.speak(callId: "spk1", lines: ["hi"])]),   // turn 1: speak → stash spk1
             nil,                                                        // turn 2: throws before sending
             .init(toolCalls: []),                                       // turn 3: silent
         ])
@@ -210,7 +223,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     /// WINDOW (not just the per-turn delta), or the model loses the problem statement.
     @Test func statelessTurnCarriesContextWindowAndSpeaks() async {
         let clock = ManualClock(now: 0)
-        let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s", text: "hi")])],
+        let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s", lines: ["hi"])])],
                                   failConversation: true)
         let (driver, transcript) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(), clock: clock)
         transcript.append(.init(speaker: .me, text: "the whole problem context", at: 1))
@@ -228,7 +241,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
     @Test func spokeOutcome() async {
         let clock = ManualClock(now: 0)
-        let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s1", text: "hi")])])
+        let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s1", lines: ["hi"])])])
         let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(), clock: clock)
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
     }
@@ -244,7 +257,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     /// old rate-cap behavior, which suppressed the second).
     @Test func consecutiveTurnsBothReachBrain() async {
         let clock = ManualClock(now: 100)
-        let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s1", text: "first")])])
+        let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s1", lines: ["first"])])])
         let overlay = FakeOverlay()
         let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: overlay, clock: clock)
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
@@ -289,7 +302,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     /// prompt — reply, look at the screen, or stay silent.
     @Test func everyTurnUsesAutoToolChoice() async {
         let clock = ManualClock(now: 0)
-        let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s1", text: "hi")])])
+        let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s1", lines: ["hi"])])])
         let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(), clock: clock)
         await driver.handleTrigger(.turnEnd)
         #expect(brain.toolChoices.last == .auto)
@@ -299,7 +312,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     /// request (bundled with the new speech), so the server-side conversation never dangles.
     @Test func nextTurnAnswersPriorSpeak() async {
         let clock = ManualClock(now: 0)
-        let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "spk1", text: "hi")])])
+        let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "spk1", lines: ["hi"])])])
         let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(), clock: clock)
         await driver.handleTrigger(.turnEnd)          // speaks, stashes spk1 to close next turn
         await driver.handleTrigger(.turnEnd)
@@ -341,7 +354,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     @Test func concurrentTriggerIsBusyThenCoalesced() async {
         let clock = ManualClock(now: 0)
         let gate = AsyncGate()
-        let brain = GatedBrain(gate: gate, response: .init(toolCalls: [.speak(callId: "s1", text: "hi")]))
+        let brain = GatedBrain(gate: gate, response: .init(toolCalls: [.speak(callId: "s1", lines: ["hi"])]))
         let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(), clock: clock)
         async let first = driver.handleTrigger(.turnEnd)   // parks in the brain call, holds the slot
         await gate.waitUntilEntered()
