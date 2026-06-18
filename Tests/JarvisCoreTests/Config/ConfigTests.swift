@@ -4,10 +4,10 @@ import Testing
 @Suite struct ConfigTests {
     @Test func defaults() {
         let c = Config.default
-        #expect(c.silenceTimeoutSeconds == 30)
-        #expect(c.silenceMaxIntervalSeconds == 240)
+        #expect(c.silenceTimeoutSeconds == 120)
+        #expect(c.silenceMaxIntervalSeconds == 960)
         #expect(c.transcriptWindowSeconds == 90)
-        #expect(c.lineDisplaySeconds == 5)
+        #expect(c.lineDisplaySeconds == 15)
         #expect(c.brainModel == "gpt-5.5")
         #expect(c.reasoningEffort == "low")
         #expect(c.transcriptionModel == "gpt-4o-transcribe")

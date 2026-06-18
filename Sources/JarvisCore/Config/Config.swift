@@ -37,10 +37,10 @@ public struct Config: Sendable {
     public var maxBufferedAudioSeconds: TimeInterval
 
     public init(
-        silenceTimeoutSeconds: TimeInterval = 30,
-        silenceMaxIntervalSeconds: TimeInterval = 240,
+        silenceTimeoutSeconds: TimeInterval = 120,
+        silenceMaxIntervalSeconds: TimeInterval = 960,
         transcriptWindowSeconds: TimeInterval = 90,
-        lineDisplaySeconds: TimeInterval = 5,
+        lineDisplaySeconds: TimeInterval = 15,
         brainModel: String = "gpt-5.5",
         reasoningEffort: String = "low",
         transcriptionModel: String = "gpt-4o-transcribe",
