@@ -15,19 +15,14 @@ final class AudioInput: @unchecked Sendable {
 
     func start() {
         let input = engine.inputNode
-        // Acoustic echo cancellation: in a meeting WITHOUT headphones, the other side's voice plays
-        // out the speakers and the mic would pick it up — then it gets transcribed on BOTH the "me"
-        // and "them" sockets. VoiceProcessingIO cancels that speaker echo (and suppresses noise), the
-        // same protection every reference impl applies to its mic. Best-effort: if the audio route
-        // can't support it, we log and fall back to a plain tap rather than failing to capture.
-        do { try input.setVoiceProcessingEnabled(true) }
-        catch {
-            // Loud on purpose: without AEC and without headphones, the other side's voice will leak
-            // into the mic and be transcribed a second time on the "me" socket, mis-attributing their
-            // words to the user. Recommend headphones in this state.
-            jlog("⚠️ Jarvis audio: echo cancellation (AEC) unavailable — USE HEADPHONES, or the other "
-                 + "side's audio may be double-transcribed as you. Falling back to raw mic: \(error)")
-        }
+        // Acoustic echo cancellation via VoiceProcessingIO is deliberately NOT enabled here. It came
+        // up "successfully" (no throw) yet left the mic silent — the SCStream we start moments later
+        // for system audio appears to change the audio route out from under the VPIO unit, and it
+        // never recovers. A plain tap is robust. Trade-off: without AEC the other side's voice over
+        // the speakers can bleed into the mic and be transcribed a second time on the "me" socket —
+        // USE HEADPHONES. (Jarvis's own audio is already excluded on the system-audio side via
+        // excludesCurrentProcessAudio.) Reviving AEC needs a setup that survives the SCStream route
+        // change without silencing the mic; tracked as a follow-on.
         let inFormat = input.outputFormat(forBus: 0)
         guard let converter = AVAudioConverter(from: inFormat, to: AudioPCM.target) else {
             jlog("Jarvis audio: cannot create converter"); return
