@@ -57,7 +57,9 @@ public struct ToolDef: Sendable {
 /// A tool call the model wants the harness to perform.
 public enum ToolInvocation: Sendable, Equatable {
     case captureScreen(callId: String)
-    case speak(callId: String, text: String)
+    /// The overlay lines to show, already split by the model (the `speak` tool's `lines` array) and
+    /// rendered one at a time — so the client never splits a free-form string on punctuation.
+    case speak(callId: String, lines: [String])
 }
 
 /// One brain response: parsed tool calls (possibly empty = stay silent), plus the raw calls

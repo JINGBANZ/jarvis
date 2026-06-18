@@ -7,17 +7,30 @@ private func http(_ code: Int, headers: [String: String]? = nil) -> HTTPURLRespo
                     statusCode: code, httpVersion: nil, headerFields: headers)!
 }
 
+/// Build a Responses body carrying one `speak` function_call whose raw `arguments` string is exactly
+/// `arguments`. JSONSerialization handles the wire-escaping, so the test can pass `{}` / `not json`
+/// verbatim without hand-escaping quotes.
+private func speakResponseBody(arguments: String) -> Data {
+    let item: [String: Any] = ["type": "function_call", "id": "f", "call_id": "c",
+                               "name": "speak", "arguments": arguments]
+    return try! JSONSerialization.data(withJSONObject: ["output": [item]])
+}
+
 @Suite struct OpenAIBrainClientTests {
-    @Test func decodesSpeakToolCall() async throws {
+    /// The model returns the overlay lines already split, in a `lines` array — so a line that contains
+    /// internal periods/code (e.g. `Array.from(...)`) survives intact as ONE element. This is the
+    /// regression that motivated the schema change: client-side sentence splitting used to shatter it.
+    @Test func decodesSpeakToolCallWithLinesArray() async throws {
         let json = """
         {"output":[
-          {"type":"function_call","id":"fc_1","call_id":"call_1","name":"speak","arguments":"{\\"text\\":\\"Try a hash map.\\"}"}
+          {"type":"function_call","id":"fc_1","call_id":"call_1","name":"speak","arguments":"{\\"lines\\":[\\"Try a hash map.\\",\\"Use `Array.from({length: n + 1}, () => [])` instead.\\"]}"}
         ]}
         """
         let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
                                        send: { _ in (Data(json.utf8), http(200)) })
         let resp = try await client.respond(messages: [.user("hi")], tools: coachTools)
-        #expect(resp.toolCalls == [.speak(callId: "call_1", text: "Try a hash map.")])
+        #expect(resp.toolCalls == [.speak(callId: "call_1",
+            lines: ["Try a hash map.", "Use `Array.from({length: n + 1}, () => [])` instead."])])
     }
 
     @Test func decodesCaptureScreenToolCall() async throws {
@@ -41,6 +54,20 @@ private func http(_ code: Int, headers: [String: String]? = nil) -> HTTPURLRespo
         #expect(resp.toolCalls.isEmpty)
     }
 
+    /// `strict:true` makes malformed `speak` arguments unlikely, but the decode must still degrade
+    /// gracefully to an EMPTY `lines` array (never nil/throw/dropped call) for every off-contract
+    /// shape: a missing key, a non-array value, an explicitly empty array, or broken JSON. Pin that
+    /// fallback so a future refactor can't silently change it.
+    @Test func speakDecodeFallsBackToEmptyLinesOnOffContractArguments() async throws {
+        for args in [#"{}"#, #"{"lines":"hi"}"#, #"{"lines":[]}"#, "not json"] {
+            let body = speakResponseBody(arguments: args)
+            let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+                                           send: { _ in (body, http(200)) })
+            let resp = try await client.respond(messages: [.user("hi")], tools: coachTools)
+            #expect(resp.toolCalls == [.speak(callId: "c", lines: [])], "args=\(args)")
+        }
+    }
+
     /// A token-truncated response (status=incomplete, max_output_tokens) must surface its reason
     /// so an empty tool-call list isn't mistaken for deliberate silence.
     @Test func decodeFlagsIncompleteResponse() async throws {
@@ -54,7 +81,7 @@ private func http(_ code: Int, headers: [String: String]? = nil) -> HTTPURLRespo
 
     /// A normal completed response carries no incomplete reason.
     @Test func decodeCompletedResponseHasNoIncompleteReason() async throws {
-        let json = #"{"status":"completed","output":[{"type":"function_call","id":"f","call_id":"c","name":"speak","arguments":"{\"text\":\"hi\"}"}]}"#
+        let json = #"{"status":"completed","output":[{"type":"function_call","id":"f","call_id":"c","name":"speak","arguments":"{\"lines\":[\"hi\"]}"}]}"#
         let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
                                        send: { _ in (Data(json.utf8), http(200)) })
         let resp = try await client.respond(messages: [.user("hi")], tools: coachTools)
@@ -93,7 +120,7 @@ private func http(_ code: Int, headers: [String: String]? = nil) -> HTTPURLRespo
     /// 429 is retried with backoff; a subsequent 200 succeeds.
     @Test func retriesOn429ThenSucceeds() async throws {
         let attempts = Counter()
-        let ok = #"{"output":[{"type":"function_call","id":"f","call_id":"c","name":"speak","arguments":"{\"text\":\"hi\"}"}]}"#
+        let ok = #"{"output":[{"type":"function_call","id":"f","call_id":"c","name":"speak","arguments":"{\"lines\":[\"hi\"]}"}]}"#
         let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
                                        maxRetries: 3, backoffBaseSeconds: 0,
                                        send: { _ in
@@ -101,7 +128,7 @@ private func http(_ code: Int, headers: [String: String]? = nil) -> HTTPURLRespo
             return n < 2 ? (Data("rate".utf8), http(429)) : (Data(ok.utf8), http(200))
         })
         let resp = try await client.respond(messages: [.user("hi")], tools: coachTools)
-        #expect(resp.toolCalls == [.speak(callId: "c", text: "hi")])
+        #expect(resp.toolCalls == [.speak(callId: "c", lines: ["hi"])])
         #expect(attempts.value == 3) // two 429s + one 200
     }
 
@@ -129,6 +156,18 @@ private func http(_ code: Int, headers: [String: String]? = nil) -> HTTPURLRespo
         #expect(body.contains("\"max_output_tokens\""))
         #expect(body.contains("\"parallel_tool_calls\":false"))
         #expect(body.contains("\"name\":\"capture_screen\""))
+    }
+
+    /// Tools are sent with `strict:true` so the model's function-call arguments are schema-guaranteed
+    /// (Structured Outputs via function calling) — that's what lets `speak` return a typed `lines`
+    /// array instead of a free-form string the client has to split.
+    @Test func encodesStrictToolsForStructuredOutput() async throws {
+        let box = CapturedBody()
+        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+                                       send: { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
+        _ = try await client.respond(messages: [.user("hi")], tools: coachTools)
+        let body = String(data: box.get() ?? Data(), encoding: .utf8) ?? ""
+        #expect(body.contains("\"strict\":true"))
     }
 
     /// Default tool choice is "auto".
