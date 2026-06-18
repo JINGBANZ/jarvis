@@ -20,6 +20,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var themTranscriber: RealtimeTranscriber?   // "them" (system audio)
     private var audio: AudioInput?
     private var systemAudio: SystemAudioInput?
+    /// Echo cancellation: system audio ("them") is the reference; the mic ("me") is cleaned against it
+    /// so the other side's voice off the speakers isn't re-transcribed as the user — no headphones.
+    private var echoCanceller: WebRTCEchoCanceller?
     /// In-flight coaching turns, so Stop can cancel one mid-brain-call (otherwise it could speak
     /// after the user pressed Stop).
     private var turns: TurnTaskBox?
@@ -147,8 +150,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         themTranscriber.onTurnEnd = { turns.run { await driver.handleTrigger(.turnEnd) } }
         themTranscriber.onTerminalFailure = onThemTerminalFailure
 
-        let audio = AudioInput { [weak transcriber] pcm in transcriber?.sendAudio(pcm) }
-        let systemAudio = SystemAudioInput { [weak themTranscriber] pcm in themTranscriber?.sendAudio(pcm) }
+        // Echo cancellation: the mic ("me") is cleaned against the system audio ("them") as the echo
+        // reference, so the other side's voice over the speakers isn't transcribed a second time as
+        // the user. Best-effort — if the canceller can't be created, the mic passes through raw. The
+        // "them" socket always gets the clean system audio; only the mic is run through the canceller.
+        let aec = WebRTCEchoCanceller()
+        let audio = AudioInput { [weak transcriber] pcm in
+            transcriber?.sendAudio(aec?.cancel(pcm) ?? pcm)
+        }
+        let systemAudio = SystemAudioInput { [weak themTranscriber] pcm in
+            aec?.registerReference(pcm)
+            themTranscriber?.sendAudio(pcm)
+        }
         // If the SCStream dies mid-session (permission revoked, display change), degrade the same way
         // as a "them" socket failure: drop the system-audio side, keep the mic coaching.
         systemAudio.onTerminalFailure = onThemTerminalFailure
@@ -156,6 +169,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.themTranscriber = themTranscriber
         self.audio = audio
         self.systemAudio = systemAudio
+        self.echoCanceller = aec
         self.turns = turns
         transcriber.connect()
         themTranscriber.connect()
@@ -181,6 +195,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         themTranscriber = nil
         audio = nil
         systemAudio = nil
+        echoCanceller = nil   // released after the capture closures that hold it are gone
         if wasRunning { jlog("Jarvis: stopped.") }
     }
 

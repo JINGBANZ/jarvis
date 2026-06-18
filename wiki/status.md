@@ -66,16 +66,16 @@ A compact log — the *rationale* for each lives in the linked design page, not 
 | **Tuned overlay/silence timing + sharpened coach prompt** — longer per-line overlay display, later first silence nudge over a wider backoff ramp, plain-language hints for interview stress, explicit `me`/`them` speaker handling; overlay now **queues** tips so a newer one never cuts off the current (2026-06-18) | [architecture.md §2](./architecture.md#2-core-loop) |
 | **Overlay is never-interrupt + never-drop, not show-freshest** — direct-reply queue-priority/preemption considered and **rejected**: in a live interview the user never addresses Jarvis aloud, so overlay traffic is all proactive coaching with no latency-critical reply to jump the queue (2026-06-18) | [architecture.md §2](./architecture.md#2-core-loop) |
 | **AEC reverted — mic was silent** — `VoiceProcessingIO` came up without throwing, but the `SCStream` starting ~150 ms later changed the audio route out from under it and the mic went silent (RMS 0); reverted to a plain `AVAudioEngine` tap (2026-06-18) | [architecture.md §3](./architecture.md#3-components) |
-| **Speaker bleed handled in the transcript, not the audio — no headphones needed** — instead of acoustic echo cancellation, `RollingTranscript` drops a `me` line that near-duplicates a recent `them` line (the mic re-capturing the speakers). The coach only reads the transcript, so this removes the mis-attribution with no fragile audio plumbing and works on speakers. Chosen over software AEC (speexdsp, Glass-style) and over a Core Audio process tap + VPIO for stability + minimum code; reference-based AEC is the documented escalation if real use needs cleaner audio (2026-06-18) | [architecture.md §3](./architecture.md#3-components) |
+| **Acoustic echo cancellation via WebRTC AEC3 — no headphones needed** — `WebRTCEchoCanceller` (`CJarvisAEC`) cleans the mic against the system audio as the far-end reference, removing the other side's speaker bleed before transcription. Chosen for quality + reliability over a transcript-level dedup heuristic (too lossy: misses paraphrased bleed, can drop real speech) and over Apple `VoiceProcessingIO` (silenced the mic, ducks SCStream audio). The lib is webrtc-audio-processing v2.1 + its bundled abseil, built static + zero-dylib (macOS 14, arm64) by `scripts/build-aec.sh` and vendored as one `.a`; `swift build` links it with no C++ toolchain. Resamples our 24 kHz wire to AEC3's 48 kHz (`Resampler`) on 10 ms frames (`PCM16Framer`). Open: live delay-alignment tuning (2026-06-18) | [architecture.md §3](./architecture.md#3-components) |
 
 ## Open Questions / To Confirm
 
-- **Speaker bleed escalation (only if needed).** Bleed is handled in the transcript today (drop a
-  `me` line that near-duplicates a recent `them` line). If real use shows that's not enough — e.g.
-  the mic's degraded copy transcribes too differently to match, or cleaner `me` audio is wanted
-  during talk-over — escalate to reference-based AEC (feed the captured system audio as the far-end
-  reference into speexdsp/WebRTC AEC3; Glass does exactly this). The hard part there is two-clock
-  delay/drift alignment, which is why we did the transcript fix first.
+- **AEC live delay-alignment tuning.** Echo cancellation (WebRTC AEC3, `WebRTCEchoCanceller`) is
+  wired and unit-tested through the framer, but the mic↔SCStream relative latency (two independent
+  capture clocks) needs a live speaker test to confirm AEC3's delay estimator converges. If residual
+  echo remains, options are feeding AEC3 a `stream_delay_ms` hint or a small fixed pre-delay on the
+  reference. Possible refinement: bypass AEC when the output device is headphones (no echo to cancel).
+- **Universal binary.** `libjarvis-aec.a` is arm64-only; `lipo` in an x86_64 build if Intel is needed.
 - Minimum macOS version target. Build host is macOS 26.5; ScreenCaptureKit screen+audio capture
   needs macOS 13+. Target **macOS 14+** unless a needed API forces higher.
 - The **live Realtime transcription wiring** in `Sources/JarvisApp/Capture/RealtimeTranscriber.swift` is the

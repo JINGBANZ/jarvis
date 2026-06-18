@@ -15,16 +15,12 @@ final class AudioInput: @unchecked Sendable {
 
     func start() {
         let input = engine.inputNode
-        // Acoustic echo cancellation via VoiceProcessingIO is deliberately NOT enabled here. It came
-        // up "successfully" (no throw) yet left the mic silent — the SCStream we start moments later
-        // for system audio changes the audio route out from under the VPIO unit, and it never
-        // recovers (VPIO is also documented to duck the very SCStream audio we capture). A plain tap
-        // is robust on any route. The reason AEC existed — the other side's voice bleeding off the
-        // speakers into the mic and being transcribed a second time as "me" — is instead handled
-        // where it actually matters, in the transcript: `RollingTranscript` drops a `me` line that
-        // near-duplicates a recent `them` line (see its speaker-bleed section). The coach only ever
-        // reads the transcript, so that fully removes the mis-attribution with no fragile audio
-        // plumbing and no headphone requirement. Reference-based AEC stays the escalation if needed.
+        // A plain tap, deliberately NOT VoiceProcessingIO: Apple's VPIO came up "successfully" yet
+        // left the mic silent — the SCStream we start moments later for system audio changes the
+        // audio route out from under the VPIO unit and it never recovers (VPIO also ducks the very
+        // SCStream audio we capture). Echo cancellation is instead done downstream by
+        // `WebRTCEchoCanceller` (AEC3), which cleans this mic stream against the system audio as the
+        // far-end reference — robust on any route, and no headphones required. See AppDelegate.start().
         let inFormat = input.outputFormat(forBus: 0)
         guard let converter = AVAudioConverter(from: inFormat, to: AudioPCM.target) else {
             jlog("Jarvis audio: cannot create converter"); return

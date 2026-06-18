@@ -16,7 +16,8 @@ and keep anything OS-bound thin and on the outside.**
 |---|---|---|
 | `JarvisCore` | library | All the logic. **Foundation-only** — no AppKit / AVFoundation / ScreenCaptureKit / WebKit. Runs and is unit-tested on any machine. |
 | `JarvisOverlay` | library | The AppKit overlay (`NSPanel`, capture-invisibility). Its own target *so its behavior can be unit-tested* (`JarvisOverlayTests`) without dragging UIKit into Core. |
-| `JarvisApp` | executable | The thin macOS shell: menu bar, capture, permissions, the dev viewer window. Wires Core + Overlay to the OS. Verified by a live run. |
+| `CJarvisAEC` | C target | The acoustic-echo-cancellation edge: a pure-C facade over WebRTC AEC3. The C++ impl is prebuilt + statically merged (abseil included, zero runtime dylibs) into `lib/libjarvis-aec.a` by `scripts/build-aec.sh`, so `swift build` only links the archive — no C++ toolchain or vendored headers. Regenerate the `.a` only when bumping the webrtc version. |
+| `JarvisApp` | executable | The thin macOS shell: menu bar, capture, permissions, the dev viewer window. Wires Core + Overlay + AEC to the OS. Verified by a live run. |
 
 > **Put logic in `JarvisCore`.** If something can be written without an OS framework, it goes in Core
 > where a test can reach it. Reach outward to `JarvisOverlay` / `JarvisApp` only when you genuinely
