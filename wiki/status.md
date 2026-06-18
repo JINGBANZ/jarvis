@@ -61,6 +61,7 @@ A compact log — the *rationale* for each lives in the linked design page, not 
 | **Overlay hidden from screen capture/sharing via `sharingType = .none`** — verified on macOS 26.5 incl. live `SCStream`; re-asserted on `show()` as defense-in-depth | [overlay-invisibility.md](./overlay-invisibility.md) |
 | **Cut the guardrail layer: no cooldown/rate cap, no wake-word detector; brain self-gates speaking; silence check backs off (30s→240s)** — simplify the flow, cut log noise, natural conversation (2026-06-16) | [architecture.md §5](./architecture.md#5-safety-model) |
 | **`speak` returns a `lines` array via Structured Outputs (`strict:true`), not a free-form string** — the model splits the tip into overlay lines, so the client no longer splits prose on `.`/`!`/`?` (which shattered code like `Array.from(...)`) (2026-06-17) | [architecture.md §2](./architecture.md#2-core-loop) |
+| **Unified Settings window** replaces the separate API-key dialog and log-viewer menu item; overlay text size (12–32 pt, default 18) + background opacity (40–100%, default 78%) are now user-adjustable and persisted via `OverlayAppearance` (UserDefaults) (2026-06-17) | [settings-window.md](./settings-window.md) |
 
 ## Open Questions / To Confirm
 

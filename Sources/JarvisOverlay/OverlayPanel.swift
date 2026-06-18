@@ -6,10 +6,13 @@ import JarvisCore
 /// overlay stays invisible in anyone else's screen share or recording (Zoom/Meet/Teams/QuickTime).
 /// See `init` and wiki/overlay-invisibility.md.
 @MainActor
-public final class OverlayPanel: NSObject, OverlayRendering {
+public final class OverlayPanel: NSObject, OverlayRendering, OverlayAppearanceApplying {
     private let panel: NSPanel
     private let label: NSTextField
     private var hideWorkItem: DispatchWorkItem?
+    /// Whether the panel is currently showing the Settings live preview (vs. a real coaching tip).
+    /// Lets `showAppearancePreview(false)` avoid tearing down a genuine tip when Settings closes.
+    private var isPreviewing = false
     /// Test hook (internal): counts how many times `show()` has re-asserted capture exclusion.
     private(set) var captureExclusionReassertCount = 0
 
@@ -20,7 +23,7 @@ public final class OverlayPanel: NSObject, OverlayRendering {
         panel.level = .floating
         panel.isFloatingPanel = true
         panel.hidesOnDeactivate = false
-        panel.backgroundColor = NSColor.black.withAlphaComponent(0.78)
+        panel.backgroundColor = NSColor.black.withAlphaComponent(CGFloat(Config.overlayOpacityDefault))
         panel.isOpaque = false
         panel.hasShadow = true
         panel.ignoresMouseEvents = true
@@ -36,7 +39,7 @@ public final class OverlayPanel: NSObject, OverlayRendering {
 
         label = NSTextField(wrappingLabelWithString: "")
         label.textColor = .white
-        label.font = .systemFont(ofSize: 18, weight: .medium)
+        label.font = .systemFont(ofSize: CGFloat(Config.overlayFontSizeDefault), weight: .medium)
         label.alignment = .center
         label.translatesAutoresizingMaskIntoConstraints = false
         label.backgroundColor = .clear
@@ -70,12 +73,12 @@ public final class OverlayPanel: NSObject, OverlayRendering {
     }
 
     private func show(_ lines: [String], each: TimeInterval) {
-        // Re-assert capture exclusion on every display: an NSApp activation-policy flip (e.g. the
-        // API-key dialog in MenuBarController.setKey) can make WindowServer drop sharingType on some
+        // Re-assert capture exclusion on every display: an NSApp activation-policy flip (e.g. opening
+        // the Settings window in SettingsWindow.show) can make WindowServer drop sharingType on some
         // macOS versions/configs. Cheap insurance against a silent, high-impact regression — the
         // overlay becoming visible to a screen share with no signal. See wiki/overlay-invisibility.md.
-        panel.sharingType = .none
-        captureExclusionReassertCount += 1
+        reassertCaptureExclusion()
+        isPreviewing = false   // a real tip takes over the panel from any Settings preview
         hideWorkItem?.cancel()
         var idx = 0
         func next() {
@@ -92,8 +95,53 @@ public final class OverlayPanel: NSObject, OverlayRendering {
 
     private func hide() { panel.orderOut(nil) }
 
+    /// Re-apply screen-capture exclusion and count it, so tests can prove the re-assert ran (on
+    /// macOS 26 the OS normalizes `sharingType`, so asserting `== .none` alone can't tell a real
+    /// re-assert from the value set at init). See wiki/overlay-invisibility.md.
+    private func reassertCaptureExclusion() {
+        panel.sharingType = .none
+        captureExclusionReassertCount += 1
+    }
+
+    // MARK: - OverlayAppearanceApplying
+
+    /// Live preview sample shown while the Settings window is open.
+    private static let previewText = "Sample overlay text"
+
+    public func setFontSize(_ points: Double) {
+        label.font = .systemFont(ofSize: CGFloat(points), weight: .medium)
+    }
+
+    public func setBackgroundOpacity(_ opacity: Double) {
+        panel.backgroundColor = NSColor.black.withAlphaComponent(CGFloat(opacity))
+    }
+
+    /// Show a sample tip (on) or clear it (off). Cancels any pending auto-hide so a live coaching
+    /// tip doesn't yank the preview away mid-adjust, and re-asserts capture exclusion (same
+    /// defense-in-depth as `show()`; an activation-policy flip can drop `sharingType`). Turning the
+    /// preview off only hides the panel if a preview is actually up — so closing Settings never
+    /// tears down a genuine coaching tip that `show()` put on screen in the meantime.
+    public func showAppearancePreview(_ on: Bool) {
+        if on {
+            hideWorkItem?.cancel()
+            reassertCaptureExclusion()
+            isPreviewing = true
+            label.stringValue = Self.previewText
+            panel.orderFrontRegardless()
+        } else if isPreviewing {
+            isPreviewing = false
+            hide()
+        }
+    }
+
     // MARK: - Test hooks (internal; reached via `@testable import JarvisOverlay`)
 
     /// The panel's current capture-sharing type. `.none` means excluded from screen capture.
     var currentSharingType: NSWindow.SharingType { panel.sharingType }
+
+    /// The label's current font point size.
+    var currentFontPointSize: CGFloat { label.font?.pointSize ?? 0 }
+
+    /// The panel background's current alpha (the opacity the user picked).
+    var currentBackgroundAlpha: CGFloat { panel.backgroundColor.alphaComponent }
 }

@@ -16,6 +16,7 @@
 - **[overlay-invisibility.md](./overlay-invisibility.md)** — how the coaching overlay stays out of screen recordings and screen shares (the `sharingType = .none` mechanism), with empirical verification on macOS 26.5 and the limits.
 - **[landscape-survey.md](./landscape-survey.md)** — every tool and product we tried or evaluated, and how each measured up. ("What I tried.")
 - **[fork-evaluation.md](./fork-evaluation.md)** — code-level evaluation of open-source apps as a fork base for the PoC, and why they're all Electron/Tauri rather than native Swift.
+- **[settings-window.md](./settings-window.md)** — the unified Settings window: one menu item → `SettingsWindow` hosting `APIKeySection`, `OverlaySection`, and (dev mode) `ActivitySection`; overlay text size + background opacity persisted via `OverlayAppearance`.
 
 ## Key Decisions
 
