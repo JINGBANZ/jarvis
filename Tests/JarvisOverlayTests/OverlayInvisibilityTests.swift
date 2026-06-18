@@ -66,6 +66,11 @@ import AppKit
         await checkTipsQueue()
     }
 
+    @Test
+    func overlayResumesTipAndQueueAfterSettingsPreview() async {
+        await checkPreviewResumesTip()
+    }
+
     // Condition trait so opting out reports as *skipped* (not a green pass) — important for a
     // security-adjacent test where "skipped" and "passed" must be distinguishable.
     @Test(.enabled(if: ProcessInfo.processInfo.environment["JARVIS_RUN_CAPTURE_TESTS"] == "1",
@@ -123,6 +128,29 @@ private func checkTipsQueue() async {
 
     try? await Task.sleep(nanoseconds: 300_000_000)   // first tip's window elapses; the queued tip takes over
     #expect(overlay.currentText == "second", "the queued tip must display after the first finishes")
+}
+
+// Opening the Settings appearance preview mid-tip must PAUSE the tip (showing the sample), then on
+// close RESUME the exact line it stopped on — and a tip that arrived while the preview was open must
+// play afterwards. Guards the regression where the preview stranded the queue / dropped a tip.
+@MainActor
+private func checkPreviewResumesTip() async {
+    let overlay = OverlayPanel()
+
+    overlay.render(["A1", "A2"], perLineSeconds: 0.4)   // line A1 shows; A2 scheduled at ~0.4s
+    try? await Task.sleep(nanoseconds: 150_000_000)     // ~0.15s: still on A1
+    overlay.showAppearancePreview(true)                 // pause the tip; sample takes the panel
+    overlay.render(["B1"], perLineSeconds: 0.4)         // a new tip arrives while previewing — must wait
+
+    try? await Task.sleep(nanoseconds: 100_000_000)     // ~0.25s
+    #expect(overlay.currentText == "Sample overlay text", "preview must own the panel while open")
+
+    overlay.showAppearancePreview(false)                // close Settings: resume the paused tip at A2
+    try? await Task.sleep(nanoseconds: 150_000_000)     // ~0.40s into A2's window
+    #expect(overlay.currentText == "A2", "the paused tip must resume its remaining line, not be dropped")
+
+    try? await Task.sleep(nanoseconds: 400_000_000)     // A2 elapses (~0.65s); the queued tip plays
+    #expect(overlay.currentText == "B1", "a tip that arrived during preview must play after the resumed tip")
 }
 
 @MainActor

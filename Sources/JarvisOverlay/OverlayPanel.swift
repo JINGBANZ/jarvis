@@ -10,15 +10,18 @@ import JarvisCore
 public final class OverlayPanel: NSObject, OverlayRendering, OverlayAppearanceApplying {
     private let panel: NSPanel
     private let label: NSTextField
+    /// One coaching tip: its lines and how long each line is shown.
+    private struct Tip { let lines: [String]; let each: TimeInterval }
     /// Tips waiting their turn. A tip the user may still be reading is never cut off by a newer one —
     /// arrivals queue here and play in order once the current tip finishes.
-    private var queue: [(lines: [String], each: TimeInterval)] = []
-    private var isShowing = false
-    /// The pending line-advance work, retained so the Settings live preview can suspend tip
-    /// progression while the user adjusts appearance.
+    private var queue: [Tip] = []
+    /// The tip currently on screen and the index of the NEXT line to show. Held as instance state (not
+    /// inside the advance closure) so a Settings preview can pause it and later resume the exact line.
+    private var active: (tip: Tip, nextLine: Int)?
+    /// The pending line-advance work, retained so the Settings live preview can cancel (pause) it.
     private var tickWorkItem: DispatchWorkItem?
-    /// Whether the panel is currently showing the Settings live preview (vs. a real coaching tip).
-    /// Lets `showAppearancePreview(false)` avoid tearing down a genuine tip when Settings closes.
+    /// Whether the Settings live preview currently owns the panel. While true, an active tip is paused
+    /// and newly-arriving tips wait in the queue; they resume/play when the preview closes.
     private var isPreviewing = false
     /// Test hook (internal): counts how many times `show()` has re-asserted capture exclusion.
     private(set) var captureExclusionReassertCount = 0
@@ -85,30 +88,37 @@ public final class OverlayPanel: NSObject, OverlayRendering, OverlayAppearanceAp
         // macOS versions/configs. Cheap insurance against a silent, high-impact regression — the
         // overlay becoming visible to a screen share with no signal. See wiki/overlay-invisibility.md.
         reassertCaptureExclusion()
-        isPreviewing = false   // a real tip takes over the panel from any Settings preview
         // Queue rather than interrupt: a tip the user is still reading must not vanish because a newer
         // one arrived. Tips play in arrival order and none are dropped.
-        queue.append((lines, each))
-        if !isShowing { showNextTip() }
+        queue.append(Tip(lines: lines, each: each))
+        pumpQueue()
     }
 
-    /// Pull the next queued tip and step through its lines one at a time; when it ends, advance to the
-    /// next queued tip, or hide the panel once the queue is empty.
-    private func showNextTip() {
-        guard !queue.isEmpty else { isShowing = false; hide(); return }
-        isShowing = true
-        let tip = queue.removeFirst()
-        var idx = 0
-        func next() {
-            guard idx < tip.lines.count else { showNextTip(); return }
-            label.stringValue = tip.lines[idx]
-            panel.orderFrontRegardless()
-            idx += 1
-            let work = DispatchWorkItem { MainActor.assumeIsolated { next() } }
-            tickWorkItem = work
-            DispatchQueue.main.asyncAfter(deadline: .now() + tip.each, execute: work)
+    /// Begin the next queued tip if the panel is free. A no-op while a tip is already on screen (the
+    /// new one waits its turn) or while the Settings preview owns the panel (queued tips resume when
+    /// the preview closes) — so a tip is never interrupted or dropped.
+    private func pumpQueue() {
+        guard !isPreviewing, active == nil, !queue.isEmpty else { return }
+        active = (queue.removeFirst(), 0)
+        advance()
+    }
+
+    /// Show the active tip's current line and schedule the next. When the tip's lines are exhausted,
+    /// move on to the next queued tip, or hide the panel if nothing is waiting. Resumable: it reads the
+    /// line index from `active`, so a preview can pause it (cancel the tick) and resume exactly here.
+    private func advance() {
+        guard let (tip, line) = active else { return }
+        guard line < tip.lines.count else {
+            active = nil
+            if queue.isEmpty { hide() } else { pumpQueue() }
+            return
         }
-        next()
+        label.stringValue = tip.lines[line]
+        panel.orderFrontRegardless()
+        active = (tip, line + 1)
+        let work = DispatchWorkItem { MainActor.assumeIsolated { self.advance() } }
+        tickWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + tip.each, execute: work)
     }
 
     private func hide() { panel.orderOut(nil) }
@@ -141,15 +151,20 @@ public final class OverlayPanel: NSObject, OverlayRendering, OverlayAppearanceAp
     /// tears down a genuine coaching tip that `show()` put on screen in the meantime.
     public func showAppearancePreview(_ on: Bool) {
         if on {
-            tickWorkItem?.cancel()   // pause any in-flight tip so it doesn't overwrite the sample
+            tickWorkItem?.cancel()   // pause the active tip; `active` keeps its line index for resume
             reassertCaptureExclusion()
             isPreviewing = true
             label.stringValue = Self.previewText
             panel.orderFrontRegardless()
         } else if isPreviewing {
             isPreviewing = false
-            // Resume any tips that queued (or were paused) while Settings was open; else clear.
-            if isShowing || !queue.isEmpty { showNextTip() } else { hide() }
+            if active != nil {
+                advance()        // resume the paused tip from the exact line it stopped on
+            } else if !queue.isEmpty {
+                pumpQueue()      // a tip arrived while previewing — play it now
+            } else {
+                hide()           // nothing to show; clear the sample text
+            }
         }
     }
 
