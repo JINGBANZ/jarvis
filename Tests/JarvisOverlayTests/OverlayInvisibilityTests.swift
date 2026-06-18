@@ -61,6 +61,11 @@ import AppKit
         await checkEmptyLinesDoNotShow()
     }
 
+    @Test
+    func overlayQueuesTipsInsteadOfInterrupting() async {
+        await checkTipsQueue()
+    }
+
     // Condition trait so opting out reports as *skipped* (not a green pass) — important for a
     // security-adjacent test where "skipped" and "passed" must be distinguishable.
     @Test(.enabled(if: ProcessInfo.processInfo.environment["JARVIS_RUN_CAPTURE_TESTS"] == "1",
@@ -100,6 +105,24 @@ private func checkEmptyLinesDoNotShow() async {
 
     #expect(overlay.captureExclusionReassertCount == before,
             "empty/whitespace-only lines must not show the overlay")
+}
+
+// A newer tip must not interrupt one still on screen: it queues and plays after the current tip
+// finishes, so no hint is dropped. Uses sub-second display windows with wide margins to stay robust
+// under CI load.
+@MainActor
+private func checkTipsQueue() async {
+    let overlay = OverlayPanel()
+
+    overlay.render(["first"], perLineSeconds: 0.3)
+    try? await Task.sleep(nanoseconds: 80_000_000)    // 80ms into the first tip's 300ms window
+    overlay.render(["second"], perLineSeconds: 0.3)   // arrives mid-display — must queue, not replace
+    try? await Task.sleep(nanoseconds: 80_000_000)    // still inside the first tip's window
+
+    #expect(overlay.currentText == "first", "a newer tip must not interrupt one still on screen")
+
+    try? await Task.sleep(nanoseconds: 300_000_000)   // first tip's window elapses; the queued tip takes over
+    #expect(overlay.currentText == "second", "the queued tip must display after the first finishes")
 }
 
 @MainActor

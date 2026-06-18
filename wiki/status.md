@@ -20,7 +20,8 @@ by the human smoke checklist in the [README](../README.md#live-smoke-checklist).
   session for multi-turn memory. **Transcription:** `gpt-4o-transcribe` over the GA Realtime API.
   API-only, no local models. Rationale: [architecture.md](./architecture.md#4-data-flow--cost-model).
 - **Overlay:** the brain returns the tip as a pre-split `lines` array (Structured Outputs); the
-  overlay shows up to ~3 short lines per response, one at a time, ~5 seconds each.
+  overlay shows up to ~3 short lines per response, one at a time. Newer tips queue behind the one on
+  screen rather than interrupting it, so no hint is dropped.
 - **Build approach: native Swift, directly.** The two-phase plan (fork Natively first, then native)
   was dropped: **Phase 1 is skipped** and we build the clean native Swift app now. The fork
   evaluation and survey still stand as the *why-build-our-own* basis ([fork evaluation](./fork-evaluation.md),
@@ -59,9 +60,10 @@ A compact log — the *rationale* for each lives in the linked design page, not 
 | **Tuned `server_vad`+debounce (not `semantic_vad`); quiet graceful Stop** — fixes from first live smoke run (2026-06-15) | [architecture.md](./architecture.md#models-and-apis) |
 | **Dev activity viewer = in-app `WKWebView`** (live push, no meta-refresh; screenshot lightbox; persisted JSONL session history + clear-history) | [build-and-run.md](./build-and-run.md) |
 | **Overlay hidden from screen capture/sharing via `sharingType = .none`** — verified on macOS 26.5 incl. live `SCStream`; re-asserted on `show()` as defense-in-depth | [overlay-invisibility.md](./overlay-invisibility.md) |
-| **Cut the guardrail layer: no cooldown/rate cap, no wake-word detector; brain self-gates speaking; silence check backs off (30s→240s)** — simplify the flow, cut log noise, natural conversation (2026-06-16) | [architecture.md §5](./architecture.md#5-safety-model) |
+| **Cut the guardrail layer: no cooldown/rate cap, no wake-word detector; brain self-gates speaking; silence check backs off across a long silence** — simplify the flow, cut log noise, natural conversation (2026-06-16) | [architecture.md §5](./architecture.md#5-safety-model) |
 | **`speak` returns a `lines` array via Structured Outputs (`strict:true`), not a free-form string** — the model splits the tip into overlay lines, so the client no longer splits prose on `.`/`!`/`?` (which shattered code like `Array.from(...)`) (2026-06-17) | [architecture.md §2](./architecture.md#2-core-loop) |
 | **Unified Settings window** replaces the separate API-key dialog and log-viewer menu item; overlay text size (12–32 pt, default 18) + background opacity (40–100%, default 78%) are now user-adjustable and persisted via `OverlayAppearance` (UserDefaults) (2026-06-17) | [settings-window.md](./settings-window.md) |
+| **Tuned overlay/silence timing + sharpened coach prompt** — longer per-line overlay display, later first silence nudge over a wider backoff ramp, plain-language hints for interview stress, explicit `me`/`them` speaker handling; overlay now **queues** tips so a newer one never cuts off the current (2026-06-18) | [architecture.md §2](./architecture.md#2-core-loop) |
 
 ## Open Questions / To Confirm
 

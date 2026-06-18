@@ -53,20 +53,21 @@ moments the model judges worthwhile.
 
 1. The Transcriber emits a **turn-end** event (`gpt-4o-transcribe` server VAD ends the turn after a
    tuned silence window) or a **silence check** fires (you've gone quiet, maybe stuck). The silence
-   check carries *how long* you've been quiet and backs off across a long silence (e.g. 30s, 60s,
-   120s, …), resetting on speech.
+   check carries *how long* you've been quiet and backs off across a long silence (the interval
+   doubles each step up to a cap — see `Config`), resetting on speech.
 2. The CoachDriver calls the brain on **every** trigger — there is no cooldown, rate cap, or
    wake-word gate. Whether to speak (and whether the user just addressed Jarvis) is the model's
    call, governed by the system prompt; the only hard gate is the user's Start/Stop.
 3. It calls **`gpt-5.5`** with the coach system prompt, the recent **timestamped** transcript
-   window, the timing context (seconds silent, time on the problem), and the tool set
+   window, the timing context (seconds silent, session elapsed), and the tool set
    `[capture_screen, speak]`. The timing is what lets the model tell "thinking" from "stuck."
 4. The model may call `capture_screen`. The harness fulfills it (a silent screenshot) and
    returns the image into the conversation. The model may now reason over what's on screen.
 5. The model either calls `speak(lines)` — a tip of up to ~3 short lines, returned **already split**
    into an array (Structured Outputs / `strict:true`), so the client never splits prose on
    punctuation — or returns nothing (stay silent).
-6. `speak` renders to the **Overlay**, one line at a time, ~5 seconds each.
+6. `speak` renders to the **Overlay**, one line at a time (per-line display time set in `Config`).
+   A newer tip never interrupts one still showing — tips queue and play in order, so no hint is lost.
 
 ## 3. Components
 
@@ -77,7 +78,7 @@ moments the model judges worthwhile.
 | **Transcriber** | Maintain a rolling, speaker-labeled, **timestamped** transcript; emit turn-end events and backing-off silence checks (with quiet duration). Two instances run in parallel — one per side — tagging lines `me`/`them` into one shared transcript. | `gpt-4o-transcribe` (Realtime API; tuned `server_vad`). |
 | **CoachDriver** | The event loop. On every trigger, call the brain with the transcript + timing context and tools, route tool calls. No cooldown/rate cap — restraint is the model's. | `gpt-5.5` (vision + tool-use). |
 | **ScreenTool** | Fulfill `capture_screen`: take a silent screenshot of the active display, excluding the overlay window. | macOS `screencapture` CLI. |
-| **Overlay** | Render `speak` output: up to ~3 short lines (model-split), ~5s each, non-activating, always-on-top, excluded from capture. | AppKit NSPanel. |
+| **Overlay** | Render `speak` output: up to ~3 short lines (model-split), shown one at a time and queued so a newer tip never cuts off the current one; non-activating, always-on-top, excluded from capture. | AppKit NSPanel. |
 | **MenuBar** | Manual **Start/Stop** of the pipeline (two states: ⚪️ stopped / 🟢 running — no auto-start), status indicator, one-time API-key entry. | AppKit menu-bar item; Keychain for the key. |
 
 Each component has one job and a narrow interface. The CoachDriver is the only place the
@@ -118,7 +119,7 @@ rather than a per-turn screenshot.
 Target: **turn-end → first overlay line < 2s.** It holds because transcription is continuous
 (no STT latency at trigger time) and most turns are text-only (no `capture_screen`), so the brain
 call is a single short round-trip. The overlay then reveals the already-returned lines one at a
-time (~5s each), so the first tip appears immediately — note the brain response itself is **not**
+time (paced by `Config`), so the first tip appears immediately — note the brain response itself is **not**
 streamed (one buffered request; the overlay just paces the display).
 
 ### Resilience
