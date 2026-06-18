@@ -86,7 +86,7 @@ path still works for testing/practice; it is simply not latency-critical there.)
 
 | Component | Responsibility | Built on (borrowed) |
 |---|---|---|
-| **AudioInput** | Capture the mic (`me`) with AEC; stream 24 kHz PCM16 to its Transcriber. | AVFoundation (`VoiceProcessingIO`). |
+| **AudioInput** | Capture the mic (`me`) with a plain `AVAudioEngine` tap; stream 24 kHz PCM16 to its Transcriber. **No AEC** — `VoiceProcessingIO` silenced the mic once the `SCStream` started, so use headphones to avoid speaker bleed. | AVFoundation (`AVAudioEngine` tap). |
 | **SystemAudioInput** | Capture the other side (`them`) — system output audio; stream the same 24 kHz PCM16 to its own Transcriber. Degrades gracefully without the Screen-Recording grant. | ScreenCaptureKit (`SCStream`, `capturesAudio`, `excludesCurrentProcessAudio`). |
 | **Transcriber** | Maintain a rolling, speaker-labeled, **timestamped** transcript; emit turn-end events and backing-off silence checks (with quiet duration). Two instances run in parallel — one per side — tagging lines `me`/`them` into one shared transcript. | `gpt-4o-transcribe` (Realtime API; tuned `server_vad`). |
 | **CoachDriver** | The event loop. On every trigger, call the brain with the transcript + timing context and tools, route tool calls. No cooldown/rate cap — restraint is the model's. | `gpt-5.5` (vision + tool-use). |

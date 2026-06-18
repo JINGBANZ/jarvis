@@ -52,7 +52,7 @@ A compact log — the *rationale* for each lives in the linked design page, not 
 | **Models (verified 2026-06):** `gpt-5.5` brain via Responses API (vision), `gpt-4o-transcribe` over GA Realtime | [architecture.md](./architecture.md#models-and-apis) |
 | **Server-side conversation per session** (Conversations API, `store:true`) for the coach's own memory — quality over local-only retention | [architecture.md](./architecture.md#models-and-apis), [sandbox.md](./sandbox.md) |
 | **Coach is time-aware** (timestamped transcript + silence duration) | [architecture.md](./architecture.md#2-core-loop) |
-| **System audio shipped** — `SystemAudioInput` (ScreenCaptureKit) → a second `them`-tagged transcriber beside the mic's `me`, one shared transcript; mic runs `VoiceProcessingIO` AEC to stop speaker bleed (2026-06-16; live SCK run still pending) | [architecture.md](./architecture.md#3-components) |
+| **System audio shipped** — `SystemAudioInput` (ScreenCaptureKit) → a second `them`-tagged transcriber beside the mic's `me`, one shared transcript (2026-06-16) | [architecture.md](./architecture.md#3-components) |
 | ~~Two-phase build~~ → **Skip Phase 1; build native Swift directly** (2026-06-14) | this page; [fork-evaluation.md](./fork-evaluation.md) |
 | **Native Swift app** (cleanest sandbox/footprint on macOS) | [architecture.md](./architecture.md), [fork-evaluation.md](./fork-evaluation.md) |
 | **Toolchain: SwiftPM + Command Line Tools** (no full Xcode; manual bundle + stable self-signed `Jarvis Dev` identity so TCC grants persist; TCC prompts) | [build-and-run.md](./build-and-run.md) |
@@ -65,9 +65,15 @@ A compact log — the *rationale* for each lives in the linked design page, not 
 | **Unified Settings window** replaces the separate API-key dialog and log-viewer menu item; overlay text size (12–32 pt, default 18) + background opacity (40–100%, default 78%) are now user-adjustable and persisted via `OverlayAppearance` (UserDefaults) (2026-06-17) | [settings-window.md](./settings-window.md) |
 | **Tuned overlay/silence timing + sharpened coach prompt** — longer per-line overlay display, later first silence nudge over a wider backoff ramp, plain-language hints for interview stress, explicit `me`/`them` speaker handling; overlay now **queues** tips so a newer one never cuts off the current (2026-06-18) | [architecture.md §2](./architecture.md#2-core-loop) |
 | **Overlay is never-interrupt + never-drop, not show-freshest** — direct-reply queue-priority/preemption considered and **rejected**: in a live interview the user never addresses Jarvis aloud, so overlay traffic is all proactive coaching with no latency-critical reply to jump the queue (2026-06-18) | [architecture.md §2](./architecture.md#2-core-loop) |
+| **AEC reverted — mic was silent** — `VoiceProcessingIO` came up without throwing, but the `SCStream` starting ~150 ms later changed the audio route out from under it and the mic went silent (RMS 0); reverted to a plain `AVAudioEngine` tap. Without AEC the other side over speakers can be double-transcribed as `me` — **use headphones**. Reviving AEC so it survives the SCStream route change is the follow-on (2026-06-18) | [architecture.md §3](./architecture.md#3-components) |
 
 ## Open Questions / To Confirm
 
+- **Revive AEC without silencing the mic.** `VoiceProcessingIO` died when the `SCStream` changed the
+  audio route; needs a setup that survives it (reorder mic vs. SCK startup, or rebuild the tap on
+  `AVAudioEngineConfigurationChange`). Until then the mic runs a plain tap with no echo cancellation.
+  Related: surface a **user-visible "use headphones" notice** at Start when mic + system audio are
+  both live — today the constraint lives only in a code comment, invisible to a menu-bar user.
 - Minimum macOS version target. Build host is macOS 26.5; ScreenCaptureKit screen+audio capture
   needs macOS 13+. Target **macOS 14+** unless a needed API forces higher.
 - The **live Realtime transcription wiring** in `Sources/JarvisApp/Capture/RealtimeTranscriber.swift` is the
