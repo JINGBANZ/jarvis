@@ -2,9 +2,9 @@ import Testing
 @testable import JarvisCore
 
 @Suite struct TriggerContextTests {
-    @Test func turnEndPromptLineDescribesSpeechAndSessionElapsed() {
+    @Test func turnEndPromptLineIsSpeakerNeutralAndDescribesSessionElapsed() {
         let ctx = TriggerContext(reason: .turnEnd, secondsSinceLastSpeech: 0, sessionElapsedSeconds: 95)
-        #expect(ctx.promptLine == "Trigger: the user just finished speaking. The session has been running for 95s.")
+        #expect(ctx.promptLine == "Trigger: a turn just ended — check the transcript labels for who spoke (\"me\" or \"them\"). The session has been running for 95s.")
     }
 
     @Test func silencePromptLineDescribesQuietDurationAndSessionElapsed() {
