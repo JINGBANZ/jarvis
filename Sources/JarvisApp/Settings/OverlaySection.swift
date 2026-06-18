@@ -61,9 +61,12 @@ final class OverlaySection: NSObject, SettingsSection {
         self.opacityReadout = opacityReadout
 
         updateReadouts()
-        applying.showAppearancePreview(true)   // live preview while the window is open
         return view
     }
+
+    // Preview only while this tab is actually visible — not whenever the Settings window is open.
+    func didBecomeActive() { applying.showAppearancePreview(true) }
+    func didResignActive() { applying.showAppearancePreview(false) }
 
     @objc private func sizeChanged(_ sender: NSSlider) {
         appearance.fontSize = sender.doubleValue.rounded()   // whole points: readout == stored == applied
@@ -86,9 +89,5 @@ final class OverlaySection: NSObject, SettingsSection {
         opacityReadout?.stringValue = "\(pct)%"
         sizeSlider?.setAccessibilityValueDescription("\(pt) points")
         opacitySlider?.setAccessibilityValueDescription("\(pct) percent")
-    }
-
-    func windowWillClose() {
-        applying.showAppearancePreview(false)
     }
 }
