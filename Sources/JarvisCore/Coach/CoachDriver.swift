@@ -270,10 +270,9 @@ public final class CoachDriver: @unchecked Sendable {
                 if convId != nil { unansweredCaptureCallId = callId }
                 continue // let the model reason over the image
 
-            case .speak(let callId, let text):
-                jlog("💬 \(text)")
-                overlay.render(text, maxSentences: config.maxSentences,
-                               perSentenceSeconds: config.sentenceDisplaySeconds)
+            case .speak(let callId, let lines):
+                jlog("💬 \(lines.joined(separator: " "))")
+                overlay.render(lines, perLineSeconds: config.lineDisplaySeconds)
                 onSpoke?()
                 // `speak` is terminal; its tool-result is sent on the next turn so the conversation
                 // stays valid without an extra round-trip now.

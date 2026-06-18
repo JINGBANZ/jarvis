@@ -1,15 +1,18 @@
 import Foundation
 
+// NB: schemas set additionalProperties:false and mark every key required — the requirements for the
+// `strict:true` Structured Outputs that OpenAIBrainClient sends on each tool. The empty-object schema
+// below is valid under strict (no properties, none required).
 public let captureScreenTool = ToolDef(
     name: "capture_screen",
     description: "Take a screenshot of the user's active display to see the LeetCode problem and their code. Call this only when you need to see the screen to give a useful, specific tip. Returns an image.",
-    parametersJSON: #"{"type":"object","properties":{},"required":[]}"#
+    parametersJSON: #"{"type":"object","properties":{},"required":[],"additionalProperties":false}"#
 )
 
 public let speakTool = ToolDef(
     name: "speak",
-    description: "Say a short coaching tip to the user via the on-screen overlay. Use at most 3 short sentences. Only call this when you have something genuinely useful to add; otherwise do not call any tool (stay silent).",
-    parametersJSON: #"{"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}"#
+    description: "Say a short coaching tip to the user via the on-screen overlay. `lines` is the tip split into short standalone lines, shown one at a time — at most 3, one idea per line; keep any code snippet on a single line. Only call this when you have something genuinely useful to add; otherwise do not call any tool (stay silent).",
+    parametersJSON: #"{"type":"object","properties":{"lines":{"type":"array","items":{"type":"string"}}},"required":["lines"],"additionalProperties":false}"#
 )
 
 public let coachTools: [ToolDef] = [captureScreenTool, speakTool]
@@ -42,5 +45,6 @@ productively without seeing what they are doing — so prefer to call capture_sc
 current problem and code before deciding whether a nudge would help. A long silence often means they
 are stuck; but if the screen shows steady progress, stay silent and leave them alone.
 
-When you do speak, call the speak tool with at most 3 short sentences.
+When you do speak, call the speak tool with at most 3 short lines — one idea per line, since each
+line is shown on the overlay on its own. Keep any code snippet within a single line.
 """

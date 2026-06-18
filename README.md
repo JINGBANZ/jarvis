@@ -36,7 +36,7 @@ as they are designed and built.
                                               ▼
                                          CoachDriver ──(brain + tools)──┐
                                             ▲   │                       │
-                               capture_screen   │ speak(text)           │
+                               capture_screen   │ speak(lines)          │
                                             │   ▼                       │
   screen ◄───────────────── ScreenTool ◄───┘  Overlay (on-screen) ◄─────┘
 ```

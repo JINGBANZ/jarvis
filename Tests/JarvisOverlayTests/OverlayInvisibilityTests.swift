@@ -36,6 +36,11 @@ import AppKit
         await checkReassertOnShow()
     }
 
+    @Test
+    func overlayDoesNotShowForEmptyOrWhitespaceLines() async {
+        await checkEmptyLinesDoNotShow()
+    }
+
     // Condition trait so opting out reports as *skipped* (not a green pass) — important for a
     // security-adjacent test where "skipped" and "passed" must be distinguishable.
     @Test(.enabled(if: ProcessInfo.processInfo.environment["JARVIS_RUN_CAPTURE_TESTS"] == "1",
@@ -55,11 +60,26 @@ private func checkReassertOnShow() async {
     let overlay = OverlayPanel()
     let before = overlay.captureExclusionReassertCount
 
-    overlay.render("Stay hidden. Even after a reset.", maxSentences: 3, perSentenceSeconds: 0.05)
+    overlay.render(["Stay hidden.", "Even after a reset."], perLineSeconds: 0.05)
     try? await Task.sleep(nanoseconds: 300_000_000)   // real await → lets render's main-actor hop run
 
     #expect(overlay.captureExclusionReassertCount > before, "render() must re-assert capture exclusion")
     #expect(overlay.currentSharingType == .none)
+}
+
+// render() trims each line and drops empties; if nothing survives it must NOT show the panel. Since
+// only show() bumps captureExclusionReassertCount, an unchanged count proves the empty-guard held.
+@MainActor
+private func checkEmptyLinesDoNotShow() async {
+    let overlay = OverlayPanel()
+    let before = overlay.captureExclusionReassertCount
+
+    overlay.render([], perLineSeconds: 0.05)
+    overlay.render(["   ", "", "\n\t"], perLineSeconds: 0.05)
+    try? await Task.sleep(nanoseconds: 200_000_000)   // give any erroneous main-actor hop time to run
+
+    #expect(overlay.captureExclusionReassertCount == before,
+            "empty/whitespace-only lines must not show the overlay")
 }
 
 @MainActor
