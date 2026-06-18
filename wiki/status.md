@@ -64,6 +64,7 @@ A compact log — the *rationale* for each lives in the linked design page, not 
 | **`speak` returns a `lines` array via Structured Outputs (`strict:true`), not a free-form string** — the model splits the tip into overlay lines, so the client no longer splits prose on `.`/`!`/`?` (which shattered code like `Array.from(...)`) (2026-06-17) | [architecture.md §2](./architecture.md#2-core-loop) |
 | **Unified Settings window** replaces the separate API-key dialog and log-viewer menu item; overlay text size (12–32 pt, default 18) + background opacity (40–100%, default 78%) are now user-adjustable and persisted via `OverlayAppearance` (UserDefaults) (2026-06-17) | [settings-window.md](./settings-window.md) |
 | **Tuned overlay/silence timing + sharpened coach prompt** — longer per-line overlay display, later first silence nudge over a wider backoff ramp, plain-language hints for interview stress, explicit `me`/`them` speaker handling; overlay now **queues** tips so a newer one never cuts off the current (2026-06-18) | [architecture.md §2](./architecture.md#2-core-loop) |
+| **Overlay is never-interrupt + never-drop, not show-freshest** — direct-reply queue-priority/preemption considered and **rejected**: in a live interview the user never addresses Jarvis aloud, so overlay traffic is all proactive coaching with no latency-critical reply to jump the queue (2026-06-18) | [architecture.md §2](./architecture.md#2-core-loop) |
 
 ## Open Questions / To Confirm
 

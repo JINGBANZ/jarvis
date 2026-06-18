@@ -69,6 +69,19 @@ moments the model judges worthwhile.
 6. `speak` renders to the **Overlay**, one line at a time (per-line display time set in `Config`).
    A newer tip never interrupts one still showing — tips queue and play in order, so no hint is lost.
 
+**Why the overlay never interrupts and never drops (and why direct-reply latency is a non-issue).**
+The queue is deliberately strict: a tip the user may still be reading is never cut off, and nothing
+is discarded. The obvious objection — "a direct *'Jarvis, help'* reply could wait tens of seconds
+behind a proactive tip" — does not apply in the real use case: **in a live interview the user never
+addresses Jarvis out loud** (speaking to an AI would expose it), so overlay traffic is *entirely
+proactive coaching* with no latency-critical direct reply to jump the queue. The accepted tradeoff is
+that a queued proactive tip can surface some seconds after it was generated; that is bounded in
+practice because `CoachDriver` runs a single turn in-flight (so tips are produced no faster than one
+brain round-trip) and the prompt keeps the model restrained. So the policy is *not interrupt + not
+drop*, not *show-freshest-only* — and adding direct-reply priority/preemption was considered and
+rejected as solving a problem the interview workflow doesn't have. (The must-reply-on-direct-address
+path still works for testing/practice; it is simply not latency-critical there.)
+
 ## 3. Components
 
 | Component | Responsibility | Built on (borrowed) |
