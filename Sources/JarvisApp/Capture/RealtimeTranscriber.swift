@@ -23,6 +23,9 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
     private let maxReconnects = 6
     private let apiKey: String
     private let model: String
+    /// Who this socket is transcribing: `.me` (mic) or `.them` (system audio). Two transcribers run
+    /// in parallel — one per side — feeding the same `RollingTranscript`, so the coach sees both.
+    private let speaker: Speaker
     private let transcript: RollingTranscript
     private let clock: Clock
     private let sessionStart: TimeInterval
@@ -46,12 +49,13 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
     private var connected = false        // true only between "session ready" and the next drop/close
     private var everConnected = false    // distinguishes the first connect from a reconnect
 
-    init(apiKey: String, model: String, transcript: RollingTranscript, clock: Clock,
+    init(apiKey: String, model: String, speaker: Speaker = .me, transcript: RollingTranscript, clock: Clock,
          silenceTimeout: TimeInterval = 30, silenceMaxInterval: TimeInterval = 240,
          silenceDurationMs: Int = 1000,
          turnDebounce: TimeInterval = 0.4, maxBufferedAudioSeconds: TimeInterval = 60) {
         self.apiKey = apiKey
         self.model = model
+        self.speaker = speaker
         self.transcript = transcript
         self.clock = clock
         self.sessionStart = clock.now()
@@ -184,14 +188,15 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
               let type = obj["type"] as? String else { return }
 
         switch type {
-        case "conversation.item.input_audio_transcription.completed":
+        case RealtimeSession.completedTranscriptionType:
             // A completed utterance fragment: record it immediately (so the model's context is
             // whole), but DON'T fire the coach yet — debounce so rapid fragments of one spoken
-            // sentence coalesce into a single trigger.
-            if let transcriptText = obj["transcript"] as? String, !transcriptText.isEmpty {
+            // sentence coalesce into a single trigger. The wire→text parse lives in RealtimeSession
+            // (pure + unit-tested).
+            if let transcriptText = RealtimeSession.completedTranscript(from: obj) {
                 let at = clock.now() - sessionStart
-                transcript.append(.init(speaker: .me, text: transcriptText, at: at))
-                jlog("🗣 heard: \"\(transcriptText)\"")   // show what was actually said in the viewer
+                transcript.append(.init(speaker: speaker, text: transcriptText, at: at))
+                jlog("🗣 heard (\(speaker.rawValue)): \"\(transcriptText)\"")   // show side + what was said
                 pending.append(transcriptText)
                 resetSilenceTimer()
                 scheduleTurnDebounce()
@@ -298,6 +303,9 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
     /// (Re)start the proactive silence check from its base interval — called on connect and whenever
     /// speech is heard, so a fresh quiet stretch always begins at the base interval before backing off.
     private func resetSilenceTimer() {
+        // The "them" transcriber leaves onSilence nil (only the mic owns the "are you stuck?" prompt);
+        // skip arming a timer that would just no-op, avoiding per-utterance main-queue/Timer churn.
+        guard onSilence != nil else { return }
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.silenceBackoff.reset()
@@ -317,7 +325,18 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
             self.lock.lock(); let isStopped = self.stopped; self.lock.unlock()
             guard !isStopped else { return }   // don't drive a coaching turn on a torn-down pipeline
             let quiet = self.transcript.silenceDuration(now: self.clock.now() - self.sessionStart)
-            self.onSilence?(max(interval, quiet))
+            // Only nudge on GENUINE conversational silence. The transcript is shared with the "them"
+            // (system-audio) socket, so `quiet` reflects the last line from EITHER side. If the other
+            // party spoke within this interval the user isn't stuck — they're listening — so suppress
+            // the nudge and restart the backoff, so a fresh quiet stretch begins at the base interval
+            // once the conversation actually goes quiet. (Mic speech resets via resetSilenceTimer; this
+            // covers the them side, which only feeds the shared transcript and doesn't reset the timer.)
+            guard quiet >= interval else {
+                self.silenceBackoff.reset()
+                self.armSilenceTimer()
+                return
+            }
+            self.onSilence?(quiet)
             self.armSilenceTimer()             // re-arm with the next (backed-off) interval
         }
         lock.unlock()

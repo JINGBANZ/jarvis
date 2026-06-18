@@ -51,7 +51,7 @@ A compact log — the *rationale* for each lives in the linked design page, not 
 | **Models (verified 2026-06):** `gpt-5.5` brain via Responses API (vision), `gpt-4o-transcribe` over GA Realtime | [architecture.md](./architecture.md#models-and-apis) |
 | **Server-side conversation per session** (Conversations API, `store:true`) for the coach's own memory — quality over local-only retention | [architecture.md](./architecture.md#models-and-apis), [sandbox.md](./sandbox.md) |
 | **Coach is time-aware** (timestamped transcript + silence duration) | [architecture.md](./architecture.md#2-core-loop) |
-| **System audio in the MVP** (budget-permitting; mic is the critical path) | [architecture.md](./architecture.md#3-components) |
+| **System audio shipped** — `SystemAudioInput` (ScreenCaptureKit) → a second `them`-tagged transcriber beside the mic's `me`, one shared transcript; mic runs `VoiceProcessingIO` AEC to stop speaker bleed (2026-06-16; live SCK run still pending) | [architecture.md](./architecture.md#3-components) |
 | ~~Two-phase build~~ → **Skip Phase 1; build native Swift directly** (2026-06-14) | this page; [fork-evaluation.md](./fork-evaluation.md) |
 | **Native Swift app** (cleanest sandbox/footprint on macOS) | [architecture.md](./architecture.md), [fork-evaluation.md](./fork-evaluation.md) |
 | **Toolchain: SwiftPM + Command Line Tools** (no full Xcode; manual bundle + stable self-signed `Jarvis Dev` identity so TCC grants persist; TCC prompts) | [build-and-run.md](./build-and-run.md) |

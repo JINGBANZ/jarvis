@@ -45,4 +45,16 @@ public enum RealtimeSession {
     public static func appendAudio(base64PCM: String) -> [String: Any] {
         ["type": "input_audio_buffer.append", "audio": base64PCM]
     }
+
+    /// The event type the server emits when an utterance's transcription is final.
+    public static let completedTranscriptionType = "conversation.item.input_audio_transcription.completed"
+
+    /// The transcript text from a parsed realtime event, if it is a **completed** input-audio
+    /// transcription carrying non-empty text — otherwise nil. Pure and unit-testable; the live socket
+    /// is not, so this is where the wire→text parsing is verified.
+    public static func completedTranscript(from event: [String: Any]) -> String? {
+        guard event["type"] as? String == completedTranscriptionType,
+              let text = event["transcript"] as? String, !text.isEmpty else { return nil }
+        return text
+    }
 }
