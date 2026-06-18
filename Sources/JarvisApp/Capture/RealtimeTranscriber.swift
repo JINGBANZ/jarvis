@@ -50,7 +50,7 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
     private var everConnected = false    // distinguishes the first connect from a reconnect
 
     init(apiKey: String, model: String, speaker: Speaker = .me, transcript: RollingTranscript, clock: Clock,
-         silenceTimeout: TimeInterval = 30, silenceMaxInterval: TimeInterval = 240,
+         silenceTimeout: TimeInterval, silenceMaxInterval: TimeInterval,
          silenceDurationMs: Int = 1000,
          turnDebounce: TimeInterval = 0.4, maxBufferedAudioSeconds: TimeInterval = 60) {
         self.apiKey = apiKey
@@ -315,8 +315,8 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
 
     /// Schedule the next "maybe stuck" silence check using the current backoff interval. When it fires
     /// (no speech in the meantime) it reports how long the user has been quiet, then re-arms with the
-    /// next, longer interval — so a long silence is gently re-checked (e.g. 30s, 60s, 120s, …) rather
-    /// than nudged once and never again. Must be called on the main queue.
+    /// next, longer interval — so a long silence is gently re-checked (the interval doubles each step
+    /// up to a cap; see `Config`) rather than nudged once and never again. Must be called on the main queue.
     private func armSilenceTimer() {
         let interval = silenceBackoff.next()
         lock.lock(); silenceTimer?.invalidate()

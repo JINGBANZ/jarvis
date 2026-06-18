@@ -61,6 +61,35 @@ import AppKit
         await checkEmptyLinesDoNotShow()
     }
 
+    @Test
+    func overlayQueuesTipsInsteadOfInterrupting() async {
+        await checkTipsQueue()
+    }
+
+    @Test
+    func overlayResumesTipAndQueueAfterSettingsPreview() async {
+        await checkPreviewResumesTip()
+    }
+
+    @Test
+    func overlayHidesPanelAfterQueueDrains() async {
+        await checkDrainThenHide()
+    }
+
+    @MainActor @Test
+    func overlayPreviewWithEmptyQueueHidesOnCloseAndTogglesCleanly() {
+        let overlay = OverlayPanel()
+        // Preview with nothing queued, toggled twice: must not crash, must end hidden and excluded.
+        overlay.showAppearancePreview(true)
+        #expect(overlay.currentText == "Sample overlay text")
+        overlay.showAppearancePreview(false)
+        #expect(!overlay.isPanelVisible, "closing an empty-queue preview must hide the panel")
+        overlay.showAppearancePreview(true)
+        overlay.showAppearancePreview(false)
+        #expect(!overlay.isPanelVisible)
+        #expect(overlay.currentSharingType == .none)
+    }
+
     // Condition trait so opting out reports as *skipped* (not a green pass) — important for a
     // security-adjacent test where "skipped" and "passed" must be distinguishable.
     @Test(.enabled(if: ProcessInfo.processInfo.environment["JARVIS_RUN_CAPTURE_TESTS"] == "1",
@@ -100,6 +129,66 @@ private func checkEmptyLinesDoNotShow() async {
 
     #expect(overlay.captureExclusionReassertCount == before,
             "empty/whitespace-only lines must not show the overlay")
+}
+
+// A newer tip must not interrupt one still on screen: it queues and plays after the current tip
+// finishes, so no hint is dropped. Display windows are 0.6s with assertions sampled ~0.3s from each
+// edge, so a loaded CI runloop has to drift >300ms to flip a result — comfortable slack since
+// Task.sleep only ever overshoots.
+@MainActor
+private func checkTipsQueue() async {
+    let overlay = OverlayPanel()
+
+    overlay.render(["first"], perLineSeconds: 0.6)
+    try? await Task.sleep(nanoseconds: 200_000_000)   // 0.2s into the first tip's 0.6s window
+    overlay.render(["second"], perLineSeconds: 0.6)   // arrives mid-display — must queue, not replace
+    try? await Task.sleep(nanoseconds: 200_000_000)   // ~0.4s: still well inside the first tip's window
+
+    #expect(overlay.currentText == "first", "a newer tip must not interrupt one still on screen")
+
+    try? await Task.sleep(nanoseconds: 500_000_000)   // ~0.9s: first window (0.6s) elapsed; queued tip is up
+    #expect(overlay.currentText == "second", "the queued tip must display after the first finishes")
+}
+
+// Once the queue fully drains, the panel must hide and reset so the next coaching turn can display.
+@MainActor
+private func checkDrainThenHide() async {
+    let overlay = OverlayPanel()
+
+    overlay.render(["only"], perLineSeconds: 0.3)
+    try? await Task.sleep(nanoseconds: 100_000_000)   // ~0.1s: tip on screen
+    #expect(overlay.isPanelVisible, "the tip should be on screen while displaying")
+
+    try? await Task.sleep(nanoseconds: 400_000_000)   // ~0.5s: the 0.3s window elapsed → drain → hide
+    #expect(!overlay.isPanelVisible, "the panel must hide once the queue drains")
+
+    overlay.render(["again"], perLineSeconds: 0.3)    // a fresh tip after drain must display immediately
+    try? await Task.sleep(nanoseconds: 100_000_000)
+    #expect(overlay.currentText == "again", "state must reset so the next tip shows")
+    #expect(overlay.isPanelVisible)
+}
+
+// Opening the Settings appearance preview mid-tip must PAUSE the tip (showing the sample), then on
+// close RESUME the exact line it stopped on — and a tip that arrived while the preview was open must
+// play afterwards. Guards the regression where the preview stranded the queue / dropped a tip.
+@MainActor
+private func checkPreviewResumesTip() async {
+    let overlay = OverlayPanel()
+
+    overlay.render(["A1", "A2"], perLineSeconds: 0.6)   // line A1 shows; A2 scheduled at ~0.6s
+    try? await Task.sleep(nanoseconds: 200_000_000)     // ~0.2s: still on A1
+    overlay.showAppearancePreview(true)                 // pause the tip; sample takes the panel
+    overlay.render(["B1"], perLineSeconds: 0.6)         // a new tip arrives while previewing — must wait
+
+    try? await Task.sleep(nanoseconds: 200_000_000)     // ~0.4s
+    #expect(overlay.currentText == "Sample overlay text", "preview must own the panel while open")
+
+    overlay.showAppearancePreview(false)                // close Settings: resume the paused tip at A2
+    try? await Task.sleep(nanoseconds: 300_000_000)     // ~0.3s into A2's resumed 0.6s window
+    #expect(overlay.currentText == "A2", "the paused tip must resume its remaining line, not be dropped")
+
+    try? await Task.sleep(nanoseconds: 600_000_000)     // A2 elapses (~0.7s after resume); the queued tip plays
+    #expect(overlay.currentText == "B1", "a tip that arrived during preview must play after the resumed tip")
 }
 
 @MainActor

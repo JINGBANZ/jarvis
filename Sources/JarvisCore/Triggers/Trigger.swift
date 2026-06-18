@@ -23,9 +23,9 @@ public struct TriggerContext: Sendable {
         let elapsed = Int(sessionElapsedSeconds)
         switch reason {
         case .turnEnd:
-            return "Trigger: the user just finished speaking. They have been on this problem for \(elapsed)s."
+            return "Trigger: a turn just ended — check the transcript labels for who spoke (\"me\" or \"them\"). The session has been running for \(elapsed)s."
         case .silence(let secs):
-            return "Trigger: the user has been silent for \(Int(secs))s. They have been on this problem for \(elapsed)s."
+            return "Trigger: the user has been silent for \(Int(secs))s. The session has been running for \(elapsed)s."
         }
     }
 }
