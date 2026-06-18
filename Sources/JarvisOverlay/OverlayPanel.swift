@@ -110,13 +110,16 @@ public final class OverlayPanel: NSObject, OverlayRendering, OverlayAppearanceAp
         guard let (tip, line) = active else { return }
         guard line < tip.lines.count else {
             active = nil
+            tickWorkItem = nil   // tip done: drop the fired work item (no lingering self-capture)
             if queue.isEmpty { hide() } else { pumpQueue() }
             return
         }
         label.stringValue = tip.lines[line]
         panel.orderFrontRegardless()
         active = (tip, line + 1)
-        let work = DispatchWorkItem { MainActor.assumeIsolated { self.advance() } }
+        // [weak self] breaks the self -> tickWorkItem -> closure -> self cycle; if the panel is gone
+        // there is nothing to advance.
+        let work = DispatchWorkItem { [weak self] in MainActor.assumeIsolated { self?.advance() } }
         tickWorkItem = work
         DispatchQueue.main.asyncAfter(deadline: .now() + tip.each, execute: work)
     }
@@ -151,7 +154,7 @@ public final class OverlayPanel: NSObject, OverlayRendering, OverlayAppearanceAp
     /// tears down a genuine coaching tip that `show()` put on screen in the meantime.
     public func showAppearancePreview(_ on: Bool) {
         if on {
-            tickWorkItem?.cancel()   // pause the active tip; `active` keeps its line index for resume
+            tickWorkItem?.cancel(); tickWorkItem = nil   // pause the active tip; `active` keeps its line index for resume
             reassertCaptureExclusion()
             isPreviewing = true
             label.stringValue = Self.previewText
@@ -181,4 +184,7 @@ public final class OverlayPanel: NSObject, OverlayRendering, OverlayAppearanceAp
 
     /// The line currently displayed on the overlay — lets tests assert queue/ordering behavior.
     var currentText: String { label.stringValue }
+
+    /// Whether the panel is on screen — lets tests assert the drain-then-hide transition.
+    var isPanelVisible: Bool { panel.isVisible }
 }
