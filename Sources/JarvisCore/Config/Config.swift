@@ -10,9 +10,18 @@ public struct Config: Sendable {
     /// occasional gentle check rather than going dark forever.
     public var silenceMaxIntervalSeconds: TimeInterval
     public var transcriptWindowSeconds: TimeInterval
-    /// How long each overlay line is shown before advancing to the next. The brain returns the lines
-    /// pre-split (the `speak` tool's `lines` array); there is no client-side cap on how many.
-    public var lineDisplaySeconds: TimeInterval
+    /// Fixed time added to every overlay line before its reading time. Unlike a movie viewer (eyes on
+    /// the screen, audio reinforcing the text), our user is mid-conversation and only *glances* at the
+    /// overlay — so the dominant cost is noticing the tip and redirecting their gaze, which is constant
+    /// regardless of line length. This buffer models that; it also sets the natural floor (buffer + one
+    /// word). See `OverlayTiming` and wiki/overlay-timing.md.
+    public var overlayNoticeBufferSeconds: TimeInterval
+    /// Reading time per word, added on top of the notice buffer. Can be near normal reading speed —
+    /// the glance latency is already covered by the buffer, so this term need only cover actual reading.
+    public var overlaySecondsPerWord: TimeInterval
+    /// Ceiling on a line's display time. Tighter than movie-caption caps (~6–7s): a coaching tip goes
+    /// stale fast, and an over-long display also delays the next queued (fresher) tip.
+    public var overlayMaxDisplaySeconds: TimeInterval
     /// Brain model. `gpt-5.5` confirmed against OpenAI docs (snapshot `gpt-5.5-2026-04-23`);
     /// vision + function calling via the Responses API.
     public var brainModel: String
@@ -40,7 +49,9 @@ public struct Config: Sendable {
         silenceTimeoutSeconds: TimeInterval = 120,
         silenceMaxIntervalSeconds: TimeInterval = 960,
         transcriptWindowSeconds: TimeInterval = 90,
-        lineDisplaySeconds: TimeInterval = 15,
+        overlayNoticeBufferSeconds: TimeInterval = 2.0,
+        overlaySecondsPerWord: TimeInterval = 0.35,
+        overlayMaxDisplaySeconds: TimeInterval = 8,
         brainModel: String = "gpt-5.5",
         reasoningEffort: String = "low",
         transcriptionModel: String = "gpt-4o-transcribe",
@@ -51,7 +62,9 @@ public struct Config: Sendable {
         self.silenceTimeoutSeconds = silenceTimeoutSeconds
         self.silenceMaxIntervalSeconds = silenceMaxIntervalSeconds
         self.transcriptWindowSeconds = transcriptWindowSeconds
-        self.lineDisplaySeconds = lineDisplaySeconds
+        self.overlayNoticeBufferSeconds = overlayNoticeBufferSeconds
+        self.overlaySecondsPerWord = overlaySecondsPerWord
+        self.overlayMaxDisplaySeconds = overlayMaxDisplaySeconds
         self.brainModel = brainModel
         self.reasoningEffort = reasoningEffort
         self.transcriptionModel = transcriptionModel
@@ -66,6 +79,16 @@ public struct Config: Sendable {
     public static let overlayFontSizeDefault: Double = 18
     public static let overlayOpacityRange: ClosedRange<Double> = 0.40...1.0
     public static let overlayOpacityDefault: Double = 0.78
+
+    /// Brief blank shown between consecutive overlay lines (and before the next queued tip). Borrowed
+    /// from the captioning minimum-gap rule: without it, back-to-back lines read as one block and the
+    /// eye doesn't re-trigger — worse for a glancing user than a watching one. See wiki/overlay-timing.md.
+    ///
+    /// Static (unlike the instance reading-time knobs above) because it's consumed inside the
+    /// `JarvisOverlay` panel during playback, which is never handed a `Config` instance — same reason
+    /// the appearance defaults above are statics. The per-line *durations* differ: they're computed in
+    /// Core from a `Config` instance and passed into the overlay, so they stay instance properties.
+    public static let overlayLineGapSeconds: TimeInterval = 0.2
 
     public static let `default` = Config()
 }

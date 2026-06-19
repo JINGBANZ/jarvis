@@ -280,7 +280,8 @@ public final class CoachDriver: @unchecked Sendable {
                 // the new session. This is the "speak after Stop" guard the TurnTaskBox relies on.
                 if Task.isCancelled { jlog("… turn cancelled (stopped) before speaking"); return .cancelled }
                 jlog("💬 \(lines.joined(separator: " "))")
-                overlay.render(lines, perLineSeconds: config.lineDisplaySeconds)
+                let perLine = lines.map { OverlayTiming.displaySeconds(for: $0, config: config) }
+                overlay.render(lines, perLineSeconds: perLine)
                 onSpoke?()
                 // `speak` is terminal; its tool-result is sent on the next turn so the conversation
                 // stays valid without an extra round-trip now.

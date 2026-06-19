@@ -76,6 +76,16 @@ import AppKit
         await checkDrainThenHide()
     }
 
+    @Test
+    func overlayBlanksBetweenConsecutiveLines() async {
+        await checkInterLineGapBlanks()
+    }
+
+    @Test
+    func overlayKeepsPerLineTimesAlignedWhenDroppingEmptyLines() async {
+        await checkRenderAlignsTimesWhenDroppingEmptyLines()
+    }
+
     @MainActor @Test
     func overlayPreviewWithEmptyQueueHidesOnCloseAndTogglesCleanly() {
         let overlay = OverlayPanel()
@@ -97,6 +107,21 @@ import AppKit
     func protectedWindowIsExcludedFromScreenCaptureKit() async {
         await checkScreenCaptureKitExclusion()
     }
+}
+
+// MARK: - Helpers
+
+/// Poll `condition` every 20 ms until it holds or `timeout` elapses; returns the final result. Lets a
+/// timing test wait for a state transition instead of sleeping a fixed amount and racing the real
+/// `DispatchQueue.main` timer — the test adapts to the production code rather than the reverse.
+@MainActor
+private func waitUntil(timeout: TimeInterval = 5, _ condition: () -> Bool) async -> Bool {
+    let steps = max(1, Int(timeout / 0.02))
+    for _ in 0..<steps {
+        if condition() { return true }
+        try? await Task.sleep(nanoseconds: 20_000_000)
+    }
+    return condition()
 }
 
 // MARK: - Main-actor checks (called via `await` from the nonisolated tests)
@@ -132,28 +157,33 @@ private func checkEmptyLinesDoNotShow() async {
 }
 
 // A newer tip must not interrupt one still on screen: it queues and plays after the current tip
-// finishes, so no hint is dropped. Display windows are 0.6s with assertions sampled ~0.3s from each
-// edge, so a loaded CI runloop has to drift >300ms to flip a result — comfortable slack since
-// Task.sleep only ever overshoots.
+// finishes, so no hint is dropped. The "first is STILL up when second arrives" assertion is the
+// flaky-prone one, so we give the first line a long display window (3s) and check the instant it
+// appears — a ~3s margin before its timer could fire, vs. the old 0.2s. The queued tip is then
+// awaited via polling rather than a fixed sleep, so neither check races the real timer.
 @MainActor
 private func checkTipsQueue() async {
     let overlay = OverlayPanel()
+    let hold: TimeInterval = 3   // long enough that "first" can't advance before we check it
 
-    overlay.render(["first"], perLineSeconds: 0.6)
-    try? await Task.sleep(nanoseconds: 200_000_000)   // 0.2s into the first tip's 0.6s window
-    overlay.render(["second"], perLineSeconds: 0.6)   // arrives mid-display — must queue, not replace
-    try? await Task.sleep(nanoseconds: 200_000_000)   // ~0.4s: still well inside the first tip's window
+    overlay.render(["first"], perLineSeconds: hold)
+    overlay.render(["second"], perLineSeconds: hold)   // arrives while "first" is up — must queue, not replace
 
+    // Wait for the first tip to actually reach the screen (render hops to the main actor), then confirm
+    // the newer tip did NOT replace it. We're still ~3s inside "first"'s window, so this can't flip.
+    #expect(await waitUntil { overlay.currentText == "first" }, "the first tip should display")
     #expect(overlay.currentText == "first", "a newer tip must not interrupt one still on screen")
 
-    try? await Task.sleep(nanoseconds: 500_000_000)   // ~0.9s: first window (0.6s) elapsed; queued tip is up
-    #expect(overlay.currentText == "second", "the queued tip must display after the first finishes")
+    // After "first"'s window (+ the inter-line gap) elapses, the queued tip must take over.
+    #expect(await waitUntil(timeout: hold + 2) { overlay.currentText == "second" },
+            "the queued tip must display after the first finishes")
 }
 
 // Once the queue fully drains, the panel must hide and reset so the next coaching turn can display.
 @MainActor
 private func checkDrainThenHide() async {
     let overlay = OverlayPanel()
+    overlay.interLineGapSeconds = 0   // isolate the drain→hide timing from the inter-line gap
 
     overlay.render(["only"], perLineSeconds: 0.3)
     try? await Task.sleep(nanoseconds: 100_000_000)   // ~0.1s: tip on screen
@@ -168,12 +198,48 @@ private func checkDrainThenHide() async {
     #expect(overlay.isPanelVisible)
 }
 
+// Between two lines of one tip the panel must briefly blank, so a glancing eye registers that the
+// text changed (the borrowed captioning minimum-gap idea). Wide windows (0.4s line, 0.5s gap) keep
+// the mid-gap and post-gap samples clear of the edges on a loaded runloop.
+@MainActor
+private func checkInterLineGapBlanks() async {
+    let overlay = OverlayPanel()
+    overlay.interLineGapSeconds = 0.5
+
+    overlay.render(["L1", "L2"], perLineSeconds: 0.4)   // L1: 0–0.4s, blank gap: 0.4–0.9s, L2: 0.9s+
+    try? await Task.sleep(nanoseconds: 200_000_000)     // ~0.2s: still on L1
+    #expect(overlay.currentText == "L1", "the first line should be up before the gap")
+
+    try? await Task.sleep(nanoseconds: 400_000_000)     // ~0.6s: inside the 0.4–0.9s blank gap
+    #expect(overlay.currentText == "", "the panel must blank between consecutive lines")
+    #expect(overlay.isPanelVisible, "the gap must blank the TEXT while the panel stays on screen — not hide it")
+
+    try? await Task.sleep(nanoseconds: 500_000_000)     // ~1.1s: past the gap, second line up
+    #expect(overlay.currentText == "L2", "the next line must appear after the gap")
+}
+
+// render(_:perLineSeconds:[TimeInterval]) zips lines with their times, then trims and drops empties
+// while keeping the two aligned. The convenience scalar overload always builds a same-length array, so
+// this drives the array form directly: a leading empty line must be dropped AND its time dropped with
+// it, so the surviving line is shown for ITS own duration (a misaligned zip/filter would use 0.1s).
+@MainActor
+private func checkRenderAlignsTimesWhenDroppingEmptyLines() async {
+    let overlay = OverlayPanel()
+    overlay.interLineGapSeconds = 0
+
+    overlay.render(["   ", "survivor"], perLineSeconds: [0.1, 0.6])
+    try? await Task.sleep(nanoseconds: 200_000_000)   // ~0.2s: if times misaligned, "survivor" got 0.1s and is gone
+    #expect(overlay.currentText == "survivor", "the surviving line must keep ITS own duration, not the dropped line's")
+    #expect(overlay.isPanelVisible)
+}
+
 // Opening the Settings appearance preview mid-tip must PAUSE the tip (showing the sample), then on
 // close RESUME the exact line it stopped on — and a tip that arrived while the preview was open must
 // play afterwards. Guards the regression where the preview stranded the queue / dropped a tip.
 @MainActor
 private func checkPreviewResumesTip() async {
     let overlay = OverlayPanel()
+    overlay.interLineGapSeconds = 0   // isolate pause/resume timing from the inter-line gap
 
     overlay.render(["A1", "A2"], perLineSeconds: 0.6)   // line A1 shows; A2 scheduled at ~0.6s
     try? await Task.sleep(nanoseconds: 200_000_000)     // ~0.2s: still on A1

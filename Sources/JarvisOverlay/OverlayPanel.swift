@@ -10,8 +10,9 @@ import JarvisCore
 public final class OverlayPanel: NSObject, OverlayRendering, OverlayAppearanceApplying {
     private let panel: NSPanel
     private let label: NSTextField
-    /// One coaching tip: its lines and how long each line is shown.
-    private struct Tip { let lines: [String]; let each: TimeInterval }
+    /// One coaching tip: its lines and how long each one is shown (aligned arrays; `seconds[i]`
+    /// is the display time for `lines[i]`, scaled to that line's length — see `OverlayTiming`).
+    private struct Tip { let lines: [String]; let seconds: [TimeInterval] }
     /// Tips waiting their turn. A tip the user may still be reading is never cut off by a newer one —
     /// arrivals queue here and play in order once the current tip finishes.
     private var queue: [Tip] = []
@@ -20,6 +21,10 @@ public final class OverlayPanel: NSObject, OverlayRendering, OverlayAppearanceAp
     private var active: (tip: Tip, nextLine: Int)?
     /// The pending line-advance work, retained so the Settings live preview can cancel (pause) it.
     private var tickWorkItem: DispatchWorkItem?
+    /// Brief blank inserted between consecutive lines (and before the next queued tip) so a glancing
+    /// eye registers that the text changed — see Config.overlayLineGapSeconds and wiki/overlay-timing.md.
+    /// Settable so timing-sensitive tests can opt out.
+    var interLineGapSeconds: TimeInterval = Config.overlayLineGapSeconds
     /// Whether the Settings live preview currently owns the panel. While true, an active tip is paused
     /// and newly-arriving tips wait in the queue; they resume/play when the preview closes.
     private var isPreviewing = false
@@ -75,14 +80,18 @@ public final class OverlayPanel: NSObject, OverlayRendering, OverlayAppearanceAp
     }
 
     /// OverlayRendering witness — nonisolated so it satisfies the protocol; hops to the main actor.
-    /// The brain already split the tip into lines; we just trim and drop any empties before showing.
-    public nonisolated func render(_ lines: [String], perLineSeconds: TimeInterval) {
-        let cleaned = lines.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+    /// The brain already split the tip into lines; we just trim and drop any empties (carrying each
+    /// line's display time along with it so the two stay aligned) before showing.
+    public nonisolated func render(_ lines: [String], perLineSeconds: [TimeInterval]) {
+        let cleaned = zip(lines, perLineSeconds)
+            .map { ($0.0.trimmingCharacters(in: .whitespacesAndNewlines), $0.1) }
+            .filter { !$0.0.isEmpty }
         guard !cleaned.isEmpty else { return }
-        Task { @MainActor in self.show(cleaned, each: perLineSeconds) }
+        let tip = Tip(lines: cleaned.map(\.0), seconds: cleaned.map(\.1))
+        Task { @MainActor in self.show(tip) }
     }
 
-    private func show(_ lines: [String], each: TimeInterval) {
+    private func show(_ tip: Tip) {
         // Re-assert capture exclusion on every display: an NSApp activation-policy flip (e.g. opening
         // the Settings window in SettingsWindow.show) can make WindowServer drop sharingType on some
         // macOS versions/configs. Cheap insurance against a silent, high-impact regression — the
@@ -90,7 +99,7 @@ public final class OverlayPanel: NSObject, OverlayRendering, OverlayAppearanceAp
         reassertCaptureExclusion()
         // Queue rather than interrupt: a tip the user is still reading must not vanish because a newer
         // one arrived. Tips play in arrival order and none are dropped.
-        queue.append(Tip(lines: lines, each: each))
+        queue.append(tip)
         pumpQueue()
     }
 
@@ -103,9 +112,10 @@ public final class OverlayPanel: NSObject, OverlayRendering, OverlayAppearanceAp
         advance()
     }
 
-    /// Show the active tip's current line and schedule the next. When the tip's lines are exhausted,
-    /// move on to the next queued tip, or hide the panel if nothing is waiting. Resumable: it reads the
-    /// line index from `active`, so a preview can pause it (cancel the tick) and resume exactly here.
+    /// Show the active tip's current line, then after its display time blank the panel for the
+    /// inter-line gap before advancing. When the tip's lines are exhausted, move on to the next queued
+    /// tip, or hide the panel if nothing is waiting. Resumable: it reads the line index from `active`,
+    /// so a preview can pause it (cancel the tick) and resume exactly here.
     private func advance() {
         guard let (tip, line) = active else { return }
         guard line < tip.lines.count else {
@@ -117,11 +127,33 @@ public final class OverlayPanel: NSObject, OverlayRendering, OverlayAppearanceAp
         label.stringValue = tip.lines[line]
         panel.orderFrontRegardless()
         active = (tip, line + 1)
+        scheduleTick(after: tip.seconds[line]) { $0.gapThenAdvance() }
+    }
+
+    /// Blank the on-screen text for the inter-line gap, then advance to the next line/tip. The brief
+    /// blank is what makes a glancing eye notice the text changed (the captioning minimum-gap idea).
+    private func gapThenAdvance() {
+        label.stringValue = ""
+        scheduleTick(after: interLineGapSeconds) { $0.advance() }
+    }
+
+    /// Schedule the next playback step on the main queue. The work item captures `self` weakly so the
+    /// self -> tickWorkItem -> closure -> self cycle can't form; `step` takes the panel non-capturing.
+    /// Cancels any prior pending tick first, so the "at most one pending tick" invariant is enforced
+    /// here rather than relying on every caller to have fired/cancelled the previous one.
+    private func scheduleTick(after delay: TimeInterval, _ step: @escaping (OverlayPanel) -> Void) {
+        // Cancel any prior pending tick first, so the "at most one pending tick" invariant is enforced
+        // here rather than relying on every caller to have fired/cancelled the previous one.
+        tickWorkItem?.cancel()
         // [weak self] breaks the self -> tickWorkItem -> closure -> self cycle; if the panel is gone
-        // there is nothing to advance.
-        let work = DispatchWorkItem { [weak self] in MainActor.assumeIsolated { self?.advance() } }
+        // there is nothing to advance. assumeIsolated: asyncAfter on the main *queue* runs on the main
+        // thread, so we are in fact on the main actor when the body fires.
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            MainActor.assumeIsolated { step(self) }
+        }
         tickWorkItem = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + tip.each, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
     private func hide() { panel.orderOut(nil) }

@@ -7,7 +7,9 @@ import Testing
         #expect(c.silenceTimeoutSeconds == 120)
         #expect(c.silenceMaxIntervalSeconds == 960)
         #expect(c.transcriptWindowSeconds == 90)
-        #expect(c.lineDisplaySeconds == 15)
+        #expect(c.overlayNoticeBufferSeconds == 2.0)
+        #expect(c.overlaySecondsPerWord == 0.35)
+        #expect(c.overlayMaxDisplaySeconds == 8)
         #expect(c.brainModel == "gpt-5.5")
         #expect(c.reasoningEffort == "low")
         #expect(c.transcriptionModel == "gpt-4o-transcribe")
@@ -30,6 +32,16 @@ import Testing
         #expect(Config.overlayOpacityRange.contains(Config.overlayOpacityDefault))
         #expect(Config.overlayFontSizeRange.lowerBound < Config.overlayFontSizeRange.upperBound)
         #expect(Config.overlayOpacityRange.lowerBound < Config.overlayOpacityRange.upperBound)
+    }
+
+    /// The overlay timing knobs must form a usable model: a positive buffer and per-word rate, a cap
+    /// above the buffer (so even a one-word line fits under it), and a non-negative inter-line gap.
+    @Test func overlayTimingConstantsAreCoherent() {
+        let c = Config.default
+        #expect(c.overlayNoticeBufferSeconds > 0)
+        #expect(c.overlaySecondsPerWord > 0)
+        #expect(c.overlayMaxDisplaySeconds > c.overlayNoticeBufferSeconds)
+        #expect(Config.overlayLineGapSeconds >= 0)
     }
 
     @Test func envSecretStoreReadsKey() {

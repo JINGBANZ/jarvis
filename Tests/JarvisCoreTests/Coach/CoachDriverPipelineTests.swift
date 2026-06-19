@@ -71,8 +71,11 @@ final class GatedScreen: ScreenCapturing, @unchecked Sendable {
 final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     /// One entry per `render` call: the lines the brain returned, passed straight through (no splitting).
     var rendered: [[String]] = []
-    func render(_ lines: [String], perLineSeconds: TimeInterval) {
+    /// The per-line display times passed alongside each `render` call (length-scaled by the driver).
+    var renderedSeconds: [[TimeInterval]] = []
+    func render(_ lines: [String], perLineSeconds: [TimeInterval]) {
         rendered.append(lines)
+        renderedSeconds.append(perLineSeconds)
     }
 }
 
@@ -105,6 +108,11 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
         #expect(screen.captureCount == 1)
         #expect(overlay.rendered == [["What's the complexity of that nested loop?"]])
+        // The driver must hand the overlay length-scaled per-line durations, not a constant — one
+        // entry per line, each = OverlayTiming.displaySeconds for that line under the active config.
+        let expectedSeconds = OverlayTiming.displaySeconds(
+            for: "What's the complexity of that nested loop?", config: .default)
+        #expect(overlay.renderedSeconds == [[expectedSeconds]])
         #expect(brain.calls.count == 2)
         // Second brain call must contain the screenshot image we fed back...
         #expect(brain.calls[1].contains { $0.imageBase64JPEG != nil })
