@@ -34,7 +34,10 @@ public struct SessionStore: Sendable {
     private struct Line: Decodable { let t: String; let m: String; let s: String? }
 
     /// Immediate subdirectories of `base` that look like a session and hold a `jarvis-activity.jsonl`,
-    /// newest-first. The live session always appears (its `.jsonl` is created on `enable`).
+    /// newest-first. The current session always appears (so the live run shows in the picker even
+    /// before it records anything); a PAST session appears only if it has coaching content — a Start
+    /// that produced nothing but lifecycle breadcrumbs (failed/instantly-stopped run) is hidden rather
+    /// than cluttering history. (`enable` creates an empty `.jsonl` so the live session is discoverable.)
     public func listSessions() -> [Session] {
         let curPath = current?.standardizedFileURL.path
         let names = (try? FileManager.default.contentsOfDirectory(atPath: base.path)) ?? []
@@ -42,12 +45,27 @@ public struct SessionStore: Sendable {
             .filter { Self.isSessionID($0) }
             .filter { FileManager.default.fileExists(atPath:
                 base.appendingPathComponent($0).appendingPathComponent("jarvis-activity.jsonl").path) }
-            .sorted(by: >)   // id is a lexically-sortable timestamp ⇒ newest first
-            .map { name in
+            .map { name -> Session in
                 let url = base.appendingPathComponent(name)
-                return Session(id: name, label: Self.label(from: name), url: url,
-                               isCurrent: curPath != nil && url.standardizedFileURL.path == curPath)
+                let isCurrent = curPath != nil && url.standardizedFileURL.path == curPath
+                return Session(id: name, label: Self.label(from: name), url: url, isCurrent: isCurrent)
             }
+            .filter { $0.isCurrent || Self.hasCoachingContent($0.url) }
+            .sorted { $0.id > $1.id }   // id is a lexically-sortable timestamp ⇒ newest first
+    }
+
+    /// Whether a session's log holds anything worth browsing: at least one coaching-class line
+    /// (`💬`/`👁`/`🗣`/`🤫`/`💭`/error — see `ActivityLog.cssClass`) or a captured screenshot. Pure
+    /// lifecycle noise ("coaching started"/"stopped") classifies as empty, so an aborted run is hidden.
+    private static func hasCoachingContent(_ sessionURL: URL) -> Bool {
+        let url = sessionURL.appendingPathComponent("jarvis-activity.jsonl")
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return false }
+        for raw in text.split(separator: "\n", omittingEmptySubsequences: true) {
+            guard let line = try? JSONDecoder().decode(Line.self, from: Data(raw.utf8)) else { continue }
+            if line.s != nil { return true }
+            if !ActivityLog.cssClass(for: line.m).isEmpty { return true }
+        }
+        return false
     }
 
     /// Decode a session's `.jsonl` into entries paired with their screenshot bytes (when the `s`

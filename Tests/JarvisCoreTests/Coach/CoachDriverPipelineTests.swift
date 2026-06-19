@@ -51,6 +51,23 @@ final class FakeScreen: ScreenCapturing, @unchecked Sendable {
     func capture() -> String? { captureCount += 1; return payload }
 }
 
+/// A screen whose `capture()` parks until released, so a test can cancel the turn *while the
+/// (detached, un-cancellable) screenshot is in flight* — the exact window the cancellation guard
+/// closes. `entered` signals capture has begun; `release` lets it return.
+final class GatedScreen: ScreenCapturing, @unchecked Sendable {
+    let entered = DispatchSemaphore(value: 0)
+    let release = DispatchSemaphore(value: 0)
+    private(set) var captureCount = 0
+    let payload: String
+    init(payload: String = "ZmFrZS1qcGVn") { self.payload = payload }
+    func capture() -> String? {
+        captureCount += 1
+        entered.signal()
+        release.wait()
+        return payload
+    }
+}
+
 final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     /// One entry per `render` call: the lines the brain returned, passed straight through (no splitting).
     var rendered: [[String]] = []
@@ -157,6 +174,35 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(bytes.prefix(2) == Data([0xFF, 0xD8]) && bytes.suffix(2) == Data([0xFF, 0xD9]))
         let perms = try FileManager.default.attributesOfItem(atPath: shot.path)[.posixPermissions] as? NSNumber
         #expect(perms?.int16Value == 0o600)
+    }
+
+    /// Stop cancelling a turn *while the screenshot is being captured* must abort before emitting:
+    /// no "👁" line, no follow-up reasoning, no `speak`. The detached capture doesn't inherit
+    /// cancellation, so without the post-capture guard the screenshot (and a stale tip) would leak —
+    /// into the NEW session once a Start has rotated the dev log mid-turn.
+    @Test func cancelDuringCaptureAbortsBeforeEmitting() async {
+        let clock = ManualClock(now: 0)
+        let brain = ScriptedBrain(script: [
+            .init(toolCalls: [.captureScreen(callId: "c")],
+                  rawToolCalls: [RawToolCall(id: "c", name: "capture_screen", argumentsJSON: "{}")]),
+            .init(toolCalls: [.speak(callId: "s", lines: ["stale tip from the stopped run"])]),
+        ])
+        let screen = GatedScreen()
+        let overlay = FakeOverlay()
+        let (driver, transcript) = makeDriver(brain: brain, screen: screen, overlay: overlay, clock: clock)
+        transcript.append(.init(speaker: .me, text: "here is my code", at: 0))
+
+        let task = Task { await driver.handleTrigger(.turnEnd) }
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            DispatchQueue.global().async { screen.entered.wait(); cont.resume() }   // capture in flight
+        }
+        task.cancel()                                         // Stop fires mid-capture
+        screen.release.signal()                               // let the screenshot finish
+
+        #expect(await task.value == .cancelled)
+        #expect(screen.captureCount == 1)        // captured once...
+        #expect(overlay.rendered.isEmpty)        // ...but never rendered a tip after Stop
+        #expect(brain.calls.count == 1)          // and never looped back to the brain with the image
     }
 
     /// A `speak` with an empty `lines` array (the decode fallback, or a model returning []) is passed
