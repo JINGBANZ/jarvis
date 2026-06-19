@@ -52,7 +52,7 @@ A compact log — the *rationale* for each lives in the linked design page, not 
 | **Models (verified 2026-06):** `gpt-5.5` brain via Responses API (vision), `gpt-4o-transcribe` over GA Realtime | [architecture.md](./architecture.md#models-and-apis) |
 | **Server-side conversation per session** (Conversations API, `store:true`) for the coach's own memory — quality over local-only retention | [architecture.md](./architecture.md#models-and-apis), [sandbox.md](./sandbox.md) |
 | **Coach is time-aware** (timestamped transcript + silence duration) | [architecture.md](./architecture.md#2-core-loop) |
-| **System audio shipped** — `SystemAudioInput` (ScreenCaptureKit) → a second `them`-tagged transcriber beside the mic's `me`, one shared transcript; mic runs `VoiceProcessingIO` AEC to stop speaker bleed (2026-06-16; live SCK run still pending) | [architecture.md](./architecture.md#3-components) |
+| **System audio shipped** — `SystemAudioInput` (ScreenCaptureKit) → a second `them`-tagged transcriber beside the mic's `me`, one shared transcript (2026-06-16) | [architecture.md](./architecture.md#3-components) |
 | ~~Two-phase build~~ → **Skip Phase 1; build native Swift directly** (2026-06-14) | this page; [fork-evaluation.md](./fork-evaluation.md) |
 | **Native Swift app** (cleanest sandbox/footprint on macOS) | [architecture.md](./architecture.md), [fork-evaluation.md](./fork-evaluation.md) |
 | **Toolchain: SwiftPM + Command Line Tools** (no full Xcode; manual bundle + stable self-signed `Jarvis Dev` identity so TCC grants persist; TCC prompts) | [build-and-run.md](./build-and-run.md) |
@@ -65,9 +65,17 @@ A compact log — the *rationale* for each lives in the linked design page, not 
 | **Unified Settings window** replaces the separate API-key dialog and log-viewer menu item; overlay text size (12–32 pt, default 18) + background opacity (40–100%, default 78%) are now user-adjustable and persisted via `OverlayAppearance` (UserDefaults) (2026-06-17) | [settings-window.md](./settings-window.md) |
 | **Tuned overlay/silence timing + sharpened coach prompt** — longer per-line overlay display, later first silence nudge over a wider backoff ramp, plain-language hints for interview stress, explicit `me`/`them` speaker handling; overlay now **queues** tips so a newer one never cuts off the current (2026-06-18) | [architecture.md §2](./architecture.md#2-core-loop) |
 | **Overlay is never-interrupt + never-drop, not show-freshest** — direct-reply queue-priority/preemption considered and **rejected**: in a live interview the user never addresses Jarvis aloud, so overlay traffic is all proactive coaching with no latency-critical reply to jump the queue (2026-06-18) | [architecture.md §2](./architecture.md#2-core-loop) |
+| **AEC reverted — mic was silent** — `VoiceProcessingIO` came up without throwing, but the `SCStream` starting ~150 ms later changed the audio route out from under it and the mic went silent (RMS 0); reverted to a plain `AVAudioEngine` tap (2026-06-18) | [architecture.md §3](./architecture.md#3-components) |
+| **Echo cancellation via one-clock Core Audio aggregate device + AEC3 — no headphones needed** — the mic was bleeding the other side's speaker audio into the `me` transcript (verbatim, on speakers). Solved by capturing the mic + a system-output **process tap** in ONE private aggregate device (mic = clock master, tap drift-compensated), so a single IOProc delivers both synced at 48 kHz — the meeting-app single-clock case — and AEC3 runs inside that callback. Measured **30–50 dB** cancellation live; the other side no longer mis-transcribes as `me`, the user's own voice is preserved, double-talk works. Replaces the separate `AVAudioEngine` mic + `SCStream`. Path taken after a prior two-clock attempt (separate mic + SCStream feeding AEC3) achieved only ~5% — confirmed by research that a passive bystander on two clocks is the hard async-AEC case; one aggregate device removes the drift. AEC3 lib via `scripts/build-aec.sh` (vendored zero-dylib `.a`). (2026-06-19) | [architecture.md §3](./architecture.md#3-components) |
 
 ## Open Questions / To Confirm
 
+- **Double-talk under loud far audio** can over-attenuate the user briefly (AEC3 limitation); a neural
+  canceller (DTLN, Muesli-style) on the same aligned streams is the escalation if it bites in practice.
+  AEC stays ON across all routes (near-passthrough on headphones); we deliberately don't auto-bypass
+  on "headphones" because the detection is unreliable (a BT speaker looks like headphones) and a wrong
+  bypass re-admits the echo.
+- **Universal binary.** `libjarvis-aec.a` is arm64-only; `lipo` in an x86_64 build if Intel is needed.
 - Minimum macOS version target. Build host is macOS 26.5; ScreenCaptureKit screen+audio capture
   needs macOS 13+. Target **macOS 14+** unless a needed API forces higher.
 - The **live Realtime transcription wiring** in `Sources/JarvisApp/Capture/RealtimeTranscriber.swift` is the

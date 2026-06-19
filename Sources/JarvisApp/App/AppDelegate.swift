@@ -18,8 +18,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Two transcription sockets feeding one shared transcript: mic → `.me`, system audio → `.them`.
     private var transcriber: RealtimeTranscriber?       // "me" (mic)
     private var themTranscriber: RealtimeTranscriber?   // "them" (system audio)
-    private var audio: AudioInput?
-    private var systemAudio: SystemAudioInput?
+    /// One-clock capture: a single private aggregate device (built-in mic + system-output tap on one
+    /// drift-compensated clock) feeds both transcription sockets, running AEC3 inside its IOProc so the
+    /// other side's speaker bleed is cancelled from the mic. Replaces the separate AVAudioEngine mic +
+    /// ScreenCaptureKit capture.
+    private var aggregateCapture: AggregateEchoCapture?
     /// In-flight coaching turns, so Stop can cancel one mid-brain-call (otherwise it could speak
     /// after the user pressed Stop).
     private var turns: TurnTaskBox?
@@ -112,12 +115,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let onMicTerminalFailure: @Sendable () -> Void = { [weak self] in
             Task { @MainActor in self?.stop(); self?.menuBar.setRunning(false) }
         }
-        // "Them" socket gave up: degrade gracefully — tear down ONLY the system-audio side and keep
-        // the mic running (matches the SystemAudioInput contract). The menu stays 🟢.
+        // "Them" socket gave up: degrade gracefully — stop the system-audio transcriber and keep the
+        // mic running. The shared aggregate capture keeps feeding the mic side; its now-nil "them"
+        // transcriber simply drops the tap audio. The menu stays 🟢.
         let onThemTerminalFailure: @Sendable () -> Void = { [weak self] in
             Task { @MainActor in
                 self?.themTranscriber?.stop(); self?.themTranscriber = nil
-                self?.systemAudio?.stop(); self?.systemAudio = nil
                 jlog("Jarvis: 'them' (system audio) socket gave up — mic side still active")
             }
         }
@@ -147,40 +150,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         themTranscriber.onTurnEnd = { turns.run { await driver.handleTrigger(.turnEnd) } }
         themTranscriber.onTerminalFailure = onThemTerminalFailure
 
-        let audio = AudioInput { [weak transcriber] pcm in transcriber?.sendAudio(pcm) }
-        let systemAudio = SystemAudioInput { [weak themTranscriber] pcm in themTranscriber?.sendAudio(pcm) }
-        // If the SCStream dies mid-session (permission revoked, display change), degrade the same way
-        // as a "them" socket failure: drop the system-audio side, keep the mic coaching.
-        systemAudio.onTerminalFailure = onThemTerminalFailure
+        // One-clock capture + echo cancellation: a single aggregate device (mic + system tap) feeds
+        // the cleaned mic to the "me" socket and the raw system audio to the "them" socket, with AEC3
+        // run inside its IOProc. If the device can't be built, the whole capture is gone, so treat it
+        // as a full (mic-side) terminal failure.
+        let capture = AggregateEchoCapture(
+            onMicClean: { [weak transcriber] data in transcriber?.sendAudio(data) },
+            onSystem: { [weak themTranscriber] data in themTranscriber?.sendAudio(data) })
+        capture.onUnavailable = onMicTerminalFailure
         self.transcriber = transcriber
         self.themTranscriber = themTranscriber
-        self.audio = audio
-        self.systemAudio = systemAudio
+        self.aggregateCapture = capture
         self.turns = turns
         transcriber.connect()
         themTranscriber.connect()
-        audio.start()
-        systemAudio.start()
-        jlog("Jarvis: coaching started (mic + system audio).")
+        capture.start()
+        jlog("Jarvis: coaching started (one-clock capture + AEC).")
         return true
     }
 
-    /// Stop and tear down BOTH transcription pipelines (mic/"me" and system-audio/"them"). Safe to
-    /// call when already stopped. Both sides must be torn down: otherwise the "them" SCStream keeps
-    /// capturing and its socket keeps streaming after Stop, and its turn triggers could still drive a
+    /// Stop and tear down the capture (one aggregate device) and BOTH transcription sockets
+    /// (mic/"me" and system-audio/"them"). Safe to call when already stopped. The capture and both
+    /// transcribers must go: otherwise a turn-end trigger from a still-live socket could drive a
     /// coaching turn on a torn-down driver — the exact "speak after Stop" failure the turns box exists
-    /// to prevent. A subsequent Start would also leak the orphaned stream/socket and double-transcribe.
+    /// to prevent — and a subsequent Start would leak the orphaned IOProc/sockets.
     private func stop() {
         let wasRunning = transcriber != nil || themTranscriber != nil
         turns?.cancelAll(); turns = nil      // cancel any in-flight coaching turn
+        aggregateCapture?.stop(); aggregateCapture = nil   // stop the IOProc, tear down tap+aggregate
         transcriber?.stop()
         themTranscriber?.stop()
-        audio?.stop()
-        systemAudio?.stop()
         transcriber = nil
         themTranscriber = nil
-        audio = nil
-        systemAudio = nil
         if wasRunning { jlog("Jarvis: stopped.") }
     }
 
