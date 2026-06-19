@@ -57,7 +57,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         var sections: [SettingsSection] = [
             APIKeySection(keychain: keychain, onKeySaved: { [weak self] _ in
                 guard let self, self.transcriber != nil else { return }
-                self.menuBar.setRunning(self.start())
+                // Re-saving a key while running only re-applies it to the pipeline — it is NOT a new
+                // coaching run, so keep the current session (don't rotate logs). Session rotation is
+                // reserved for an explicit user Start.
+                self.menuBar.setRunning(self.start(freshSession: false))
             }),
             OverlaySection(appearance: appearance, applying: overlay),
         ]
@@ -80,16 +83,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Build the brain + driver and start the transcription pipeline. Returns `false` (and stays
     /// stopped) if no API key is available yet.
+    ///
+    /// `freshSession` is true for a user-initiated Start (rotate to a fresh dev session + logs) and
+    /// false for an in-place restart that only re-applies a setting — e.g. saving a new API key while
+    /// running — which must NOT be misattributed as a new coaching run.
     @discardableResult
-    private func start() -> Bool {
+    private func start(freshSession: Bool = true) -> Bool {
         guard let key = secrets.apiKey(), !key.isEmpty else {
             jlog("Jarvis: can't start — no API key.")
             warnNoKey()
             return false
         }
         stop() // tear down any existing pipeline so we start cleanly
-        beginNewSession()       // dev mode: rotate to a fresh session dir + activity/debug log
-        menuBar.resetCounter()  // a Start begins a fresh session
+        if freshSession {
+            beginNewSession()       // dev mode: rotate to a fresh session dir + activity/debug log
+            menuBar.resetCounter()  // a user Start begins a fresh session
+        }
 
         let brain = OpenAIBrainClient(apiKey: key, model: config.brainModel,
                                       reasoningEffort: config.reasoningEffort)
