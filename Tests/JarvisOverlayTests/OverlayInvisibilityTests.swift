@@ -81,6 +81,11 @@ import AppKit
         await checkInterLineGapBlanks()
     }
 
+    @Test
+    func overlayKeepsPerLineTimesAlignedWhenDroppingEmptyLines() async {
+        await checkRenderAlignsTimesWhenDroppingEmptyLines()
+    }
+
     @MainActor @Test
     func overlayPreviewWithEmptyQueueHidesOnCloseAndTogglesCleanly() {
         let overlay = OverlayPanel()
@@ -189,9 +194,25 @@ private func checkInterLineGapBlanks() async {
 
     try? await Task.sleep(nanoseconds: 400_000_000)     // ~0.6s: inside the 0.4–0.9s blank gap
     #expect(overlay.currentText == "", "the panel must blank between consecutive lines")
+    #expect(overlay.isPanelVisible, "the gap must blank the TEXT while the panel stays on screen — not hide it")
 
     try? await Task.sleep(nanoseconds: 500_000_000)     // ~1.1s: past the gap, second line up
     #expect(overlay.currentText == "L2", "the next line must appear after the gap")
+}
+
+// render(_:perLineSeconds:[TimeInterval]) zips lines with their times, then trims and drops empties
+// while keeping the two aligned. The convenience scalar overload always builds a same-length array, so
+// this drives the array form directly: a leading empty line must be dropped AND its time dropped with
+// it, so the surviving line is shown for ITS own duration (a misaligned zip/filter would use 0.1s).
+@MainActor
+private func checkRenderAlignsTimesWhenDroppingEmptyLines() async {
+    let overlay = OverlayPanel()
+    overlay.interLineGapSeconds = 0
+
+    overlay.render(["   ", "survivor"], perLineSeconds: [0.1, 0.6])
+    try? await Task.sleep(nanoseconds: 200_000_000)   // ~0.2s: if times misaligned, "survivor" got 0.1s and is gone
+    #expect(overlay.currentText == "survivor", "the surviving line must keep ITS own duration, not the dropped line's")
+    #expect(overlay.isPanelVisible)
 }
 
 // Opening the Settings appearance preview mid-tip must PAUSE the tip (showing the sample), then on

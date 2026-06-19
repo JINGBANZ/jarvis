@@ -91,6 +91,11 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
         #expect(screen.captureCount == 1)
         #expect(overlay.rendered == [["What's the complexity of that nested loop?"]])
+        // The driver must hand the overlay length-scaled per-line durations, not a constant — one
+        // entry per line, each = OverlayTiming.displaySeconds for that line under the active config.
+        let expectedSeconds = OverlayTiming.displaySeconds(
+            for: "What's the complexity of that nested loop?", config: .default)
+        #expect(overlay.renderedSeconds == [[expectedSeconds]])
         #expect(brain.calls.count == 2)
         // Second brain call must contain the screenshot image we fed back...
         #expect(brain.calls[1].contains { $0.imageBase64JPEG != nil })

@@ -83,6 +83,11 @@ public struct Config: Sendable {
     /// Brief blank shown between consecutive overlay lines (and before the next queued tip). Borrowed
     /// from the captioning minimum-gap rule: without it, back-to-back lines read as one block and the
     /// eye doesn't re-trigger — worse for a glancing user than a watching one. See wiki/overlay-timing.md.
+    ///
+    /// Static (unlike the instance reading-time knobs above) because it's consumed inside the
+    /// `JarvisOverlay` panel during playback, which is never handed a `Config` instance — same reason
+    /// the appearance defaults above are statics. The per-line *durations* differ: they're computed in
+    /// Core from a `Config` instance and passed into the overlay, so they stay instance properties.
     public static let overlayLineGapSeconds: TimeInterval = 0.2
 
     public static let `default` = Config()

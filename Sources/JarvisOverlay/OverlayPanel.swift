@@ -139,7 +139,10 @@ public final class OverlayPanel: NSObject, OverlayRendering, OverlayAppearanceAp
 
     /// Schedule the next playback step on the main queue. The work item captures `self` weakly so the
     /// self -> tickWorkItem -> closure -> self cycle can't form; `step` takes the panel non-capturing.
+    /// Cancels any prior pending tick first, so the "at most one pending tick" invariant is enforced
+    /// here rather than relying on every caller to have fired/cancelled the previous one.
     private func scheduleTick(after delay: TimeInterval, _ step: @escaping (OverlayPanel) -> Void) {
+        tickWorkItem?.cancel()
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
             MainActor.assumeIsolated { step(self) }
