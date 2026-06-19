@@ -68,6 +68,15 @@ per-line seconds = noticeBuffer + words × readingRate     (capped at a max)
 The net: every line gets a noticing floor, plus reading time that grows with length, capped so the
 queue stays fresh — and a blank flash between lines so a glance catches the change.
 
+## Known limitation — per-tip total is unbounded (validate live)
+
+The cap bounds each *line* (≈8s), not the whole *tip*. Since tips queue FIFO and never interrupt,
+a worst-case 3-line tip (~6s/line under the prompt's ~12-word limit) can hold the screen ~19s and
+delay a fresher queued tip — which cuts against the "stale tip is worse than none" principle above. A
+per-tip total budget (scale the lines down proportionally past a ceiling) was considered and
+**deferred**: in practice tips are mostly 1–2 short lines, so we'd rather judge real pacing in the
+live smoke run before adding another knob. Revisit if multi-line tips feel like they linger.
+
 ## Where it lives
 
 - **The formula:** [`OverlayTiming.displaySeconds(for:config:)`](../Sources/JarvisCore/Overlay/OverlayTiming.swift)
