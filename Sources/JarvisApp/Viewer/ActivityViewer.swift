@@ -9,7 +9,7 @@ import JarvisCore
 @MainActor
 final class ActivityViewer: NSObject, WKNavigationDelegate {
     private let log: ActivityLog
-    private let store: SessionStore
+    private var store: SessionStore   // rebuilt when a new session opens (see `sessionDidChange`)
 
     private var webView: WKWebView?
     private var picker: NSPopUpButton?
@@ -87,6 +87,17 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         loaded = false
         pending = []
         snapshotRows = []
+    }
+
+    /// A new coaching session opened (a Start rotated the session dir). Re-point the history browser at
+    /// the new current dir; if the viewer is on-screen, refresh the picker and re-attach to the fresh
+    /// live session. `ActivityLog.enable` dropped the previous observer, so without this an open viewer
+    /// would freeze on the old session's rows. No-op when not embedded — the next open reads it fresh.
+    func sessionDidChange(base: URL, current: URL?) {
+        store = SessionStore(base: base, current: current)
+        guard webView != nil else { return }
+        populatePicker()
+        loadCurrent()
     }
 
     // MARK: - Session list

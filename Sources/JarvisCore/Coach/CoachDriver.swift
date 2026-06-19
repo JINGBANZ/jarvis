@@ -243,6 +243,10 @@ public final class CoachDriver: @unchecked Sendable {
                 // off the cooperative pool so it doesn't stall a pool thread while holding the slot.
                 let screen = self.screen
                 let img = await Task.detached(priority: .userInitiated, operation: { screen.capture() }).value
+                // Stop may have fired during the (un-cancellable, detached) capture. Bail before
+                // emitting: otherwise this screenshot — and the reasoning that follows — would be
+                // logged into whatever session is now current (a Start rotates the dev log mid-turn).
+                if Task.isCancelled { jlog("… turn cancelled (stopped) after capture"); return .cancelled }
                 if let img { jlog("👁 looking at your screen", image: img) }   // thumbnail in the dev viewer
                 else { jlog("👁 screenshot failed") }
                 if convId == nil {
@@ -271,6 +275,10 @@ public final class CoachDriver: @unchecked Sendable {
                 continue // let the model reason over the image
 
             case .speak(let callId, let lines):
+                // Last gate before side effects: a turn cancelled by Stop (or a Stop→Start that
+                // rotated the dev session) must not render a stale tip, bump the counter, or log into
+                // the new session. This is the "speak after Stop" guard the TurnTaskBox relies on.
+                if Task.isCancelled { jlog("… turn cancelled (stopped) before speaking"); return .cancelled }
                 jlog("💬 \(lines.joined(separator: " "))")
                 overlay.render(lines, perLineSeconds: config.lineDisplaySeconds)
                 onSpoke?()

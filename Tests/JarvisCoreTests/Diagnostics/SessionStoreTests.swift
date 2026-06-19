@@ -14,8 +14,9 @@ import Foundation
 
     @Test func listsNewestFirstWithCurrentFlagged() throws {
         let base = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: base) }
-        try makeSession(base, "2026-06-16_10-00-00_aaaa", lines: ["{\"t\":\"10:00:00\",\"m\":\"x\"}"])
-        try makeSession(base, "2026-06-16_11-00-00_bbbb", lines: ["{\"t\":\"11:00:00\",\"m\":\"y\"}"])
+        // Coaching-class lines (🗣) so both sessions count as content-bearing history.
+        try makeSession(base, "2026-06-16_10-00-00_aaaa", lines: ["{\"t\":\"10:00:00\",\"m\":\"🗣 heard: x\"}"])
+        try makeSession(base, "2026-06-16_11-00-00_bbbb", lines: ["{\"t\":\"11:00:00\",\"m\":\"🗣 heard: y\"}"])
         // A non-session subdir must be ignored.
         try FileManager.default.createDirectory(at: base.appendingPathComponent("not-a-session"),
                                                 withIntermediateDirectories: true)
@@ -26,6 +27,29 @@ import Foundation
         #expect(sessions[0].isCurrent == true)
         #expect(sessions[0].label == "2026-06-16 11:00:00")
         #expect(sessions[1].isCurrent == false)
+    }
+
+    @Test func hidesContentlessPastSessionsButKeepsCurrentAndContentful() throws {
+        let base = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: base) }
+        // A past session with only lifecycle breadcrumbs (no coaching class, no shot) — an aborted run.
+        try makeSession(base, "2026-06-16_09-00-00_aaaa", lines: [
+            "{\"t\":\"09:00:00\",\"m\":\"Jarvis: dev mode — session …\"}",
+            "{\"t\":\"09:00:01\",\"m\":\"Jarvis: coaching started (mic + system audio).\"}",
+            "{\"t\":\"09:00:02\",\"m\":\"Jarvis: stopped.\"}",
+        ])
+        // A past session that actually coached (has a 💬 line) — keep it.
+        try makeSession(base, "2026-06-16_10-00-00_bbbb", lines: ["{\"t\":\"10:00:00\",\"m\":\"💬 try this\"}"])
+        // A past session whose only content is a screenshot reference — keep it.
+        try makeSession(base, "2026-06-16_10-30-00_cccc", lines: ["{\"t\":\"10:30:00\",\"m\":\"saw\",\"s\":\"shot-1.jpg\"}"])
+        // The current session, breadcrumbs only — always shown so the live run appears in the picker.
+        try makeSession(base, "2026-06-16_11-00-00_dddd", lines: ["{\"t\":\"11:00:00\",\"m\":\"Jarvis: coaching started.\"}"])
+
+        let cur = base.appendingPathComponent("2026-06-16_11-00-00_dddd")
+        let ids = SessionStore(base: base, current: cur).listSessions().map(\.id)
+        #expect(ids == ["2026-06-16_11-00-00_dddd",   // current, kept despite breadcrumbs-only
+                        "2026-06-16_10-30-00_cccc",   // has a screenshot
+                        "2026-06-16_10-00-00_bbbb"])  // has a coaching line
+        #expect(!ids.contains("2026-06-16_09-00-00_aaaa"))   // aborted run hidden
     }
 
     @Test func entriesDecodeTolerateMalformedAndGuardTraversal() throws {

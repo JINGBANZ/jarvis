@@ -68,10 +68,11 @@ sidesteps the `file://` `fetch()` restriction that forced the original viewer's 
 reload.
 
 - New events stream in live (no reload, no flicker); thumbnails open in an in-page lightbox.
-- Sessions are persisted per launch as owner-only `jarvis-activity.jsonl` + `shot-N.jpg`, so past
-  runs can be browsed and the history cleared from the viewer.
+- Each Start opens a fresh session (a Stop→Start gets a new log, never resuming the previous run),
+  persisted as owner-only `jarvis-activity.jsonl` + `shot-N.jpg`, so past runs can be browsed and the
+  history cleared from the viewer.
 - **File logging is dev-only.** Outside `--dev`, `jlog` writes solely to the unified log (Console.app),
-  never a flat file. The dev files are `0600` in a gitignored per-launch `.jarvis/<session>/` — the
+  never a flat file. The dev files are `0600` in a gitignored per-session `.jarvis/<session>/` — the
   full privacy posture is in [sandbox.md](./sandbox.md).
 - The viewer's rendering logic (`htmlShell`/`rowScript`) and history reader (`SessionStore`) live in
   `JarvisCore` so they're unit/WebKit-tested; `ActivityViewer` in `JarvisApp` is the thin window.
