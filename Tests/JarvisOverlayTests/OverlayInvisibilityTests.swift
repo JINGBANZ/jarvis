@@ -76,6 +76,11 @@ import AppKit
         await checkDrainThenHide()
     }
 
+    @Test
+    func overlayBlanksBetweenConsecutiveLines() async {
+        await checkInterLineGapBlanks()
+    }
+
     @MainActor @Test
     func overlayPreviewWithEmptyQueueHidesOnCloseAndTogglesCleanly() {
         let overlay = OverlayPanel()
@@ -138,6 +143,7 @@ private func checkEmptyLinesDoNotShow() async {
 @MainActor
 private func checkTipsQueue() async {
     let overlay = OverlayPanel()
+    overlay.interLineGapSeconds = 0   // isolate queue/ordering timing from the inter-line gap
 
     overlay.render(["first"], perLineSeconds: 0.6)
     try? await Task.sleep(nanoseconds: 200_000_000)   // 0.2s into the first tip's 0.6s window
@@ -154,6 +160,7 @@ private func checkTipsQueue() async {
 @MainActor
 private func checkDrainThenHide() async {
     let overlay = OverlayPanel()
+    overlay.interLineGapSeconds = 0   // isolate the drain→hide timing from the inter-line gap
 
     overlay.render(["only"], perLineSeconds: 0.3)
     try? await Task.sleep(nanoseconds: 100_000_000)   // ~0.1s: tip on screen
@@ -168,12 +175,32 @@ private func checkDrainThenHide() async {
     #expect(overlay.isPanelVisible)
 }
 
+// Between two lines of one tip the panel must briefly blank, so a glancing eye registers that the
+// text changed (the borrowed captioning minimum-gap idea). Wide windows (0.4s line, 0.5s gap) keep
+// the mid-gap and post-gap samples clear of the edges on a loaded runloop.
+@MainActor
+private func checkInterLineGapBlanks() async {
+    let overlay = OverlayPanel()
+    overlay.interLineGapSeconds = 0.5
+
+    overlay.render(["L1", "L2"], perLineSeconds: 0.4)   // L1: 0–0.4s, blank gap: 0.4–0.9s, L2: 0.9s+
+    try? await Task.sleep(nanoseconds: 200_000_000)     // ~0.2s: still on L1
+    #expect(overlay.currentText == "L1", "the first line should be up before the gap")
+
+    try? await Task.sleep(nanoseconds: 400_000_000)     // ~0.6s: inside the 0.4–0.9s blank gap
+    #expect(overlay.currentText == "", "the panel must blank between consecutive lines")
+
+    try? await Task.sleep(nanoseconds: 500_000_000)     // ~1.1s: past the gap, second line up
+    #expect(overlay.currentText == "L2", "the next line must appear after the gap")
+}
+
 // Opening the Settings appearance preview mid-tip must PAUSE the tip (showing the sample), then on
 // close RESUME the exact line it stopped on — and a tip that arrived while the preview was open must
 // play afterwards. Guards the regression where the preview stranded the queue / dropped a tip.
 @MainActor
 private func checkPreviewResumesTip() async {
     let overlay = OverlayPanel()
+    overlay.interLineGapSeconds = 0   // isolate pause/resume timing from the inter-line gap
 
     overlay.render(["A1", "A2"], perLineSeconds: 0.6)   // line A1 shows; A2 scheduled at ~0.6s
     try? await Task.sleep(nanoseconds: 200_000_000)     // ~0.2s: still on A1

@@ -54,8 +54,11 @@ final class FakeScreen: ScreenCapturing, @unchecked Sendable {
 final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     /// One entry per `render` call: the lines the brain returned, passed straight through (no splitting).
     var rendered: [[String]] = []
-    func render(_ lines: [String], perLineSeconds: TimeInterval) {
+    /// The per-line display times passed alongside each `render` call (length-scaled by the driver).
+    var renderedSeconds: [[TimeInterval]] = []
+    func render(_ lines: [String], perLineSeconds: [TimeInterval]) {
         rendered.append(lines)
+        renderedSeconds.append(perLineSeconds)
     }
 }
 

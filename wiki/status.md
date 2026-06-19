@@ -65,6 +65,7 @@ A compact log — the *rationale* for each lives in the linked design page, not 
 | **Unified Settings window** replaces the separate API-key dialog and log-viewer menu item; overlay text size (12–32 pt, default 18) + background opacity (40–100%, default 78%) are now user-adjustable and persisted via `OverlayAppearance` (UserDefaults) (2026-06-17) | [settings-window.md](./settings-window.md) |
 | **Tuned overlay/silence timing + sharpened coach prompt** — longer per-line overlay display, later first silence nudge over a wider backoff ramp, plain-language hints for interview stress, explicit `me`/`them` speaker handling; overlay now **queues** tips so a newer one never cuts off the current (2026-06-18) | [architecture.md §2](./architecture.md#2-core-loop) |
 | **Overlay is never-interrupt + never-drop, not show-freshest** — direct-reply queue-priority/preemption considered and **rejected**: in a live interview the user never addresses Jarvis aloud, so overlay traffic is all proactive coaching with no latency-critical reply to jump the queue (2026-06-18) | [architecture.md §2](./architecture.md#2-core-loop) |
+| **Per-line overlay time is length-proportional, not hard-coded** — a hybrid of the captioning reading-speed standard and our glance-not-watch situation: `noticeBuffer + words × readingRate` (capped), plus a brief blank gap between lines borrowed from the captioning minimum-gap rule (2026-06-19) | [overlay-timing.md](./overlay-timing.md) |
 
 ## Open Questions / To Confirm
 
