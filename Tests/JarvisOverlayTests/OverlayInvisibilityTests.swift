@@ -109,39 +109,19 @@ import AppKit
     }
 }
 
-// MARK: - Deterministic tick scheduler for ordering tests
+// MARK: - Helpers
 
-/// Records scheduled ticks and fires them on demand, so overlay playback is driven step-by-step with
-/// no wall-clock waits — removing the timing race that made the real `DispatchQueue.main` timer flaky.
+/// Poll `condition` every 20 ms until it holds or `timeout` elapses; returns the final result. Lets a
+/// timing test wait for a state transition instead of sleeping a fixed amount and racing the real
+/// `DispatchQueue.main` timer — the test adapts to the production code rather than the reverse.
 @MainActor
-final class ManualOverlayScheduler: OverlayTickScheduler {
-    private var pending: [(id: Int, body: @MainActor () -> Void)] = []
-    private var nextId = 0
-
-    func schedule(after delay: TimeInterval, _ body: @escaping @MainActor () -> Void) -> any OverlayTickToken {
-        let id = nextId; nextId += 1
-        pending.append((id, body))
-        return ManualOverlayTickToken(scheduler: self, id: id)
+private func waitUntil(timeout: TimeInterval = 5, _ condition: () -> Bool) async -> Bool {
+    let steps = max(1, Int(timeout / 0.02))
+    for _ in 0..<steps {
+        if condition() { return true }
+        try? await Task.sleep(nanoseconds: 20_000_000)
     }
-
-    /// Fire the oldest pending tick, simulating its timer elapsing. Returns false if none was pending.
-    @discardableResult
-    func fireNext() -> Bool {
-        guard !pending.isEmpty else { return false }
-        let next = pending.removeFirst()
-        next.body()
-        return true
-    }
-
-    var pendingCount: Int { pending.count }
-    fileprivate func cancel(id: Int) { pending.removeAll { $0.id == id } }
-}
-
-@MainActor
-private struct ManualOverlayTickToken: OverlayTickToken {
-    let scheduler: ManualOverlayScheduler
-    let id: Int
-    func cancel() { scheduler.cancel(id: id) }
+    return condition()
 }
 
 // MARK: - Main-actor checks (called via `await` from the nonisolated tests)
@@ -177,27 +157,26 @@ private func checkEmptyLinesDoNotShow() async {
 }
 
 // A newer tip must not interrupt one still on screen: it queues and plays after the current tip
-// finishes, so no hint is dropped. Driven by a manual scheduler so the assertion that "first" is
-// STILL up when "second" arrives can't race a real timer (the old wall-clock version could overshoot
-// the 0.6s window before the check and flip the result). `await Task.yield()` flushes render's
-// main-actor hop; ticks then advance playback deterministically.
+// finishes, so no hint is dropped. The "first is STILL up when second arrives" assertion is the
+// flaky-prone one, so we give the first line a long display window (3s) and check the instant it
+// appears — a ~3s margin before its timer could fire, vs. the old 0.2s. The queued tip is then
+// awaited via polling rather than a fixed sleep, so neither check races the real timer.
 @MainActor
 private func checkTipsQueue() async {
-    let scheduler = ManualOverlayScheduler()
-    let overlay = OverlayPanel(scheduler: scheduler)
+    let overlay = OverlayPanel()
+    let hold: TimeInterval = 3   // long enough that "first" can't advance before we check it
 
-    overlay.render(["first"], perLineSeconds: 5)    // duration is nominal — ticks fire on demand, not by clock
-    await Task.yield()                              // let render's main-actor hop run show()
-    overlay.render(["second"], perLineSeconds: 5)   // arrives while "first" is up — must queue, not replace
-    await Task.yield()
+    overlay.render(["first"], perLineSeconds: hold)
+    overlay.render(["second"], perLineSeconds: hold)   // arrives while "first" is up — must queue, not replace
 
+    // Wait for the first tip to actually reach the screen (render hops to the main actor), then confirm
+    // the newer tip did NOT replace it. We're still ~3s inside "first"'s window, so this can't flip.
+    #expect(await waitUntil { overlay.currentText == "first" }, "the first tip should display")
     #expect(overlay.currentText == "first", "a newer tip must not interrupt one still on screen")
 
-    // Advance playback: the first line's display elapses (→ inter-line blank), then the blank elapses
-    // (→ the tip finishes and the queued "second" plays).
-    scheduler.fireNext()
-    scheduler.fireNext()
-    #expect(overlay.currentText == "second", "the queued tip must display after the first finishes")
+    // After "first"'s window (+ the inter-line gap) elapses, the queued tip must take over.
+    #expect(await waitUntil(timeout: hold + 2) { overlay.currentText == "second" },
+            "the queued tip must display after the first finishes")
 }
 
 // Once the queue fully drains, the panel must hide and reset so the next coaching turn can display.
