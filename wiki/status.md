@@ -66,15 +66,18 @@ A compact log — the *rationale* for each lives in the linked design page, not 
 | **Tuned overlay/silence timing + sharpened coach prompt** — longer per-line overlay display, later first silence nudge over a wider backoff ramp, plain-language hints for interview stress, explicit `me`/`them` speaker handling; overlay now **queues** tips so a newer one never cuts off the current (2026-06-18) | [architecture.md §2](./architecture.md#2-core-loop) |
 | **Overlay is never-interrupt + never-drop, not show-freshest** — direct-reply queue-priority/preemption considered and **rejected**: in a live interview the user never addresses Jarvis aloud, so overlay traffic is all proactive coaching with no latency-critical reply to jump the queue (2026-06-18) | [architecture.md §2](./architecture.md#2-core-loop) |
 | **AEC reverted — mic was silent** — `VoiceProcessingIO` came up without throwing, but the `SCStream` starting ~150 ms later changed the audio route out from under it and the mic went silent (RMS 0); reverted to a plain `AVAudioEngine` tap (2026-06-18) | [architecture.md §3](./architecture.md#3-components) |
-| **Acoustic echo cancellation via WebRTC AEC3 — no headphones needed** — `WebRTCEchoCanceller` (`CJarvisAEC`) cleans the mic against the system audio as the far-end reference, removing the other side's speaker bleed before transcription. Chosen for quality + reliability over a transcript-level dedup heuristic (too lossy: misses paraphrased bleed, can drop real speech) and over Apple `VoiceProcessingIO` (silenced the mic, ducks SCStream audio). The lib is webrtc-audio-processing v2.1 + its bundled abseil, built static + zero-dylib (macOS 14, arm64) by `scripts/build-aec.sh` and vendored as one `.a`; `swift build` links it with no C++ toolchain. Resamples our 24 kHz wire to AEC3's 48 kHz (`Resampler`) on 10 ms frames (`PCM16Framer`). Open: live delay-alignment tuning (2026-06-18) | [architecture.md §3](./architecture.md#3-components) |
+| **Echo cancellation via one-clock Core Audio aggregate device + AEC3 — no headphones needed** — the mic was bleeding the other side's speaker audio into the `me` transcript (verbatim, on speakers). Solved by capturing the mic + a system-output **process tap** in ONE private aggregate device (mic = clock master, tap drift-compensated), so a single IOProc delivers both synced at 48 kHz — the meeting-app single-clock case — and AEC3 runs inside that callback. Measured **30–50 dB** cancellation live; the other side no longer mis-transcribes as `me`, the user's own voice is preserved, double-talk works. Replaces the separate `AVAudioEngine` mic + `SCStream`. Path taken after a prior two-clock attempt (separate mic + SCStream feeding AEC3) achieved only ~5% — confirmed by research that a passive bystander on two clocks is the hard async-AEC case; one aggregate device removes the drift. AEC3 lib via `scripts/build-aec.sh` (vendored zero-dylib `.a`). (2026-06-19) | [architecture.md §3](./architecture.md#3-components) |
 
 ## Open Questions / To Confirm
 
-- **AEC live delay-alignment tuning.** Echo cancellation (WebRTC AEC3, `WebRTCEchoCanceller`) is
-  wired and unit-tested through the framer, but the mic↔SCStream relative latency (two independent
-  capture clocks) needs a live speaker test to confirm AEC3's delay estimator converges. If residual
-  echo remains, options are feeding AEC3 a `stream_delay_ms` hint or a small fixed pre-delay on the
-  reference. Possible refinement: bypass AEC when the output device is headphones (no echo to cancel).
+- **AEC robustness: mid-session route changes.** The process tap targets the output device at start;
+  if the user plugs/unplugs headphones mid-call the tap can go stale. Need an
+  `AudioObjectAddPropertyListener` on the default output device to tear down + rebuild the aggregate,
+  and to bypass AEC on headphone routes (no acoustic echo). Not yet implemented.
+- **Double-talk under loud far audio** can over-attenuate the user briefly (AEC3 limitation); a neural
+  canceller (DTLN, Muesli-style) on the same aligned streams is the escalation if it bites in practice.
+- **Dead code to remove:** the old `AudioInput` (AVAudioEngine mic) + `SystemAudioInput` (SCStream) are
+  superseded by `AggregateEchoCapture`; the SCStream screen-recording priming can go too.
 - **Universal binary.** `libjarvis-aec.a` is arm64-only; `lipo` in an x86_64 build if Intel is needed.
 - Minimum macOS version target. Build host is macOS 26.5; ScreenCaptureKit screen+audio capture
   needs macOS 13+. Target **macOS 14+** unless a needed API forces higher.

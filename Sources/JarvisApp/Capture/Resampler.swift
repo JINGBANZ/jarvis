@@ -40,4 +40,5 @@ final class Resampler {
     }
 }
 
-private final class Fed { var done = false }
+// Single-use flag, touched only within one synchronous `convert` call on one thread.
+private final class Fed: @unchecked Sendable { var done = false }
