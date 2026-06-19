@@ -10,13 +10,17 @@ import CJarvisAEC
 /// need no locking.
 final class WebRTCEchoCanceller {
     private let aec: OpaquePointer
-    private let frameSamples: Int32 = 480          // 10 ms at 48 kHz
-    private var farFramer = PCM16Framer(frameSize: 480)
-    private var nearFramer = PCM16Framer(frameSize: 480)
+    private let frameSamples: Int32                 // 10 ms at the AEC rate (480 at 48 kHz)
+    private var farFramer: PCM16Framer
+    private var nearFramer: PCM16Framer
 
     init?(rateHz: Int32 = 48_000) {
         guard let handle = jarvis_aec_create(rateHz) else { return nil }
         aec = handle
+        let n = Int(rateHz) / 100                   // AEC3 works on 10 ms frames; matches the C shim
+        frameSamples = Int32(n)
+        farFramer = PCM16Framer(frameSize: n)
+        nearFramer = PCM16Framer(frameSize: n)
     }
 
     /// Register far-end ("them" / system) 48 kHz mono samples as the echo reference. Call this for the

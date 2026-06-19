@@ -169,11 +169,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
-    /// Stop and tear down BOTH transcription pipelines (mic/"me" and system-audio/"them"). Safe to
-    /// call when already stopped. Both sides must be torn down: otherwise the "them" SCStream keeps
-    /// capturing and its socket keeps streaming after Stop, and its turn triggers could still drive a
+    /// Stop and tear down the capture (one aggregate device) and BOTH transcription sockets
+    /// (mic/"me" and system-audio/"them"). Safe to call when already stopped. The capture and both
+    /// transcribers must go: otherwise a turn-end trigger from a still-live socket could drive a
     /// coaching turn on a torn-down driver — the exact "speak after Stop" failure the turns box exists
-    /// to prevent. A subsequent Start would also leak the orphaned stream/socket and double-transcribe.
+    /// to prevent — and a subsequent Start would leak the orphaned IOProc/sockets.
     private func stop() {
         let wasRunning = transcriber != nil || themTranscriber != nil
         turns?.cancelAll(); turns = nil      // cancel any in-flight coaching turn

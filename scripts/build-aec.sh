@@ -54,6 +54,13 @@ clang++ -std=c++17 -arch arm64 -O2 -mmacosx-version-min=14.0 -Wno-nullability-co
 # 3. Merge the webrtc lib (already contains the static abseil objects) + our shim.
 libtool -static -o "$OUT_LIB" "$WEBRTC_LIB" "$WORK/jarvis_aec.o"
 
+# 3b. Vendor the exact upstream license files for the statically-linked deps (BSD-3 webrtc,
+#     Apache-2.0 abseil), so THIRD_PARTY_NOTICES.md is backed by the real texts at the built versions.
+TP="$REPO_ROOT/Sources/CJarvisAEC/third_party"
+mkdir -p "$TP/webrtc-audio-processing" "$TP/abseil-cpp"
+cp "$WORK/wap/COPYING" "$WORK/wap/AUTHORS" "$TP/webrtc-audio-processing/" 2>/dev/null || true
+cp "$ABSL_INC/LICENSE" "$ABSL_INC/AUTHORS" "$TP/abseil-cpp/" 2>/dev/null || true
+
 # 4. Verify the shim symbols are DEFINED and nothing targets a newer macOS than 14.
 if ! nm "$OUT_LIB" 2>/dev/null | grep -q 'T _jarvis_aec_create'; then
   echo "FAIL: jarvis_aec_create not defined in $OUT_LIB" >&2; exit 1
@@ -61,4 +68,7 @@ fi
 if otool -l "$OUT_LIB" 2>/dev/null | grep -E 'minos' | grep -vq '14.0'; then
   echo "FAIL: some objects target a macOS other than 14.0" >&2; exit 1
 fi
+# 5. Record the artifact checksum so the committed binary can be tied back to a rebuild.
+#    (For stricter reproducibility, pin WEBRTC_TAG to a full commit SHA via `git checkout <sha>`.)
 echo "Built $OUT_LIB ($(du -h "$OUT_LIB" | cut -f1)); shim present, all objects minos 14.0."
+echo "sha256: $(shasum -a 256 "$OUT_LIB" | cut -d' ' -f1)"

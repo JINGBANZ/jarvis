@@ -7,9 +7,11 @@
 // (scripts/aec/jarvis_aec.cpp) is compiled and merged into libjarvis-aec.a by
 // scripts/build-aec.sh, so this header pulls in NO webrtc/abseil headers and
 // `swift build` compiles no C++ — it just links the prebuilt archive. This is
-// the OS/native-bound edge for acoustic echo cancellation; the Swift wrapper
-// (WebRTCEchoCanceller) lives in JarvisApp and resamples our 24 kHz wire format
-// to the 48 kHz AEC3 wants and frames it into 10 ms blocks (see PCM16Framer).
+// the OS/native-bound edge for acoustic echo cancellation. The capture
+// (AggregateEchoCapture) delivers mic + reference already at 48 kHz from one
+// aggregate-device IOProc; the Swift wrapper (WebRTCEchoCanceller) only frames
+// them into 10 ms blocks (see PCM16Framer) and does NO resampling — the cleaned
+// mic + tap are downsampled to the 24 kHz wire afterward.
 
 #ifdef __cplusplus
 extern "C" {
