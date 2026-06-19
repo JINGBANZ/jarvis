@@ -35,21 +35,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory) // menu-bar app, no Dock icon
 
         if devMode {
-            // Each dev-mode launch is its own session: nest logs under a unique per-launch
-            // subdirectory so each debug/dev run keeps its own separated logs.
-            let dir = devLogDirectory().appendingPathComponent(newSessionID())
-            // 0700: the screenshots/logs inside are 0600, so the directory holding them must be
-            // owner-only too — otherwise a 0755 dir leaks file names/counts/timestamps to other
-            // local users (CWE-732). Applies to the created session dir and any intermediates.
-            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true,
-                                                     attributes: [.posixPermissions: 0o700])
-            JarvisLog.enableFileLogging(directory: dir)     // <dir>/jarvis-debug.log, 0600, fresh
-            ActivityLog.shared.enable(directory: dir)        // <dir>/jarvis-activity.jsonl, 0600, fresh
-            // The viewer can browse every past session under the base log dir; clear-history spares
-            // this one.
+            // The activity viewer lives for the whole dev run, but a *session* is one coaching run:
+            // each Start opens a fresh session dir + logs (see `beginNewSession`). No session exists
+            // until the first Start, so the viewer starts with no current session to browse.
             activityViewer = ActivityViewer(log: .shared,
-                                            store: SessionStore(base: devLogDirectory(), current: dir))
-            jlog("Jarvis: dev mode — session \(dir.lastPathComponent) (\(dir.path)).")
+                                            store: SessionStore(base: devLogDirectory(), current: nil))
         }
 
         // Ask for Microphone + Screen Recording up front, not lazily mid-session.
@@ -98,6 +88,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return false
         }
         stop() // tear down any existing pipeline so we start cleanly
+        beginNewSession()       // dev mode: rotate to a fresh session dir + activity/debug log
         menuBar.resetCounter()  // a Start begins a fresh session
 
         let brain = OpenAIBrainClient(apiKey: key, model: config.brainModel,
@@ -195,8 +186,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.runModal()
     }
 
-    /// A unique id for this dev-mode launch, used as the session's log subdirectory name. Sortable
-    /// timestamp + a short random suffix so two launches in the same second don't collide.
+    /// Open a fresh dev session: a new per-Start subdirectory under the base log dir, with its own
+    /// `jarvis-debug.log` and `jarvis-activity.jsonl`. Called on every Start so each coaching run keeps
+    /// its own logs instead of resuming the previous run's. No-op outside dev mode.
+    private func beginNewSession() {
+        guard devMode else { return }
+        let dir = devLogDirectory().appendingPathComponent(newSessionID())
+        // 0700: the screenshots/logs inside are 0600, so the directory holding them must be owner-only
+        // too — otherwise a 0755 dir leaks file names/counts/timestamps to other local users (CWE-732).
+        // Applies to the created session dir and any intermediates.
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true,
+                                                 attributes: [.posixPermissions: 0o700])
+        JarvisLog.enableFileLogging(directory: dir)     // <dir>/jarvis-debug.log, 0600, fresh
+        ActivityLog.shared.enable(directory: dir)        // <dir>/jarvis-activity.jsonl, 0600, fresh
+        // Point the viewer's history browser at the new current session and show it live; clear-history
+        // spares whichever session is current.
+        activityViewer?.sessionDidChange(base: devLogDirectory(), current: dir)
+        jlog("Jarvis: dev mode — session \(dir.lastPathComponent) (\(dir.path)).")
+    }
+
+    /// A unique id for a dev session (one per Start), used as its log subdirectory name. Sortable
+    /// timestamp + a short random suffix so two Starts in the same second don't collide.
     private func newSessionID() -> String {
         let f = DateFormatter()
         // Fixed-format timestamp: pin locale + calendar so the name is always Gregorian yyyy-MM-dd
@@ -210,7 +220,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Where dev-mode logs go: `--log-dir <path>` (run-dev.sh passes the workspace `.jarvis/`),
     /// else a per-user Caches/Jarvis directory. Never `/tmp` (world-readable, shared across users).
-    /// Each launch nests a per-session subdirectory under this base (see `newSessionID`).
+    /// Each Start nests a per-session subdirectory under this base (see `beginNewSession`).
     private func devLogDirectory() -> URL {
         let args = CommandLine.arguments
         if let i = args.firstIndex(of: "--log-dir"), i + 1 < args.count {
