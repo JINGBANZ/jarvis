@@ -54,8 +54,9 @@ clang++ -std=c++17 -arch arm64 -O2 -mmacosx-version-min=14.0 -Wno-nullability-co
 # 3. Merge the webrtc lib (already contains the static abseil objects) + our shim.
 libtool -static -o "$OUT_LIB" "$WEBRTC_LIB" "$WORK/jarvis_aec.o"
 
-# 3b. Vendor the exact upstream license files for the statically-linked deps (BSD-3 webrtc,
-#     Apache-2.0 abseil), so THIRD_PARTY_NOTICES.md is backed by the real texts at the built versions.
+# 3b. Copy the exact upstream license files for the statically-linked deps (BSD-3 webrtc, Apache-2.0
+#     abseil) into a LOCAL, git-ignored dir for cross-checking against THIRD_PARTY_NOTICES.md (whose
+#     inline texts are the authoritative attribution). Not committed — see .gitignore.
 TP="$REPO_ROOT/Sources/CJarvisAEC/third_party"
 mkdir -p "$TP/webrtc-audio-processing" "$TP/abseil-cpp"
 cp "$WORK/wap/COPYING" "$WORK/wap/AUTHORS" "$TP/webrtc-audio-processing/" 2>/dev/null || true
