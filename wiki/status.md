@@ -70,14 +70,11 @@ A compact log — the *rationale* for each lives in the linked design page, not 
 
 ## Open Questions / To Confirm
 
-- **AEC robustness: mid-session route changes.** The process tap targets the output device at start;
-  if the user plugs/unplugs headphones mid-call the tap can go stale. Need an
-  `AudioObjectAddPropertyListener` on the default output device to tear down + rebuild the aggregate,
-  and to bypass AEC on headphone routes (no acoustic echo). Not yet implemented.
 - **Double-talk under loud far audio** can over-attenuate the user briefly (AEC3 limitation); a neural
   canceller (DTLN, Muesli-style) on the same aligned streams is the escalation if it bites in practice.
-- **Dead code to remove:** the old `AudioInput` (AVAudioEngine mic) + `SystemAudioInput` (SCStream) are
-  superseded by `AggregateEchoCapture`; the SCStream screen-recording priming can go too.
+  AEC stays ON across all routes (near-passthrough on headphones); we deliberately don't auto-bypass
+  on "headphones" because the detection is unreliable (a BT speaker looks like headphones) and a wrong
+  bypass re-admits the echo.
 - **Universal binary.** `libjarvis-aec.a` is arm64-only; `lipo` in an x86_64 build if Intel is needed.
 - Minimum macOS version target. Build host is macOS 26.5; ScreenCaptureKit screen+audio capture
   needs macOS 13+. Target **macOS 14+** unless a needed API forces higher.
