@@ -19,8 +19,11 @@ public final class OverlayPanel: NSObject, OverlayRendering, OverlayAppearanceAp
     /// The tip currently on screen and the index of the NEXT line to show. Held as instance state (not
     /// inside the advance closure) so a Settings preview can pause it and later resume the exact line.
     private var active: (tip: Tip, nextLine: Int)?
-    /// The pending line-advance work, retained so the Settings live preview can cancel (pause) it.
-    private var tickWorkItem: DispatchWorkItem?
+    /// The pending line-advance tick, retained so the Settings live preview can cancel (pause) it.
+    private var tickToken: (any OverlayTickToken)?
+    /// Schedules the per-line / gap ticks. Production uses a real `DispatchQueue.main` timer; tests
+    /// inject a manual scheduler to drive playback deterministically, with no wall-clock waits.
+    private let scheduler: any OverlayTickScheduler
     /// Brief blank inserted between consecutive lines (and before the next queued tip) so a glancing
     /// eye registers that the text changed — see Config.overlayLineGapSeconds and wiki/overlay-timing.md.
     /// Settable so timing-sensitive tests can opt out.
@@ -31,7 +34,13 @@ public final class OverlayPanel: NSObject, OverlayRendering, OverlayAppearanceAp
     /// Test hook (internal): counts how many times `show()` has re-asserted capture exclusion.
     private(set) var captureExclusionReassertCount = 0
 
-    public override init() {
+    public override convenience init() {
+        self.init(scheduler: DispatchOverlayScheduler())
+    }
+
+    /// Designated init. Tests inject a manual scheduler so overlay playback timing is deterministic.
+    init(scheduler: any OverlayTickScheduler) {
+        self.scheduler = scheduler
         panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 520, height: 80),
                         styleMask: [.nonactivatingPanel, .borderless],
                         backing: .buffered, defer: false)
@@ -120,7 +129,7 @@ public final class OverlayPanel: NSObject, OverlayRendering, OverlayAppearanceAp
         guard let (tip, line) = active else { return }
         guard line < tip.lines.count else {
             active = nil
-            tickWorkItem = nil   // tip done: drop the fired work item (no lingering self-capture)
+            tickToken = nil   // tip done: drop the fired tick (no lingering self-capture)
             if queue.isEmpty { hide() } else { pumpQueue() }
             return
         }
@@ -142,13 +151,11 @@ public final class OverlayPanel: NSObject, OverlayRendering, OverlayAppearanceAp
     /// Cancels any prior pending tick first, so the "at most one pending tick" invariant is enforced
     /// here rather than relying on every caller to have fired/cancelled the previous one.
     private func scheduleTick(after delay: TimeInterval, _ step: @escaping (OverlayPanel) -> Void) {
-        tickWorkItem?.cancel()
-        let work = DispatchWorkItem { [weak self] in
+        tickToken?.cancel()
+        tickToken = scheduler.schedule(after: delay) { [weak self] in
             guard let self else { return }
-            MainActor.assumeIsolated { step(self) }
+            step(self)
         }
-        tickWorkItem = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
     private func hide() { panel.orderOut(nil) }
@@ -181,7 +188,7 @@ public final class OverlayPanel: NSObject, OverlayRendering, OverlayAppearanceAp
     /// tears down a genuine coaching tip that `show()` put on screen in the meantime.
     public func showAppearancePreview(_ on: Bool) {
         if on {
-            tickWorkItem?.cancel(); tickWorkItem = nil   // pause the active tip; `active` keeps its line index for resume
+            tickToken?.cancel(); tickToken = nil   // pause the active tip; `active` keeps its line index for resume
             reassertCaptureExclusion()
             isPreviewing = true
             label.stringValue = Self.previewText
@@ -214,4 +221,38 @@ public final class OverlayPanel: NSObject, OverlayRendering, OverlayAppearanceAp
 
     /// Whether the panel is on screen — lets tests assert the drain-then-hide transition.
     var isPanelVisible: Bool { panel.isVisible }
+}
+
+// MARK: - Tick scheduling (injectable so tests can drive playback without wall-clock waits)
+
+/// Schedules a main-actor closure to run after a delay, returning a token to cancel it. Production
+/// uses `DispatchOverlayScheduler` (a real timer); tests inject a manual one so overlay playback
+/// timing is deterministic — mirrors how `JarvisCore` injects `Clock` for the same reason.
+@MainActor
+protocol OverlayTickScheduler {
+    func schedule(after delay: TimeInterval, _ body: @escaping @MainActor () -> Void) -> any OverlayTickToken
+}
+
+/// A cancellable handle for one scheduled tick.
+@MainActor
+protocol OverlayTickToken {
+    func cancel()
+}
+
+/// Production scheduler: a `DispatchQueue.main.asyncAfter` timer, cancellable via its work item.
+@MainActor
+struct DispatchOverlayScheduler: OverlayTickScheduler {
+    func schedule(after delay: TimeInterval, _ body: @escaping @MainActor () -> Void) -> any OverlayTickToken {
+        // assumeIsolated: asyncAfter on the main *queue* runs on the main thread, so we are in fact on
+        // the main actor when the body fires — this just tells the compiler so `body` can be called.
+        let work = DispatchWorkItem { MainActor.assumeIsolated { body() } }
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+        return DispatchOverlayTickToken(work: work)
+    }
+}
+
+@MainActor
+private struct DispatchOverlayTickToken: OverlayTickToken {
+    let work: DispatchWorkItem
+    func cancel() { work.cancel() }
 }

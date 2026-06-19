@@ -109,6 +109,41 @@ import AppKit
     }
 }
 
+// MARK: - Deterministic tick scheduler for ordering tests
+
+/// Records scheduled ticks and fires them on demand, so overlay playback is driven step-by-step with
+/// no wall-clock waits — removing the timing race that made the real `DispatchQueue.main` timer flaky.
+@MainActor
+final class ManualOverlayScheduler: OverlayTickScheduler {
+    private var pending: [(id: Int, body: @MainActor () -> Void)] = []
+    private var nextId = 0
+
+    func schedule(after delay: TimeInterval, _ body: @escaping @MainActor () -> Void) -> any OverlayTickToken {
+        let id = nextId; nextId += 1
+        pending.append((id, body))
+        return ManualOverlayTickToken(scheduler: self, id: id)
+    }
+
+    /// Fire the oldest pending tick, simulating its timer elapsing. Returns false if none was pending.
+    @discardableResult
+    func fireNext() -> Bool {
+        guard !pending.isEmpty else { return false }
+        let next = pending.removeFirst()
+        next.body()
+        return true
+    }
+
+    var pendingCount: Int { pending.count }
+    fileprivate func cancel(id: Int) { pending.removeAll { $0.id == id } }
+}
+
+@MainActor
+private struct ManualOverlayTickToken: OverlayTickToken {
+    let scheduler: ManualOverlayScheduler
+    let id: Int
+    func cancel() { scheduler.cancel(id: id) }
+}
+
 // MARK: - Main-actor checks (called via `await` from the nonisolated tests)
 
 @MainActor
@@ -142,22 +177,26 @@ private func checkEmptyLinesDoNotShow() async {
 }
 
 // A newer tip must not interrupt one still on screen: it queues and plays after the current tip
-// finishes, so no hint is dropped. Display windows are 0.6s with assertions sampled ~0.3s from each
-// edge, so a loaded CI runloop has to drift >300ms to flip a result — comfortable slack since
-// Task.sleep only ever overshoots.
+// finishes, so no hint is dropped. Driven by a manual scheduler so the assertion that "first" is
+// STILL up when "second" arrives can't race a real timer (the old wall-clock version could overshoot
+// the 0.6s window before the check and flip the result). `await Task.yield()` flushes render's
+// main-actor hop; ticks then advance playback deterministically.
 @MainActor
 private func checkTipsQueue() async {
-    let overlay = OverlayPanel()
-    overlay.interLineGapSeconds = 0   // isolate queue/ordering timing from the inter-line gap
+    let scheduler = ManualOverlayScheduler()
+    let overlay = OverlayPanel(scheduler: scheduler)
 
-    overlay.render(["first"], perLineSeconds: 0.6)
-    try? await Task.sleep(nanoseconds: 200_000_000)   // 0.2s into the first tip's 0.6s window
-    overlay.render(["second"], perLineSeconds: 0.6)   // arrives mid-display — must queue, not replace
-    try? await Task.sleep(nanoseconds: 200_000_000)   // ~0.4s: still well inside the first tip's window
+    overlay.render(["first"], perLineSeconds: 5)    // duration is nominal — ticks fire on demand, not by clock
+    await Task.yield()                              // let render's main-actor hop run show()
+    overlay.render(["second"], perLineSeconds: 5)   // arrives while "first" is up — must queue, not replace
+    await Task.yield()
 
     #expect(overlay.currentText == "first", "a newer tip must not interrupt one still on screen")
 
-    try? await Task.sleep(nanoseconds: 500_000_000)   // ~0.9s: first window (0.6s) elapsed; queued tip is up
+    // Advance playback: the first line's display elapses (→ inter-line blank), then the blank elapses
+    // (→ the tip finishes and the queued "second" plays).
+    scheduler.fireNext()
+    scheduler.fireNext()
     #expect(overlay.currentText == "second", "the queued tip must display after the first finishes")
 }
 
