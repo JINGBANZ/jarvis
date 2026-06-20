@@ -55,7 +55,7 @@ relaunches. On the first build macOS prompts once to let `codesign` use the new 
   TCC attribute the grant to the *terminal*, so the app reports Microphone/Screen Recording as
   "denied" even when granted. Pass flags with `open ./Jarvis.app --args …`.
 - Jarvis does **not** auto-start: set the OpenAI key once via the menu bar ("Set OpenAI API Key…",
-  saved to the Keychain; `OPENAI_API_KEY` is a headless fallback), then **Start / Stop** from the
+  saved to an owner-only file; `OPENAI_API_KEY` is a headless fallback), then **Start / Stop** from the
   menu. The icon shows two states only: ⚪️ stopped, 🟢 running.
 
 ## Dev mode — the live activity viewer

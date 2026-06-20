@@ -48,7 +48,7 @@ into one module, so moving a file between subfolders never changes access contro
 | `Sources/JarvisCore/Triggers/` | Turn / silence trigger detection + silence backoff |
 | `Sources/JarvisCore/Screen/` | Screen-capture tool contract |
 | `Sources/JarvisCore/Overlay/` | Overlay text model (the rendered tip; not the window) |
-| `Sources/JarvisCore/Config/` | Config + Keychain secrets |
+| `Sources/JarvisCore/Config/` | Config + secrets (owner-only file) |
 | `Sources/JarvisCore/Diagnostics/` | Logging, the dev-mode activity log, session-history store |
 | `Sources/JarvisCore/Support/` | Small primitives (`Clock`, `TurnTaskBox`) |
 | `Sources/JarvisOverlay/` | The on-screen `NSPanel` overlay (single file — no subfolders) |
@@ -100,8 +100,9 @@ behavior, it's `JarvisOverlay`. If no subsystem fits and it's a generic helper, 
 
 ## Safety & secrets
 
-- **No secrets in code, ever** — not in source, tests, or examples. The API key lives in the
-  Keychain (`OPENAI_API_KEY` env var is a headless fallback only).
+- **No secrets in code, ever** — not in source, tests, or examples. The API key lives in an
+  owner-only `0600` file (`OPENAI_API_KEY` env var is a headless fallback only); see
+  [`wiki/sandbox.md`](./wiki/sandbox.md) for why not the Keychain.
 - **Nothing screen- or audio-derived is written to disk** outside dev mode. Dev-mode logs and
   screenshots go to a gitignored, owner-only `.jarvis/<session>/`. Never relax that.
 - Full security posture: [`wiki/sandbox.md`](./wiki/sandbox.md).

@@ -17,7 +17,7 @@ Two layers below are **relaxed** for the personal build, by explicit decision:
   **git worktree** for recoverability, rather than a restricted `jarvisbuild` account. The former
   HARD REQUIREMENT is **waived** here. (Hardened model: §2.)
 
-Everything else (Keychain for the key, narrow egress, no recording to disk, model-governed behavioral
+Everything else (owner-only file for the key, narrow egress, no recording to disk, model-governed behavioral
 restraint) **still holds**. To re-harden for a shippable build, re-enable §1 and §2.
 
 ## Principle
@@ -64,8 +64,19 @@ Standard account cannot grant itself Screen Recording.
 
 ### 3. Secrets
 
-The OpenAI API key lives in the **macOS Keychain**, entered once through the menu bar. It is never
-written to disk in plaintext, never committed, never logged.
+The OpenAI API key lives in an **owner-only file** (`~/Library/Application Support/Jarvis/openai-api-key`,
+mode `0600` in a `0700` directory), entered once through the menu bar. It is never committed, never
+logged.
+
+We deliberately **don't** use the macOS Keychain. macOS keys Keychain access to a per-build code
+*partition* — for a self-signed app with no Apple Team ID, that partition is the binary's `cdhash`,
+which changes on every build — so each rebuild is treated as a new program and re-prompts for the
+login-keychain password. (TCC grants for Microphone/Screen Recording don't have this problem: they
+key to the stable signing identity, not the `cdhash`.) The only ways to avoid the re-prompt are an
+Apple Developer Team ID (stable `teamid:` partition) or moving off the Keychain. A `0600` file has
+the same practical trust boundary as the `OPENAI_API_KEY` headless fallback — any process running as
+this user can read it — but never prompts and survives every rebuild. If Jarvis ever ships under a
+real Developer ID, revisit this and move the key back into the Keychain.
 
 ## Data Egress
 
