@@ -30,6 +30,7 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
     private let clock: Clock
     private let sessionStart: TimeInterval
     private let silenceDurationMs: Int
+    private let noiseReduction: NoiseReductionMode
     private let turnDebounce: TimeInterval
 
     private let lock = NSLock()
@@ -51,7 +52,7 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
 
     init(apiKey: String, model: String, speaker: Speaker = .me, transcript: RollingTranscript, clock: Clock,
          silenceTimeout: TimeInterval, silenceMaxInterval: TimeInterval,
-         silenceDurationMs: Int = 1000,
+         silenceDurationMs: Int = 1000, noiseReduction: NoiseReductionMode = .auto,
          turnDebounce: TimeInterval = 0.4, maxBufferedAudioSeconds: TimeInterval = 60) {
         self.apiKey = apiKey
         self.model = model
@@ -61,6 +62,7 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         self.sessionStart = clock.now()
         self.silenceBackoff = SilenceBackoff(base: silenceTimeout, maxInterval: silenceMaxInterval)
         self.silenceDurationMs = silenceDurationMs
+        self.noiseReduction = noiseReduction
         self.turnDebounce = turnDebounce
         // PCM16 mono at the realtime sample rate → 2 bytes/sample.
         let bytesPerSecond = RealtimeSession.sampleRate * 2
@@ -112,7 +114,11 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
     }
 
     private func configureSession() {
-        send(json: RealtimeSession.sessionUpdate(model: model, silenceDurationMs: silenceDurationMs))
+        // Resolve .auto against the live default-input device each session, so a reconnect after a
+        // device swap (e.g. plugging in AirPods) picks the right profile.
+        let profile = NoiseReduction.profile(mode: noiseReduction, micProximity: InputDeviceProximity.current())
+        send(json: RealtimeSession.sessionUpdate(model: model, silenceDurationMs: silenceDurationMs,
+                                                 noiseReduction: profile))
     }
 
     func sendAudio(_ pcm: Data) {
@@ -193,7 +199,7 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
             // whole), but DON'T fire the coach yet — debounce so rapid fragments of one spoken
             // sentence coalesce into a single trigger. The wire→text parse lives in RealtimeSession
             // (pure + unit-tested).
-            if let transcriptText = RealtimeSession.completedTranscript(from: obj) {
+            if let transcriptText = RealtimeSession.completedTranscript(from: obj, speaker: speaker) {
                 let at = clock.now() - sessionStart
                 transcript.append(.init(speaker: speaker, text: transcriptText, at: at))
                 jlog("🗣 heard (\(speaker.rawValue)): \"\(transcriptText)\"")   // show side + what was said

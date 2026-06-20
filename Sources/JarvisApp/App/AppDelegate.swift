@@ -145,6 +145,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                               silenceTimeout: config.silenceTimeoutSeconds,
                                               silenceMaxInterval: config.silenceMaxIntervalSeconds,
                                               silenceDurationMs: config.vadSilenceDurationMs,
+                                              noiseReduction: config.audioNoiseReduction,
                                               turnDebounce: config.turnDebounceSeconds,
                                               maxBufferedAudioSeconds: config.maxBufferedAudioSeconds)
         transcriber.onTurnEnd = { turns.run { await driver.handleTrigger(.turnEnd) } }
@@ -159,6 +160,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                                   silenceTimeout: config.silenceTimeoutSeconds,
                                                   silenceMaxInterval: config.silenceMaxIntervalSeconds,
                                                   silenceDurationMs: config.vadSilenceDurationMs,
+                                                  noiseReduction: config.audioNoiseReduction,
                                                   turnDebounce: config.turnDebounceSeconds,
                                                   maxBufferedAudioSeconds: config.maxBufferedAudioSeconds)
         themTranscriber.onTurnEnd = { turns.run { await driver.handleTrigger(.turnEnd) } }
