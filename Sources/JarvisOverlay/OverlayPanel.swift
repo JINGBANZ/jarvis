@@ -57,14 +57,8 @@ public final class OverlayPanel: NSObject, OverlayRendering, OverlayAppearanceAp
         panel.hasShadow = true
         panel.ignoresMouseEvents = true
         panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
-        // Exclude from ALL screen capture. This one flag does double duty: it keeps the overlay out
-        // of Jarvis's own `capture_screen` shots (so the brain never reads its own output) AND hides
-        // it from anyone else's screen share or recording. It is the same OS mechanism every
-        // comparable tool uses (Electron's setContentProtection / Tauri's contentProtected both map
-        // to it); there is no other public API. Verified on macOS 26.5 across the screencapture CLI,
-        // SCScreenshotManager, and a live SCStream. Re-asserted in show(). See
-        // wiki/overlay-invisibility.md.
-        panel.sharingType = .none
+        // Exclude from ALL screen capture (re-asserted in show()). See NSPanel.excludeFromScreenCapture.
+        panel.excludeFromScreenCapture()
 
         label = NSTextField(wrappingLabelWithString: "")
         label.textColor = .white
@@ -206,7 +200,7 @@ public final class OverlayPanel: NSObject, OverlayRendering, OverlayAppearanceAp
     /// macOS 26 the OS normalizes `sharingType`, so asserting `== .none` alone can't tell a real
     /// re-assert from the value set at init). See wiki/overlay-invisibility.md.
     private func reassertCaptureExclusion() {
-        panel.sharingType = .none
+        panel.excludeFromScreenCapture()
         captureExclusionReassertCount += 1
     }
 
