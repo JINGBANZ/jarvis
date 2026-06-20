@@ -82,6 +82,11 @@ import AppKit
     }
 
     @Test
+    func overlayExpandsToFitLongText() async {
+        await checkPanelGrowsForLongText()
+    }
+
+    @Test
     func overlayKeepsPerLineTimesAlignedWhenDroppingEmptyLines() async {
         await checkRenderAlignsTimesWhenDroppingEmptyLines()
     }
@@ -216,6 +221,28 @@ private func checkInterLineGapBlanks() async {
 
     try? await Task.sleep(nanoseconds: 500_000_000)     // ~1.1s: past the gap, second line up
     #expect(overlay.currentText == "L2", "the next line must appear after the gap")
+}
+
+// A line too long to fit one row must not be clipped by the old fixed 80pt window: the panel grows
+// taller to fit the wrapped text, while a short line stays at the floor height. Guards the overflow fix.
+@MainActor
+private func checkPanelGrowsForLongText() async {
+    let overlay = OverlayPanel()
+    overlay.interLineGapSeconds = 0   // no gap between the two tips, so the long one plays right after
+
+    let short = "Nod."
+    // No trailing space — render() trims each line, so the stored text would otherwise differ.
+    let long = String(repeating: "This is a long coaching tip that must wrap onto several lines.", count: 6)
+
+    overlay.render([short], perLineSeconds: 0.3)
+    #expect(await waitUntil { overlay.currentText == short }, "the short line should display")
+    let shortHeight = overlay.currentPanelHeight
+    #expect(shortHeight == 80, "a short line stays at the floor height (got \(shortHeight))")
+
+    overlay.render([long], perLineSeconds: 3)   // queued; plays once the short line's 0.3s window ends
+    #expect(await waitUntil { overlay.currentText == long }, "the long line should display")
+    #expect(overlay.currentPanelHeight > shortHeight,
+            "the panel must grow taller to fit wrapped long text (got \(overlay.currentPanelHeight)pt)")
 }
 
 // render(_:perLineSeconds:[TimeInterval]) zips lines with their times, then trims and drops empties
