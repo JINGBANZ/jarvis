@@ -185,16 +185,15 @@ private func checkDrainThenHide() async {
     let overlay = OverlayPanel()
     overlay.interLineGapSeconds = 0   // isolate the drain→hide timing from the inter-line gap
 
+    // Poll each transition rather than sleeping a fixed amount and racing the real DispatchQueue.main
+    // timer — a fixed wait after the 0.3s window slips on a loaded CI runner and the panel reads as
+    // still-visible. Same polling discipline as `checkTipsQueue` above.
     overlay.render(["only"], perLineSeconds: 0.3)
-    try? await Task.sleep(nanoseconds: 100_000_000)   // ~0.1s: tip on screen
-    #expect(overlay.isPanelVisible, "the tip should be on screen while displaying")
-
-    try? await Task.sleep(nanoseconds: 400_000_000)   // ~0.5s: the 0.3s window elapsed → drain → hide
-    #expect(!overlay.isPanelVisible, "the panel must hide once the queue drains")
+    #expect(await waitUntil { overlay.isPanelVisible }, "the tip should be on screen while displaying")
+    #expect(await waitUntil { !overlay.isPanelVisible }, "the panel must hide once the queue drains")
 
     overlay.render(["again"], perLineSeconds: 0.3)    // a fresh tip after drain must display immediately
-    try? await Task.sleep(nanoseconds: 100_000_000)
-    #expect(overlay.currentText == "again", "state must reset so the next tip shows")
+    #expect(await waitUntil { overlay.currentText == "again" }, "state must reset so the next tip shows")
     #expect(overlay.isPanelVisible)
 }
 
