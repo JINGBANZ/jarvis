@@ -4,14 +4,27 @@ import JarvisCore
 /// Settings panel for the OpenAI API key. Saves to an owner-only file and reports back via
 /// `onKeySaved` (the app restarts the pipeline only if it was already running). Replaces the old modal
 /// dialog in MenuBarController.
+///
+/// Two states: when no key is stored yet it shows the entry field + Save; when one already exists it
+/// shows a "key is saved" summary + an Edit button (we never display the stored key — it's write-only,
+/// matching the owner-only-file posture). Edit reveals an empty field to paste a replacement.
 @MainActor
 final class APIKeySection: NSObject, SettingsSection {
     let title = "API Key"
 
     private let store: FileSecretStore
     private let onKeySaved: (String) -> Void
+
+    private var prompt: NSTextField?           // entry instructions
     private var field: NSSecureTextField?
+    private var saveButton: NSButton?
+    private var savedLabel: NSTextField?       // "a key is saved" summary
+    private var editButton: NSButton?
     private var status: NSTextField?
+
+    /// When true the entry field is shown; when false the saved summary is. Starts in entry mode only
+    /// if no key exists yet.
+    private var editing = true
 
     init(store: FileSecretStore, onKeySaved: @escaping (String) -> Void) {
         self.store = store
@@ -21,9 +34,10 @@ final class APIKeySection: NSObject, SettingsSection {
     func makeView() -> NSView {
         let view = NSView(frame: NSRect(x: 0, y: 0, width: 560, height: 432))
 
-        let label = NSTextField(labelWithString: "Paste your OpenAI API key. It's stored in an owner-only file on this Mac.")
-        label.frame = NSRect(x: 24, y: 360, width: 512, height: 20)
-        view.addSubview(label)
+        let prompt = NSTextField(labelWithString: "Paste your OpenAI API key. It's stored in an owner-only file on this Mac.")
+        prompt.frame = NSRect(x: 24, y: 360, width: 512, height: 20)
+        view.addSubview(prompt)
+        self.prompt = prompt
 
         let field = NSSecureTextField(frame: NSRect(x: 24, y: 322, width: 512, height: 26))
         field.placeholderString = "sk-…"
@@ -36,6 +50,18 @@ final class APIKeySection: NSObject, SettingsSection {
         save.bezelStyle = .rounded
         save.keyEquivalent = "\r"
         view.addSubview(save)
+        self.saveButton = save
+
+        let savedLabel = NSTextField(labelWithString: "An OpenAI API key is saved on this Mac.")
+        savedLabel.frame = NSRect(x: 24, y: 360, width: 512, height: 20)
+        view.addSubview(savedLabel)
+        self.savedLabel = savedLabel
+
+        let edit = NSButton(title: "Edit", target: self, action: #selector(editTapped))
+        edit.frame = NSRect(x: 24, y: 318, width: 92, height: 32)
+        edit.bezelStyle = .rounded
+        view.addSubview(edit)
+        self.editButton = edit
 
         let status = NSTextField(labelWithString: "")
         status.frame = NSRect(x: 24, y: 288, width: 400, height: 20)
@@ -43,7 +69,26 @@ final class APIKeySection: NSObject, SettingsSection {
         view.addSubview(status)
         self.status = status
 
+        editing = store.apiKey() == nil
+        applyState()
         return view
+    }
+
+    /// Show the entry field + Save, or the saved summary + Edit, per `editing`.
+    private func applyState() {
+        prompt?.isHidden = !editing
+        field?.isHidden = !editing
+        saveButton?.isHidden = !editing
+        savedLabel?.isHidden = editing
+        editButton?.isHidden = editing
+    }
+
+    @objc private func editTapped() {
+        editing = true
+        status?.stringValue = ""
+        field?.stringValue = ""
+        applyState()
+        field?.window?.makeFirstResponder(field)
     }
 
     @objc private func saveTapped() {
@@ -53,5 +98,7 @@ final class APIKeySection: NSObject, SettingsSection {
         onKeySaved(token)
         status?.stringValue = "Key saved ✓"
         field?.stringValue = ""
+        editing = false
+        applyState()
     }
 }
