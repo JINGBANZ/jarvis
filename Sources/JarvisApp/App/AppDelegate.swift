@@ -7,8 +7,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let clock = SystemClock()
     private let config = Config.default
     private let transcript = RollingTranscript()
-    private let keychain = KeychainSecretStore()
-    private lazy var secrets = ChainedSecretStore([keychain, EnvSecretStore()])
+    private let secretFile = FileSecretStore()
+    private lazy var secrets = ChainedSecretStore([secretFile, EnvSecretStore()])
 
     private var overlay: OverlayPanel!
     private var menuBar: MenuBarController!
@@ -56,7 +56,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // in dev mode. A pasted key is stored but does not auto-start; restart only if already
         // running, reflecting the real outcome back into the menu state.
         var sections: [SettingsSection] = [
-            APIKeySection(keychain: keychain, onKeySaved: { [weak self] _ in
+            APIKeySection(store: secretFile, onKeySaved: { [weak self] _ in
                 guard let self, self.transcriber != nil else { return }
                 // Re-saving a key while running only re-applies it to the pipeline — it is NOT a new
                 // coaching run, so keep the current session (don't rotate logs). Session rotation is

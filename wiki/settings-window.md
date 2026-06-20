@@ -48,7 +48,7 @@ resizing; the API-key and overlay panels stay compact.
 
 | Section class | Tab title | Always present | Description |
 |---|---|---|---|
-| `APIKeySection` | "API Key" | yes | `NSSecureTextField` to paste the OpenAI key; saves to Keychain on "Save", restarts the pipeline if already running. |
+| `APIKeySection` | "API Key" | yes | `NSSecureTextField` to paste the OpenAI key; saves to an owner-only file on "Save", restarts the pipeline if already running. |
 | `OverlaySection` | "Overlay" | yes | Text-size and background-opacity sliders with live readouts; persists via `OverlayAppearance`; shows the sample-overlay live preview **only while the Overlay tab is selected** (`didBecomeActive`/`didResignActive`). |
 | `BrainModelSection` | "Brain" | yes | Two dropdowns — the brain (LLM) model and the reasoning effort applied to it; persists via `BrainPreferences`. Takes effect on the next Start. |
 | `ActivitySection` | "Activity" | dev mode only | Embeds the `ActivityViewer` content view (`makeContentView()` / `teardown()`); `prefersResizableWindow == true` so the log gets a larger, resizable window. |

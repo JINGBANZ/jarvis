@@ -1,27 +1,27 @@
 import AppKit
 import JarvisCore
 
-/// Settings panel for the OpenAI API key. Saves to the Keychain and reports back via `onKeySaved`
-/// (the app restarts the pipeline only if it was already running). Replaces the old modal dialog in
-/// MenuBarController.
+/// Settings panel for the OpenAI API key. Saves to an owner-only file and reports back via
+/// `onKeySaved` (the app restarts the pipeline only if it was already running). Replaces the old modal
+/// dialog in MenuBarController.
 @MainActor
 final class APIKeySection: NSObject, SettingsSection {
     let title = "API Key"
 
-    private let keychain: KeychainSecretStore
+    private let store: FileSecretStore
     private let onKeySaved: (String) -> Void
     private var field: NSSecureTextField?
     private var status: NSTextField?
 
-    init(keychain: KeychainSecretStore, onKeySaved: @escaping (String) -> Void) {
-        self.keychain = keychain
+    init(store: FileSecretStore, onKeySaved: @escaping (String) -> Void) {
+        self.store = store
         self.onKeySaved = onKeySaved
     }
 
     func makeView() -> NSView {
         let view = NSView(frame: NSRect(x: 0, y: 0, width: 560, height: 432))
 
-        let label = NSTextField(labelWithString: "Paste your OpenAI API key. It's stored in your Keychain.")
+        let label = NSTextField(labelWithString: "Paste your OpenAI API key. It's stored in an owner-only file on this Mac.")
         label.frame = NSRect(x: 24, y: 360, width: 512, height: 20)
         view.addSubview(label)
 
@@ -49,7 +49,7 @@ final class APIKeySection: NSObject, SettingsSection {
     @objc private func saveTapped() {
         let token = (field?.stringValue ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !token.isEmpty else { status?.stringValue = "Enter a key first."; return }
-        keychain.setApiKey(token)
+        guard store.setApiKey(token) else { status?.stringValue = "Couldn't save key — check disk permissions."; return }
         onKeySaved(token)
         status?.stringValue = "Key saved ✓"
         field?.stringValue = ""

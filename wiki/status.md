@@ -57,6 +57,7 @@ A compact log — the *rationale* for each lives in the linked design page, not 
 | ~~Two-phase build~~ → **Skip Phase 1; build native Swift directly** (2026-06-14) | this page; [fork-evaluation.md](./fork-evaluation.md) |
 | **Native Swift app** (cleanest sandbox/footprint on macOS) | [architecture.md](./architecture.md), [fork-evaluation.md](./fork-evaluation.md) |
 | **Toolchain: SwiftPM + Command Line Tools** (no full Xcode; manual bundle + stable self-signed `Jarvis Dev` identity so TCC grants persist; TCC prompts) | [build-and-run.md](./build-and-run.md) |
+| **API key in an owner-only `0600` file, not the Keychain** — a self-signed (no Team ID) app's Keychain access keys to a per-build `cdhash`, so the Keychain re-prompts every rebuild; a file doesn't (2026-06-20) | [sandbox.md §3](./sandbox.md) |
 | ~~Build in a separate restricted account (HARD)~~ → **build in main `forrest` account, in a git worktree; hard requirement waived for the personal build** (2026-06-14) | [sandbox.md](./sandbox.md) |
 | **Tuned `server_vad`+debounce (not `semantic_vad`); quiet graceful Stop** — fixes from first live smoke run (2026-06-15) | [architecture.md](./architecture.md#models-and-apis) |
 | **Dev activity viewer = in-app `WKWebView`** (live push, no meta-refresh; screenshot lightbox; persisted JSONL session history + clear-history) | [build-and-run.md](./build-and-run.md) |
@@ -91,7 +92,7 @@ The headless build is done. Remaining is the **human smoke run** — build, run,
 
 1. `./scripts/build-app.sh release` → `open ./Jarvis.app`; grant Microphone + Screen Recording
    (one-time; they persist afterward — see [build-and-run.md](./build-and-run.md)).
-2. Paste your OpenAI key via the menu bar ("Set OpenAI API Key…") — it saves to the Keychain. Jarvis
+2. Paste your OpenAI key via the menu bar ("Set OpenAI API Key…") — it saves to an owner-only file. Jarvis
    does **not** auto-start; press **Start Jarvis** in the menu to begin (⚪️ stopped → 🟢 running),
    **Stop Jarvis** to halt. Model IDs are doc-verified; no edit expected.
 3. Run the **live smoke checklist** ([README](../README.md#live-smoke-checklist)): speak →
