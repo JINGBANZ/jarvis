@@ -24,8 +24,10 @@ public final class ResponseLogPanel: NSObject, OverlayRendering, ResponseBoxAppe
     /// While the Settings appearance tab is open, the box shows sample text (not the real log) so size
     /// and opacity changes are visible even with no responses yet. Restored on close.
     private var isPreviewing = false
-    /// Whether the box was already on screen when the preview opened, so we can restore it on close.
-    private var wasVisibleBeforePreview = false
+    /// The user's intended visibility (via the menu), kept distinct from `panel.isVisible` because the
+    /// Settings preview can show the box without the user asking. The menu title tracks this, and the
+    /// preview restores to it on close — so the menu label can never disagree with what `toggle()` does.
+    private var userWantsShown = false
     /// Stand-in responses shown during the Settings preview.
     private static let sampleEntries: [(stamp: String, text: String)] = [
         ("10:30:00", "Ask about the time complexity of that loop."),
@@ -121,6 +123,10 @@ public final class ResponseLogPanel: NSObject, OverlayRendering, ResponseBoxAppe
     private func append(_ text: String) {
         entries.append((stamp: timeFormatter.string(from: Date()), text: text))
         guard !isPreviewing else { return }   // the preview owns the display; restored on close
+        // Re-assert capture exclusion on every render that reaches the screen — same defense-in-depth as
+        // OverlayPanel.show, since this box can be visible (full of responses) while Settings flips the
+        // activation policy and WindowServer drops `sharingType` on vulnerable macOS builds.
+        if panel.isVisible { reassertCaptureExclusion() }
         rerender()
         textView.scrollToEndOfDocument(nil)   // keep the newest response in view
     }
@@ -163,21 +169,29 @@ public final class ResponseLogPanel: NSObject, OverlayRendering, ResponseBoxAppe
         rerender()
     }
 
-    /// Toggle the box on screen; returns its new visibility so the caller can update the menu label.
+    /// Toggle the box per the user's intent; returns the new intended state so the caller updates the
+    /// menu label. Keyed off `userWantsShown`, not `panel.isVisible`, so a click during a Settings
+    /// preview (which can show the box on its own) still does what the menu label promises.
     @discardableResult
     public func toggle() -> Bool {
-        if panel.isVisible { hide(); return false }
+        if userWantsShown { hide(); return false }
         show(); return true
     }
 
     public func show() {
+        userWantsShown = true
         // Re-assert capture exclusion on every show — defense-in-depth against an activation-policy
         // flip dropping `sharingType` (same reason as OverlayPanel.show).
         reassertCaptureExclusion()
         panel.orderFrontRegardless()
     }
 
-    public func hide() { panel.orderOut(nil) }
+    public func hide() {
+        userWantsShown = false
+        // Don't tear down a live preview's on-screen sample; the preview restores to `userWantsShown`
+        // when it closes. Otherwise order the box out now.
+        if !isPreviewing { panel.orderOut(nil) }
+    }
 
     public var isVisible: Bool { panel.isVisible }
 
@@ -200,15 +214,15 @@ public final class ResponseLogPanel: NSObject, OverlayRendering, ResponseBoxAppe
     /// capture exclusion, mirroring `OverlayPanel.showAppearancePreview`.
     public func showAppearancePreview(_ on: Bool) {
         if on {
-            if !isPreviewing { wasVisibleBeforePreview = panel.isVisible }
             isPreviewing = true
             reassertCaptureExclusion()
             setEntriesText(Self.sampleEntries)
             panel.orderFrontRegardless()
         } else if isPreviewing {
             isPreviewing = false
-            rerender()                                  // restore the real log
-            if !wasVisibleBeforePreview { hide() }      // and the box's prior on/off state
+            rerender()                                  // restore the real log…
+            textView.scrollToEndOfDocument(nil)         // …scrolled to any responses that arrived during preview
+            if !userWantsShown { panel.orderOut(nil) }  // and the box's user-intended on/off state
         }
     }
 

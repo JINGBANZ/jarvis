@@ -100,6 +100,16 @@ import AppKit
     func dropsEmptyAndWhitespaceOnlyTips() async {
         await checkDropsEmptyTips()
     }
+
+    @Test
+    func reassertsCaptureExclusionOnRenderWhileVisible() async {
+        await checkReassertOnRenderWhileVisible()
+    }
+
+    @Test
+    func responsesDuringPreviewAreRevealedAfterClose() async {
+        await checkAppendDuringPreview()
+    }
 }
 
 // MARK: - Main-actor checks (awaited from nonisolated tests so render's main-actor hop can run)
@@ -112,6 +122,36 @@ private func waitUntil(timeout: TimeInterval = 5, _ condition: () -> Bool) async
         try? await Task.sleep(nanoseconds: 20_000_000)
     }
     return condition()
+}
+
+// A render that reaches the screen (box visible) must re-assert capture exclusion — the same
+// defense-in-depth as OverlayPanel.show, so the box can't be left capturable after an activation-policy
+// flip. Only show()/append-while-visible bump the counter, so an increase proves the re-assert ran.
+@MainActor
+private func checkReassertOnRenderWhileVisible() async {
+    let panel = ResponseLogPanel()
+    panel.show()
+    let before = panel.captureExclusionReassertCount
+    panel.render(["A new response."], perLineSeconds: 0)
+    #expect(await waitUntil { panel.entryCount == 1 }, "the response should be logged")
+    #expect(panel.captureExclusionReassertCount > before, "a render while visible must re-assert capture exclusion")
+    #expect(panel.currentSharingType == .none)
+}
+
+// A response arriving during the Settings preview is stored but stays hidden behind the sample; closing
+// the preview reveals it. Guards the `guard !isPreviewing` branch in append() and the restore in
+// showAppearancePreview(false).
+@MainActor
+private func checkAppendDuringPreview() async {
+    let panel = ResponseLogPanel()
+    panel.showAppearancePreview(true)
+    panel.render(["Mid-preview response."], perLineSeconds: 0)
+    #expect(await waitUntil { panel.entryCount == 1 }, "the response is logged even during preview")
+    #expect(panel.currentText.contains("Ask about the time complexity"), "preview still shows the sample…")
+    #expect(!panel.currentText.contains("Mid-preview response."), "…not the response that arrived during it")
+    panel.showAppearancePreview(false)
+    #expect(panel.currentText.contains("Mid-preview response."), "closing the preview reveals the mid-preview response")
+    #expect(!panel.currentText.contains("Ask about the time complexity"), "the sample is gone after preview closes")
 }
 
 // Each spoken tip becomes one entry, its lines joined into a single paragraph, newest last.
