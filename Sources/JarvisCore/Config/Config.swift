@@ -36,6 +36,10 @@ public struct Config: Sendable {
     /// Server-VAD silence window: how long a pause must last before the server ends the turn.
     /// Raised above the ~500 ms server default so a mid-thought pause doesn't split a sentence.
     public var vadSilenceDurationMs: Int
+    /// Input noise-reduction profile applied *before* VAD, to stop non-speech blips from firing the
+    /// VAD and producing phantom transcripts. `near_field` suits a MacBook's built-in/close mic;
+    /// `far_field` suits a room/conference mic; `nil` disables it. See `RealtimeSession.sessionUpdate`.
+    public var audioNoiseReduction: String?
     /// Client-side coalescing window: rapid `…transcription.completed` fragments arriving within this
     /// window are merged into one coaching trigger, so even residual VAD fragmentation doesn't drive
     /// multiple brain calls for one spoken sentence.
@@ -56,6 +60,7 @@ public struct Config: Sendable {
         reasoningEffort: String = "low",
         transcriptionModel: String = "gpt-4o-transcribe",
         vadSilenceDurationMs: Int = 1000,
+        audioNoiseReduction: String? = "near_field",
         turnDebounceSeconds: TimeInterval = 0.4,
         maxBufferedAudioSeconds: TimeInterval = 60
     ) {
@@ -69,6 +74,7 @@ public struct Config: Sendable {
         self.reasoningEffort = reasoningEffort
         self.transcriptionModel = transcriptionModel
         self.vadSilenceDurationMs = vadSilenceDurationMs
+        self.audioNoiseReduction = audioNoiseReduction
         self.turnDebounceSeconds = turnDebounceSeconds
         self.maxBufferedAudioSeconds = maxBufferedAudioSeconds
     }

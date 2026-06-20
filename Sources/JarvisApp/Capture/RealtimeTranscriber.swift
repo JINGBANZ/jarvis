@@ -30,6 +30,7 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
     private let clock: Clock
     private let sessionStart: TimeInterval
     private let silenceDurationMs: Int
+    private let noiseReduction: String?
     private let turnDebounce: TimeInterval
 
     private let lock = NSLock()
@@ -51,7 +52,7 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
 
     init(apiKey: String, model: String, speaker: Speaker = .me, transcript: RollingTranscript, clock: Clock,
          silenceTimeout: TimeInterval, silenceMaxInterval: TimeInterval,
-         silenceDurationMs: Int = 1000,
+         silenceDurationMs: Int = 1000, noiseReduction: String? = "near_field",
          turnDebounce: TimeInterval = 0.4, maxBufferedAudioSeconds: TimeInterval = 60) {
         self.apiKey = apiKey
         self.model = model
@@ -61,6 +62,7 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         self.sessionStart = clock.now()
         self.silenceBackoff = SilenceBackoff(base: silenceTimeout, maxInterval: silenceMaxInterval)
         self.silenceDurationMs = silenceDurationMs
+        self.noiseReduction = noiseReduction
         self.turnDebounce = turnDebounce
         // PCM16 mono at the realtime sample rate → 2 bytes/sample.
         let bytesPerSecond = RealtimeSession.sampleRate * 2
@@ -112,7 +114,8 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
     }
 
     private func configureSession() {
-        send(json: RealtimeSession.sessionUpdate(model: model, silenceDurationMs: silenceDurationMs))
+        send(json: RealtimeSession.sessionUpdate(model: model, silenceDurationMs: silenceDurationMs,
+                                                 noiseReduction: noiseReduction))
     }
 
     func sendAudio(_ pcm: Data) {

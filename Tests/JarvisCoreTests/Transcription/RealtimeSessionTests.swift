@@ -21,6 +21,33 @@ import Testing
         #expect(RealtimeSession.completedTranscript(from: [:]) == nil)
     }
 
+    /// Layer 3 (text filter): the model hallucinates a lone "." (and other punctuation/whitespace) when
+    /// server VAD fires on non-speech. No real utterance is punctuation-only, so these are dropped —
+    /// otherwise each one logs a phantom `heard (me)` line, resets the silence timer, and fires a turn.
+    @Test func completedTranscriptRejectsPunctuationAndWhitespaceOnly() {
+        for junk in [".", " . ", "…", ",", ". .", "?!", "  ", "\n", "-"] {
+            #expect(RealtimeSession.meaningfulTranscript(junk) == nil, "should drop \(junk.debugDescription)")
+        }
+    }
+
+    /// Layer 3 (denylist): gpt-4o-transcribe / Whisper emit stock caption-artifact phrases on silence
+    /// ("Thank you.", "Thanks for watching"). Matched only when the *whole* utterance equals one — so a
+    /// real sentence that merely contains the words is kept.
+    @Test func completedTranscriptRejectsStockHallucinationPhrases() {
+        for junk in ["Thank you.", "thank you", "Thanks for watching!", "you", "Please subscribe."] {
+            #expect(RealtimeSession.meaningfulTranscript(junk) == nil, "should drop \(junk.debugDescription)")
+        }
+    }
+
+    /// Real speech survives, and is returned trimmed of surrounding whitespace. A sentence that merely
+    /// contains a denylisted phrase as a substring is NOT dropped.
+    @Test func completedTranscriptKeepsAndTrimsRealSpeech() {
+        #expect(RealtimeSession.meaningfulTranscript("  two pointers  ") == "two pointers")
+        #expect(RealtimeSession.meaningfulTranscript("thank you, let's use a hash map")
+                == "thank you, let's use a hash map")
+        #expect(RealtimeSession.meaningfulTranscript("3") == "3")  // a lone digit is real content
+    }
+
     /// The connect URL MUST select a transcription session via intent (not ?model=).
     @Test func connectURLUsesIntentTranscription() {
         let url = RealtimeSession.connectURL().absoluteString
@@ -51,6 +78,32 @@ import Testing
         let obj = try JSONSerialization.jsonObject(with: data) as! [String: Any]
         let input = (((obj["session"] as! [String: Any])["audio"] as! [String: Any])["input"] as! [String: Any])
         #expect((((input["turn_detection"] as! [String: Any])["silence_duration_ms"]) as? Int) == 700)
+    }
+
+    /// Layer 1 (pre-VAD): noise reduction is sent as an OBJECT `{"type": "near_field"}` nested under
+    /// `audio.input` (GA shape — a string here is the documented LiveKit bug the server rejects). It
+    /// filters the buffer before VAD, cutting the non-speech blips that trigger phantom transcripts.
+    @Test func sessionUpdateIncludesNoiseReductionNearFieldByDefault() throws {
+        let payload = RealtimeSession.sessionUpdate(model: "gpt-4o-transcribe")
+        let data = try JSONSerialization.data(withJSONObject: payload)
+        let obj = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        let input = (((obj["session"] as! [String: Any])["audio"] as! [String: Any])["input"] as! [String: Any])
+        let nr = try #require(input["noise_reduction"] as? [String: Any])
+        #expect(nr["type"] as? String == "near_field")
+    }
+
+    /// The mic profile is tunable (far_field for a laptop/room mic), and nil omits the key entirely so
+    /// the server applies no filtering.
+    @Test func sessionUpdateHonorsConfiguredNoiseReduction() throws {
+        func input(_ payload: [String: Any]) throws -> [String: Any] {
+            let obj = try JSONSerialization.jsonObject(
+                with: try JSONSerialization.data(withJSONObject: payload)) as! [String: Any]
+            return (((obj["session"] as! [String: Any])["audio"] as! [String: Any])["input"] as! [String: Any])
+        }
+        let far = try input(RealtimeSession.sessionUpdate(model: "m", noiseReduction: "far_field"))
+        #expect((far["noise_reduction"] as? [String: Any])?["type"] as? String == "far_field")
+        let off = try input(RealtimeSession.sessionUpdate(model: "m", noiseReduction: nil))
+        #expect(off["noise_reduction"] == nil)
     }
 
     @Test func appendAudioShape() {
