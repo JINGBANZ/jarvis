@@ -83,28 +83,30 @@ public final class OverlayPanel: NSObject, OverlayRendering, OverlayAppearanceAp
             label.centerYAnchor.constraint(equalTo: content.centerYAnchor),
         ])
         super.init()
-        resizeToFit("")   // start at the floor height, centered along the bottom
+        resizeToFit()   // label is empty → floor height, centered along the bottom
     }
 
-    /// Height the panel needs to show `text` without clipping: the wrapped text height (measured at the
-    /// label's current font, constrained to the label's width) plus padding above and below, floored at
-    /// `minHeight`. Foundation/AppKit text measurement — no layout pass required.
-    private func fittedHeight(for text: String) -> CGFloat {
-        let font = label.font ?? .systemFont(ofSize: CGFloat(Config.overlayFontSizeDefault), weight: .medium)
+    /// Height the panel needs to show the label's *current* text without clipping: the wrapped text
+    /// height plus padding above and below, floored at `minHeight`. Measured through the label's own
+    /// cell (`cellSize(forBounds:)`) rather than `NSString.boundingRect`, so the wrap width and line
+    /// count match what's actually laid out — the cell reserves a small horizontal inset that a bare
+    /// `boundingRect` ignores, which at large fonts could under-measure by a row and clip the text the
+    /// resize exists to reveal. Callers set `label.stringValue` before invoking, so the cell holds the
+    /// right string.
+    private func fittedHeight() -> CGFloat {
         let innerWidth = Layout.width - 2 * Layout.horizontalPadding
-        let bounding = (text as NSString).boundingRect(
-            with: NSSize(width: innerWidth, height: .greatestFiniteMagnitude),
-            options: [.usesLineFragmentOrigin, .usesFontLeading],
-            attributes: [.font: font])
-        return max(Layout.minHeight, ceil(bounding.height) + 2 * Layout.verticalPadding)
+        let bounds = NSRect(x: 0, y: 0, width: innerWidth, height: .greatestFiniteMagnitude)
+        let measured = label.cell?.cellSize(forBounds: bounds).height ?? 0
+        return max(Layout.minHeight, ceil(measured) + 2 * Layout.verticalPadding)
     }
 
-    /// Re-center the panel along the bottom of the screen and size its height to fit `text`. The bottom
-    /// edge stays pinned at `bottomMargin`, so a taller panel grows *upward* and a long line is fully
-    /// shown rather than clipped by the old fixed height. Off-screen-session-safe: if there's no main
-    /// screen it keeps the current origin (only tests hit that path) and still applies the fitted height.
-    private func resizeToFit(_ text: String) {
-        let h = fittedHeight(for: text)
+    /// Re-center the panel along the bottom of the screen and size its height to fit the label's current
+    /// text. The bottom edge stays pinned at `bottomMargin`, so a taller panel grows *upward* and a long
+    /// line is fully shown rather than clipped by the old fixed height. Off-screen-session-safe: if
+    /// there's no main screen it keeps the current origin (only tests hit that path) and still applies
+    /// the fitted height. Set `label.stringValue` before calling.
+    private func resizeToFit() {
+        let h = fittedHeight()
         let w = Layout.width
         var origin = panel.frame.origin
         if let screen = NSScreen.main {
@@ -160,7 +162,7 @@ public final class OverlayPanel: NSObject, OverlayRendering, OverlayAppearanceAp
             return
         }
         label.stringValue = tip.lines[line]
-        resizeToFit(tip.lines[line])   // grow the panel so a long line isn't clipped
+        resizeToFit()   // grow the panel so a long line isn't clipped
         panel.orderFrontRegardless()
         active = (tip, line + 1)
         scheduleTick(after: tip.seconds[line]) { $0.gapThenAdvance() }
@@ -210,7 +212,7 @@ public final class OverlayPanel: NSObject, OverlayRendering, OverlayAppearanceAp
     public func setFontSize(_ points: Double) {
         label.font = .systemFont(ofSize: CGFloat(points), weight: .medium)
         // Re-fit the live preview so a larger font doesn't overflow the sample mid-adjust.
-        if isPreviewing { resizeToFit(Self.previewText) }
+        if isPreviewing { resizeToFit() }
     }
 
     public func setBackgroundOpacity(_ opacity: Double) {
@@ -228,7 +230,7 @@ public final class OverlayPanel: NSObject, OverlayRendering, OverlayAppearanceAp
             reassertCaptureExclusion()
             isPreviewing = true
             label.stringValue = Self.previewText
-            resizeToFit(Self.previewText)
+            resizeToFit()
             panel.orderFrontRegardless()
         } else if isPreviewing {
             isPreviewing = false
