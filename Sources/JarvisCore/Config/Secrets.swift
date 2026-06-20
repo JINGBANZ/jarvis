@@ -57,6 +57,11 @@ public struct FileSecretStore: SecretStore {
         do {
             try fm.createDirectory(at: dir, withIntermediateDirectories: true,
                                    attributes: [.posixPermissions: 0o700])
+            // createDirectory only applies the mode to directories it *creates*; a pre-existing dir
+            // (e.g. a 0755 left by a restored backup or another tool) keeps its mode. Tighten it so the
+            // owner-only guarantee holds regardless. Best-effort: a metadata-perms failure must not
+            // block saving the key, whose own bytes are still protected 0600.
+            try? fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dir.path)
         } catch { return false }
         // Create the file 0600 from the start (createFile applies attributes atomically on creation),
         // so the secret is never briefly world-readable between write and chmod.

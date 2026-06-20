@@ -29,7 +29,8 @@ import Testing
         let url = tempFileURL()
         let store = FileSecretStore(fileURL: url)
         #expect(store.setApiKey("   \n  "))
-        // A key that is only whitespace is "no key" — same as the env store's empty handling.
+        // A key that is only whitespace is "no key": the file store trims before checking (stricter
+        // than EnvSecretStore, which doesn't trim and would return the raw whitespace).
         #expect(store.apiKey() == nil)
     }
 
@@ -64,6 +65,42 @@ import Testing
         let dir = url.deletingLastPathComponent().path
         let perms = try FileManager.default.attributesOfItem(atPath: dir)[.posixPermissions] as? NSNumber
         #expect(perms?.int16Value == 0o700)
+    }
+
+    /// `createDirectory` only applies its mode to directories it creates — a *pre-existing* loose dir
+    /// keeps its mode. The store must tighten it anyway, or the owner-only guarantee silently lapses.
+    @Test func tightensPreExistingLooseDirectory() throws {
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory.appendingPathComponent("jarvis-loose-\(UUID().uuidString)", isDirectory: true)
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o755])
+        let store = FileSecretStore(fileURL: dir.appendingPathComponent("openai-api-key"))
+        #expect(store.setApiKey("sk-tighten"))
+        let perms = try fm.attributesOfItem(atPath: dir.path)[.posixPermissions] as? NSNumber
+        #expect(perms?.int16Value == 0o700)
+    }
+
+    /// Overwriting an already-saved key must re-assert 0600 — otherwise a file someone loosened (or a
+    /// future switch to a perms-preserving write) would silently leave the secret world-readable.
+    @Test func overwriteReassertsOwnerOnlyPermissions() throws {
+        let fm = FileManager.default
+        let url = tempFileURL()
+        let store = FileSecretStore(fileURL: url)
+        #expect(store.setApiKey("sk-first"))
+        try fm.setAttributes([.posixPermissions: 0o644], ofItemAtPath: url.path)
+        #expect(store.setApiKey("sk-second"))
+        let perms = try fm.attributesOfItem(atPath: url.path)[.posixPermissions] as? NSNumber
+        #expect(perms?.int16Value == 0o600)
+    }
+
+    /// `setApiKey` returns false (not a crash) when the file can't be written — the path the Settings
+    /// UI surfaces as "Couldn't save key". Here the intended parent is a regular file, so the store's
+    /// directory creation fails.
+    @Test func writeFailsGracefullyWhenDirectoryUnavailable() throws {
+        let fm = FileManager.default
+        let blocker = fm.temporaryDirectory.appendingPathComponent("jarvis-blocker-\(UUID().uuidString)")
+        try Data("x".utf8).write(to: blocker)   // a file where the store wants a directory
+        let store = FileSecretStore(fileURL: blocker.appendingPathComponent("sub/openai-api-key"))
+        #expect(store.setApiKey("sk-nope") == false)
     }
 
     @Test func defaultLocationIsUnderApplicationSupport() {

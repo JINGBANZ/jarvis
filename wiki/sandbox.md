@@ -78,6 +78,9 @@ the same practical trust boundary as the `OPENAI_API_KEY` headless fallback — 
 this user can read it — but never prompts and survives every rebuild. If Jarvis ever ships under a
 real Developer ID, revisit this and move the key back into the Keychain.
 
+Upgrading from an older Keychain build: the key isn't migrated — re-paste it once (the file starts
+empty), and optionally delete the now-orphaned item with `security delete-generic-password -s com.jarvis.coach`.
+
 ## Data Egress
 
 Narrow and explicit. Data leaves the machine only via:
