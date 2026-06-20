@@ -92,7 +92,8 @@ path still works for testing/practice; it is simply not latency-critical there.)
 | **CoachDriver** | The event loop. On every trigger, call the brain with the transcript + timing context and tools, route tool calls. No cooldown/rate cap — restraint is the model's. | `gpt-5.5` (vision + tool-use). |
 | **ScreenTool** | Fulfill `capture_screen`: take a silent screenshot of the active display, excluding the overlay window. | macOS `screencapture` CLI. |
 | **Overlay** | Render `speak` output: up to ~3 short lines (model-split), shown one at a time and queued so a newer tip never cuts off the current one; non-activating, always-on-top, excluded from capture. | AppKit NSPanel. |
-| **MenuBar** | Manual **Start/Stop** of the pipeline (two states: ⚪️ stopped / 🟢 running — no auto-start), status indicator, one-time API-key entry. | AppKit menu-bar item; owner-only file for the key. |
+| **Response box** | An optional persistent window logging every `speak` tip in full, timestamped — the scrollable history of what the overlay flashed one line at a time. Movable, resizable, opaque, also excluded from capture; toggled from the menu bar, cleared on each Start. Fed by the same `speak` call as the overlay via **`BroadcastOverlay`**, which fans one `OverlayRendering.render` out to both sinks (so `CoachDriver` is unchanged). | AppKit NSPanel; `ResponseLogPanel`. |
+| **MenuBar** | Manual **Start/Stop** of the pipeline (two states: ⚪️ stopped / 🟢 running — no auto-start), a **Show/Hide Responses** toggle, status indicator, one-time API-key entry. | AppKit menu-bar item; owner-only file for the key. |
 
 Each component has one job and a narrow interface. The CoachDriver is the only place the
 "intelligence" lives, and even there the intelligence is the model — the driver just wires events

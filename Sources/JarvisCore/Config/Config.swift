@@ -69,6 +69,12 @@ public struct Config: Sendable {
     public static let overlayFontSizeDefault: Double = 18
     public static let overlayOpacityRange: ClosedRange<Double> = 0.40...1.0
     public static let overlayOpacityDefault: Double = 0.78
+    // The persistent response box: its background-fill opacity. Defaults fully opaque (the box is a
+    // readout meant to stay legible); the lower bound matches the overlay so it can be dimmed too.
+    public static let responseBoxOpacityRange: ClosedRange<Double> = 0.40...1.0
+    public static let responseBoxOpacityDefault: Double = 1.0
+    public static let responseBoxFontSizeRange: ClosedRange<Double> = 12...32
+    public static let responseBoxFontSizeDefault: Double = 14
 
     /// Brief blank shown between consecutive overlay lines (and before the next queued tip). Borrowed
     /// from the captioning minimum-gap rule: without it, back-to-back lines read as one block and the

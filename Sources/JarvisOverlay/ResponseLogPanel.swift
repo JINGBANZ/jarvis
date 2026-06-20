@@ -1,0 +1,268 @@
+import AppKit
+import JarvisCore
+
+/// A persistent, borderless box that logs every coaching response in full — the running history of
+/// what the overlay flashed one line at a time, each line timestamped. It conforms to the same
+/// `OverlayRendering` seam as `OverlayPanel`, so `CoachDriver` feeds both through one `render` call
+/// (fanned out by `BroadcastOverlay`); this panel simply appends each tip instead of timing it out.
+///
+/// Like the overlay it is excluded from all screen capture (so it stays invisible in a screen share
+/// and the brain never reads it back) and has no window chrome. Unlike the overlay it accepts mouse
+/// events: drag anywhere to move it, scroll to read the backlog. The menu bar toggles it; each fresh
+/// Start clears it.
+@MainActor
+public final class ResponseLogPanel: NSObject, OverlayRendering, ResponseBoxAppearanceApplying {
+    private let panel: NSPanel
+    /// The layer-backed, opaque rounded fill behind the text — its alpha is the box's opacity.
+    private let box: NSView
+    private let textView: NSTextView
+    /// White level of the box fill; the opacity setting only varies the alpha, keeping this constant.
+    private static let boxWhite: CGFloat = 0.10
+    /// Point size of the response text; the timestamp is rendered a couple points smaller. Driven by
+    /// the Settings slider via `setBoxFontSize`.
+    private var fontSize: CGFloat = CGFloat(Config.responseBoxFontSizeDefault)
+    /// While the Settings appearance tab is open, the box shows sample text (not the real log) so size
+    /// and opacity changes are visible even with no responses yet. Restored on close.
+    private var isPreviewing = false
+    /// The user's intended visibility (via the menu), kept distinct from `panel.isVisible` because the
+    /// Settings preview can show the box without the user asking. The menu title tracks this, and the
+    /// preview restores to it on close — so the menu label can never disagree with what `toggle()` does.
+    private var userWantsShown = false
+    /// Stand-in responses shown during the Settings preview.
+    private static let sampleEntries: [(stamp: String, text: String)] = [
+        ("10:30:00", "Ask about the time complexity of that loop."),
+        ("10:30:08", "Mention the edge case when the list is empty."),
+    ]
+    /// Each spoken tip with the time it arrived, newest last. Held as structured entries (not the
+    /// rendered string) so `clear()` and the test hooks don't have to parse the text back out.
+    private var entries: [(stamp: String, text: String)] = []
+    /// Test hook (internal): counts how many times the panel has re-asserted capture exclusion.
+    private(set) var captureExclusionReassertCount = 0
+
+    /// `HH:mm:ss`, pinned to a fixed locale so the prefix is stable regardless of the user's locale.
+    private let timeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "HH:mm:ss"
+        return f
+    }()
+
+    public override init() {
+        // `.resizable` lets the user drag the borderless box's edges to resize it (no visible chrome,
+        // but the window server still provides edge resizing on a resizable window). `minSize` keeps it
+        // from being shrunk to nothing.
+        panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 380, height: 320),
+                        styleMask: [.nonactivatingPanel, .borderless, .resizable],
+                        backing: .buffered, defer: false)
+        panel.minSize = NSSize(width: 240, height: 140)
+        panel.level = .floating
+        panel.isFloatingPanel = true
+        panel.hidesOnDeactivate = false
+        // Borderless + opaque rounded box: the window itself is transparent so the corners can round;
+        // the opaque fill is drawn by the layer-backed content view below.
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        panel.isMovableByWindowBackground = true   // drag anywhere on the box to move it
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+
+        let box = NSView(frame: panel.contentRect(forFrameRect: panel.frame))
+        box.wantsLayer = true
+        box.layer?.backgroundColor = NSColor(white: Self.boxWhite, alpha: 1).cgColor   // opaque by default
+        box.layer?.cornerRadius = 12
+        box.layer?.masksToBounds = true
+        self.box = box
+
+        let scroll = NSScrollView(frame: box.bounds)
+        scroll.autoresizingMask = [.width, .height]
+        scroll.hasVerticalScroller = true
+        scroll.drawsBackground = false        // let the opaque box show through
+        scroll.borderType = .noBorder
+
+        // Drag-to-move over the text area too (a plain NSTextView would swallow the drag). Non-editable,
+        // non-selectable: this is a read-only readout, so clicks should move the window, not select.
+        let tv = MovableTextView(frame: scroll.bounds)
+        tv.isEditable = false
+        tv.isSelectable = false
+        tv.drawsBackground = false
+        tv.textContainerInset = NSSize(width: 14, height: 12)
+        let unbounded = CGFloat.greatestFiniteMagnitude
+        tv.minSize = NSSize(width: 0, height: 0)
+        tv.maxSize = NSSize(width: unbounded, height: unbounded)
+        tv.isVerticallyResizable = true
+        tv.isHorizontallyResizable = false
+        tv.autoresizingMask = [.width]
+        tv.textContainer?.widthTracksTextView = true
+        tv.textContainer?.containerSize = NSSize(width: scroll.contentSize.width, height: unbounded)
+        scroll.documentView = tv
+        textView = tv
+
+        box.addSubview(scroll)
+        panel.contentView = box
+        super.init()
+        // Centered on screen initially; the user can drag it anywhere from there (the frame persists
+        // across menu toggles, since hide() only orders it out).
+        panel.center()
+        panel.excludeFromScreenCapture()
+    }
+
+    // MARK: - OverlayRendering
+
+    /// Append the spoken tip (its lines joined into one paragraph, timestamped) to the log. Nonisolated
+    /// to satisfy the protocol; hops to the main actor. Empty/whitespace-only lines are dropped,
+    /// matching the overlay, so a no-text tip never adds a blank entry.
+    public nonisolated func render(_ lines: [String], perLineSeconds: [TimeInterval]) {
+        let text = lines
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        guard !text.isEmpty else { return }
+        Task { @MainActor in self.append(text) }
+    }
+
+    private func append(_ text: String) {
+        entries.append((stamp: timeFormatter.string(from: Date()), text: text))
+        guard !isPreviewing else { return }   // the preview owns the display; restored on close
+        // Re-assert capture exclusion on every render that reaches the screen — same defense-in-depth as
+        // OverlayPanel.show, since this box can be visible (full of responses) while Settings flips the
+        // activation policy and WindowServer drops `sharingType` on vulnerable macOS builds.
+        if panel.isVisible { reassertCaptureExclusion() }
+        rerender()
+        textView.scrollToEndOfDocument(nil)   // keep the newest response in view
+    }
+
+    /// Re-render whichever content the box should currently show — sample text while previewing, the
+    /// real log otherwise. Called after a font change so the new size is reflected live in both modes.
+    private func refreshText() {
+        setEntriesText(isPreviewing ? Self.sampleEntries : entries)
+    }
+
+    private func rerender() { setEntriesText(entries) }
+
+    /// Build the readout from `items`: a dimmed monospaced timestamp in front of each response, blank
+    /// line between.
+    private func setEntriesText(_ items: [(stamp: String, text: String)]) {
+        let result = NSMutableAttributedString()
+        let stampAttrs: [NSAttributedString.Key: Any] = [
+            .foregroundColor: NSColor(white: 1, alpha: 0.5),
+            .font: NSFont.monospacedDigitSystemFont(ofSize: max(8, fontSize - 2), weight: .regular),
+        ]
+        let textAttrs: [NSAttributedString.Key: Any] = [
+            .foregroundColor: NSColor.white,
+            .font: NSFont.systemFont(ofSize: fontSize),
+        ]
+        for (i, entry) in items.enumerated() {
+            if i > 0 { result.append(NSAttributedString(string: "\n\n")) }
+            result.append(NSAttributedString(string: "\(entry.stamp)  ", attributes: stampAttrs))
+            result.append(NSAttributedString(string: entry.text, attributes: textAttrs))
+        }
+        textView.textStorage?.setAttributedString(result)
+    }
+
+    // MARK: - Visibility (driven by the menu bar)
+
+    /// Wipe the log. Called on each fresh Start so the box shows only the current conversation,
+    /// matching how the dev session rotates.
+    public func clear() {
+        entries.removeAll()
+        guard !isPreviewing else { return }   // the preview owns the display; restored on close
+        rerender()
+    }
+
+    /// Toggle the box per the user's intent; returns the new intended state so the caller updates the
+    /// menu label. Keyed off `userWantsShown`, not `panel.isVisible`, so a click during a Settings
+    /// preview (which can show the box on its own) still does what the menu label promises.
+    @discardableResult
+    public func toggle() -> Bool {
+        if userWantsShown { hide(); return false }
+        show(); return true
+    }
+
+    public func show() {
+        userWantsShown = true
+        // Re-assert capture exclusion on every show — defense-in-depth against an activation-policy
+        // flip dropping `sharingType` (same reason as OverlayPanel.show).
+        reassertCaptureExclusion()
+        panel.orderFrontRegardless()
+    }
+
+    public func hide() {
+        userWantsShown = false
+        // Don't tear down a live preview's on-screen sample; the preview restores to `userWantsShown`
+        // when it closes. Otherwise order the box out now.
+        if !isPreviewing { panel.orderOut(nil) }
+    }
+
+    public var isVisible: Bool { panel.isVisible }
+
+    // MARK: - ResponseBoxAppearanceApplying
+
+    /// Set the box's background-fill opacity (0–1), live. Only the alpha varies; the fill colour stays
+    /// constant. The window stays non-opaque so a dimmed fill reads as translucent over what's behind.
+    public func setBoxOpacity(_ opacity: Double) {
+        box.layer?.backgroundColor = NSColor(white: Self.boxWhite, alpha: CGFloat(opacity)).cgColor
+    }
+
+    /// Set the response text's point size, live; the timestamp tracks a couple points smaller.
+    public func setBoxFontSize(_ points: Double) {
+        fontSize = CGFloat(points)
+        refreshText()
+    }
+
+    /// Show the box with sample text (on) while the Settings appearance tab is open so size/opacity
+    /// changes are visible, then restore the real log and the box's prior visibility (off). Re-asserts
+    /// capture exclusion, mirroring `OverlayPanel.showAppearancePreview`.
+    public func showAppearancePreview(_ on: Bool) {
+        if on {
+            isPreviewing = true
+            reassertCaptureExclusion()
+            setEntriesText(Self.sampleEntries)
+            panel.orderFrontRegardless()
+        } else if isPreviewing {
+            isPreviewing = false
+            rerender()                                  // restore the real log…
+            textView.scrollToEndOfDocument(nil)         // …scrolled to any responses that arrived during preview
+            if !userWantsShown { panel.orderOut(nil) }  // and the box's user-intended on/off state
+        }
+    }
+
+    private func reassertCaptureExclusion() {
+        panel.excludeFromScreenCapture()
+        captureExclusionReassertCount += 1
+    }
+
+    // MARK: - Test hooks (internal; reached via `@testable import JarvisOverlay`)
+
+    /// The panel's current capture-sharing type. `.none` means excluded from screen capture.
+    var currentSharingType: NSWindow.SharingType { panel.sharingType }
+
+    /// Number of logged responses — lets tests assert append/clear behavior.
+    var entryCount: Int { entries.count }
+
+    /// The full rendered log text (timestamps + responses) — lets tests assert what is shown.
+    var currentText: String { textView.string }
+
+    /// Whether the panel is on screen — lets tests assert toggle/show/hide.
+    var isPanelVisible: Bool { panel.isVisible }
+
+    /// The box fill's current alpha (the opacity the user picked).
+    var currentBoxOpacity: CGFloat { box.layer?.backgroundColor?.alpha ?? 0 }
+
+    /// The response text's current point size (the size the user picked).
+    var currentFontPointSize: CGFloat { fontSize }
+
+    /// Whether the box can be resized by dragging its edges.
+    var isResizable: Bool { panel.isResizable }
+
+    /// Resize the box's content (used by tests; the user resizes by dragging the edges).
+    func setContentSize(_ size: NSSize) { panel.setContentSize(size) }
+
+    /// The box's current content size — lets tests assert resize/min-size behavior.
+    var currentContentSize: NSSize { panel.contentRect(forFrameRect: panel.frame).size }
+}
+
+/// An NSTextView that lets a click-drag move the borderless window instead of being swallowed by the
+/// text view — so the read-only box is draggable anywhere, while the scroll wheel still scrolls.
+private final class MovableTextView: NSTextView {
+    override var mouseDownCanMoveWindow: Bool { true }
+}
