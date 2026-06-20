@@ -17,7 +17,8 @@ by the human smoke checklist in the [README](../README.md#live-smoke-checklist).
 - **What it is:** a personal LeetCode-coaching "Jarvis" for macOS. Hears you think aloud,
   watches your screen *on demand*, proactively offers short coaching tips via an overlay.
 - **Brain:** `gpt-5.5` (Responses API, tool-use + vision), with a server-side conversation per
-  session for multi-turn memory. **Transcription:** `gpt-4o-transcribe` over the GA Realtime API.
+  session for multi-turn memory. Model + reasoning effort are user-selectable in Settings
+  (default `gpt-5.5` / `low`). **Transcription:** `gpt-4o-transcribe` over the GA Realtime API.
   API-only, no local models. Rationale: [architecture.md](./architecture.md#4-data-flow--cost-model).
 - **Overlay:** the brain returns the tip as a pre-split `lines` array (Structured Outputs); the
   overlay shows up to ~3 short lines per response, one at a time. Newer tips queue behind the one on
@@ -68,6 +69,7 @@ A compact log — the *rationale* for each lives in the linked design page, not 
 | **AEC reverted — mic was silent** — `VoiceProcessingIO` came up without throwing, but the `SCStream` starting ~150 ms later changed the audio route out from under it and the mic went silent (RMS 0); reverted to a plain `AVAudioEngine` tap (2026-06-18) | [architecture.md §3](./architecture.md#3-components) |
 | **Echo cancellation via one-clock Core Audio aggregate device + AEC3 — no headphones needed** — the mic was bleeding the other side's speaker audio into the `me` transcript (verbatim, on speakers). Solved by capturing the mic + a system-output **process tap** in ONE private aggregate device (mic = clock master, tap drift-compensated), so a single IOProc delivers both synced at 48 kHz — the meeting-app single-clock case — and AEC3 runs inside that callback. Measured **30–50 dB** cancellation live; the other side no longer mis-transcribes as `me`, the user's own voice is preserved, double-talk works. Replaces the separate `AVAudioEngine` mic + `SCStream`. Path taken after a prior two-clock attempt (separate mic + SCStream feeding AEC3) achieved only ~5% — confirmed by research that a passive bystander on two clocks is the hard async-AEC case; one aggregate device removes the drift. AEC3 lib via `scripts/build-aec.sh` (vendored zero-dylib `.a`). (2026-06-19) | [architecture.md §3](./architecture.md#3-components) |
 | **Per-line overlay time is length-proportional, not hard-coded** — a hybrid of the captioning reading-speed standard and our glance-not-watch situation: `noticeBuffer + words × readingRate` (capped), plus a brief blank gap between lines borrowed from the captioning minimum-gap rule (2026-06-19) | [overlay-timing.md](./overlay-timing.md) |
+| **Brain model + reasoning effort are user-selectable in Settings** — a "Brain" tab picks the OpenAI model from a curated code-owned `BrainModelCatalog` (default `gpt-5.5`) and one global reasoning effort (None/Low/Medium/High, default `low`), persisted via `BrainPreferences` (UserDefaults); applied on next Start. Brain model/effort moved out of `Config` so the catalog/enum is the single source of truth (2026-06-20) | [settings-window.md](./settings-window.md) |
 
 ## Open Questions / To Confirm
 

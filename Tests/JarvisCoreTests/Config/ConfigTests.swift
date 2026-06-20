@@ -10,8 +10,6 @@ import Testing
         #expect(c.overlayNoticeBufferSeconds == 2.0)
         #expect(c.overlaySecondsPerWord == 0.35)
         #expect(c.overlayMaxDisplaySeconds == 8)
-        #expect(c.brainModel == "gpt-5.5")
-        #expect(c.reasoningEffort == "low")
         #expect(c.transcriptionModel == "gpt-4o-transcribe")
         #expect(c.vadSilenceDurationMs == 1000)
         #expect(c.turnDebounceSeconds == 0.4)
