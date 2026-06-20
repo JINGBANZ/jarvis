@@ -49,7 +49,7 @@ resizing; the API-key and overlay panels stay compact.
 | Section class | Tab title | Always present | Description |
 |---|---|---|---|
 | `APIKeySection` | "API Key" | yes | `NSSecureTextField` to paste the OpenAI key; saves to an owner-only file on "Save", restarts the pipeline if already running. |
-| `OverlaySection` | "Overlay" | yes | Text-size and background-opacity sliders with live readouts; persists via `OverlayAppearance`; shows the sample-overlay live preview **only while the Overlay tab is selected** (`didBecomeActive`/`didResignActive`). |
+| `OverlaySection` | "Overlay" | yes | Two groups of sliders with live readouts: **Overlay** (text size + background opacity) and **Response Box** (text size + opacity); persists via `OverlayAppearance`. Shows a live sample of *both* the overlay and the response box **only while the Overlay tab is selected** (`didBecomeActive`/`didResignActive`). |
 | `BrainModelSection` | "Brain" | yes | Two dropdowns — the brain (LLM) model and the reasoning effort applied to it; persists via `BrainPreferences`. Takes effect on the next Start. |
 | `ActivitySection` | "Activity" | dev mode only | Embeds the `ActivityViewer` content view (`makeContentView()` / `teardown()`); `prefersResizableWindow == true` so the log gets a larger, resizable window. |
 
@@ -71,21 +71,25 @@ ranges defined in `Config`:
 
 | Property | Default | Range | UserDefaults key |
 |---|---|---|---|
-| Font size | 18 pt | 12–32 pt | `overlay.fontSize` |
-| Background opacity | 0.78 (78%) | 0.40–1.00 (40–100%) | `overlay.backgroundOpacity` |
+| Overlay font size | 18 pt | 12–32 pt | `overlay.fontSize` |
+| Overlay background opacity | 0.78 (78%) | 0.40–1.00 (40–100%) | `overlay.backgroundOpacity` |
+| Response box font size | 14 pt | 12–32 pt | `responseBox.fontSize` |
+| Response box opacity | 1.00 (100%) | 0.40–1.00 (40–100%) | `responseBox.opacity` |
 
-`OverlaySection` applies changes live to the overlay via the `OverlayAppearanceApplying` protocol
-(`setFontSize(_:)` / `setBackgroundOpacity(_:)` / `showAppearancePreview(_:)`), with no direct
-dependency on `OverlayPanel`. Changes are round-tripped through `OverlayAppearance` so they survive
-an app relaunch.
+`OverlaySection` applies changes live through two protocols, with no direct dependency on the AppKit
+panels: `OverlayAppearanceApplying` (`setFontSize` / `setBackgroundOpacity` / `showAppearancePreview`,
+conformed by `OverlayPanel`) and `ResponseBoxAppearanceApplying` (`setBoxFontSize` / `setBoxOpacity` /
+`showAppearancePreview`, conformed by `ResponseLogPanel`). All four values round-trip through
+`OverlayAppearance` so they survive an app relaunch.
 
-The sample-overlay preview is shown only while the Overlay tab is selected (toggled from
-`didBecomeActive`/`didResignActive`, not from `makeView`/`windowWillClose`). `showAppearancePreview(_:)`
-re-asserts capture exclusion via the counted `reassertCaptureExclusion()` helper inside `OverlayPanel`
-so the preview stays hidden from screen capture — same defense-in-depth as the coaching display path —
-and its off-path only hides the panel when a preview is actually up, so closing/leaving the tab never
-tears down a live coaching tip. The `setFontSize`/`setBackgroundOpacity` setters only change appearance
-and don't touch `sharingType`. See [overlay-invisibility.md](./overlay-invisibility.md).
+Both samples are shown only while the Overlay tab is selected (toggled from
+`didBecomeActive`/`didResignActive`, not from `makeView`/`windowWillClose`). Each panel's
+`showAppearancePreview(_:)` re-asserts capture exclusion so the preview stays hidden from screen
+capture — same defense-in-depth as the coaching display path. The response box's preview shows sample
+text without disturbing the real log and restores the box's **user-intended** visibility on close (it
+tracks intent separately from `panel.isVisible` so the menu toggle can't desync). The plain setters
+(`setFontSize`/`setBackgroundOpacity`/`setBoxFontSize`/`setBoxOpacity`) only change appearance and
+don't touch `sharingType`. See [overlay-invisibility.md](./overlay-invisibility.md).
 
 ## Brain Model
 
@@ -120,9 +124,12 @@ not mid-session — hence the caption on the tab.
 | `Sources/JarvisCore/Coach/BrainModelCatalog.swift` | Curated model list (`BrainModel`) |
 | `Sources/JarvisCore/Coach/ReasoningEffort.swift` | The four effort levels |
 | `Sources/JarvisCore/Config/BrainPreferences.swift` | UserDefaults persistence + validation |
-| `Sources/JarvisCore/Config/Config.swift` | `overlayFontSizeRange`, `overlayOpacityRange`, defaults |
-| `Sources/JarvisCore/Overlay/OverlayAppearance.swift` | UserDefaults persistence |
+| `Sources/JarvisCore/Config/Config.swift` | `overlay*`/`responseBox*` size + opacity ranges, defaults |
+| `Sources/JarvisCore/Overlay/OverlayAppearance.swift` | UserDefaults persistence; `OverlayAppearanceApplying` + `ResponseBoxAppearanceApplying` protocols |
+| `Sources/JarvisCore/Overlay/BroadcastOverlay.swift` | Fans one `render` out to the overlay + response box |
 | `Sources/JarvisOverlay/OverlayPanel.swift` | `OverlayAppearanceApplying` conformance |
+| `Sources/JarvisOverlay/ResponseLogPanel.swift` | The response box; `ResponseBoxAppearanceApplying` conformance |
+| `Sources/JarvisOverlay/NSPanel+CaptureExclusion.swift` | Shared `sharingType = .none` helper for both panels |
 
 ## Related Pages
 

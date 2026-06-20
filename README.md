@@ -45,6 +45,8 @@ Audio streams continuously and cheaply into a transcript. The expensive steps �
 screen and speaking — happen **only when the model invokes a tool**, so the model itself governs
 cost. There's no cooldown or rate cap: every utterance reaches the brain and the brain decides
 whether to speak (restraint lives in the prompt); the manual Start/Stop is the only hard gate.
+Tips flash one line at a time in the overlay; an optional **Responses** window (toggled from the menu
+bar) keeps the full, timestamped history. Both are hidden from screen capture.
 Full design: [`wiki/architecture.md`](./wiki/architecture.md).
 
 ## Project structure
@@ -60,20 +62,22 @@ Full design: [`wiki/architecture.md`](./wiki/architecture.md).
 │   │   ├── Coach/                 # the event loop: CoachDriver, brain client, tool defs
 │   │   ├── Triggers/              # turn / silence detection + silence backoff
 │   │   ├── Screen/                # screen-capture tool contract
-│   │   ├── Overlay/               # overlay text model (the rendered tip)
+│   │   ├── Overlay/               # overlay text model + render fan-out (BroadcastOverlay)
 │   │   ├── Config/                # config + secrets (owner-only file)
 │   │   ├── Diagnostics/           # logging, activity log, session-history store
 │   │   └── Support/               # small primitives (Clock, TurnTaskBox)
-│   ├── JarvisOverlay/         # the on-screen NSPanel overlay — own target so it's unit-testable
-│   │   └── OverlayPanel.swift
+│   ├── JarvisOverlay/         # the on-screen NSPanels — own target so they're unit-testable
+│   │   ├── OverlayPanel.swift         # one-line coaching overlay
+│   │   ├── ResponseLogPanel.swift     # persistent, timestamped response history box
+│   │   └── NSPanel+CaptureExclusion.swift  # shared screen-capture-exclusion helper
 │   └── JarvisApp/             # the macOS app shell — the native, OS-bound parts
 │       ├── App/                   # main.swift, AppDelegate
-│       ├── MenuBar/               # menu-bar item, Start/Stop, key entry
+│       ├── MenuBar/               # menu-bar item, Start/Stop, Show Responses, key entry
 │       ├── Capture/               # mic + system-audio capture, realtime transcriber, TCC priming
 │       └── Viewer/                # dev-mode WKWebView activity viewer
 ├── Tests/
 │   ├── JarvisCoreTests/      # unit + offline-pipeline tests (mirrors the Core subsystems)
-│   ├── JarvisOverlayTests/   # overlay screen-capture-invisibility checks
+│   ├── JarvisOverlayTests/   # overlay + response-box behavior & screen-capture-invisibility checks
 │   └── JarvisViewerTests/    # WebKit end-to-end tests of the viewer HTML/JS
 ├── Resources/Info.plist       # bundle id, mic usage string
 ├── scripts/                   # build / run / test (see below)

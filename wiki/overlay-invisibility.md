@@ -84,8 +84,16 @@ used was a handful of standalone Swift programs driving `NSPanel` + ScreenCaptur
   `captureExclusionReassertCount` hook (`previewReassertsCaptureExclusion`). The plain setters
   `setFontSize`/`setBackgroundOpacity` only change font/alpha and don't touch `sharingType`.
 
-That is the entire implementation: no package, no entitlement, no private API. `OverlayPanel` lives in
-its own small `JarvisOverlay` library target (not the executable) so the tests below can import it.
+**The same applies to the [response box](./settings-window.md) ([`ResponseLogPanel`](../Sources/JarvisOverlay/ResponseLogPanel.swift)).**
+It is the *more* sensitive of the two windows — it holds the full, persistent history of every spoken
+tip — so it gets the identical treatment, not less: both panels set the flag through one shared
+`NSPanel.excludeFromScreenCapture()` helper at construction, and the box **re-asserts on every render
+that reaches the screen** (`append` while visible), on `show()`, and in its preview — mirroring the
+overlay's per-`show()` re-assert. Regression-tested the same way via its own
+`captureExclusionReassertCount` hook (`reassertsCaptureExclusionOnRenderWhileVisible`).
+
+That is the entire implementation: no package, no entitlement, no private API. Both panels live in
+the small `JarvisOverlay` library target (not the executable) so the tests below can import them.
 
 ## Regression tests
 
