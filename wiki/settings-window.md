@@ -50,6 +50,7 @@ resizing; the API-key and overlay panels stay compact.
 |---|---|---|---|
 | `APIKeySection` | "API Key" | yes | `NSSecureTextField` to paste the OpenAI key; saves to Keychain on "Save", restarts the pipeline if already running. |
 | `OverlaySection` | "Overlay" | yes | Text-size and background-opacity sliders with live readouts; persists via `OverlayAppearance`; shows the sample-overlay live preview **only while the Overlay tab is selected** (`didBecomeActive`/`didResignActive`). |
+| `BrainModelSection` | "Brain" | yes | Two dropdowns — the brain (LLM) model and the reasoning effort applied to it; persists via `BrainPreferences`. Takes effect on the next Start. |
 | `ActivitySection` | "Activity" | dev mode only | Embeds the `ActivityViewer` content view (`makeContentView()` / `teardown()`); `prefersResizableWindow == true` so the log gets a larger, resizable window. |
 
 `AppDelegate` builds the section list at launch and passes it to `SettingsWindow`. `ActivitySection`
@@ -86,6 +87,26 @@ and its off-path only hides the panel when a preview is actually up, so closing/
 tears down a live coaching tip. The `setFontSize`/`setBackgroundOpacity` setters only change appearance
 and don't touch `sharingType`. See [overlay-invisibility.md](./overlay-invisibility.md).
 
+## Brain Model
+
+The brain (LLM) model and its reasoning effort are user-selectable, persisted through
+`BrainPreferences` (UserDefaults). Two independent dropdowns: a **Model** picker drawn from
+`BrainModelCatalog` — the curated, code-owned list of OpenAI brain models (the single source of truth,
+bumped by a one-line edit when OpenAI ships a new one) — and a **Reasoning Effort** picker over the
+fixed `ReasoningEffort` levels (None / Low / Medium / High, default Low). The effort is stored
+independently of the model, so it's set once and carries across model changes.
+
+Reads are validated: a persisted model id no longer in the catalog (or an unrecognized effort) falls
+back to the default rather than reaching the API. The transcription model is deliberately **not**
+here — it's a separate field and code path (`Config.transcriptionModel`). Both values are read in
+`AppDelegate.start()` when the brain client is built, so a change takes effect on the **next Start**,
+not mid-session — hence the caption on the tab.
+
+| Setting | Default | Source of truth | UserDefaults key |
+|---|---|---|---|
+| Brain model | `gpt-5.5` | `BrainModelCatalog` | `brain.model` |
+| Reasoning effort | `low` | `ReasoningEffort` | `brain.reasoningEffort` |
+
 ## Key Files
 
 | File | Role |
@@ -94,7 +115,11 @@ and don't touch `sharingType`. See [overlay-invisibility.md](./overlay-invisibil
 | `Sources/JarvisApp/Settings/SettingsWindow.swift` | Host window + tab view |
 | `Sources/JarvisApp/Settings/APIKeySection.swift` | API-key tab |
 | `Sources/JarvisApp/Settings/OverlaySection.swift` | Overlay-appearance tab |
+| `Sources/JarvisApp/Settings/BrainModelSection.swift` | Brain model + reasoning-effort tab |
 | `Sources/JarvisApp/Settings/ActivitySection.swift` | Dev-mode activity tab |
+| `Sources/JarvisCore/Coach/BrainModelCatalog.swift` | Curated model list (`BrainModel`) |
+| `Sources/JarvisCore/Coach/ReasoningEffort.swift` | The four effort levels |
+| `Sources/JarvisCore/Config/BrainPreferences.swift` | UserDefaults persistence + validation |
 | `Sources/JarvisCore/Config/Config.swift` | `overlayFontSizeRange`, `overlayOpacityRange`, defaults |
 | `Sources/JarvisCore/Overlay/OverlayAppearance.swift` | UserDefaults persistence |
 | `Sources/JarvisOverlay/OverlayPanel.swift` | `OverlayAppearanceApplying` conformance |

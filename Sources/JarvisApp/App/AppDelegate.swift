@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var menuBar: MenuBarController!
     private var settingsWindow: SettingsWindow!
     private let appearance = OverlayAppearance()
+    private let brainPreferences = BrainPreferences()
     private var activityViewer: ActivityViewer?    // dev mode only; embedded as the Settings Activity tab
     /// Two transcription sockets feeding one shared transcript: mic → `.me`, system audio → `.them`.
     private var transcriber: RealtimeTranscriber?       // "me" (mic)
@@ -63,6 +64,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.menuBar.setRunning(self.start(freshSession: false))
             }),
             OverlaySection(appearance: appearance, applying: overlay),
+            BrainModelSection(preferences: brainPreferences),
         ]
         if let viewer = activityViewer {
             sections.append(ActivitySection(viewer: viewer))
@@ -100,8 +102,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             menuBar.resetCounter()  // a user Start begins a fresh session
         }
 
-        let brain = OpenAIBrainClient(apiKey: key, model: config.brainModel,
-                                      reasoningEffort: config.reasoningEffort)
+        let brain = OpenAIBrainClient(apiKey: key, model: brainPreferences.model.id,
+                                      reasoningEffort: brainPreferences.effort.rawValue)
         let driver = CoachDriver(config: config, transcript: transcript,
                                  brain: brain, screen: ScreenCaptureCLI(), overlay: overlay, clock: clock,
                                  onSpoke: { [weak self] in Task { @MainActor in self?.menuBar.noteSpoke() } })

@@ -22,12 +22,6 @@ public struct Config: Sendable {
     /// Ceiling on a line's display time. Tighter than movie-caption caps (~6–7s): a coaching tip goes
     /// stale fast, and an over-long display also delays the next queued (fresher) tip.
     public var overlayMaxDisplaySeconds: TimeInterval
-    /// Brain model. `gpt-5.5` confirmed against OpenAI docs (snapshot `gpt-5.5-2026-04-23`);
-    /// vision + function calling via the Responses API.
-    public var brainModel: String
-    /// Reasoning effort for the Responses API. Valid for gpt-5.5: none | low | medium (default) |
-    /// high | xhigh. `low` keeps the turn fast (sub-2s target) while still allowing tool calls.
-    public var reasoningEffort: String
     /// Realtime transcription model. `gpt-4o-transcribe` — supports `server_vad` turn detection,
     /// so the Realtime server auto-commits the audio buffer at each speech boundary and emits
     /// `…transcription.completed` (this is what makes the coach loop fire). `gpt-realtime-whisper`
@@ -52,8 +46,6 @@ public struct Config: Sendable {
         overlayNoticeBufferSeconds: TimeInterval = 2.0,
         overlaySecondsPerWord: TimeInterval = 0.35,
         overlayMaxDisplaySeconds: TimeInterval = 8,
-        brainModel: String = "gpt-5.5",
-        reasoningEffort: String = "low",
         transcriptionModel: String = "gpt-4o-transcribe",
         vadSilenceDurationMs: Int = 1000,
         turnDebounceSeconds: TimeInterval = 0.4,
@@ -65,8 +57,6 @@ public struct Config: Sendable {
         self.overlayNoticeBufferSeconds = overlayNoticeBufferSeconds
         self.overlaySecondsPerWord = overlaySecondsPerWord
         self.overlayMaxDisplaySeconds = overlayMaxDisplaySeconds
-        self.brainModel = brainModel
-        self.reasoningEffort = reasoningEffort
         self.transcriptionModel = transcriptionModel
         self.vadSilenceDurationMs = vadSilenceDurationMs
         self.turnDebounceSeconds = turnDebounceSeconds
