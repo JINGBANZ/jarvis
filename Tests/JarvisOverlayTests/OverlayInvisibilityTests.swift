@@ -222,10 +222,12 @@ private func checkRenderAlignsTimesWhenDroppingEmptyLines() async {
     let overlay = OverlayPanel()
     overlay.interLineGapSeconds = 0
 
-    overlay.render(["   ", "survivor"], perLineSeconds: [0.1, 0.6])
-    // Wait for the survivor to appear, then confirm it's STILL up past the dropped line's 0.1s — a
-    // misaligned zip/filter would have shortened it to 0.1s. The persistence recheck only gets safer
-    // under load (the real 0.6s window stretches), so it doesn't flake.
+    // Wide contrast: the dropped whitespace line carries 0.1s, the survivor a long 3.0s. Wait for the
+    // survivor to appear, then confirm it's STILL up a short moment later — a misaligned zip/filter
+    // would have shortened it to 0.1s and it'd already be gone. The 3.0s window dwarfs both the 0.25s
+    // recheck and any main-actor observation latency on a loaded runner, so the recheck can't race the
+    // window's end (the failure mode when the survivor used only a 0.6s window).
+    overlay.render(["   ", "survivor"], perLineSeconds: [0.1, 3.0])
     #expect(await waitUntil { overlay.currentText == "survivor" }, "the surviving line must appear")
     try? await Task.sleep(nanoseconds: 250_000_000)
     #expect(overlay.currentText == "survivor", "the surviving line must keep ITS own duration, not the dropped line's")
