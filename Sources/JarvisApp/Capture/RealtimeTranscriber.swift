@@ -30,7 +30,7 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
     private let clock: Clock
     private let sessionStart: TimeInterval
     private let silenceDurationMs: Int
-    private let noiseReduction: String?
+    private let noiseReduction: NoiseReductionMode
     private let turnDebounce: TimeInterval
 
     private let lock = NSLock()
@@ -52,7 +52,7 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
 
     init(apiKey: String, model: String, speaker: Speaker = .me, transcript: RollingTranscript, clock: Clock,
          silenceTimeout: TimeInterval, silenceMaxInterval: TimeInterval,
-         silenceDurationMs: Int = 1000, noiseReduction: String? = "near_field",
+         silenceDurationMs: Int = 1000, noiseReduction: NoiseReductionMode = .auto,
          turnDebounce: TimeInterval = 0.4, maxBufferedAudioSeconds: TimeInterval = 60) {
         self.apiKey = apiKey
         self.model = model
@@ -114,8 +114,11 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
     }
 
     private func configureSession() {
+        // Resolve .auto against the live default-input device each session, so a reconnect after a
+        // device swap (e.g. plugging in AirPods) picks the right profile.
+        let profile = NoiseReduction.profile(mode: noiseReduction, micProximity: InputDeviceProximity.current())
         send(json: RealtimeSession.sessionUpdate(model: model, silenceDurationMs: silenceDurationMs,
-                                                 noiseReduction: noiseReduction))
+                                                 noiseReduction: profile))
     }
 
     func sendAudio(_ pcm: Data) {
