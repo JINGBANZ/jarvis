@@ -46,7 +46,7 @@ final class BrainModelSection: NSObject, SettingsSection {
         }
         view.addSubview(effortPopup)
 
-        let note = NSTextField(labelWithString: "Changes apply the next time you press Start.")
+        let note = NSTextField(labelWithString: "Changes apply on the next Start (Stop and Start to apply now).")
         note.frame = NSRect(x: 24, y: 222, width: 512, height: 20)
         note.textColor = .secondaryLabelColor
         view.addSubview(note)
