@@ -105,11 +105,17 @@ public final class OverlayPanel: NSObject, OverlayRendering, OverlayAppearanceAp
     /// line is fully shown rather than clipped by the old fixed height. Off-screen-session-safe: if
     /// there's no main screen it keeps the current origin (only tests hit that path) and still applies
     /// the fitted height. Set `label.stringValue` before calling.
+    ///
+    /// This now runs per line (not once at init), so it prefers the panel's *current* screen over
+    /// `NSScreen.main`: `NSScreen.main` follows keyboard focus, and recomputing it every line would
+    /// relocate an in-flight tip onto another display the instant the user shifts focus mid-tip. Pinning
+    /// to `panel.screen` keeps a playing tip put; the `NSScreen.main` fallback covers the first call,
+    /// when the panel isn't on a screen yet.
     private func resizeToFit() {
         let h = fittedHeight()
         let w = Layout.width
         var origin = panel.frame.origin
-        if let screen = NSScreen.main {
+        if let screen = panel.screen ?? NSScreen.main {
             let f = screen.visibleFrame
             origin = NSPoint(x: f.midX - w / 2, y: f.minY + Layout.bottomMargin)
         }
@@ -263,4 +269,8 @@ public final class OverlayPanel: NSObject, OverlayRendering, OverlayAppearanceAp
 
     /// The panel's current height in points — lets tests assert it grows to fit a long line.
     var currentPanelHeight: CGFloat { panel.frame.height }
+
+    /// The panel's bottom edge (frame.minY) — lets tests assert the panel grows *upward* (this stays
+    /// pinned) rather than downward off the screen.
+    var currentPanelBottom: CGFloat { panel.frame.minY }
 }

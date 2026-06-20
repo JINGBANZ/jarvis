@@ -224,25 +224,44 @@ private func checkInterLineGapBlanks() async {
 }
 
 // A line too long to fit one row must not be clipped by the old fixed 80pt window: the panel grows
-// taller to fit the wrapped text, while a short line stays at the floor height. Guards the overflow fix.
+// taller to fit the wrapped text, while a short line stays at the floor height. The three lengths make
+// the growth assertions *load-bearing on row count*: a regression to single-line (or wrongly-inset)
+// measurement would floor BOTH the medium and long lines at 80, so `medium > floor` proves real
+// multi-line measurement happens and `long > medium` proves the height scales with the wrapped row
+// count — exactly the cellSize(forBounds:) behavior the fix depends on. We also assert the bottom edge
+// stays pinned (the panel grows upward, not down off-screen) and that capture exclusion survives the
+// resize. No trailing whitespace in the fixtures — render() trims it, which would desync currentText.
 @MainActor
 private func checkPanelGrowsForLongText() async {
     let overlay = OverlayPanel()
-    overlay.interLineGapSeconds = 0   // no gap between the two tips, so the long one plays right after
+    overlay.interLineGapSeconds = 0   // no gap between tips, so each queued line plays right after
 
     let short = "Nod."
-    // No trailing space — render() trims each line, so the stored text would otherwise differ.
-    let long = String(repeating: "This is a long coaching tip that must wrap onto several lines.", count: 6)
+    let medium = String(repeating: "This is a coaching tip that wraps onto a few rows.", count: 4)
+    let long = String(repeating: "This is a long coaching tip that must wrap onto several lines.", count: 8)
 
     overlay.render([short], perLineSeconds: 0.3)
     #expect(await waitUntil { overlay.currentText == short }, "the short line should display")
     let shortHeight = overlay.currentPanelHeight
+    let bottomEdge = overlay.currentPanelBottom
     #expect(shortHeight == 80, "a short line stays at the floor height (got \(shortHeight))")
 
-    overlay.render([long], perLineSeconds: 3)   // queued; plays once the short line's 0.3s window ends
+    overlay.render([medium], perLineSeconds: 0.3)   // queued; plays once the short line's window ends
+    #expect(await waitUntil { overlay.currentText == medium }, "the medium line should display")
+    let mediumHeight = overlay.currentPanelHeight
+    #expect(mediumHeight > shortHeight,
+            "a multi-row line must clear the floor — proves real wrapped-height measurement (got \(mediumHeight)pt)")
+    #expect(overlay.currentPanelBottom == bottomEdge,
+            "the panel must grow upward — its bottom edge stays pinned (got \(overlay.currentPanelBottom), was \(bottomEdge))")
+
+    overlay.render([long], perLineSeconds: 3)   // queued; plays once the medium line's window ends
     #expect(await waitUntil { overlay.currentText == long }, "the long line should display")
-    #expect(overlay.currentPanelHeight > shortHeight,
-            "the panel must grow taller to fit wrapped long text (got \(overlay.currentPanelHeight)pt)")
+    #expect(overlay.currentPanelHeight > mediumHeight,
+            "a longer line wraps to more rows and must be taller still — proves height scales with row count (got \(overlay.currentPanelHeight)pt)")
+    #expect(overlay.currentPanelBottom == bottomEdge,
+            "the bottom edge must stay pinned as the panel grows taller (got \(overlay.currentPanelBottom), was \(bottomEdge))")
+    #expect(overlay.currentSharingType == .none,
+            "the panel must stay excluded from screen capture after the resize")
 }
 
 // render(_:perLineSeconds:[TimeInterval]) zips lines with their times, then trims and drops empties
