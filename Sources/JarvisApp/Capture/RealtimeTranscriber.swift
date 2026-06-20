@@ -196,7 +196,7 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
             // whole), but DON'T fire the coach yet — debounce so rapid fragments of one spoken
             // sentence coalesce into a single trigger. The wire→text parse lives in RealtimeSession
             // (pure + unit-tested).
-            if let transcriptText = RealtimeSession.completedTranscript(from: obj) {
+            if let transcriptText = RealtimeSession.completedTranscript(from: obj, speaker: speaker) {
                 let at = clock.now() - sessionStart
                 transcript.append(.init(speaker: speaker, text: transcriptText, at: at))
                 jlog("🗣 heard (\(speaker.rawValue)): \"\(transcriptText)\"")   // show side + what was said

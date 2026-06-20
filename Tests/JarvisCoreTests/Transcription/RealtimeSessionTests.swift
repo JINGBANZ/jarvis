@@ -8,44 +8,80 @@ import Testing
     @Test func completedTranscriptParsesCompletedEvent() throws {
         let wire = "{\"type\":\"\(RealtimeSession.completedTranscriptionType)\",\"transcript\":\"two pointers\"}"
         let obj = try #require(try JSONSerialization.jsonObject(with: Data(wire.utf8)) as? [String: Any])
-        #expect(RealtimeSession.completedTranscript(from: obj) == "two pointers")
+        #expect(RealtimeSession.completedTranscript(from: obj, speaker: .me) == "two pointers")
     }
 
     /// Non-completed events, empty text, and a missing transcript field all yield nil (no line gets
     /// appended / no speaker tagged for them).
     @Test func completedTranscriptIgnoresNonCompletedAndEmpty() {
         let type = RealtimeSession.completedTranscriptionType
-        #expect(RealtimeSession.completedTranscript(from: ["type": "input_audio_buffer.speech_stopped"]) == nil)
-        #expect(RealtimeSession.completedTranscript(from: ["type": type, "transcript": ""]) == nil)
-        #expect(RealtimeSession.completedTranscript(from: ["type": type]) == nil)
-        #expect(RealtimeSession.completedTranscript(from: [:]) == nil)
+        #expect(RealtimeSession.completedTranscript(from: ["type": "input_audio_buffer.speech_stopped"], speaker: .me) == nil)
+        #expect(RealtimeSession.completedTranscript(from: ["type": type, "transcript": ""], speaker: .me) == nil)
+        #expect(RealtimeSession.completedTranscript(from: ["type": type], speaker: .me) == nil)
+        #expect(RealtimeSession.completedTranscript(from: [:], speaker: .me) == nil)
     }
 
     /// Layer 3 (text filter): the model hallucinates a lone "." (and other punctuation/whitespace) when
-    /// server VAD fires on non-speech. No real utterance is punctuation-only, so these are dropped —
-    /// otherwise each one logs a phantom `heard (me)` line, resets the silence timer, and fires a turn.
+    /// server VAD fires on non-speech. No real utterance is punctuation-only, so these are dropped for
+    /// BOTH speakers — otherwise each one logs a phantom `heard` line, resets the silence timer (me side),
+    /// and fires a turn.
     @Test func completedTranscriptRejectsPunctuationAndWhitespaceOnly() {
-        for junk in [".", " . ", "…", ",", ". .", "?!", "  ", "\n", "-"] {
-            #expect(RealtimeSession.meaningfulTranscript(junk) == nil, "should drop \(junk.debugDescription)")
+        for speaker in [Speaker.me, .them] {
+            for junk in [".", " . ", "…", ",", ". .", "?!", "  ", "\n", "-"] {
+                #expect(RealtimeSession.meaningfulTranscript(junk, speaker: speaker) == nil,
+                        "\(speaker) should drop \(junk.debugDescription)")
+            }
         }
     }
 
     /// Layer 3 (denylist): gpt-4o-transcribe / Whisper emit stock caption-artifact phrases on silence
-    /// ("Thank you.", "Thanks for watching"). Matched only when the *whole* utterance equals one — so a
-    /// real sentence that merely contains the words is kept.
-    @Test func completedTranscriptRejectsStockHallucinationPhrases() {
-        for junk in ["Thank you.", "thank you", "Thanks for watching!", "you", "Please subscribe."] {
-            #expect(RealtimeSession.meaningfulTranscript(junk) == nil, "should drop \(junk.debugDescription)")
+    /// ("Thank you.", "Thanks for watching"). On the ME side these are hallucinations and are dropped —
+    /// every entry, plus a Capitalized + trailing-punctuation variant to exercise normalization.
+    @Test func completedTranscriptRejectsEveryDenylistedPhraseOnMeSide() {
+        for phrase in RealtimeSession.hallucinationDenylist {
+            #expect(RealtimeSession.meaningfulTranscript(phrase, speaker: .me) == nil,
+                    "me should drop \(phrase.debugDescription)")
+            #expect(RealtimeSession.meaningfulTranscript(phrase.capitalized + ".", speaker: .me) == nil,
+                    "me should drop normalized \(phrase.debugDescription)")
         }
+    }
+
+    /// The denylist is a ME-side artifact filter only. On the THEM (system-audio) side a bare
+    /// "Thank you."/"Thanks" is a real conversational closer that must still fire a turn, so it is kept
+    /// (trimmed). Punctuation/whitespace-only noise is still dropped for them.
+    @Test func completedTranscriptKeepsDenylistedPhrasesOnThemSide() {
+        #expect(RealtimeSession.meaningfulTranscript("Thank you.", speaker: .them) == "Thank you.")
+        #expect(RealtimeSession.meaningfulTranscript("thanks", speaker: .them) == "thanks")
+        #expect(RealtimeSession.meaningfulTranscript(".", speaker: .them) == nil)
+    }
+
+    /// "bye" was removed from the denylist: a lone sign-off is well-formed real speech even on the me
+    /// side, and the punctuation filter already covers the lone-"." artifact.
+    @Test func byeIsNotFiltered() {
+        #expect(!RealtimeSession.hallucinationDenylist.contains("bye"))
+        #expect(RealtimeSession.meaningfulTranscript("Bye.", speaker: .me) == "Bye.")
     }
 
     /// Real speech survives, and is returned trimmed of surrounding whitespace. A sentence that merely
     /// contains a denylisted phrase as a substring is NOT dropped.
     @Test func completedTranscriptKeepsAndTrimsRealSpeech() {
-        #expect(RealtimeSession.meaningfulTranscript("  two pointers  ") == "two pointers")
-        #expect(RealtimeSession.meaningfulTranscript("thank you, let's use a hash map")
+        #expect(RealtimeSession.meaningfulTranscript("  two pointers  ", speaker: .me) == "two pointers")
+        #expect(RealtimeSession.meaningfulTranscript("thank you, let's use a hash map", speaker: .me)
                 == "thank you, let's use a hash map")
-        #expect(RealtimeSession.meaningfulTranscript("3") == "3")  // a lone digit is real content
+        #expect(RealtimeSession.meaningfulTranscript("3", speaker: .me) == "3")  // a lone digit is real
+    }
+
+    /// The filtering must take effect through the PUBLIC entry point the app actually calls
+    /// (`completedTranscript(from:speaker:)`), not only the internal helper — so a regression of the
+    /// one-line delegation can't slip through green tests.
+    @Test func completedTranscriptFiltersThroughPublicEntryPoint() {
+        let type = RealtimeSession.completedTranscriptionType
+        func event(_ t: String) -> [String: Any] { ["type": type, "transcript": t] }
+        #expect(RealtimeSession.completedTranscript(from: event("."), speaker: .me) == nil)
+        #expect(RealtimeSession.completedTranscript(from: event("."), speaker: .them) == nil)
+        #expect(RealtimeSession.completedTranscript(from: event("Thank you."), speaker: .me) == nil)
+        #expect(RealtimeSession.completedTranscript(from: event("Thank you."), speaker: .them) == "Thank you.")
+        #expect(RealtimeSession.completedTranscript(from: event("  two pointers "), speaker: .me) == "two pointers")
     }
 
     /// The connect URL MUST select a transcription session via intent (not ?model=).

@@ -57,32 +57,42 @@ public enum RealtimeSession {
     /// The transcript text from a parsed realtime event, if it is a **completed** input-audio
     /// transcription carrying real speech — otherwise nil. Pure and unit-testable; the live socket
     /// is not, so this is where the wire→text parsing (and hallucination filtering) is verified.
-    public static func completedTranscript(from event: [String: Any]) -> String? {
+    ///
+    /// `speaker` scopes the phrase denylist: a bare "Thank you."/"Thanks" is a silence hallucination on
+    /// the *me* (mic) side but a real turn-ending reply on the *them* (system-audio) side, so the
+    /// denylist applies to `.me` only. The punctuation/whitespace-only drop applies to both.
+    public static func completedTranscript(from event: [String: Any], speaker: Speaker) -> String? {
         guard event["type"] as? String == completedTranscriptionType,
               let text = event["transcript"] as? String else { return nil }
-        return meaningfulTranscript(text)
+        return meaningfulTranscript(text, speaker: speaker)
     }
 
     /// Stock non-speech hallucinations gpt-4o-transcribe / Whisper emit when VAD fires on silence —
     /// mostly YouTube-caption artifacts the model absorbed in training. Lower-cased, punctuation
     /// stripped; matched only against a whole utterance (see `meaningfulTranscript`) so a real sentence
     /// containing these words survives. Conservative on purpose — add only well-attested phrases here.
+    /// Applied to the `.me` side only (see `completedTranscript`). "bye" is deliberately absent: it is a
+    /// well-formed sign-off, and the punctuation filter already catches the lone-"." artifact.
     static let hallucinationDenylist: Set<String> = [
         "you", "thank you", "thank you very much", "thanks", "thanks for watching",
-        "thank you for watching", "please subscribe", "bye",
+        "thank you for watching", "please subscribe",
     ]
 
     /// Returns the utterance trimmed if it is real speech, else nil — the Layer-3 text filter for the
     /// `"."`-on-silence problem. Drops two kinds of non-speech the model invents:
-    ///   1. punctuation/whitespace-only output (a lone "." has no letter or digit), and
-    ///   2. an utterance that, normalized, is exactly a known caption-artifact phrase.
+    ///   1. punctuation/whitespace-only output (a lone "." has no letter or digit) — both speakers, and
+    ///   2. an utterance that, normalized, is exactly a known caption-artifact phrase — `.me` only.
     /// Letting either through logs a phantom `heard` line, resets the silence timer, and fires a turn.
-    static func meaningfulTranscript(_ raw: String) -> String? {
+    static func meaningfulTranscript(_ raw: String, speaker: Speaker) -> String? {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.contains(where: { $0.isLetter || $0.isNumber }) else { return nil }
-        let normalized = trimmed.lowercased()
-            .trimmingCharacters(in: CharacterSet(charactersIn: ".,!?…\"' "))
-        guard !hallucinationDenylist.contains(normalized) else { return nil }
+        if speaker == .me {
+            // Strip only the trailing punctuation the transcriber actually emits; no apostrophe (it
+            // belongs inside contractions, and trimming it could mangle a legitimately-quoted word).
+            let normalized = trimmed.lowercased()
+                .trimmingCharacters(in: CharacterSet(charactersIn: ".,!?…\" "))
+            guard !hallucinationDenylist.contains(normalized) else { return nil }
+        }
         return trimmed
     }
 }
