@@ -135,9 +135,8 @@ private func checkReassertOnShow() async {
     let before = overlay.captureExclusionReassertCount
 
     overlay.render(["Stay hidden.", "Even after a reset."], perLineSeconds: 0.05)
-    try? await Task.sleep(nanoseconds: 300_000_000)   // real await → lets render's main-actor hop run
-
-    #expect(overlay.captureExclusionReassertCount > before, "render() must re-assert capture exclusion")
+    // Poll for the re-assert rather than sleeping a fixed amount and racing render's main-actor hop.
+    #expect(await waitUntil { overlay.captureExclusionReassertCount > before }, "render() must re-assert capture exclusion")
     #expect(overlay.currentSharingType == .none)
 }
 
@@ -198,23 +197,20 @@ private func checkDrainThenHide() async {
 }
 
 // Between two lines of one tip the panel must briefly blank, so a glancing eye registers that the
-// text changed (the borrowed captioning minimum-gap idea). Wide windows (0.4s line, 0.5s gap) keep
-// the mid-gap and post-gap samples clear of the edges on a loaded runloop.
+// text changed (the borrowed captioning minimum-gap idea). Poll each forward transition
+// (L1 → blank → L2) rather than sampling at fixed sleeps that race the real timer on a loaded runner.
 @MainActor
 private func checkInterLineGapBlanks() async {
     let overlay = OverlayPanel()
     overlay.interLineGapSeconds = 0.5
 
-    overlay.render(["L1", "L2"], perLineSeconds: 0.4)   // L1: 0–0.4s, blank gap: 0.4–0.9s, L2: 0.9s+
-    try? await Task.sleep(nanoseconds: 200_000_000)     // ~0.2s: still on L1
-    #expect(overlay.currentText == "L1", "the first line should be up before the gap")
-
-    try? await Task.sleep(nanoseconds: 400_000_000)     // ~0.6s: inside the 0.4–0.9s blank gap
-    #expect(overlay.currentText == "", "the panel must blank between consecutive lines")
+    overlay.render(["L1", "L2"], perLineSeconds: 0.4)   // L1, then a 0.5s blank gap, then L2
+    #expect(await waitUntil { overlay.currentText == "L1" }, "the first line should be up before the gap")
+    // The gap (0.5s) is long enough that catching the blank by polling leaves ample margin to also
+    // observe the panel is still on screen during it.
+    #expect(await waitUntil { overlay.currentText == "" }, "the panel must blank between consecutive lines")
     #expect(overlay.isPanelVisible, "the gap must blank the TEXT while the panel stays on screen — not hide it")
-
-    try? await Task.sleep(nanoseconds: 500_000_000)     // ~1.1s: past the gap, second line up
-    #expect(overlay.currentText == "L2", "the next line must appear after the gap")
+    #expect(await waitUntil { overlay.currentText == "L2" }, "the next line must appear after the gap")
 }
 
 // render(_:perLineSeconds:[TimeInterval]) zips lines with their times, then trims and drops empties
@@ -227,7 +223,11 @@ private func checkRenderAlignsTimesWhenDroppingEmptyLines() async {
     overlay.interLineGapSeconds = 0
 
     overlay.render(["   ", "survivor"], perLineSeconds: [0.1, 0.6])
-    try? await Task.sleep(nanoseconds: 200_000_000)   // ~0.2s: if times misaligned, "survivor" got 0.1s and is gone
+    // Wait for the survivor to appear, then confirm it's STILL up past the dropped line's 0.1s — a
+    // misaligned zip/filter would have shortened it to 0.1s. The persistence recheck only gets safer
+    // under load (the real 0.6s window stretches), so it doesn't flake.
+    #expect(await waitUntil { overlay.currentText == "survivor" }, "the surviving line must appear")
+    try? await Task.sleep(nanoseconds: 250_000_000)
     #expect(overlay.currentText == "survivor", "the surviving line must keep ITS own duration, not the dropped line's")
     #expect(overlay.isPanelVisible)
 }
@@ -240,20 +240,17 @@ private func checkPreviewResumesTip() async {
     let overlay = OverlayPanel()
     overlay.interLineGapSeconds = 0   // isolate pause/resume timing from the inter-line gap
 
-    overlay.render(["A1", "A2"], perLineSeconds: 0.6)   // line A1 shows; A2 scheduled at ~0.6s
-    try? await Task.sleep(nanoseconds: 200_000_000)     // ~0.2s: still on A1
+    // Poll each forward transition rather than sleeping fixed amounts that race the real timer:
+    // A1 up → preview owns the panel → resume reaches A2 → the queued B1 plays last.
+    overlay.render(["A1", "A2"], perLineSeconds: 0.6)   // line A1 shows; A2 scheduled next
+    #expect(await waitUntil { overlay.currentText == "A1" }, "the first line should be up")
     overlay.showAppearancePreview(true)                 // pause the tip; sample takes the panel
     overlay.render(["B1"], perLineSeconds: 0.6)         // a new tip arrives while previewing — must wait
+    #expect(await waitUntil { overlay.currentText == "Sample overlay text" }, "preview must own the panel while open")
 
-    try? await Task.sleep(nanoseconds: 200_000_000)     // ~0.4s
-    #expect(overlay.currentText == "Sample overlay text", "preview must own the panel while open")
-
-    overlay.showAppearancePreview(false)                // close Settings: resume the paused tip at A2
-    try? await Task.sleep(nanoseconds: 300_000_000)     // ~0.3s into A2's resumed 0.6s window
-    #expect(overlay.currentText == "A2", "the paused tip must resume its remaining line, not be dropped")
-
-    try? await Task.sleep(nanoseconds: 600_000_000)     // A2 elapses (~0.7s after resume); the queued tip plays
-    #expect(overlay.currentText == "B1", "a tip that arrived during preview must play after the resumed tip")
+    overlay.showAppearancePreview(false)                // close Settings: resume the paused tip
+    #expect(await waitUntil { overlay.currentText == "A2" }, "the paused tip must resume its remaining line, not be dropped")
+    #expect(await waitUntil { overlay.currentText == "B1" }, "a tip that arrived during preview must play after the resumed tip")
 }
 
 @MainActor
