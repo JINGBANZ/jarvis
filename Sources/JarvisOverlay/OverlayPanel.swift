@@ -31,8 +31,22 @@ public final class OverlayPanel: NSObject, OverlayRendering, OverlayAppearanceAp
     /// Test hook (internal): counts how many times `show()` has re-asserted capture exclusion.
     private(set) var captureExclusionReassertCount = 0
 
+    /// Fixed panel geometry. Width and bottom margin are constant; the *height* grows to fit the
+    /// wrapped line so a long tip can't overflow the window (see `fittedHeight` / `resizeToFit`).
+    private enum Layout {
+        static let width: CGFloat = 520
+        /// Floor height — a single short line sits in a panel this tall.
+        static let minHeight: CGFloat = 80
+        /// Inset between the panel edge and the label (matches the label's leading/trailing constraints).
+        static let horizontalPadding: CGFloat = 16
+        /// Inset above and below the text, each side — the slack added to the measured text height.
+        static let verticalPadding: CGFloat = 16
+        /// Gap from the screen's bottom to the panel's bottom edge (which stays fixed as it grows up).
+        static let bottomMargin: CGFloat = 80
+    }
+
     public override init() {
-        panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 520, height: 80),
+        panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: Layout.width, height: Layout.minHeight),
                         styleMask: [.nonactivatingPanel, .borderless],
                         backing: .buffered, defer: false)
         panel.level = .floating
@@ -69,14 +83,43 @@ public final class OverlayPanel: NSObject, OverlayRendering, OverlayAppearanceAp
             label.centerYAnchor.constraint(equalTo: content.centerYAnchor),
         ])
         super.init()
-        positionBottomCenter()
+        resizeToFit()   // label is empty → floor height, centered along the bottom
     }
 
-    private func positionBottomCenter() {
-        guard let screen = NSScreen.main else { return }
-        let f = screen.visibleFrame
-        let w: CGFloat = 520, h: CGFloat = 80
-        panel.setFrame(NSRect(x: f.midX - w / 2, y: f.minY + 80, width: w, height: h), display: true)
+    /// Height the panel needs to show the label's *current* text without clipping: the wrapped text
+    /// height plus padding above and below, floored at `minHeight`. Measured through the label's own
+    /// cell (`cellSize(forBounds:)`) rather than `NSString.boundingRect`, so the wrap width and line
+    /// count match what's actually laid out — the cell reserves a small horizontal inset that a bare
+    /// `boundingRect` ignores, which at large fonts could under-measure by a row and clip the text the
+    /// resize exists to reveal. Callers set `label.stringValue` before invoking, so the cell holds the
+    /// right string.
+    private func fittedHeight() -> CGFloat {
+        let innerWidth = Layout.width - 2 * Layout.horizontalPadding
+        let bounds = NSRect(x: 0, y: 0, width: innerWidth, height: .greatestFiniteMagnitude)
+        let measured = label.cell?.cellSize(forBounds: bounds).height ?? 0
+        return max(Layout.minHeight, ceil(measured) + 2 * Layout.verticalPadding)
+    }
+
+    /// Re-center the panel along the bottom of the screen and size its height to fit the label's current
+    /// text. The bottom edge stays pinned at `bottomMargin`, so a taller panel grows *upward* and a long
+    /// line is fully shown rather than clipped by the old fixed height. Off-screen-session-safe: if
+    /// there's no main screen it keeps the current origin (only tests hit that path) and still applies
+    /// the fitted height. Set `label.stringValue` before calling.
+    ///
+    /// This now runs per line (not once at init), so it prefers the panel's *current* screen over
+    /// `NSScreen.main`: `NSScreen.main` follows keyboard focus, and recomputing it every line would
+    /// relocate an in-flight tip onto another display the instant the user shifts focus mid-tip. Pinning
+    /// to `panel.screen` keeps a playing tip put; the `NSScreen.main` fallback covers the first call,
+    /// when the panel isn't on a screen yet.
+    private func resizeToFit() {
+        let h = fittedHeight()
+        let w = Layout.width
+        var origin = panel.frame.origin
+        if let screen = panel.screen ?? NSScreen.main {
+            let f = screen.visibleFrame
+            origin = NSPoint(x: f.midX - w / 2, y: f.minY + Layout.bottomMargin)
+        }
+        panel.setFrame(NSRect(x: origin.x, y: origin.y, width: w, height: h), display: true)
     }
 
     /// OverlayRendering witness — nonisolated so it satisfies the protocol; hops to the main actor.
@@ -125,6 +168,7 @@ public final class OverlayPanel: NSObject, OverlayRendering, OverlayAppearanceAp
             return
         }
         label.stringValue = tip.lines[line]
+        resizeToFit()   // grow the panel so a long line isn't clipped
         panel.orderFrontRegardless()
         active = (tip, line + 1)
         scheduleTick(after: tip.seconds[line]) { $0.gapThenAdvance() }
@@ -173,6 +217,8 @@ public final class OverlayPanel: NSObject, OverlayRendering, OverlayAppearanceAp
 
     public func setFontSize(_ points: Double) {
         label.font = .systemFont(ofSize: CGFloat(points), weight: .medium)
+        // Re-fit the live preview so a larger font doesn't overflow the sample mid-adjust.
+        if isPreviewing { resizeToFit() }
     }
 
     public func setBackgroundOpacity(_ opacity: Double) {
@@ -190,6 +236,7 @@ public final class OverlayPanel: NSObject, OverlayRendering, OverlayAppearanceAp
             reassertCaptureExclusion()
             isPreviewing = true
             label.stringValue = Self.previewText
+            resizeToFit()
             panel.orderFrontRegardless()
         } else if isPreviewing {
             isPreviewing = false
@@ -219,4 +266,11 @@ public final class OverlayPanel: NSObject, OverlayRendering, OverlayAppearanceAp
 
     /// Whether the panel is on screen — lets tests assert the drain-then-hide transition.
     var isPanelVisible: Bool { panel.isVisible }
+
+    /// The panel's current height in points — lets tests assert it grows to fit a long line.
+    var currentPanelHeight: CGFloat { panel.frame.height }
+
+    /// The panel's bottom edge (frame.minY) — lets tests assert the panel grows *upward* (this stays
+    /// pinned) rather than downward off the screen.
+    var currentPanelBottom: CGFloat { panel.frame.minY }
 }
