@@ -2,9 +2,9 @@ import Foundation
 import Testing
 @testable import JarvisCore
 
-private func http(_ code: Int) -> HTTPURLResponse {
+private func http(_ code: Int, headers: [String: String]? = nil) -> HTTPURLResponse {
     HTTPURLResponse(url: URL(string: "https://api.openai.com/v1/responses")!,
-                    statusCode: code, httpVersion: nil, headerFields: nil)!
+                    statusCode: code, httpVersion: nil, headerFields: headers)!
 }
 
 /// Build an SSE line stream from scripted `data:` payloads (the wire `event:` lines are optional —
@@ -97,5 +97,25 @@ final class LineCollector: @unchecked Sendable {
                                             toolChoice: .auto, conversationId: nil, onLine: { _ in })
         #expect(resp.toolCalls == [.speak(callId: "c", lines: ["hi"])])
         #expect(attempts.value == 3) // two 429s + one 200
+    }
+
+    /// A 429 carrying a `Retry-After: 0` header on the streaming path is honoured: the client reads
+    /// the header, routes it through the shared helper, and retries — proving the Retry-After code
+    /// path is exercised without imposing any wall-clock delay (Retry-After: 0, backoffBase: 0).
+    @Test func streamingRetriesOn429WithRetryAfterHeader() async throws {
+        let attempts = Counter()
+        let completed = #"{"type":"response.completed","response":{"status":"completed","output":[{"type":"function_call","id":"f","call_id":"c","name":"speak","arguments":"{\"lines\":[\"hi\"]}"}]}}"#
+        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+                                       maxRetries: 3, backoffBaseSeconds: 0,
+                                       lineSend: { _ in
+            let n = attempts.next()
+            return n < 2
+                ? (sseStream([]), http(429, headers: ["Retry-After": "0"]))
+                : (sseStream([completed]), http(200))
+        })
+        let resp = try await client.respond(messages: [.user("hi")], tools: coachTools,
+                                            toolChoice: .auto, conversationId: nil, onLine: { _ in })
+        #expect(resp.toolCalls == [.speak(callId: "c", lines: ["hi"])])
+        #expect(attempts.value == 3) // two 429s (with Retry-After: 0) + one 200
     }
 }

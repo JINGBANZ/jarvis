@@ -451,6 +451,20 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(overlay.rendered == [["a", "b"]])
     }
 
+    /// When a brain streams only SOME lines live (via onLine) but the final BrainResponse carries ALL
+    /// lines, the driver renders the streamed line(s) live AND the un-streamed remainder once via the
+    /// leftover path (lines[alreadyShown...]).
+    @Test func partialStreamRendersLiveLinesThenLeftover() async {
+        let clock = ManualClock(now: 0)
+        let brain = PartialStreamBrain(allLines: ["line one", "line two", "line three"], streamCount: 1)
+        let overlay = FakeOverlay()
+        let driver = CoachDriver(config: .default, transcript: RollingTranscript(),
+                                 brain: brain, screen: FakeScreen(), overlay: overlay, clock: clock)
+        #expect(await driver.handleTrigger(.turnEnd) == .spoke)
+        // "line one" rendered live as it streamed; the un-streamed remainder rendered once as leftover.
+        #expect(overlay.rendered == [["line one"], ["line two", "line three"]])
+    }
+
     /// While one turn is in flight, a second concurrent trigger must be reported as `.busy` AND
     /// coalesced: the running turn picks it up and runs it too, so nothing is dropped (vs. the old
     /// cancel-the-previous behavior).
@@ -571,6 +585,23 @@ final class StreamingSpeakBrain: BrainClient, @unchecked Sendable {
                  conversationId: String?, onLine: (@Sendable (String) -> Void)?) async throws -> BrainResponse {
         for l in lines { onLine?(l) }
         return .init(toolCalls: [.speak(callId: "s1", lines: lines)])
+    }
+}
+
+/// Streams only the first `streamCount` lines via onLine, but returns the FULL line set — to prove
+/// CoachDriver renders the streamed lines live and the un-streamed remainder via the leftover path.
+final class PartialStreamBrain: BrainClient, @unchecked Sendable {
+    private let allLines: [String]
+    private let streamCount: Int
+    init(allLines: [String], streamCount: Int) { self.allLines = allLines; self.streamCount = streamCount }
+    func respond(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice,
+                 conversationId: String?) async throws -> BrainResponse {
+        .init(toolCalls: [.speak(callId: "s1", lines: allLines)])
+    }
+    func respond(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice,
+                 conversationId: String?, onLine: (@Sendable (String) -> Void)?) async throws -> BrainResponse {
+        for l in allLines.prefix(streamCount) { onLine?(l) }
+        return .init(toolCalls: [.speak(callId: "s1", lines: allLines)])
     }
 }
 

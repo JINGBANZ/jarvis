@@ -67,6 +67,13 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
         }
     }
 
+    /// Seconds to wait before the next retry: the server's `Retry-After` when present, else jittered
+    /// exponential backoff. Shared by the streaming and non-streaming retry loops so they can't drift.
+    private func retryDelaySeconds(attempt: Int, retryAfter: Double?) -> Double {
+        let backoff = backoffBaseSeconds * pow(2, Double(attempt)) * Double.random(in: 1.0...1.3)
+        return max(0, retryAfter ?? backoff)
+    }
+
     public func respond(messages: [ChatMessage], tools: [ToolDef],
                         toolChoice: ToolChoice, conversationId: String?) async throws -> BrainResponse {
         var request = URLRequest(url: endpoint, timeoutInterval: timeout)
@@ -85,9 +92,7 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
             let retryable = status == 429 || (500...599).contains(status)
             if retryable && attempt < maxRetries {
                 let retryAfter = http?.value(forHTTPHeaderField: "Retry-After").flatMap { Double($0) }
-                // Exponential backoff with multiplicative jitter; honor Retry-After when present.
-                let backoff = backoffBaseSeconds * pow(2, Double(attempt)) * Double.random(in: 1.0...1.3)
-                let delay = max(0, retryAfter ?? backoff)
+                let delay = retryDelaySeconds(attempt: attempt, retryAfter: retryAfter)
                 if delay > 0 { try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)) }
                 attempt += 1
                 continue
@@ -291,8 +296,9 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
             for try await line in stream { errBody += line }
             let retryable = status == 429 || (500...599).contains(status)
             if retryable && attempt < maxRetries {
-                let backoff = backoffBaseSeconds * pow(2, Double(attempt)) * Double.random(in: 1.0...1.3)
-                if backoff > 0 { try? await Task.sleep(nanoseconds: UInt64(backoff * 1_000_000_000)) }
+                let retryAfter = http?.value(forHTTPHeaderField: "Retry-After").flatMap { Double($0) }
+                let delay = retryDelaySeconds(attempt: attempt, retryAfter: retryAfter)
+                if delay > 0 { try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)) }
                 attempt += 1
                 continue
             }
