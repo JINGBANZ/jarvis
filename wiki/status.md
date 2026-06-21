@@ -47,7 +47,7 @@ A compact log — the *rationale* for each lives in the linked design page, not 
 |---|---|
 | **Build our own** (no maintained tool does proactive speak-up well) | [landscape-survey.md](./landscape-survey.md), [fork-evaluation.md](./fork-evaluation.md) |
 | **Personal tool first** (no auth/billing; freely reuse open code; <2-day MVP) | this page; [architecture.md](./architecture.md) |
-| **Proactive, unprompted** coaching is the core differentiator (no hotkey) | [architecture.md](./architecture.md) |
+| **Proactive, unprompted** coaching is the core differentiator (proactive by default; ⌥⌘J is an optional on-demand hint, not a wake key) | [architecture.md](./architecture.md) |
 | **One mode for v1: LeetCode Coach** (no tiers) | [architecture.md](./architecture.md#6-non-goals-v1) |
 | **Model-triggered `capture_screen`** (tool-use loop; cheaper + smarter) | [architecture.md](./architecture.md#2-core-loop) |
 | **Models (verified 2026-06):** `gpt-5.5` brain via Responses API (vision), `gpt-4o-transcribe` over GA Realtime | [architecture.md](./architecture.md#models-and-apis) |
@@ -72,6 +72,7 @@ A compact log — the *rationale* for each lives in the linked design page, not 
 | **Per-line overlay time is length-proportional, not hard-coded** — a hybrid of the captioning reading-speed standard and our glance-not-watch situation: `noticeBuffer + words × readingRate` (capped), plus a brief blank gap between lines borrowed from the captioning minimum-gap rule (2026-06-19) | [overlay-timing.md](./overlay-timing.md) |
 | **Brain model + reasoning effort are user-selectable in Settings** — a "Brain" tab picks the OpenAI model from a curated code-owned `BrainModelCatalog` (default `gpt-5.5`) and one global reasoning effort (None/Low/Medium/High, default `low`), persisted via `BrainPreferences` (UserDefaults); applied on next Start. Brain model/effort moved out of `Config` so the catalog/enum is the single source of truth (2026-06-20) | [settings-window.md](./settings-window.md) |
 | **Persistent response box beside the overlay** — an optional menu-toggled window (`ResponseLogPanel`) logging every `speak` tip in full, timestamped and scrollable; movable/resizable/opaque, **also excluded from capture** (shared `NSPanel.excludeFromScreenCapture`, re-asserted on render), cleared on each Start. Fed via a `BroadcastOverlay` fan-out so `CoachDriver` is unchanged; its text size + opacity are adjustable in the Overlay settings tab (2026-06-20) | [settings-window.md](./settings-window.md), [overlay-invisibility.md](./overlay-invisibility.md) |
+| **On-demand hint hotkey (⌥⌘J)** — a global Carbon `RegisterEventHotKey` (no TCC) that, while running, captures the screen in-app and forces a `speak` hint in **one** brain round-trip (vs. the proactive screen path's two); complements proactive coaching, inert when stopped. Raw Carbon over the `KeyboardShortcuts` package because its SwiftUI macros (`@Entry`/`#Preview`) need full Xcode and Jarvis builds CLT-only (2026-06-21) | [architecture.md §2](./architecture.md#on-demand-hint-j) |
 
 ## Open Questions / To Confirm
 

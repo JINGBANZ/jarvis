@@ -82,6 +82,25 @@ drop*, not *show-freshest-only* — and adding direct-reply priority/preemption 
 rejected as solving a problem the interview workflow doesn't have. (The must-reply-on-direct-address
 path still works for testing/practice; it is simply not latency-critical there.)
 
+### On-demand hint (⌥⌘J)
+
+Proactive coaching is the default, but the user can also **pull** a hint on demand. Pressing the
+global hotkey **⌥⌘J** while a session is running fires a `manualHint` trigger that does in **one**
+brain round-trip what the proactive screen path needs two for: the harness captures the screenshot
+*itself* and injects it — plus a synthetic "give me a hint now" user message — into the *first*
+request, and forces the `speak` tool, so a screen-aware hint always comes straight back. (The
+proactive path, by contrast, must first let the model decide to call `capture_screen`, then reason
+over the returned image on a second trip — the latency this hotkey exists to skip.) It reuses the
+live session's brain, conversation, and transcript, so the hint has full context, and it routes
+through the same single-in-flight turn box as audio triggers (a press coalesces, never stacks). It is
+inert — a beep — when no session is running, since there is no live conversation to hint from.
+
+The hotkey is registered with **Carbon `RegisterEventHotKey`**, the one global-shortcut API Apple
+never modernized, which needs no Accessibility/TCC permission. We deliberately did **not** take the
+`KeyboardShortcuts` package: every modern release uses SwiftUI macros (`@Entry`/`#Preview`) whose
+plugins ship only with full Xcode, and Jarvis builds **CLT-only** (see
+[build-and-run.md](./build-and-run.md)). The binding is fixed for now; a rebinding UI is a later nicety.
+
 ## 3. Components
 
 | Component | Responsibility | Built on (borrowed) |
@@ -94,6 +113,7 @@ path still works for testing/practice; it is simply not latency-critical there.)
 | **Overlay** | Render `speak` output: up to ~3 short lines (model-split), shown one at a time and queued so a newer tip never cuts off the current one; non-activating, always-on-top, excluded from capture. | AppKit NSPanel. |
 | **Response box** | An optional persistent window logging every `speak` tip in full, timestamped — the scrollable history of what the overlay flashed one line at a time. Movable, resizable, opaque, also excluded from capture; toggled from the menu bar, cleared on each Start. Fed by the same `speak` call as the overlay via **`BroadcastOverlay`**, which fans one `OverlayRendering.render` out to both sinks (so `CoachDriver` is unchanged). | AppKit NSPanel; `ResponseLogPanel`. |
 | **MenuBar** | Manual **Start/Stop** of the pipeline (two states: ⚪️ stopped / 🟢 running — no auto-start), a **Show/Hide Responses** toggle, status indicator, one-time API-key entry. | AppKit menu-bar item; owner-only file for the key. |
+| **HotkeyController** | Register the global **⌥⌘J** hint hotkey and route a press to a one-trip `manualHint` turn while a session runs (beep otherwise). See [§2 On-demand hint](#on-demand-hint-j). | Carbon HIToolbox (`RegisterEventHotKey`, no TCC). |
 
 Each component has one job and a narrow interface. The CoachDriver is the only place the
 "intelligence" lives, and even there the intelligence is the model — the driver just wires events
@@ -179,7 +199,9 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
 - Multiple modes / a tiered sensitivity dial. (One mode: LeetCode Coach.)
 - Continuous OCR or recording the screen/audio to disk ("recall").
 - A dedicated wake-word engine. Direct address is just the word "Jarvis" (or a question) appearing
-  in the transcript, which the brain reads and answers — there is no separate detector or hotkey.
+  in the transcript, which the brain reads and answers — there is no wake-word detector. (A global
+  **⌥⌘J** hotkey for an on-demand screen hint *does* exist — see [§2](#on-demand-hint-j) — but it
+  complements the proactive default; it is not a trigger-to-listen wake key.)
 - Productization: auth, billing, onboarding, multi-provider.
 - Windows / cross-platform.
 
