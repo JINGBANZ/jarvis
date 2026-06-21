@@ -198,8 +198,10 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
             // server-side — a deliberate quality-over-retention choice; see wiki/sandbox.md.
             "store": true,
             "prompt_cache_key": promptCacheKey, // stable system prompt → better cache routing
-            "stream": stream,
         ]
+        if stream {
+            body["stream"] = true
+        }
         if let conversationId {
             body["conversation"] = conversationId
         }
@@ -329,7 +331,7 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
                 }
             case "response.completed", "response.incomplete", "response.failed":
                 if let resp = obj["response"], JSONSerialization.isValidJSONObject(resp) {
-                    finalResponse = try? JSONSerialization.data(withJSONObject: resp)
+                    finalResponse = try JSONSerialization.data(withJSONObject: resp)
                 }
             default:
                 break

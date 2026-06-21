@@ -82,4 +82,20 @@ final class LineCollector: @unchecked Sendable {
         #expect(resp.incompleteReason == "max_output_tokens")
         #expect(resp.toolCalls.isEmpty)
     }
+
+    /// 429 is retried on the streaming path; a subsequent 200 with a valid stream succeeds.
+    @Test func streamingRetriesOn429ThenSucceeds() async throws {
+        let attempts = Counter()
+        let completed = #"{"type":"response.completed","response":{"status":"completed","output":[{"type":"function_call","id":"f","call_id":"c","name":"speak","arguments":"{\"lines\":[\"hi\"]}"}]}}"#
+        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+                                       maxRetries: 3, backoffBaseSeconds: 0,
+                                       lineSend: { _ in
+            let n = attempts.next()
+            return n < 2 ? (sseStream([]), http(429)) : (sseStream([completed]), http(200))
+        })
+        let resp = try await client.respond(messages: [.user("hi")], tools: coachTools,
+                                            toolChoice: .auto, conversationId: nil, onLine: { _ in })
+        #expect(resp.toolCalls == [.speak(callId: "c", lines: ["hi"])])
+        #expect(attempts.value == 3) // two 429s + one 200
+    }
 }
