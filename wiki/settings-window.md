@@ -49,7 +49,7 @@ resizing; the API-key and overlay panels stay compact.
 | Section class | Tab title | Always present | Description |
 |---|---|---|---|
 | `APIKeySection` | "API Key" | yes | `NSSecureTextField` to paste the OpenAI key; saves to an owner-only file on "Save", restarts the pipeline if already running. |
-| `OverlaySection` | "Overlay" | yes | Two groups, one per overlay surface — **Overlay Caption** (the transient on-screen tip) and **Overlay Box** (the persistent response history). Each has an on/off checkbox, a one-line description, and Text Size + Opacity sliders with live readouts; persists via `OverlayAppearance`. Shows a live sample of *both* surfaces **only while the Overlay tab is selected** (`didBecomeActive`/`didResignActive`), regardless of their on/off state, so the sliders stay adjustable. |
+| `OverlaySection` | "Overlay" | yes | Two groups, one per overlay surface — **Overlay Caption** (the transient on-screen tip) and **Overlay Box** (the persistent response history). Each has a header with an On/Off toggle (an `NSSwitch` + "On"/"Off" label) and a one-line description. When a surface is **on** it also shows its Text Size + Opacity sliders (with live readouts) and a live sample, **only while the Overlay tab is selected** (`didBecomeActive`/`didResignActive`); when **off**, its sliders and sample are hidden and the layout collapses. Persists via `OverlayAppearance`. |
 | `BrainModelSection` | "Brain" | yes | Two dropdowns — the brain (LLM) model and the reasoning effort applied to it; persists via `BrainPreferences`. Takes effect on the next Start. |
 | `ActivitySection` | "Activity" | dev mode only | Embeds the `ActivityViewer` content view (`makeContentView()` / `teardown()`); `prefersResizableWindow == true` so the log gets a larger, resizable window. |
 
@@ -88,11 +88,12 @@ panels: `OverlayCaptionApplying` (`setFontSize` / `setBackgroundOpacity` / `setE
 round-trip through `OverlayAppearance` so they survive an app relaunch.
 
 `setEnabled(false)` on the caption suppresses coaching tips (dropping any in-flight/queued tip); on
-the box it simply hides the window. Both samples are still shown while the Overlay tab is selected
-(toggled from `didBecomeActive`/`didResignActive`, not from `makeView`/`windowWillClose`) **regardless
-of the on/off state** — the live preview ignores the enabled flag so size/opacity stay adjustable.
-Each panel's `showAppearancePreview(_:)` re-asserts capture exclusion so the preview stays hidden from
-screen capture — same defense-in-depth as the coaching display path. The box's preview shows sample
+the box it simply hides the window. A surface's live sample is shown only while the Overlay tab is
+selected **and that surface is on** — `didBecomeActive` previews each surface for its enabled state,
+and flipping a toggle shows/hides that surface's sample (and collapses/expands its sliders via
+`relayout()`) live. Each panel's `showAppearancePreview(_:)` re-asserts capture exclusion so the
+preview stays hidden from screen capture — same defense-in-depth as the coaching display path. The
+box's preview shows sample
 text without disturbing the real log and restores the box's **user-intended** visibility on close (it
 tracks intent separately from `panel.isVisible` so the setting can't desync). The plain setters
 (`setFontSize`/`setBackgroundOpacity`/`setOpacity`) only change appearance and don't touch
