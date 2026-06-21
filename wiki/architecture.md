@@ -130,11 +130,37 @@ rather than a per-turn screenshot.
 
 ### Latency
 
-Target: **turn-end → first overlay line < 2s.** It holds because transcription is continuous
-(no STT latency at trigger time) and most turns are text-only (no `capture_screen`), so the brain
-call is a single short round-trip. The overlay then reveals the already-returned lines one at a
-time (paced by `Config`), so the first tip appears immediately — note the brain response itself is **not**
-streamed (one buffered request; the overlay just paces the display).
+Measured **turn-end → first overlay line** (this metric excludes the VAD/debounce window that
+*precedes* turn-end). Two paths, with very different costs:
+
+- **Text-only turn** (no screen): a single short `gpt-5.5` round-trip — **< 2s**, and snappier now
+  that the answer streams. Transcription is continuous, so there's no STT latency at trigger time.
+- **Screen question** (the model calls `capture_screen`): inherently **two sequential brain calls** —
+  decide-it-needs-the-screen, then answer-with-the-image — because screen capture is *model-decided*
+  (§4), not attached to every call. Left naive this ran ~10s end-to-end; three changes cut a screen
+  question to **≈ 2–3s (turn-end → first spoken word)**, ~3.5–4.5s including the talk-detection
+  window, *without* removing the round-trip or changing `speak`:
+  1. **Capture overlaps the first call** — `CoachDriver` pre-warms the screenshot when the turn fires,
+     concurrently with brain call #1, so it's already in hand the instant the model asks (and dropped,
+     never written to disk, if the model never asks).
+  2. **The answer streams to the overlay** — the brain call is read as an SSE stream (`stream:true`)
+     and each `speak` line renders the moment it finishes generating (incrementally parsed in
+     `SpeakLinesStreamParser`), so first words appear ~1–2s into the answer instead of after the whole
+     response. `speak` stays a tool call: the final `BrainResponse` is still decoded from the terminal
+     event (byte-identical to the non-streamed result), and the overlay's queue/pacing is unchanged
+     (each streamed line is just a queued one-line tip).
+  3. **A decisive capture decision** — the coach prompt tells the model to decide on the first turn
+     whether it needs the screen and call `capture_screen` immediately, rather than answer-from-memory-
+     then-look.
+
+  The remaining floor — two model passes plus the VAD/debounce "are-you-done-talking" window — is
+  structural and accepted. Going lower would mean relaxing a kept constraint (pre-attaching the screen,
+  or trimming the VAD floor), deferred until the latency demands it.
+- **Full-resolution screenshots are kept** (no downscaling): GPT-5.5 reads the shot at full `original`
+  resolution by default, and the vision docs *recommend* `original` for large/dense images, so
+  reliable code-reading outweighs the upload saving. The brain response is now streamed (the earlier
+  "not streamed" note no longer holds). Implementation: `CoachDriver.swift`, `OpenAIBrainClient.swift`,
+  `SpeakLinesStreamParser.swift`.
 
 ### Resilience
 

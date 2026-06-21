@@ -72,6 +72,7 @@ A compact log — the *rationale* for each lives in the linked design page, not 
 | **Per-line overlay time is length-proportional, not hard-coded** — a hybrid of the captioning reading-speed standard and our glance-not-watch situation: `noticeBuffer + words × readingRate` (capped), plus a brief blank gap between lines borrowed from the captioning minimum-gap rule (2026-06-19) | [overlay-timing.md](./overlay-timing.md) |
 | **Brain model + reasoning effort are user-selectable in Settings** — a "Brain" tab picks the OpenAI model from a curated code-owned `BrainModelCatalog` (default `gpt-5.5`) and one global reasoning effort (None/Low/Medium/High, default `low`), persisted via `BrainPreferences` (UserDefaults); applied on next Start. Brain model/effort moved out of `Config` so the catalog/enum is the single source of truth (2026-06-20) | [settings-window.md](./settings-window.md) |
 | **Persistent response box beside the overlay** — an optional menu-toggled window (`ResponseLogPanel`) logging every `speak` tip in full, timestamped and scrollable; movable/resizable/opaque, **also excluded from capture** (shared `NSPanel.excludeFromScreenCapture`, re-asserted on render), cleared on each Start. Fed via a `BroadcastOverlay` fan-out so `CoachDriver` is unchanged; its text size + opacity are adjustable in the Overlay settings tab (2026-06-20) | [settings-window.md](./settings-window.md), [overlay-invisibility.md](./overlay-invisibility.md) |
+| **Cut screen-question latency (~10s → ~3–4s)** — kept the model-decided `capture_screen` round-trip and `speak`-as-tool, but overlap the screenshot with the first brain call, **stream** the answer to the overlay as it generates, and sharpen the capture decision in the prompt; full-resolution screenshots kept for GPT-5.5 vision reliability (2026-06-21) | [architecture.md §4 (Latency)](./architecture.md#latency) |
 
 ## Open Questions / To Confirm
 
@@ -100,7 +101,10 @@ The headless build is done. Remaining is the **human smoke run** — build, run,
    transcript; "I'm stuck on two-sum" → coaching overlay + observed `capture_screen`; overlay
    excluded from the screenshot; while you talk steadily Jarvis stays mostly quiet (model restraint,
    not a rate cap) and **Stop Jarvis** halts the pipeline. (Run via `./scripts/build-app.sh --dev`,
-   then open the activity viewer from the menu bar to watch each step.)
+   then open the activity viewer from the menu bar to watch each step.) Also confirm the **reduced
+   screen-question latency** — a "check my screen" question should show its first spoken line in
+   ~2–3s after you stop talking (streamed as it generates), not ~10s — see
+   [architecture.md §4 (Latency)](./architecture.md#latency).
 4. **Only remaining live unknown:** the bare-WebSocket connect for a transcription-only Realtime
    session. The connect contract (`?intent=transcription`, the `session.update` payload) lives in
    `RealtimeSession.swift`; if the live connect fails, that's the file to adjust (e.g. swap
