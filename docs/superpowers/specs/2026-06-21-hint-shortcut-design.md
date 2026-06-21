@@ -24,10 +24,18 @@ a hint appears on the overlay. Works while a session is running, with full meeti
 | Question | Decision |
 |---|---|
 | When is the shortcut active? | **Only while a session is running.** Reuses the live brain client, server-side conversation, and rolling transcript so the hint has full context. If stopped, the keypress is ignored (with an `NSSound.beep()` so it isn't silently dead). |
-| Hotkey mechanism | **`KeyboardShortcuts` SPM package** (Sindre Sorhus). Industry standard; wraps Carbon `RegisterEventHotKey`, so **no Accessibility/TCC permission and no permission dialog**. Swift 6-compatible. |
-| Customizable? | **Yes — a recorder field in Settings.** The recorder (press-any-combo) is the part that's tedious to hand-build, which is what justifies the dependency. Default binding **⌥⌘J**. |
+| Hotkey mechanism | **Raw Carbon `RegisterEventHotKey`** (no dependency). It is the one global-shortcut API Apple never modernized; needs **no Accessibility/TCC permission and no permission dialog**, and — unlike the `KeyboardShortcuts` package — builds cleanly with the Command Line Tools. See the constraint note below. |
+| Customizable? | **No — fixed `⌥⌘J` for now.** A rebinding UI can come later; the value here is the one-trip hint, not the binding control. |
 | Synthetic message | **Fixed generic prompt** (hard-coded, not configurable). |
 | Force a reply? | **Yes — force the `speak` tool** (`ToolChoice.force("speak")`) so a keypress always yields a visible hint. |
+
+> **Why not the `KeyboardShortcuts` package?** It was the first choice (industry standard, ships a
+> recorder UI), but every modern release uses SwiftUI macros (`@Entry` in 3.x, `#Preview` in 2.x)
+> whose plugins ship **only with full Xcode**. Jarvis builds **CLT-only** (`run-tests.sh` even
+> patches the CLT swift-testing path; `xcode-select -p` here is `/Library/Developer/CommandLineTools`),
+> so the package fails to compile in this environment regardless of version. Raw Carbon needs no
+> macros and no dependency, and has the identical permission profile. The only thing given up is the
+> free recorder UI — which we weren't shipping in the fixed-binding scope anyway.
 
 ## Architecture
 
@@ -96,30 +104,19 @@ working because `.manualHint` flows through the same `handleTrigger` → `runTur
 > directly as an `input_image`, and `speak` is forced, so the model answers from what it sees
 > regardless of that line. No prompt change required.
 
-### 3. Global hotkey — `Sources/JarvisApp/MenuBar/` (or a new `Shortcuts/` subfolder)
+### 3. Global hotkey — `Sources/JarvisApp/Shortcuts/HotkeyController.swift`
 
-- **`HintShortcut.swift`** — declares the shortcut name + default:
+A thin `@MainActor` type that registers the fixed ⌥⌘J hot key via Carbon and exposes a callback,
+mirroring how `MenuBarController` exposes `onStart`/`onStop`:
 
-  ```swift
-  import KeyboardShortcuts
-  extension KeyboardShortcuts.Name {
-      static let requestHint = Self("requestHint", default: .init(.j, modifiers: [.command, .option]))
-  }
-  ```
-
-- **`HotkeyController.swift`** — a tiny `@MainActor` type that registers the handler and exposes a
-  callback, mirroring how `MenuBarController` exposes `onStart`/`onStop`:
-
-  ```swift
-  @MainActor final class HotkeyController {
-      var onRequestHint: (() -> Void)?
-      init() {
-          KeyboardShortcuts.onKeyUp(for: .requestHint) { [weak self] in self?.onRequestHint?() }
-      }
-  }
-  ```
-
-  (`onKeyUp` avoids auto-repeat from a held combo; `onKeyDown` is the alternative.)
+- `installHandler()` calls `InstallEventHandler(GetApplicationEventTarget(), …)` for
+  `kEventHotKeyPressed`. The C callback can't capture context, so `self` is handed in via `userData`
+  and recovered with `Unmanaged`. Carbon delivers application-target hot-key events on the main
+  thread, so the callback uses `MainActor.assumeIsolated { controller.onRequestHint?() }`.
+- `register()` calls `RegisterEventHotKey(UInt32(kVK_ANSI_J), UInt32(cmdKey | optionKey), …)`.
+- No `deinit` teardown: the controller is app-lifetime (like the menu bar / overlay), and the OS
+  reclaims the registration on process exit. (A `deinit` couldn't touch the non-`Sendable` Carbon
+  pointers under Swift 6 strict concurrency anyway.)
 
 ### 4. Wiring — `Sources/JarvisApp/App/AppDelegate.swift`
 
@@ -129,49 +126,36 @@ use:
 
 ```swift
 hotkeys = HotkeyController()
-hotkeys.onRequestHint = { [weak self] in
-    guard let self, let turns = self.turns else { NSSound.beep(); return }  // no live session
-    turns.run { await self.driver?.handleTrigger(.manualHint) }
+hotkeys?.onRequestHint = { [weak self] in
+    guard let self, let fire = self.requestManualHint else { NSSound.beep(); return }  // no session
+    fire()
 }
 ```
 
-`turns` (and a stored `driver`) are non-nil only while a session is running, so the
-`guard` cleanly enforces the "only during a session" decision. Routing through `TurnTaskBox` gives
-coalescing and Stop-cancellation for free, identical to `onTurnEnd`/`onSilence`.
+Rather than store the whole driver, `AppDelegate` stores a `requestManualHint: (() -> Void)?` closure
+that captures the `Sendable` driver + turn box — the same trick the transcriber callbacks already use
+(`turns.run { await driver.handleTrigger(.manualHint) }`). It's set in `start()` and cleared in
+`stop()`, so it is non-nil **only while a session is running** — the `guard` (beep on nil) enforces
+the "only during a session" decision, and routing through `TurnTaskBox` gives coalescing and
+Stop-cancellation for free, identical to `onTurnEnd`/`onSilence`.
 
-> Minor: today `AppDelegate` stores the transcribers/capture/`turns` but not the `driver`. We
-> need a reference to the live `driver` (or a stored closure that calls it). Add a `driver`
-> property set in `start()` and cleared in `stop()`, matching the existing session-state fields.
+### 5. No Settings UI
 
-### 5. Settings recorder — `Sources/JarvisApp/Settings/ShortcutsSection.swift`
+The binding is fixed (⌥⌘J), so there is no Settings section in this scope. (A rebinding control —
+either a hand-built recorder or a preset dropdown — is deferred; see Out of scope.)
 
-A new `SettingsSection` ("Shortcuts" tab) hosting `KeyboardShortcuts.RecorderCocoa` (AppKit) for
-`.requestHint`. The recorder persists to `UserDefaults` and warns on conflicts automatically; no
-extra config plumbing. Register the section in the array passed to `SettingsWindow` in
-`AppDelegate` (next to the API-key / overlay / brain-model sections).
+### 6. No new dependency / build changes
 
-### 6. Package — `Package.swift`
-
-Add the dependency and attach it to the executable target only:
-
-```swift
-.package(url: "https://github.com/sindresorhus/KeyboardShortcuts", from: "2.0.0")
-// …
-.executableTarget(
-    name: "JarvisApp",
-    dependencies: ["JarvisCore", "JarvisOverlay", "CJarvisAEC",
-                   .product(name: "KeyboardShortcuts", package: "KeyboardShortcuts")]
-)
-```
-
-`JarvisCore` stays Foundation-only and dependency-free — the package never reaches it.
+Raw Carbon is part of the SDK, so `Package.swift` is unchanged and `build-app.sh` needs no
+resource-bundle handling. `JarvisCore` stays Foundation-only; the Carbon import lives only in the
+single `JarvisApp/Shortcuts/HotkeyController.swift` file.
 
 ## Data flow
 
 ```
-⌥⌘J (global, no session-focus needed)
-  → KeyboardShortcuts handler → HotkeyController.onRequestHint
-  → AppDelegate: session running? → TurnTaskBox.run { driver.handleTrigger(.manualHint) }
+⌥⌘J (global hot key — RegisterEventHotKey, fires even when Jarvis isn't frontmost)
+  → Carbon event handler → HotkeyController.onRequestHint
+  → AppDelegate: session running? → requestManualHint() → TurnTaskBox.run { driver.handleTrigger(.manualHint) }
   → CoachDriver.runTurn(.manualHint):
        capture screen (off-pool) → convo += .userImage
        brain.respond(convo, tools, toolChoice: .force("speak"), conversationId)   ← ONE trip
@@ -187,8 +171,9 @@ Add the dependency and attach it to the executable target only:
   before any overlay render — same protection the existing capture branch has.
 - **Rapid double-press:** `TurnTaskBox` + `claimOrPend` coalesce into one pending follow-up turn
   rather than stacking, exactly like audio triggers.
-- **Hotkey registration conflict:** `KeyboardShortcuts` surfaces conflicts in the recorder; a
-  system-claimed default just won't fire — the user rebinds in Settings.
+- **Hotkey registration conflict:** if another app/the system already owns ⌥⌘J, `RegisterEventHotKey`
+  fails and the hot key simply won't fire. With a fixed binding there's no in-app remedy yet; ⌥⌘J is
+  an uncommon combo, and a rebinding UI is the deferred follow-up.
 
 ## Testing
 
@@ -201,12 +186,12 @@ Add the dependency and attach it to the executable target only:
   3. The brain is called **once** (no `capture_screen` round trip) and the outcome is `.spoke`,
      with the overlay receiving the lines.
   4. Capture-failure variant: `screen.capture()` returns nil → still one call, still `.spoke`.
-- **App-level (smoke checklist):** hotkey fires only while running; beep when stopped; recorder in
-  Settings rebinds the shortcut and it persists across relaunch. `JarvisApp` is not unit-tested per
-  CLAUDE.md.
+- **App-level (smoke checklist):** ⌥⌘J fires globally (even when another app is frontmost) and shows
+  a hint while running; beeps when stopped. `JarvisApp` is not unit-tested per CLAUDE.md.
 
 ## Out of scope (YAGNI)
 
 - Configurable hint *prompt text* (fixed for now).
+- A rebinding UI for the shortcut (fixed ⌥⌘J for now — a recorder or preset dropdown can come later).
 - Working without a session (auto-start / one-shot no-context path).
-- Additional shortcuts beyond the hint trigger (the section is structured to grow, but we add one).
+- Additional shortcuts beyond the hint trigger.

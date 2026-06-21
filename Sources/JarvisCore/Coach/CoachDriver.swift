@@ -194,6 +194,22 @@ public final class CoachDriver: @unchecked Sendable {
             \(ctx.promptLine)
             """))
 
+        // Manual hint (hotkey): the user explicitly asked for help, so capture the screen HERE and
+        // inject it into THIS first request — no waiting for the model to call capture_screen.
+        // Forcing `speak` (below) then guarantees a visible hint in a single round trip. Same
+        // off-pool capture + post-capture cancellation guard as the capture_screen tool branch.
+        if reason == .manualHint {
+            let screen = self.screen
+            let img = await Task.detached(priority: .userInitiated, operation: { screen.capture() }).value
+            if Task.isCancelled { jlog("… turn cancelled (stopped) after capture"); return .cancelled }
+            if let img { jlog("👁 looking at your screen", image: img); convo.append(.userImage(img)) }
+            else { jlog("👁 screenshot failed") }   // still force a hint from transcript/conversation
+        }
+
+        // Force a reply ONLY for an explicit manual hint; audio-driven turns stay `.auto` so the
+        // model decides whether to speak, look at the screen, or stay silent.
+        let turnToolChoice: ToolChoice = (reason == .manualHint) ? .force(speakTool.name) : .auto
+
         jlog("💭 thinking…")
 
         var committed = false
@@ -203,11 +219,11 @@ public final class CoachDriver: @unchecked Sendable {
             iterations += 1
             let response: BrainResponse
             do {
-                // No forcing: the model picks the tool from the prompt (reply, look at the screen, or
-                // stay quiet). The system prompt tells it to answer when addressed and stay silent
-                // otherwise — that judgment lives in the model, not in a guardrail here.
+                // Audio-driven turns don't force: the model picks the tool from the prompt (reply,
+                // look at the screen, or stay quiet). A manual hint forces `speak` (see above) so an
+                // explicit keypress always yields a visible hint in one trip.
                 response = try await brain.respond(messages: convo, tools: coachTools,
-                                                   toolChoice: .auto, conversationId: convId)
+                                                   toolChoice: turnToolChoice, conversationId: convId)
             } catch {
                 // A cancellation (barge-in / Stop) is expected — report it quietly, not as a failure.
                 if Task.isCancelled { jlog("… turn cancelled (interrupted)"); return .cancelled }

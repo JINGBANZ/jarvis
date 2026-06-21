@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>On-demand hint shortcut — design</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1d212b; --ink:#e8eaf0; --muted:#9aa3b2;
+    --line:#2a2f3a; --accent:#6ea8fe; --accent2:#7ee787; --warn:#f0b86e; --pink:#f792c8;
+    --code:#0b0d12;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  .wrap{max-width:920px;margin:0 auto;padding:48px 24px 96px}
+  header.hero{
+    border:1px solid var(--line);border-radius:16px;padding:28px 30px;margin-bottom:34px;
+    background:linear-gradient(135deg,#1a2030,#14171f);
+  }
+  header.hero h1{margin:0 0 6px;font-size:30px;letter-spacing:-.5px}
+  .badges{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
+  .badge{font-size:12.5px;padding:4px 11px;border-radius:999px;border:1px solid var(--line);
+    background:var(--panel2);color:var(--muted)}
+  .badge.ok{color:var(--accent2);border-color:#27502f}
+  .badge.key{color:var(--accent);border-color:#274064}
+  h2{font-size:21px;margin:42px 0 14px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+  h3{font-size:16.5px;margin:26px 0 8px;color:#cdd4e0}
+  p{margin:10px 0;color:#d4d9e3}
+  .muted{color:var(--muted)}
+  strong{color:#fff}
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13.5px;
+    background:#222733;color:#e6c07b;padding:1.5px 6px;border-radius:5px}
+  pre{background:var(--code);border:1px solid var(--line);border-radius:10px;padding:14px 16px;
+    overflow:auto;margin:14px 0}
+  pre code{background:none;color:#cdd4e0;padding:0;font-size:13px;line-height:1.55}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:14.5px}
+  th,td{text-align:left;padding:10px 12px;border:1px solid var(--line);vertical-align:top}
+  th{background:var(--panel2);color:#cdd4e0;font-weight:600}
+  td:first-child{color:var(--accent);white-space:nowrap;font-weight:600}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:6px 22px 16px}
+  .callout{border-left:3px solid var(--accent);background:#141b29;border-radius:0 10px 10px 0;
+    padding:12px 16px;margin:16px 0;color:#c6d2e6;font-size:14.5px}
+  .callout.warn{border-color:var(--warn);background:#221b12;color:#e8d4b6}
+  ul{margin:10px 0;padding-left:22px}
+  li{margin:6px 0;color:#d4d9e3}
+  .fig{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px;margin:18px 0;text-align:center}
+  .fig figcaption{color:var(--muted);font-size:13px;margin-top:12px}
+  svg{max-width:100%;height:auto}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:680px){.grid2{grid-template-columns:1fr}}
+  .toc{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}
+  .toc a{font-size:13px;color:var(--muted);text-decoration:none;border:1px solid var(--line);
+    padding:4px 10px;border-radius:8px}
+  .toc a:hover{color:var(--ink);border-color:var(--accent)}
+  .done{color:var(--accent2)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <h1>On-demand hint shortcut <span class="muted" style="font-weight:400">— one round trip</span></h1>
+    <p class="muted" style="margin:0">Press ⌥⌘J → screenshot + a synthetic “give me a hint” message
+    go to the brain in <strong>one</strong> call → a hint appears on the overlay.</p>
+    <div class="badges">
+      <span class="badge">2026-06-21</span>
+      <span class="badge ok">Implemented · 172 tests green</span>
+      <span class="badge key">Fixed ⌥⌘J</span>
+      <span class="badge key">Raw Carbon · no dependency</span>
+    </div>
+    <div class="toc">
+      <a href="#problem">Problem</a><a href="#why">Why it's fast</a><a href="#decisions">Decisions</a>
+      <a href="#arch">Architecture</a><a href="#flow">Data flow</a><a href="#errors">Edge cases</a>
+      <a href="#test">Testing</a><a href="#scope">Out of scope</a>
+    </div>
+  </header>
+
+  <h2 id="problem">Problem</h2>
+  <p>A screen-aware hint costs <strong>two</strong> brain round trips today. The model has no eyes until it
+  calls the <code>capture_screen</code> tool, so the loop is: trigger → model asks for a screenshot →
+  <code>CoachDriver</code> captures and re-injects it → model reasons again and finally speaks. That second
+  trip is pure latency, and it only fires reactively (when audio triggers a turn).</p>
+  <p>We want a <strong>deliberate, user-initiated</strong> way to get a hint <em>right now</em> in
+  <strong>one</strong> trip: press a global key, the app grabs the screenshot itself, injects it plus a
+  synthetic hint request into the <em>first</em> request, and forces the model to speak.</p>
+
+  <h2 id="why">Why this is one trip instead of two</h2>
+  <figure class="fig">
+    <svg viewBox="0 0 860 340" role="img" aria-label="Before and after comparison">
+      <defs>
+        <marker id="arr" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+          <path d="M0,0 L8,3 L0,6 Z" fill="#9aa3b2"/>
+        </marker>
+        <marker id="arrG" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+          <path d="M0,0 L8,3 L0,6 Z" fill="#7ee787"/>
+        </marker>
+      </defs>
+      <text x="20" y="26" fill="#f0b86e" font-size="15" font-weight="700">BEFORE — 2 trips (reactive)</text>
+      <g font-size="12.5" fill="#e8eaf0" font-family="sans-serif">
+        <rect x="20" y="44" width="120" height="40" rx="8" fill="#1d212b" stroke="#2a2f3a"/>
+        <text x="80" y="68" text-anchor="middle">audio trigger</text>
+        <rect x="200" y="44" width="150" height="40" rx="8" fill="#1d212b" stroke="#2a2f3a"/>
+        <text x="275" y="62" text-anchor="middle">brain: “need to</text>
+        <text x="275" y="78" text-anchor="middle">see screen”</text>
+        <rect x="410" y="44" width="150" height="40" rx="8" fill="#1d212b" stroke="#2a2f3a"/>
+        <text x="485" y="68" text-anchor="middle">app screenshots</text>
+        <rect x="620" y="44" width="150" height="40" rx="8" fill="#1d212b" stroke="#2a2f3a"/>
+        <text x="695" y="62" text-anchor="middle">brain reasons</text>
+        <text x="695" y="78" text-anchor="middle">→ speaks</text>
+        <line x1="140" y1="64" x2="198" y2="64" stroke="#9aa3b2" marker-end="url(#arr)"/>
+        <line x1="350" y1="64" x2="408" y2="64" stroke="#9aa3b2" marker-end="url(#arr)"/>
+        <line x1="560" y1="64" x2="618" y2="64" stroke="#9aa3b2" marker-end="url(#arr)"/>
+        <text x="275" y="108" text-anchor="middle" fill="#f0b86e" font-size="11">⟵ trip 1 ⟶</text>
+        <text x="695" y="108" text-anchor="middle" fill="#f0b86e" font-size="11">⟵ trip 2 ⟶</text>
+      </g>
+      <line x1="20" y1="150" x2="840" y2="150" stroke="#2a2f3a" stroke-dasharray="4 4"/>
+      <text x="20" y="190" fill="#7ee787" font-size="15" font-weight="700">AFTER — 1 trip (⌥⌘J on demand)</text>
+      <g font-size="12.5" fill="#e8eaf0" font-family="sans-serif">
+        <rect x="20" y="210" width="140" height="44" rx="8" fill="#16241a" stroke="#27502f"/>
+        <text x="90" y="228" text-anchor="middle">⌥⌘J pressed</text>
+        <text x="90" y="244" text-anchor="middle" fill="#9aa3b2" font-size="11">app screenshots first</text>
+        <rect x="250" y="210" width="200" height="44" rx="8" fill="#16241a" stroke="#27502f"/>
+        <text x="350" y="228" text-anchor="middle">inject image + hint msg</text>
+        <text x="350" y="244" text-anchor="middle" fill="#9aa3b2" font-size="11">force speak tool</text>
+        <rect x="540" y="210" width="150" height="44" rx="8" fill="#16241a" stroke="#27502f"/>
+        <text x="615" y="228" text-anchor="middle">brain speaks</text>
+        <text x="615" y="244" text-anchor="middle" fill="#9aa3b2" font-size="11">one call</text>
+        <rect x="730" y="210" width="110" height="44" rx="8" fill="#16241a" stroke="#27502f"/>
+        <text x="785" y="236" text-anchor="middle">overlay hint</text>
+        <line x1="160" y1="232" x2="248" y2="232" stroke="#7ee787" marker-end="url(#arrG)"/>
+        <line x1="450" y1="232" x2="538" y2="232" stroke="#7ee787" marker-end="url(#arrG)"/>
+        <line x1="690" y1="232" x2="728" y2="232" stroke="#7ee787" marker-end="url(#arrG)"/>
+        <text x="430" y="290" text-anchor="middle" fill="#7ee787" font-size="11">⟵ single trip ⟶</text>
+      </g>
+    </svg>
+    <figcaption>The app captures the screenshot <em>before</em> calling the brain, so the model never has to ask for it.</figcaption>
+  </figure>
+
+  <h2 id="decisions">Decisions</h2>
+  <div class="panel">
+  <table>
+    <tr><th>Question</th><th>Decision</th></tr>
+    <tr><td>When active?</td><td><strong>Only while a session is running.</strong> Reuses the live brain client, server-side conversation, and rolling transcript so the hint has full context. If stopped, the keypress is ignored with an <code>NSSound.beep()</code>.</td></tr>
+    <tr><td>Hotkey mechanism</td><td><strong>Raw Carbon <code>RegisterEventHotKey</code></strong> (no dependency). The one global-shortcut API Apple never modernized → <strong>no Accessibility/TCC permission, no dialog</strong>, and it builds under the Command Line Tools.</td></tr>
+    <tr><td>Customizable?</td><td><strong>No — fixed <code>⌥⌘J</code> for now.</strong> A rebinding UI is deferred; the value is the one-trip hint, not the binding control.</td></tr>
+    <tr><td>Synthetic message</td><td><strong>Fixed generic prompt</strong> (hard-coded, not configurable).</td></tr>
+    <tr><td>Force a reply?</td><td><strong>Yes — force the <code>speak</code> tool</strong> (<code>ToolChoice.force("speak")</code>) so a keypress always yields a visible hint.</td></tr>
+  </table>
+  </div>
+
+  <div class="callout warn"><strong>Why not the KeyboardShortcuts package?</strong> It was the first
+  choice (industry standard, free recorder UI), but every modern release uses SwiftUI macros
+  (<code>@Entry</code> in 3.x, <code>#Preview</code> in 2.x) whose plugins ship <strong>only with full
+  Xcode</strong>. Jarvis builds <strong>CLT-only</strong> (verified: <code>xcode-select -p</code> is
+  <code>/Library/Developer/CommandLineTools</code>), so the package fails to compile here regardless of
+  version. Raw Carbon needs no macros and no dependency, with the identical permission profile.</div>
+
+  <h2 id="arch">Architecture</h2>
+  <p>Three changes. The one-trip mechanic lives in <code>JarvisCore</code> (testable); the hotkey is OS
+  glue in <code>JarvisApp</code>.</p>
+
+  <h3>1 · New trigger <code>.manualHint</code> — <span class="muted">Triggers/Trigger.swift</span></h3>
+  <p>Add a case to <code>TriggerReason</code> and a <code>promptLine</code> (the fixed synthetic message) to
+  <code>TriggerContext</code>. The enum is <code>Equatable</code>/<code>Sendable</code>; the existing
+  <code>if case .silence</code> switch is non-exhaustive, so nothing else breaks.</p>
+  <pre><code>case manualHint   // user pressed the hint hotkey — capture + force a hint, one trip</code></pre>
+
+  <h3>2 · Direct injection + forced speak — <span class="muted">Coach/CoachDriver.swift</span></h3>
+  <p>In <code>runTurn(_:)</code>, after the base <code>convo</code> is built and before the tool loop:</p>
+  <pre><code>if reason == .manualHint {
+    let screen = self.screen
+    let img = await Task.detached(priority: .userInitiated) { screen.capture() }.value
+    if Task.isCancelled { return .cancelled }
+    if let img { convo.append(.userImage(img)) }   // else: hint from context alone
+}
+let turnToolChoice: ToolChoice = (reason == .manualHint) ? .force(speakTool.name) : .auto
+// ... brain.respond(messages: convo, tools: coachTools, toolChoice: turnToolChoice, ...)</code></pre>
+  <p>Forcing <code>speak</code> means the model can’t call <code>capture_screen</code> (image already attached)
+  and must return a hint on the first iteration. Conversation continuity, prior-close bundling,
+  coalescing, and Stop-cancellation all keep working — <code>.manualHint</code> flows through the same path.</p>
+  <div class="callout">The system prompt’s “you cannot see the screen unless you call capture_screen”
+  stays true for audio turns. For a manual hint the image is provided directly as an <code>input_image</code>
+  and <code>speak</code> is forced, so the model answers from what it sees. <strong>No prompt change.</strong></div>
+
+  <h3>3 · Global hotkey — <span class="muted">Shortcuts/HotkeyController.swift</span></h3>
+  <p>A thin <code>@MainActor</code> type that registers ⌥⌘J via Carbon and exposes an
+  <code>onRequestHint</code> callback, mirroring <code>MenuBarController</code>’s <code>onStart</code>/<code>onStop</code>.</p>
+  <ul>
+    <li><code>InstallEventHandler(GetApplicationEventTarget(), …)</code> for <code>kEventHotKeyPressed</code>.
+    The C callback can’t capture context, so <code>self</code> is passed via <code>userData</code> and recovered
+    with <code>Unmanaged</code>; Carbon delivers on the main thread, so it uses
+    <code>MainActor.assumeIsolated { controller.onRequestHint?() }</code>.</li>
+    <li><code>RegisterEventHotKey(UInt32(kVK_ANSI_J), UInt32(cmdKey | optionKey), …)</code>.</li>
+    <li>No <code>deinit</code> teardown: app-lifetime object (like the menu bar / overlay); the OS reclaims
+    the registration on exit. (A <code>deinit</code> couldn’t touch the non-<code>Sendable</code> Carbon
+    pointers under Swift 6 anyway.)</li>
+  </ul>
+
+  <h3>4 · Wiring — <span class="muted">App/AppDelegate.swift</span></h3>
+  <pre><code>hotkeys = HotkeyController()
+hotkeys?.onRequestHint = { [weak self] in
+    guard let self, let fire = self.requestManualHint else { NSSound.beep(); return }  // no session
+    fire()
+}</code></pre>
+  <p>Instead of storing the driver, <code>AppDelegate</code> stores a <code>requestManualHint</code> closure
+  capturing the <code>Sendable</code> driver + turn box (the same trick the transcriber callbacks use). It’s
+  set in <code>start()</code>, cleared in <code>stop()</code> — non-nil only while running, so the
+  <code>guard</code> enforces “only during a session,” and routing through <code>TurnTaskBox</code> gives
+  coalescing + Stop-cancellation for free.</p>
+
+  <h3>5 · No new dependency, no Settings UI</h3>
+  <p>Carbon is in the SDK — <code>Package.swift</code> and <code>build-app.sh</code> are unchanged, and
+  <code>JarvisCore</code> stays Foundation-only (the <code>Carbon</code> import lives in the single
+  <code>HotkeyController.swift</code>). The binding is fixed, so there’s no Settings section in this scope.</p>
+
+  <h2 id="flow">Data flow</h2>
+  <figure class="fig">
+    <svg viewBox="0 0 360 470" role="img" aria-label="Data flow">
+      <defs>
+        <marker id="d" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+          <path d="M0,0 L8,3 L0,6 Z" fill="#6ea8fe"/>
+        </marker>
+      </defs>
+      <g font-family="sans-serif" font-size="12.5" text-anchor="middle">
+        <rect x="40" y="14" width="280" height="42" rx="9" fill="#1d212b" stroke="#274064"/>
+        <text x="180" y="32" fill="#e8eaf0">⌥⌘J  (global — RegisterEventHotKey)</text>
+        <text x="180" y="48" fill="#9aa3b2" font-size="11">fires even when not frontmost</text>
+
+        <rect x="60" y="78" width="240" height="40" rx="9" fill="#1d212b" stroke="#2a2f3a"/>
+        <text x="180" y="103" fill="#e8eaf0">HotkeyController.onRequestHint</text>
+
+        <rect x="40" y="140" width="280" height="46" rx="9" fill="#1d212b" stroke="#2a2f3a"/>
+        <text x="180" y="160" fill="#e8eaf0">AppDelegate — session running?</text>
+        <text x="180" y="177" fill="#9aa3b2" font-size="11">no → beep · yes → requestManualHint()</text>
+
+        <rect x="40" y="208" width="280" height="120" rx="9" fill="#16241a" stroke="#27502f"/>
+        <text x="180" y="230" fill="#7ee787" font-weight="700">CoachDriver.runTurn(.manualHint)</text>
+        <text x="180" y="252" fill="#e8eaf0">capture screen (off-pool)</text>
+        <text x="180" y="270" fill="#9aa3b2" font-size="11">convo += .userImage</text>
+        <text x="180" y="292" fill="#e8eaf0">brain.respond( … force "speak" )</text>
+        <text x="180" y="310" fill="#7ee787" font-size="11.5" font-weight="700">◀ ONE round trip ▶</text>
+
+        <rect x="60" y="350" width="240" height="40" rx="9" fill="#1d212b" stroke="#2a2f3a"/>
+        <text x="180" y="375" fill="#e8eaf0">.speak(lines) → overlay.render</text>
+
+        <rect x="90" y="412" width="180" height="40" rx="9" fill="#1d212b" stroke="#274064"/>
+        <text x="180" y="437" fill="#6ea8fe">hint on screen ✦</text>
+
+        <line x1="180" y1="56"  x2="180" y2="76"  stroke="#6ea8fe" marker-end="url(#d)"/>
+        <line x1="180" y1="118" x2="180" y2="138" stroke="#6ea8fe" marker-end="url(#d)"/>
+        <line x1="180" y1="186" x2="180" y2="206" stroke="#6ea8fe" marker-end="url(#d)"/>
+        <line x1="180" y1="328" x2="180" y2="348" stroke="#6ea8fe" marker-end="url(#d)"/>
+        <line x1="180" y1="390" x2="180" y2="410" stroke="#6ea8fe" marker-end="url(#d)"/>
+      </g>
+    </svg>
+  </figure>
+
+  <h2 id="errors">Error handling / edge cases</h2>
+  <div class="panel">
+  <ul>
+    <li><strong>No session running</strong> — <code>guard</code> ignores the press; <code>NSSound.beep()</code> signals it.</li>
+    <li><strong>Screenshot fails</strong> (<code>capture()</code> → nil) — proceed without the image; forced <code>speak</code> still produces a hint from transcript/conversation context.</li>
+    <li><strong>Stop mid-capture</strong> — the post-capture <code>Task.isCancelled</code> guard returns <code>.cancelled</code> before any overlay render.</li>
+    <li><strong>Rapid double-press</strong> — <code>TurnTaskBox</code> + <code>claimOrPend</code> coalesce into one pending follow-up turn, like audio triggers.</li>
+    <li><strong>Hotkey conflict</strong> — if the system/another app owns ⌥⌘J, <code>RegisterEventHotKey</code> fails and it won’t fire; ⌥⌘J is uncommon, and a rebinding UI is the deferred follow-up.</li>
+  </ul>
+  </div>
+
+  <h2 id="test">Testing</h2>
+  <div class="grid2">
+    <div class="panel">
+      <h3 style="margin-top:14px">Unit — JarvisCoreTests/Coach <span class="done">✓ green</span></h3>
+      <ul>
+        <li>Driver (not the brain) calls <code>screen.capture()</code> — image injected, not tool-requested.</li>
+        <li><code>brain.respond</code> gets <code>toolChoice == .force("speak")</code> and a <code>.userImage</code> message.</li>
+        <li>Brain called <strong>once</strong>; outcome <code>.spoke</code>; overlay receives the lines.</li>
+        <li>Capture-failure variant: still one call, still <code>.spoke</code>, no image.</li>
+      </ul>
+    </div>
+    <div class="panel">
+      <h3 style="margin-top:14px">App — smoke checklist</h3>
+      <ul>
+        <li>⌥⌘J fires globally (even when another app is frontmost) and shows a hint while running.</li>
+        <li>Beeps when stopped.</li>
+        <li><code>JarvisApp</code> is not unit-tested (per CLAUDE.md). App bundles + signs cleanly.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2 id="scope">Out of scope (YAGNI)</h2>
+  <div class="panel">
+  <ul>
+    <li>Configurable hint <em>prompt text</em> (fixed for now).</li>
+    <li>A rebinding UI for the shortcut (fixed ⌥⌘J — a recorder or preset dropdown can come later).</li>
+    <li>Working without a session (auto-start / one-shot no-context path).</li>
+    <li>Additional shortcuts beyond the hint trigger.</li>
+  </ul>
+  </div>
+
+</div>
+</body>
+</html>
