@@ -173,6 +173,9 @@ step as it happens.
 - With a LeetCode problem on screen, say *"Jarvis, I'm stuck on two-sum"* — expect a coaching overlay
   within ~2s and a 👁 `looking at your screen` (`capture_screen`) line.
 - Confirm the screenshot excludes the overlay window.
+- On a fresh run the **Overlay Box** is visible and the **Overlay Caption** is suppressed (the
+  defaults). In Settings → Overlay, toggling each surface off hides its sliders + preview; toggle
+  states survive a relaunch.
 - While you talk steadily, Jarvis stays mostly quiet (restraint is the model's, not a rate cap);
   **Stop Jarvis** halts the pipeline entirely.
 

@@ -16,7 +16,6 @@ final class OverlaySection: NSObject, SettingsSection {
     private let box: OverlayBoxApplying
 
     // Built once per `makeView`, then repositioned by `relayout()` as toggles flip.
-    private weak var rootView: NSView?
     private var captionViews: SurfaceViews?
     private var boxViews: SurfaceViews?
 
@@ -36,7 +35,11 @@ final class OverlaySection: NSObject, SettingsSection {
         static var contentRight: CGFloat { width - right }   // 524
         static let readoutWidth: CGFloat = 56
         static let columnGap: CGFloat = 12
-        static let topMargin: CGFloat = 36   // space between the tab bar and the first header
+        // Fixed top anchor for the first header. Constant (not derived from the view's live height) so
+        // the initial layout and every toggle-driven relayout agree — NSTabView resizes the section view
+        // to its content rect AFTER makeView() runs, and reading frame.height would shift everything on
+        // the first toggle.
+        static let contentTop: CGFloat = 396
         static let groupGap: CGFloat = 24    // space between the two surface groups
     }
 
@@ -67,7 +70,6 @@ final class OverlaySection: NSObject, SettingsSection {
 
     func makeView() -> NSView {
         let view = NSView(frame: NSRect(x: 0, y: 0, width: L.width, height: 432))
-        rootView = view
 
         captionViews = buildSurface(
             in: view, header: "Overlay Caption", description: "A transient response from Jarvis.",
@@ -115,7 +117,8 @@ final class OverlaySection: NSObject, SettingsSection {
         s.header.font = .boldSystemFont(ofSize: 13)
         s.header.textColor = .secondaryLabelColor
 
-        s.toggle.controlSize = .small   // match the panel's text scale (the regular switch dwarfed it)
+        // NSSwitch renders at a fixed size (it ignores controlSize), so we use the standard macOS
+        // toggle — the same one System Settings uses — rather than trying to shrink it.
         s.toggle.state = enabledOn ? .on : .off
         s.toggle.target = self
         s.toggle.action = enableAction
@@ -140,8 +143,8 @@ final class OverlaySection: NSObject, SettingsSection {
 
     /// Reposition both groups top-down, collapsing a surface's config + state when it is off.
     private func relayout() {
-        guard let root = rootView, let cap = captionViews, let bx = boxViews else { return }
-        var cursor = root.frame.height - L.topMargin
+        guard let cap = captionViews, let bx = boxViews else { return }
+        var cursor = L.contentTop
         layoutSurface(cap, enabled: appearance.captionEnabled, cursor: &cursor)
         cursor -= L.groupGap
         layoutSurface(bx, enabled: appearance.boxEnabled, cursor: &cursor)
