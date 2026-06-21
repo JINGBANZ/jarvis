@@ -291,9 +291,16 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
                 return try await consumeStream(stream, onLine: onLine)
             }
             // Non-2xx: drain whatever body arrived (for the error message) and retry like the
-            // non-streaming path on 429/5xx.
+            // non-streaming path on 429/5xx. Draining can itself throw (e.g. the server sends a 429
+            // header then drops the connection) — swallow that so a failed drain still falls through to
+            // the retry guard below rather than escaping the loop. Keep newlines so a multi-line body
+            // stays readable in the error.
             var errBody = ""
-            for try await line in stream { errBody += line }
+            do {
+                for try await line in stream { errBody += line + "\n" }
+            } catch {
+                // partial/failed drain — proceed with whatever we collected
+            }
             let retryable = status == 429 || (500...599).contains(status)
             if retryable && attempt < maxRetries {
                 let retryAfter = http?.value(forHTTPHeaderField: "Retry-After").flatMap { Double($0) }
@@ -326,7 +333,11 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
 
             switch type {
             case "response.output_item.added":
+                // Only function_call items carry a tool name we route on; skip an item that declares a
+                // DIFFERENT type (a future output-item kind that happens to carry a `name`). A missing
+                // type is accepted, so we never depend on the field always being present.
                 if let item = obj["item"] as? [String: Any],
+                   ((item["type"] as? String) ?? "function_call") == "function_call",
                    let id = item["id"] as? String, let name = item["name"] as? String {
                     nameByItemId[id] = name
                 }

@@ -28,7 +28,7 @@ final class LineCollector: @unchecked Sendable {
     /// and the final BrainResponse matches what the terminal response.completed event carries.
     @Test func streamsSpeakLinesAndReturnsFinalResponse() async throws {
         let collector = LineCollector()
-        let added = #"{"type":"response.output_item.added","item":{"id":"fc_1","call_id":"call_1","name":"speak","arguments":""}}"#
+        let added = #"{"type":"response.output_item.added","item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"speak","arguments":""}}"#
         let d1 = #"{"type":"response.function_call_arguments.delta","item_id":"fc_1","delta":"{\"lines\":[\"Use a hash map.\","}"#
         let d2 = #"{"type":"response.function_call_arguments.delta","item_id":"fc_1","delta":"\"Track seen values.\"]}"}"#
         let completed = #"{"type":"response.completed","response":{"status":"completed","output":[{"type":"function_call","id":"fc_1","call_id":"call_1","name":"speak","arguments":"{\"lines\":[\"Use a hash map.\",\"Track seen values.\"]}"}]}}"#
@@ -47,7 +47,7 @@ final class LineCollector: @unchecked Sendable {
     /// capture_screen streams no speak lines; onLine never fires, final response decodes the call.
     @Test func captureScreenStreamsNoLines() async throws {
         let collector = LineCollector()
-        let added = #"{"type":"response.output_item.added","item":{"id":"fc_9","call_id":"call_9","name":"capture_screen","arguments":""}}"#
+        let added = #"{"type":"response.output_item.added","item":{"type":"function_call","id":"fc_9","call_id":"call_9","name":"capture_screen","arguments":""}}"#
         let completed = #"{"type":"response.completed","response":{"status":"completed","output":[{"type":"function_call","id":"fc_9","call_id":"call_9","name":"capture_screen","arguments":"{}"}]}}"#
         let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
             lineSend: { _ in (sseStream([added, completed]), http(200)) })
@@ -99,23 +99,30 @@ final class LineCollector: @unchecked Sendable {
         #expect(attempts.value == 3) // two 429s + one 200
     }
 
-    /// A 429 carrying a `Retry-After: 0` header on the streaming path is honoured: the client reads
-    /// the header, routes it through the shared helper, and retries — proving the Retry-After code
-    /// path is exercised without imposing any wall-clock delay (Retry-After: 0, backoffBase: 0).
-    @Test func streamingRetriesOn429WithRetryAfterHeader() async throws {
+    /// A small `Retry-After` header is honoured *over* a large computed backoff. With
+    /// `backoffBaseSeconds` high, an ignored header would impose a multi-second wait; reading
+    /// `Retry-After: 0` makes the retry near-instant. Asserting the call completes well under that
+    /// backoff proves the header is actually read — which the `backoffBaseSeconds: 0` retry test above
+    /// cannot (its delay is 0 either way). Adapts to the code via a generous wall-clock margin rather
+    /// than adding a clock seam to production.
+    @Test func streamingHonoursRetryAfterOverComputedBackoff() async throws {
         let attempts = Counter()
         let completed = #"{"type":"response.completed","response":{"status":"completed","output":[{"type":"function_call","id":"f","call_id":"c","name":"speak","arguments":"{\"lines\":[\"hi\"]}"}]}}"#
         let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
-                                       maxRetries: 3, backoffBaseSeconds: 0,
+                                       maxRetries: 3, backoffBaseSeconds: 10,  // ignored header => >=10s wait
                                        lineSend: { _ in
             let n = attempts.next()
             return n < 2
                 ? (sseStream([]), http(429, headers: ["Retry-After": "0"]))
                 : (sseStream([completed]), http(200))
         })
+        let clock = ContinuousClock()
+        let start = clock.now
         let resp = try await client.respond(messages: [.user("hi")], tools: coachTools,
                                             toolChoice: .auto, conversationId: nil, onLine: { _ in })
+        let elapsed = clock.now - start
         #expect(resp.toolCalls == [.speak(callId: "c", lines: ["hi"])])
-        #expect(attempts.value == 3) // two 429s (with Retry-After: 0) + one 200
+        #expect(attempts.value == 3)        // two 429s + one 200
+        #expect(elapsed < .seconds(2))      // Retry-After:0 honoured, not the ~10s+ computed backoff
     }
 }

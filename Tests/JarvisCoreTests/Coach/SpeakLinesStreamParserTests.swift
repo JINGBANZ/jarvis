@@ -39,4 +39,18 @@ import Testing
         var p = SpeakLinesStreamParser()
         #expect(p.feed(#"{"lines":[]}"#) == [])
     }
+
+    /// A BMP `\uXXXX` escape decodes to its character (not the literal `uXXXX`) -- the regression that
+    /// would otherwise garble any tip with an arrow, dash, or accented/non-English character.
+    @Test func decodesBMPUnicodeEscape() {
+        var p = SpeakLinesStreamParser()
+        #expect(p.feed(#"{"lines":["x\u2014y"]}"#) == ["x\u{2014}y"])   // \u2014 (raw) decodes to an em dash
+    }
+
+    /// A `\uXXXX` escape split across feed() chunks (mid-sequence boundary) still decodes correctly.
+    @Test func decodesUnicodeEscapeSplitAcrossChunks() {
+        var p = SpeakLinesStreamParser()
+        #expect(p.feed(#"{"lines":["a\u21"#) == [])        // mid-\u sequence: nothing emitted yet
+        #expect(p.feed(#"92b"]}"#) == ["a\u{2192}b"])      // completes → -> right arrow
+    }
 }

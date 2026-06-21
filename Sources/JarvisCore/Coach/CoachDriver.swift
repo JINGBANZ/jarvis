@@ -202,13 +202,17 @@ public final class CoachDriver: @unchecked Sendable {
             \(ctx.promptLine)
             """))
 
-        // M1: pre-warm the screenshot NOW, concurrently with brain call #1, so when the model asks
-        // for the screen the image is already in hand (capture leaves the critical path). If the model
-        // never asks, the result is simply dropped. `screen.capture()` is synchronous/blocking and
-        // un-cancellable, so it runs detached off the cooperative pool — same as before, just earlier.
+        // M1: on a user-spoke (`.turnEnd`) turn, pre-warm the screenshot NOW — concurrently with brain
+        // call #1 — so when the model asks for the screen the image is already in hand (capture leaves
+        // the critical path); it's dropped if the model never asks. Silence-triggered turns are
+        // proactive, not latency-critical, so they skip the pre-warm and capture on demand only if the
+        // model asks — we don't fire `screencapture` on every silence tick. `screen.capture()` is
+        // synchronous/blocking and un-cancellable, so it runs detached off the cooperative pool.
         let screen = self.screen
-        var pendingCapture: Task<String?, Never>? =
-            Task.detached(priority: .userInitiated) { screen.capture() }
+        var pendingCapture: Task<String?, Never>?
+        if case .turnEnd = reason {
+            pendingCapture = Task.detached(priority: .userInitiated) { screen.capture() }
+        }
 
         jlog("💭 thinking…")
 

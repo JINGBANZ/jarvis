@@ -421,6 +421,31 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(screen.captureCount == 1)       // reused, not double-captured
     }
 
+    /// A silence-triggered turn does NOT pre-warm the screenshot — only spoke turns do — so
+    /// `screencapture` doesn't fire on every silence tick. With the model staying silent, capture()
+    /// is never called.
+    @Test func silenceTurnDoesNotPrewarmCapture() async {
+        let clock = ManualClock(now: 0)
+        let screen = FakeScreen()
+        let brain = ScriptedBrain(script: [.init(toolCalls: [])])   // model stays silent
+        let driver = CoachDriver(config: .default, transcript: RollingTranscript(),
+                                 brain: brain, screen: screen, overlay: FakeOverlay(), clock: clock)
+        await driver.handleTrigger(.silence(secondsQuiet: 60))
+        #expect(screen.captureCount == 0)   // no pre-warm on a silence turn; the model didn't ask
+    }
+
+    /// A spoke (.turnEnd) turn DOES pre-warm even if the model ends up silent — the capture is
+    /// speculative and simply dropped (the counterpart to the silence-turn gate above).
+    @Test func spokeTurnPrewarmsEvenWhenModelSilent() async {
+        let clock = ManualClock(now: 0)
+        let screen = FakeScreen()
+        let brain = ScriptedBrain(script: [.init(toolCalls: [])])
+        let driver = CoachDriver(config: .default, transcript: RollingTranscript(),
+                                 brain: brain, screen: screen, overlay: FakeOverlay(), clock: clock)
+        await driver.handleTrigger(.turnEnd)
+        #expect(screen.captureCount == 1)   // speculative pre-warm fired; its result is dropped
+    }
+
     // MARK: - Streaming speak lines (M4c)
 
     @Test func streamedLinesRenderOnePerLineAndNotTwice() async {
@@ -527,24 +552,26 @@ final class GatedBrain: BrainClient, @unchecked Sendable {
     }
 }
 
-/// A screen that signals the instant capture() begins, so a test can prove capture started
+/// A screen that records the instant capture() begins, so a test can prove capture started
 /// concurrently with — not after — the first brain call.
 final class SignalingScreen: ScreenCapturing, @unchecked Sendable {
-    let started = DispatchSemaphore(value: 0)
     private let lock = NSLock()
     private var _count = 0
+    private var _started = false
     var captureCount: Int { lock.lock(); defer { lock.unlock() }; return _count }
+    var hasStarted: Bool { lock.lock(); defer { lock.unlock() }; return _started }
     let payload: String
     init(payload: String = "ZmFrZS1qcGVn") { self.payload = payload }
     func capture() -> String? {
-        lock.lock(); _count += 1; lock.unlock()
-        started.signal()
+        lock.lock(); _count += 1; _started = true; lock.unlock()
         return payload
     }
 }
 
 /// A brain whose FIRST respond() records whether the screenshot has already started capturing —
-/// i.e. whether M1's pre-warm ran in parallel with call #1 (true) or only after it (times out → false).
+/// i.e. whether M1's pre-warm ran in parallel with call #1. It waits *cooperatively* (yields, never
+/// blocks a thread) up to a short deadline, so a regression fails cleanly on the deadline rather than
+/// hanging or blocking a GCD thread.
 final class CaptureProbeBrain: BrainClient, @unchecked Sendable {
     private let screen: SignalingScreen
     private let script: [BrainResponse]
@@ -553,18 +580,18 @@ final class CaptureProbeBrain: BrainClient, @unchecked Sendable {
     private var _startedDuringFirstCall = false
     var startedDuringFirstCall: Bool { lock.lock(); defer { lock.unlock() }; return _startedDuringFirstCall }
     init(screen: SignalingScreen, script: [BrainResponse]) { self.screen = screen; self.script = script }
-    // NSLock sync helpers — callable from async contexts via the @unchecked Sendable guarantee.
     private func nextIndex() -> Int { lock.lock(); defer { lock.unlock() }; let i = idx; idx += 1; return i }
     private func setStarted(_ v: Bool) { lock.lock(); _startedDuringFirstCall = v; lock.unlock() }
     func respond(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice,
                  conversationId: String?) async throws -> BrainResponse {
         let i = nextIndex()
         if i == 0 {
-            // DispatchSemaphore.wait() is blocking and unavailable in async contexts; run it on a
-            // background thread and await completion so we don't block a Swift concurrency thread.
-            let started = screen.started
-            let ok: Bool = await withCheckedContinuation { cont in
-                DispatchQueue.global().async { cont.resume(returning: started.wait(timeout: .now() + 2) == .success) }
+            let clock = ContinuousClock()
+            let deadline = clock.now.advanced(by: .seconds(2))
+            var ok = false
+            while clock.now < deadline {
+                if screen.hasStarted { ok = true; break }
+                await Task.yield()
             }
             setStarted(ok)
         }

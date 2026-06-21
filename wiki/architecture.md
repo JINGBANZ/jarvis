@@ -44,10 +44,12 @@ glue that wires them into a proactive coach. We write the least code possible an
 Always-on and cheap: audio streams continuously to the Realtime API, producing a rolling,
 speaker-labeled transcript. The transcript — not the screen — is the constant input signal.
 
-On demand and expensive: the screen is **only** captured when the model asks for it via the
-`capture_screen` tool, and a coaching response is **only** produced when the model calls `speak`.
-This is what keeps Jarvis cheap and fast — the costly vision and generation steps fire only at
-moments the model judges worthwhile.
+On demand and expensive: the screen image is **only sent to the model** (the costly vision step) when
+it asks via the `capture_screen` tool, and a coaching response is **only** produced when the model
+calls `speak`. This is what keeps Jarvis cheap and fast — the costly vision and generation steps fire
+only at moments the model judges worthwhile. (On a *spoke* turn the local screenshot is pre-warmed
+speculatively, in parallel with the first brain call, so it's ready instantly — see [Latency](#latency) —
+but it never leaves the machine unless the model asks; silence turns don't pre-warm.)
 
 ### The turn
 
@@ -104,8 +106,11 @@ to tool calls and enforces safety.
 - **Continuous (cheap):** audio → Realtime → transcript. This runs the whole session.
 - **Per-turn (cheap):** a text-only `gpt-5.5` call on each turn-end/silence event. No image unless
   the model asks.
-- **On-demand (expensive):** a screenshot + vision tokens, only when the model calls
-  `capture_screen`. A coaching response, only when the model calls `speak`.
+- **On-demand (expensive):** **vision tokens** (the screenshot sent to the model), only when the model
+  calls `capture_screen`. A coaching response, only when the model calls `speak`. (On a spoke turn the
+  local screenshot is pre-warmed speculatively so it's ready instantly — see [Latency](#latency) — but
+  the expensive part, sending it for vision, stays model-gated; the pre-warmed shot is dropped, never
+  written to disk, if the model doesn't ask.)
 
 The model is the cost governor: it spends vision tokens and screen real estate only when it
 judges them worthwhile. That is the whole point of making screen capture a model-invoked tool
@@ -140,9 +145,10 @@ Measured **turn-end → first overlay line** (this metric excludes the VAD/debou
   (§4), not attached to every call. Left naive this ran ~10s end-to-end; three changes cut a screen
   question to **≈ 2–3s (turn-end → first spoken word)**, ~3.5–4.5s including the talk-detection
   window, *without* removing the round-trip or changing `speak`:
-  1. **Capture overlaps the first call** — `CoachDriver` pre-warms the screenshot when the turn fires,
-     concurrently with brain call #1, so it's already in hand the instant the model asks (and dropped,
-     never written to disk, if the model never asks).
+  1. **Capture overlaps the first call** — on a spoke (`.turnEnd`) turn, `CoachDriver` pre-warms the
+     screenshot the moment the turn fires, concurrently with brain call #1, so it's already in hand the
+     instant the model asks (and dropped, never written to disk, if the model never asks). Silence turns
+     don't pre-warm — they're proactive, not latency-critical — and capture on demand if the model asks.
   2. **The answer streams to the overlay** — the brain call is read as an SSE stream (`stream:true`)
      and each `speak` line renders the moment it finishes generating (incrementally parsed in
      `SpeakLinesStreamParser`), so first words appear ~1–2s into the answer instead of after the whole
