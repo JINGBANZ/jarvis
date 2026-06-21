@@ -93,7 +93,9 @@ proactive path, by contrast, must first let the model decide to call `capture_sc
 over the returned image on a second trip — the latency this hotkey exists to skip.) It reuses the
 live session's brain, conversation, and transcript, so the hint has full context, and it routes
 through the same single-in-flight turn box as audio triggers (a press coalesces, never stacks). It is
-inert — a beep — when no session is running, since there is no live conversation to hint from.
+inert — a beep — when no session is running, since there is no live conversation to hint from. In dev
+mode the trigger and its pre-filled message are recorded to the [activity viewer](./build-and-run.md),
+so you can see exactly what the shortcut sent to the brain.
 
 The hotkey is registered with **Carbon `RegisterEventHotKey`**, the one global-shortcut API Apple
 never modernized, which needs no Accessibility/TCC permission. We deliberately did **not** take the

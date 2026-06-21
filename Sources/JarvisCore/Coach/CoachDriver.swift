@@ -165,6 +165,11 @@ public final class CoachDriver: @unchecked Sendable {
             sessionElapsedSeconds: now - sessionStart
         )
 
+        // A hotkey trigger leaves no "🗣 heard:" line (the user pressed a key, didn't speak), so record
+        // it — with the synthetic request we pre-fill as the user's message — so the activity viewer
+        // shows what the shortcut sent to the brain.
+        if reason == .manualHint { jlog("⌨️ hint shortcut — \(ctx.promptLine)") }
+
         // Context: when conversation-backed, send only the NEW lines (the server holds the rest),
         // tracked by index. When STATELESS (no conversation), send a full recent window every turn —
         // there's no server history, so a delta would starve the model of the problem statement.
