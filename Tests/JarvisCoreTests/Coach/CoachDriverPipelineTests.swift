@@ -202,7 +202,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(await task.value == .cancelled)
         #expect(screen.captureCount == 1)        // captured once...
         #expect(overlay.rendered.isEmpty)        // ...but never rendered a tip after Stop
-        #expect(brain.calls.count == 1)          // and never looped back to the brain with the image
+        #expect(brain.calls.count < 2)           // never looped back to the brain (call #2) with the image
     }
 
     /// A `speak` with an empty `lines` array (the decode fallback, or a model returning []) is passed
@@ -402,6 +402,25 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(brain.lastMessages.contains { ($0.text ?? "").contains("important words") })   // re-sent
     }
 
+    @Test func captureRunsInParallelWithFirstBrainCall() async {
+        let clock = ManualClock(now: 0)
+        let screen = SignalingScreen()
+        let brain = CaptureProbeBrain(screen: screen, script: [
+            .init(toolCalls: [.captureScreen(callId: "c1")],
+                  rawToolCalls: [RawToolCall(id: "c1", name: "capture_screen", argumentsJSON: "{}")]),
+            .init(toolCalls: [.speak(callId: "s1", lines: ["tip"])]),
+        ])
+        let transcript = RollingTranscript()
+        let driver = CoachDriver(config: .default, transcript: transcript,
+                                 brain: brain, screen: screen, overlay: FakeOverlay(), clock: clock)
+        transcript.append(.init(speaker: .me, text: "look at my code", at: 0))
+
+        await driver.handleTrigger(.turnEnd)
+
+        #expect(brain.startedDuringFirstCall)   // pre-warm: capture began during call #1, not after it
+        #expect(screen.captureCount == 1)       // reused, not double-captured
+    }
+
     /// While one turn is in flight, a second concurrent trigger must be reported as `.busy` AND
     /// coalesced: the running turn picks it up and runs it too, so nothing is dropped (vs. the old
     /// cancel-the-previous behavior).
@@ -461,6 +480,51 @@ final class GatedBrain: BrainClient, @unchecked Sendable {
         record(messages)
         await gate.enter()
         return response
+    }
+}
+
+/// A screen that signals the instant capture() begins, so a test can prove capture started
+/// concurrently with — not after — the first brain call.
+final class SignalingScreen: ScreenCapturing, @unchecked Sendable {
+    let started = DispatchSemaphore(value: 0)
+    private let lock = NSLock()
+    private var _count = 0
+    var captureCount: Int { lock.lock(); defer { lock.unlock() }; return _count }
+    let payload: String
+    init(payload: String = "ZmFrZS1qcGVn") { self.payload = payload }
+    func capture() -> String? {
+        lock.lock(); _count += 1; lock.unlock()
+        started.signal()
+        return payload
+    }
+}
+
+/// A brain whose FIRST respond() records whether the screenshot has already started capturing —
+/// i.e. whether M1's pre-warm ran in parallel with call #1 (true) or only after it (times out → false).
+final class CaptureProbeBrain: BrainClient, @unchecked Sendable {
+    private let screen: SignalingScreen
+    private let script: [BrainResponse]
+    private let lock = NSLock()
+    private var idx = 0
+    private var _startedDuringFirstCall = false
+    var startedDuringFirstCall: Bool { lock.lock(); defer { lock.unlock() }; return _startedDuringFirstCall }
+    init(screen: SignalingScreen, script: [BrainResponse]) { self.screen = screen; self.script = script }
+    // NSLock sync helpers — callable from async contexts via the @unchecked Sendable guarantee.
+    private func nextIndex() -> Int { lock.lock(); defer { lock.unlock() }; let i = idx; idx += 1; return i }
+    private func setStarted(_ v: Bool) { lock.lock(); _startedDuringFirstCall = v; lock.unlock() }
+    func respond(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice,
+                 conversationId: String?) async throws -> BrainResponse {
+        let i = nextIndex()
+        if i == 0 {
+            // DispatchSemaphore.wait() is blocking and unavailable in async contexts; run it on a
+            // background thread and await completion so we don't block a Swift concurrency thread.
+            let started = screen.started
+            let ok: Bool = await withCheckedContinuation { cont in
+                DispatchQueue.global().async { cont.resume(returning: started.wait(timeout: .now() + 2) == .success) }
+            }
+            setStarted(ok)
+        }
+        return script[min(i, script.count - 1)]
     }
 }
 

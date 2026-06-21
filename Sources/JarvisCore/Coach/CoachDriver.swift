@@ -194,6 +194,14 @@ public final class CoachDriver: @unchecked Sendable {
             \(ctx.promptLine)
             """))
 
+        // M1: pre-warm the screenshot NOW, concurrently with brain call #1, so when the model asks
+        // for the screen the image is already in hand (capture leaves the critical path). If the model
+        // never asks, the result is simply dropped. `screen.capture()` is synchronous/blocking and
+        // un-cancellable, so it runs detached off the cooperative pool — same as before, just earlier.
+        let screen = self.screen
+        var pendingCapture: Task<String?, Never>? =
+            Task.detached(priority: .userInitiated) { screen.capture() }
+
         jlog("💭 thinking…")
 
         var committed = false
@@ -239,10 +247,16 @@ public final class CoachDriver: @unchecked Sendable {
 
             switch call {
             case .captureScreen(let callId):
-                // ScreenCaptureCLI shells out to `screencapture` and blocks for 100s of ms; run it
-                // off the cooperative pool so it doesn't stall a pool thread while holding the slot.
-                let screen = self.screen
-                let img = await Task.detached(priority: .userInitiated, operation: { screen.capture() }).value
+                // Use the pre-warmed capture (M1) for the first request; a second capture_screen in the
+                // same turn (a model looping on capture) gets a fresh shot, since the screen may have
+                // changed and the model explicitly asked to look again.
+                let img: String?
+                if let pre = pendingCapture {
+                    pendingCapture = nil
+                    img = await pre.value
+                } else {
+                    img = await Task.detached(priority: .userInitiated, operation: { screen.capture() }).value
+                }
                 // Stop may have fired during the (un-cancellable, detached) capture. Bail before
                 // emitting: otherwise this screenshot — and the reasoning that follows — would be
                 // logged into whatever session is now current (a Start rotates the dev log mid-turn).
