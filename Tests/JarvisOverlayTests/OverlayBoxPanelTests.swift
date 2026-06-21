@@ -39,6 +39,29 @@ import AppKit
         #expect(!panel.isPanelVisible)
     }
 
+    // The enable checkbox fires while the Overlay tab is active, i.e. while a preview owns the box.
+    // Switching off mid-preview must not tear down the sample, but must take effect on close.
+    @MainActor @Test
+    func setEnabledOffDuringPreviewHidesOnClose() {
+        let panel = OverlayBoxPanel()
+        panel.setEnabled(true)             // box on
+        panel.showAppearancePreview(true)  // preview owns it
+        panel.setEnabled(false)            // user switches it off mid-preview (deferred)
+        #expect(panel.isPanelVisible, "the preview sample must stay up until the tab closes")
+        panel.showAppearancePreview(false) // close the tab
+        #expect(!panel.isPanelVisible, "a box switched off during preview must be ordered out on close")
+    }
+
+    // Symmetric: switching the box ON during a preview must leave it shown after the tab closes.
+    @MainActor @Test
+    func setEnabledOnDuringPreviewShowsOnClose() {
+        let panel = OverlayBoxPanel()      // starts hidden
+        panel.showAppearancePreview(true)
+        panel.setEnabled(true)             // user switches it on mid-preview
+        panel.showAppearancePreview(false) // close the tab
+        #expect(panel.isPanelVisible, "a box switched on during preview must stay shown on close")
+    }
+
     @MainActor @Test
     func isResizableAndHonorsAResize() {
         let panel = OverlayBoxPanel()

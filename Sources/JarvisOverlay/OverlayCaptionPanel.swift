@@ -253,6 +253,16 @@ public final class OverlayCaptionPanel: NSObject, OverlayRendering, OverlayCapti
             panel.orderFrontRegardless()
         } else if isPreviewing {
             isPreviewing = false
+            // If the caption was switched off *during* the preview, `setEnabled(false)` deferred its
+            // cleanup (it can't tear down the sample mid-preview). Honor that off state now: drop any
+            // paused/queued tip instead of resuming it onto a caption the user explicitly turned off.
+            guard isEnabled else {
+                tickWorkItem?.cancel(); tickWorkItem = nil
+                queue.removeAll()
+                active = nil
+                hide()
+                return
+            }
             if active != nil {
                 advance()        // resume the paused tip from the exact line it stopped on
             } else if !queue.isEmpty {

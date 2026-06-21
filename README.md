@@ -45,8 +45,9 @@ Audio streams continuously and cheaply into a transcript. The expensive steps �
 screen and speaking — happen **only when the model invokes a tool**, so the model itself governs
 cost. There's no cooldown or rate cap: every utterance reaches the brain and the brain decides
 whether to speak (restraint lives in the prompt); the manual Start/Stop is the only hard gate.
-Tips flash one line at a time in the overlay; an optional **Responses** window (toggled from the menu
-bar) keeps the full, timestamped history. Both are hidden from screen capture.
+Tips flash one line at a time in the **Overlay Caption**; the optional **Overlay Box** keeps the
+full, timestamped history. Each is switched on/off in the Settings → Overlay tab (caption off, box
+on by default). Both are hidden from screen capture.
 Full design: [`wiki/architecture.md`](./wiki/architecture.md).
 
 ## Project structure
@@ -67,12 +68,12 @@ Full design: [`wiki/architecture.md`](./wiki/architecture.md).
 │   │   ├── Diagnostics/           # logging, activity log, session-history store
 │   │   └── Support/               # small primitives (Clock, TurnTaskBox)
 │   ├── JarvisOverlay/         # the on-screen NSPanels — own target so they're unit-testable
-│   │   ├── OverlayPanel.swift         # one-line coaching overlay
-│   │   ├── ResponseLogPanel.swift     # persistent, timestamped response history box
+│   │   ├── OverlayCaptionPanel.swift   # transient one-line coaching caption
+│   │   ├── OverlayBoxPanel.swift       # persistent, timestamped response-history box
 │   │   └── NSPanel+CaptureExclusion.swift  # shared screen-capture-exclusion helper
 │   └── JarvisApp/             # the macOS app shell — the native, OS-bound parts
 │       ├── App/                   # main.swift, AppDelegate
-│       ├── MenuBar/               # menu-bar item, Start/Stop, Show Responses, key entry
+│       ├── MenuBar/               # menu-bar item, Start/Stop, key entry
 │       ├── Capture/               # mic + system-audio capture, realtime transcriber, TCC priming
 │       └── Viewer/                # dev-mode WKWebView activity viewer
 ├── Tests/

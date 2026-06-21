@@ -106,6 +106,11 @@ import AppKit
         await checkDisablingMidTipHides()
     }
 
+    @Test
+    func disablingDuringPreviewStaysOffOnClose() async {
+        await checkDisableDuringPreviewStaysOff()
+    }
+
     @MainActor @Test
     func disabledCaptionStillPreviews() {
         // The on/off switch gates real tips, not the Settings preview — size/opacity must stay
@@ -364,6 +369,26 @@ private func checkDisablingMidTipHides() async {
     #expect(await waitUntil { overlay.isPanelVisible }, "the tip should be on screen first")
     overlay.setEnabled(false)
     #expect(!overlay.isPanelVisible, "disabling the caption must hide an in-flight tip immediately")
+}
+
+// Switching the caption OFF *during* a Settings preview must take effect on close: setEnabled(false)
+// can't tear down the sample mid-preview, so it defers; closing the preview must then honor the off
+// state and drop the paused tip rather than resuming it onto a caption the user turned off.
+@MainActor
+private func checkDisableDuringPreviewStaysOff() async {
+    let overlay = OverlayCaptionPanel()                            // enabled by default
+    overlay.interLineGapSeconds = 0
+    // A TWO-line tip so a line is still pending when the preview pauses it — that pending line is what
+    // a buggy close would resume onto the disabled caption (a single-line tip would already be on its
+    // last line, so resume just hides and the bug wouldn't reproduce).
+    overlay.render(["Line one, paused.", "Line two, must be dropped."], perLineSeconds: 5)
+    #expect(await waitUntil { overlay.currentText == "Line one, paused." }, "the first line should display")
+    overlay.showAppearancePreview(true)                           // pause the tip (line two pending); sample owns the panel
+    #expect(await waitUntil { overlay.currentText == "Sample overlay text" }, "the preview must own the panel")
+    overlay.setEnabled(false)                                     // user switches the caption off mid-preview
+    overlay.showAppearancePreview(false)                         // close Settings
+    #expect(!overlay.isPanelVisible, "a caption switched off during preview must stay hidden on close, not resume the tip")
+    #expect(overlay.currentText != "Line two, must be dropped.", "the pending line must not be shown on a disabled caption")
 }
 
 @MainActor
