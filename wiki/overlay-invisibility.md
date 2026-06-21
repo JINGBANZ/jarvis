@@ -7,8 +7,8 @@
 
 ## The Requirement
 
-Jarvis draws short coaching tips in a floating overlay ([`OverlayPanel`](../Sources/JarvisOverlay/OverlayPanel.swift)).
-That overlay must be invisible to two distinct audiences:
+Jarvis draws short coaching tips in a floating overlay caption ([`OverlayCaptionPanel`](../Sources/JarvisOverlay/OverlayCaptionPanel.swift)).
+That caption must be invisible to two distinct audiences:
 
 1. **Other apps capturing the screen** — the interviewer's Zoom/Meet/Teams share, a QuickTime/OBS
    recording, the macOS screenshot tool.
@@ -69,7 +69,7 @@ used was a handful of standalone Swift programs driving `NSPanel` + ScreenCaptur
 
 ## What Jarvis Does
 
-- [`OverlayPanel`](../Sources/JarvisOverlay/OverlayPanel.swift) sets `panel.sharingType = .none` at
+- [`OverlayCaptionPanel`](../Sources/JarvisOverlay/OverlayCaptionPanel.swift) sets `panel.sharingType = .none` at
   construction.
 - It **re-asserts** `.none` at the top of `show()` every time a coaching response is displayed.
   This is defense-in-depth, taken from Natively's documented lesson: flipping `NSApp` activation
@@ -78,13 +78,13 @@ used was a handful of standalone Swift programs driving `NSPanel` + ScreenCaptur
   does **not** reproduce on macOS 26.5, but the failure would be silent and high-impact (the overlay
   would become visible to an interviewer with no signal), so re-asserting on every show is cheap
   insurance.
-- `OverlayPanel.showAppearancePreview(_:)` (the live preview shown while the Settings window is
+- `OverlayCaptionPanel.showAppearancePreview(_:)` (the live preview shown while the Settings window is
   open) routes its capture-exclusion re-assert through the counted `reassertCaptureExclusion()`
   helper, so the preview stays excluded from screen capture. This is regression-tested via the
   `captureExclusionReassertCount` hook (`previewReassertsCaptureExclusion`). The plain setters
   `setFontSize`/`setBackgroundOpacity` only change font/alpha and don't touch `sharingType`.
 
-**The same applies to the [response box](./settings-window.md) ([`ResponseLogPanel`](../Sources/JarvisOverlay/ResponseLogPanel.swift)).**
+**The same applies to the [Overlay Box](./settings-window.md) ([`OverlayBoxPanel`](../Sources/JarvisOverlay/OverlayBoxPanel.swift)).**
 It is the *more* sensitive of the two windows — it holds the full, persistent history of every spoken
 tip — so it gets the identical treatment, not less: both panels set the flag through one shared
 `NSPanel.excludeFromScreenCapture()` helper at construction, and the box **re-asserts on every render

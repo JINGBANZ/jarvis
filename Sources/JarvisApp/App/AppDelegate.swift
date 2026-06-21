@@ -10,8 +10,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let secretFile = FileSecretStore()
     private lazy var secrets = ChainedSecretStore([secretFile, EnvSecretStore()])
 
-    private var overlay: OverlayPanel!
-    private var responseLog: ResponseLogPanel!   // persistent, movable history of every spoken response
+    private var overlayCaption: OverlayCaptionPanel!   // transient on-screen tip
+    private var overlayBox: OverlayBoxPanel!            // persistent, movable history of every spoken response
     private var menuBar: MenuBarController!
     private var settingsWindow: SettingsWindow!
     private let appearance = OverlayAppearance()
@@ -54,13 +54,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Ask for Microphone + Screen Recording up front, not lazily mid-session.
         Permissions.primeAll()
 
-        overlay = OverlayPanel()
-        overlay.setFontSize(appearance.fontSize)
-        overlay.setBackgroundOpacity(appearance.backgroundOpacity)
+        overlayCaption = OverlayCaptionPanel()
+        overlayCaption.setFontSize(appearance.captionFontSize)
+        overlayCaption.setBackgroundOpacity(appearance.captionBackgroundOpacity)
+        overlayCaption.setEnabled(appearance.captionEnabled)   // off by default
 
-        responseLog = ResponseLogPanel()
-        responseLog.setBoxFontSize(appearance.responseBoxFontSize)
-        responseLog.setBoxOpacity(appearance.responseBoxOpacity)
+        overlayBox = OverlayBoxPanel()
+        overlayBox.setFontSize(appearance.boxFontSize)
+        overlayBox.setOpacity(appearance.boxOpacity)
+        overlayBox.setEnabled(appearance.boxEnabled)   // on by default — shows the history box at launch
 
         menuBar = MenuBarController()
 
@@ -75,7 +77,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // reserved for an explicit user Start.
                 self.menuBar.setRunning(self.start(freshSession: false))
             }),
-            OverlaySection(appearance: appearance, applying: overlay, responseBox: responseLog),
+            OverlaySection(appearance: appearance, caption: overlayCaption, box: overlayBox),
             BrainModelSection(preferences: brainPreferences),
         ]
         if let viewer = activityViewer {
@@ -83,10 +85,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         settingsWindow = SettingsWindow(sections: sections)
         menuBar.onOpenSettings = { [weak self] in self?.settingsWindow.show() }
-        menuBar.onToggleResponses = { [weak self] in
-            guard let self else { return }
-            self.menuBar.setResponsesShown(self.responseLog.toggle())
-        }
 
         // The menu drives the pipeline lifecycle. Jarvis does NOT auto-start; the user presses Start.
         menuBar.onStart = { [weak self] in self?.start() ?? false }
@@ -124,13 +122,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if freshSession {
             beginNewSession()       // dev mode: rotate to a fresh session dir + activity/debug log
             menuBar.resetCounter()  // a user Start begins a fresh session
-            responseLog.clear()     // …and a fresh response history for the new conversation
+            overlayBox.clear()      // …and a fresh response history for the new conversation
         }
 
         let brain = OpenAIBrainClient(apiKey: key, model: brainPreferences.model.id,
                                       reasoningEffort: brainPreferences.effort.rawValue)
-        // Fan each spoken tip out to both the on-screen overlay and the persistent response window.
-        let overlaySink = BroadcastOverlay([overlay, responseLog])
+        // Fan each spoken tip out to both the Overlay Caption and the persistent Overlay Box.
+        let overlaySink = BroadcastOverlay([overlayCaption, overlayBox])
         let driver = CoachDriver(config: config, transcript: transcript,
                                  brain: brain, screen: ScreenCaptureCLI(), overlay: overlaySink, clock: clock,
                                  onSpoke: { [weak self] in Task { @MainActor in self?.menuBar.noteSpoke() } })

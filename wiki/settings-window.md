@@ -49,7 +49,7 @@ resizing; the API-key and overlay panels stay compact.
 | Section class | Tab title | Always present | Description |
 |---|---|---|---|
 | `APIKeySection` | "API Key" | yes | `NSSecureTextField` to paste the OpenAI key; saves to an owner-only file on "Save", restarts the pipeline if already running. |
-| `OverlaySection` | "Overlay" | yes | Two groups of sliders with live readouts: **Overlay** (text size + background opacity) and **Response Box** (text size + opacity); persists via `OverlayAppearance`. Shows a live sample of *both* the overlay and the response box **only while the Overlay tab is selected** (`didBecomeActive`/`didResignActive`). |
+| `OverlaySection` | "Overlay" | yes | Two groups, one per overlay surface — **Overlay Caption** (the transient on-screen tip) and **Overlay Box** (the persistent response history). Each has a header with an On/Off toggle (an `NSSwitch` + "On"/"Off" label) and a one-line description. When a surface is **on** it also shows its Text Size + Opacity sliders (with live readouts) and a live sample, **only while the Overlay tab is selected** (`didBecomeActive`/`didResignActive`); when **off**, its sliders and sample are hidden and the layout collapses. Persists via `OverlayAppearance`. |
 | `BrainModelSection` | "Brain" | yes | Two dropdowns — the brain (LLM) model and the reasoning effort applied to it; persists via `BrainPreferences`. Takes effect on the next Start. |
 | `ActivitySection` | "Activity" | dev mode only | Embeds the `ActivityViewer` content view (`makeContentView()` / `teardown()`); `prefersResizableWindow == true` so the log gets a larger, resizable window. |
 
@@ -71,25 +71,33 @@ ranges defined in `Config`:
 
 | Property | Default | Range | UserDefaults key |
 |---|---|---|---|
-| Overlay font size | 18 pt | 12–32 pt | `overlay.fontSize` |
-| Overlay background opacity | 0.78 (78%) | 0.40–1.00 (40–100%) | `overlay.backgroundOpacity` |
-| Response box font size | 14 pt | 12–32 pt | `responseBox.fontSize` |
-| Response box opacity | 1.00 (100%) | 0.40–1.00 (40–100%) | `responseBox.opacity` |
+| Caption enabled | off | on/off | `overlayCaption.enabled` |
+| Caption font size | 18 pt | 12–32 pt | `overlayCaption.fontSize` |
+| Caption background opacity | 0.78 (78%) | 0.40–1.00 (40–100%) | `overlayCaption.backgroundOpacity` |
+| Box enabled | on | on/off | `overlayBox.enabled` |
+| Box font size | 14 pt | 12–32 pt | `overlayBox.fontSize` |
+| Box opacity | 1.00 (100%) | 0.40–1.00 (40–100%) | `overlayBox.opacity` |
+
+The two surfaces default opposite ways — the caption **off**, the box **on** — so a first run shows
+the durable history rather than a flashing caption. `AppDelegate` applies both enabled flags at launch.
 
 `OverlaySection` applies changes live through two protocols, with no direct dependency on the AppKit
-panels: `OverlayAppearanceApplying` (`setFontSize` / `setBackgroundOpacity` / `showAppearancePreview`,
-conformed by `OverlayPanel`) and `ResponseBoxAppearanceApplying` (`setBoxFontSize` / `setBoxOpacity` /
-`showAppearancePreview`, conformed by `ResponseLogPanel`). All four values round-trip through
-`OverlayAppearance` so they survive an app relaunch.
+panels: `OverlayCaptionApplying` (`setFontSize` / `setBackgroundOpacity` / `setEnabled` /
+`showAppearancePreview`, conformed by `OverlayCaptionPanel`) and `OverlayBoxApplying` (`setFontSize` /
+`setOpacity` / `setEnabled` / `showAppearancePreview`, conformed by `OverlayBoxPanel`). All values
+round-trip through `OverlayAppearance` so they survive an app relaunch.
 
-Both samples are shown only while the Overlay tab is selected (toggled from
-`didBecomeActive`/`didResignActive`, not from `makeView`/`windowWillClose`). Each panel's
-`showAppearancePreview(_:)` re-asserts capture exclusion so the preview stays hidden from screen
-capture — same defense-in-depth as the coaching display path. The response box's preview shows sample
+`setEnabled(false)` on the caption suppresses coaching tips (dropping any in-flight/queued tip); on
+the box it simply hides the window. A surface's live sample is shown only while the Overlay tab is
+selected **and that surface is on** — `didBecomeActive` previews each surface for its enabled state,
+and flipping a toggle shows/hides that surface's sample (and collapses/expands its sliders via
+`relayout()`) live. Each panel's `showAppearancePreview(_:)` re-asserts capture exclusion so the
+preview stays hidden from screen capture — same defense-in-depth as the coaching display path. The
+box's preview shows sample
 text without disturbing the real log and restores the box's **user-intended** visibility on close (it
-tracks intent separately from `panel.isVisible` so the menu toggle can't desync). The plain setters
-(`setFontSize`/`setBackgroundOpacity`/`setBoxFontSize`/`setBoxOpacity`) only change appearance and
-don't touch `sharingType`. See [overlay-invisibility.md](./overlay-invisibility.md).
+tracks intent separately from `panel.isVisible` so the setting can't desync). The plain setters
+(`setFontSize`/`setBackgroundOpacity`/`setOpacity`) only change appearance and don't touch
+`sharingType`. See [overlay-invisibility.md](./overlay-invisibility.md).
 
 ## Brain Model
 
@@ -124,11 +132,11 @@ not mid-session — hence the caption on the tab.
 | `Sources/JarvisCore/Coach/BrainModelCatalog.swift` | Curated model list (`BrainModel`) |
 | `Sources/JarvisCore/Coach/ReasoningEffort.swift` | The four effort levels |
 | `Sources/JarvisCore/Config/BrainPreferences.swift` | UserDefaults persistence + validation |
-| `Sources/JarvisCore/Config/Config.swift` | `overlay*`/`responseBox*` size + opacity ranges, defaults |
-| `Sources/JarvisCore/Overlay/OverlayAppearance.swift` | UserDefaults persistence; `OverlayAppearanceApplying` + `ResponseBoxAppearanceApplying` protocols |
-| `Sources/JarvisCore/Overlay/BroadcastOverlay.swift` | Fans one `render` out to the overlay + response box |
-| `Sources/JarvisOverlay/OverlayPanel.swift` | `OverlayAppearanceApplying` conformance |
-| `Sources/JarvisOverlay/ResponseLogPanel.swift` | The response box; `ResponseBoxAppearanceApplying` conformance |
+| `Sources/JarvisCore/Config/Config.swift` | `overlayCaption*`/`overlayBox*` size + opacity ranges, enabled + appearance defaults |
+| `Sources/JarvisCore/Overlay/OverlayAppearance.swift` | UserDefaults persistence; `OverlayCaptionApplying` + `OverlayBoxApplying` protocols |
+| `Sources/JarvisCore/Overlay/BroadcastOverlay.swift` | Fans one `render` out to the caption + box |
+| `Sources/JarvisOverlay/OverlayCaptionPanel.swift` | The Overlay Caption; `OverlayCaptionApplying` conformance |
+| `Sources/JarvisOverlay/OverlayBoxPanel.swift` | The Overlay Box; `OverlayBoxApplying` conformance |
 | `Sources/JarvisOverlay/NSPanel+CaptureExclusion.swift` | Shared `sharingType = .none` helper for both panels |
 
 ## Related Pages

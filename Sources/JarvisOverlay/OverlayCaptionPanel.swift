@@ -1,13 +1,14 @@
 import AppKit
 import JarvisCore
 
-/// A non-activating, always-on-top panel that shows coaching tips one line at a time and is
-/// excluded from screen capture — both so Jarvis's own brain never sees its output and so the
-/// overlay stays invisible in anyone else's screen share or recording (Zoom/Meet/Teams/QuickTime).
-/// A newer tip never interrupts one still on screen; it queues and plays after, so no hint is
-/// dropped. See `init` and wiki/overlay-invisibility.md.
+/// The Overlay Caption: a non-activating, always-on-top panel that shows coaching tips one line at a
+/// time and is excluded from screen capture — both so Jarvis's own brain never sees its output and so
+/// it stays invisible in anyone else's screen share or recording (Zoom/Meet/Teams/QuickTime). A newer
+/// tip never interrupts one still on screen; it queues and plays after, so no hint is dropped. The
+/// caption can be switched off (`setEnabled(false)`), which suppresses tips entirely. See `init` and
+/// wiki/overlay-invisibility.md.
 @MainActor
-public final class OverlayPanel: NSObject, OverlayRendering, OverlayAppearanceApplying {
+public final class OverlayCaptionPanel: NSObject, OverlayRendering, OverlayCaptionApplying {
     private let panel: NSPanel
     private let label: NSTextField
     /// One coaching tip: its lines and how long each one is shown (aligned arrays; `seconds[i]`
@@ -28,6 +29,10 @@ public final class OverlayPanel: NSObject, OverlayRendering, OverlayAppearanceAp
     /// Whether the Settings live preview currently owns the panel. While true, an active tip is paused
     /// and newly-arriving tips wait in the queue; they resume/play when the preview closes.
     private var isPreviewing = false
+    /// Whether the caption is switched on. When off, real coaching tips are suppressed in `show` (the
+    /// Settings live preview ignores this, so size/opacity stay adjustable while off). Applied from the
+    /// persisted setting at launch and toggled live from Settings.
+    private var isEnabled = true
     /// Test hook (internal): counts how many times `show()` has re-asserted capture exclusion.
     private(set) var captureExclusionReassertCount = 0
 
@@ -52,7 +57,7 @@ public final class OverlayPanel: NSObject, OverlayRendering, OverlayAppearanceAp
         panel.level = .floating
         panel.isFloatingPanel = true
         panel.hidesOnDeactivate = false
-        panel.backgroundColor = NSColor.black.withAlphaComponent(CGFloat(Config.overlayOpacityDefault))
+        panel.backgroundColor = NSColor.black.withAlphaComponent(CGFloat(Config.overlayCaptionOpacityDefault))
         panel.isOpaque = false
         panel.hasShadow = true
         panel.ignoresMouseEvents = true
@@ -62,7 +67,7 @@ public final class OverlayPanel: NSObject, OverlayRendering, OverlayAppearanceAp
 
         label = NSTextField(wrappingLabelWithString: "")
         label.textColor = .white
-        label.font = .systemFont(ofSize: CGFloat(Config.overlayFontSizeDefault), weight: .medium)
+        label.font = .systemFont(ofSize: CGFloat(Config.overlayCaptionFontSizeDefault), weight: .medium)
         label.alignment = .center
         label.translatesAutoresizingMaskIntoConstraints = false
         label.backgroundColor = .clear
@@ -129,6 +134,8 @@ public final class OverlayPanel: NSObject, OverlayRendering, OverlayAppearanceAp
     }
 
     private func show(_ tip: Tip) {
+        // Caption switched off: suppress the tip entirely (the Box still logs it via its own sink).
+        guard isEnabled else { return }
         // Re-assert capture exclusion on every display: an NSApp activation-policy flip (e.g. opening
         // the Settings window in SettingsWindow.show) can make WindowServer drop sharingType on some
         // macOS versions/configs. Cheap insurance against a silent, high-impact regression — the
@@ -179,7 +186,7 @@ public final class OverlayPanel: NSObject, OverlayRendering, OverlayAppearanceAp
     /// self -> tickWorkItem -> closure -> self cycle can't form; `step` takes the panel non-capturing.
     /// Cancels any prior pending tick first, so the "at most one pending tick" invariant is enforced
     /// here rather than relying on every caller to have fired/cancelled the previous one.
-    private func scheduleTick(after delay: TimeInterval, _ step: @escaping (OverlayPanel) -> Void) {
+    private func scheduleTick(after delay: TimeInterval, _ step: @escaping (OverlayCaptionPanel) -> Void) {
         // Cancel any prior pending tick first, so the "at most one pending tick" invariant is enforced
         // here rather than relying on every caller to have fired/cancelled the previous one.
         tickWorkItem?.cancel()
@@ -204,7 +211,7 @@ public final class OverlayPanel: NSObject, OverlayRendering, OverlayAppearanceAp
         captureExclusionReassertCount += 1
     }
 
-    // MARK: - OverlayAppearanceApplying
+    // MARK: - OverlayCaptionApplying
 
     /// Live preview sample shown while the Settings window is open.
     private static let previewText = "Sample overlay text"
@@ -217,6 +224,18 @@ public final class OverlayPanel: NSObject, OverlayRendering, OverlayAppearanceAp
 
     public func setBackgroundOpacity(_ opacity: Double) {
         panel.backgroundColor = NSColor.black.withAlphaComponent(CGFloat(opacity))
+    }
+
+    /// Switch the caption on or off, live. Turning it off drops any in-flight and queued tips and hides
+    /// the panel at once (unless a Settings preview currently owns it — the preview restores to this
+    /// state on close). Turning it on simply lets the next tip through.
+    public func setEnabled(_ enabled: Bool) {
+        isEnabled = enabled
+        guard !enabled, !isPreviewing else { return }
+        tickWorkItem?.cancel(); tickWorkItem = nil
+        queue.removeAll()
+        active = nil
+        hide()
     }
 
     /// Show a sample tip (on) or clear it (off). Cancels any pending auto-hide so a live coaching
@@ -234,6 +253,16 @@ public final class OverlayPanel: NSObject, OverlayRendering, OverlayAppearanceAp
             panel.orderFrontRegardless()
         } else if isPreviewing {
             isPreviewing = false
+            // If the caption was switched off *during* the preview, `setEnabled(false)` deferred its
+            // cleanup (it can't tear down the sample mid-preview). Honor that off state now: drop any
+            // paused/queued tip instead of resuming it onto a caption the user explicitly turned off.
+            guard isEnabled else {
+                tickWorkItem?.cancel(); tickWorkItem = nil
+                queue.removeAll()
+                active = nil
+                hide()
+                return
+            }
             if active != nil {
                 advance()        // resume the paused tip from the exact line it stopped on
             } else if !queue.isEmpty {
