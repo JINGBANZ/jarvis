@@ -85,6 +85,6 @@ live smoke run before adding another knob. Revisit if multi-line tips feel like 
   and the static `overlayLineGapSeconds` in [`Config.swift`](../Sources/JarvisCore/Config/Config.swift)
   (single source of the actual values — tune them there).
 - **Playback:** [`CoachDriver`](../Sources/JarvisCore/Coach/CoachDriver.swift) computes a duration per
-  line and hands the array to the overlay; [`OverlayPanel`](../Sources/JarvisOverlay/OverlayPanel.swift)
+  line and hands the array to the caption; [`OverlayCaptionPanel`](../Sources/JarvisOverlay/OverlayCaptionPanel.swift)
   plays each line for its time and inserts the blank gap between them (`OverlayInvisibilityTests`
   covers the gap and the queue/hide behavior).

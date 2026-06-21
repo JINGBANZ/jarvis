@@ -9,9 +9,6 @@ final class MenuBarController: NSObject {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let counterItem = NSMenuItem(title: "Interjections: 0", action: nil, keyEquivalent: "")
     private let startStopItem = NSMenuItem(title: "Start Jarvis", action: nil, keyEquivalent: "s")
-    /// Toggles the persistent response box; its title flips between "Show"/"Hide" to mirror the state,
-    /// matching the Start/Stop convention above.
-    private let responsesItem = NSMenuItem(title: "Show Responses", action: nil, keyEquivalent: "")
     private var interjections = 0
     /// Whether the listen/coach pipeline is currently running.
     private(set) var isRunning = false
@@ -22,8 +19,6 @@ final class MenuBarController: NSObject {
     var onStop: (() -> Void)?
     /// Fired when the user picks "Settings…". Opens the unified Settings window.
     var onOpenSettings: (() -> Void)?
-    /// Fired when the user picks "Show Responses". Toggles the response-history window.
-    var onToggleResponses: (() -> Void)?
 
     override init() {
         super.init()
@@ -34,9 +29,6 @@ final class MenuBarController: NSObject {
         let settings = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         settings.target = self
         menu.addItem(settings)
-        responsesItem.target = self
-        responsesItem.action = #selector(toggleResponses)
-        menu.addItem(responsesItem)
         menu.addItem(.separator())
         menu.addItem(counterItem)
         menu.addItem(.separator())
@@ -64,13 +56,6 @@ final class MenuBarController: NSObject {
     }
 
     @objc private func openSettings() { onOpenSettings?() }
-
-    @objc private func toggleResponses() { onToggleResponses?() }
-
-    /// Flip the toggle's title to mirror whether the response box is currently shown.
-    func setResponsesShown(_ shown: Bool) {
-        responsesItem.title = shown ? "Hide Responses" : "Show Responses"
-    }
 
     @objc private func toggleStartStop() {
         if isRunning {

@@ -17,19 +17,27 @@ import Testing
     }
 
     @Test func overlayAppearanceConstants() {
-        #expect(Config.overlayFontSizeDefault == 18)
-        #expect(Config.overlayFontSizeRange == 12...32)
-        #expect(Config.overlayOpacityDefault == 0.78)
-        #expect(Config.overlayOpacityRange == 0.40...1.0)
+        #expect(Config.overlayCaptionFontSizeDefault == 18)
+        #expect(Config.overlayCaptionFontSizeRange == 12...32)
+        #expect(Config.overlayCaptionOpacityDefault == 0.78)
+        #expect(Config.overlayCaptionOpacityRange == 0.40...1.0)
+        #expect(Config.overlayBoxFontSizeDefault == 14)
+        #expect(Config.overlayBoxOpacityDefault == 1.0)
+        // The two surfaces default opposite ways: caption off, box on.
+        #expect(Config.overlayCaptionEnabledDefault == false)
+        #expect(Config.overlayBoxEnabledDefault == true)
     }
 
     /// Invariants the rest of the code relies on, independent of the exact literals above:
     /// each default must sit inside its range, and each range must be non-empty.
     @Test func overlayAppearanceConstantsAreCoherent() {
-        #expect(Config.overlayFontSizeRange.contains(Config.overlayFontSizeDefault))
-        #expect(Config.overlayOpacityRange.contains(Config.overlayOpacityDefault))
-        #expect(Config.overlayFontSizeRange.lowerBound < Config.overlayFontSizeRange.upperBound)
-        #expect(Config.overlayOpacityRange.lowerBound < Config.overlayOpacityRange.upperBound)
+        for (range, def) in [(Config.overlayCaptionFontSizeRange, Config.overlayCaptionFontSizeDefault),
+                             (Config.overlayCaptionOpacityRange, Config.overlayCaptionOpacityDefault),
+                             (Config.overlayBoxFontSizeRange, Config.overlayBoxFontSizeDefault),
+                             (Config.overlayBoxOpacityRange, Config.overlayBoxOpacityDefault)] {
+            #expect(range.contains(def))
+            #expect(range.lowerBound < range.upperBound)
+        }
     }
 
     /// The overlay timing knobs must form a usable model: a positive buffer and per-word rate, a cap
