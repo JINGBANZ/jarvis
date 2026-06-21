@@ -18,6 +18,7 @@ final class APIKeySection: NSObject, SettingsSection {
     private var prompt: NSTextField?           // entry instructions
     private var field: NSSecureTextField?
     private var saveButton: NSButton?
+    private var cancelButton: NSButton?        // shown only when editing an existing key
     private var savedLabel: NSTextField?       // "a key is saved" summary
     private var editButton: NSButton?
     private var status: NSTextField?
@@ -34,7 +35,7 @@ final class APIKeySection: NSObject, SettingsSection {
     func makeView() -> NSView {
         let view = NSView(frame: NSRect(x: 0, y: 0, width: 560, height: 432))
 
-        let prompt = NSTextField(labelWithString: "Paste your OpenAI API key. It's stored in an owner-only file on this Mac.")
+        let prompt = NSTextField(labelWithString: "Paste your OpenAI API key to unlock OpenAI model.")
         prompt.frame = NSRect(x: 24, y: 360, width: 512, height: 20)
         view.addSubview(prompt)
         self.prompt = prompt
@@ -52,6 +53,15 @@ final class APIKeySection: NSObject, SettingsSection {
         view.addSubview(save)
         self.saveButton = save
 
+        // Sits just left of Save; only meaningful when a key already exists, so canceling has a saved
+        // state to return to (a first-time entry has nothing to cancel back to).
+        let cancel = NSButton(title: "Cancel", target: self, action: #selector(cancelTapped))
+        cancel.frame = NSRect(x: 344, y: 282, width: 92, height: 32)
+        cancel.bezelStyle = .rounded
+        cancel.keyEquivalent = "\u{1b}" // Esc
+        view.addSubview(cancel)
+        self.cancelButton = cancel
+
         let savedLabel = NSTextField(labelWithString: "An OpenAI API key is saved on this Mac.")
         savedLabel.frame = NSRect(x: 24, y: 360, width: 512, height: 20)
         view.addSubview(savedLabel)
@@ -63,8 +73,10 @@ final class APIKeySection: NSObject, SettingsSection {
         view.addSubview(edit)
         self.editButton = edit
 
+        // Below the Save/Cancel row — at the buttons' own height its frame would overlap (and, being
+        // a later subview, swallow clicks on) the Cancel button.
         let status = NSTextField(labelWithString: "")
-        status.frame = NSRect(x: 24, y: 288, width: 400, height: 20)
+        status.frame = NSRect(x: 24, y: 248, width: 512, height: 20)
         status.textColor = .secondaryLabelColor
         view.addSubview(status)
         self.status = status
@@ -74,11 +86,13 @@ final class APIKeySection: NSObject, SettingsSection {
         return view
     }
 
-    /// Show the entry field + Save, or the saved summary + Edit, per `editing`.
+    /// Show the entry field + Save, or the saved summary + Edit, per `editing`. Cancel appears only
+    /// while editing a key that's already stored — a first-time entry has no saved state to revert to.
     private func applyState() {
         prompt?.isHidden = !editing
         field?.isHidden = !editing
         saveButton?.isHidden = !editing
+        cancelButton?.isHidden = !(editing && store.apiKey() != nil)
         savedLabel?.isHidden = editing
         editButton?.isHidden = editing
     }
@@ -89,6 +103,13 @@ final class APIKeySection: NSObject, SettingsSection {
         field?.stringValue = ""
         applyState()
         field?.window?.makeFirstResponder(field)
+    }
+
+    @objc private func cancelTapped() {
+        editing = false
+        status?.stringValue = ""
+        field?.stringValue = ""
+        applyState()
     }
 
     @objc private func saveTapped() {
