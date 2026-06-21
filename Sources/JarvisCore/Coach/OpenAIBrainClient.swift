@@ -11,6 +11,10 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
     /// Injected transport; returns the body and the HTTP response (for status + headers).
     public typealias Sender = @Sendable (URLRequest) async throws -> (Data, HTTPURLResponse?)
 
+    /// Injected streaming transport; yields the raw SSE text lines of a `stream:true` response,
+    /// plus the HTTP response for the status code. Defaulted to a real `URLSession.bytes` reader.
+    public typealias LineSender = @Sendable (URLRequest) async throws -> (AsyncThrowingStream<String, Error>, HTTPURLResponse?)
+
     private let apiKey: String
     private let model: String
     private let reasoningEffort: String
@@ -21,6 +25,7 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
     private let maxOutputTokens: Int
     private let promptCacheKey: String
     private let send: Sender
+    private let lineSend: LineSender
 
     public init(apiKey: String,
                 model: String,
@@ -31,7 +36,8 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
                 backoffBaseSeconds: Double = 0.5,
                 maxOutputTokens: Int = 768,   // headroom so reasoning + a short tool call don't truncate
                 promptCacheKey: String = "jarvis-coach-v1",
-                send: Sender? = nil) {
+                send: Sender? = nil,
+                lineSend: LineSender? = nil) {
         self.apiKey = apiKey
         self.model = model
         self.reasoningEffort = reasoningEffort
@@ -44,6 +50,20 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
         self.send = send ?? { request in
             let (data, response) = try await URLSession.shared.data(for: request)
             return (data, response as? HTTPURLResponse)
+        }
+        self.lineSend = lineSend ?? { request in
+            let (bytes, response) = try await URLSession.shared.bytes(for: request)
+            let http = response as? HTTPURLResponse
+            let stream = AsyncThrowingStream<String, Error> { continuation in
+                let task = Task {
+                    do {
+                        for try await line in bytes.lines { continuation.yield(line) }
+                        continuation.finish()
+                    } catch { continuation.finish(throwing: error) }
+                }
+                continuation.onTermination = { _ in task.cancel() }
+            }
+            return (stream, http)
         }
     }
 
@@ -99,7 +119,7 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
     // MARK: - Encoding (Responses API)
 
     private func encodeBody(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice,
-                            conversationId: String?) throws -> Data {
+                            conversationId: String?, stream: Bool = false) throws -> Data {
         var instructions: [String] = []
         var input: [[String: Any]] = []
 
@@ -178,6 +198,7 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
             // server-side — a deliberate quality-over-retention choice; see wiki/sandbox.md.
             "store": true,
             "prompt_cache_key": promptCacheKey, // stable system prompt → better cache routing
+            "stream": stream,
         ]
         if let conversationId {
             body["conversation"] = conversationId
@@ -231,5 +252,94 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
             ? (decoded.incomplete_details?.reason ?? "incomplete")
             : nil
         return BrainResponse(toolCalls: invocations, rawToolCalls: raws, incompleteReason: incompleteReason)
+    }
+
+    // MARK: - Streaming respond
+
+    /// Streaming variant: POSTs with `stream:true`, delivers each completed `speak` line to `onLine`
+    /// as it generates, and returns the final BrainResponse decoded from the terminal response event.
+    /// Falls back to the non-streaming path when `onLine` is nil. The request/response threading,
+    /// conversation continuity, and final decode are identical to the non-streaming path — streaming
+    /// only adds a live read of partial output for display.
+    public func respond(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice,
+                        conversationId: String?,
+                        onLine: (@Sendable (String) -> Void)?) async throws -> BrainResponse {
+        guard let onLine else {
+            return try await respond(messages: messages, tools: tools, toolChoice: toolChoice,
+                                     conversationId: conversationId)
+        }
+        var request = URLRequest(url: endpoint, timeoutInterval: timeout)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        request.httpBody = try encodeBody(messages: messages, tools: tools, toolChoice: toolChoice,
+                                          conversationId: conversationId, stream: true)
+
+        var attempt = 0
+        while true {
+            let (stream, http) = try await lineSend(request)
+            let status = http?.statusCode ?? 0
+            if (200..<300).contains(status) {
+                return try await consumeStream(stream, onLine: onLine)
+            }
+            // Non-2xx: drain whatever body arrived (for the error message) and retry like the
+            // non-streaming path on 429/5xx.
+            var errBody = ""
+            for try await line in stream { errBody += line }
+            let retryable = status == 429 || (500...599).contains(status)
+            if retryable && attempt < maxRetries {
+                let backoff = backoffBaseSeconds * pow(2, Double(attempt)) * Double.random(in: 1.0...1.3)
+                if backoff > 0 { try? await Task.sleep(nanoseconds: UInt64(backoff * 1_000_000_000)) }
+                attempt += 1
+                continue
+            }
+            throw NSError(domain: "OpenAIBrainClient", code: status,
+                          userInfo: [NSLocalizedDescriptionKey: errBody.isEmpty ? "http \(status)" : errBody])
+        }
+    }
+
+    /// Read the SSE stream: track which streamed item is the `speak` call, feed its argument deltas
+    /// to the line parser (emitting completed lines to `onLine`), and decode the terminal response
+    /// event into the authoritative BrainResponse via the existing `decode`.
+    private func consumeStream(_ stream: AsyncThrowingStream<String, Error>,
+                               onLine: @Sendable (String) -> Void) async throws -> BrainResponse {
+        var nameByItemId: [String: String] = [:]
+        var speakParser = SpeakLinesStreamParser()
+        var finalResponse: Data?
+
+        for try await raw in stream {
+            guard raw.hasPrefix("data:") else { continue }
+            let payload = raw.dropFirst(5).trimmingCharacters(in: .whitespaces)
+            if payload.isEmpty || payload == "[DONE]" { continue }
+            guard let data = payload.data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let type = obj["type"] as? String else { continue }
+
+            switch type {
+            case "response.output_item.added":
+                if let item = obj["item"] as? [String: Any],
+                   let id = item["id"] as? String, let name = item["name"] as? String {
+                    nameByItemId[id] = name
+                }
+            case "response.function_call_arguments.delta":
+                if let itemId = obj["item_id"] as? String, nameByItemId[itemId] == "speak",
+                   let delta = obj["delta"] as? String {
+                    for line in speakParser.feed(delta) { onLine(line) }
+                }
+            case "response.completed", "response.incomplete", "response.failed":
+                if let resp = obj["response"], JSONSerialization.isValidJSONObject(resp) {
+                    finalResponse = try? JSONSerialization.data(withJSONObject: resp)
+                }
+            default:
+                break
+            }
+        }
+
+        guard let finalResponse else {
+            throw NSError(domain: "OpenAIBrainClient", code: -1,
+                          userInfo: [NSLocalizedDescriptionKey: "stream ended without a terminal response event"])
+        }
+        return try decode(finalResponse)
     }
 }
