@@ -421,6 +421,36 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(screen.captureCount == 1)       // reused, not double-captured
     }
 
+    // MARK: - Streaming speak lines (M4c)
+
+    @Test func streamedLinesRenderOnePerLineAndNotTwice() async {
+        let clock = ManualClock(now: 0)
+        let brain = StreamingSpeakBrain(lines: ["first line", "second line"])
+        let overlay = FakeOverlay()
+        let transcript = RollingTranscript()
+        let driver = CoachDriver(config: .default, transcript: transcript,
+                                 brain: brain, screen: FakeScreen(), overlay: overlay, clock: clock)
+        #expect(await driver.handleTrigger(.turnEnd) == .spoke)
+        // One render per streamed line, in order — and each carries its own length-scaled duration.
+        #expect(overlay.rendered == [["first line"], ["second line"]])
+        #expect(overlay.renderedSeconds == [
+            [OverlayTiming.displaySeconds(for: "first line", config: .default)],
+            [OverlayTiming.displaySeconds(for: "second line", config: .default)],
+        ])
+    }
+
+    @Test func nonStreamingBrainStillRendersWholeTip() async {
+        // ScriptedBrain does NOT implement onLine → default falls back to non-streaming → the .speak
+        // branch renders the full tip at once (unchanged behavior for non-streaming conformers).
+        let clock = ManualClock(now: 0)
+        let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s", lines: ["a", "b"])])])
+        let overlay = FakeOverlay()
+        let driver = CoachDriver(config: .default, transcript: RollingTranscript(),
+                                 brain: brain, screen: FakeScreen(), overlay: overlay, clock: clock)
+        #expect(await driver.handleTrigger(.turnEnd) == .spoke)
+        #expect(overlay.rendered == [["a", "b"]])
+    }
+
     /// While one turn is in flight, a second concurrent trigger must be reported as `.busy` AND
     /// coalesced: the running turn picks it up and runs it too, so nothing is dropped (vs. the old
     /// cancel-the-previous behavior).
@@ -525,6 +555,22 @@ final class CaptureProbeBrain: BrainClient, @unchecked Sendable {
             setStarted(ok)
         }
         return script[min(i, script.count - 1)]
+    }
+}
+
+/// A brain that streams its speak lines (via onLine) before returning — to prove the driver renders
+/// each line live, one render call per line, without re-rendering them when the call returns.
+final class StreamingSpeakBrain: BrainClient, @unchecked Sendable {
+    private let lines: [String]
+    init(lines: [String]) { self.lines = lines }
+    func respond(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice,
+                 conversationId: String?) async throws -> BrainResponse {
+        .init(toolCalls: [.speak(callId: "s1", lines: lines)])
+    }
+    func respond(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice,
+                 conversationId: String?, onLine: (@Sendable (String) -> Void)?) async throws -> BrainResponse {
+        for l in lines { onLine?(l) }
+        return .init(toolCalls: [.speak(callId: "s1", lines: lines)])
     }
 }
 

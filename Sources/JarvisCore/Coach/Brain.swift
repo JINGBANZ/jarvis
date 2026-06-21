@@ -95,12 +95,23 @@ public protocol BrainClient: Sendable {
     /// only the NEW input each turn.
     func respond(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice,
                  conversationId: String?) async throws -> BrainResponse
+    /// Streaming entrypoint: `onLine` receives each completed `speak` line as it generates. Has a
+    /// default (below) that ignores `onLine` and runs non-streaming, so conformers need not implement
+    /// it; `OpenAIBrainClient` overrides it with a real SSE stream.
+    func respond(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice,
+                 conversationId: String?, onLine: (@Sendable (String) -> Void)?) async throws -> BrainResponse
     /// Create a server-side conversation and return its id. Default: a local stub (no server state),
     /// so mocks/tests need not implement it.
     func createConversation() async throws -> String
 }
 
 public extension BrainClient {
+    func respond(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice,
+                 conversationId: String?, onLine: (@Sendable (String) -> Void)?) async throws -> BrainResponse {
+        try await respond(messages: messages, tools: tools, toolChoice: toolChoice,
+                          conversationId: conversationId)
+    }
+
     func createConversation() async throws -> String { "conv_local" }
 
     /// Convenience overloads so callers/tests need not pass every argument.

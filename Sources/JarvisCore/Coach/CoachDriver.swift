@@ -131,6 +131,14 @@ public final class CoachDriver: @unchecked Sendable {
         stateLock.lock(); createBackoffUntil = clock.now() + conversationRetrySeconds; stateLock.unlock()
     }
 
+    /// Render one streamed line to the overlay immediately (M4), unless the turn was cancelled by Stop
+    /// — the first streamed line is the side effect the speak-after-Stop guard must gate.
+    private func renderStreamedLine(_ line: String, into box: StreamedLineBox) {
+        if Task.isCancelled { return }
+        overlay.render([line], perLineSeconds: [OverlayTiming.displaySeconds(for: line, config: config)])
+        box.add()
+    }
+
     @discardableResult
     public func handleTrigger(_ reason: TriggerReason) async -> TurnOutcome {
         // Single-in-flight, but we COALESCE rather than drop: a trigger arriving while a turn runs is
@@ -204,6 +212,10 @@ public final class CoachDriver: @unchecked Sendable {
 
         jlog("💭 thinking…")
 
+        // M4: lines the brain streamed live this turn (rendered as they arrived) — so the terminal
+        // speak doesn't render them again. A small box because the @Sendable onLine closure mutates it.
+        let streamed = StreamedLineBox()
+
         var committed = false
         var unansweredCaptureCallId: String?   // a capture whose result hasn't been sent yet this turn
         var iterations = 0
@@ -215,7 +227,10 @@ public final class CoachDriver: @unchecked Sendable {
                 // stay quiet). The system prompt tells it to answer when addressed and stay silent
                 // otherwise — that judgment lives in the model, not in a guardrail here.
                 response = try await brain.respond(messages: convo, tools: coachTools,
-                                                   toolChoice: .auto, conversationId: convId)
+                                                   toolChoice: .auto, conversationId: convId,
+                                                   onLine: { [weak self] line in
+                                                       self?.renderStreamedLine(line, into: streamed)
+                                                   })
             } catch {
                 // A cancellation (barge-in / Stop) is expected — report it quietly, not as a failure.
                 if Task.isCancelled { jlog("… turn cancelled (interrupted)"); return .cancelled }
@@ -294,8 +309,17 @@ public final class CoachDriver: @unchecked Sendable {
                 // the new session. This is the "speak after Stop" guard the TurnTaskBox relies on.
                 if Task.isCancelled { jlog("… turn cancelled (stopped) before speaking"); return .cancelled }
                 jlog("💬 \(lines.joined(separator: " "))")
-                let perLine = lines.map { OverlayTiming.displaySeconds(for: $0, config: config) }
-                overlay.render(lines, perLineSeconds: perLine)
+                // Render only what streaming did NOT already show: live streaming (M4) renders each
+                // line as it arrives, so here we show any trailing lines the stream missed (or the
+                // whole tip when the brain didn't stream — a non-streaming conformer or a parse miss).
+                // When nothing was streamed (alreadyShown == 0) we always call render — even for an
+                // empty lines array — so the real overlay can no-op and the turn still reports .spoke.
+                let alreadyShown = streamed.count
+                let remaining = alreadyShown < lines.count ? Array(lines[alreadyShown...]) : []
+                if alreadyShown == 0 || !remaining.isEmpty {
+                    let perLine = remaining.map { OverlayTiming.displaySeconds(for: $0, config: config) }
+                    overlay.render(remaining, perLineSeconds: perLine)
+                }
                 onSpoke?()
                 // `speak` is terminal; its tool-result is sent on the next turn so the conversation
                 // stays valid without an extra round-trip now.
@@ -308,6 +332,15 @@ public final class CoachDriver: @unchecked Sendable {
         if convId != nil, let cap = unansweredCaptureCallId { setPendingCloseCallId(cap) }
         return .exhausted
     }
+}
+
+/// Counts the speak lines already rendered live this turn (M4). A reference type so the @Sendable
+/// onLine closure can record into it; reads happen-after the awaited brain call returns.
+final class StreamedLineBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _count = 0
+    func add() { lock.lock(); _count += 1; lock.unlock() }
+    var count: Int { lock.lock(); defer { lock.unlock() }; return _count }
 }
 
 /// The terminal outcome of a coaching turn — surfaced so every "quiet" path is observable instead
