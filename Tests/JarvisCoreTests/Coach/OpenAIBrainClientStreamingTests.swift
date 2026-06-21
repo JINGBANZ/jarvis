@@ -16,6 +16,15 @@ private func sseStream(_ dataLines: [String]) -> AsyncThrowingStream<String, Err
     }
 }
 
+/// A stream that yields a partial line then throws — to exercise the streaming error-body drain's
+/// do/catch (a 429 whose body connection drops mid-drain).
+private func throwingStream() -> AsyncThrowingStream<String, Error> {
+    AsyncThrowingStream { continuation in
+        continuation.yield("data: partial error body")
+        continuation.finish(throwing: NSError(domain: "test", code: -99))
+    }
+}
+
 /// Collects streamed lines from a @Sendable callback.
 final class LineCollector: @unchecked Sendable {
     private let lock = NSLock(); private var _lines: [String] = []
@@ -124,5 +133,63 @@ final class LineCollector: @unchecked Sendable {
         #expect(resp.toolCalls == [.speak(callId: "c", lines: ["hi"])])
         #expect(attempts.value == 3)        // two 429s + one 200
         #expect(elapsed < .seconds(2))      // Retry-After:0 honoured, not the ~10s+ computed backoff
+    }
+
+    /// A terminal `response.failed` event must surface as a thrown error (→ CoachDriver `.brainError`),
+    /// NOT decode to an empty response that's indistinguishable from a deliberate stay-silent turn.
+    @Test func streamedFailedEventThrows() async {
+        let failed = #"{"type":"response.failed","response":{"status":"failed","error":{"message":"server boom"},"output":[]}}"#
+        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+            lineSend: { _ in (sseStream([failed]), http(200)) })
+        await #expect(throws: (any Error).self) {
+            _ = try await client.respond(messages: [.user("hi")], tools: coachTools,
+                                         toolChoice: .auto, conversationId: nil, onLine: { _ in })
+        }
+    }
+
+    /// A 429 whose error-body stream THROWS mid-drain must not escape the retry loop: the drain's
+    /// do/catch swallows it and the client still retries and succeeds on the next attempt.
+    @Test func streamingRetriesWhen429BodyDrainThrows() async throws {
+        let attempts = Counter()
+        let completed = #"{"type":"response.completed","response":{"status":"completed","output":[{"type":"function_call","id":"f","call_id":"c","name":"speak","arguments":"{\"lines\":[\"hi\"]}"}]}}"#
+        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+                                       maxRetries: 3, backoffBaseSeconds: 0,
+                                       lineSend: { _ in
+            let n = attempts.next()
+            return n < 1 ? (throwingStream(), http(429)) : (sseStream([completed]), http(200))
+        })
+        let resp = try await client.respond(messages: [.user("hi")], tools: coachTools,
+                                            toolChoice: .auto, conversationId: nil, onLine: { _ in })
+        #expect(resp.toolCalls == [.speak(callId: "c", lines: ["hi"])])
+        #expect(attempts.value == 2)   // 429 (drain threw, was swallowed) → retry → 200
+    }
+
+    /// An output_item.added with NO `type` is still treated as a function_call (the forward-compat
+    /// default), so its speak deltas stream — exercises the default-when-absent branch of the guard.
+    @Test func streamsLinesWhenItemTypeMissing() async throws {
+        let collector = LineCollector()
+        let added = #"{"type":"response.output_item.added","item":{"id":"fc_1","call_id":"call_1","name":"speak","arguments":""}}"#
+        let d = #"{"type":"response.function_call_arguments.delta","item_id":"fc_1","delta":"{\"lines\":[\"hi\"]}"}"#
+        let completed = #"{"type":"response.completed","response":{"status":"completed","output":[{"type":"function_call","id":"fc_1","call_id":"call_1","name":"speak","arguments":"{\"lines\":[\"hi\"]}"}]}}"#
+        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+            lineSend: { _ in (sseStream([added, d, completed]), http(200)) })
+        _ = try await client.respond(messages: [.user("hi")], tools: coachTools,
+                                     toolChoice: .auto, conversationId: nil, onLine: { collector.add($0) })
+        #expect(collector.lines == ["hi"])
+    }
+
+    /// An output_item.added whose `type` is NOT function_call (e.g. a reasoning/message item that
+    /// happens to carry a `name`) is rejected, so its deltas never feed the speak parser — exercises
+    /// the reject-on-mismatch branch of the guard.
+    @Test func ignoresDeltasForNonFunctionCallItem() async throws {
+        let collector = LineCollector()
+        let bogus = #"{"type":"response.output_item.added","item":{"type":"reasoning","id":"rs_1","name":"speak","arguments":""}}"#
+        let bogusDelta = #"{"type":"response.function_call_arguments.delta","item_id":"rs_1","delta":"{\"lines\":[\"leak\"]}"}"#
+        let completed = #"{"type":"response.completed","response":{"status":"completed","output":[]}}"#
+        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+            lineSend: { _ in (sseStream([bogus, bogusDelta, completed]), http(200)) })
+        _ = try await client.respond(messages: [.user("hi")], tools: coachTools,
+                                     toolChoice: .auto, conversationId: nil, onLine: { collector.add($0) })
+        #expect(collector.lines.isEmpty)   // the non-function_call item's name was not mapped
     }
 }

@@ -426,11 +426,13 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     /// is never called.
     @Test func silenceTurnDoesNotPrewarmCapture() async {
         let clock = ManualClock(now: 0)
-        let screen = FakeScreen()
+        let screen = SignalingScreen()   // lock-guarded captureCount — no data race on the read
         let brain = ScriptedBrain(script: [.init(toolCalls: [])])   // model stays silent
         let driver = CoachDriver(config: .default, transcript: RollingTranscript(),
                                  brain: brain, screen: screen, overlay: FakeOverlay(), clock: clock)
         await driver.handleTrigger(.silence(secondsQuiet: 60))
+        // Give any (erroneously created) detached pre-warm a chance to run, then confirm none did.
+        for _ in 0..<20 { await Task.yield() }
         #expect(screen.captureCount == 0)   // no pre-warm on a silence turn; the model didn't ask
     }
 
@@ -438,11 +440,16 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     /// speculative and simply dropped (the counterpart to the silence-turn gate above).
     @Test func spokeTurnPrewarmsEvenWhenModelSilent() async {
         let clock = ManualClock(now: 0)
-        let screen = FakeScreen()
+        let screen = SignalingScreen()
         let brain = ScriptedBrain(script: [.init(toolCalls: [])])
         let driver = CoachDriver(config: .default, transcript: RollingTranscript(),
                                  brain: brain, screen: screen, overlay: FakeOverlay(), clock: clock)
         await driver.handleTrigger(.turnEnd)
+        // The pre-warm is fire-and-forget here (the model stayed silent, so it's never awaited); wait
+        // for the detached capture to run — on the lock-guarded count, with a bounded deadline.
+        let pollClock = ContinuousClock()
+        let deadline = pollClock.now.advanced(by: .seconds(2))
+        while pollClock.now < deadline && screen.captureCount == 0 { await Task.yield() }
         #expect(screen.captureCount == 1)   // speculative pre-warm fired; its result is dropped
     }
 

@@ -346,10 +346,18 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
                    let delta = obj["delta"] as? String {
                     for line in speakParser.feed(delta) { onLine(line) }
                 }
-            case "response.completed", "response.incomplete", "response.failed":
+            case "response.completed", "response.incomplete":
                 if let resp = obj["response"], JSONSerialization.isValidJSONObject(resp) {
                     finalResponse = try JSONSerialization.data(withJSONObject: resp)
                 }
+            case "response.failed":
+                // A server-side failure *after* the 2xx stream opened. Surface it as a thrown error
+                // (→ CoachDriver `.brainError`) rather than letting `decode()` collapse the empty
+                // output to a `BrainResponse` that's indistinguishable from a deliberate stay-silent
+                // turn. This mirrors the non-streaming path, where a non-2xx status throws.
+                let detail = ((obj["response"] as? [String: Any])?["error"] as? [String: Any])?["message"] as? String
+                throw NSError(domain: "OpenAIBrainClient", code: -2,
+                              userInfo: [NSLocalizedDescriptionKey: detail ?? "streaming response failed"])
             default:
                 break
             }

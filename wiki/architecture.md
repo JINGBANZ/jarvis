@@ -135,7 +135,7 @@ rather than a per-turn screenshot.
 
 ### Latency
 
-Measured **turn-end → first overlay line** (this metric excludes the VAD/debounce window that
+Target **turn-end → first overlay line** (this metric excludes the VAD/debounce window that
 *precedes* turn-end). Two paths, with very different costs:
 
 - **Text-only turn** (no screen): a single short `gpt-5.5` round-trip — **< 2s**, and snappier now
@@ -153,7 +153,8 @@ Measured **turn-end → first overlay line** (this metric excludes the VAD/debou
      and each `speak` line renders the moment it finishes generating (incrementally parsed in
      `SpeakLinesStreamParser`), so first words appear ~1–2s into the answer instead of after the whole
      response. `speak` stays a tool call: the final `BrainResponse` is still decoded from the terminal
-     event (byte-identical to the non-streamed result), and the overlay's queue/pacing is unchanged
+     event (semantically equivalent to the non-streamed result — same decode, via a JSON round-trip),
+     and the overlay's queue/pacing is unchanged
      (each streamed line is just a queued one-line tip).
   3. **A decisive capture decision** — the coach prompt tells the model to decide on the first turn
      whether it needs the screen and call `capture_screen` immediately, rather than answer-from-memory-
