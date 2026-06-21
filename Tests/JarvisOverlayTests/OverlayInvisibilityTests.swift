@@ -9,7 +9,7 @@ import AppKit
 /// Regression tests for the overlay's screen-capture invisibility (see wiki/overlay-invisibility.md).
 ///
 /// Two layers:
-///   1. Fast property tests — verify `OverlayPanel` sets `sharingType = .none` and *re-asserts* it on
+///   1. Fast property tests — verify `OverlayCaptionPanel` sets `sharingType = .none` and *re-asserts* it on
 ///      `render()`. No screen-recording permission needed, so they run everywhere (including CI) and
 ///      catch the most likely regression: the flag being removed or the re-assert deleted.
 ///   2. On-screen capture test — actually captures the screen with ScreenCaptureKit (the API
@@ -27,13 +27,13 @@ import AppKit
 
     @MainActor @Test
     func overlaySetsCaptureExclusionAtInit() {
-        let overlay = OverlayPanel()
+        let overlay = OverlayCaptionPanel()
         #expect(overlay.currentSharingType == .none)
     }
 
     @MainActor @Test
     func settersChangeFontAndOpacity() {
-        let overlay = OverlayPanel()
+        let overlay = OverlayCaptionPanel()
         overlay.setFontSize(26)
         overlay.setBackgroundOpacity(0.5)
         #expect(overlay.currentFontPointSize == 26)
@@ -42,7 +42,7 @@ import AppKit
 
     @MainActor @Test
     func previewReassertsCaptureExclusion() {
-        let overlay = OverlayPanel()
+        let overlay = OverlayCaptionPanel()
         let before = overlay.captureExclusionReassertCount
         overlay.showAppearancePreview(true)
         #expect(overlay.captureExclusionReassertCount > before, "showAppearancePreview must re-assert capture exclusion")
@@ -91,9 +91,38 @@ import AppKit
         await checkRenderAlignsTimesWhenDroppingEmptyLines()
     }
 
+    @Test
+    func disabledCaptionSuppressesTips() async {
+        await checkDisabledCaptionSuppressesTips()
+    }
+
+    @Test
+    func reEnabledCaptionShowsTipsAgain() async {
+        await checkReEnabledCaptionShowsTips()
+    }
+
+    @Test
+    func disablingMidTipHidesTheCaption() async {
+        await checkDisablingMidTipHides()
+    }
+
+    @MainActor @Test
+    func disabledCaptionStillPreviews() {
+        // The on/off switch gates real tips, not the Settings preview — size/opacity must stay
+        // adjustable (and the sample visible) even while the caption is off.
+        let overlay = OverlayCaptionPanel()
+        overlay.setEnabled(false)
+        overlay.showAppearancePreview(true)
+        #expect(overlay.currentText == "Sample overlay text", "the preview sample must show even when the caption is off")
+        #expect(overlay.isPanelVisible)
+        overlay.showAppearancePreview(false)
+        #expect(!overlay.isPanelVisible, "closing the preview restores the off (hidden) state")
+        #expect(overlay.currentSharingType == .none)
+    }
+
     @MainActor @Test
     func overlayPreviewWithEmptyQueueHidesOnCloseAndTogglesCleanly() {
-        let overlay = OverlayPanel()
+        let overlay = OverlayCaptionPanel()
         // Preview with nothing queued, toggled twice: must not crash, must end hidden and excluded.
         overlay.showAppearancePreview(true)
         #expect(overlay.currentText == "Sample overlay text")
@@ -136,7 +165,7 @@ private func checkReassertOnShow() async {
     // macOS 26 normalizes sharingType (won't hold a non-`.none` value we write), so we can't simulate
     // a "dropped flag". Instead assert the re-assert code actually runs: showing a response must
     // re-apply exclusion (and leave it `.none`). Guards the defense-in-depth re-assert from deletion.
-    let overlay = OverlayPanel()
+    let overlay = OverlayCaptionPanel()
     let before = overlay.captureExclusionReassertCount
 
     overlay.render(["Stay hidden.", "Even after a reset."], perLineSeconds: 0.05)
@@ -149,7 +178,7 @@ private func checkReassertOnShow() async {
 // only show() bumps captureExclusionReassertCount, an unchanged count proves the empty-guard held.
 @MainActor
 private func checkEmptyLinesDoNotShow() async {
-    let overlay = OverlayPanel()
+    let overlay = OverlayCaptionPanel()
     let before = overlay.captureExclusionReassertCount
 
     overlay.render([], perLineSeconds: 0.05)
@@ -167,7 +196,7 @@ private func checkEmptyLinesDoNotShow() async {
 // awaited via polling rather than a fixed sleep, so neither check races the real timer.
 @MainActor
 private func checkTipsQueue() async {
-    let overlay = OverlayPanel()
+    let overlay = OverlayCaptionPanel()
     let hold: TimeInterval = 3   // long enough that "first" can't advance before we check it
 
     overlay.render(["first"], perLineSeconds: hold)
@@ -186,7 +215,7 @@ private func checkTipsQueue() async {
 // Once the queue fully drains, the panel must hide and reset so the next coaching turn can display.
 @MainActor
 private func checkDrainThenHide() async {
-    let overlay = OverlayPanel()
+    let overlay = OverlayCaptionPanel()
     overlay.interLineGapSeconds = 0   // isolate the drain→hide timing from the inter-line gap
 
     // Poll each transition rather than sleeping a fixed amount and racing the real DispatchQueue.main
@@ -206,7 +235,7 @@ private func checkDrainThenHide() async {
 // (L1 → blank → L2) rather than sampling at fixed sleeps that race the real timer on a loaded runner.
 @MainActor
 private func checkInterLineGapBlanks() async {
-    let overlay = OverlayPanel()
+    let overlay = OverlayCaptionPanel()
     overlay.interLineGapSeconds = 0.5
 
     overlay.render(["L1", "L2"], perLineSeconds: 0.4)   // L1, then a 0.5s blank gap, then L2
@@ -228,7 +257,7 @@ private func checkInterLineGapBlanks() async {
 // resize. No trailing whitespace in the fixtures — render() trims it, which would desync currentText.
 @MainActor
 private func checkPanelGrowsForLongText() async {
-    let overlay = OverlayPanel()
+    let overlay = OverlayCaptionPanel()
     overlay.interLineGapSeconds = 0   // no gap between tips, so each queued line plays right after
 
     let short = "Nod."
@@ -265,7 +294,7 @@ private func checkPanelGrowsForLongText() async {
 // it, so the surviving line is shown for ITS own duration (a misaligned zip/filter would use 0.1s).
 @MainActor
 private func checkRenderAlignsTimesWhenDroppingEmptyLines() async {
-    let overlay = OverlayPanel()
+    let overlay = OverlayCaptionPanel()
     overlay.interLineGapSeconds = 0
 
     // Wide contrast: the dropped whitespace line carries 0.1s, the survivor a long 3.0s. Wait for the
@@ -285,7 +314,7 @@ private func checkRenderAlignsTimesWhenDroppingEmptyLines() async {
 // play afterwards. Guards the regression where the preview stranded the queue / dropped a tip.
 @MainActor
 private func checkPreviewResumesTip() async {
-    let overlay = OverlayPanel()
+    let overlay = OverlayCaptionPanel()
     overlay.interLineGapSeconds = 0   // isolate pause/resume timing from the inter-line gap
 
     // Poll each forward transition rather than sleeping fixed amounts that race the real timer:
@@ -299,6 +328,42 @@ private func checkPreviewResumesTip() async {
     overlay.showAppearancePreview(false)                // close Settings: resume the paused tip
     #expect(await waitUntil { overlay.currentText == "A2" }, "the paused tip must resume its remaining line, not be dropped")
     #expect(await waitUntil { overlay.currentText == "B1" }, "a tip that arrived during preview must play after the resumed tip")
+}
+
+// A disabled caption must suppress tips entirely: render() reaches show(), which early-returns. Since
+// only a displayed tip bumps captureExclusionReassertCount, an unchanged count proves nothing showed.
+@MainActor
+private func checkDisabledCaptionSuppressesTips() async {
+    let overlay = OverlayCaptionPanel()
+    overlay.setEnabled(false)
+    let before = overlay.captureExclusionReassertCount
+
+    overlay.render(["This must not appear."], perLineSeconds: 0.05)
+    try? await Task.sleep(nanoseconds: 200_000_000)   // give any erroneous main-actor hop time to run
+
+    #expect(overlay.captureExclusionReassertCount == before, "a disabled caption must not show any tip")
+    #expect(!overlay.isPanelVisible)
+}
+
+// Turning the caption back on lets the next tip through again.
+@MainActor
+private func checkReEnabledCaptionShowsTips() async {
+    let overlay = OverlayCaptionPanel()
+    overlay.setEnabled(false)
+    overlay.setEnabled(true)
+    overlay.render(["Back on."], perLineSeconds: 0.3)
+    #expect(await waitUntil { overlay.currentText == "Back on." }, "a re-enabled caption must display tips again")
+    #expect(overlay.isPanelVisible)
+}
+
+// Disabling mid-tip must drop the on-screen tip at once (not wait for its timer to elapse).
+@MainActor
+private func checkDisablingMidTipHides() async {
+    let overlay = OverlayCaptionPanel()
+    overlay.render(["On screen for a while."], perLineSeconds: 5)   // long window so it can't self-advance
+    #expect(await waitUntil { overlay.isPanelVisible }, "the tip should be on screen first")
+    overlay.setEnabled(false)
+    #expect(!overlay.isPanelVisible, "disabling the caption must hide an in-flight tip immediately")
 }
 
 @MainActor

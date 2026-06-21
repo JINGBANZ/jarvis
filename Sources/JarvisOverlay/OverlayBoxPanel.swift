@@ -1,17 +1,18 @@
 import AppKit
 import JarvisCore
 
-/// A persistent, borderless box that logs every coaching response in full — the running history of
-/// what the overlay flashed one line at a time, each line timestamped. It conforms to the same
-/// `OverlayRendering` seam as `OverlayPanel`, so `CoachDriver` feeds both through one `render` call
-/// (fanned out by `BroadcastOverlay`); this panel simply appends each tip instead of timing it out.
+/// The Overlay Box: a persistent, borderless box that logs every coaching response in full — the
+/// running history of what the caption flashed one line at a time, each line timestamped. It conforms
+/// to the same `OverlayRendering` seam as `OverlayCaptionPanel`, so `CoachDriver` feeds both through
+/// one `render` call (fanned out by `BroadcastOverlay`); this panel simply appends each tip instead of
+/// timing it out.
 ///
-/// Like the overlay it is excluded from all screen capture (so it stays invisible in a screen share
-/// and the brain never reads it back) and has no window chrome. Unlike the overlay it accepts mouse
-/// events: drag anywhere to move it, scroll to read the backlog. The menu bar toggles it; each fresh
-/// Start clears it.
+/// Like the caption it is excluded from all screen capture (so it stays invisible in a screen share
+/// and the brain never reads it back) and has no window chrome. Unlike the caption it accepts mouse
+/// events: drag anywhere to move it, scroll to read the backlog. Settings switches it on/off; each
+/// fresh Start clears it.
 @MainActor
-public final class ResponseLogPanel: NSObject, OverlayRendering, ResponseBoxAppearanceApplying {
+public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplying {
     private let panel: NSPanel
     /// The layer-backed, opaque rounded fill behind the text — its alpha is the box's opacity.
     private let box: NSView
@@ -19,14 +20,14 @@ public final class ResponseLogPanel: NSObject, OverlayRendering, ResponseBoxAppe
     /// White level of the box fill; the opacity setting only varies the alpha, keeping this constant.
     private static let boxWhite: CGFloat = 0.10
     /// Point size of the response text; the timestamp is rendered a couple points smaller. Driven by
-    /// the Settings slider via `setBoxFontSize`.
-    private var fontSize: CGFloat = CGFloat(Config.responseBoxFontSizeDefault)
+    /// the Settings slider via `setFontSize`.
+    private var fontSize: CGFloat = CGFloat(Config.overlayBoxFontSizeDefault)
     /// While the Settings appearance tab is open, the box shows sample text (not the real log) so size
     /// and opacity changes are visible even with no responses yet. Restored on close.
     private var isPreviewing = false
-    /// The user's intended visibility (via the menu), kept distinct from `panel.isVisible` because the
-    /// Settings preview can show the box without the user asking. The menu title tracks this, and the
-    /// preview restores to it on close — so the menu label can never disagree with what `toggle()` does.
+    /// The user's intended visibility (via the Settings toggle), kept distinct from `panel.isVisible`
+    /// because the Settings preview can show the box without the user asking. The preview restores to
+    /// this on close — so the box's on/off state can never disagree with the persisted setting.
     private var userWantsShown = false
     /// Stand-in responses shown during the Settings preview.
     private static let sampleEntries: [(stamp: String, text: String)] = [
@@ -124,7 +125,7 @@ public final class ResponseLogPanel: NSObject, OverlayRendering, ResponseBoxAppe
         entries.append((stamp: timeFormatter.string(from: Date()), text: text))
         guard !isPreviewing else { return }   // the preview owns the display; restored on close
         // Re-assert capture exclusion on every render that reaches the screen — same defense-in-depth as
-        // OverlayPanel.show, since this box can be visible (full of responses) while Settings flips the
+        // OverlayCaptionPanel.show, since this box can be visible (full of responses) while Settings flips the
         // activation policy and WindowServer drops `sharingType` on vulnerable macOS builds.
         if panel.isVisible { reassertCaptureExclusion() }
         rerender()
@@ -159,7 +160,7 @@ public final class ResponseLogPanel: NSObject, OverlayRendering, ResponseBoxAppe
         textView.textStorage?.setAttributedString(result)
     }
 
-    // MARK: - Visibility (driven by the menu bar)
+    // MARK: - Visibility (driven by the Settings toggle)
 
     /// Wipe the log. Called on each fresh Start so the box shows only the current conversation,
     /// matching how the dev session rotates.
@@ -169,19 +170,10 @@ public final class ResponseLogPanel: NSObject, OverlayRendering, ResponseBoxAppe
         rerender()
     }
 
-    /// Toggle the box per the user's intent; returns the new intended state so the caller updates the
-    /// menu label. Keyed off `userWantsShown`, not `panel.isVisible`, so a click during a Settings
-    /// preview (which can show the box on its own) still does what the menu label promises.
-    @discardableResult
-    public func toggle() -> Bool {
-        if userWantsShown { hide(); return false }
-        show(); return true
-    }
-
     public func show() {
         userWantsShown = true
         // Re-assert capture exclusion on every show — defense-in-depth against an activation-policy
-        // flip dropping `sharingType` (same reason as OverlayPanel.show).
+        // flip dropping `sharingType` (same reason as OverlayCaptionPanel.show).
         reassertCaptureExclusion()
         panel.orderFrontRegardless()
     }
@@ -195,23 +187,29 @@ public final class ResponseLogPanel: NSObject, OverlayRendering, ResponseBoxAppe
 
     public var isVisible: Bool { panel.isVisible }
 
-    // MARK: - ResponseBoxAppearanceApplying
+    // MARK: - OverlayBoxApplying
 
     /// Set the box's background-fill opacity (0–1), live. Only the alpha varies; the fill colour stays
     /// constant. The window stays non-opaque so a dimmed fill reads as translucent over what's behind.
-    public func setBoxOpacity(_ opacity: Double) {
+    public func setOpacity(_ opacity: Double) {
         box.layer?.backgroundColor = NSColor(white: Self.boxWhite, alpha: CGFloat(opacity)).cgColor
     }
 
     /// Set the response text's point size, live; the timestamp tracks a couple points smaller.
-    public func setBoxFontSize(_ points: Double) {
+    public func setFontSize(_ points: Double) {
         fontSize = CGFloat(points)
         refreshText()
     }
 
+    /// Switch the box on or off, live — `show()` / `hide()` (which carry the capture-exclusion re-assert
+    /// and the preview-aware visibility handling).
+    public func setEnabled(_ enabled: Bool) {
+        if enabled { show() } else { hide() }
+    }
+
     /// Show the box with sample text (on) while the Settings appearance tab is open so size/opacity
     /// changes are visible, then restore the real log and the box's prior visibility (off). Re-asserts
-    /// capture exclusion, mirroring `OverlayPanel.showAppearancePreview`.
+    /// capture exclusion, mirroring `OverlayCaptionPanel.showAppearancePreview`.
     public func showAppearancePreview(_ on: Bool) {
         if on {
             isPreviewing = true

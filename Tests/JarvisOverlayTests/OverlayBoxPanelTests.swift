@@ -2,23 +2,24 @@ import Testing
 import AppKit
 @testable import JarvisOverlay
 
-/// Tests for the persistent response-history window: it must stay excluded from screen capture (the
-/// same privacy guarantee as the overlay), accumulate each spoken tip, toggle visibility, and clear.
+/// Tests for the Overlay Box (the persistent response-history window): it must stay excluded from
+/// screen capture (the same privacy guarantee as the caption), accumulate each spoken tip, switch on
+/// and off, and clear.
 ///
 /// Like `OverlayInvisibilityTests`, the synchronous checks are `@MainActor @Test` (the async +
 /// @MainActor @Test combination miscompiles on the bundled swift-testing toolchain), while anything
 /// that needs `render`'s main-actor hop to run is a nonisolated `@Test` awaiting a `@MainActor` helper.
-@Suite struct ResponseLogPanelTests {
+@Suite struct OverlayBoxPanelTests {
 
     @MainActor @Test
     func excludedFromScreenCaptureAtInit() {
-        let panel = ResponseLogPanel()
+        let panel = OverlayBoxPanel()
         #expect(panel.currentSharingType == .none)
     }
 
     @MainActor @Test
     func showReassertsCaptureExclusion() {
-        let panel = ResponseLogPanel()
+        let panel = OverlayBoxPanel()
         let before = panel.captureExclusionReassertCount
         panel.show()
         #expect(panel.captureExclusionReassertCount > before, "show() must re-assert capture exclusion")
@@ -29,17 +30,18 @@ import AppKit
     }
 
     @MainActor @Test
-    func toggleFlipsVisibilityAndReportsIt() {
-        let panel = ResponseLogPanel()
-        #expect(panel.toggle() == true)   // hidden → shown
+    func setEnabledShowsAndHidesTheBox() {
+        let panel = OverlayBoxPanel()
+        panel.setEnabled(true)            // off → shown
         #expect(panel.isPanelVisible)
-        #expect(panel.toggle() == false)  // shown → hidden
+        #expect(panel.currentSharingType == .none, "showing the box must keep it excluded from capture")
+        panel.setEnabled(false)           // shown → hidden
         #expect(!panel.isPanelVisible)
     }
 
     @MainActor @Test
     func isResizableAndHonorsAResize() {
-        let panel = ResponseLogPanel()
+        let panel = OverlayBoxPanel()
         #expect(panel.isResizable, "the box must be resizable by dragging its edges")
         panel.setContentSize(NSSize(width: 500, height: 400))
         #expect(panel.currentContentSize.width == 500)
@@ -48,16 +50,16 @@ import AppKit
 
     @MainActor @Test
     func appearanceSettersChangeOpacityAndFontSize() {
-        let panel = ResponseLogPanel()
-        panel.setBoxOpacity(0.5)
-        panel.setBoxFontSize(22)
+        let panel = OverlayBoxPanel()
+        panel.setOpacity(0.5)
+        panel.setFontSize(22)
         #expect(abs(panel.currentBoxOpacity - 0.5) < 0.001)
         #expect(panel.currentFontPointSize == 22)
     }
 
     @MainActor @Test
     func previewShowsSampleThenRestoresPriorState() {
-        let panel = ResponseLogPanel()
+        let panel = OverlayBoxPanel()
         // Box starts hidden; opening the preview shows it with sample text and re-asserts exclusion.
         let before = panel.captureExclusionReassertCount
         panel.showAppearancePreview(true)
@@ -74,7 +76,7 @@ import AppKit
 
     @MainActor @Test
     func previewKeepsBoxShownIfItWasAlreadyOpen() {
-        let panel = ResponseLogPanel()
+        let panel = OverlayBoxPanel()
         panel.show()                       // user had the box open
         panel.showAppearancePreview(true)
         panel.showAppearancePreview(false)
@@ -83,7 +85,7 @@ import AppKit
 
     @MainActor @Test
     func clearEmptiesTheLog() {
-        let panel = ResponseLogPanel()
+        let panel = OverlayBoxPanel()
         panel.render(["kept for now"], perLineSeconds: 0)
         // (append runs on the next main-actor hop; clear must empty regardless of pending entries)
         panel.clear()
@@ -125,11 +127,11 @@ private func waitUntil(timeout: TimeInterval = 5, _ condition: () -> Bool) async
 }
 
 // A render that reaches the screen (box visible) must re-assert capture exclusion — the same
-// defense-in-depth as OverlayPanel.show, so the box can't be left capturable after an activation-policy
+// defense-in-depth as OverlayCaptionPanel.show, so the box can't be left capturable after an activation-policy
 // flip. Only show()/append-while-visible bump the counter, so an increase proves the re-assert ran.
 @MainActor
 private func checkReassertOnRenderWhileVisible() async {
-    let panel = ResponseLogPanel()
+    let panel = OverlayBoxPanel()
     panel.show()
     let before = panel.captureExclusionReassertCount
     panel.render(["A new response."], perLineSeconds: 0)
@@ -143,7 +145,7 @@ private func checkReassertOnRenderWhileVisible() async {
 // showAppearancePreview(false).
 @MainActor
 private func checkAppendDuringPreview() async {
-    let panel = ResponseLogPanel()
+    let panel = OverlayBoxPanel()
     panel.showAppearancePreview(true)
     panel.render(["Mid-preview response."], perLineSeconds: 0)
     #expect(await waitUntil { panel.entryCount == 1 }, "the response is logged even during preview")
@@ -157,7 +159,7 @@ private func checkAppendDuringPreview() async {
 // Each spoken tip becomes one entry, its lines joined into a single paragraph, newest last.
 @MainActor
 private func checkAppendsEntries() async {
-    let panel = ResponseLogPanel()
+    let panel = OverlayBoxPanel()
     panel.render(["Ask about the time complexity."], perLineSeconds: 0)
     panel.render(["Mention", "the edge case."], perLineSeconds: 0)
 
@@ -169,7 +171,7 @@ private func checkAppendsEntries() async {
 // Empty / whitespace-only tips must not add blank entries — matches the overlay's empty-line guard.
 @MainActor
 private func checkDropsEmptyTips() async {
-    let panel = ResponseLogPanel()
+    let panel = OverlayBoxPanel()
     panel.render([], perLineSeconds: 0)
     panel.render(["   ", "", "\n\t"], perLineSeconds: 0)
     try? await Task.sleep(nanoseconds: 200_000_000)   // give any erroneous append a chance to run

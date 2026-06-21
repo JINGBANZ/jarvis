@@ -13,56 +13,69 @@ import Foundation
 
     @Test func defaultsWhenUnset() {
         let a = OverlayAppearance(defaults: freshDefaults())
-        #expect(a.fontSize == Config.overlayFontSizeDefault)
-        #expect(a.backgroundOpacity == Config.overlayOpacityDefault)
-        #expect(a.responseBoxOpacity == Config.responseBoxOpacityDefault)
-        #expect(a.responseBoxFontSize == Config.responseBoxFontSizeDefault)
+        #expect(a.captionFontSize == Config.overlayCaptionFontSizeDefault)
+        #expect(a.captionBackgroundOpacity == Config.overlayCaptionOpacityDefault)
+        #expect(a.boxOpacity == Config.overlayBoxOpacityDefault)
+        #expect(a.boxFontSize == Config.overlayBoxFontSizeDefault)
+    }
+
+    /// The two surfaces default opposite ways: the caption off, the box on.
+    @Test func enabledDefaults() {
+        let a = OverlayAppearance(defaults: freshDefaults())
+        #expect(a.captionEnabled == Config.overlayCaptionEnabledDefault)
+        #expect(a.boxEnabled == Config.overlayBoxEnabledDefault)
+        #expect(a.captionEnabled == false)
+        #expect(a.boxEnabled == true)
     }
 
     @Test func roundTripsThroughDefaults() {
         let d = freshDefaults()
-        OverlayAppearance(defaults: d).fontSize = 22
-        OverlayAppearance(defaults: d).backgroundOpacity = 0.9
-        OverlayAppearance(defaults: d).responseBoxOpacity = 0.6
-        OverlayAppearance(defaults: d).responseBoxFontSize = 20
+        OverlayAppearance(defaults: d).captionFontSize = 22
+        OverlayAppearance(defaults: d).captionBackgroundOpacity = 0.9
+        OverlayAppearance(defaults: d).boxOpacity = 0.6
+        OverlayAppearance(defaults: d).boxFontSize = 20
+        OverlayAppearance(defaults: d).captionEnabled = true
+        OverlayAppearance(defaults: d).boxEnabled = false
         let reloaded = OverlayAppearance(defaults: d)
-        #expect(reloaded.fontSize == 22)
-        #expect(reloaded.backgroundOpacity == 0.9)
-        #expect(reloaded.responseBoxOpacity == 0.6)
-        #expect(reloaded.responseBoxFontSize == 20)
+        #expect(reloaded.captionFontSize == 22)
+        #expect(reloaded.captionBackgroundOpacity == 0.9)
+        #expect(reloaded.boxOpacity == 0.6)
+        #expect(reloaded.boxFontSize == 20)
+        #expect(reloaded.captionEnabled == true)
+        #expect(reloaded.boxEnabled == false)
     }
 
     @Test func clampsOutOfRange() {
         let a = OverlayAppearance(defaults: freshDefaults())
-        a.fontSize = 999
-        a.backgroundOpacity = 999
-        a.responseBoxOpacity = 999
-        a.responseBoxFontSize = 999
-        #expect(a.fontSize == Config.overlayFontSizeRange.upperBound)
-        #expect(a.backgroundOpacity == Config.overlayOpacityRange.upperBound)
-        #expect(a.responseBoxOpacity == Config.responseBoxOpacityRange.upperBound)
-        #expect(a.responseBoxFontSize == Config.responseBoxFontSizeRange.upperBound)
+        a.captionFontSize = 999
+        a.captionBackgroundOpacity = 999
+        a.boxOpacity = 999
+        a.boxFontSize = 999
+        #expect(a.captionFontSize == Config.overlayCaptionFontSizeRange.upperBound)
+        #expect(a.captionBackgroundOpacity == Config.overlayCaptionOpacityRange.upperBound)
+        #expect(a.boxOpacity == Config.overlayBoxOpacityRange.upperBound)
+        #expect(a.boxFontSize == Config.overlayBoxFontSizeRange.upperBound)
 
-        a.fontSize = 1
-        a.backgroundOpacity = 0
-        a.responseBoxOpacity = 0
-        a.responseBoxFontSize = 1
-        #expect(a.fontSize == Config.overlayFontSizeRange.lowerBound)
-        #expect(a.backgroundOpacity == Config.overlayOpacityRange.lowerBound)
-        #expect(a.responseBoxOpacity == Config.responseBoxOpacityRange.lowerBound)
-        #expect(a.responseBoxFontSize == Config.responseBoxFontSizeRange.lowerBound)
+        a.captionFontSize = 1
+        a.captionBackgroundOpacity = 0
+        a.boxOpacity = 0
+        a.boxFontSize = 1
+        #expect(a.captionFontSize == Config.overlayCaptionFontSizeRange.lowerBound)
+        #expect(a.captionBackgroundOpacity == Config.overlayCaptionOpacityRange.lowerBound)
+        #expect(a.boxOpacity == Config.overlayBoxOpacityRange.lowerBound)
+        #expect(a.boxFontSize == Config.overlayBoxFontSizeRange.lowerBound)
     }
 
     @Test func nonFiniteInputFallsBackToFinite() {
         // A corrupted plist value (NaN/±inf) must never reach systemFont(ofSize:)/withAlphaComponent:.
         let a = OverlayAppearance(defaults: freshDefaults())
         for bad in [Double.nan, .infinity, -.infinity] {
-            a.fontSize = bad
-            a.backgroundOpacity = bad
-            #expect(a.fontSize.isFinite)
-            #expect(a.backgroundOpacity.isFinite)
-            #expect(Config.overlayFontSizeRange.contains(a.fontSize))
-            #expect(Config.overlayOpacityRange.contains(a.backgroundOpacity))
+            a.captionFontSize = bad
+            a.captionBackgroundOpacity = bad
+            #expect(a.captionFontSize.isFinite)
+            #expect(a.captionBackgroundOpacity.isFinite)
+            #expect(Config.overlayCaptionFontSizeRange.contains(a.captionFontSize))
+            #expect(Config.overlayCaptionOpacityRange.contains(a.captionBackgroundOpacity))
         }
     }
 }

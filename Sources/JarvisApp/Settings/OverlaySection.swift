@@ -1,177 +1,223 @@
 import AppKit
 import JarvisCore
 
-/// Settings panel for overlay appearance and the persistent response box. The overlay group has Text
-/// Size and Background Opacity sliders (with a live sample while the tab is open); the response-box
-/// group has its own Text Size and Opacity sliders that apply live to the box. All values persist
-/// through `OverlayAppearance` and push to the live windows via the two `*Applying` protocols (no
-/// direct panel dependency).
+/// Settings panel for the two overlay surfaces. Each group — Overlay Caption (the transient on-screen
+/// tip) and Overlay Box (the persistent response history) — has an on/off checkbox, a one-line
+/// description, and Text Size + Opacity sliders that apply live (with a sample shown while the tab is
+/// open). All values persist through `OverlayAppearance` and push to the live windows via the two
+/// `*Applying` protocols (no direct panel dependency).
 @MainActor
 final class OverlaySection: NSObject, SettingsSection {
     let title = "Overlay"
 
     private let appearance: OverlayAppearance
-    private let applying: OverlayAppearanceApplying
-    private let responseBox: ResponseBoxAppearanceApplying
-    private var sizeSlider: NSSlider?
-    private var opacitySlider: NSSlider?
-    private var sizeReadout: NSTextField?
-    private var opacityReadout: NSTextField?
+    private let caption: OverlayCaptionApplying
+    private let box: OverlayBoxApplying
+    private var captionSizeSlider: NSSlider?
+    private var captionOpacitySlider: NSSlider?
+    private var captionSizeReadout: NSTextField?
+    private var captionOpacityReadout: NSTextField?
     private var boxSizeSlider: NSSlider?
     private var boxOpacitySlider: NSSlider?
     private var boxSizeReadout: NSTextField?
     private var boxOpacityReadout: NSTextField?
 
-    init(appearance: OverlayAppearance, applying: OverlayAppearanceApplying,
-         responseBox: ResponseBoxAppearanceApplying) {
+    init(appearance: OverlayAppearance, caption: OverlayCaptionApplying, box: OverlayBoxApplying) {
         self.appearance = appearance
-        self.applying = applying
-        self.responseBox = responseBox
+        self.caption = caption
+        self.box = box
+    }
+
+    // Layout constants. AppKit's origin is bottom-left, so a running `cursor` decrements from the top.
+    private enum L {
+        static let width: CGFloat = 560
+        static let left: CGFloat = 24
+        static let sliderWidth: CGFloat = 440
+        static let readoutX: CGFloat = 472
+        static let readoutWidth: CGFloat = 64
+        static let checkboxX: CGFloat = 300
+        static let checkboxWidth: CGFloat = 236
     }
 
     func makeView() -> NSView {
-        let view = NSView(frame: NSRect(x: 0, y: 0, width: 560, height: 432))
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: L.width, height: 432))
+        var cursor: CGFloat = 416   // top edge, leaving a 16pt top margin
 
-        // MARK: Overlay group
-        addHeader("Overlay", to: view, y: 400)
+        let cap = addGroup(
+            to: view, cursor: &cursor,
+            header: "Overlay Caption", description: "A transient response from Jarvis.",
+            enabledOn: appearance.captionEnabled, enableAction: #selector(captionEnabledChanged),
+            sizeValue: appearance.captionFontSize, sizeRange: Config.overlayCaptionFontSizeRange,
+            sizeAction: #selector(captionSizeChanged), sizeA11y: "Overlay caption text size",
+            opacityTitle: "Background Opacity", opacityValue: appearance.captionBackgroundOpacity,
+            opacityRange: Config.overlayCaptionOpacityRange, opacityAction: #selector(captionOpacityChanged),
+            opacityA11y: "Overlay caption background opacity")
+        captionSizeSlider = cap.sizeSlider
+        captionSizeReadout = cap.sizeReadout
+        captionOpacitySlider = cap.opacitySlider
+        captionOpacityReadout = cap.opacityReadout
 
-        let sizeLabel = NSTextField(labelWithString: "Text Size")
-        sizeLabel.frame = NSRect(x: 24, y: 372, width: 200, height: 20)
-        view.addSubview(sizeLabel)
+        cursor -= 24   // gap between the two groups
 
-        let sizeSlider = NSSlider(value: appearance.fontSize,
-                                  minValue: Config.overlayFontSizeRange.lowerBound,
-                                  maxValue: Config.overlayFontSizeRange.upperBound,
-                                  target: self, action: #selector(sizeChanged))
-        sizeSlider.frame = NSRect(x: 24, y: 342, width: 440, height: 24)
-        sizeSlider.setAccessibilityLabel("Text size")
-        view.addSubview(sizeSlider)
-        self.sizeSlider = sizeSlider
-
-        let sizeReadout = NSTextField(labelWithString: "")
-        sizeReadout.frame = NSRect(x: 472, y: 344, width: 64, height: 20)
-        view.addSubview(sizeReadout)
-        self.sizeReadout = sizeReadout
-
-        let opacityLabel = NSTextField(labelWithString: "Background Opacity")
-        opacityLabel.frame = NSRect(x: 24, y: 292, width: 200, height: 20)
-        view.addSubview(opacityLabel)
-
-        let opacitySlider = NSSlider(value: appearance.backgroundOpacity,
-                                     minValue: Config.overlayOpacityRange.lowerBound,
-                                     maxValue: Config.overlayOpacityRange.upperBound,
-                                     target: self, action: #selector(opacityChanged))
-        opacitySlider.frame = NSRect(x: 24, y: 262, width: 440, height: 24)
-        opacitySlider.setAccessibilityLabel("Background opacity")
-        view.addSubview(opacitySlider)
-        self.opacitySlider = opacitySlider
-
-        let opacityReadout = NSTextField(labelWithString: "")
-        opacityReadout.frame = NSRect(x: 472, y: 264, width: 64, height: 20)
-        view.addSubview(opacityReadout)
-        self.opacityReadout = opacityReadout
-
-        // MARK: Response box group
-        addHeader("Response Box", to: view, y: 212)
-
-        let boxSizeLabel = NSTextField(labelWithString: "Text Size")
-        boxSizeLabel.frame = NSRect(x: 24, y: 184, width: 200, height: 20)
-        view.addSubview(boxSizeLabel)
-
-        let boxSizeSlider = NSSlider(value: appearance.responseBoxFontSize,
-                                     minValue: Config.responseBoxFontSizeRange.lowerBound,
-                                     maxValue: Config.responseBoxFontSizeRange.upperBound,
-                                     target: self, action: #selector(boxSizeChanged))
-        boxSizeSlider.frame = NSRect(x: 24, y: 154, width: 440, height: 24)
-        boxSizeSlider.setAccessibilityLabel("Response box text size")
-        view.addSubview(boxSizeSlider)
-        self.boxSizeSlider = boxSizeSlider
-
-        let boxSizeReadout = NSTextField(labelWithString: "")
-        boxSizeReadout.frame = NSRect(x: 472, y: 156, width: 64, height: 20)
-        view.addSubview(boxSizeReadout)
-        self.boxSizeReadout = boxSizeReadout
-
-        let boxOpacityLabel = NSTextField(labelWithString: "Opacity")
-        boxOpacityLabel.frame = NSRect(x: 24, y: 104, width: 200, height: 20)
-        view.addSubview(boxOpacityLabel)
-
-        let boxOpacitySlider = NSSlider(value: appearance.responseBoxOpacity,
-                                        minValue: Config.responseBoxOpacityRange.lowerBound,
-                                        maxValue: Config.responseBoxOpacityRange.upperBound,
-                                        target: self, action: #selector(boxOpacityChanged))
-        boxOpacitySlider.frame = NSRect(x: 24, y: 74, width: 440, height: 24)
-        boxOpacitySlider.setAccessibilityLabel("Response box opacity")
-        view.addSubview(boxOpacitySlider)
-        self.boxOpacitySlider = boxOpacitySlider
-
-        let boxOpacityReadout = NSTextField(labelWithString: "")
-        boxOpacityReadout.frame = NSRect(x: 472, y: 76, width: 64, height: 20)
-        view.addSubview(boxOpacityReadout)
-        self.boxOpacityReadout = boxOpacityReadout
+        let bx = addGroup(
+            to: view, cursor: &cursor,
+            header: "Overlay Box", description: "A persistent history of messages from Jarvis.",
+            enabledOn: appearance.boxEnabled, enableAction: #selector(boxEnabledChanged),
+            sizeValue: appearance.boxFontSize, sizeRange: Config.overlayBoxFontSizeRange,
+            sizeAction: #selector(boxSizeChanged), sizeA11y: "Overlay box text size",
+            opacityTitle: "Opacity", opacityValue: appearance.boxOpacity,
+            opacityRange: Config.overlayBoxOpacityRange, opacityAction: #selector(boxOpacityChanged),
+            opacityA11y: "Overlay box opacity")
+        boxSizeSlider = bx.sizeSlider
+        boxSizeReadout = bx.sizeReadout
+        boxOpacitySlider = bx.opacitySlider
+        boxOpacityReadout = bx.opacityReadout
 
         updateReadouts()
         return view
     }
 
-    /// A small bold section header.
-    private func addHeader(_ text: String, to view: NSView, y: CGFloat) {
-        let header = NSTextField(labelWithString: text)
-        header.frame = NSRect(x: 24, y: y, width: 300, height: 20)
-        header.font = .boldSystemFont(ofSize: 13)
-        header.textColor = .secondaryLabelColor
-        view.addSubview(header)
+    /// Build one appearance group — bold header + enable checkbox on one row, a description line, then
+    /// Text Size and Opacity sliders with readouts — placing each control under the running `cursor`.
+    private func addGroup(
+        to view: NSView, cursor: inout CGFloat,
+        header: String, description: String,
+        enabledOn: Bool, enableAction: Selector,
+        sizeValue: Double, sizeRange: ClosedRange<Double>, sizeAction: Selector, sizeA11y: String,
+        opacityTitle: String, opacityValue: Double, opacityRange: ClosedRange<Double>,
+        opacityAction: Selector, opacityA11y: String
+    ) -> (sizeSlider: NSSlider, sizeReadout: NSTextField, opacitySlider: NSSlider, opacityReadout: NSTextField) {
+        // Header + enable checkbox on the same row.
+        cursor -= 20
+        let headerLabel = NSTextField(labelWithString: header)
+        headerLabel.frame = NSRect(x: L.left, y: cursor, width: 220, height: 20)
+        headerLabel.font = .boldSystemFont(ofSize: 13)
+        headerLabel.textColor = .secondaryLabelColor
+        view.addSubview(headerLabel)
+
+        let enable = NSButton(checkboxWithTitle: enableActionTitle(header), target: self, action: enableAction)
+        enable.state = enabledOn ? .on : .off
+        enable.frame = NSRect(x: L.checkboxX, y: cursor, width: L.checkboxWidth, height: 20)
+        view.addSubview(enable)
+
+        // Description line.
+        cursor -= 4
+        cursor -= 16
+        let desc = NSTextField(labelWithString: description)
+        desc.frame = NSRect(x: L.left, y: cursor, width: L.width - 2 * L.left, height: 16)
+        desc.font = .systemFont(ofSize: 11)
+        desc.textColor = .tertiaryLabelColor
+        view.addSubview(desc)
+
+        // Text Size.
+        cursor -= 12
+        let (sizeSlider, sizeReadout) = addSliderRow(
+            to: view, cursor: &cursor, label: "Text Size", value: sizeValue, range: sizeRange,
+            action: sizeAction, a11y: sizeA11y)
+
+        // Opacity.
+        cursor -= 12
+        let (opacitySlider, opacityReadout) = addSliderRow(
+            to: view, cursor: &cursor, label: opacityTitle, value: opacityValue, range: opacityRange,
+            action: opacityAction, a11y: opacityA11y)
+
+        return (sizeSlider, sizeReadout, opacitySlider, opacityReadout)
+    }
+
+    /// A labelled slider with a right-hand readout, placed under the running cursor.
+    private func addSliderRow(
+        to view: NSView, cursor: inout CGFloat, label: String, value: Double,
+        range: ClosedRange<Double>, action: Selector, a11y: String
+    ) -> (slider: NSSlider, readout: NSTextField) {
+        cursor -= 20
+        let labelField = NSTextField(labelWithString: label)
+        labelField.frame = NSRect(x: L.left, y: cursor, width: 200, height: 20)
+        view.addSubview(labelField)
+
+        cursor -= 6
+        cursor -= 24
+        let slider = NSSlider(value: value, minValue: range.lowerBound, maxValue: range.upperBound,
+                              target: self, action: action)
+        slider.frame = NSRect(x: L.left, y: cursor, width: L.sliderWidth, height: 24)
+        slider.setAccessibilityLabel(a11y)
+        view.addSubview(slider)
+
+        let readout = NSTextField(labelWithString: "")
+        readout.frame = NSRect(x: L.readoutX, y: cursor + 2, width: L.readoutWidth, height: 20)
+        view.addSubview(readout)
+
+        return (slider, readout)
+    }
+
+    private func enableActionTitle(_ header: String) -> String {
+        "Show \(header.lowercased())"
     }
 
     // Preview only while this tab is actually visible — not whenever the Settings window is open. Both
-    // the overlay sample and the response box appear so their size/opacity sliders show live effect.
+    // surfaces appear (regardless of their on/off state) so their size/opacity sliders show live effect.
     func didBecomeActive() {
-        applying.showAppearancePreview(true)
-        responseBox.showAppearancePreview(true)
+        caption.showAppearancePreview(true)
+        box.showAppearancePreview(true)
     }
     func didResignActive() {
-        applying.showAppearancePreview(false)
-        responseBox.showAppearancePreview(false)
+        caption.showAppearancePreview(false)
+        box.showAppearancePreview(false)
     }
 
-    @objc private func sizeChanged(_ sender: NSSlider) {
-        appearance.fontSize = sender.doubleValue.rounded()   // whole points: readout == stored == applied
-        sender.doubleValue = appearance.fontSize             // snap the thumb to the rounded value
-        applying.setFontSize(appearance.fontSize)
+    // MARK: - Enable toggles
+
+    @objc private func captionEnabledChanged(_ sender: NSButton) {
+        let on = sender.state == .on
+        appearance.captionEnabled = on
+        caption.setEnabled(on)
+    }
+
+    @objc private func boxEnabledChanged(_ sender: NSButton) {
+        let on = sender.state == .on
+        appearance.boxEnabled = on
+        box.setEnabled(on)
+    }
+
+    // MARK: - Appearance sliders
+
+    @objc private func captionSizeChanged(_ sender: NSSlider) {
+        appearance.captionFontSize = sender.doubleValue.rounded()   // whole points: readout == stored == applied
+        sender.doubleValue = appearance.captionFontSize             // snap the thumb to the rounded value
+        caption.setFontSize(appearance.captionFontSize)
         updateReadouts()
     }
 
-    @objc private func opacityChanged(_ sender: NSSlider) {
-        appearance.backgroundOpacity = (sender.doubleValue * 100).rounded() / 100   // whole percent
-        sender.doubleValue = appearance.backgroundOpacity    // snap the thumb to the rounded value
-        applying.setBackgroundOpacity(appearance.backgroundOpacity)
+    @objc private func captionOpacityChanged(_ sender: NSSlider) {
+        appearance.captionBackgroundOpacity = (sender.doubleValue * 100).rounded() / 100   // whole percent
+        sender.doubleValue = appearance.captionBackgroundOpacity    // snap the thumb to the rounded value
+        caption.setBackgroundOpacity(appearance.captionBackgroundOpacity)
         updateReadouts()
     }
 
     @objc private func boxSizeChanged(_ sender: NSSlider) {
-        appearance.responseBoxFontSize = sender.doubleValue.rounded()
-        sender.doubleValue = appearance.responseBoxFontSize
-        responseBox.setBoxFontSize(appearance.responseBoxFontSize)
+        appearance.boxFontSize = sender.doubleValue.rounded()
+        sender.doubleValue = appearance.boxFontSize
+        box.setFontSize(appearance.boxFontSize)
         updateReadouts()
     }
 
     @objc private func boxOpacityChanged(_ sender: NSSlider) {
-        appearance.responseBoxOpacity = (sender.doubleValue * 100).rounded() / 100
-        sender.doubleValue = appearance.responseBoxOpacity
-        responseBox.setBoxOpacity(appearance.responseBoxOpacity)
+        appearance.boxOpacity = (sender.doubleValue * 100).rounded() / 100
+        sender.doubleValue = appearance.boxOpacity
+        box.setOpacity(appearance.boxOpacity)
         updateReadouts()
     }
 
     private func updateReadouts() {
-        let pt = Int(appearance.fontSize.rounded())
-        let pct = Int((appearance.backgroundOpacity * 100).rounded())
-        sizeReadout?.stringValue = "\(pt) pt"
-        opacityReadout?.stringValue = "\(pct)%"
-        sizeSlider?.setAccessibilityValueDescription("\(pt) points")
-        opacitySlider?.setAccessibilityValueDescription("\(pct) percent")
+        let capPt = Int(appearance.captionFontSize.rounded())
+        let capPct = Int((appearance.captionBackgroundOpacity * 100).rounded())
+        captionSizeReadout?.stringValue = "\(capPt) pt"
+        captionOpacityReadout?.stringValue = "\(capPct)%"
+        captionSizeSlider?.setAccessibilityValueDescription("\(capPt) points")
+        captionOpacitySlider?.setAccessibilityValueDescription("\(capPct) percent")
 
-        let boxPt = Int(appearance.responseBoxFontSize.rounded())
-        let boxPct = Int((appearance.responseBoxOpacity * 100).rounded())
+        let boxPt = Int(appearance.boxFontSize.rounded())
+        let boxPct = Int((appearance.boxOpacity * 100).rounded())
         boxSizeReadout?.stringValue = "\(boxPt) pt"
         boxOpacityReadout?.stringValue = "\(boxPct)%"
         boxSizeSlider?.setAccessibilityValueDescription("\(boxPt) points")

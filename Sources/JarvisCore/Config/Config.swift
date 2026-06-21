@@ -72,16 +72,22 @@ public struct Config: Sendable {
 
     // Overlay appearance: defaults + allowed ranges. The persisted values live in UserDefaults via
     // OverlayAppearance; these are the single source of the defaults and the clamp bounds.
-    public static let overlayFontSizeRange: ClosedRange<Double> = 12...32
-    public static let overlayFontSizeDefault: Double = 18
-    public static let overlayOpacityRange: ClosedRange<Double> = 0.40...1.0
-    public static let overlayOpacityDefault: Double = 0.78
-    // The persistent response box: its background-fill opacity. Defaults fully opaque (the box is a
-    // readout meant to stay legible); the lower bound matches the overlay so it can be dimmed too.
-    public static let responseBoxOpacityRange: ClosedRange<Double> = 0.40...1.0
-    public static let responseBoxOpacityDefault: Double = 1.0
-    public static let responseBoxFontSizeRange: ClosedRange<Double> = 12...32
-    public static let responseBoxFontSizeDefault: Double = 14
+    //
+    // The overlay has two surfaces, each independently switchable: the Overlay Caption (the transient
+    // on-screen tip) and the Overlay Box (the persistent history of responses). The caption is off by
+    // default and the box on, so a first run shows the durable history rather than a flashing caption.
+    public static let overlayCaptionFontSizeRange: ClosedRange<Double> = 12...32
+    public static let overlayCaptionFontSizeDefault: Double = 18
+    public static let overlayCaptionOpacityRange: ClosedRange<Double> = 0.40...1.0
+    public static let overlayCaptionOpacityDefault: Double = 0.78
+    public static let overlayCaptionEnabledDefault: Bool = false
+    // The persistent overlay box: its background-fill opacity. Defaults fully opaque (the box is a
+    // readout meant to stay legible); the lower bound matches the caption so it can be dimmed too.
+    public static let overlayBoxOpacityRange: ClosedRange<Double> = 0.40...1.0
+    public static let overlayBoxOpacityDefault: Double = 1.0
+    public static let overlayBoxFontSizeRange: ClosedRange<Double> = 12...32
+    public static let overlayBoxFontSizeDefault: Double = 14
+    public static let overlayBoxEnabledDefault: Bool = true
 
     /// Brief blank shown between consecutive overlay lines (and before the next queued tip). Borrowed
     /// from the captioning minimum-gap rule: without it, back-to-back lines read as one block and the

@@ -8,7 +8,7 @@ extension NSPanel {
     /// recording (Zoom/Meet/Teams/QuickTime). It is the same OS mechanism every comparable tool uses
     /// (Electron's setContentProtection / Tauri's contentProtected both map to it); there is no other
     /// public API. Verified on macOS 26.5 across the screencapture CLI, SCScreenshotManager, and a live
-    /// SCStream. Both `OverlayPanel` and `ResponseLogPanel` rely on it, and both re-assert it on show:
+    /// SCStream. Both `OverlayCaptionPanel` and `OverlayBoxPanel` rely on it, and both re-assert it on show:
     /// an NSApp activation-policy flip (e.g. opening the Settings window) can make WindowServer drop
     /// `sharingType` on some macOS versions/configs. See wiki/overlay-invisibility.md.
     func excludeFromScreenCapture() {

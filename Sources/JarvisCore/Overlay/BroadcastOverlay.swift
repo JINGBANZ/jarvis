@@ -1,8 +1,8 @@
 import Foundation
 
 /// Fans a single `render(_:perLineSeconds:)` out to several overlay sinks in order, so `CoachDriver`
-/// keeps talking to ONE `OverlayRendering` while each spoken tip reaches both the on-screen overlay
-/// and the persistent response-log window. Adding a sink needs no change to the driver or the brain.
+/// keeps talking to ONE `OverlayRendering` while each spoken tip reaches both the Overlay Caption and
+/// the persistent Overlay Box. Adding a sink needs no change to the driver or the brain.
 public final class BroadcastOverlay: OverlayRendering {
     private let sinks: [OverlayRendering]
 
