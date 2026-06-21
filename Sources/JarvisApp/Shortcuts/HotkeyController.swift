@@ -1,5 +1,6 @@
 import AppKit
 import Carbon.HIToolbox
+import JarvisCore   // jlog
 
 /// Registers a single global hotkey — ⌥⌘J — and forwards each press to `onRequestHint`. The shortcut
 /// is system-wide (it fires even when Jarvis, a menu-bar accessory, isn't frontmost) via Carbon
@@ -37,7 +38,7 @@ final class HotkeyController {
         var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard),
                                  eventKind: UInt32(kEventHotKeyPressed))
         let selfPtr = Unmanaged.passUnretained(self).toOpaque()
-        InstallEventHandler(GetApplicationEventTarget(), { _, _, userData -> OSStatus in
+        let status = InstallEventHandler(GetApplicationEventTarget(), { _, _, userData -> OSStatus in
             guard let userData else { return noErr }
             let controller = Unmanaged<HotkeyController>.fromOpaque(userData).takeUnretainedValue()
             // Carbon delivers application-target hot-key events on the main thread, so it is safe to
@@ -45,13 +46,20 @@ final class HotkeyController {
             MainActor.assumeIsolated { controller.onRequestHint?() }
             return noErr
         }, 1, &spec, selfPtr, &handlerRef)
+        // A failed install leaves the hot key dead; without this line that failure is invisible.
+        if status != noErr { jlog("Jarvis: hint-hotkey handler install failed (status \(status)).") }
     }
 
     private func register() {
         let id = EventHotKeyID(signature: Self.signature, id: 1)
         // ⌥⌘J. Carbon modifier masks (cmdKey/optionKey) differ from NSEvent's modifier flags.
         let modifiers = UInt32(cmdKey | optionKey)
-        RegisterEventHotKey(UInt32(kVK_ANSI_J), modifiers, id,
-                            GetApplicationEventTarget(), 0, &hotKeyRef)
+        let status = RegisterEventHotKey(UInt32(kVK_ANSI_J), modifiers, id,
+                                         GetApplicationEventTarget(), 0, &hotKeyRef)
+        // The common failure is eventHotKeyExistsErr — another running app already owns ⌥⌘J. Log it so
+        // a silently-dead hotkey is diagnosable instead of looking like nothing happened on press.
+        if status != noErr {
+            jlog("Jarvis: hint hotkey ⌥⌘J unavailable (status \(status)) — another app may already own it.")
+        }
     }
 }

@@ -45,6 +45,11 @@ private final class FailingScreen: ScreenCapturing, @unchecked Sendable {
         #expect(brain.toolChoices.last == .force("speak"))            // forced to reply
         #expect(brain.calls[0].contains { $0.imageBase64JPEG != nil })// the screenshot rode along in the first request
         #expect(overlay.rendered == [["Use a hash map to remember what you've seen."]])
+        // The "simulate a message as the user" half: the manual-hint prompt AND the live transcript
+        // both reach the brain in that single request.
+        let userText = brain.calls[0].compactMap { $0.text }.joined(separator: " ")
+        #expect(userText.contains("hint shortcut"))   // the synthetic manual-hint message
+        #expect(userText.contains("two-sum"))         // …alongside the real transcript context
     }
 
     /// If the screenshot fails, the hint is still forced from transcript/conversation context — one
@@ -66,5 +71,33 @@ private final class FailingScreen: ScreenCapturing, @unchecked Sendable {
         #expect(brain.toolChoices.last == .force("speak"))
         #expect(!brain.calls[0].contains { $0.imageBase64JPEG != nil })// no image, capture failed
         #expect(overlay.rendered == [["Talk me through your current approach."]])
+    }
+
+    /// Stop firing *while the manual-hint screenshot is in flight* must abort before emitting. The
+    /// detached capture isn't cancellable, so without the post-capture guard the screenshot — and a
+    /// stale tip — would leak into whatever session is current after a Stop→Start. Unlike the
+    /// `capture_screen` tool branch (which has already made one brain call), the manual-hint guard
+    /// fires BEFORE any `brain.respond`, so no request is sent at all. Reuses `GatedScreen`.
+    @Test func manualHintCancelDuringCaptureAbortsBeforeAnyBrainCall() async {
+        let clock = ManualClock(now: 0)
+        let brain = ScriptedBrain(script: [
+            .init(toolCalls: [.speak(callId: "s", lines: ["stale tip from the stopped run"])]),
+        ])
+        let screen = GatedScreen()
+        let overlay = FakeOverlay()
+        let (driver, transcript) = makeDriver(brain: brain, screen: screen, overlay: overlay, clock: clock)
+        transcript.append(.init(speaker: .me, text: "here is my code", at: 0))
+
+        let task = Task { await driver.handleTrigger(.manualHint) }
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            DispatchQueue.global().async { screen.entered.wait(); cont.resume() }   // capture in flight
+        }
+        task.cancel()                                         // Stop fires mid-capture
+        screen.release.signal()                               // let the screenshot finish
+
+        #expect(await task.value == .cancelled)
+        #expect(screen.captureCount == 1)        // captured once...
+        #expect(overlay.rendered.isEmpty)        // ...but never rendered a tip after Stop
+        #expect(brain.calls.isEmpty)             // and the guard fires before any brain.respond call
     }
 }

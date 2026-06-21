@@ -79,10 +79,10 @@ public struct BrainResponse: Sendable {
     }
 }
 
-/// How the model may use tools on a given turn. `auto` lets it call zero, one, or many — the coach
-/// always uses `auto` and lets the prompt decide. `force(name)` (require exactly that function) is
-/// retained for the encoder contract / future use but is NOT currently used by the coach (the rework
-/// replaced forcing a reply with a strong prompt + a spoken fallback).
+/// How the model may use tools on a given turn. `auto` lets it call zero, one, or many — audio-driven
+/// turns always use `auto` and let the prompt decide. `force(name)` (require exactly that function) is
+/// used by the manual-hint hotkey, which forces `speak` so an explicit ⌥⌘J keypress always yields a
+/// visible hint in one round trip (see `CoachDriver.runTurn` + `TriggerReason.manualHint`).
 public enum ToolChoice: Sendable, Equatable {
     case auto
     case force(String)
