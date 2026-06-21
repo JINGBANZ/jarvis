@@ -79,7 +79,10 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     }
 }
 
-@Suite struct CoachDriverPipelineTests {
+// `.serialized`: two tests here drive the shared `ActivityLog` singleton (the screenshot e2e and the
+// manual-hint trigger-log e2e). Serializing the suite keeps their enable()/disable() from racing each
+// other — they are the only code that enables the shared log, so no other suite can collide.
+@Suite(.serialized) struct CoachDriverPipelineTests {
     private func makeDriver(brain: BrainClient, screen: ScreenCapturing, overlay: OverlayRendering,
                             clock: Clock) -> (CoachDriver, RollingTranscript) {
         let transcript = RollingTranscript()
@@ -174,6 +177,32 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(bytes.prefix(2) == Data([0xFF, 0xD8]) && bytes.suffix(2) == Data([0xFF, 0xD9]))
         let perms = try FileManager.default.attributesOfItem(atPath: shot.path)[.posixPermissions] as? NSNumber
         #expect(perms?.int16Value == 0o600)
+    }
+
+    /// A hotkey trigger leaves no "🗣 heard:" transcript line (the user pressed a key, didn't speak),
+    /// so the manual hint must record its OWN activity line — including the synthetic message we
+    /// pre-fill as the user's request — so the dev viewer shows what the shortcut sent to the brain.
+    /// Drives the shared `ActivityLog` like the screenshot e2e above; the suite is `.serialized` so the
+    /// two shared-log tests don't race. (Other suites' `jlog` calls may also land in this dir while it's
+    /// enabled; that only adds lines, so the `contains` check stays robust.)
+    @Test func manualHintTriggerAndPrefilledMessageLandInActivityLog() async throws {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("jarvis-hintlog-\(ProcessInfo.processInfo.globallyUniqueString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { ActivityLog.shared.disable(); try? FileManager.default.removeItem(at: dir) }
+        ActivityLog.shared.enable(directory: dir)
+
+        let clock = ManualClock(now: 100)
+        let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s", lines: ["use a hash map"])])])
+        let (driver, transcript) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(), clock: clock)
+        transcript.append(.init(speaker: .me, text: "stuck on two-sum", at: 100))
+
+        await driver.handleTrigger(.manualHint)
+
+        _ = ActivityLog.shared.attach { _ in }   // sync barrier: all async record()s have landed
+        let jsonl = try String(contentsOf: dir.appendingPathComponent("jarvis-activity.jsonl"), encoding: .utf8)
+        // The trigger marker carries the pre-filled synthetic request ("…pressed the hint shortcut…").
+        #expect(jsonl.contains("hint shortcut"))
     }
 
     /// Stop cancelling a turn *while the screenshot is being captured* must abort before emitting:

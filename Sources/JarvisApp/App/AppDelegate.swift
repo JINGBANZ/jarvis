@@ -28,6 +28,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// In-flight coaching turns, so Stop can cancel one mid-brain-call (otherwise it could speak
     /// after the user pressed Stop).
     private var turns: TurnTaskBox?
+    /// The global hint hotkey. Lives for the whole app run; its callback beeps when no session runs.
+    private var hotkeys: HotkeyController?
+    /// Fires an on-demand hint for the running session. Non-nil only while running — set in `start()`,
+    /// cleared in `stop()` — so the hotkey beeps when there's no session. Captures the Sendable driver
+    /// + turn box (not `@MainActor` self), like the transcriber callbacks do.
+    private var requestManualHint: (() -> Void)?
 
     /// Dev mode (`open ./Jarvis.app --args --dev`): enables owner-only file logging for the session.
     /// The activity log is available on demand from the Activity tab in Settings (dev mode only).
@@ -83,6 +89,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // The menu drives the pipeline lifecycle. Jarvis does NOT auto-start; the user presses Start.
         menuBar.onStart = { [weak self] in self?.start() ?? false }
         menuBar.onStop = { [weak self] in self?.stop() }
+
+        // Global hint hotkey: while a session is running, screenshot + ask the brain for a hint in one
+        // trip; otherwise beep — there's no live driver/conversation to hint from when stopped.
+        hotkeys = HotkeyController()
+        hotkeys?.onRequestHint = { [weak self] in
+            guard let self, let fire = self.requestManualHint else { NSSound.beep(); return }
+            fire()
+        }
 
         if secrets.apiKey()?.isEmpty == false {
             jlog("Jarvis: ready — press Start in the menu bar to begin coaching.")
@@ -177,6 +191,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.themTranscriber = themTranscriber
         self.aggregateCapture = capture
         self.turns = turns
+        // Arm the hint hotkey for this session: capture the screen and force a one-trip hint, routed
+        // through the same turn box as audio triggers (so Stop cancels it and rapid presses coalesce).
+        self.requestManualHint = { turns.run { await driver.handleTrigger(.manualHint) } }
         transcriber.connect()
         themTranscriber.connect()
         capture.start()
@@ -191,6 +208,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// to prevent — and a subsequent Start would leak the orphaned IOProc/sockets.
     private func stop() {
         let wasRunning = transcriber != nil || themTranscriber != nil
+        requestManualHint = nil              // hotkey beeps again once there's no live session
         turns?.cancelAll(); turns = nil      // cancel any in-flight coaching turn
         aggregateCapture?.stop(); aggregateCapture = nil   // stop the IOProc, tear down tap+aggregate
         transcriber?.stop()

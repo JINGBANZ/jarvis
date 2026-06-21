@@ -5,6 +5,7 @@ import Foundation
 public enum TriggerReason: Sendable, Equatable {
     case turnEnd                              // server VAD: the speaker finished an utterance
     case silence(secondsQuiet: TimeInterval)  // no speech for the current backoff interval
+    case manualHint                           // user pressed the hint hotkey — capture + force a hint, one trip
 }
 
 /// Timing context handed to the model so it can tell "thinking" from "stuck".
@@ -26,6 +27,8 @@ public struct TriggerContext: Sendable {
             return "Trigger: a turn just ended — check the transcript labels for who spoke (\"me\" or \"them\"). The session has been running for \(elapsed)s."
         case .silence(let secs):
             return "Trigger: the user has been silent for \(Int(secs))s. The session has been running for \(elapsed)s."
+        case .manualHint:
+            return "Trigger: the user pressed the hint shortcut. They want your single most useful hint about what's on their screen right now — answer using the attached screenshot and the recent transcript. The session has been running for \(elapsed)s."
         }
     }
 }
