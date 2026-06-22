@@ -60,7 +60,8 @@ A compact log — the *rationale* for each lives in the linked design page, not 
 | **API key in an owner-only `0600` file, not the Keychain** — a self-signed (no Team ID) app's Keychain access keys to a per-build `cdhash`, so the Keychain re-prompts every rebuild; a file doesn't (2026-06-20) | [sandbox.md §3](./sandbox.md) |
 | ~~Build in a separate restricted account (HARD)~~ → **build in main `forrest` account, in a git worktree; hard requirement waived for the personal build** (2026-06-14) | [sandbox.md](./sandbox.md) |
 | **Tuned `server_vad`+debounce (not `semantic_vad`); quiet graceful Stop** — fixes from first live smoke run (2026-06-15) | [architecture.md](./architecture.md#models-and-apis) |
-| **Dev activity viewer = in-app `WKWebView`** (live push, no meta-refresh; screenshot lightbox; persisted JSONL session history + clear-history) | [build-and-run.md](./build-and-run.md) |
+| **Activity viewer = in-app `WKWebView`** (live push, no meta-refresh; screenshot lightbox; persisted JSONL session history + clear-history) | [build-and-run.md](./build-and-run.md) |
+| **Activity log is always on, not `--dev`-gated** — Settings → Activity + owner-only per-session disk logs on every launch; `--dev` now only routes logs to the workspace `.jarvis/` (2026-06-22) | [sandbox.md](./sandbox.md) |
 | **Overlay hidden from screen capture/sharing via `sharingType = .none`** — verified on macOS 26.5 incl. live `SCStream`; re-asserted on `show()` as defense-in-depth | [overlay-invisibility.md](./overlay-invisibility.md) |
 | **Cut the guardrail layer: no cooldown/rate cap, no wake-word detector; brain self-gates speaking; silence check backs off across a long silence** — simplify the flow, cut log noise, natural conversation (2026-06-16) | [architecture.md §5](./architecture.md#5-safety-model) |
 | **`speak` returns a `lines` array via Structured Outputs (`strict:true`), not a free-form string** — the model splits the tip into overlay lines, so the client no longer splits prose on `.`/`!`/`?` (which shattered code like `Array.from(...)`) (2026-06-17) | [architecture.md §2](./architecture.md#2-core-loop) |
@@ -102,7 +103,7 @@ The headless build is done. Remaining is the **human smoke run** — build, run,
    transcript; "I'm stuck on two-sum" → coaching overlay + observed `capture_screen`; overlay
    excluded from the screenshot; while you talk steadily Jarvis stays mostly quiet (model restraint,
    not a rate cap) and **Stop Jarvis** halts the pipeline. (Run via `./scripts/build-app.sh --dev`,
-   then open the activity viewer from the menu bar to watch each step.)
+   then open Settings → Activity to watch each step.)
 4. **Only remaining live unknown:** the bare-WebSocket connect for a transcription-only Realtime
    session. The connect contract (`?intent=transcription`, the `session.update` payload) lives in
    `RealtimeSession.swift`; if the live connect fails, that's the file to adjust (e.g. swap

@@ -93,9 +93,9 @@ proactive path, by contrast, must first let the model decide to call `capture_sc
 over the returned image on a second trip — the latency this hotkey exists to skip.) It reuses the
 live session's brain, conversation, and transcript, so the hint has full context, and it routes
 through the same single-in-flight turn box as audio triggers (a press coalesces, never stacks). It is
-inert — a beep — when no session is running, since there is no live conversation to hint from. In dev
-mode the trigger and its pre-filled message are recorded to the [activity viewer](./build-and-run.md),
-so you can see exactly what the shortcut sent to the brain.
+inert — a beep — when no session is running, since there is no live conversation to hint from. The
+trigger and its pre-filled message are recorded to the [activity viewer](./build-and-run.md), so you
+can see exactly what the shortcut sent to the brain.
 
 The hotkey is registered with **Carbon `RegisterEventHotKey`**, the one global-shortcut API Apple
 never modernized, which needs no Accessibility/TCC permission. We deliberately did **not** take the
@@ -217,5 +217,5 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
 6. **Self-verifying.** Every build ships with tests and a smoke checklist the agent can run to prove it works.
 7. **One mode, done well.** Ship the coach; expand later.
 
-How Jarvis is built, signed, tested, and run — and the dev-mode activity viewer — is its own
+How Jarvis is built, signed, tested, and run — and the activity viewer — is its own
 operational page: [build-and-run.md](./build-and-run.md).

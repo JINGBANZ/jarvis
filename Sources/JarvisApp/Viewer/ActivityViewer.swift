@@ -2,7 +2,7 @@ import AppKit
 import WebKit
 import JarvisCore
 
-/// The dev-mode activity viewer view: an in-app `WKWebView` that live-appends log rows pushed from
+/// The activity viewer view: an in-app `WKWebView` that live-appends log rows pushed from
 /// `ActivityLog` (no reload), shows screenshots in an in-page lightbox, and lets you browse and clear
 /// past sessions via `SessionStore`. Thin by design — the rendering logic and its tests live in
 /// JarvisCore (`htmlShell`/`rowScript`) and `JarvisViewerTests`. See wiki/build-and-run.md.
@@ -54,7 +54,7 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         let pop = NSPopUpButton(frame: NSRect(x: 76, y: 8, width: 280, height: 26))
         pop.target = self
         pop.action = #selector(sessionChanged)
-        pop.toolTip = "Switch between this and previous dev sessions"
+        pop.toolTip = "Switch between this and previous sessions"
         pop.autoresizingMask = [.maxXMargin]
         header.addSubview(pop)
         self.picker = pop

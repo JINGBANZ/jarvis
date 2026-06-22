@@ -75,7 +75,7 @@ Full design: [`wiki/architecture.md`](./wiki/architecture.md).
 │       ├── App/                   # main.swift, AppDelegate
 │       ├── MenuBar/               # menu-bar item, Start/Stop, key entry
 │       ├── Capture/               # mic + system-audio capture, realtime transcriber, TCC priming
-│       └── Viewer/                # dev-mode WKWebView activity viewer
+│       └── Viewer/                # WKWebView activity viewer
 ├── Tests/
 │   ├── JarvisCoreTests/      # unit + offline-pipeline tests (mirrors the Core subsystems)
 │   ├── JarvisOverlayTests/   # overlay + response-box behavior & screen-capture-invisibility checks
@@ -97,7 +97,7 @@ by a live run. Folders are grouped **by subsystem**, following
 |---|---|
 | `./scripts/run-tests.sh` | Build and run the unit + offline-pipeline tests (no key, no permissions needed). |
 | `./scripts/build-app.sh [release\|debug]` | Build, bundle, and sign `Jarvis.app` (defaults to `release`). Creates the stable `Jarvis Dev` signing identity automatically on first run. |
-| `./scripts/build-app.sh --dev` | Same build, then launch in **dev mode** (open the activity viewer on demand from the menu bar). |
+| `./scripts/build-app.sh --dev` | Same build + launch, but routes per-session logs to the workspace `.jarvis/` instead of `~/Caches/Jarvis`. |
 | `./scripts/build-app.sh --run` | Same build, then launch the app normally. |
 
 ## Develop locally
@@ -137,16 +137,12 @@ Then:
 Permissions persist across rebuilds automatically (the app always signs with a stable identity); the
 mechanics are in [`wiki/build-and-run.md`](./wiki/build-and-run.md).
 
-## Dev mode — live activity viewer
+## The live activity viewer
 
-```bash
-./scripts/build-app.sh --dev   # rebuild, launch with --dev
-```
-
-In dev mode Jarvis opens an **in-app live viewer** (a `WKWebView` it pushes events into) so you can
-**watch it think** without tailing a log. It doesn't pop open on launch — choose **Open Log Viewer**
-from the menu bar when you want it (each launch is its own session; you can also browse past sessions
-or clear the history). New events stream in live — no reload — and are color-coded:
+Jarvis has an **in-app live viewer** (a `WKWebView` it pushes events into) so you can **watch it
+think** without tailing a log. Open it from **Settings → Activity** (each launch is its own session;
+you can also browse past sessions or clear the history). New events stream in live — no reload — and
+are color-coded:
 
 - 🗣 `heard: "…"` — what you said (transcribed) / 🤫 `quiet for 30s` — why it woke
 - 💭 `thinking…` — calling the brain
@@ -155,10 +151,11 @@ or clear the history). New events stream in live — no reload — and are color
 - 💬 `…the tip it spoke…` — a `speak` call rendered to the overlay
 - `… staying silent` — when the model declines to speak
 
-**Privacy posture.** File logging is dev-only — outside dev mode nothing is written to disk (just the
-unified Console log). In dev mode the logs (and the screenshot thumbnails) go to a gitignored,
-owner-only `.jarvis/<session>/` in the workspace — one fresh subdirectory per launch. The posture and
-build/run mechanics are in [`wiki/build-and-run.md`](./wiki/build-and-run.md)
+**Privacy posture.** The activity log (the viewer's `jarvis-activity.jsonl` + the screenshot
+thumbnails + `jarvis-debug.log`) is written on **every** launch to a gitignored, owner-only
+per-session directory — `~/Caches/Jarvis/<session>/` by default, or the workspace `.jarvis/<session>/`
+with `--dev` (`./scripts/build-app.sh --dev`). The raw mic audio and the live transcript are never
+archived. The posture and build/run mechanics are in [`wiki/build-and-run.md`](./wiki/build-and-run.md)
 and [`wiki/sandbox.md`](./wiki/sandbox.md).
 
 ## Live smoke checklist

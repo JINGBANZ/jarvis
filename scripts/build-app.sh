@@ -10,7 +10,7 @@
 #   ./scripts/build-app.sh                build + sign (release)
 #   ./scripts/build-app.sh debug          build + sign (debug)
 #   ./scripts/build-app.sh --run          ...then launch it
-#   ./scripts/build-app.sh --dev          ...then launch in dev mode (open the log viewer from the menu bar)
+#   ./scripts/build-app.sh --dev          ...then launch with logs in the workspace .jarvis/ (instead of ~/Caches/Jarvis)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -94,12 +94,13 @@ case "$LAUNCH" in
     ;;
   dev)
     launch
-    # Logs go to a gitignored .jarvis/ (owner-only 0600, fresh each session) so the model's
-    # screen-derived tips never land in world-readable /tmp or in git.
+    # Route per-session logs into a gitignored, workspace-local .jarvis/ (owner-only 0600, fresh each
+    # session) so they're easy to tail from the repo — instead of the default ~/Caches/Jarvis. Either
+    # way the activity log is always on; this only changes where it's written.
     LOGDIR="$PWD/.jarvis"
     mkdir -p "$LOGDIR"
-    echo "▶ launching Jarvis (dev mode) — pick “Open Log Viewer” from the menu bar; per-session logs in $LOGDIR/<session>"
-    open ./"$APP" --args --dev --log-dir "$LOGDIR"
+    echo "▶ launching Jarvis — open Settings → Activity to watch the log; per-session logs in $LOGDIR/<session>"
+    open ./"$APP" --args --log-dir "$LOGDIR"
     ;;
   "")
     echo "   run: open ./$APP        (or: ./scripts/build-app.sh --run  /  --dev)"

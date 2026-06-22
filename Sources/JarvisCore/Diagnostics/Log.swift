@@ -1,10 +1,10 @@
 import Foundation
 
-/// Dev-only file logging config. By default `jlog` writes ONLY to the unified log (Console.app);
-/// no flat file is created. In dev mode the app calls `JarvisLog.enableFileLogging(directory:)`,
+/// Per-session file logging config. By default `jlog` writes ONLY to the unified log (Console.app);
+/// no flat file is created. On each Start the app calls `JarvisLog.enableFileLogging(directory:)`,
 /// after which `jlog` also appends to `<directory>/jarvis-debug.log` (created `0600`, truncated
-/// fresh for the session). This keeps screen-derived coaching text out of any world-readable or
-/// persistent file outside dev mode — see wiki/sandbox.md ("no recording to disk").
+/// fresh for the session). The file is always owner-only and never lands in a world-readable path —
+/// see wiki/sandbox.md ("activity log persistence").
 public enum JarvisLog {
     private static let lock = NSLock()
     nonisolated(unsafe) private static var directory: URL?   // guarded by `lock`
@@ -27,13 +27,13 @@ public enum JarvisLog {
     }
 }
 
-/// Lightweight logger: always writes to the unified log (Console) and mirrors into the dev activity
-/// viewer; additionally appends to the dev debug file when file logging is enabled.
-/// `image`, when set, is a base64-encoded JPEG screenshot to show as a thumbnail in the dev activity
+/// Lightweight logger: always writes to the unified log (Console) and mirrors into the activity
+/// viewer; additionally appends to the session debug file when file logging is enabled.
+/// `image`, when set, is a base64-encoded JPEG screenshot to show as a thumbnail in the activity
 /// viewer (the file log and unified log stay text-only).
 public func jlog(_ message: String, image base64JPEG: String? = nil) {
     NSLog("%@", message)
-    ActivityLog.shared.record(message, imageBase64: base64JPEG)  // dev-only HTML viewer (no-op when disabled)
+    ActivityLog.shared.record(message, imageBase64: base64JPEG)  // HTML activity viewer (no-op until enabled)
 
     guard let url = JarvisLog.debugLogURL else { return }
     let line = "\(logTimestamp()) \(message)\n"

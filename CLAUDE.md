@@ -31,7 +31,7 @@ and keep anything OS-bound thin and on the outside.**
 | Test | `./scripts/run-tests.sh` | **Always use this, not raw `swift test`** — it fixes the swift-testing search path on CLT-only machines. Runs all three test targets. |
 | Build the app | `./scripts/build-app.sh [release\|debug]` | Bundles + signs `Jarvis.app` with the stable `Jarvis Dev` identity (so TCC grants persist). |
 | Run it | `./scripts/build-app.sh --run` | Build, then launch. Launch via `open`, never the bare binary. |
-| Dev mode | `./scripts/build-app.sh --dev` | Launch with the in-app activity viewer available from the menu bar. |
+| Dev mode | `./scripts/build-app.sh --dev` | Same as `--run`, but routes per-session logs to the workspace `.jarvis/` instead of `~/Caches/Jarvis`. The activity log is always on regardless. |
 
 ## Layout
 
@@ -49,13 +49,13 @@ into one module, so moving a file between subfolders never changes access contro
 | `Sources/JarvisCore/Screen/` | Screen-capture tool contract |
 | `Sources/JarvisCore/Overlay/` | Overlay text model (the rendered tip; not the window) |
 | `Sources/JarvisCore/Config/` | Config + secrets (owner-only file) |
-| `Sources/JarvisCore/Diagnostics/` | Logging, the dev-mode activity log, session-history store |
+| `Sources/JarvisCore/Diagnostics/` | Logging, the activity log, session-history store |
 | `Sources/JarvisCore/Support/` | Small primitives (`Clock`, `TurnTaskBox`) |
 | `Sources/JarvisOverlay/` | The on-screen `NSPanel` overlay (single file — no subfolders) |
 | `Sources/JarvisApp/App/` | Entry point, `AppDelegate` |
 | `Sources/JarvisApp/MenuBar/` | Menu-bar item, Start/Stop, key entry |
 | `Sources/JarvisApp/Capture/` | Mic + system-audio capture, realtime transcriber, TCC priming |
-| `Sources/JarvisApp/Viewer/` | Dev-mode `WKWebView` activity-viewer window |
+| `Sources/JarvisApp/Viewer/` | The `WKWebView` activity-viewer window |
 | `Tests/JarvisCoreTests/` | Mirrors the Core subfolders; `TestFixtures.swift` stays at the root |
 | `Tests/JarvisOverlayTests/` | Overlay screen-capture-invisibility checks |
 | `Tests/JarvisViewerTests/` | WebKit end-to-end tests of the viewer's shipped HTML/JS |
@@ -103,8 +103,11 @@ behavior, it's `JarvisOverlay`. If no subsystem fits and it's a generic helper, 
 - **No secrets in code, ever** — not in source, tests, or examples. The API key lives in an
   owner-only `0600` file (`OPENAI_API_KEY` env var is a headless fallback only); see
   [`wiki/sandbox.md`](./wiki/sandbox.md) for why not the Keychain.
-- **Nothing screen- or audio-derived is written to disk** outside dev mode. Dev-mode logs and
-  screenshots go to a gitignored, owner-only `.jarvis/<session>/`. Never relax that.
+- **The only screen-/audio-derived data persisted to disk is the activity log** (the spoken tips,
+  the transcribed "heard:" lines, and the screenshots the model looked at). It is written in **all**
+  modes to an **owner-only** (`0600` files in a `0700` dir) per-session directory — `~/Caches/Jarvis`
+  by default, or the workspace `.jarvis/` under `--dev` — fresh each session, never `/tmp`. The raw
+  mic audio and the live transcript are **never** archived. Keep the owner-only, no-`/tmp` posture.
 - Full security posture: [`wiki/sandbox.md`](./wiki/sandbox.md).
 
 ## Workflow

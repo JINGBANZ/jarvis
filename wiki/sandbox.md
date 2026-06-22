@@ -17,8 +17,9 @@ Two layers below are **relaxed** for the personal build, by explicit decision:
   **git worktree** for recoverability, rather than a restricted `jarvisbuild` account. The former
   HARD REQUIREMENT is **waived** here. (Hardened model: §2.)
 
-Everything else (owner-only file for the key, narrow egress, no recording to disk, model-governed behavioral
-restraint) **still holds**. To re-harden for a shippable build, re-enable §1 and §2.
+Everything else (owner-only file for the key, narrow egress, no rolling stream archive, owner-only
+activity log, model-governed behavioral restraint) **still holds**. To re-harden for a shippable
+build, re-enable §1 and §2.
 
 ## Principle
 
@@ -89,11 +90,11 @@ Narrow and explicit. Data leaves the machine only via:
 - **Screenshot + transcript window → `gpt-5.5`** — and *only* when the model triggers a
   `capture_screen` and/or a coaching turn. No screen content leaves the machine on idle turns.
 
-In the MVP there is **no recording to disk** — no rolling screen/audio archive, no "recall"
-database. Temp screenshots are deleted after use. This guarantee covers the **sensitive captured
-streams** (mic audio, screenshots, and the transcript derived from them): audio streams to the API
-and is dropped, the transcript lives in memory, and nothing is persisted *on this machine* in normal
-operation.
+There is **no rolling screen/audio archive and no "recall" database** — Jarvis keeps no continuous
+recording of what it sees or hears. The **raw captured streams stay transient**: mic audio streams to
+the API and is dropped, the live transcript lives in memory, and the temp screenshot files used to
+hand a frame to `screencapture` are deleted immediately after use. The one thing persisted *on this
+machine* is the **activity log** — owner-only and bounded; see below.
 
 > **Server-side retention for conversation quality (current behavior).** To give the coach real
 > multi-turn memory — so it remembers its *own* prior replies, not just the user's speech — the brain
@@ -103,14 +104,17 @@ operation.
 > extend to OpenAI's servers. A deliberate *quality-over-retention* choice; revisiting it (encrypted
 > reasoning items / ephemeral conversations / client-side history) is tracked as a future privacy item.
 
-**Dev-mode logging is the one bounded exception, and it is hardened to not break the guarantee.**
-File logging (the activity HTML + `jarvis-debug.log`, which include the model's spoken tips and the
-transcribed "heard:" lines) is written **only when the `--dev` flag is set** — normal launches log
-solely to the unified log, never a flat file. When on, the files go to the `--log-dir` (a
-**gitignored `.jarvis/` in the workspace**, or a per-user `Caches/Jarvis`) with **`0600`** owner-only
-permissions, **truncated fresh each session** — never `/tmp` (which is world-readable and shared
-across user accounts). So even the dev affordance produces no world-readable or persistent record.
-See [build-and-run.md](./build-and-run.md).
+**The activity log is the one bounded form of disk persistence, hardened to stay owner-only.** The
+log (the in-app `WKWebView` viewer's `jarvis-activity.jsonl` + the screenshots the model looked at,
+alongside `jarvis-debug.log`) records the model's spoken tips and the transcribed "heard:" lines so a
+session can be reviewed afterward. It is written on **every** launch — it was previously gated to the
+`--dev` flag, now it is always on (an explicit decision to make session review a default affordance).
+The hardening that made the dev affordance safe still applies in full: the files go to a per-session
+directory under the `--log-dir` (the workspace **gitignored `.jarvis/`** under `--dev`, else a
+per-user `Caches/Jarvis`) at **`0600`** owner-only permissions inside a **`0700`** dir, **fresh each
+session**, and **never `/tmp`** (world-readable, shared across user accounts). The viewer's
+clear-history removes past sessions. So the persisted record is readable by this user account and by
+nothing else. See [build-and-run.md](./build-and-run.md).
 
 ## Behavioral Restraint (anti-annoyance = anti-misbehavior)
 
