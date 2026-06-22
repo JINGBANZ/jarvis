@@ -192,12 +192,12 @@ public final class CoachDriver: @unchecked Sendable {
         if let priorClose {
             convo.append(.init(role: .tool, text: "shown to the user", toolCallId: priorClose))
         }
-        convo.append(.user("""
-            New since last turn (timestamped):
-            \(newSpeech.isEmpty ? "(nothing new)" : newSpeech)
-
-            \(ctx.promptLine)
-            """))
+        // Lead with the trigger line; prepend new speech only when there is any (a manual hint often
+        // has none, and an empty "New since last turn" block just buries the real signal).
+        let userText = newSpeech.isEmpty
+            ? ctx.promptLine
+            : "New since last turn:\n\(newSpeech)\n\n\(ctx.promptLine)"
+        convo.append(.user(userText))
 
         // Manual hint (hotkey): the user explicitly asked for help, so capture the screen HERE and
         // inject it into THIS first request — no waiting for the model to call capture_screen.
