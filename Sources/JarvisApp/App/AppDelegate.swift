@@ -35,8 +35,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// + turn box (not `@MainActor` self), like the transcriber callbacks do.
     private var requestManualHint: (() -> Void)?
 
-    /// How many past session log directories to keep on disk; older ones are pruned at each Start so the
-    /// always-on activity log stays bounded. Clear all but the current via the viewer's "Clear history".
+    /// How many past session log *directories* to keep on disk; older ones are pruned at each Start so
+    /// the always-on activity log stays bounded across launches. This caps session count, not the size
+    /// of any one session — a very long single run still grows its (append-only) logs + screenshots.
+    /// Clear all but the current via the viewer's "Clear history".
     private static let retainedSessions = 10
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -228,20 +230,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// `jarvis-debug.log` and `jarvis-activity.jsonl`. Called on every Start so each coaching run keeps
     /// its own logs instead of resuming the previous run's.
     private func beginNewSession() {
-        let dir = logDirectory().appendingPathComponent(newSessionID())
+        let base = logDirectory()
+        let dir = base.appendingPathComponent(newSessionID())
         // 0700: the screenshots/logs inside are 0600, so the directory holding them must be owner-only
         // too — otherwise a 0755 dir leaks file names/counts/timestamps to other local users (CWE-732).
         // Applies to the created session dir and any intermediates.
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true,
                                                  attributes: [.posixPermissions: 0o700])
+        // createDirectory only sets the mode on dirs it *creates*; a pre-existing base (e.g. a 0755
+        // Application Support/Jarvis left by another tool) keeps its mode, which would leak session-dir
+        // names. Tighten it best-effort, mirroring FileSecretStore.setApiKey.
+        try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: base.path)
         JarvisLog.enableFileLogging(directory: dir)     // <dir>/jarvis-debug.log, 0600, fresh
         ActivityLog.shared.enable(directory: dir)        // <dir>/jarvis-activity.jsonl, 0600, fresh
         // Now that logging is always on, sessions accumulate every launch. Bound it: keep only the most
         // recent few (the just-created one is current, so it's always spared).
-        SessionStore(base: logDirectory(), current: dir).pruneToMostRecent(Self.retainedSessions)
+        SessionStore(base: base, current: dir).pruneToMostRecent(Self.retainedSessions)
         // Point the viewer's history browser at the new current session and show it live; clear-history
         // spares whichever session is current.
-        activityViewer.sessionDidChange(base: logDirectory(), current: dir)
+        activityViewer.sessionDidChange(base: base, current: dir)
         jlog("Jarvis: session \(dir.lastPathComponent) (\(dir.path)).")
     }
 

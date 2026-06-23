@@ -185,9 +185,11 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
 - **Built and run in the main `forrest` account inside a git worktree** (recoverability). The
   separate-restricted-account requirement is waived for the personal build; see [sandbox.md](./sandbox.md).
 - **Egress is narrow and explicit:** audio to `gpt-4o-transcribe`; a screenshot + transcript window
-  to `gpt-5.5` *only when the model triggers a capture/response*. Nothing is recorded to **local**
-  disk in the MVP; the per-session OpenAI conversation does retain transcript + screenshots
-  server-side (see [sandbox.md](./sandbox.md)).
+  to `gpt-5.5` *only when the model triggers a capture/response*. The only screen-/audio-derived data
+  written to **local** disk is the owner-only, bounded per-session **activity log** (spoken tips,
+  transcribed lines, the screenshots the model saw); raw mic audio and the live transcript are never
+  archived. The per-session OpenAI conversation does retain transcript + screenshots server-side (see
+  [sandbox.md](./sandbox.md)).
 - **Behavioral restraint (model-governed):** there is **no cooldown or rate cap** in code. Every
   utterance reaches the brain, and the brain decides whether it has anything worth saying — that
   restraint lives in the system prompt ("stay silent unless genuinely useful"). This keeps

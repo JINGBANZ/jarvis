@@ -163,7 +163,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     // MARK: - Visibility (driven by the Settings toggle)
 
     /// Wipe the log. Called on each fresh Start so the box shows only the current conversation,
-    /// matching how the dev session rotates.
+    /// matching how the session rotates.
     public func clear() {
         entries.removeAll()
         guard !isPreviewing else { return }   // the preview owns the display; restored on close
