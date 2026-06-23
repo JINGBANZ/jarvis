@@ -12,11 +12,6 @@ import Testing
         #expect(!UserFacingError.Severity.degraded.stopsSession)
     }
 
-    @Test func infoNeitherAlertsNorStops() {
-        #expect(!UserFacingError.Severity.info.showsAlert)
-        #expect(!UserFacingError.Severity.info.stopsSession)
-    }
-
     @Test func carriesFields() {
         let e = UserFacingError(title: "T", message: "M", severity: .fatal)
         #expect(e.title == "T")

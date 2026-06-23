@@ -1,8 +1,9 @@
 import Foundation
 
 /// The catalog of the app's user-facing failures: the single source of truth for *which* failures are
-/// loud (`.fatal` → alert + stop) versus quiet (`.degraded`/`.info`). Call sites reference these instead
-/// of inlining titles, copy, and severities, so the loudness policy is centralized and unit-testable.
+/// loud (`.fatal` → alert + stop) versus quiet (`.degraded`). It owns the title + severity policy of each
+/// named failure; dynamic copy composed at the failure site (e.g. a capture reason) is passed through.
+/// Call sites reference these so the loudness policy is centralized and unit-testable.
 public extension UserFacingError {
     /// No API key on Start. The session never comes up, so this is fatal.
     static var noAPIKey: UserFacingError {
@@ -17,10 +18,11 @@ public extension UserFacingError {
         .init(title: "Couldn't start audio capture", message: reason, severity: .fatal)
     }
 
-    /// The mic ("me") transcription socket gave up (bad key / quota / network). Coaching can't continue.
-    static var microphoneDisconnected: UserFacingError {
-        .init(title: "Microphone disconnected",
-              message: "Jarvis lost the microphone connection (often a bad API key, quota, or network issue). Coaching has stopped.",
+    /// The mic ("me") transcription socket gave up (bad key / quota / network) — NOT a mic-hardware
+    /// failure (that's `captureFailed`). Coaching can't continue, so it's fatal.
+    static var transcriptionStopped: UserFacingError {
+        .init(title: "Transcription stopped",
+              message: "Jarvis lost its connection to the transcription service (often a bad API key, quota, or network issue). Coaching has stopped.",
               severity: .fatal)
     }
 

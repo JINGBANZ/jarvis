@@ -146,7 +146,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Mic socket gave up (bad key / quota / network): coaching can't continue. Report fatal — the
         // reporter's onFatal stops the session and corrects the menu (no more lying 🟢).
         let onMicTerminalFailure: @Sendable () -> Void = { [errorReporter] in
-            errorReporter.report(.microphoneDisconnected)
+            errorReporter.report(.transcriptionStopped)
         }
         // "Them" socket gave up: degrade gracefully — stop the system-audio transcriber, keep the mic
         // running. The shared aggregate capture keeps feeding the mic side; its now-nil "them"

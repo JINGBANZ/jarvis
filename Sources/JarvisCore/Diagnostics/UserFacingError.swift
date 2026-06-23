@@ -5,11 +5,10 @@ import Foundation
 /// only renders it. Construct one at any failure site and hand it to the reporter.
 public struct UserFacingError: Error, Sendable, Equatable {
     /// How the reporter should react. `.fatal` interrupts the user and tears the session down;
-    /// `.degraded` is a non-blocking notice (the session keeps running); `.info` is log-only.
+    /// `.degraded` is a non-blocking notice the session survives (logged, not alerted).
     public enum Severity: Sendable, Equatable {
         case fatal
         case degraded
-        case info
 
         /// Whether the reporter pops a modal alert for this severity.
         public var showsAlert: Bool { self == .fatal }

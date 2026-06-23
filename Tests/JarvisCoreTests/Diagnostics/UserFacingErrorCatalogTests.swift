@@ -17,8 +17,8 @@ import Testing
         #expect(e.message.contains("no input device"))
     }
 
-    @Test func microphoneDisconnectedIsFatal() {
-        #expect(UserFacingError.microphoneDisconnected.severity == .fatal)
+    @Test func transcriptionStoppedIsFatal() {
+        #expect(UserFacingError.transcriptionStopped.severity == .fatal)
     }
 
     @Test func systemAudioStoppedStaysQuiet() {
