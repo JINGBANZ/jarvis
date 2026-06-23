@@ -122,6 +122,37 @@ Each component has one job and a narrow interface. The CoachDriver is the only p
 "intelligence" lives, and even there the intelligence is the model — the driver just wires events
 to tool calls and enforces safety.
 
+### Capture: device-rate adaptation
+
+`AggregateEchoCapture` reads the input device's native sample rate and resamples up to AEC3's
+48 kHz, rather than forcing the aggregate to 48 kHz. The earlier hard **pin** existed for two
+reasons — AEC3 is created at a fixed 48 kHz, and the 48→24 kHz wire downsampler assumes a true
+48 kHz input — so an aggregate that inherited a 44.1 kHz mic would corrupt the echo model and
+mislabel the wire rate. But the pin **silently failed to start** on any device that can't do
+48 kHz, notably AirPods (Bluetooth HFP runs them at 16/24 kHz). Reading-and-resampling serves both
+original concerns *better* (AEC3 always gets true 48 kHz; the wire label stays correct) and works on
+every device. The **one-clock aggregate is untouched** — the pin was about *rate*, not the clock;
+mic and tap still come off one drift-compensated IOProc, so they stay sample-synced and the far/near
+lockstep (now applied post-resample) holds. If the rate can't be read we fail rather than assume.
+
+Alternatives rejected: running AEC at the device's *native* rate doesn't generalize (24/44.1 kHz
+aren't AEC3-legal, so you resample anyway, with a variable frame size in the most delicate
+component); and **bypassing AEC on "headphone" routes** is unsafe because a Bluetooth *speaker* is
+indistinguishable from a headset, so a wrong bypass re-admits the echo. AEC3 therefore stays on for
+all routes — it's a near-passthrough on earbuds (no acoustic echo to cancel). Caveat: AirPods *as a
+mic* are HFP narrowband and low-fidelity regardless of resampling; for input quality, use the
+built-in mic.
+
+### Failure surfacing — fail loud
+
+Every user-facing failure flows through one `ErrorReporter`: severity on a Foundation-only
+`UserFacingError` decides the response (`fatal` → `NSAlert` + session teardown; `degraded`/`info` →
+log only), so a startup failure can never again flip the menu green and silently revert. Per-failure
+copy and severity live in a Core **catalog** (`UserFacingError+Catalog`), the single source of truth
+for *which* failures are loud — unit-tested in Core (e.g. the system-audio degrade must stay quiet),
+since `JarvisApp` itself can't be headlessly tested and the `NSAlert` display stays a manual smoke
+check. Diagnostics remain `JarvisLog`'s job; `ErrorReporter` owns surfacing + lifecycle consequence.
+
 ## 4. Data Flow & Cost Model
 
 - **Continuous (cheap):** audio → Realtime → transcript. This runs the whole session.
