@@ -9,18 +9,16 @@
 # Usage:
 #   ./scripts/build-app.sh                build + sign (release)
 #   ./scripts/build-app.sh debug          build + sign (debug)
-#   ./scripts/build-app.sh --run          ...then launch it
-#   ./scripts/build-app.sh --dev          ...then launch with logs in the workspace .jarvis/ (instead of ~/Caches/Jarvis)
+#   ./scripts/build-app.sh --run          ...then launch it (per-session logs in the workspace .jarvis/)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 CONFIG="release"
-LAUNCH=""            # "" | run | dev
+LAUNCH=""            # "" | run
 for arg in "$@"; do
   case "$arg" in
     release|debug) CONFIG="$arg" ;;
     --run)         LAUNCH="run" ;;
-    --dev)         LAUNCH="dev" ;;
     *) echo "unknown argument: $arg" >&2; exit 2 ;;
   esac
 done
@@ -89,15 +87,10 @@ launch() {
 case "$LAUNCH" in
   run)
     launch
-    echo "▶ launching Jarvis"
-    open ./"$APP"
-    ;;
-  dev)
-    launch
-    # Route per-session logs into a gitignored, workspace-local .jarvis/ so they're easy to tail from
-    # the repo — instead of the default ~/Caches/Jarvis. Either way the activity log is always on; this
-    # only changes where it's written. chmod 700 so the session-dir names (timestamps) aren't readable
-    # by other local users — the app then makes each <session>/ 0700 with 0600 files inside (CWE-732).
+    # Per-session logs go to a gitignored, workspace-local .jarvis/ (passed via --log-dir so the app,
+    # launched from anywhere by `open`, writes back into the repo). chmod 700 the base so session-dir
+    # names (timestamps) aren't readable by other local users — the app then makes each <session>/
+    # 0700 with 0600 files inside (CWE-732).
     LOGDIR="$PWD/.jarvis"
     mkdir -p "$LOGDIR"
     chmod 700 "$LOGDIR"
@@ -105,6 +98,6 @@ case "$LAUNCH" in
     open ./"$APP" --args --log-dir "$LOGDIR"
     ;;
   "")
-    echo "   run: open ./$APP        (or: ./scripts/build-app.sh --run  /  --dev)"
+    echo "   run: open ./$APP        (or: ./scripts/build-app.sh --run)"
     ;;
 esac

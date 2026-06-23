@@ -258,16 +258,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return "\(f.string(from: Date()))_\(suffix)"
     }
 
-    /// Where session logs go: `--log-dir <path>` (`build-app.sh --dev` passes the workspace `.jarvis/`),
-    /// else a per-user Caches/Jarvis directory. Never `/tmp` (world-readable, shared across users).
-    /// Each Start nests a per-session subdirectory under this base (see `beginNewSession`).
+    /// Where session logs go: a gitignored, workspace-local `.jarvis/`. `build-app.sh --run` passes its
+    /// absolute path via `--log-dir` (the app is launched by `open` from an arbitrary cwd, so it can't
+    /// find the repo itself); absent that, fall back to `.jarvis/` under the current directory. Each
+    /// Start nests a per-session subdirectory under this base (see `beginNewSession`).
     private func logDirectory() -> URL {
         let args = CommandLine.arguments
         if let i = args.firstIndex(of: "--log-dir"), i + 1 < args.count {
             return URL(fileURLWithPath: args[i + 1])
         }
-        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
-            ?? URL(fileURLWithPath: NSTemporaryDirectory())
-        return caches.appendingPathComponent("Jarvis")
+        return URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent(".jarvis")
     }
 }

@@ -48,8 +48,7 @@ relaunches. On the first build macOS prompts once to let `codesign` use the new 
 |---|---|
 | `./scripts/run-tests.sh` | Build + run the unit/offline-pipeline tests (no key, no permissions). |
 | `./scripts/build-app.sh [release\|debug]` | Build, bundle, sign `Jarvis.app` (default `release`). Creates `Jarvis Dev` on first run. |
-| `./scripts/build-app.sh --run` | Same build, then launch normally. |
-| `./scripts/build-app.sh --dev` | Same build + launch, but routes per-session logs to the workspace `.jarvis/` instead of `~/Caches/Jarvis` (see below). |
+| `./scripts/build-app.sh --run` | Same build, then launch. Per-session logs land in the workspace `.jarvis/` (see below). |
 
 - **Always launch with `open ./Jarvis.app`**, never the bare binary — running it from a shell makes
   TCC attribute the grant to the *terminal*, so the app reports Microphone/Screen Recording as
@@ -70,11 +69,12 @@ runtime). It also sidesteps the `file://` `fetch()` restriction that forced the 
 - New events stream in live (no reload, no flicker); thumbnails open in an in-page lightbox.
 - Each Start opens a fresh session (a Stop→Start gets a new log, never resuming the previous run),
   persisted as owner-only `jarvis-activity.jsonl` + `shot-N.jpg`, so past runs can be browsed and the
-  history cleared from the viewer.
-- **The viewer and its file logging are always on** (they used to be `--dev`-gated). On every launch
-  `jlog` writes to the unified log (Console.app) *and* the per-session files; `--dev` only changes
-  *where* — the workspace `.jarvis/<session>/` instead of `~/Caches/Jarvis/<session>/`. The files are
-  `0600` in a `0700` per-session dir either way — the full privacy posture is in [sandbox.md](./sandbox.md).
+  history cleared from the viewer. Old sessions are pruned to the most recent few at each Start.
+- **The viewer and its file logging are always on** (they used to be `--dev`-gated; that flag is gone).
+  On every launch `jlog` writes to the unified log (Console.app) *and* the per-session files in the
+  gitignored, workspace-local `.jarvis/<session>/` (`0600` files in a `0700` dir). `build-app.sh --run`
+  passes that path via `--log-dir`, since the `open`-launched app can't find the repo itself. The full
+  privacy posture is in [sandbox.md](./sandbox.md).
 - The viewer's rendering logic (`htmlShell`/`rowScript`) and history reader (`SessionStore`) live in
   `JarvisCore` so they're unit/WebKit-tested; `ActivityViewer` in `JarvisApp` is the thin window.
 
@@ -82,4 +82,4 @@ runtime). It also sidesteps the `file://` `fetch()` restriction that forced the 
 
 Some behavior can only be verified by a human with a real key, a mic, and granted permissions — see
 the checklist in the [README](../README.md#live-smoke-checklist). Run via `./scripts/build-app.sh
---dev` and watch each step in the activity viewer (Settings → Activity).
+--run` and watch each step in the activity viewer (Settings → Activity).

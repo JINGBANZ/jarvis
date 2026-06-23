@@ -107,14 +107,14 @@ machine* is the **activity log** — owner-only and bounded; see below.
 **The activity log is the one bounded form of disk persistence, hardened to stay owner-only.** The
 log (the in-app `WKWebView` viewer's `jarvis-activity.jsonl` + the screenshots the model looked at,
 alongside `jarvis-debug.log`) records the model's spoken tips and the transcribed "heard:" lines so a
-session can be reviewed afterward. It is written on **every** launch — it was previously gated to the
-`--dev` flag, now it is always on (an explicit decision to make session review a default affordance).
-The hardening that made the dev affordance safe still applies in full: the files go to a per-session
-directory under the `--log-dir` (the workspace **gitignored `.jarvis/`** under `--dev`, else a
-per-user `Caches/Jarvis`) at **`0600`** owner-only permissions inside a **`0700`** dir, **fresh each
-session**, and **never `/tmp`** (world-readable, shared across user accounts). Because it now records
-on every launch, growth is bounded: each Start prunes to the **10 most recent** session dirs, and the
-viewer's clear-history removes all but the current. So the persisted record is small, owner-only, and
+session can be reviewed afterward. It is written on **every** launch — it was previously gated to a
+`--dev` flag (now removed), an explicit decision to make session review a default affordance. The
+hardening that made the old dev affordance safe still applies in full: the files always go to a
+per-session directory in the **gitignored, workspace-local `.jarvis/`** (passed to the `open`-launched
+app via `--log-dir` by `build-app.sh --run`) at **`0600`** owner-only permissions inside a **`0700`**
+dir, **fresh each session**, and **never `/tmp`** (world-readable, shared across user accounts). Because
+it now records on every launch, growth is bounded: each Start prunes to the **10 most recent** session
+dirs, and the viewer's clear-history removes all but the current. So the persisted record is small, owner-only, and
 readable by this user account and by nothing else. See [build-and-run.md](./build-and-run.md).
 
 ## Behavioral Restraint (anti-annoyance = anti-misbehavior)

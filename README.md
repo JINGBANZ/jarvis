@@ -97,8 +97,7 @@ by a live run. Folders are grouped **by subsystem**, following
 |---|---|
 | `./scripts/run-tests.sh` | Build and run the unit + offline-pipeline tests (no key, no permissions needed). |
 | `./scripts/build-app.sh [release\|debug]` | Build, bundle, and sign `Jarvis.app` (defaults to `release`). Creates the stable `Jarvis Dev` signing identity automatically on first run. |
-| `./scripts/build-app.sh --dev` | Same build + launch, but routes per-session logs to the workspace `.jarvis/` instead of `~/Caches/Jarvis`. |
-| `./scripts/build-app.sh --run` | Same build, then launch the app normally. |
+| `./scripts/build-app.sh --run` | Same build, then launch the app. Per-session logs land in the workspace `.jarvis/`. |
 
 ## Develop locally
 
@@ -153,15 +152,14 @@ are color-coded:
 
 **Privacy posture.** The activity log (the viewer's `jarvis-activity.jsonl` + the screenshot
 thumbnails + `jarvis-debug.log`) is written on **every** launch to a gitignored, owner-only
-per-session directory — `~/Caches/Jarvis/<session>/` by default, or the workspace `.jarvis/<session>/`
-with `--dev` (`./scripts/build-app.sh --dev`). The raw mic audio and the live transcript are never
-archived. The posture and build/run mechanics are in [`wiki/build-and-run.md`](./wiki/build-and-run.md)
-and [`wiki/sandbox.md`](./wiki/sandbox.md).
+per-session directory in the workspace `.jarvis/<session>/`, pruned to the most recent few sessions.
+The raw mic audio and the live transcript are never archived. The posture and build/run mechanics are
+in [`wiki/build-and-run.md`](./wiki/build-and-run.md) and [`wiki/sandbox.md`](./wiki/sandbox.md).
 
 ## Live smoke checklist
 
 Some behavior can only be verified by a human with a real key, a mic, and granted permissions. Run
-via `./scripts/build-app.sh --dev`, then open **Settings → Activity**; it shows each
+via `./scripts/build-app.sh --run`, then open **Settings → Activity**; it shows each
 step as it happens.
 
 - Confirm the transcription session connects end-to-end — watch for `transcription session ready`

@@ -268,7 +268,7 @@ public final class CoachDriver: @unchecked Sendable {
                 // emitting: otherwise this screenshot — and the reasoning that follows — would be
                 // logged into whatever session is now current (a Start rotates the dev log mid-turn).
                 if Task.isCancelled { jlog("… turn cancelled (stopped) after capture"); return .cancelled }
-                if let img { jlog("👁 looking at your screen", image: img) }   // thumbnail in the dev viewer
+                if let img { jlog("👁 looking at your screen", image: img) }   // thumbnail in the activity viewer
                 else { jlog("👁 screenshot failed") }
                 if convId == nil {
                     // Stateless fallback: replay the model's call + the tool result + image.

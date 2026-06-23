@@ -17,7 +17,7 @@ and keep anything OS-bound thin and on the outside.**
 | `JarvisCore` | library | All the logic. **Foundation-only** — no AppKit / AVFoundation / ScreenCaptureKit / WebKit. Runs and is unit-tested on any machine. |
 | `JarvisOverlay` | library | The AppKit overlay (`NSPanel`, capture-invisibility). Its own target *so its behavior can be unit-tested* (`JarvisOverlayTests`) without dragging UIKit into Core. |
 | `CJarvisAEC` | C target | The acoustic-echo-cancellation edge: a pure-C facade over WebRTC AEC3. The C++ impl is prebuilt + statically merged (abseil included, zero runtime dylibs) into `lib/libjarvis-aec.a` by `scripts/build-aec.sh`, so `swift build` only links the archive — no C++ toolchain or vendored headers. Regenerate the `.a` only when bumping the webrtc version. |
-| `JarvisApp` | executable | The thin macOS shell: menu bar, capture, permissions, the dev viewer window. Wires Core + Overlay + AEC to the OS. Verified by a live run. |
+| `JarvisApp` | executable | The thin macOS shell: menu bar, capture, permissions, the activity viewer window. Wires Core + Overlay + AEC to the OS. Verified by a live run. |
 
 > **Put logic in `JarvisCore`.** If something can be written without an OS framework, it goes in Core
 > where a test can reach it. Reach outward to `JarvisOverlay` / `JarvisApp` only when you genuinely
@@ -30,8 +30,7 @@ and keep anything OS-bound thin and on the outside.**
 | Compile | `swift build` | Builds all targets. |
 | Test | `./scripts/run-tests.sh` | **Always use this, not raw `swift test`** — it fixes the swift-testing search path on CLT-only machines. Runs all three test targets. |
 | Build the app | `./scripts/build-app.sh [release\|debug]` | Bundles + signs `Jarvis.app` with the stable `Jarvis Dev` identity (so TCC grants persist). |
-| Run it | `./scripts/build-app.sh --run` | Build, then launch. Launch via `open`, never the bare binary. |
-| Dev mode | `./scripts/build-app.sh --dev` | Same as `--run`, but routes per-session logs to the workspace `.jarvis/` instead of `~/Caches/Jarvis`. The activity log is always on regardless. |
+| Run it | `./scripts/build-app.sh --run` | Build, then launch. Launch via `open`, never the bare binary. Per-session logs land in the workspace `.jarvis/`. |
 
 ## Layout
 
@@ -104,10 +103,10 @@ behavior, it's `JarvisOverlay`. If no subsystem fits and it's a generic helper, 
   owner-only `0600` file (`OPENAI_API_KEY` env var is a headless fallback only); see
   [`wiki/sandbox.md`](./wiki/sandbox.md) for why not the Keychain.
 - **The only screen-/audio-derived data persisted to disk is the activity log** (the spoken tips,
-  the transcribed "heard:" lines, and the screenshots the model looked at). It is written in **all**
-  modes to an **owner-only** (`0600` files in a `0700` dir) per-session directory — `~/Caches/Jarvis`
-  by default, or the workspace `.jarvis/` under `--dev` — fresh each session, never `/tmp`. The raw
-  mic audio and the live transcript are **never** archived. Keep the owner-only, no-`/tmp` posture.
+  the transcribed "heard:" lines, and the screenshots the model looked at). It is written every run to
+  an **owner-only** (`0600` files in a `0700` dir) per-session directory in the gitignored, workspace-
+  local `.jarvis/`, pruned to the most recent few sessions, never `/tmp`. The raw mic audio and the
+  live transcript are **never** archived. Keep the owner-only, no-`/tmp`, workspace-local posture.
 - Full security posture: [`wiki/sandbox.md`](./wiki/sandbox.md).
 
 ## Workflow
