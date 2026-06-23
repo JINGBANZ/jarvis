@@ -9,18 +9,16 @@
 # Usage:
 #   ./scripts/build-app.sh                build + sign (release)
 #   ./scripts/build-app.sh debug          build + sign (debug)
-#   ./scripts/build-app.sh --run          ...then launch it
-#   ./scripts/build-app.sh --dev          ...then launch in dev mode (open the log viewer from the menu bar)
+#   ./scripts/build-app.sh --run          ...then launch it (per-session logs in the workspace .jarvis/)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 CONFIG="release"
-LAUNCH=""            # "" | run | dev
+LAUNCH=""            # "" | run
 for arg in "$@"; do
   case "$arg" in
     release|debug) CONFIG="$arg" ;;
     --run)         LAUNCH="run" ;;
-    --dev)         LAUNCH="dev" ;;
     *) echo "unknown argument: $arg" >&2; exit 2 ;;
   esac
 done
@@ -89,19 +87,17 @@ launch() {
 case "$LAUNCH" in
   run)
     launch
-    echo "▶ launching Jarvis"
-    open ./"$APP"
-    ;;
-  dev)
-    launch
-    # Logs go to a gitignored .jarvis/ (owner-only 0600, fresh each session) so the model's
-    # screen-derived tips never land in world-readable /tmp or in git.
+    # Per-session logs go to a gitignored, workspace-local .jarvis/ (passed via --log-dir so the app,
+    # launched from anywhere by `open`, writes back into the repo). chmod 700 the base so session-dir
+    # names (timestamps) aren't readable by other local users — the app then makes each <session>/
+    # 0700 with 0600 files inside (CWE-732).
     LOGDIR="$PWD/.jarvis"
     mkdir -p "$LOGDIR"
-    echo "▶ launching Jarvis (dev mode) — pick “Open Log Viewer” from the menu bar; per-session logs in $LOGDIR/<session>"
-    open ./"$APP" --args --dev --log-dir "$LOGDIR"
+    chmod 700 "$LOGDIR"
+    echo "▶ launching Jarvis — open Settings → Activity to watch the log; per-session logs in $LOGDIR/<session>"
+    open ./"$APP" --args --log-dir "$LOGDIR"
     ;;
   "")
-    echo "   run: open ./$APP        (or: ./scripts/build-app.sh --run  /  --dev)"
+    echo "   run: open ./$APP        (or: ./scripts/build-app.sh --run)"
     ;;
 esac

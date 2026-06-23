@@ -1,6 +1,6 @@
-# Build, Run & Dev Mode
+# Build, Run & the Activity Viewer
 
-> How Jarvis is built, signed, tested, and run on macOS, plus the dev-mode activity viewer. This is
+> How Jarvis is built, signed, tested, and run on macOS, plus the activity viewer. This is
 > the operational *how*; the design *why* lives in [architecture.md](./architecture.md), the security
 > posture in [sandbox.md](./sandbox.md). Anything here that's a plain value or wiring lives in code —
 > this page captures the non-obvious mechanics and the decisions behind them.
@@ -48,8 +48,7 @@ relaunches. On the first build macOS prompts once to let `codesign` use the new 
 |---|---|
 | `./scripts/run-tests.sh` | Build + run the unit/offline-pipeline tests (no key, no permissions). |
 | `./scripts/build-app.sh [release\|debug]` | Build, bundle, sign `Jarvis.app` (default `release`). Creates `Jarvis Dev` on first run. |
-| `./scripts/build-app.sh --run` | Same build, then launch normally. |
-| `./scripts/build-app.sh --dev` | Same build, then launch in dev mode (see below). |
+| `./scripts/build-app.sh --run` | Same build, then launch. Per-session logs land in the workspace `.jarvis/` (see below). |
 
 - **Always launch with `open ./Jarvis.app`**, never the bare binary — running it from a shell makes
   TCC attribute the grant to the *terminal*, so the app reports Microphone/Screen Recording as
@@ -58,22 +57,25 @@ relaunches. On the first build macOS prompts once to let `codesign` use the new 
   saved to an owner-only file; `OPENAI_API_KEY` is a headless fallback), then **Start / Stop** from the
   menu. The icon shows two states only: ⚪️ stopped, 🟢 running.
 
-## Dev mode — the live activity viewer
+## The live activity viewer
 
-`--dev` enables an **in-app `WKWebView`** window into which Swift *pushes* each `jlog` line (and
-`capture_screen` thumbnails as in-memory `data:` URIs). Chosen over a local HTTP server + SSE: for an
-app that already holds the entries in memory, pushing into an embedded WebView is less code, has zero
-network surface, and is the most testable (the production runtime *is* the test runtime). It also
-sidesteps the `file://` `fetch()` restriction that forced the original viewer's `<meta refresh>`
-reload.
+Settings → **Activity** opens an **in-app `WKWebView`** window into which Swift *pushes* each `jlog`
+line (and `capture_screen` thumbnails as in-memory `data:` URIs). Chosen over a local HTTP server +
+SSE: for an app that already holds the entries in memory, pushing into an embedded WebView is less
+code, has zero network surface, and is the most testable (the production runtime *is* the test
+runtime). It also sidesteps the `file://` `fetch()` restriction that forced the original viewer's
+`<meta refresh>` reload.
 
 - New events stream in live (no reload, no flicker); thumbnails open in an in-page lightbox.
 - Each Start opens a fresh session (a Stop→Start gets a new log, never resuming the previous run),
   persisted as owner-only `jarvis-activity.jsonl` + `shot-N.jpg`, so past runs can be browsed and the
-  history cleared from the viewer.
-- **File logging is dev-only.** Outside `--dev`, `jlog` writes solely to the unified log (Console.app),
-  never a flat file. The dev files are `0600` in a gitignored per-session `.jarvis/<session>/` — the
-  full privacy posture is in [sandbox.md](./sandbox.md).
+  history cleared from the viewer. Old sessions are pruned to the most recent few at each Start.
+- **The viewer and its file logging are always on** (they used to be `--dev`-gated; that flag is gone).
+  On every launch `jlog` writes to the unified log (Console.app) *and* the per-session files in the
+  gitignored, workspace-local `.jarvis/<session>/` (`0600` files in a `0700` dir). `build-app.sh --run`
+  passes that path via `--log-dir`, since the `open`-launched app can't find the repo itself; opening
+  the bundle directly with no `--log-dir` falls back to `~/Library/Application Support/Jarvis/sessions/`.
+  The full privacy posture is in [sandbox.md](./sandbox.md).
 - The viewer's rendering logic (`htmlShell`/`rowScript`) and history reader (`SessionStore`) live in
   `JarvisCore` so they're unit/WebKit-tested; `ActivityViewer` in `JarvisApp` is the thin window.
 
@@ -81,4 +83,4 @@ reload.
 
 Some behavior can only be verified by a human with a real key, a mic, and granted permissions — see
 the checklist in the [README](../README.md#live-smoke-checklist). Run via `./scripts/build-app.sh
---dev` and watch each step in the activity viewer.
+--run` and watch each step in the activity viewer (Settings → Activity).

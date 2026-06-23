@@ -93,9 +93,9 @@ proactive path, by contrast, must first let the model decide to call `capture_sc
 over the returned image on a second trip — the latency this hotkey exists to skip.) It reuses the
 live session's brain, conversation, and transcript, so the hint has full context, and it routes
 through the same single-in-flight turn box as audio triggers (a press coalesces, never stacks). It is
-inert — a beep — when no session is running, since there is no live conversation to hint from. In dev
-mode the trigger and its pre-filled message are recorded to the [activity viewer](./build-and-run.md),
-so you can see exactly what the shortcut sent to the brain.
+inert — a beep — when no session is running, since there is no live conversation to hint from. The
+trigger and its pre-filled message are recorded to the [activity viewer](./build-and-run.md), so you
+can see exactly what the shortcut sent to the brain.
 
 The hotkey is registered with **Carbon `RegisterEventHotKey`**, the one global-shortcut API Apple
 never modernized, which needs no Accessibility/TCC permission. We deliberately did **not** take the
@@ -217,9 +217,11 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
 - **Built and run in the main `forrest` account inside a git worktree** (recoverability). The
   separate-restricted-account requirement is waived for the personal build; see [sandbox.md](./sandbox.md).
 - **Egress is narrow and explicit:** audio to `gpt-4o-transcribe`; a screenshot + transcript window
-  to `gpt-5.5` *only when the model triggers a capture/response*. Nothing is recorded to **local**
-  disk in the MVP; the per-session OpenAI conversation does retain transcript + screenshots
-  server-side (see [sandbox.md](./sandbox.md)).
+  to `gpt-5.5` *only when the model triggers a capture/response*. The only screen-/audio-derived data
+  written to **local** disk is the owner-only, bounded per-session **activity log** (spoken tips,
+  transcribed lines, the screenshots the model saw); raw mic audio and the live transcript are never
+  archived. The per-session OpenAI conversation does retain transcript + screenshots server-side (see
+  [sandbox.md](./sandbox.md)).
 - **Behavioral restraint (model-governed):** there is **no cooldown or rate cap** in code. Every
   utterance reaches the brain, and the brain decides whether it has anything worth saying — that
   restraint lives in the system prompt ("stay silent unless genuinely useful"). This keeps
@@ -249,5 +251,5 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
 6. **Self-verifying.** Every build ships with tests and a smoke checklist the agent can run to prove it works.
 7. **One mode, done well.** Ship the coach; expand later.
 
-How Jarvis is built, signed, tested, and run — and the dev-mode activity viewer — is its own
+How Jarvis is built, signed, tested, and run — and the activity viewer — is its own
 operational page: [build-and-run.md](./build-and-run.md).

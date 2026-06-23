@@ -51,10 +51,10 @@ resizing; the API-key and overlay panels stay compact.
 | `APIKeySection` | "API Key" | yes | `NSSecureTextField` to paste the OpenAI key; saves to an owner-only file on "Save", restarts the pipeline if already running. |
 | `OverlaySection` | "Overlay" | yes | Two groups, one per overlay surface — **Overlay Caption** (the transient on-screen tip) and **Overlay Box** (the persistent response history). Each has a header with an On/Off toggle (an `NSSwitch` + "On"/"Off" label) and a one-line description. When a surface is **on** it also shows its Text Size + Opacity sliders (with live readouts) and a live sample, **only while the Overlay tab is selected** (`didBecomeActive`/`didResignActive`); when **off**, its sliders and sample are hidden and the layout collapses. Persists via `OverlayAppearance`. |
 | `BrainModelSection` | "Brain" | yes | Two dropdowns — the brain (LLM) model and the reasoning effort applied to it; persists via `BrainPreferences`. Takes effect on the next Start. |
-| `ActivitySection` | "Activity" | dev mode only | Embeds the `ActivityViewer` content view (`makeContentView()` / `teardown()`); `prefersResizableWindow == true` so the log gets a larger, resizable window. |
+| `ActivitySection` | "Activity" | yes | Embeds the `ActivityViewer` content view (`makeContentView()` / `teardown()`); `prefersResizableWindow == true` so the log gets a larger, resizable window. |
 
-`AppDelegate` builds the section list at launch and passes it to `SettingsWindow`. `ActivitySection`
-is appended only when `--dev` is passed.
+`AppDelegate` builds the section list at launch and passes it to `SettingsWindow`. All four sections
+are always present.
 
 ## Activation-Policy Switch
 
@@ -128,7 +128,7 @@ not mid-session — hence the caption on the tab.
 | `Sources/JarvisApp/Settings/APIKeySection.swift` | API-key tab |
 | `Sources/JarvisApp/Settings/OverlaySection.swift` | Overlay-appearance tab |
 | `Sources/JarvisApp/Settings/BrainModelSection.swift` | Brain model + reasoning-effort tab |
-| `Sources/JarvisApp/Settings/ActivitySection.swift` | Dev-mode activity tab |
+| `Sources/JarvisApp/Settings/ActivitySection.swift` | Activity tab |
 | `Sources/JarvisCore/Coach/BrainModelCatalog.swift` | Curated model list (`BrainModel`) |
 | `Sources/JarvisCore/Coach/ReasoningEffort.swift` | The four effort levels |
 | `Sources/JarvisCore/Config/BrainPreferences.swift` | UserDefaults persistence + validation |
@@ -142,4 +142,4 @@ not mid-session — hence the caption on the tab.
 ## Related Pages
 
 - [overlay-invisibility.md](./overlay-invisibility.md) — capture exclusion re-assert during preview
-- [build-and-run.md](./build-and-run.md) — the embedded dev-mode activity log
+- [build-and-run.md](./build-and-run.md) — the embedded activity log

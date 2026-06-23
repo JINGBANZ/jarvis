@@ -2,7 +2,7 @@ import AppKit
 
 /// Menu-bar status item: start/stop, a "Settings…" item, and a session interjection counter.
 /// Two states, shown as the robot emoji icon: desaturated (black-and-white) when stopped, full
-/// colour when running. All settings (API key, overlay appearance, the dev activity log) live in
+/// colour when running. All settings (API key, overlay appearance, the activity log) live in
 /// the unified Settings window, opened via `onOpenSettings`.
 @MainActor
 final class MenuBarController: NSObject {

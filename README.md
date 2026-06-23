@@ -48,7 +48,12 @@ whether to speak (restraint lives in the prompt); the manual Start/Stop is the o
 Tips flash one line at a time in the **Overlay Caption**; the optional **Overlay Box** keeps the
 full, timestamped history. Each is switched on/off in the Settings → Overlay tab (caption off, box
 on by default). Both are hidden from screen capture.
-Full design: [`wiki/architecture.md`](./wiki/architecture.md).
+
+Nothing leaves the machine beyond the API calls; on disk, only an owner-only per-session **activity
+log** (the spoken tips, transcribed lines, and screenshots the model saw) is kept — pruned to the
+recent few and browsable live in **Settings → Activity**. The raw mic audio and live transcript are
+never archived. Full design: [`wiki/architecture.md`](./wiki/architecture.md); privacy posture:
+[`wiki/sandbox.md`](./wiki/sandbox.md).
 
 ## Project structure
 
@@ -75,7 +80,7 @@ Full design: [`wiki/architecture.md`](./wiki/architecture.md).
 │       ├── App/                   # main.swift, AppDelegate
 │       ├── MenuBar/               # menu-bar item, Start/Stop, key entry
 │       ├── Capture/               # mic + system-audio capture, realtime transcriber, TCC priming
-│       └── Viewer/                # dev-mode WKWebView activity viewer
+│       └── Viewer/                # WKWebView activity viewer
 ├── Tests/
 │   ├── JarvisCoreTests/      # unit + offline-pipeline tests (mirrors the Core subsystems)
 │   ├── JarvisOverlayTests/   # overlay + response-box behavior & screen-capture-invisibility checks
@@ -87,7 +92,7 @@ Full design: [`wiki/architecture.md`](./wiki/architecture.md).
 
 The split is deliberate: **`JarvisCore`** holds all the logic (Foundation-only) and is unit-tested on
 any machine; **`JarvisOverlay`** is the AppKit overlay, split into its own target so its behavior is
-testable; **`JarvisApp`** is the thin macOS glue (menu bar, capture, permissions, dev viewer) verified
+testable; **`JarvisApp`** is the thin macOS glue (menu bar, capture, permissions, activity viewer) verified
 by a live run. Folders are grouped **by subsystem**, following
 [`wiki/architecture.md`](./wiki/architecture.md). Working rules live in [`CLAUDE.md`](./CLAUDE.md).
 
@@ -97,8 +102,7 @@ by a live run. Folders are grouped **by subsystem**, following
 |---|---|
 | `./scripts/run-tests.sh` | Build and run the unit + offline-pipeline tests (no key, no permissions needed). |
 | `./scripts/build-app.sh [release\|debug]` | Build, bundle, and sign `Jarvis.app` (defaults to `release`). Creates the stable `Jarvis Dev` signing identity automatically on first run. |
-| `./scripts/build-app.sh --dev` | Same build, then launch in **dev mode** (open the activity viewer on demand from the menu bar). |
-| `./scripts/build-app.sh --run` | Same build, then launch the app normally. |
+| `./scripts/build-app.sh --run` | Same build, then launch the app. Per-session logs land in the workspace `.jarvis/`. |
 
 ## Develop locally
 
@@ -137,34 +141,10 @@ Then:
 Permissions persist across rebuilds automatically (the app always signs with a stable identity); the
 mechanics are in [`wiki/build-and-run.md`](./wiki/build-and-run.md).
 
-## Dev mode — live activity viewer
-
-```bash
-./scripts/build-app.sh --dev   # rebuild, launch with --dev
-```
-
-In dev mode Jarvis opens an **in-app live viewer** (a `WKWebView` it pushes events into) so you can
-**watch it think** without tailing a log. It doesn't pop open on launch — choose **Open Log Viewer**
-from the menu bar when you want it (each launch is its own session; you can also browse past sessions
-or clear the history). New events stream in live — no reload — and are color-coded:
-
-- 🗣 `heard: "…"` — what you said (transcribed) / 🤫 `quiet for 30s` — why it woke
-- 💭 `thinking…` — calling the brain
-- 👁 `looking at your screen` — the model invoked `capture_screen`; the captured frame appears as a
-  thumbnail you can click to open full size
-- 💬 `…the tip it spoke…` — a `speak` call rendered to the overlay
-- `… staying silent` — when the model declines to speak
-
-**Privacy posture.** File logging is dev-only — outside dev mode nothing is written to disk (just the
-unified Console log). In dev mode the logs (and the screenshot thumbnails) go to a gitignored,
-owner-only `.jarvis/<session>/` in the workspace — one fresh subdirectory per launch. The posture and
-build/run mechanics are in [`wiki/build-and-run.md`](./wiki/build-and-run.md)
-and [`wiki/sandbox.md`](./wiki/sandbox.md).
-
 ## Live smoke checklist
 
 Some behavior can only be verified by a human with a real key, a mic, and granted permissions. Run
-via `./scripts/build-app.sh --dev`, then open the activity viewer from the menu bar; it shows each
+via `./scripts/build-app.sh --run`, then open **Settings → Activity**; it shows each
 step as it happens.
 
 - Confirm the transcription session connects end-to-end — watch for `transcription session ready`
