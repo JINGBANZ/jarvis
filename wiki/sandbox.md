@@ -109,10 +109,12 @@ log (the in-app `WKWebView` viewer's `jarvis-activity.jsonl` + the screenshots t
 alongside `jarvis-debug.log`) records the model's spoken tips and the transcribed "heard:" lines so a
 session can be reviewed afterward. It is written on **every** launch — it was previously gated to a
 `--dev` flag (now removed), an explicit decision to make session review a default affordance. The
-hardening that made the old dev affordance safe still applies in full: the files always go to a
-per-session directory in the **gitignored, workspace-local `.jarvis/`** (passed to the `open`-launched
-app via `--log-dir` by `build-app.sh --run`) at **`0600`** owner-only permissions inside a **`0700`**
-dir, **fresh each session**, and **never `/tmp`** (world-readable, shared across user accounts). Because
+hardening that made the old dev affordance safe still applies in full: the files go to a per-session
+directory in the **gitignored, workspace-local `.jarvis/`** (passed to the `open`-launched app via
+`--log-dir` by `build-app.sh --run`) — or, when the bundle is opened directly with no `--log-dir`, a
+per-user **`~/Library/Application Support/Jarvis/sessions/`** alongside the API key — at **`0600`**
+owner-only permissions inside a **`0700`** dir, **fresh each session**, and **never `/tmp`**
+(world-readable, shared across user accounts). Because
 it now records on every launch, growth is bounded: each Start prunes to the **10 most recent** session
 dirs, and the viewer's clear-history removes all but the current. So the persisted record is small, owner-only, and
 readable by this user account and by nothing else. See [build-and-run.md](./build-and-run.md).

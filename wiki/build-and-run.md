@@ -73,8 +73,9 @@ runtime). It also sidesteps the `file://` `fetch()` restriction that forced the 
 - **The viewer and its file logging are always on** (they used to be `--dev`-gated; that flag is gone).
   On every launch `jlog` writes to the unified log (Console.app) *and* the per-session files in the
   gitignored, workspace-local `.jarvis/<session>/` (`0600` files in a `0700` dir). `build-app.sh --run`
-  passes that path via `--log-dir`, since the `open`-launched app can't find the repo itself. The full
-  privacy posture is in [sandbox.md](./sandbox.md).
+  passes that path via `--log-dir`, since the `open`-launched app can't find the repo itself; opening
+  the bundle directly with no `--log-dir` falls back to `~/Library/Application Support/Jarvis/sessions/`.
+  The full privacy posture is in [sandbox.md](./sandbox.md).
 - The viewer's rendering logic (`htmlShell`/`rowScript`) and history reader (`SessionStore`) live in
   `JarvisCore` so they're unit/WebKit-tested; `ActivityViewer` in `JarvisApp` is the thin window.
 

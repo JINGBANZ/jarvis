@@ -258,15 +258,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return "\(f.string(from: Date()))_\(suffix)"
     }
 
-    /// Where session logs go: a gitignored, workspace-local `.jarvis/`. `build-app.sh --run` passes its
-    /// absolute path via `--log-dir` (the app is launched by `open` from an arbitrary cwd, so it can't
-    /// find the repo itself); absent that, fall back to `.jarvis/` under the current directory. Each
-    /// Start nests a per-session subdirectory under this base (see `beginNewSession`).
+    /// Where session logs go. `build-app.sh --run` passes a `--log-dir` pointing at the repo's
+    /// gitignored, workspace-local `.jarvis/` (the app is launched by `open` from an arbitrary cwd, so
+    /// it can't find the repo itself). When the bundle is opened directly with no `--log-dir`, fall back
+    /// to a per-user app-data dir alongside the API key — `~/Library/Application Support/Jarvis/sessions/`
+    /// — which is always writable and owner-only. Each Start nests a per-session subdir under this base
+    /// (see `beginNewSession`).
     private func logDirectory() -> URL {
         let args = CommandLine.arguments
         if let i = args.firstIndex(of: "--log-dir"), i + 1 < args.count {
             return URL(fileURLWithPath: args[i + 1])
         }
-        return URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent(".jarvis")
+        return secretFile.fileURL.deletingLastPathComponent().appendingPathComponent("sessions")
     }
 }
