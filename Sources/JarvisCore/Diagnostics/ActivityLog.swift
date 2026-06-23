@@ -1,9 +1,9 @@
 import Foundation
 
-/// The model behind the dev-mode activity viewer. Mirrors `jlog` lines into an in-app `WKWebView`
-/// window (see `ActivityViewer` in JarvisApp) by **pushing** each line to a registered observer, and
-/// persists the session to disk so past sessions can be browsed later. **Dev-mode only:** until
-/// `enable(directory:)` is called, `record(_:)` is a no-op and nothing is written.
+/// The model behind the activity viewer. Mirrors `jlog` lines into an in-app `WKWebView` window
+/// (see `ActivityViewer` in JarvisApp) by **pushing** each line to a registered observer, and
+/// persists the session to disk so past sessions can be browsed later. Until `enable(directory:)`
+/// is called (on each Start), `record(_:)` is a no-op and nothing is written.
 ///
 /// This type is UI-free (Foundation only): it generates the page HTML and the per-row JS as plain
 /// strings; the WebView lives in JarvisApp. See wiki/build-and-run.md.
@@ -57,7 +57,7 @@ public final class ActivityLog: @unchecked Sendable {
         df.dateFormat = "HH:mm:ss"
     }
 
-    /// Turn on the viewer for a dev session. `directory` is this session's dir; an empty
+    /// Turn on the viewer for a session. `directory` is this session's dir; an empty
     /// `jarvis-activity.jsonl` is created at 0600 immediately so the session is discoverable by
     /// `SessionStore.listSessions()` even before its first `record()`.
     public func enable(directory: URL) {

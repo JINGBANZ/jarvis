@@ -33,7 +33,7 @@ import Foundation
         let base = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: base) }
         // A past session with only lifecycle breadcrumbs (no coaching class, no shot) — an aborted run.
         try makeSession(base, "2026-06-16_09-00-00_aaaa", lines: [
-            "{\"t\":\"09:00:00\",\"m\":\"Jarvis: dev mode — session …\"}",
+            "{\"t\":\"09:00:00\",\"m\":\"Jarvis: session …\"}",
             "{\"t\":\"09:00:01\",\"m\":\"Jarvis: coaching started (mic + system audio).\"}",
             "{\"t\":\"09:00:02\",\"m\":\"Jarvis: stopped.\"}",
         ])
@@ -91,5 +91,36 @@ import Foundation
         #expect(!FileManager.default.fileExists(atPath: base.appendingPathComponent("2026-06-16_10-00-00_aaaa").path))
         #expect(FileManager.default.fileExists(atPath: cur.path))      // current spared
         #expect(FileManager.default.fileExists(atPath: base.path))     // base spared
+    }
+
+    @Test func pruneKeepsNewestNDeletesOlderAndSparesCurrent() throws {
+        let base = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: base) }
+        let exists = { (id: String) in
+            FileManager.default.fileExists(atPath: base.appendingPathComponent(id).path)
+        }
+        // Five sessions, oldest→newest. Include a content-less one (it still counts toward the cap, even
+        // though listSessions would hide it) and a non-session dir that must be left untouched.
+        let ids = (0..<5).map { "2026-06-16_1\($0)-00-00_aaaa" }
+        for id in ids { try makeSession(base, id, lines: ["{\"t\":\"1\",\"m\":\"🗣 heard\"}"]) }
+        try makeSession(base, "2026-06-16_09-00-00_zzzz", lines: [])   // content-less, oldest
+        try FileManager.default.createDirectory(at: base.appendingPathComponent("keepme"),
+                                                withIntermediateDirectories: true)
+        // Current is the oldest *real* session: must be spared even though it falls outside the newest-3.
+        let cur = base.appendingPathComponent(ids[0])
+        SessionStore(base: base, current: cur).pruneToMostRecent(3)
+
+        #expect(exists(ids[4]) && exists(ids[3]) && exists(ids[2]))   // newest 3 kept
+        #expect(!exists(ids[1]))                                       // older pruned
+        #expect(!exists("2026-06-16_09-00-00_zzzz"))                   // content-less also pruned
+        #expect(exists(ids[0]))                                        // current spared despite being old
+        #expect(exists("keepme"))                                      // non-session dir untouched
+    }
+
+    @Test func pruneTreatsNonPositiveKeepAsOneSoCurrentSurvives() throws {
+        let base = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: base) }
+        try makeSession(base, "2026-06-16_10-00-00_aaaa", lines: ["{\"t\":\"1\",\"m\":\"x\"}"])
+        let cur = base.appendingPathComponent("2026-06-16_10-00-00_aaaa")
+        SessionStore(base: base, current: cur).pruneToMostRecent(0)
+        #expect(FileManager.default.fileExists(atPath: cur.path))   // never deletes the session being written
     }
 }

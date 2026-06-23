@@ -1,6 +1,6 @@
 import Foundation
 
-/// Reads, lists, and deletes past dev-session directories so the activity viewer can browse history.
+/// Reads, lists, prunes, and deletes past session directories so the activity viewer can browse history.
 /// Foundation-only and stateless beyond its two URLs. All operations are bounded to immediate
 /// subdirectories of `base` whose name matches the session-id shape, so a stray `--log-dir` or a
 /// malformed persisted filename can't make it touch anything outside the log tree. See
@@ -95,6 +95,26 @@ public struct SessionStore: Sendable {
         let curPath = current?.standardizedFileURL.path
         let names = (try? FileManager.default.contentsOfDirectory(atPath: base.path)) ?? []
         for name in names where Self.isSessionID(name) {
+            let url = base.appendingPathComponent(name)
+            if url.standardizedFileURL.path == curPath { continue }                 // spare current
+            let vals = try? url.resourceValues(forKeys: [.isSymbolicLinkKey])
+            if vals?.isSymbolicLink == true { continue }                            // don't follow symlinks
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
+
+    /// Keep only the `keep` newest session directories, deleting the rest — so the always-on activity
+    /// log can't grow without bound across launches. Counts EVERY session-shaped subdir (including
+    /// content-less aborted runs that `listSessions` hides), spares the current session, and skips
+    /// symlinks; bounded to immediate children of `base` exactly like `clearHistory`. A non-positive
+    /// `keep` is treated as 1 so a run never deletes the session it's about to write into.
+    public func pruneToMostRecent(_ keep: Int) {
+        let keep = max(1, keep)
+        let curPath = current?.standardizedFileURL.path
+        let names = ((try? FileManager.default.contentsOfDirectory(atPath: base.path)) ?? [])
+            .filter { Self.isSessionID($0) }
+            .sorted(by: >)   // id is a lexically-sortable timestamp ⇒ newest first
+        for name in names.dropFirst(keep) {
             let url = base.appendingPathComponent(name)
             if url.standardizedFileURL.path == curPath { continue }                 // spare current
             let vals = try? url.resourceValues(forKeys: [.isSymbolicLinkKey])

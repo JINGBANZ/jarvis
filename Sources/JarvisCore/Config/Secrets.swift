@@ -53,7 +53,7 @@ public struct FileSecretStore: SecretStore {
         let fm = FileManager.default
         let dir = fileURL.deletingLastPathComponent()
         // 0700 dir: a 0755 parent would leak the credential file's name/metadata to other local users
-        // (CWE-732). Mirrors how the dev-mode log directory is created.
+        // (CWE-732). Mirrors how the per-session log directory is created.
         do {
             try fm.createDirectory(at: dir, withIntermediateDirectories: true,
                                    attributes: [.posixPermissions: 0o700])

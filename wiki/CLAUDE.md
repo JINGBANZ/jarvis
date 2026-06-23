@@ -38,7 +38,7 @@ wiki/
 ├── index.md                 # navigation / single source of truth
 ├── status.md                # current phase, key-decisions log, next action (read first)
 ├── architecture.md          # vision, harness loop, components, models/APIs, resilience, safety
-├── build-and-run.md         # operational: toolchain, signing/TCC, running, dev-mode viewer
+├── build-and-run.md         # operational: toolchain, signing/TCC, running, the activity viewer
 ├── sandbox.md               # security / isolation model
 ├── overlay-invisibility.md  # hiding the overlay from screen capture (`sharingType = .none`)
 ├── landscape-survey.md      # tools tried & evaluated
