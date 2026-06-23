@@ -123,10 +123,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func start(freshSession: Bool = true) -> Bool {
         guard let key = secrets.apiKey(), !key.isEmpty else {
             jlog("Jarvis: can't start — no API key.")
-            errorReporter.report(UserFacingError(
-                title: "No OpenAI API key set",
-                message: "Open \u{201C}Settings\u{2026}\u{201D} from the Jarvis menu, paste your key, then press Start.",
-                severity: .fatal))
+            errorReporter.report(.noAPIKey)
             return false
         }
         stop() // tear down any existing pipeline so we start cleanly
@@ -151,10 +148,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Mic socket gave up (bad key / quota / network): coaching can't continue. Report fatal — the
         // reporter's onFatal stops the session and corrects the menu (no more lying 🟢).
         let onMicTerminalFailure: @Sendable () -> Void = { [errorReporter] in
-            errorReporter.report(UserFacingError(
-                title: "Microphone disconnected",
-                message: "Jarvis lost the microphone connection (often a bad API key, quota, or network issue). Coaching has stopped.",
-                severity: .fatal))
+            errorReporter.report(.microphoneDisconnected)
         }
         // "Them" socket gave up: degrade gracefully — stop the system-audio transcriber, keep the mic
         // running. The shared aggregate capture keeps feeding the mic side; its now-nil "them"
@@ -162,10 +156,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // it flows through the one funnel; the menu stays 🟢.
         let onThemTerminalFailure: @Sendable () -> Void = { [weak self, errorReporter] in
             Task { @MainActor in self?.themTranscriber?.stop(); self?.themTranscriber = nil }
-            errorReporter.report(UserFacingError(
-                title: "System audio stopped",
-                message: "Stopped transcribing the other side's audio; your microphone is still active.",
-                severity: .degraded))
+            errorReporter.report(.systemAudioStopped)
         }
 
         // "Me" side: the mic. Drives turn-end and the backing-off silence check ("are you stuck?").
@@ -203,8 +194,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onMicClean: { [weak transcriber] data in transcriber?.sendAudio(data) },
             onSystem: { [weak themTranscriber] data in themTranscriber?.sendAudio(data) })
         capture.onUnavailable = { [errorReporter] reason in
-            errorReporter.report(UserFacingError(
-                title: "Audio capture stopped", message: reason, severity: .fatal))
+            errorReporter.report(.captureFailed(reason: reason))
         }
         self.transcriber = transcriber
         self.themTranscriber = themTranscriber
@@ -217,8 +207,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         themTranscriber.connect()
         if let reason = capture.start() {
             stop()                      // tear down the sockets we just opened
-            errorReporter.report(UserFacingError(
-                title: "Couldn't start audio capture", message: reason, severity: .fatal))
+            errorReporter.report(.captureFailed(reason: reason))
             return false
         }
         jlog("Jarvis: coaching started (one-clock capture + AEC).")
