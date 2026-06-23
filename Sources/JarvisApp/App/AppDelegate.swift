@@ -16,7 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsWindow: SettingsWindow!
     private let appearance = OverlayAppearance()
     private let brainPreferences = BrainPreferences()
-    private var activityViewer: ActivityViewer?    // embedded as the Settings Activity tab
+    private var activityViewer: ActivityViewer!    // embedded as the Settings Activity tab
     /// Two transcription sockets feeding one shared transcript: mic → `.me`, system audio → `.them`.
     private var transcriber: RealtimeTranscriber?       // "me" (mic)
     private var themTranscriber: RealtimeTranscriber?   // "them" (system audio)
@@ -34,6 +34,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// cleared in `stop()` — so the hotkey beeps when there's no session. Captures the Sendable driver
     /// + turn box (not `@MainActor` self), like the transcriber callbacks do.
     private var requestManualHint: (() -> Void)?
+
+    /// How many past session log directories to keep on disk; older ones are pruned at each Start so the
+    /// always-on activity log stays bounded. Clear all but the current via the viewer's "Clear history".
+    private static let retainedSessions = 10
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory) // menu-bar app, no Dock icon
@@ -63,7 +67,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Unified Settings window: API key + overlay appearance + the activity log. A pasted key is
         // stored but does not auto-start; restart only if already running, reflecting the real
         // outcome back into the menu state.
-        var sections: [SettingsSection] = [
+        let sections: [SettingsSection] = [
             APIKeySection(store: secretFile, onKeySaved: { [weak self] _ in
                 guard let self, self.transcriber != nil else { return }
                 // Re-saving a key while running only re-applies it to the pipeline — it is NOT a new
@@ -73,10 +77,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }),
             OverlaySection(appearance: appearance, caption: overlayCaption, box: overlayBox),
             BrainModelSection(preferences: brainPreferences),
+            ActivitySection(viewer: activityViewer),
         ]
-        if let viewer = activityViewer {
-            sections.append(ActivitySection(viewer: viewer))
-        }
         settingsWindow = SettingsWindow(sections: sections)
         menuBar.onOpenSettings = { [weak self] in self?.settingsWindow.show() }
 
@@ -234,9 +236,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                                  attributes: [.posixPermissions: 0o700])
         JarvisLog.enableFileLogging(directory: dir)     // <dir>/jarvis-debug.log, 0600, fresh
         ActivityLog.shared.enable(directory: dir)        // <dir>/jarvis-activity.jsonl, 0600, fresh
+        // Now that logging is always on, sessions accumulate every launch. Bound it: keep only the most
+        // recent few (the just-created one is current, so it's always spared).
+        SessionStore(base: logDirectory(), current: dir).pruneToMostRecent(Self.retainedSessions)
         // Point the viewer's history browser at the new current session and show it live; clear-history
         // spares whichever session is current.
-        activityViewer?.sessionDidChange(base: logDirectory(), current: dir)
+        activityViewer.sessionDidChange(base: logDirectory(), current: dir)
         jlog("Jarvis: session \(dir.lastPathComponent) (\(dir.path)).")
     }
 

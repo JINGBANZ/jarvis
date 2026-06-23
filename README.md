@@ -87,7 +87,7 @@ Full design: [`wiki/architecture.md`](./wiki/architecture.md).
 
 The split is deliberate: **`JarvisCore`** holds all the logic (Foundation-only) and is unit-tested on
 any machine; **`JarvisOverlay`** is the AppKit overlay, split into its own target so its behavior is
-testable; **`JarvisApp`** is the thin macOS glue (menu bar, capture, permissions, dev viewer) verified
+testable; **`JarvisApp`** is the thin macOS glue (menu bar, capture, permissions, activity viewer) verified
 by a live run. Folders are grouped **by subsystem**, following
 [`wiki/architecture.md`](./wiki/architecture.md). Working rules live in [`CLAUDE.md`](./CLAUDE.md).
 
@@ -161,7 +161,7 @@ and [`wiki/sandbox.md`](./wiki/sandbox.md).
 ## Live smoke checklist
 
 Some behavior can only be verified by a human with a real key, a mic, and granted permissions. Run
-via `./scripts/build-app.sh --dev`, then open the activity viewer from the menu bar; it shows each
+via `./scripts/build-app.sh --dev`, then open **Settings → Activity**; it shows each
 step as it happens.
 
 - Confirm the transcription session connects end-to-end — watch for `transcription session ready`

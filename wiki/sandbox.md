@@ -112,9 +112,10 @@ session can be reviewed afterward. It is written on **every** launch — it was 
 The hardening that made the dev affordance safe still applies in full: the files go to a per-session
 directory under the `--log-dir` (the workspace **gitignored `.jarvis/`** under `--dev`, else a
 per-user `Caches/Jarvis`) at **`0600`** owner-only permissions inside a **`0700`** dir, **fresh each
-session**, and **never `/tmp`** (world-readable, shared across user accounts). The viewer's
-clear-history removes past sessions. So the persisted record is readable by this user account and by
-nothing else. See [build-and-run.md](./build-and-run.md).
+session**, and **never `/tmp`** (world-readable, shared across user accounts). Because it now records
+on every launch, growth is bounded: each Start prunes to the **10 most recent** session dirs, and the
+viewer's clear-history removes all but the current. So the persisted record is small, owner-only, and
+readable by this user account and by nothing else. See [build-and-run.md](./build-and-run.md).
 
 ## Behavioral Restraint (anti-annoyance = anti-misbehavior)
 

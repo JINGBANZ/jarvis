@@ -94,11 +94,13 @@ case "$LAUNCH" in
     ;;
   dev)
     launch
-    # Route per-session logs into a gitignored, workspace-local .jarvis/ (owner-only 0600, fresh each
-    # session) so they're easy to tail from the repo — instead of the default ~/Caches/Jarvis. Either
-    # way the activity log is always on; this only changes where it's written.
+    # Route per-session logs into a gitignored, workspace-local .jarvis/ so they're easy to tail from
+    # the repo — instead of the default ~/Caches/Jarvis. Either way the activity log is always on; this
+    # only changes where it's written. chmod 700 so the session-dir names (timestamps) aren't readable
+    # by other local users — the app then makes each <session>/ 0700 with 0600 files inside (CWE-732).
     LOGDIR="$PWD/.jarvis"
     mkdir -p "$LOGDIR"
+    chmod 700 "$LOGDIR"
     echo "▶ launching Jarvis — open Settings → Activity to watch the log; per-session logs in $LOGDIR/<session>"
     open ./"$APP" --args --log-dir "$LOGDIR"
     ;;
