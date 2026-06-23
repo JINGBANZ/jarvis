@@ -148,19 +148,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Route turns through TurnTaskBox so Stop can cancel an in-flight one. Concurrent triggers are
         // coalesced inside CoachDriver (the running turn batches them in), so we don't cancel here.
         let turns = TurnTaskBox()
-        // Mic socket gave up (bad key / quota): coaching can't continue, so stop cleanly and correct
-        // the menu instead of lying 🟢.
-        let onMicTerminalFailure: @Sendable () -> Void = { [weak self] in
-            Task { @MainActor in self?.stop(); self?.menuBar.setRunning(false) }
+        // Mic socket gave up (bad key / quota / network): coaching can't continue. Report fatal — the
+        // reporter's onFatal stops the session and corrects the menu (no more lying 🟢).
+        let onMicTerminalFailure: @Sendable () -> Void = { [errorReporter] in
+            errorReporter.report(UserFacingError(
+                title: "Microphone disconnected",
+                message: "Jarvis lost the microphone connection (often a bad API key, quota, or network issue). Coaching has stopped.",
+                severity: .fatal))
         }
-        // "Them" socket gave up: degrade gracefully — stop the system-audio transcriber and keep the
-        // mic running. The shared aggregate capture keeps feeding the mic side; its now-nil "them"
-        // transcriber simply drops the tap audio. The menu stays 🟢.
-        let onThemTerminalFailure: @Sendable () -> Void = { [weak self] in
-            Task { @MainActor in
-                self?.themTranscriber?.stop(); self?.themTranscriber = nil
-                jlog("Jarvis: 'them' (system audio) socket gave up — mic side still active")
-            }
+        // "Them" socket gave up: degrade gracefully — stop the system-audio transcriber, keep the mic
+        // running. The shared aggregate capture keeps feeding the mic side; its now-nil "them"
+        // transcriber simply drops the tap audio. Still report it (a non-blocking .degraded notice) so
+        // it flows through the one funnel; the menu stays 🟢.
+        let onThemTerminalFailure: @Sendable () -> Void = { [weak self, errorReporter] in
+            Task { @MainActor in self?.themTranscriber?.stop(); self?.themTranscriber = nil }
+            errorReporter.report(UserFacingError(
+                title: "System audio stopped",
+                message: "Stopped transcribing the other side's audio; your microphone is still active.",
+                severity: .degraded))
         }
 
         // "Me" side: the mic. Drives turn-end and the backing-off silence check ("are you stuck?").
@@ -197,7 +202,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let capture = AggregateEchoCapture(
             onMicClean: { [weak transcriber] data in transcriber?.sendAudio(data) },
             onSystem: { [weak themTranscriber] data in themTranscriber?.sendAudio(data) })
-        capture.onUnavailable = onMicTerminalFailure
+        capture.onUnavailable = { [errorReporter] reason in
+            errorReporter.report(UserFacingError(
+                title: "Audio capture stopped", message: reason, severity: .fatal))
+        }
         self.transcriber = transcriber
         self.themTranscriber = themTranscriber
         self.aggregateCapture = capture
@@ -207,7 +215,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.requestManualHint = { turns.run { await driver.handleTrigger(.manualHint) } }
         transcriber.connect()
         themTranscriber.connect()
-        capture.start()
+        if let reason = capture.start() {
+            stop()                      // tear down the sockets we just opened
+            errorReporter.report(UserFacingError(
+                title: "Couldn't start audio capture", message: reason, severity: .fatal))
+            return false
+        }
         jlog("Jarvis: coaching started (one-clock capture + AEC).")
         return true
     }
