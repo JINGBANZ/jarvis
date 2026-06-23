@@ -48,7 +48,12 @@ whether to speak (restraint lives in the prompt); the manual Start/Stop is the o
 Tips flash one line at a time in the **Overlay Caption**; the optional **Overlay Box** keeps the
 full, timestamped history. Each is switched on/off in the Settings → Overlay tab (caption off, box
 on by default). Both are hidden from screen capture.
-Full design: [`wiki/architecture.md`](./wiki/architecture.md).
+
+Nothing leaves the machine beyond the API calls; on disk, only an owner-only per-session **activity
+log** (the spoken tips, transcribed lines, and screenshots the model saw) is kept — pruned to the
+recent few and browsable live in **Settings → Activity**. The raw mic audio and live transcript are
+never archived. Full design: [`wiki/architecture.md`](./wiki/architecture.md); privacy posture:
+[`wiki/sandbox.md`](./wiki/sandbox.md).
 
 ## Project structure
 
@@ -135,26 +140,6 @@ Then:
 
 Permissions persist across rebuilds automatically (the app always signs with a stable identity); the
 mechanics are in [`wiki/build-and-run.md`](./wiki/build-and-run.md).
-
-## The live activity viewer
-
-Jarvis has an **in-app live viewer** (a `WKWebView` it pushes events into) so you can **watch it
-think** without tailing a log. Open it from **Settings → Activity** (each launch is its own session;
-you can also browse past sessions or clear the history). New events stream in live — no reload — and
-are color-coded:
-
-- 🗣 `heard: "…"` — what you said (transcribed) / 🤫 `quiet for 30s` — why it woke
-- 💭 `thinking…` — calling the brain
-- 👁 `looking at your screen` — the model invoked `capture_screen`; the captured frame appears as a
-  thumbnail you can click to open full size
-- 💬 `…the tip it spoke…` — a `speak` call rendered to the overlay
-- `… staying silent` — when the model declines to speak
-
-**Privacy posture.** The activity log (the viewer's `jarvis-activity.jsonl` + the screenshot
-thumbnails + `jarvis-debug.log`) is written on **every** launch to a gitignored, owner-only
-per-session directory in the workspace `.jarvis/<session>/`, pruned to the most recent few sessions.
-The raw mic audio and the live transcript are never archived. The posture and build/run mechanics are
-in [`wiki/build-and-run.md`](./wiki/build-and-run.md) and [`wiki/sandbox.md`](./wiki/sandbox.md).
 
 ## Live smoke checklist
 
