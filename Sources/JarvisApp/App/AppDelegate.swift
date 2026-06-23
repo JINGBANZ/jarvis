@@ -9,6 +9,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let transcript = RollingTranscript()
     private let secretFile = FileSecretStore()
     private lazy var secrets = ChainedSecretStore([secretFile, EnvSecretStore()])
+    /// The single funnel for user-facing failures (alerts + fatal session teardown). See `ErrorReporter`.
+    private let errorReporter = ErrorReporter()
 
     private var overlayCaption: OverlayCaptionPanel!   // transient on-screen tip
     private var overlayBox: OverlayBoxPanel!            // persistent, movable history of every spoken response
@@ -90,6 +92,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menuBar.onStart = { [weak self] in self?.start() ?? false }
         menuBar.onStop = { [weak self] in self?.stop() }
 
+        // A fatal error tears the session down and corrects the menu — one place owns that.
+        errorReporter.onFatal = { [weak self] in
+            self?.stop()
+            self?.menuBar.setRunning(false)
+        }
+
         // Global hint hotkey: while a session is running, screenshot + ask the brain for a hint in one
         // trip; otherwise beep — there's no live driver/conversation to hint from when stopped.
         hotkeys = HotkeyController()
@@ -115,7 +123,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func start(freshSession: Bool = true) -> Bool {
         guard let key = secrets.apiKey(), !key.isEmpty else {
             jlog("Jarvis: can't start — no API key.")
-            warnNoKey()
+            errorReporter.report(UserFacingError(
+                title: "No OpenAI API key set",
+                message: "Open \u{201C}Settings\u{2026}\u{201D} from the Jarvis menu, paste your key, then press Start.",
+                severity: .fatal))
             return false
         }
         stop() // tear down any existing pipeline so we start cleanly
@@ -218,15 +229,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if wasRunning { jlog("Jarvis: stopped.") }
     }
 
-
-    private func warnNoKey() {
-        NSApp.activate(ignoringOtherApps: true)
-        let alert = NSAlert()
-        alert.messageText = "No OpenAI API key set"
-        alert.informativeText = "Open \u{201C}Settings\u{2026}\u{201D} from the Jarvis menu, paste your key, then press Start."
-        alert.alertStyle = .informational
-        alert.runModal()
-    }
 
     /// Open a fresh dev session: a new per-Start subdirectory under the base log dir, with its own
     /// `jarvis-debug.log` and `jarvis-activity.jsonl`. Called on every Start so each coaching run keeps
