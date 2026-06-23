@@ -24,8 +24,9 @@ import JarvisCore
 final class AggregateEchoCapture: @unchecked Sendable {
     private let onMicClean: @Sendable (Data) -> Void
     private let onSystem: @Sendable (Data) -> Void
-    /// Fired if the device can't be built/started — the caller decides how to degrade.
-    var onUnavailable: (@Sendable () -> Void)?
+    /// Fired if the device can't be built/started mid-session (route-change rebuild) — the caller
+    /// decides how to surface it. Carries a human-readable reason.
+    var onUnavailable: (@Sendable (String) -> Void)?
 
     private var tapID = AudioObjectID(kAudioObjectUnknown)
     private var aggregateID = AudioObjectID(kAudioObjectUnknown)
@@ -34,6 +35,14 @@ final class AggregateEchoCapture: @unchecked Sendable {
     private let aec = WebRTCEchoCanceller()          // adaptive; re-converges across route rebuilds
     private let micDown = Resampler(fromHz: 48_000, toHz: 24_000)   // cleaned mic → 24 kHz wire
     private let sysDown = Resampler(fromHz: 48_000, toHz: 24_000)   // tap → 24 kHz wire
+    /// Device-native → 48 kHz, rebuilt per `buildAudioLocked` from the aggregate's actual rate. `nil`
+    /// when the device is already 48 kHz (then mic/tap feed AEC directly — the built-in path, unchanged).
+    /// Touched only by the IOProc thread (read in `handle`) and by build/rebuild under `lock` while the
+    /// device is stopped — same discipline as `procID`/`aggregateID`, covered by `@unchecked Sendable`.
+    private var micUp: Resampler?
+    private var sysUp: Resampler?
+
+    private static let aecRate = 48_000.0
 
     private let lock = NSLock()
     private let routeQueue = DispatchQueue(label: "jarvis.aec.routes")
@@ -46,17 +55,20 @@ final class AggregateEchoCapture: @unchecked Sendable {
         self.onSystem = onSystem
     }
 
-    func start() {
-        var built = false
+    /// Build + start capture. Returns `nil` on success, or a human-readable reason on failure (the
+    /// caller surfaces it via `ErrorReporter`). Mid-session rebuild failures go through `onUnavailable`.
+    func start() -> String? {
+        var reason: String?
         lock.lock()
         if #available(macOS 14.2, *), aec != nil, micDown != nil, sysDown != nil {
-            built = buildAudioLocked()
-            if built { registerRouteListenersLocked() }
+            reason = buildAudioLocked()
+            if reason == nil { registerRouteListenersLocked() }
         } else {
             jlog("Jarvis: one-clock capture unavailable — needs macOS 14.2+ and AEC/resampler")
+            reason = "Jarvis needs macOS 14.2 or later for echo-cancelled capture."
         }
         lock.unlock()
-        if !built { onUnavailable?() }      // notify outside the lock
+        return reason
     }
 
     func stop() {
@@ -72,10 +84,11 @@ final class AggregateEchoCapture: @unchecked Sendable {
     /// Builds tap + aggregate + IOProc. Self-cleaning: on any failure it tears down whatever it
     /// already created and returns false, so it never leaves partial state. Logs the failure; the
     /// caller notifies `onUnavailable` outside the lock.
-    private func buildAudioLocked() -> Bool {
-        guard #available(macOS 14.2, *) else { return false }
+    private func buildAudioLocked() -> String? {
+        guard #available(macOS 14.2, *) else { return "Jarvis needs macOS 14.2 or later." }
         guard let micUID = Self.defaultInputDeviceUID() else {
-            jlog("Jarvis: capture — no default input device"); return false
+            jlog("Jarvis: capture — no default input device")
+            return "No microphone is available. Connect an input device and press Start."
         }
 
         let tapDesc = CATapDescription(monoGlobalTapButExcludeProcesses: [])
@@ -83,7 +96,8 @@ final class AggregateEchoCapture: @unchecked Sendable {
         tapDesc.muteBehavior = .unmuted               // user keeps hearing the call
         var tap = AudioObjectID(kAudioObjectUnknown)
         guard AudioHardwareCreateProcessTap(tapDesc, &tap) == noErr, tap != kAudioObjectUnknown else {
-            jlog("Jarvis: capture — process tap creation failed (audio-capture permission?)"); return false
+            jlog("Jarvis: capture — process tap creation failed (audio-capture permission?)")
+            return "Couldn't capture system audio. Grant Jarvis the audio-capture permission and press Start."
         }
         tapID = tap
 
@@ -101,30 +115,47 @@ final class AggregateEchoCapture: @unchecked Sendable {
         var agg = AudioObjectID(kAudioObjectUnknown)
         guard AudioHardwareCreateAggregateDevice(description as CFDictionary, &agg) == noErr,
               agg != kAudioObjectUnknown else {
-            jlog("Jarvis: capture — aggregate device creation failed"); teardownAudioLocked(); return false
+            jlog("Jarvis: capture — aggregate device creation failed")
+            teardownAudioLocked(); return "Couldn't build the audio capture device."
         }
         aggregateID = agg
 
-        // AEC3, the 480-sample (10 ms) framing, and the 48→24 resamplers all assume 48 kHz. The
-        // aggregate otherwise inherits the mic's rate (could be 44.1 kHz), which would corrupt the
-        // echo model and mislabel the wire rate to the transcriber — so pin it and verify.
-        guard Self.setNominalSampleRate(agg, 48_000) else {
-            jlog("Jarvis: capture — could not pin aggregate to 48 kHz"); teardownAudioLocked(); return false
+        // Don't fight the device's rate — read it. AEC3, the 480-sample framing, and the 48→24 resamplers
+        // all run at 48 kHz, so resample the device-native rate up to 48 kHz before AEC (mic+tap come off
+        // ONE clock, so they stay sample-synced; the far/near lockstep in `handle` absorbs converter slack).
+        // If we can't read the rate, fail loud — assuming 48 kHz when it isn't would corrupt the echo
+        // model and mislabel the wire rate (the exact thing the old pin guarded).
+        guard let deviceRate = Self.nominalSampleRate(agg) else {
+            jlog("Jarvis: capture — could not read the input device's sample rate")
+            teardownAudioLocked(); return "Couldn't read the audio input device's sample rate."
+        }
+        if abs(deviceRate - Self.aecRate) < 1 {
+            micUp = nil; sysUp = nil                         // already 48 kHz — feed AEC directly
+        } else {
+            guard let mu = Resampler(fromHz: deviceRate, toHz: Self.aecRate),
+                  let su = Resampler(fromHz: deviceRate, toHz: Self.aecRate) else {
+                jlog("Jarvis: capture — could not build \(Int(deviceRate))→48 kHz resampler")
+                teardownAudioLocked()
+                return "Couldn't prepare audio resampling for this input device (\(Int(deviceRate)) Hz)."
+            }
+            micUp = mu; sysUp = su
         }
 
         var proc: AudioDeviceIOProcID?
         guard AudioDeviceCreateIOProcIDWithBlock(&proc, agg, nil, { [weak self] _, input, _, _, _ in
             self?.handle(input)
         }) == noErr, let proc else {
-            jlog("Jarvis: capture — IOProc creation failed"); teardownAudioLocked(); return false
+            jlog("Jarvis: capture — IOProc creation failed")
+            teardownAudioLocked(); return "Couldn't start the audio capture callback."
         }
         procID = proc
 
         guard AudioDeviceStart(agg, proc) == noErr else {
-            jlog("Jarvis: capture — device start failed"); teardownAudioLocked(); return false
+            jlog("Jarvis: capture — device start failed")
+            teardownAudioLocked(); return "Couldn't start the audio capture device."
         }
-        jlog("Jarvis: capture started (one-clock mic + system tap @48 kHz, AEC3 on).")
-        return true
+        jlog("Jarvis: capture started (mic+tap @\(Int(deviceRate)) Hz → AEC3 @48 kHz, AEC3 on).")
+        return nil
     }
 
     private func teardownAudioLocked() {
@@ -173,20 +204,17 @@ final class AggregateEchoCapture: @unchecked Sendable {
     /// Default input/output device changed — rebuild the tap + aggregate against the new route. Runs
     /// on `routeQueue` (serial, debounced); the `stopped` guard makes a late change a no-op.
     private func rebuild() {
-        var failed = false
+        var reason: String?
         lock.lock()
         if !stopped {
             teardownAudioLocked()
-            if buildAudioLocked() {
-                jlog("Jarvis: rebuilt capture after audio route change")
-            } else {
-                failed = true
-            }
+            reason = buildAudioLocked()
+            if reason == nil { jlog("Jarvis: rebuilt capture after audio route change") }
         }
         lock.unlock()
-        if failed {
+        if let reason {
             jlog("Jarvis: capture rebuild failed after route change")
-            onUnavailable?()        // notify outside the lock
+            onUnavailable?(reason)        // notify outside the lock
         }
     }
 
@@ -196,11 +224,16 @@ final class AggregateEchoCapture: @unchecked Sendable {
         let buffers = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: list))
         guard buffers.count >= 2, let aec, let micDown, let sysDown else { return }
         // Composition order = sub-devices (mic) then taps; confirmed live: buf0=mic, buf1=tap.
-        let mic = Self.monoInt16(buffers[0])
+        var mic = Self.monoInt16(buffers[0])
         var tap = Self.monoInt16(buffers[1])
-        // Keep far and near in lockstep: AEC3's reference and capture must advance by the SAME sample
-        // count each callback, or the two framers drift apart for the rest of the session. The tap can
-        // legitimately deliver a short/empty buffer (silence), so pad/truncate it to the mic's count.
+        // Resample device-native → 48 kHz for AEC (no-ops to today's path when the device is already
+        // 48 kHz and the up-resamplers are nil).
+        if let micUp { mic = micUp.convert(mic) }
+        if let sysUp { tap = sysUp.convert(tap) }
+        // Keep far and near in lockstep AT THE AEC RATE: AEC3's reference and capture must advance by the
+        // SAME sample count each callback, or the two framers drift apart for the rest of the session. The
+        // tap can legitimately be short/empty (silence), and the two converters can emit a sample or two
+        // apart — so pad/truncate the tap to the mic's count after resampling.
         if tap.count != mic.count {
             if tap.count < mic.count { tap.append(contentsOf: repeatElement(0, count: mic.count - tap.count)) }
             else { tap.removeLast(tap.count - mic.count) }
@@ -227,18 +260,15 @@ final class AggregateEchoCapture: @unchecked Sendable {
         samples.withUnsafeBufferPointer { Data(buffer: $0) }
     }
 
-    /// Set a device's nominal sample rate and confirm it took (within 1 Hz). Returns false on failure.
-    private static func setNominalSampleRate(_ dev: AudioObjectID, _ rate: Double) -> Bool {
+    /// Read a device's current nominal sample rate. Returns nil if it can't be read.
+    private static func nominalSampleRate(_ dev: AudioObjectID) -> Double? {
         var addr = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyNominalSampleRate,
                                               mScope: kAudioObjectPropertyScopeGlobal,
                                               mElement: kAudioObjectPropertyElementMain)
-        var wanted = rate
-        guard AudioObjectSetPropertyData(dev, &addr, 0, nil, UInt32(MemoryLayout<Double>.size), &wanted) == noErr
-        else { return false }
-        var actual = 0.0
+        var rate = 0.0
         var size = UInt32(MemoryLayout<Double>.size)
-        guard AudioObjectGetPropertyData(dev, &addr, 0, nil, &size, &actual) == noErr else { return false }
-        return abs(actual - rate) < 1
+        guard AudioObjectGetPropertyData(dev, &addr, 0, nil, &size, &rate) == noErr, rate > 0 else { return nil }
+        return rate
     }
 
     private static func defaultInputDeviceUID() -> String? {
