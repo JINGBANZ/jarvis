@@ -24,12 +24,16 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
 
     public init(apiKey: String,
                 model: String,
-                reasoningEffort: String = "low",
+                reasoningEffort: String = ReasoningEffort.default.rawValue,
                 endpoint: URL = URL(string: "https://api.openai.com/v1/responses")!,
                 timeout: TimeInterval = 15,
                 maxRetries: Int = 2,
                 backoffBaseSeconds: Double = 0.5,
-                maxOutputTokens: Int = 2_048,   // combined reasoning+output cap; pass a per-effort budget (see ReasoningEffort.maxOutputTokens)
+                // The cap MUST track the effort: it's a combined reasoning+output budget, so a value
+                // too small for the effort truncates the run (the high-effort bug). Callers pass the
+                // budget for the *selected* effort (`AppDelegate` → `effort.maxOutputTokens`); this
+                // default mirrors the default effort so there's one source of truth, never a magic number.
+                maxOutputTokens: Int = ReasoningEffort.default.maxOutputTokens,
                 promptCacheKey: String = "jarvis-coach-v1",
                 send: Sender? = nil) {
         self.apiKey = apiKey
