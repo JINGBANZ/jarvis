@@ -92,8 +92,9 @@ documented behavior without a doc update is incomplete; stale docs erode trust f
 3. **[`decisions.md`](./decisions.md)** — log any load-bearing decision.
 4. **[`index.md`](./index.md)** — update if a page was added, renamed, or removed.
 5. **Links** — confirm every link and file pointer in touched pages still resolves.
-6. **Duplicated facts** — code ↔ wiki, page ↔ page: collapse to one source or link; if you can't fix it
-   now, note it under "Known drift" in `status.md`.
+6. **Duplicated facts** — code ↔ wiki, page ↔ page: collapse to one source or link **within this same
+   change**. Don't ship drift; if a mismatch genuinely can't be resolved here, call it out explicitly in
+   the PR description rather than parking it in the wiki.
 
 A change isn't done until a fresh agent could reconstruct what's built and where to start, from
 `index.md` + `status.md` + the touched pages.
