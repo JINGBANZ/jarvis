@@ -132,7 +132,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let brain = OpenAIBrainClient(apiKey: key, model: brainPreferences.model.id,
-                                      reasoningEffort: brainPreferences.effort.rawValue)
+                                      reasoningEffort: brainPreferences.effort.rawValue,
+                                      maxOutputTokens: brainPreferences.effort.maxOutputTokens)
         // Fan each spoken tip out to both the Overlay Caption and the persistent Overlay Box.
         let overlaySink = BroadcastOverlay([overlayCaption, overlayBox])
         let driver = CoachDriver(config: config, transcript: transcript,
