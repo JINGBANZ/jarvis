@@ -29,7 +29,7 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
                 timeout: TimeInterval = 15,
                 maxRetries: Int = 2,
                 backoffBaseSeconds: Double = 0.5,
-                maxOutputTokens: Int = 768,   // headroom so reasoning + a short tool call don't truncate
+                maxOutputTokens: Int = 2_048,   // combined reasoning+output cap; pass a per-effort budget (see ReasoningEffort.maxOutputTokens)
                 promptCacheKey: String = "jarvis-coach-v1",
                 send: Sender? = nil) {
         self.apiKey = apiKey
@@ -198,13 +198,27 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
             let arguments: String?
         }
         struct IncompleteDetails: Decodable { let reason: String? }
+        struct Usage: Decodable {
+            struct OutputDetails: Decodable { let reasoning_tokens: Int? }
+            let output_tokens: Int?
+            let output_tokens_details: OutputDetails?
+        }
         let output: [Item]
         let status: String?
         let incomplete_details: IncompleteDetails?
+        let usage: Usage?
     }
 
     private func decode(_ data: Data) throws -> BrainResponse {
         let decoded = try JSONDecoder().decode(Response.self, from: data)
+        // Log per-turn token usage so the per-effort `max_output_tokens` budgets can be tuned DOWN
+        // from real consumption (OpenAI's own advice). `reasoning` is the share spent thinking — the
+        // part that silently ate the whole cap at high effort.
+        if let usage = decoded.usage {
+            let reasoning = usage.output_tokens_details?.reasoning_tokens ?? 0
+            let truncated = decoded.status == "incomplete" ? " [incomplete]" : ""
+            jlog("Jarvis coach: tokens — reasoning \(reasoning), output \(usage.output_tokens ?? 0), cap \(maxOutputTokens)\(truncated)")
+        }
         var invocations: [ToolInvocation] = []
         var raws: [RawToolCall] = []
         for item in decoded.output where item.type == "function_call" {

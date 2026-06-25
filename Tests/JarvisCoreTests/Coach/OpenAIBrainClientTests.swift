@@ -158,6 +158,17 @@ private func speakResponseBody(arguments: String) -> Data {
         #expect(body.contains("\"name\":\"capture_screen\""))
     }
 
+    /// The caller's `max_output_tokens` budget is encoded verbatim — this is what carries the
+    /// per-effort cap (high → 25k) so high-effort reasoning isn't truncated before the tip.
+    @Test func encodesProvidedMaxOutputTokens() async throws {
+        let box = CapturedBody()
+        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5", maxOutputTokens: 25_000,
+                                       send: { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
+        _ = try await client.respond(messages: [.user("hi")], tools: coachTools)
+        let body = String(data: box.get() ?? Data(), encoding: .utf8) ?? ""
+        #expect(body.contains("\"max_output_tokens\":25000"))
+    }
+
     /// Tools are sent with `strict:true` so the model's function-call arguments are schema-guaranteed
     /// (Structured Outputs via function calling) — that's what lets `speak` return a typed `lines`
     /// array instead of a free-form string the client has to split.
