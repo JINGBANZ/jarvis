@@ -76,3 +76,10 @@ The headless build is done. Remaining is the **human smoke run** — build, run,
    session. The connect contract (`?intent=transcription`, the `session.update` payload) lives in
    `RealtimeSession.swift`; if the live connect fails, that's the file to adjust (e.g. swap
    `transcriptionModel` in `Config.swift`).
+
+## Known drift
+
+Anything where two facts (code ↔ wiki, page ↔ page) currently disagree and haven't been reconciled.
+Empty is the goal; the keep-in-sync checklist in [CLAUDE.md](./CLAUDE.md) keeps it that way.
+
+- none

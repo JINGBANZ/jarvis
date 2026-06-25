@@ -113,8 +113,9 @@ behavior, it's `JarvisOverlay`. If no subsystem fits and it's a generic helper, 
   `UpperCamelCase` types, `lowerCamelCase` everything else, clarity over brevity. Folders are `UpperCamelCase`.
 - **Keep files small and single-purpose.** A file growing past a few hundred lines usually means it's
   doing two jobs — split it. Small files are easier for both humans and agents to hold in context.
-- **Swift 6 strict concurrency** is on. Respect actor isolation and `Sendable`; document non-obvious
-  decisions in comments — explain *why*, not *what*.
+- **Swift 6 strict concurrency** is on. Respect actor isolation and `Sendable`; don't silence warnings
+  with `@unchecked` or `nonisolated(unsafe)` without a written reason.
+- Document non-obvious decisions in comments — explain *why*, not *what*.
 
 ## Modularity — when to add a target
 

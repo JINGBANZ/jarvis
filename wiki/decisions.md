@@ -211,6 +211,13 @@
 - **Rejected:** The `KeyboardShortcuts` package.
 - **Detail:** [architecture.md §2](./architecture.md#on-demand-hint-j).
 
+### 2026-06-22 — Activity log is always on; the `--dev` flag removed
+
+- **Chose:** The activity log (Settings → Activity, plus owner-only per-session disk logs on every launch, pruned to the 10 most recent in the gitignored, workspace-local `.jarvis/`) is always on; removed the `--dev` flag that previously gated it.
+- **Why:** The log is useful in every run, not just a dev mode; one always-on path is simpler and the disk logs keep the owner-only, no-`/tmp` posture.
+- **Rejected:** Keeping the log behind a `--dev` flag.
+- **Detail:** [sandbox.md](./sandbox.md).
+
 ### 2026-06-23 — Capture adapts to any input rate; startup fails loud
 
 - **Chose:** Read the device's native rate and resample mic+tap up to AEC3's 48 kHz; centralize startup failures in an `ErrorReporter` (severity-driven `NSAlert`, `UserFacingError` in Core).
