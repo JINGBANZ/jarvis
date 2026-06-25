@@ -19,14 +19,14 @@
 - **[fork-evaluation.md](./fork-evaluation.md)** — code-level evaluation of open-source apps as a fork base for the PoC, and why they're all Electron/Tauri rather than native Swift.
 - **[settings-window.md](./settings-window.md)** — the unified Settings window: one menu item → `SettingsWindow` hosting `APIKeySection`, `OverlaySection`, `BrainModelSection`, and `ActivitySection`; the Overlay Caption and Overlay Box each have an on/off toggle + size/opacity, persisted via `OverlayAppearance`.
 
-## Key Decisions
+## Decisions
 
-There is no formal ADR folder — decisions are recorded as a compact log in
-**[status.md](./status.md#key-decisions)**, with the *rationale* living in the design pages it links to.
+- **[decisions.md](./decisions.md)** — the decision log: what was chosen and why, with the rejected
+  alternative. One page, no ADR folder by design; see [CLAUDE.md](./CLAUDE.md) → Convention 8.
 
 ## Meta
 
-- **[CLAUDE.md](./CLAUDE.md)** — how to maintain this wiki.
+- **[CLAUDE.md](./CLAUDE.md)** — conventions for maintaining this wiki. Read before editing any wiki file.
 
 ## What Jarvis Is, In One Sentence
 

@@ -1,0 +1,220 @@
+# Decisions
+
+> The project's decision log — *why* Jarvis is the way it is. One entry per load-bearing, non-obvious
+> choice. Unlike the rest of the wiki, this page is **append-mostly and historical**: it is the one
+> place [`CLAUDE.md`](./CLAUDE.md) → Convention 3's "write in the present, delete the narration" rule
+> does **not** apply, because the rejected alternative is exactly what you don't want to lose. A
+> running list, newest last, each entry dated. When a decision is reversed, **supersede it in place**
+> (add the `Superseded by` / `Supersedes` lines); never delete it. The *how it works* lives in the
+> core design pages — the `Detail:` line links to it rather than restating it here.
+
+### 2026-06-13 — Build our own proactive coach
+
+- **Chose:** Build a native macOS coaching tool from scratch.
+- **Why:** No maintained tool does proactive, unprompted speak-up coaching well.
+- **Rejected:** Forking/using existing tools — all closed, paid, or answer-dumping (LockedIn AI is the best behavior reference only).
+- **Detail:** [landscape-survey.md](./landscape-survey.md), [fork-evaluation.md](./fork-evaluation.md).
+
+### 2026-06-13 — Personal tool first
+
+- **Chose:** A personal single-user tool — no auth/billing, freely reuse open code, <2-day MVP target.
+- **Why:** Fastest path to a working coach; product infrastructure is premature.
+- **Rejected:** Building shippable product scaffolding up front.
+- **Detail:** [architecture.md](./architecture.md).
+
+### 2026-06-13 — Proactive, unprompted coaching is the core differentiator
+
+- **Chose:** Proactive by default; ⌥⌘J is an optional on-demand hint, not a wake key.
+- **Why:** Speaking up unprompted is the differentiator versus every wake-word assistant.
+- **Detail:** [architecture.md](./architecture.md).
+
+### 2026-06-13 — One mode for v1: LeetCode Coach
+
+- **Chose:** A single coaching mode, no tiers.
+- **Why:** Scope discipline for the MVP.
+- **Detail:** [architecture.md §6](./architecture.md#6-non-goals-v1).
+
+### 2026-06-13 — Model-triggered `capture_screen`
+
+- **Chose:** The brain decides when to capture the screen, via a tool-use loop.
+- **Why:** Cheaper and smarter than capturing on every turn.
+- **Rejected:** Always-on screen capture.
+- **Detail:** [architecture.md §2](./architecture.md#2-core-loop).
+
+### 2026-06-13 — Coach is time-aware
+
+- **Chose:** Feed a timestamped transcript plus silence duration to the coach.
+- **Why:** Lets it reason about pacing and when to nudge.
+- **Detail:** [architecture.md §2](./architecture.md#2-core-loop).
+
+### 2026-06-13 — Native Swift app
+
+- **Chose:** Native Swift.
+- **Why:** Cleanest sandbox/footprint on macOS.
+- **Detail:** [architecture.md](./architecture.md), [fork-evaluation.md](./fork-evaluation.md).
+
+### 2026-06-13 — Toolchain: SwiftPM + Command Line Tools
+
+- **Chose:** SwiftPM + CLT, no full Xcode; a hand-built `.app` bundle signed with a stable self-signed `Jarvis Dev` identity.
+- **Why:** Removes the Xcode dependency; the stable identity keeps TCC grants across rebuilds.
+- **Detail:** [build-and-run.md](./build-and-run.md).
+
+### 2026-06-13 — Server-side conversation per session
+
+- **Chose:** OpenAI Conversations API (`store:true`) for the coach's own multi-turn memory.
+- **Why:** Multi-turn coaching quality over local-only retention.
+- **Rejected:** Local-only conversation state.
+- **Detail:** [architecture.md](./architecture.md#models-and-apis), [sandbox.md](./sandbox.md).
+
+### 2026-06-13 — Activity viewer is an in-app `WKWebView`
+
+- **Chose:** An in-app `WKWebView` viewer — live push (no meta-refresh), screenshot lightbox, persisted JSONL history + clear-history.
+- **Why:** Live updates and full session visibility without page reloads.
+- **Detail:** [build-and-run.md](./build-and-run.md).
+
+### 2026-06-13 — Overlay hidden from screen capture via `sharingType = .none`
+
+- **Chose:** Set the overlay `NSPanel` `sharingType = .none`, re-asserted on `show()`.
+- **Why:** The overlay must not appear in shared/recorded screen; verified on macOS 26.5 including a live `SCStream`.
+- **Detail:** [overlay-invisibility.md](./overlay-invisibility.md).
+
+### 2026-06-14 — Two-phase build (fork Natively first)
+
+- **Chose:** A two-phase plan — fork Natively as Phase 1, then build native.
+- **Superseded by:** 2026-06-14 — Skip Phase 1; build native Swift directly.
+- **Detail:** [fork-evaluation.md](./fork-evaluation.md).
+
+### 2026-06-14 — Skip Phase 1; build native Swift directly
+
+- **Chose:** Drop the two-phase plan and build the clean native app now.
+- **Why:** The fork eval and survey already establish the why-build-our-own basis; Natively is at most a reference, not a base.
+- **Rejected:** Forking Natively as Phase 1.
+- **Supersedes:** Two-phase build (fork Natively first).
+- **Detail:** [fork-evaluation.md](./fork-evaluation.md).
+
+### 2026-06-14 — Restricted-account requirement (hard)
+
+- **Chose:** Require building in a separate restricted macOS account.
+- **Superseded by:** 2026-06-14 — Build in the main account, restricted-account requirement waived.
+- **Detail:** [sandbox.md](./sandbox.md).
+
+### 2026-06-14 — Build in the main `forrest` account, restricted-account requirement waived
+
+- **Chose:** Build in the main account inside a git worktree; waive the hard restricted-account requirement.
+- **Why:** Accept the security tradeoff (an unsandboxed app can read the main account's files) for this personal build; the hardened model (App Sandbox + restricted account) stays documented as the path for any shippable version.
+- **Supersedes:** Restricted-account requirement (hard).
+- **Detail:** [sandbox.md](./sandbox.md).
+
+### 2026-06 — Models verified
+
+- **Chose:** `gpt-5.5` brain via the Responses API (tool-use + vision); `gpt-4o-transcribe` over the GA Realtime API; API-only, no local models.
+- **Why:** Best available quality; verified against the docs in 2026-06.
+- **Detail:** [architecture.md](./architecture.md#models-and-apis).
+
+### 2026-06-15 — Tuned `server_vad` + debounce; quiet graceful Stop
+
+- **Chose:** Tuned `server_vad` + debounce, and a quiet graceful Stop.
+- **Why:** Fixes from the first live smoke run.
+- **Rejected:** `semantic_vad`.
+- **Detail:** [architecture.md](./architecture.md#models-and-apis).
+
+### 2026-06-16 — System audio shipped
+
+- **Chose:** `SystemAudioInput` (ScreenCaptureKit) → a second `them`-tagged transcriber beside the mic's `me`, into one shared transcript.
+- **Why:** Captures the other side of the conversation.
+- **Detail:** [architecture.md §3](./architecture.md#3-components).
+
+### 2026-06-16 — Cut the guardrail layer
+
+- **Chose:** No cooldown/rate cap and no wake-word detector; the brain self-gates speaking; the silence check backs off across a long silence.
+- **Why:** Simpler flow, less log noise, more natural conversation.
+- **Rejected:** Explicit rate-limiting / wake-word guardrails.
+- **Detail:** [architecture.md §5](./architecture.md#5-safety-model).
+
+### 2026-06-17 — `speak` returns a `lines` array via Structured Outputs
+
+- **Chose:** `speak` returns a `lines` array (`strict:true`), not a free-form string.
+- **Why:** The model splits the tip into overlay lines, so the client no longer splits prose on `.`/`!`/`?` (which shattered code like `Array.from(...)`).
+- **Detail:** [architecture.md §2](./architecture.md#2-core-loop).
+
+### 2026-06-17 — Unified Settings window
+
+- **Chose:** One Settings window replaces the separate API-key dialog and log-viewer menu item; overlay text size + background opacity are user-adjustable and persisted via `OverlayAppearance`.
+- **Why:** A single place for configuration.
+- **Detail:** [settings-window.md](./settings-window.md).
+
+### 2026-06-18 — Tuned overlay/silence timing + sharpened coach prompt
+
+- **Chose:** Longer per-line overlay display, a later first silence nudge over a wider backoff ramp, plain-language hints, explicit `me`/`them` speaker handling; the overlay queues tips.
+- **Why:** Better pacing without cutting off the current tip.
+- **Detail:** [architecture.md §2](./architecture.md#2-core-loop).
+
+### 2026-06-18 — Overlay is never-interrupt + never-drop
+
+- **Chose:** Queue tips; never preempt the one on screen.
+- **Why:** In a live interview the user never addresses Jarvis aloud, so all overlay traffic is proactive coaching with no latency-critical reply that needs to jump the queue.
+- **Rejected:** Direct-reply queue-priority/preemption (show-freshest).
+- **Detail:** [architecture.md §2](./architecture.md#2-core-loop).
+
+### 2026-06-18 — AEC reverted to a plain `AVAudioEngine` tap (interim)
+
+- **Chose:** Revert `VoiceProcessingIO` AEC; use a plain `AVAudioEngine` mic tap.
+- **Why:** `VoiceProcessingIO` came up without throwing, but the `SCStream` starting ~150 ms later changed the audio route and the mic went silent (RMS 0).
+- **Superseded by:** 2026-06-19 — Echo cancellation via one-clock aggregate device + AEC3.
+- **Detail:** [architecture.md §3](./architecture.md#3-components).
+
+### 2026-06-19 — Echo cancellation via one-clock aggregate device + AEC3
+
+- **Chose:** Capture the mic + a system-output process tap in ONE private aggregate device (mic = clock master, tap drift-compensated) so a single IOProc delivers both synced at 48 kHz, and run AEC3 inside that callback.
+- **Why:** The mic was bleeding the other side's speaker audio into the `me` transcript. One aggregate device removes the cross-clock drift that limited a prior two-clock attempt to ~5%; measured 30–50 dB cancellation live, no headphones needed.
+- **Rejected:** Two-clock (separate mic + `SCStream` feeding AEC3) — the hard async-AEC case.
+- **Supersedes:** AEC reverted to a plain `AVAudioEngine` tap.
+- **Revisit if:** Double-talk under loud far audio over-attenuates the user — escalate to a neural canceller (DTLN/Muesli-style) on the same aligned streams.
+- **Detail:** [architecture.md §3](./architecture.md#3-components).
+
+### 2026-06-19 — Per-line overlay time is length-proportional
+
+- **Chose:** `noticeBuffer + words × readingRate` (capped), plus a brief blank gap between lines.
+- **Why:** Hybrid of the captioning reading-speed standard and our glance-not-watch situation.
+- **Rejected:** Hard-coded per-line duration.
+- **Detail:** [overlay-timing.md](./overlay-timing.md).
+
+### 2026-06-20 — API key in an owner-only `0600` file, not the Keychain
+
+- **Chose:** Store the API key in an owner-only `0600` file.
+- **Why:** A self-signed (no Team ID) app's Keychain access keys to a per-build `cdhash`, so the Keychain re-prompts every rebuild; a file doesn't.
+- **Rejected:** Keychain storage.
+- **Detail:** [sandbox.md §3](./sandbox.md).
+
+### 2026-06-20 — Brain model + reasoning effort are user-selectable
+
+- **Chose:** A Brain settings tab picks the model from a code-owned `BrainModelCatalog` (default `gpt-5.5`) and one global reasoning effort (default `low`), persisted via `BrainPreferences` and applied on next Start; moved out of `Config`.
+- **Why:** The catalog/enum becomes the single source of truth, and the user can trade quality versus cost/latency.
+- **Detail:** [settings-window.md](./settings-window.md).
+
+### 2026-06-20 — Persistent response box beside the overlay
+
+- **Chose:** An optional Overlay Box (`OverlayBoxPanel`) logging every `speak` tip in full, also excluded from capture; fed via a `BroadcastOverlay` fan-out so `CoachDriver` is unchanged.
+- **Why:** A full, scrollable history of tips.
+- **Detail:** [settings-window.md](./settings-window.md), [overlay-invisibility.md](./overlay-invisibility.md).
+
+### 2026-06-21 — Overlay surfaces renamed + independently switchable
+
+- **Chose:** Overlay Caption (transient, `OverlayCaptionPanel`) and Overlay Box (persistent, `OverlayBoxPanel`), each with its own On/Off toggle (defaults: caption off, box on); visibility lives only in Settings. Repo-wide rename of `OverlayAppearance` keys + the `Applying` protocols.
+- **Why:** Clear naming and independent control of the two surfaces.
+- **Detail:** [settings-window.md](./settings-window.md).
+
+### 2026-06-21 — On-demand hint hotkey (⌥⌘J)
+
+- **Chose:** A global Carbon `RegisterEventHotKey` that, while running, captures the screen and forces a `speak` hint in one brain round-trip.
+- **Why:** Complements proactive coaching. Raw Carbon over the `KeyboardShortcuts` package because that package's SwiftUI macros (`@Entry`/`#Preview`) need full Xcode and Jarvis builds CLT-only.
+- **Rejected:** The `KeyboardShortcuts` package.
+- **Detail:** [architecture.md §2](./architecture.md#on-demand-hint-j).
+
+### 2026-06-23 — Capture adapts to any input rate; startup fails loud
+
+- **Chose:** Read the device's native rate and resample mic+tap up to AEC3's 48 kHz; centralize startup failures in an `ErrorReporter` (severity-driven `NSAlert`, `UserFacingError` in Core).
+- **Why:** The old hard 48 kHz aggregate pin silently failed for devices that can't do 48 kHz (notably AirPods, HFP at 16/24 kHz); now any input device works, and failures surface instead of the menu lying green.
+- **Rejected:** The hard 48 kHz aggregate pin.
+- **Revisit if:** AirPods-as-mic HFP narrowband quality bites — use the built-in mic for fidelity.
+- **Detail:** [architecture.md §3](./architecture.md#3-components).

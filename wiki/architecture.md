@@ -6,7 +6,7 @@
 
 > **Scope:** This page describes the **native Swift app** — the thing being built. The earlier
 > two-phase plan (a Natively fork PoC first) was **dropped on 2026-06-14**; we build this directly,
-> including the model-triggered `capture_screen` tool-loop. See [status.md](./status.md#key-decisions).
+> including the model-triggered `capture_screen` tool-loop. See [decisions.md](./decisions.md).
 > Exact schemas, the coach prompt, and config are **not duplicated here** — they live in code
 > (`Sources/JarvisCore/`, esp. `ToolDefs.swift`, `Config.swift`, `CoachDriver.swift`); this page is
 > the *why*, the code is the *what*.
