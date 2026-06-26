@@ -15,7 +15,7 @@ let package = Package(
         // imported by tests — see Tests/JarvisOverlayTests for the screen-capture invisibility checks.
         .target(name: "JarvisOverlay", dependencies: ["JarvisCore"]),
         // Acoustic echo cancellation (WebRTC AEC3), the OS/native-bound edge. The C++ implementation
-        // is prebuilt + statically merged with abseil into lib/libjarvis-aec.a by scripts/build-aec.sh
+        // is prebuilt + statically merged with abseil into Sources/CJarvisAEC/lib/libjarvis-aec.a by scripts/build-aec.sh
         // (zero runtime dylib deps), so `swift build` compiles only the pure-C shim header and links
         // the archive — no C++ toolchain or vendored headers needed. See scripts/aec/jarvis_aec.cpp.
         .target(

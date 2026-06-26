@@ -61,6 +61,7 @@ never archived. Full design: [`wiki/architecture.md`](./wiki/architecture.md); p
 .
 ├── Package.swift              # SwiftPM manifest (Swift 6, macOS 14+)
 ├── CLAUDE.md                  # development rules for agents/humans working in the repo
+├── AGENTS.md                  # symlink → CLAUDE.md, for AGENTS.md-compatible tools
 ├── Sources/
 │   ├── JarvisCore/            # the testable harness — Foundation-only, runs anywhere
 │   │   ├── Audio/                 # PCM + utterance buffering

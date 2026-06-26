@@ -65,8 +65,9 @@ holds:
 - **A genuinely new concept arrives** — a new subsystem / surface / role, not a refinement.
 
 **Concrete-noun test:** can you finish "X is a ___" non-generically? "the overlay is a capture-invisible
-`NSPanel`" → yes; "good error handling matters" → no. The wiki stays flat until flat stops working; let
-taxonomy emerge. **Adding / renaming / removing a page → update [`index.md`](./index.md) in the same
+`NSPanel`" → yes; "good error handling matters" → no. **Cold start:** this governs *splitting*, not the
+first page — create `architecture.md` as soon as you have three sentences. The wiki stays flat until flat
+stops working; let taxonomy emerge. **Adding / renaming / removing a page → update [`index.md`](./index.md) in the same
 edit** (a page not in the index is invisible); keep it a lightweight map, not a second copy.
 
 ### 8. Log load-bearing decisions in one place. Don't accumulate decision files.
@@ -92,9 +93,9 @@ documented behavior without a doc update is incomplete; stale docs erode trust f
 3. **[`decisions.md`](./decisions.md)** — log any load-bearing decision.
 4. **[`index.md`](./index.md)** — update if a page was added, renamed, or removed.
 5. **Links** — confirm every link and file pointer in touched pages still resolves.
-6. **Duplicated facts** — code ↔ wiki, page ↔ page: collapse to one source or link **within this same
-   change**. Don't ship drift; if a mismatch genuinely can't be resolved here, call it out explicitly in
-   the PR description rather than parking it in the wiki.
+6. **Duplicated facts** — code ↔ wiki, page ↔ page, code ↔ config: collapse to one source or link
+   **within this same change**. Don't ship drift; if a mismatch genuinely can't be resolved here, call it
+   out explicitly in the PR description rather than parking it in the wiki.
 
 A change isn't done until a fresh agent could reconstruct what's built and where to start, from
 `index.md` + `status.md` + the touched pages.

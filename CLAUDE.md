@@ -21,7 +21,7 @@ demand, and proactively offers short coaching tips via a capture-invisible overl
 |---|---|---|
 | `JarvisCore` | library | All the logic. **Foundation-only** — no AppKit / AVFoundation / ScreenCaptureKit / WebKit. Runs and is unit-tested on any machine. |
 | `JarvisOverlay` | library | The AppKit overlay (`NSPanel`, capture-invisibility). Its own target *so its behavior can be unit-tested* (`JarvisOverlayTests`) without dragging UIKit into Core. |
-| `CJarvisAEC` | C target | The acoustic-echo-cancellation edge: a pure-C facade over WebRTC AEC3. The C++ impl is prebuilt + statically merged (abseil included, zero runtime dylibs) into `lib/libjarvis-aec.a` by `scripts/build-aec.sh`, so `swift build` only links the archive — no C++ toolchain or vendored headers. Regenerate the `.a` only when bumping the webrtc version. |
+| `CJarvisAEC` | C target | The acoustic-echo-cancellation edge: a pure-C facade over WebRTC AEC3. The C++ impl is prebuilt + statically merged (abseil included, zero runtime dylibs) into `Sources/CJarvisAEC/lib/libjarvis-aec.a` by `scripts/build-aec.sh`, so `swift build` only links the archive — no C++ toolchain or vendored headers. Regenerate the `.a` only when bumping the webrtc version. |
 | `JarvisApp` | executable | The thin macOS shell: menu bar, capture, permissions, the activity viewer window. Wires Core + Overlay + AEC to the OS. Verified by a live run. |
 
 > **Put logic in `JarvisCore`.** If something can be written without an OS framework, it goes in Core
@@ -33,7 +33,7 @@ demand, and proactively offers short coaching tips via a capture-invisible overl
 - **Toolchain:** the Command Line Tools are enough — **no full Xcode required**. SPM deps that rely on
   SwiftUI macros (`@Entry` / `#Preview`, e.g. `KeyboardShortcuts`) won't compile CLT-only; reach for a
   lower-level API instead (the global hotkey uses raw Carbon for this reason).
-- **AEC archive:** `lib/libjarvis-aec.a` is prebuilt and committed; `swift build` just links it.
+- **AEC archive:** `Sources/CJarvisAEC/lib/libjarvis-aec.a` is prebuilt and committed; `swift build` just links it.
   Regenerate it with `scripts/build-aec.sh` only when bumping the WebRTC version.
 - **API key:** lives in an owner-only `0600` file (the `OPENAI_API_KEY` env var is a headless fallback
   only) — see [`wiki/sandbox.md`](./wiki/sandbox.md). Never put it in code.
@@ -92,7 +92,7 @@ into one module, so moving a file between subfolders never changes access contro
 | `Sources/JarvisCore/Config/` | Config + secrets (owner-only file) |
 | `Sources/JarvisCore/Diagnostics/` | Logging, the activity log, session-history store |
 | `Sources/JarvisCore/Support/` | Small primitives (`Clock`, `TurnTaskBox`) |
-| `Sources/JarvisOverlay/` | The on-screen `NSPanel` overlay (single file — no subfolders) |
+| `Sources/JarvisOverlay/` | The on-screen `NSPanel` overlay surfaces (caption + box; no subfolders) |
 | `Sources/JarvisApp/App/` | Entry point, `AppDelegate` |
 | `Sources/JarvisApp/MenuBar/` | Menu-bar item, Start/Stop, key entry |
 | `Sources/JarvisApp/Capture/` | Mic + system-audio capture, realtime transcriber, TCC priming |
@@ -146,8 +146,14 @@ behavior, it's `JarvisOverlay`. If no subsystem fits and it's a generic helper, 
 - **Branches:** branch, don't commit to `main`.
 - **Pull requests:** land changes via a PR that **squash-merges** with the number in the subject
   (`… (#N)`).
-- **Commit messages:** capitalized imperative mood ("Add…", "Fix…", "Organize…"). One logical change
-  per commit.
+- **Never commit:** secrets, generated artifacts, or large binaries.
+
+### Commit messages
+
+Follow [Conventional Commits](https://www.conventionalcommits.org/): `type(scope): summary` in
+lowercase imperative mood (`feat`, `fix`, `docs`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`).
+Mark breaking changes with `!` (`feat!:`) or a `BREAKING CHANGE:` footer. One logical change per commit.
+The squash-merge subject carries the PR number (`type: summary (#N)`).
 
 ## Security & safety
 
@@ -182,5 +188,6 @@ behavior, it's `JarvisOverlay`. If no subsystem fits and it's a generic helper, 
 
 ## Further context
 
-- **Design source of truth:** [`wiki/index.md`](./wiki/index.md) — architecture, decisions, and current
-  status. Start at [`wiki/status.md`](./wiki/status.md) if you're picking the project up mid-stream.
+- **Design source of truth:** @wiki/index.md — architecture, decisions, and current status. Start at
+  [`wiki/status.md`](./wiki/status.md) if you're picking the project up mid-stream.
+- Contribution guide: @CONTRIBUTING.md (if present)

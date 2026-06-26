@@ -1,66 +1,22 @@
 # Status
 
-> Entry point for anyone (human or agent) joining mid-stream. Updated as the project moves.
+> Snapshot of what is true *right now*. This is the entry point for picking the project up mid-stream:
+> read [`index.md`](./index.md) first, then this page, then the relevant core page. Edited in place at
+> the close of every change, per [`CLAUDE.md`](./CLAUDE.md) → "Keep-in-sync checklist". Every file
+> pointer below either resolves to a real file or this page is wrong — fix the page. The load-bearing
+> design decisions live in [`decisions.md`](./decisions.md).
 
-## Phase
+## Current phase
 
-**Build complete (headless) — awaiting the live smoke run.** Phase 1 was **skipped** (2026-06-14)
-and the native Swift app was built directly. The tested harness (config, transcript, silence
-backoff, coach tool-loop, OpenAI client, activity log + viewer, session store, overlay invisibility)
-is **green**; `Jarvis.app` builds, signs with the stable `Jarvis Dev` identity, and launches. The
-app shell, overlay, mic capture, and realtime transcriber **compile and launch**, but their *live*
-behavior (real mic, websocket, TCC grants, real `OPENAI_API_KEY`, real model IDs) is verified only
-by the human smoke checklist in the [README](../README.md#live-smoke-checklist).
+**Build complete (headless) — awaiting the live smoke run.** The native Swift app builds, signs with
+the stable `Jarvis Dev` identity, and launches, and the full tested harness is green. The OS-bound edges
+(mic + system-audio capture, the realtime transcriber, TCC grants, the live brain/transcription
+round-trips with a real key and model IDs) compile and launch but are verified only by the human smoke
+run.
 
-## What's Decided
+## Next action
 
-- **What it is:** a personal LeetCode-coaching "Jarvis" for macOS. Hears you think aloud,
-  watches your screen *on demand*, proactively offers short coaching tips via an overlay.
-- **Brain:** `gpt-5.5` (Responses API, tool-use + vision), with a server-side conversation per
-  session for multi-turn memory. Model + reasoning effort are user-selectable in Settings
-  (default `gpt-5.5` / `low`). **Transcription:** `gpt-4o-transcribe` over the GA Realtime API.
-  API-only, no local models. Rationale: [architecture.md](./architecture.md#4-data-flow--cost-model).
-- **Overlay:** the brain returns the tip as a pre-split `lines` array (Structured Outputs); the
-  overlay shows up to ~3 short lines per response, one at a time. Newer tips queue behind the one on
-  screen rather than interrupting it, so no hint is dropped.
-- **Build approach: native Swift, directly.** The two-phase plan (fork Natively first, then native)
-  was dropped: **Phase 1 is skipped** and we build the clean native Swift app now. The fork
-  evaluation and survey still stand as the *why-build-our-own* basis ([fork evaluation](./fork-evaluation.md),
-  [survey](./landscape-survey.md) — none usable: closed, paid, answer-dumping; LockedIn AI is the
-  best behavior reference), but Natively is now at most a reference, not a base.
-- **Toolchain:** **SwiftPM + the Command Line Tools**, *no full Xcode required*. The app is packaged
-  into a `.app` bundle by hand and signed with a **stable self-signed identity** (`Jarvis Dev`, so
-  TCC grants persist across rebuilds); macOS **TCC prompts** grant Screen Recording + Microphone at
-  first run. See [build-and-run.md](./build-and-run.md).
-- **Where it's built:** on the MacBook, in the **main `forrest` account**, inside a **git worktree**
-  for recoverability. The earlier HARD REQUIREMENT to build in a separate restricted account is
-  **waived for this personal build** (decision 2026-06-14) — the security tradeoff (unsandboxed app
-  could read the main account's files) is accepted for now and documented in
-  [sandbox.md](./sandbox.md); the hardened model (App Sandbox + restricted account) is kept there as
-  the path for any future shippable version.
-
-## Key decisions
-
-The load-bearing decisions and their rationale live in the dedicated log:
-[decisions.md](./decisions.md) (newest last; each entry links to the design page with the detail).
-
-## Open Questions / To Confirm
-
-- **Double-talk under loud far audio** can over-attenuate the user briefly (AEC3 limitation); a neural
-  canceller (DTLN, Muesli-style) on the same aligned streams is the escalation if it bites in practice.
-  AEC stays ON across all routes (near-passthrough on headphones); we deliberately don't auto-bypass
-  on "headphones" because the detection is unreliable (a BT speaker looks like headphones) and a wrong
-  bypass re-admits the echo.
-- **Universal binary.** `libjarvis-aec.a` is arm64-only; `lipo` in an x86_64 build if Intel is needed.
-- Minimum macOS version target. Build host is macOS 26.5; ScreenCaptureKit screen+audio capture
-  needs macOS 13+. Target **macOS 14+** unless a needed API forces higher.
-- The **live Realtime transcription wiring** in `Sources/JarvisApp/Capture/RealtimeTranscriber.swift` is the
-  one thing untested headlessly — the connect/config follow current docs but the bare-WebSocket
-  connect for a transcription-only session is unverified until the live run (see Next Action).
-
-## Next Action
-
-The headless build is done. Remaining is the **human smoke run** — build, run, and validate live:
+Run the **human smoke run** — build, run, and validate live:
 
 1. `./scripts/build-app.sh release` → `open ./Jarvis.app`; grant Microphone + Screen Recording
    (one-time; they persist afterward — see [build-and-run.md](./build-and-run.md)).
@@ -72,7 +28,35 @@ The headless build is done. Remaining is the **human smoke run** — build, run,
    excluded from the screenshot; while you talk steadily Jarvis stays mostly quiet (model restraint,
    not a rate cap) and **Stop Jarvis** halts the pipeline. (Run via `./scripts/build-app.sh --run`,
    then open Settings → Activity to watch each step.)
-4. **Only remaining live unknown:** the bare-WebSocket connect for a transcription-only Realtime
+4. **The one untested-headlessly edge:** the bare-WebSocket connect for a transcription-only Realtime
    session. The connect contract (`?intent=transcription`, the `session.update` payload) lives in
-   `RealtimeSession.swift`; if the live connect fails, that's the file to adjust (e.g. swap
-   `transcriptionModel` in `Config.swift`).
+   `Sources/JarvisCore/Transcription/RealtimeSession.swift`; if the live connect fails, that's the file
+   to adjust (e.g. swap `transcriptionModel` in `Config.swift`).
+
+## Built
+
+Tested `JarvisCore` + `JarvisOverlay` harness is green (`./scripts/run-tests.sh`); `JarvisApp` is the
+thin OS shell, verified by the smoke run.
+
+- `Sources/JarvisCore/Audio/` — PCM + utterance buffering (`PCMBuffer`, `UtteranceBuffer`, `PCM16Framer`, `AudioDownmix`).
+- `Sources/JarvisCore/Transcription/` — realtime session wire contract + rolling transcript (`RealtimeSession`, `Transcript`, `NoiseReduction`).
+- `Sources/JarvisCore/Coach/` — the event loop and brain client: `CoachDriver`, `OpenAIBrainClient`, `ToolDefs`, `BrainModelCatalog` (default `gpt-5.5`), `ReasoningEffort`.
+- `Sources/JarvisCore/Triggers/` — turn/silence trigger detection + silence backoff (`Trigger`, `SilenceBackoff`).
+- `Sources/JarvisCore/Screen/ScreenCapture.swift` — the model-triggered screen-capture tool contract.
+- `Sources/JarvisCore/Overlay/` — overlay text model + length-proportional timing + fan-out (`OverlayRendering`, `OverlayTiming`, `OverlayAppearance`, `BroadcastOverlay`).
+- `Sources/JarvisCore/Config/` — config + owner-only secrets + brain preferences (`Config`, `Secrets`, `BrainPreferences`).
+- `Sources/JarvisCore/Diagnostics/` — logging, always-on activity log, session-history store, user-facing errors (`ActivityLog`, `SessionStore`, `UserFacingError`).
+- `Sources/JarvisOverlay/` — the capture-invisible `NSPanel` surfaces: `OverlayCaptionPanel` (transient), `OverlayBoxPanel` (persistent), `NSPanel+CaptureExclusion`.
+- `Sources/JarvisApp/App/` + `MenuBar/` — entry point, menu bar, Start/Stop, `ErrorReporter` (severity-driven `NSAlert`).
+- `Sources/JarvisApp/Capture/` — one-clock aggregate mic + system-audio capture with AEC3 echo cancellation + resampling (`AggregateEchoCapture`, `WebRTCEchoCanceller`, `Resampler`, `RealtimeTranscriber`, `Permissions`).
+- `Sources/JarvisApp/Settings/` — the unified Settings window (`SettingsWindow` hosting API-key / Overlay / Brain / Activity sections).
+- `Sources/JarvisApp/Shortcuts/HotkeyController.swift` — the global Carbon ⌥⌘J on-demand-hint hotkey.
+- `Sources/JarvisApp/Viewer/ActivityViewer.swift` — the in-app `WKWebView` activity viewer.
+- `Sources/CJarvisAEC/lib/libjarvis-aec.a` — the prebuilt, zero-dylib WebRTC AEC3 C edge (the `CJarvisAEC` target; rebuilt by `scripts/build-aec.sh`).
+
+## Not yet built
+
+- **Live smoke run verified** — the one remaining gate before "done"; see Next action.
+- **Universal binary** — `Sources/CJarvisAEC/lib/libjarvis-aec.a` is arm64-only; `lipo` in an x86_64 slice if Intel is ever needed.
+- **Neural double-talk canceller** (DTLN / Muesli-style on the same aligned streams) — the escalation if AEC3 over-attenuates the user under loud far audio in practice.
+- **Minimum macOS version confirmed** — currently targeting macOS 14+; confirm against the APIs actually used (ScreenCaptureKit needs 13+).
