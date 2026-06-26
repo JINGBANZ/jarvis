@@ -61,6 +61,7 @@ never archived. Full design: [`wiki/architecture.md`](./wiki/architecture.md); p
 .
 ├── Package.swift              # SwiftPM manifest (Swift 6, macOS 14+)
 ├── CLAUDE.md                  # development rules for agents/humans working in the repo
+├── AGENTS.md                  # symlink → CLAUDE.md, for AGENTS.md-compatible tools
 ├── Sources/
 │   ├── JarvisCore/            # the testable harness — Foundation-only, runs anywhere
 │   │   ├── Audio/                 # PCM + utterance buffering
@@ -95,6 +96,11 @@ any machine; **`JarvisOverlay`** is the AppKit overlay, split into its own targe
 testable; **`JarvisApp`** is the thin macOS glue (menu bar, capture, permissions, activity viewer) verified
 by a live run. Folders are grouped **by subsystem**, following
 [`wiki/architecture.md`](./wiki/architecture.md). Working rules live in [`CLAUDE.md`](./CLAUDE.md).
+
+Claude Code reads `CLAUDE.md`; the vendor-neutral [AGENTS.md](https://agents.md/) standard (Cursor,
+Codex, Copilot, Gemini CLI, …) reads `AGENTS.md`. To serve both from one source of truth, `AGENTS.md` is
+a git symlink to `CLAUDE.md` (stored as mode `120000`, so it clones correctly on macOS/Linux); the same
+pairing exists in `wiki/`. Edit `CLAUDE.md` — never the symlink.
 
 ## Scripts
 
