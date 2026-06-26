@@ -97,11 +97,6 @@ testable; **`JarvisApp`** is the thin macOS glue (menu bar, capture, permissions
 by a live run. Folders are grouped **by subsystem**, following
 [`wiki/architecture.md`](./wiki/architecture.md). Working rules live in [`CLAUDE.md`](./CLAUDE.md).
 
-Claude Code reads `CLAUDE.md`; the vendor-neutral [AGENTS.md](https://agents.md/) standard (Cursor,
-Codex, Copilot, Gemini CLI, …) reads `AGENTS.md`. To serve both from one source of truth, `AGENTS.md` is
-a git symlink to `CLAUDE.md` (stored as mode `120000`, so it clones correctly on macOS/Linux); the same
-pairing exists in `wiki/`. Edit `CLAUDE.md` — never the symlink.
-
 ## Scripts
 
 | Script | What it does |
