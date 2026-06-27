@@ -52,10 +52,8 @@ public enum RealtimeSession {
     }
 
     /// True if a parsed wire event is the server's `session_expired` error — emitted when a transcription
-    /// session hits its maximum lifetime (~60 min). The socket then closes (1001) and we reconnect. This
-    /// is an EXPECTED rotation, not a failure: callers use it to log the rotation calmly and suppress the
-    /// redundant close / receive-failure noise that follows, while the reconnect path handles it
-    /// transparently. We don't predict *when* this fires — we just react to it whenever it does.
+    /// session hits its maximum lifetime (~60 min) and the socket rotates. An EXPECTED rotation, not a
+    /// fault (callers log it calmly and quiet the reconnect noise; see `RealtimeTranscriber`).
     public static func isSessionExpired(_ event: [String: Any]) -> Bool {
         guard event["type"] as? String == "error",
               let error = event["error"] as? [String: Any] else { return false }

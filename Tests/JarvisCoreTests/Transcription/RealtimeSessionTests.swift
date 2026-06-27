@@ -160,7 +160,9 @@ import Testing
     /// real faults rather than being quietly swallowed.
     @Test func isSessionExpiredRejectsEverythingElse() {
         #expect(!RealtimeSession.isSessionExpired(["type": "error", "error": ["code": "invalid_api_key"]]))
-        #expect(!RealtimeSession.isSessionExpired(["type": "error"]))   // no error object
+        #expect(!RealtimeSession.isSessionExpired(["type": "error"]))                       // no error object
+        #expect(!RealtimeSession.isSessionExpired(["type": "error", "error": ["message": "x"]]))  // error, but no code
+        #expect(!RealtimeSession.isSessionExpired(["type": "error", "error": ["code": 5]]))  // non-string code
         #expect(!RealtimeSession.isSessionExpired(["type": "transcription_session.created"]))
         #expect(!RealtimeSession.isSessionExpired([:]))
     }

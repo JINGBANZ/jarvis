@@ -75,6 +75,11 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         // Start clean: clear the stopped flag AND any stale backoff state from a prior session.
         lock.lock(); stopped = false; reconnectAttempt = 0; isReconnecting = false; rotating = false; lock.unlock()
         openSocket()
+        // Arm the proactive silence check exactly once, here on the first connect. A reconnect (session
+        // rotation) re-enters via openSocket() directly, NOT connect(), so the running timer is left
+        // alone — its backoff step and elapsed quiet carry across the rotation instead of snapping back
+        // to the base interval every ~hour. (Speech still resets it, via `handle`.)
+        resetSilenceTimer()
     }
 
     private func openSocket() {
@@ -90,12 +95,6 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         task.resume()
         configureSession()
         receiveLoop()
-        // Arm the proactive silence check on the FIRST connect only. On a reconnect (session rotation)
-        // the existing timer keeps running — it's tied to the conversation, not the socket — so the
-        // backoff step and the elapsed quiet carry across the rotation instead of snapping back to the
-        // base interval every time the ~hourly session rotates. (Speech still resets it, via `handle`.)
-        lock.lock(); let firstConnect = !everConnected; lock.unlock()
-        if firstConnect { resetSilenceTimer() }
         startPing()
     }
 
@@ -331,10 +330,10 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         }
     }
 
-    /// (Re)start the proactive silence check from its base interval — called on the first connect and
-    /// whenever speech is heard, so a fresh quiet stretch always begins at the base interval before
-    /// backing off. A reconnect deliberately does NOT call this (see `openSocket`), so a session
-    /// rotation preserves the current backoff step rather than resetting it.
+    /// (Re)start the proactive silence check from its base interval — called from `connect()` (the first
+    /// connect) and whenever speech is heard, so a fresh quiet stretch always begins at the base interval
+    /// before backing off. A reconnect re-enters via `openSocket()` and deliberately does NOT call this,
+    /// so a session rotation preserves the current backoff step rather than resetting it.
     private func resetSilenceTimer() {
         // The "them" transcriber leaves onSilence nil (only the mic owns the "are you stuck?" prompt);
         // skip arming a timer that would just no-op, avoiding per-utterance main-queue/Timer churn.
