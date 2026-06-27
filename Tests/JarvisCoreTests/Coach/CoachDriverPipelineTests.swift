@@ -320,6 +320,24 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(brain.createConversationCount == 1)               // failure flag prevents re-POST every turn
     }
 
+    /// Regression: the stateless context window is filtered on SESSION-RELATIVE line times, so the
+    /// cutoff must be session-relative too. The live `SystemClock` returns epoch seconds (~1.7e9), so
+    /// passing absolute `clock.now()` to `renderWindow` would push the cutoff past every line and send
+    /// an EMPTY window. The other stateless test starts the clock at 0 (absolute == relative, hiding
+    /// this); here the session starts at a large epoch-like origin so an absolute/relative mix-up fails.
+    @Test func statelessContextWindowSurvivesARealisticClockOrigin() async {
+        let clock = ManualClock(now: 1_000_000)   // session origin far from 0, like real epoch time
+        let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s", lines: ["hi"])])],
+                                  failConversation: true)
+        let (driver, transcript) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(), clock: clock)
+        transcript.append(.init(speaker: .me, text: "the whole problem context", at: 2))   // spoken 2s in
+        clock.advance(by: 10)                                                               // 10s elapsed
+        await driver.handleTrigger(.turnEnd)
+        #expect(brain.conversationIds.last! == nil)                 // confirm the stateless path
+        let lastUser = brain.calls.last!.compactMap { $0.text }.joined(separator: " ")
+        #expect(lastUser.contains("the whole problem context"))     // window NON-empty despite the origin
+    }
+
     // MARK: - Observability: structured turn outcomes (Workstream B)
 
     @Test func spokeOutcome() async {

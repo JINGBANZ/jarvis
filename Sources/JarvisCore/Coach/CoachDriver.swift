@@ -176,7 +176,9 @@ public final class CoachDriver: @unchecked Sendable {
             let delta = transcript.renderFrom(index: currentSentCount())   // single snapshot: text + upTo
             newSpeech = delta.text; upTo = delta.upTo
         } else {
-            newSpeech = transcript.renderWindow(seconds: config.transcriptWindowSeconds, now: now)
+            // `renderWindow` filters on session-relative line times (`.at`), so the cutoff must be
+            // session-relative too — pass elapsed, not absolute `clock.now()`, or the window is empty.
+            newSpeech = transcript.renderWindow(seconds: config.transcriptWindowSeconds, now: now - sessionStart)
             upTo = 0   // unused: stateless mode never advances the sent-index
         }
 
