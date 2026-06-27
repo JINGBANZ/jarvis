@@ -49,6 +49,7 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
     private var stopped = false
     private var connected = false        // true only between "session ready" and the next drop/close
     private var everConnected = false    // distinguishes the first connect from a reconnect
+    private var rotating = false         // an EXPECTED server rotation is mid-flight; quiet the noise it makes
 
     init(apiKey: String, model: String, speaker: Speaker = .me, transcript: RollingTranscript, clock: Clock,
          silenceTimeout: TimeInterval, silenceMaxInterval: TimeInterval,
@@ -72,8 +73,13 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
 
     func connect() {
         // Start clean: clear the stopped flag AND any stale backoff state from a prior session.
-        lock.lock(); stopped = false; reconnectAttempt = 0; isReconnecting = false; lock.unlock()
+        lock.lock(); stopped = false; reconnectAttempt = 0; isReconnecting = false; rotating = false; lock.unlock()
         openSocket()
+        // Arm the proactive silence check exactly once, here on the first connect. A reconnect (session
+        // rotation) re-enters via openSocket() directly, NOT connect(), so the running timer is left
+        // alone — its backoff step and elapsed quiet carry across the rotation instead of snapping back
+        // to the base interval every ~hour. (Speech still resets it, via `handle`.)
+        resetSilenceTimer()
     }
 
     private func openSocket() {
@@ -89,7 +95,6 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         task.resume()
         configureSession()
         receiveLoop()
-        resetSilenceTimer()
         startPing()
     }
 
@@ -172,9 +177,11 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
             case .failure(let err):
                 // A failed pending receive is the EXPECTED artifact of an intentional Stop
                 // (cancel → ENOTCONN/POSIX 57). Suppress it then; only a live failure reconnects.
-                self.lock.lock(); let isStopped = self.stopped; self.connected = false; self.lock.unlock()
+                self.lock.lock(); let isStopped = self.stopped; let quiet = self.rotating; self.connected = false; self.lock.unlock()
                 if isStopped { return }
-                jlog("Jarvis realtime receive failed: \(err)")
+                // During an expected rotation the failing receive is just the old socket going away — the
+                // rotation line already covers it, so don't surface "Socket is not connected" on top.
+                if !quiet { jlog("Jarvis realtime receive failed: \(err)") }
                 self.scheduleReconnect()
             case .success(let message):
                 self.lock.lock(); self.reconnectAttempt = 0; self.lock.unlock() // healthy
@@ -212,14 +219,20 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
             // handled on the completed event above. Just refresh the silence timer here.
             resetSilenceTimer()
         case "session.created", "transcription_session.created":
-            lock.lock(); let wasReconnect = everConnected; everConnected = true; lock.unlock()
+            // A fresh session is up: the rotation (if any) completed, so re-enable normal drop logging.
+            lock.lock(); let wasReconnect = everConnected; everConnected = true; rotating = false; lock.unlock()
             jlog("Jarvis realtime: transcription session ready")
             // Flush buffered audio BEFORE marking connected, so live mic audio (which keeps buffering
             // while !connected) can't be sent ahead of the older buffered chunks and scramble order.
             flushBufferedAudio(isReconnect: wasReconnect)
             lock.lock(); connected = true; lock.unlock()
         case "error":
-            jlog("Jarvis realtime error event: \(text)")
+            // A session_expired error is the server telling us this session hit its lifetime cap. That's
+            // an expected rotation, not a fault: announce it once, calmly, and mark `rotating` so the
+            // close / receive-failure it triggers next don't pile on scary lines. The reconnect itself is
+            // driven by those paths as usual. Any OTHER error is a real fault — log it verbatim.
+            if RealtimeSession.isSessionExpired(obj) { noteRotation("reached its time limit") }
+            else { jlog("Jarvis realtime error event: \(text)") }
         default:
             break
         }
@@ -262,10 +275,21 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
     func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask,
                     didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
         // An intentional Stop closes the socket on purpose; don't alarm the user with it.
-        lock.lock(); let isStopped = stopped; connected = false; lock.unlock()
+        lock.lock(); let isStopped = stopped; let quiet = rotating; connected = false; lock.unlock()
         if isStopped { return }
-        jlog("Jarvis realtime socket closed: code \(closeCode.rawValue)")
+        // A server "going away" (1001) is a routine rotation/restart we just reconnect through. Treat it
+        // as expected even if no session_expired error preceded it (the two can arrive in either order);
+        // any other close code is unexpected and stays visible.
+        if closeCode == .goingAway { noteRotation("server going away") }
+        else if !quiet { jlog("Jarvis realtime socket closed: code \(closeCode.rawValue)") }
         scheduleReconnect()
+    }
+
+    /// Announce an expected server-initiated rotation exactly once, then mark `rotating` so the close /
+    /// receive-failure it produces stay quiet until the replacement session is ready (which clears it).
+    private func noteRotation(_ reason: String) {
+        lock.lock(); let already = rotating; rotating = true; lock.unlock()
+        if !already { jlog("Jarvis realtime: session rotating (\(reason)) — reconnecting") }
     }
 
     private func scheduleReconnect() {
@@ -306,8 +330,10 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         }
     }
 
-    /// (Re)start the proactive silence check from its base interval — called on connect and whenever
-    /// speech is heard, so a fresh quiet stretch always begins at the base interval before backing off.
+    /// (Re)start the proactive silence check from its base interval — called from `connect()` (the first
+    /// connect) and whenever speech is heard, so a fresh quiet stretch always begins at the base interval
+    /// before backing off. A reconnect re-enters via `openSocket()` and deliberately does NOT call this,
+    /// so a session rotation preserves the current backoff step rather than resetting it.
     private func resetSilenceTimer() {
         // The "them" transcriber leaves onSilence nil (only the mic owns the "are you stuck?" prompt);
         // skip arming a timer that would just no-op, avoiding per-utterance main-queue/Timer churn.

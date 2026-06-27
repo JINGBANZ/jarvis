@@ -43,9 +43,12 @@ public final class RollingTranscript: @unchecked Sendable {
         return lines.map(\.at).max()
     }
 
-    /// Seconds since the last spoken line (0 if none).
+    /// Seconds since the last spoken line. Callers pass session-relative time, so with **no speech yet
+    /// this session** the user has been silent the *whole* session — return the elapsed `now`, not 0.
+    /// Returning 0 would peg the "are you stuck?" silence check below its interval forever, so it would
+    /// never fire before the first utterance (a user who opens Jarvis and works silently got no nudges).
     public func silenceDuration(now: TimeInterval) -> TimeInterval {
-        guard let last = lastSpeechTime else { return 0 }
+        guard let last = lastSpeechTime else { return max(0, now) }
         return max(0, now - last)
     }
 

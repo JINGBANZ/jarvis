@@ -11,11 +11,9 @@ public enum TriggerReason: Sendable, Equatable {
 /// Timing context handed to the model so it can tell "thinking" from "stuck".
 public struct TriggerContext: Sendable {
     public let reason: TriggerReason
-    public let secondsSinceLastSpeech: TimeInterval
     public let sessionElapsedSeconds: TimeInterval
-    public init(reason: TriggerReason, secondsSinceLastSpeech: TimeInterval, sessionElapsedSeconds: TimeInterval) {
+    public init(reason: TriggerReason, sessionElapsedSeconds: TimeInterval) {
         self.reason = reason
-        self.secondsSinceLastSpeech = secondsSinceLastSpeech
         self.sessionElapsedSeconds = sessionElapsedSeconds
     }
 

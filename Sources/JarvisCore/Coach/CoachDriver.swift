@@ -159,11 +159,7 @@ public final class CoachDriver: @unchecked Sendable {
         if case .silence(let secs) = reason { jlog("🤫 quiet for \(Int(secs))s") }
 
         let now = clock.now()
-        let ctx = TriggerContext(
-            reason: reason,
-            secondsSinceLastSpeech: transcript.silenceDuration(now: now),
-            sessionElapsedSeconds: now - sessionStart
-        )
+        let ctx = TriggerContext(reason: reason, sessionElapsedSeconds: now - sessionStart)
 
         // A hotkey trigger leaves no "🗣 heard:" line (the user pressed a key, didn't speak), so record
         // it — with the synthetic request we pre-fill as the user's message — so the activity viewer
@@ -180,7 +176,9 @@ public final class CoachDriver: @unchecked Sendable {
             let delta = transcript.renderFrom(index: currentSentCount())   // single snapshot: text + upTo
             newSpeech = delta.text; upTo = delta.upTo
         } else {
-            newSpeech = transcript.renderWindow(seconds: config.transcriptWindowSeconds, now: now)
+            // `renderWindow` filters on session-relative line times (`.at`), so the cutoff must be
+            // session-relative too — pass elapsed, not absolute `clock.now()`, or the window is empty.
+            newSpeech = transcript.renderWindow(seconds: config.transcriptWindowSeconds, now: now - sessionStart)
             upTo = 0   // unused: stateless mode never advances the sent-index
         }
 

@@ -51,6 +51,15 @@ public enum RealtimeSession {
         ["type": "input_audio_buffer.append", "audio": base64PCM]
     }
 
+    /// True if a parsed wire event is the server's `session_expired` error — emitted when a transcription
+    /// session hits its maximum lifetime (~60 min) and the socket rotates. An EXPECTED rotation, not a
+    /// fault (callers log it calmly and quiet the reconnect noise; see `RealtimeTranscriber`).
+    public static func isSessionExpired(_ event: [String: Any]) -> Bool {
+        guard event["type"] as? String == "error",
+              let error = event["error"] as? [String: Any] else { return false }
+        return error["code"] as? String == "session_expired"
+    }
+
     /// The event type the server emits when an utterance's transcription is final.
     public static let completedTranscriptionType = "conversation.item.input_audio_transcription.completed"
 

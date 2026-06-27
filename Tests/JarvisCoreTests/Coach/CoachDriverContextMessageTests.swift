@@ -45,8 +45,7 @@ import Testing
 
         await driver.handleTrigger(.silence(secondsQuiet: 30))
 
-        let expected = TriggerContext(reason: .silence(secondsQuiet: 30),
-                                      secondsSinceLastSpeech: 0, sessionElapsedSeconds: 0).promptLine
+        let expected = TriggerContext(reason: .silence(secondsQuiet: 30), sessionElapsedSeconds: 0).promptLine
         let msg = lastUserMessage(brain)
         #expect(msg == expected)
         #expect(msg?.contains("New since last turn") == false)

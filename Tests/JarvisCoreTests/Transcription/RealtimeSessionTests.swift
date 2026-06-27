@@ -147,4 +147,23 @@ import Testing
         #expect(ev["type"] as? String == "input_audio_buffer.append")
         #expect(ev["audio"] as? String == "AAAA")
     }
+
+    /// The real `session_expired` wire event (the same JSON the socket delivers at the ~60-min cap) is
+    /// recognized as an expected rotation, so the transcriber logs it calmly instead of as a fault.
+    @Test func isSessionExpiredMatchesTheServerExpiryEvent() throws {
+        let wire = "{\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"code\":\"session_expired\",\"message\":\"Your session hit the maximum duration of 60 minutes.\"}}"
+        let obj = try #require(try JSONSerialization.jsonObject(with: Data(wire.utf8)) as? [String: Any])
+        #expect(RealtimeSession.isSessionExpired(obj))
+    }
+
+    /// Other errors, non-error events, and malformed payloads are NOT rotations — they stay visible as
+    /// real faults rather than being quietly swallowed.
+    @Test func isSessionExpiredRejectsEverythingElse() {
+        #expect(!RealtimeSession.isSessionExpired(["type": "error", "error": ["code": "invalid_api_key"]]))
+        #expect(!RealtimeSession.isSessionExpired(["type": "error"]))                       // no error object
+        #expect(!RealtimeSession.isSessionExpired(["type": "error", "error": ["message": "x"]]))  // error, but no code
+        #expect(!RealtimeSession.isSessionExpired(["type": "error", "error": ["code": 5]]))  // non-string code
+        #expect(!RealtimeSession.isSessionExpired(["type": "transcription_session.created"]))
+        #expect(!RealtimeSession.isSessionExpired([:]))
+    }
 }
