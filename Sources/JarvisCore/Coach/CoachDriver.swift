@@ -159,11 +159,7 @@ public final class CoachDriver: @unchecked Sendable {
         if case .silence(let secs) = reason { jlog("🤫 quiet for \(Int(secs))s") }
 
         let now = clock.now()
-        let ctx = TriggerContext(
-            reason: reason,
-            secondsSinceLastSpeech: transcript.silenceDuration(now: now - sessionStart),
-            sessionElapsedSeconds: now - sessionStart
-        )
+        let ctx = TriggerContext(reason: reason, sessionElapsedSeconds: now - sessionStart)
 
         // A hotkey trigger leaves no "🗣 heard:" line (the user pressed a key, didn't speak), so record
         // it — with the synthetic request we pre-fill as the user's message — so the activity viewer
