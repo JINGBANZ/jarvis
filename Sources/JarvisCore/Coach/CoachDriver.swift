@@ -161,7 +161,7 @@ public final class CoachDriver: @unchecked Sendable {
         let now = clock.now()
         let ctx = TriggerContext(
             reason: reason,
-            secondsSinceLastSpeech: transcript.silenceDuration(now: now),
+            secondsSinceLastSpeech: transcript.silenceDuration(now: now - sessionStart),
             sessionElapsedSeconds: now - sessionStart
         )
 

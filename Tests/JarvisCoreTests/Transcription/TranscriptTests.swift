@@ -33,9 +33,12 @@ import Testing
         #expect(abs(t.silenceDuration(now: 70) - 20) < 0.001)
     }
 
-    @Test func silenceDurationWhenEmptyIsZero() {
+    /// With no speech yet, the user has been silent for the whole session, so silence is measured from
+    /// session start (the passed `now`), not 0 — otherwise the "are you stuck?" check, gated on
+    /// `quiet >= interval`, could never fire before the first utterance.
+    @Test func silenceDurationWhenEmptyIsWholeSession() {
         let t = RollingTranscript()
-        #expect(abs(t.silenceDuration(now: 70) - 0) < 0.001)
+        #expect(abs(t.silenceDuration(now: 70) - 70) < 0.001)
     }
 
     /// Silence is measured from the latest SPOKEN time, not the last appended line. The two sockets
