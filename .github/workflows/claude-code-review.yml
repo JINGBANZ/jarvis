@@ -41,9 +41,13 @@ jobs:
           # --comment makes the review post to the PR (inline comments per issue); without it the
           # review only prints to the Actions log.
           prompt: '/code-review:code-review --comment ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
-          # Pin the top-level driver model. Note: the code-review command still spawns its own
-          # Opus bug-hunting subagents internally — this only sets the orchestrator model.
-          claude_args: '--model claude-sonnet-4-6'
+          # --model pins the top-level driver model (the code-review command still spawns its own
+          # Opus bug-hunting subagents internally). The inline-comment tool MUST be listed here:
+          # in agent mode the action only starts the github_inline_comment MCP server when this tool
+          # is in --allowedTools, otherwise the review falls back to a single top-level comment.
+          claude_args: |
+            --model claude-sonnet-4-6
+            --allowedTools "mcp__github_inline_comment__create_inline_comment"
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://code.claude.com/docs/en/cli-reference for available options
 
