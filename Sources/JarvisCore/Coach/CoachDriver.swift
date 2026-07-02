@@ -231,6 +231,11 @@ public final class CoachDriver: @unchecked Sendable {
                 // A cancellation (barge-in / Stop) is expected — report it quietly, not as a failure.
                 if Task.isCancelled { jlog("… turn cancelled (interrupted)"); return .cancelled }
                 jlog("Jarvis coach: brain request failed on \(reason): \(error.localizedDescription)")
+                // A capture answered in THIS failed request left its function_call open server-side (the
+                // earlier iteration stored the call; the tool-result send is what just failed). Record it
+                // so the next turn closes it — otherwise the conversation carries a dangling function_call
+                // and the next request can choke on it. Mirrors the tool-loop-cap close below.
+                if convId != nil, let cap = unansweredCaptureCallId { setPendingCloseCallId(cap) }
                 return .brainError
             }
             // The input provably reached the server — NOW commit the conversation-state mutations:
