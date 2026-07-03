@@ -16,19 +16,22 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
     private let reasoningEffort: String
     private let endpoint: URL
     private let timeout: TimeInterval
-    private let maxRetries: Int
-    private let backoffBaseSeconds: Double
     private let maxOutputTokens: Int
     private let promptCacheKey: String
     private let send: Sender
+
+    /// A generous request ceiling that is a HANG backstop, not a latency knob. Normal coaching turns
+    /// finish in a few seconds; this only fires on a genuinely stuck request, so it sits well above the
+    /// slow-but-real reasoning tail. A tight value (the old 15s) abandons a still-generating turn while
+    /// the server keeps the per-session conversation lock — stranding every following turn with
+    /// `conversation_locked`. Waiting instead lets the turn finish and release the lock naturally.
+    public static let defaultTimeout: TimeInterval = 60
 
     public init(apiKey: String,
                 model: String,
                 reasoningEffort: String = ReasoningEffort.default.rawValue,
                 endpoint: URL = URL(string: "https://api.openai.com/v1/responses")!,
-                timeout: TimeInterval = 15,
-                maxRetries: Int = 2,
-                backoffBaseSeconds: Double = 0.5,
+                timeout: TimeInterval = OpenAIBrainClient.defaultTimeout,
                 // The cap MUST track the effort: it's a combined reasoning+output budget, so a value
                 // too small for the effort truncates the run (the high-effort bug). Callers pass the
                 // budget for the *selected* effort (`AppDelegate` → `effort.maxOutputTokens`); this
@@ -41,8 +44,6 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
         self.reasoningEffort = reasoningEffort
         self.endpoint = endpoint
         self.timeout = timeout
-        self.maxRetries = maxRetries
-        self.backoffBaseSeconds = backoffBaseSeconds
         self.maxOutputTokens = maxOutputTokens
         self.promptCacheKey = promptCacheKey
         self.send = send ?? { request in
@@ -60,25 +61,19 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
         request.httpBody = try encodeBody(messages: messages, tools: tools, toolChoice: toolChoice,
                                           conversationId: conversationId)
 
-        var attempt = 0
-        while true {
-            let (data, http) = try await send(request)
-            let status = http?.statusCode ?? 0
-            if (200..<300).contains(status) { return try decode(data) }
-
-            let retryable = status == 429 || (500...599).contains(status)
-            if retryable && attempt < maxRetries {
-                let retryAfter = http?.value(forHTTPHeaderField: "Retry-After").flatMap { Double($0) }
-                // Exponential backoff with multiplicative jitter; honor Retry-After when present.
-                let backoff = backoffBaseSeconds * pow(2, Double(attempt)) * Double.random(in: 1.0...1.3)
-                let delay = max(0, retryAfter ?? backoff)
-                if delay > 0 { try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)) }
-                attempt += 1
-                continue
-            }
+        // One attempt, no in-request retry. Any failure — a client-side timeout past the ceiling, a
+        // dropped connection, an HTTP error, or a `conversation_locked` while a prior turn is still
+        // generating — throws to the driver, which recovers on the NEXT trigger: `sentCount` only
+        // advances on success, so the next turn's delta re-sends the failed lines PLUS everything newer.
+        // That's fresher than resending a stale body, and it lets a held conversation lock clear
+        // naturally instead of hammering it within the turn.
+        let (data, http) = try await send(request)
+        let status = http?.statusCode ?? 0
+        guard (200..<300).contains(status) else {
             throw NSError(domain: "OpenAIBrainClient", code: status,
                           userInfo: [NSLocalizedDescriptionKey: String(data: data, encoding: .utf8) ?? "http \(status)"])
         }
+        return try decode(data)
     }
 
     /// Create a server-side conversation (one per coaching session) so the model keeps continuity —

@@ -200,8 +200,14 @@ The always-on legs are built to survive transient failure rather than die on it:
   (`PCMBuffer`, capped at `maxBufferedAudioSeconds`, oldest evicted) and **flushes it into the new
   session on reconnect** — a mid-sentence drop no longer loses the user's words. Reconnect uses
   capped exponential backoff with a ping keepalive.
-- **The brain call** retries 429/5xx with bounded backoff (honoring `Retry-After`) under a request
-  timeout, and the coach loop is single-flighted so a turn can't double-speak.
+- **The brain call** is single-flighted (a turn can't double-speak) and runs under a generous request
+  timeout — a hang backstop set well above the reasoning-turn tail, so a slow turn is waited out, not
+  abandoned. It makes **one attempt** per turn: a failed request (a stuck/timed-out call, a dropped
+  connection, an HTTP error, or a `conversation_locked` while a prior turn still holds the per-session
+  conversation lock) fails the turn rather than retrying in place. Recovery is on the **next trigger** —
+  sent-state advances only on a successful send, so the next turn re-sends the still-unsent transcript
+  (the failed lines plus anything newer, fresher than a resend) and a held lock clears naturally instead
+  of being hammered.
 
 ## 5. Safety Model
 

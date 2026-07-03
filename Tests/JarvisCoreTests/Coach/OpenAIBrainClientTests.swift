@@ -109,27 +109,17 @@ private func speakResponseBody(arguments: String) -> Data {
         #expect(id == "conv_new123")
     }
 
-    @Test func httpErrorThrows() async {
-        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5", maxRetries: 0,
-                                       send: { _ in (Data("nope".utf8), http(400)) })
+    /// Any non-2xx fails fast — there is no in-request retry. A failure throws to the driver, which
+    /// recovers on the next trigger by re-sending the (still-uncommitted) backlog. This one-attempt
+    /// contract is what lets a held `conversation_locked` clear naturally instead of being hammered.
+    @Test func httpErrorThrowsWithoutRetry() async {
+        let attempts = Counter()
+        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+                                       send: { _ in _ = attempts.next(); return (Data("nope".utf8), http(400)) })
         await #expect(throws: (any Error).self) {
             _ = try await client.respond(messages: [.user("hi")], tools: coachTools)
         }
-    }
-
-    /// 429 is retried with backoff; a subsequent 200 succeeds.
-    @Test func retriesOn429ThenSucceeds() async throws {
-        let attempts = Counter()
-        let ok = #"{"output":[{"type":"function_call","id":"f","call_id":"c","name":"speak","arguments":"{\"lines\":[\"hi\"]}"}]}"#
-        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
-                                       maxRetries: 3, backoffBaseSeconds: 0,
-                                       send: { _ in
-            let n = attempts.next()
-            return n < 2 ? (Data("rate".utf8), http(429)) : (Data(ok.utf8), http(200))
-        })
-        let resp = try await client.respond(messages: [.user("hi")], tools: coachTools)
-        #expect(resp.toolCalls == [.speak(callId: "c", lines: ["hi"])])
-        #expect(attempts.value == 3) // two 429s + one 200
+        #expect(attempts.value == 1) // single attempt, no retry
     }
 
     /// Request body uses the Responses shape + hardening flags.

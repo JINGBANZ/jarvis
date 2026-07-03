@@ -286,6 +286,26 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(brain.calls[afterTurn1].contains { $0.role == .tool && $0.toolCallId == "cap" })
     }
 
+    /// A capture whose tool-result SEND then fails must not be left dangling either: the earlier
+    /// iteration stored the function_call server-side, so the failed send leaves it open. With the
+    /// one-attempt client (no in-request retry), the driver's catch must record it and the next turn
+    /// closes it — otherwise the conversation carries a dangling function_call and 400s forever.
+    @Test func captureClosedNextTurnWhenToolResultSendFails() async {
+        let clock = ManualClock(now: 0)
+        let brain = ScriptedThrowBrain(script: [
+            .init(toolCalls: [.captureScreen(callId: "cap")],
+                  rawToolCalls: [RawToolCall(id: "cap", name: "capture_screen", argumentsJSON: "{}")]), // capture
+            nil,                    // the tool-result send throws
+            .init(toolCalls: []),   // next turn: silent
+        ])
+        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(), clock: clock)
+        #expect(await driver.handleTrigger(.turnEnd) == .brainError)
+        let afterTurn1 = brain.calls.count
+        await driver.handleTrigger(.turnEnd)
+        // The follow-up turn's first request must close the capture left open by the failed send.
+        #expect(brain.calls[afterTurn1].contains { $0.role == .tool && $0.toolCallId == "cap" })
+    }
+
     /// A prior speak's tool-result must NOT be lost if the very next turn fails before sending — it
     /// stays pending and is carried on the turn after.
     @Test func speakCallRetainedWhenNextTurnFails() async {
