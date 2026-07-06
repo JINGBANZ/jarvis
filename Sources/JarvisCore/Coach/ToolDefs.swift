@@ -5,7 +5,7 @@ import Foundation
 // below is valid under strict (no properties, none required).
 public let captureScreenTool = ToolDef(
     name: "capture_screen",
-    description: "Take a screenshot of the user's active display to see the LeetCode problem and their code. Call this only when you need to see the screen to give a useful, specific tip. Returns an image.",
+    description: "Take a screenshot of the user's screen to see the LeetCode problem and their code. Call this only when you need to see the screen to give a useful, specific tip. Returns an image.",
     parametersJSON: #"{"type":"object","properties":{},"required":[],"additionalProperties":false}"#
 )
 

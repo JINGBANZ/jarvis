@@ -18,6 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsWindow: SettingsWindow!
     private let appearance = OverlayAppearance()
     private let brainPreferences = BrainPreferences()
+    private let screenPreferences = ScreenCapturePreferences()
     private var activityViewer: ActivityViewer!    // embedded as the Settings Activity tab
     /// Two transcription sockets feeding one shared transcript: mic → `.me`, system audio → `.them`.
     private var transcriber: RealtimeTranscriber?       // "me" (mic)
@@ -80,6 +81,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.menuBar.setRunning(self.start(freshSession: false))
             }),
             OverlaySection(appearance: appearance, caption: overlayCaption, box: overlayBox),
+            DisplaySection(preferences: screenPreferences),
             BrainModelSection(preferences: brainPreferences),
             ActivitySection(viewer: activityViewer),
         ]
@@ -124,6 +126,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             errorReporter.report(.noAPIKey)
             return false
         }
+        // With more than one display connected, confirm which screen to coach from before anything
+        // is torn down or rotated — a Cancel here must leave the app exactly as it was. Only for a
+        // user-initiated Start; an in-place restart (e.g. re-saving the API key) must not prompt.
+        if freshSession, !DisplayPicker.confirmSelection(preferences: screenPreferences) {
+            jlog("Jarvis: start cancelled at the display prompt.")
+            return false
+        }
         stop() // tear down any existing pipeline so we start cleanly
         if freshSession {
             beginNewSession()       // rotate to a fresh session dir + activity/debug log
@@ -137,7 +146,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Fan each spoken tip out to both the Overlay Caption and the persistent Overlay Box.
         let overlaySink = BroadcastOverlay([overlayCaption, overlayBox])
         let driver = CoachDriver(config: config, transcript: transcript,
-                                 brain: brain, screen: ScreenCaptureCLI(), overlay: overlaySink, clock: clock,
+                                 brain: brain, screen: ScreenCaptureCLI(preferences: screenPreferences),
+                                 overlay: overlaySink, clock: clock,
                                  onSpoke: { [weak self] in Task { @MainActor in self?.menuBar.noteSpoke() } })
 
         // CoachDriver is @unchecked Sendable; capture it (not @MainActor self) in the callbacks.
