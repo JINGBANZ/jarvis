@@ -60,6 +60,11 @@ public enum ToolInvocation: Sendable, Equatable {
     /// The overlay lines to show, already split by the model (the `speak` tool's `lines` array) and
     /// rendered one at a time — so the client never splits a free-form string on punctuation.
     case speak(callId: String, lines: [String])
+    /// The model's explicit "nothing useful to add" decision. Silence is a tool call (not the absence
+    /// of one) so that `tool_choice: required` can forbid plain-text output entirely — free text from
+    /// a stay-quiet turn used to be stored in the server-side conversation, where the model imitated
+    /// its own leaked deliberation and degenerated (and every stored byte was re-billed every turn).
+    case staySilent(callId: String)
 }
 
 /// One brain response: parsed tool calls (possibly empty = stay silent), plus the raw calls
@@ -79,12 +84,16 @@ public struct BrainResponse: Sendable {
     }
 }
 
-/// How the model may use tools on a given turn. `auto` lets it call zero, one, or many — audio-driven
-/// turns always use `auto` and let the prompt decide. `force(name)` (require exactly that function) is
-/// used by the manual-hint hotkey, which forces `speak` so an explicit ⌥⌘J keypress always yields a
-/// visible hint in one round trip (see `CoachDriver.runTurn` + `TriggerReason.manualHint`).
+/// How the model may use tools on a given turn. `required` (some tool, model's pick) is what
+/// audio-driven turns use: with `stay_silent` in the tool set every decision — nudge, look, or stay
+/// quiet — is a clean tool call and the model never emits plain text into the stored conversation.
+/// `force(name)` (require exactly that function) is used by the manual-hint hotkey, which forces
+/// `speak` so an explicit ⌥⌘J keypress always yields a visible hint in one round trip (see
+/// `CoachDriver.runTurn` + `TriggerReason.manualHint`). `auto` (zero or more calls) remains for tests
+/// and future callers that genuinely want optional tool use.
 public enum ToolChoice: Sendable, Equatable {
     case auto
+    case required
     case force(String)
 }
 

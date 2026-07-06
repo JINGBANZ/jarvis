@@ -1,6 +1,9 @@
 import Foundation
 import Testing
 @testable import JarvisCore
+#if canImport(FoundationNetworking)
+import FoundationNetworking   // HTTPURLResponse lives here on non-Darwin (Core tests on Linux)
+#endif
 
 private func http(_ code: Int, headers: [String: String]? = nil) -> HTTPURLResponse {
     HTTPURLResponse(url: URL(string: "https://api.openai.com/v1/responses")!,
@@ -44,6 +47,18 @@ private func speakResponseBody(arguments: String) -> Data {
         let resp = try await client.respond(messages: [.user("hi")], tools: coachTools)
         #expect(resp.toolCalls == [.captureScreen(callId: "call_9")])
         #expect(resp.rawToolCalls == [RawToolCall(id: "call_9", name: "capture_screen", argumentsJSON: "{}")])
+    }
+
+    @Test func decodesStaySilentToolCall() async throws {
+        let json = """
+        {"output":[
+          {"type":"function_call","id":"fc_2","call_id":"call_2","name":"stay_silent","arguments":"{}"}
+        ]}
+        """
+        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+                                       send: { _ in (Data(json.utf8), http(200)) })
+        let resp = try await client.respond(messages: [.user("hi")], tools: coachTools)
+        #expect(resp.toolCalls == [.staySilent(callId: "call_2")])
     }
 
     @Test func noToolCallsMeansSilent() async throws {
@@ -191,6 +206,18 @@ private func speakResponseBody(arguments: String) -> Data {
         _ = try await client.respond(messages: [.user("hi")], tools: coachTools)
         let body = String(data: box.get() ?? Data(), encoding: .utf8) ?? ""
         #expect(body.contains("\"tool_choice\":\"auto\""))
+    }
+
+    /// `.required` (what audio-driven coach turns use) encodes the Responses "required" string — some
+    /// tool call, the model's pick — so a stay-quiet decision must be the stay_silent tool, not text.
+    @Test func requiredToolChoiceEncodesRequiredString() async throws {
+        let box = CapturedBody()
+        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+                                       send: { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
+        _ = try await client.respond(messages: [.user("hi")], tools: coachTools,
+                                     toolChoice: .required, conversationId: nil)
+        let body = String(data: box.get() ?? Data(), encoding: .utf8) ?? ""
+        #expect(body.contains("\"tool_choice\":\"required\""))
     }
 
     /// Forcing a specific function encodes the Responses tool_choice object shape.

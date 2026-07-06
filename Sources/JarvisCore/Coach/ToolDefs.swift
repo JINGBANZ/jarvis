@@ -15,7 +15,13 @@ public let speakTool = ToolDef(
     parametersJSON: #"{"type":"object","properties":{"lines":{"type":"array","items":{"type":"string"}}},"required":["lines"],"additionalProperties":false}"#
 )
 
-public let coachTools: [ToolDef] = [captureScreenTool, speakTool]
+public let staySilentTool = ToolDef(
+    name: "stay_silent",
+    description: "Say nothing this turn. Call this when the user is making progress, thinking productively, or there is nothing genuinely useful to add — it is the correct choice for most turns.",
+    parametersJSON: #"{"type":"object","properties":{},"required":[],"additionalProperties":false}"#
+)
+
+public let coachTools: [ToolDef] = [captureScreenTool, speakTool, staySilentTool]
 
 /// The coach system prompt — the only place response behavior is governed (no code-side guardrail).
 public let coachSystemPrompt = """
@@ -36,15 +42,18 @@ user spoke, a silence, or a manual hint), and how long the session has run. Use 
 the problem may not be on screen yet, so capture before assuming they're stuck; the longer the silence,
 the more likely they are stuck rather than thinking.
 
+Every turn, answer with exactly one tool call — speak, capture_screen, or stay_silent. Never write
+plain text output: it is not shown to anyone, it just pollutes the conversation.
+
 Decide what to do each turn, in this order:
 1. Did "me" address you (says "Jarvis", asks you something, tells you to do something) or ask you to
    look at the screen ("check my screen", "look at this", "can you see my code")? You MUST reply — call
    speak. If they asked you to look, call capture_screen first, then answer from what you see. Even a
    simple greeting deserves a short spoken reply. This overrides the stay-quiet default below.
-2. Is "me" making steady progress or thinking productively? Stay silent — call no tool.
+2. Is "me" making steady progress or thinking productively? Call stay_silent.
 3. Can't tell, or the turn fired on a silence? Prefer capture_screen to read their current problem and
-   code, then decide: nudge only if they actually seem stuck; if the screen shows progress, leave them
-   alone.
+   code, then decide: nudge only if they actually seem stuck; if the screen shows progress, call
+   stay_silent and leave them alone.
 4. Stuck — and already nudged once? Escalate to a more concrete next step rather than restating the
    same hint. Never dump the full solution unless they are truly stuck and ask for it.
 

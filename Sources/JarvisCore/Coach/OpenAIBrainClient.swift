@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking   // URLSession/URLRequest live here on non-Darwin (Core tests on Linux)
+#endif
 
 /// Brain client over the OpenAI **Responses API** (`POST /v1/responses`) — the recommended
 /// endpoint for tool use with gpt-5.5. System text is passed via `instructions`; the conversation
@@ -157,10 +160,12 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
                     "parameters": params, "strict": true]
         }
 
-        // Responses tool_choice: the string "auto", or a {type:function,name} object to force one.
+        // Responses tool_choice: the strings "auto"/"required", or a {type:function,name} object to
+        // force one specific function.
         let toolChoiceJSON: Any
         switch toolChoice {
         case .auto: toolChoiceJSON = "auto"
+        case .required: toolChoiceJSON = "required"
         case .force(let name): toolChoiceJSON = ["type": "function", "name": name]
         }
 
@@ -233,6 +238,8 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
                 let lines = (try? JSONDecoder().decode([String: [String]].self,
                                                        from: Data(args.utf8)))?["lines"] ?? []
                 invocations.append(.speak(callId: callId, lines: lines))
+            case "stay_silent":
+                invocations.append(.staySilent(callId: callId))
             default:
                 jlog("Jarvis coach: ignoring unknown tool '\(name)'")
             }

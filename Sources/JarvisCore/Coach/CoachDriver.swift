@@ -1,10 +1,13 @@
 import Foundation
 
 /// The event loop. On a trigger, calls the brain with the timestamped transcript + timing context
-/// and the tool set, and routes tool calls (capture_screen, speak). All judgment lives in the
-/// model — including when to stay quiet and when to answer a direct address — so this just wires
-/// events to tool calls. There is no cooldown or rate cap: every utterance reaches the brain and
-/// the brain decides whether it has anything worth saying (the system prompt carries that restraint).
+/// and the tool set, and routes tool calls (capture_screen, speak, stay_silent). All judgment lives
+/// in the model — including when to stay quiet and when to answer a direct address — so this just
+/// wires events to tool calls. There is no cooldown or rate cap: every utterance by "me" reaches the
+/// brain and the brain decides whether it has anything worth saying (the system prompt carries that
+/// restraint). The one client-side skip is the cost gate: a turn-end whose delta carries no new "me"
+/// line never becomes a request — the prompt forbids replying to "them", so it would only re-bill
+/// the conversation to decide "stay silent".
 ///
 /// `@unchecked Sendable` is justified: the only mutable state is guarded by a lock, and the injected
 /// dependencies are each either immutable or internally synchronized. A single in-flight turn is
@@ -37,10 +40,11 @@ public final class CoachDriver: @unchecked Sendable {
     /// Number of transcript lines already sent to the conversation. Each turn sends `lines[sentCount...]`
     /// and advances this ONLY after the input reached the server, so a failed turn re-sends its speech.
     private var sentCount = 0
-    /// A tool call (a terminal `speak`, or a capture left unanswered at the iteration cap) awaiting its
-    /// tool-result. We close it on the NEXT turn — but the callId is retained until the close provably
-    /// reaches the server, so a failed/cancelled next turn can't strand it and dangle the conversation.
-    private var pendingCloseCallId: String?
+    /// A tool call (a terminal `speak`/`stay_silent`, or a capture left unanswered at the iteration
+    /// cap) awaiting its tool-result, with the output text to answer it with. We close it on the NEXT
+    /// turn — but it is retained until the close provably reaches the server, so a failed/cancelled
+    /// next turn can't strand it and dangle the conversation.
+    private var pendingClose: (callId: String, output: String)?
     /// A trigger that arrived while a turn was running — coalesced into the running turn's follow-up so
     /// nothing is dropped and turns don't pile up. The first such trigger is kept and the batched
     /// speech rides along via the sent-index, so a later trigger needn't displace it.
@@ -71,14 +75,14 @@ public final class CoachDriver: @unchecked Sendable {
     private func advanceSentCount(to upTo: Int) {
         stateLock.lock(); if upTo > sentCount { sentCount = upTo }; stateLock.unlock()
     }
-    private func currentPendingCloseCallId() -> String? {
-        stateLock.lock(); defer { stateLock.unlock() }; return pendingCloseCallId
+    private func currentPendingClose() -> (callId: String, output: String)? {
+        stateLock.lock(); defer { stateLock.unlock() }; return pendingClose
     }
-    private func setPendingCloseCallId(_ id: String) {
-        stateLock.lock(); pendingCloseCallId = id; stateLock.unlock()
+    private func setPendingClose(_ id: String, output: String) {
+        stateLock.lock(); pendingClose = (id, output); stateLock.unlock()
     }
-    private func clearPendingCloseCallId() {
-        stateLock.lock(); pendingCloseCallId = nil; stateLock.unlock()
+    private func clearPendingClose() {
+        stateLock.lock(); pendingClose = nil; stateLock.unlock()
     }
 
     /// Atomically claim the single in-flight slot, OR (if busy) record the trigger as pending. One
@@ -174,6 +178,15 @@ public final class CoachDriver: @unchecked Sendable {
         let newSpeech: String
         if convId != nil {
             let delta = transcript.renderFrom(index: currentSentCount())   // single snapshot: text + upTo
+            // Cost gate: a turn-end whose delta holds no new "me" line (empty, or only the other
+            // side spoke) never calls the brain — the prompt forbids replying to "them" anyway, so
+            // the request would re-bill the whole conversation just to decide "stay silent". The
+            // unsent lines ride along on the next real turn (sentCount only advances on a send);
+            // silence and manual-hint triggers still always go through.
+            if reason == .turnEnd && !delta.hasMe {
+                jlog("… nothing new from you — skipping the brain call")
+                return .skippedNoUserSpeech
+            }
             newSpeech = delta.text; upTo = delta.upTo
         } else {
             // `renderWindow` filters on session-relative line times (`.at`), so the cutoff must be
@@ -182,13 +195,13 @@ public final class CoachDriver: @unchecked Sendable {
             upTo = 0   // unused: stateless mode never advances the sent-index
         }
 
-        // Close any prior unanswered tool call (a `speak`, or a capture left at the iteration cap),
-        // bundled here so the conversation never dangles. PEEK only — we don't drop it until the close
-        // provably reaches the server (below), so a failed/cancelled turn re-sends it.
+        // Close any prior unanswered tool call (a `speak`/`stay_silent`, or a capture left at the
+        // iteration cap), bundled here so the conversation never dangles. PEEK only — we don't drop it
+        // until the close provably reaches the server (below), so a failed/cancelled turn re-sends it.
         var convo: [ChatMessage] = [.system(coachSystemPrompt)]
-        let priorClose = convId != nil ? currentPendingCloseCallId() : nil
+        let priorClose = convId != nil ? currentPendingClose() : nil
         if let priorClose {
-            convo.append(.init(role: .tool, text: "shown to the user", toolCallId: priorClose))
+            convo.append(.init(role: .tool, text: priorClose.output, toolCallId: priorClose.callId))
         }
         // Lead with the trigger line; prepend new speech only when there is any (a manual hint often
         // has none, and an empty "New since last turn" block just buries the real signal).
@@ -209,9 +222,10 @@ public final class CoachDriver: @unchecked Sendable {
             else { jlog("👁 screenshot failed") }   // still force a hint from transcript/conversation
         }
 
-        // Force a reply ONLY for an explicit manual hint; audio-driven turns stay `.auto` so the
-        // model decides whether to speak, look at the screen, or stay silent.
-        let turnToolChoice: ToolChoice = (reason == .manualHint) ? .force(speakTool.name) : .auto
+        // Force `speak` ONLY for an explicit manual hint; audio-driven turns use `.required` — SOME
+        // tool, the model's pick (speak, look at the screen, or stay_silent). Requiring a call is what
+        // keeps a stay-quiet decision from leaking free deliberation text into the stored conversation.
+        let turnToolChoice: ToolChoice = (reason == .manualHint) ? .force(speakTool.name) : .required
 
         jlog("💭 thinking…")
 
@@ -235,14 +249,16 @@ public final class CoachDriver: @unchecked Sendable {
                 // earlier iteration stored the call; the tool-result send is what just failed). Record it
                 // so the next turn closes it — otherwise the conversation carries a dangling function_call
                 // and the next request can choke on it. Mirrors the tool-loop-cap close below.
-                if convId != nil, let cap = unansweredCaptureCallId { setPendingCloseCallId(cap) }
+                if convId != nil, let cap = unansweredCaptureCallId {
+                    setPendingClose(cap, output: "screenshot discarded (turn ended)")
+                }
                 return .brainError
             }
             // The input provably reached the server — NOW commit the conversation-state mutations:
             // advance the sent-index, and drop the prior close we just delivered. (Only when
             // conversation-backed; stateless mode keeps re-sending the window and never advances.)
             if !committed {
-                if convId != nil { advanceSentCount(to: upTo); if priorClose != nil { clearPendingCloseCallId() } }
+                if convId != nil { advanceSentCount(to: upTo); if priorClose != nil { clearPendingClose() } }
                 committed = true
             }
             // Whatever capture result was in this request's body has now been sent.
@@ -250,8 +266,9 @@ public final class CoachDriver: @unchecked Sendable {
 
             if Task.isCancelled { jlog("… turn cancelled (stopped) mid-think"); return .cancelled }
 
-            // No tool call → deliberate silence or a TRUNCATED run (zero items because reasoning blew
-            // the token cap — a bug signal, not a coaching decision).
+            // No tool call → a TRUNCATED run (zero items because reasoning blew the token cap), or a
+            // model ignoring `tool_choice: required` (deliberate silence is the stay_silent tool now).
+            // Treat the latter as silence anyway — rendering nothing is the safe interpretation.
             guard let call = response.toolCalls.first else {
                 if let reasonText = response.incompleteReason {
                     jlog("⚠️ response truncated (\(reasonText)) — not deliberate silence")
@@ -309,13 +326,22 @@ public final class CoachDriver: @unchecked Sendable {
                 onSpoke?()
                 // `speak` is terminal; its tool-result is sent on the next turn so the conversation
                 // stays valid without an extra round-trip now.
-                if convId != nil { setPendingCloseCallId(callId) }
+                if convId != nil { setPendingClose(callId, output: "shown to the user") }
                 return .spoke
+
+            case .staySilent(let callId):
+                // The model's explicit stay-quiet decision — terminal like `speak`, closed lazily on
+                // the next turn the same way so the conversation never dangles.
+                jlog("… nothing useful to add, staying silent")
+                if convId != nil { setPendingClose(callId, output: "ok") }
+                return .silentByModel
             }
         }
         jlog("… tool loop exhausted without speaking")
         // Don't leave a final-iteration capture dangling — close it on the next turn.
-        if convId != nil, let cap = unansweredCaptureCallId { setPendingCloseCallId(cap) }
+        if convId != nil, let cap = unansweredCaptureCallId {
+            setPendingClose(cap, output: "screenshot discarded (turn ended)")
+        }
         return .exhausted
     }
 }
@@ -325,7 +351,8 @@ public final class CoachDriver: @unchecked Sendable {
 /// fired.
 public enum TurnOutcome: Sendable, Equatable {
     case spoke            // rendered a coaching tip
-    case silentByModel    // model deliberately called no tool
+    case silentByModel    // model deliberately stayed quiet (stay_silent, or no tool call)
+    case skippedNoUserSpeech // turn-end delta had no new "me" line — brain not called (cost gate)
     case truncated        // response cut off by the token cap (NOT a real silence decision)
     case busy             // a turn was in flight; this trigger was coalesced into it (not dropped)
     case cancelled        // Stop cancelled the turn

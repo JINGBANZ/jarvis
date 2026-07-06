@@ -233,3 +233,17 @@
 - **Rejected:** (a) In-request retry with backoff — near-useless for `conversation_locked` (a >ceiling generation outlasts it) and it resends stale content; the only thing given up is `Retry-After` backoff on transient 429/5xx, negligible for a single-user app. (b) Cancel-and-send-the-latest via background mode + `POST /responses/{id}/cancel` — the only way to *abandon* a stale turn and jump to freshest context, but a much larger build; deferred.
 - **Revisit if:** the app grows beyond single-user (429 backpressure starts to matter), or the ceiling-length wait on a genuinely slow turn proves too laggy live (then reach for background-mode cancel).
 - **Detail:** [architecture.md → Resilience](./architecture.md#resilience).
+
+### 2026-07-06 — Silence is a tool call; audio turns require one
+
+- **Chose:** A `stay_silent` tool alongside `capture_screen`/`speak`, with `tool_choice: "required"` on every audio-driven turn — the model must answer each turn with exactly one tool call, and a stay-quiet decision is the `stay_silent` call, never text.
+- **Why:** Under "stay silent — call no tool" the model still has to emit *something*, and at low reasoning effort that came out as leaked deliberation text ("final empty. no. final."). With `store:true` + a server-side conversation, that junk was retained, replayed as context every turn — where the model imitated its own garbage and degenerated further — and re-billed as input on all subsequent turns of the session (a large share of a real hour-long session's ~$13 spend).
+- **Rejected:** Filtering the text client-side — the driver already ignores it, but the *server-side conversation* stores whatever the model emits, so only preventing emission fixes it.
+- **Detail:** `Sources/JarvisCore/Coach/ToolDefs.swift` (tool + prompt), `CoachDriver.swift` (required tool choice, lazy close).
+
+### 2026-07-06 — Turn-ends without new "me" speech skip the brain
+
+- **Chose:** A client-side cost gate in `CoachDriver`: a turn-end whose transcript delta contains no new `me` line (only the other side spoke, or nothing new) returns `.skippedNoUserSpeech` without a brain request. The unsent lines ride along on the next real turn (the sent-index only advances on a successful send); silence checks and the manual hint always go through.
+- **Why:** In an interviewer-heavy session roughly half the turn-ends are the other side's back-channel ("Hmm", "对"). The prompt already forbids replying to "them", so each of those requests re-billed the entire conversation (input tokens dominate the bill) just for the model to decide "stay silent". Skipping them is behavior-neutral by construction and roughly halves request count.
+- **Rejected:** A longer client debounce window (adds reply latency for every turn, merges far less than the gate skips); keyword/wake-word gating of "me" turns (judgment belongs to the model, per the no-code-guardrail principle).
+- **Detail:** `CoachDriver.runTurn` + `RollingTranscript.renderFrom(index:)` (`hasMe`).

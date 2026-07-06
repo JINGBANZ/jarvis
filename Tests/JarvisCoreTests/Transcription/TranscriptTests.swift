@@ -76,6 +76,17 @@ import Testing
         #expect(text.range(of: "them:")!.lowerBound < text.range(of: "me:")!.lowerBound)
     }
 
+    /// `hasMe` reports whether the DELTA (not the whole transcript) holds any "me" line — the coach
+    /// loop's cost gate skips the brain on turn-ends where only the other side spoke.
+    @Test func renderFromReportsWhetherDeltaHasMeLines() {
+        let t = RollingTranscript()
+        t.append(.init(speaker: .me, text: "my idea", at: 1))
+        t.append(.init(speaker: .them, text: "hmm", at: 5))
+        #expect(t.renderFrom(index: 0).hasMe)          // delta includes the me line
+        #expect(!t.renderFrom(index: 1).hasMe)         // delta is them-only
+        #expect(!t.renderFrom(index: t.count).hasMe)   // empty delta
+    }
+
     @Test func renderFromEmptyWhenCaughtUp() {
         let t = RollingTranscript()
         t.append(.init(speaker: .me, text: "only", at: 10))

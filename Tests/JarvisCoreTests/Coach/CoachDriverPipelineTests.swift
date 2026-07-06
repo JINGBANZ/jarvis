@@ -241,18 +241,87 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let clock = ManualClock(now: 0)
         let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s", lines: [])])])
         let overlay = FakeOverlay()
-        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: overlay, clock: clock)
+        let (driver, transcript) = makeDriver(brain: brain, screen: FakeScreen(), overlay: overlay, clock: clock)
+        transcript.append(.init(speaker: .me, text: "hm", at: 0))
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
         #expect(overlay.rendered == [[]])
     }
 
-    @Test func staySilentRendersNothing() async {
+    /// The model's explicit stay-quiet decision is the `stay_silent` TOOL now (tool_choice is
+    /// `required`, so free-text silence can't leak into the conversation): it renders nothing,
+    /// reports `.silentByModel`, and — like `speak` — its call is closed on the next turn.
+    @Test func staySilentToolRendersNothingAndIsClosedNextTurn() async {
+        let clock = ManualClock(now: 0)
+        let brain = ScriptedBrain(script: [.init(toolCalls: [.staySilent(callId: "quiet1")])])
+        let overlay = FakeOverlay()
+        let (driver, transcript) = makeDriver(brain: brain, screen: FakeScreen(), overlay: overlay, clock: clock)
+        transcript.append(.init(speaker: .me, text: "thinking aloud", at: 0))
+        #expect(await driver.handleTrigger(.turnEnd) == .silentByModel)
+        #expect(overlay.rendered.isEmpty)
+        transcript.append(.init(speaker: .me, text: "still thinking", at: 5))
+        await driver.handleTrigger(.turnEnd)
+        // The follow-up turn's request must close the stay_silent call so the conversation never dangles.
+        #expect(brain.calls[1].contains { $0.role == .tool && $0.toolCallId == "quiet1" })
+    }
+
+    /// Defensive: a model that answers with NO tool call despite `required` still reads as deliberate
+    /// silence — render nothing rather than fail the turn.
+    @Test func noToolCallsStillRendersNothing() async {
         let clock = ManualClock(now: 0)
         let brain = ScriptedBrain(script: [.init(toolCalls: [])])
         let overlay = FakeOverlay()
-        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: overlay, clock: clock)
+        let (driver, transcript) = makeDriver(brain: brain, screen: FakeScreen(), overlay: overlay, clock: clock)
+        transcript.append(.init(speaker: .me, text: "hm", at: 0))
         await driver.handleTrigger(.turnEnd)
         #expect(overlay.rendered.isEmpty)
+    }
+
+    // MARK: - Cost gate: turn-ends without new "me" speech never call the brain
+
+    /// A turn-end whose delta holds only "them" lines (the interviewer talking) is skipped without a
+    /// brain request — the prompt forbids replying to "them", so the request would only re-bill the
+    /// conversation to decide "stay silent". This was the dominant cost of interviewer-heavy sessions.
+    @Test func themOnlyTurnEndSkipsTheBrain() async {
+        let clock = ManualClock(now: 0)
+        let brain = ScriptedBrain(script: [.init(toolCalls: [])])
+        let (driver, transcript) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(), clock: clock)
+        transcript.append(.init(speaker: .them, text: "OK, take your time", at: 1))
+        #expect(await driver.handleTrigger(.turnEnd) == .skippedNoUserSpeech)
+        #expect(brain.calls.isEmpty)
+    }
+
+    /// An empty-delta turn-end (fragments already sent last turn) is skipped the same way.
+    @Test func emptyDeltaTurnEndSkipsTheBrain() async {
+        let clock = ManualClock(now: 0)
+        let brain = ScriptedBrain(script: [.init(toolCalls: [])])
+        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(), clock: clock)
+        #expect(await driver.handleTrigger(.turnEnd) == .skippedNoUserSpeech)
+        #expect(brain.calls.isEmpty)
+    }
+
+    /// Skipped lines are NOT lost: the sent-index doesn't advance on a skip, so the "them" context
+    /// rides along with the next real "me" turn in one request.
+    @Test func skippedThemLinesRideAlongOnTheNextUserTurn() async {
+        let clock = ManualClock(now: 0)
+        let brain = ScriptedBrain(script: [.init(toolCalls: [])])
+        let (driver, transcript) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(), clock: clock)
+        transcript.append(.init(speaker: .them, text: "what about the horizontal case", at: 1))
+        #expect(await driver.handleTrigger(.turnEnd) == .skippedNoUserSpeech)
+        transcript.append(.init(speaker: .me, text: "I'd check both neighbors", at: 5))
+        await driver.handleTrigger(.turnEnd)
+        let userText = brain.calls[0].compactMap { $0.text }.joined(separator: " ")
+        #expect(userText.contains("what about the horizontal case"))   // them context arrived...
+        #expect(userText.contains("I'd check both neighbors"))         // ...with the me line, one request
+    }
+
+    /// Silence wake-ups are NOT gated: with nothing new said, the model may still want to look at the
+    /// screen and nudge — the gate applies to turn-ends only.
+    @Test func silenceTriggerStillReachesTheBrainWithoutNewSpeech() async {
+        let clock = ManualClock(now: 0)
+        let brain = ScriptedBrain(script: [.init(toolCalls: [])])
+        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(), clock: clock)
+        await driver.handleTrigger(.silence(secondsQuiet: 120))
+        #expect(brain.calls.count == 1)
     }
 
     // MARK: - Server-side conversation state (Workstream G)
@@ -261,8 +330,10 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     @Test func createsConversationOnceAndThreadsId() async {
         let clock = ManualClock(now: 0)
         let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s", lines: ["hi"])])])
-        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(), clock: clock)
+        let (driver, transcript) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(), clock: clock)
+        transcript.append(.init(speaker: .me, text: "first thought", at: 0))
         await driver.handleTrigger(.turnEnd)
+        transcript.append(.init(speaker: .me, text: "second thought", at: 5))
         await driver.handleTrigger(.turnEnd)
         #expect(brain.createConversationCount == 1)               // created once for the session
         #expect(brain.conversationIds == ["conv_test", "conv_test"]) // reused on every call
@@ -278,9 +349,11 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             .init(toolCalls: [.captureScreen(callId: "cap")],
                   rawToolCalls: [RawToolCall(id: "cap", name: "capture_screen", argumentsJSON: "{}")]),
         ])  // repeats capture every iteration → turn 1 exhausts with an unanswered capture
-        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(), clock: clock)
+        let (driver, transcript) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(), clock: clock)
+        transcript.append(.init(speaker: .me, text: "look at this", at: 0))
         #expect(await driver.handleTrigger(.turnEnd) == .exhausted)
         let afterTurn1 = brain.calls.count
+        transcript.append(.init(speaker: .me, text: "and this", at: 5))
         await driver.handleTrigger(.turnEnd)
         // The follow-up turn's FIRST request must close the dangling capture.
         #expect(brain.calls[afterTurn1].contains { $0.role == .tool && $0.toolCallId == "cap" })
@@ -298,9 +371,11 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             nil,                    // the tool-result send throws
             .init(toolCalls: []),   // next turn: silent
         ])
-        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(), clock: clock)
+        let (driver, transcript) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(), clock: clock)
+        transcript.append(.init(speaker: .me, text: "look at this", at: 0))
         #expect(await driver.handleTrigger(.turnEnd) == .brainError)
         let afterTurn1 = brain.calls.count
+        transcript.append(.init(speaker: .me, text: "and this", at: 5))
         await driver.handleTrigger(.turnEnd)
         // The follow-up turn's first request must close the capture left open by the failed send.
         #expect(brain.calls[afterTurn1].contains { $0.role == .tool && $0.toolCallId == "cap" })
@@ -315,9 +390,12 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             nil,                                                        // turn 2: throws before sending
             .init(toolCalls: []),                                       // turn 3: silent
         ])
-        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(), clock: clock)
+        let (driver, transcript) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(), clock: clock)
+        transcript.append(.init(speaker: .me, text: "one", at: 0))
         await driver.handleTrigger(.turnEnd)
+        transcript.append(.init(speaker: .me, text: "two", at: 5))
         #expect(await driver.handleTrigger(.turnEnd) == .brainError)
+        transcript.append(.init(speaker: .me, text: "three", at: 9))
         await driver.handleTrigger(.turnEnd)
         #expect(brain.calls.last!.contains { $0.role == .tool && $0.toolCallId == "spk1" })
     }
@@ -363,14 +441,16 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     @Test func spokeOutcome() async {
         let clock = ManualClock(now: 0)
         let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s1", lines: ["hi"])])])
-        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(), clock: clock)
+        let (driver, transcript) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(), clock: clock)
+        transcript.append(.init(speaker: .me, text: "hm", at: 0))
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
     }
 
-    @Test func silentByModelOutcomeWhenNoToolCalls() async {
+    @Test func silentByModelOutcomeWhenStaySilentCalled() async {
         let clock = ManualClock(now: 0)
-        let brain = ScriptedBrain(script: [.init(toolCalls: [])])
-        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(), clock: clock)
+        let brain = ScriptedBrain(script: [.init(toolCalls: [.staySilent(callId: "q")])])
+        let (driver, transcript) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(), clock: clock)
+        transcript.append(.init(speaker: .me, text: "hm", at: 0))
         #expect(await driver.handleTrigger(.turnEnd) == .silentByModel)
     }
 
@@ -380,8 +460,10 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let clock = ManualClock(now: 100)
         let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s1", lines: ["first"])])])
         let overlay = FakeOverlay()
-        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: overlay, clock: clock)
+        let (driver, transcript) = makeDriver(brain: brain, screen: FakeScreen(), overlay: overlay, clock: clock)
+        transcript.append(.init(speaker: .me, text: "one", at: 0))
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
+        transcript.append(.init(speaker: .me, text: "two", at: 1))
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)   // immediately again — not held back
         #expect(brain.calls.count == 2)
         #expect(overlay.rendered.count == 2)
@@ -394,7 +476,8 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let brain = ScriptedBrain(script: [.init(toolCalls: [], rawToolCalls: [],
                                                  incompleteReason: "max_output_tokens")])
         let overlay = FakeOverlay()
-        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: overlay, clock: clock)
+        let (driver, transcript) = makeDriver(brain: brain, screen: FakeScreen(), overlay: overlay, clock: clock)
+        transcript.append(.init(speaker: .me, text: "hm", at: 0))
         #expect(await driver.handleTrigger(.turnEnd) == .truncated)
         #expect(overlay.rendered.isEmpty)
     }
@@ -407,7 +490,8 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
                   rawToolCalls: [RawToolCall(id: "c", name: "capture_screen", argumentsJSON: "{}")]),
         ])  // ScriptedBrain repeats the last response, so every iteration captures again
         let overlay = FakeOverlay()
-        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: overlay, clock: clock)
+        let (driver, transcript) = makeDriver(brain: brain, screen: FakeScreen(), overlay: overlay, clock: clock)
+        transcript.append(.init(speaker: .me, text: "hm", at: 0))
         #expect(await driver.handleTrigger(.turnEnd) == .exhausted)
         #expect(overlay.rendered.isEmpty)
     }
@@ -415,18 +499,20 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     @Test func brainErrorOutcome() async {
         let clock = ManualClock(now: 0)
         let brain = ThrowingBrain()
-        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(), clock: clock)
+        let (driver, transcript) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(), clock: clock)
+        transcript.append(.init(speaker: .me, text: "hm", at: 0))
         #expect(await driver.handleTrigger(.turnEnd) == .brainError)
     }
 
-    /// No forcing: every turn uses tool_choice auto so the model picks the right tool from the
-    /// prompt — reply, look at the screen, or stay silent.
-    @Test func everyTurnUsesAutoToolChoice() async {
+    /// Audio-driven turns REQUIRE a tool call (never free text): the model picks which tool from the
+    /// prompt — reply, look at the screen, or stay_silent — but must answer with one of them.
+    @Test func everyAudioTurnRequiresAToolCall() async {
         let clock = ManualClock(now: 0)
         let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s1", lines: ["hi"])])])
-        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(), clock: clock)
+        let (driver, transcript) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(), clock: clock)
+        transcript.append(.init(speaker: .me, text: "hm", at: 0))
         await driver.handleTrigger(.turnEnd)
-        #expect(brain.toolChoices.last == .auto)
+        #expect(brain.toolChoices.last == .required)
     }
 
     /// A `speak` call is closed lazily on the NEXT turn: its tool-result is prepended to the next
@@ -434,8 +520,10 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     @Test func nextTurnAnswersPriorSpeak() async {
         let clock = ManualClock(now: 0)
         let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "spk1", lines: ["hi"])])])
-        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(), clock: clock)
+        let (driver, transcript) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(), clock: clock)
+        transcript.append(.init(speaker: .me, text: "one", at: 0))
         await driver.handleTrigger(.turnEnd)          // speaks, stashes spk1 to close next turn
+        transcript.append(.init(speaker: .me, text: "two", at: 5))
         await driver.handleTrigger(.turnEnd)
         // The second request must include the tool-result that closes spk1.
         #expect(brain.calls[1].contains { $0.role == .tool && $0.toolCallId == "spk1" })
@@ -476,9 +564,11 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let clock = ManualClock(now: 0)
         let gate = AsyncGate()
         let brain = GatedBrain(gate: gate, response: .init(toolCalls: [.speak(callId: "s1", lines: ["hi"])]))
-        let (driver, _) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(), clock: clock)
+        let (driver, transcript) = makeDriver(brain: brain, screen: FakeScreen(), overlay: FakeOverlay(), clock: clock)
+        transcript.append(.init(speaker: .me, text: "one", at: 0))
         async let first = driver.handleTrigger(.turnEnd)   // parks in the brain call, holds the slot
         await gate.waitUntilEntered()
+        transcript.append(.init(speaker: .me, text: "two", at: 1))   // new speech for the coalesced turn
         let second = await driver.handleTrigger(.turnEnd)  // busy → queued as pending
         #expect(second == .busy)
         await gate.release()

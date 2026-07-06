@@ -63,13 +63,16 @@ public final class RollingTranscript: @unchecked Sendable {
     /// Lines from `index` onward, formatted like `renderWindow`, AND the line count rendered up to —
     /// returned together from a SINGLE locked snapshot so the caller's "advance to" index exactly
     /// matches the lines actually rendered (no duplicate-on-concurrent-append race). The index is
-    /// clamped to a valid range (defensive against a stale caller index).
-    public func renderFrom(index: Int) -> (text: String, upTo: Int) {
+    /// clamped to a valid range (defensive against a stale caller index). `hasMe` reports whether the
+    /// delta contains any "me" line — the coach loop skips the brain entirely on a turn-end where only
+    /// the other side spoke (the prompt forbids replying to "them" anyway, so the call is pure cost).
+    public func renderFrom(index: Int) -> (text: String, upTo: Int, hasMe: Bool) {
         lock.lock(); let snapshot = lines; lock.unlock()
         let start = min(max(0, index), snapshot.count)
         // Same spoken-order rendering as renderWindow, so the conversation-mode delta and the full
         // window agree on ordering (the two sockets can append out of time order).
-        return (Self.render(snapshot[start...]), snapshot.count)
+        return (Self.render(snapshot[start...]), snapshot.count,
+                snapshot[start...].contains { $0.speaker == .me })
     }
 
     /// Render lines as `[mm:ss] speaker: text`, one per line, in SPOKEN order. The two transcription

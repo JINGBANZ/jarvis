@@ -55,17 +55,24 @@ moments the model judges worthwhile.
    tuned silence window) or a **silence check** fires (you've gone quiet, maybe stuck). The silence
    check carries *how long* you've been quiet and backs off across a long silence (the interval
    doubles each step up to a cap — see `Config`), resetting on speech.
-2. The CoachDriver calls the brain on **every** trigger — there is no cooldown, rate cap, or
-   wake-word gate. Whether to speak (and whether the user just addressed Jarvis) is the model's
-   call, governed by the system prompt; the only hard gate is the user's Start/Stop.
+2. The CoachDriver calls the brain on every trigger that carries **new "me" speech** — there is no
+   cooldown, rate cap, or wake-word gate. Whether to speak (and whether the user just addressed
+   Jarvis) is the model's call, governed by the system prompt; the only hard gates are the user's
+   Start/Stop and the cost gate: a turn-end whose delta holds no new "me" line (only the other
+   side spoke, or nothing new at all) is skipped without a request — the prompt forbids replying
+   to "them" anyway, and the unsent lines ride along on the next real turn. Silence checks and the
+   hint hotkey always go through.
 3. It calls **`gpt-5.5`** with the coach system prompt, the recent **timestamped** transcript
    window, the timing context (seconds silent, session elapsed), and the tool set
-   `[capture_screen, speak]`. The timing is what lets the model tell "thinking" from "stuck."
+   `[capture_screen, speak, stay_silent]`. The timing is what lets the model tell "thinking" from
+   "stuck."
 4. The model may call `capture_screen`. The harness fulfills it (a silent screenshot) and
    returns the image into the conversation. The model may now reason over what's on screen.
-5. The model either calls `speak(lines)` — a tip of up to ~3 short lines, returned **already split**
+5. The model calls `speak(lines)` — a tip of up to ~3 short lines, returned **already split**
    into an array (Structured Outputs / `strict:true`), so the client never splits prose on
-   punctuation — or returns nothing (stay silent).
+   punctuation — or `stay_silent`. A tool call is **required** on every turn: silence is an
+   explicit tool, never plain text, so the stored conversation stays free of stray model prose
+   (see [decisions.md](./decisions.md)).
 6. `speak` renders to the **Overlay**, one line at a time (per-line display time set in `Config`).
    A newer tip never interrupts one still showing — tips queue and play in order, so no hint is lost.
 
@@ -111,7 +118,7 @@ plugins ship only with full Xcode, and Jarvis builds **CLT-only** (see
 | **WebRTCEchoCanceller** | AEC3 echo canceller driven at 48 kHz on 10 ms frames inside the capture IOProc; far reference first, then the mic cleaned in place. | WebRTC **AEC3** (`webrtc-audio-processing`), vendored static + zero-dylib via `scripts/build-aec.sh`. |
 | **ErrorReporter** | The single funnel for user-facing failures. Severity on a Foundation-only `UserFacingError` (in Core) decides the response — `fatal` pops an `NSAlert` and tears the session down, `degraded` is logged only — so no startup failure is ever silent. The only place an *error* `NSAlert` is raised (confirmation prompts aside); diagnostics stay in `JarvisLog`. | AppKit (`NSAlert`). |
 | **Transcriber** | Maintain a rolling, speaker-labeled, **timestamped** transcript; emit turn-end events and backing-off silence checks (with quiet duration). Two instances run in parallel — one per side — tagging lines `me`/`them` into one shared transcript. | `gpt-4o-transcribe` (Realtime API; tuned `server_vad`). |
-| **CoachDriver** | The event loop. On every trigger, call the brain with the transcript + timing context and tools, route tool calls. No cooldown/rate cap — restraint is the model's. | `gpt-5.5` (vision + tool-use). |
+| **CoachDriver** | The event loop. On every trigger carrying new "me" speech (plus every silence check and hint keypress), call the brain with the transcript + timing context and tools, route tool calls. No cooldown/rate cap — restraint is the model's; the only client-side skip is the them-only/empty turn-end cost gate. | `gpt-5.5` (vision + tool-use). |
 | **ScreenTool** | Fulfill `capture_screen`: take a silent screenshot of the active display, excluding the overlay window. | macOS `screencapture` CLI. |
 | **Overlay Caption** | Render `speak` output: up to ~3 short lines (model-split), shown one at a time and queued so a newer tip never cuts off the current one; non-activating, always-on-top, excluded from capture. Switchable from Settings — **off by default**; when off, tips are suppressed. | AppKit NSPanel; `OverlayCaptionPanel`. |
 | **Overlay Box** | A persistent window logging every `speak` tip in full, timestamped — the scrollable history of what the caption flashed one line at a time. Movable, resizable, opaque, also excluded from capture; switched on/off from Settings (**on by default**), cleared on each Start. Fed by the same `speak` call as the caption via **`BroadcastOverlay`**, which fans one `OverlayRendering.render` out to both sinks (so `CoachDriver` is unchanged). | AppKit NSPanel; `OverlayBoxPanel`. |
@@ -156,8 +163,9 @@ check. Diagnostics remain `JarvisLog`'s job; `ErrorReporter` owns surfacing + li
 ## 4. Data Flow & Cost Model
 
 - **Continuous (cheap):** audio → Realtime → transcript. This runs the whole session.
-- **Per-turn (cheap):** a text-only `gpt-5.5` call on each turn-end/silence event. No image unless
-  the model asks.
+- **Per-turn (cheap):** a text-only `gpt-5.5` call on each turn-end that carries new "me" speech,
+  and on each silence event. Turn-ends where only the other side spoke are skipped client-side —
+  free. No image unless the model asks.
 - **On-demand (expensive):** a screenshot + vision tokens, only when the model calls
   `capture_screen`. A coaching response, only when the model calls `speak`.
 
@@ -229,8 +237,10 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
   archived. The per-session OpenAI conversation does retain transcript + screenshots server-side (see
   [sandbox.md](./sandbox.md)).
 - **Behavioral restraint (model-governed):** there is **no cooldown or rate cap** in code. Every
-  utterance reaches the brain, and the brain decides whether it has anything worth saying — that
-  restraint lives in the system prompt ("stay silent unless genuinely useful"). This keeps
+  utterance by "me" reaches the brain (turn-ends carrying only "them" speech are skipped as pure
+  cost — the prompt forbids replying to them), and the brain decides whether it has anything worth
+  saying — that restraint lives in the system prompt ("call stay_silent unless genuinely useful").
+  This keeps
   conversation natural: a follow-up question is never stranded behind a timer. The hard control is
   the menu-bar **Start/Stop** — coaching never runs until explicitly started, and stopping tears the
   pipeline down entirely. A session interjection counter in the menu bar makes over-talking visible;
