@@ -169,7 +169,7 @@ public final class ActivityLog: @unchecked Sendable {
         let m = message.trimmingCharacters(in: .whitespaces)
         if m.hasPrefix("💬") { return "say" }
         if m.hasPrefix("👁") { return "see" }
-        if m.hasPrefix("🗣") || m.hasPrefix("🤫") { return "hear" }
+        if m.hasPrefix("🗣") || m.hasPrefix("🤫") || m.hasPrefix("⌨️") { return "hear" }
         if m.hasPrefix("💭") || m.hasPrefix("…") { return "think" }
         let low = m.lowercased()
         if low.contains("error") || low.contains("failed") || low.contains("denied") { return "err" }
