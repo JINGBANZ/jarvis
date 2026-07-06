@@ -42,14 +42,14 @@ thin OS shell, verified by the smoke run.
 - `Sources/JarvisCore/Transcription/` — realtime session wire contract + rolling transcript (`RealtimeSession`, `Transcript`, `NoiseReduction`).
 - `Sources/JarvisCore/Coach/` — the event loop and brain client: `CoachDriver`, `OpenAIBrainClient`, `ToolDefs`, `BrainModelCatalog` (default `gpt-5.5`), `ReasoningEffort`.
 - `Sources/JarvisCore/Triggers/` — turn/silence trigger detection + silence backoff (`Trigger`, `SilenceBackoff`).
-- `Sources/JarvisCore/Screen/ScreenCapture.swift` — the model-triggered screen-capture tool contract.
+- `Sources/JarvisCore/Screen/ScreenCapture.swift` — the model-triggered screen-capture tool contract; `ScreenCaptureCLI` shoots the display chosen in Settings → Screen (read at capture time, main-display fallback).
 - `Sources/JarvisCore/Overlay/` — overlay text model + length-proportional timing + fan-out (`OverlayRendering`, `OverlayTiming`, `OverlayAppearance`, `BroadcastOverlay`).
-- `Sources/JarvisCore/Config/` — config + owner-only secrets + brain preferences (`Config`, `Secrets`, `BrainPreferences`).
+- `Sources/JarvisCore/Config/` — config + owner-only secrets + brain preferences + the capture-display selection (`Config`, `Secrets`, `BrainPreferences`, `ScreenCapturePreferences`).
 - `Sources/JarvisCore/Diagnostics/` — logging, always-on activity log, session-history store, user-facing errors (`ActivityLog`, `SessionStore`, `UserFacingError`).
 - `Sources/JarvisOverlay/` — the capture-invisible `NSPanel` surfaces: `OverlayCaptionPanel` (transient), `OverlayBoxPanel` (persistent), `NSPanel+CaptureExclusion`.
 - `Sources/JarvisApp/App/` + `MenuBar/` — entry point, menu bar, Start/Stop, `ErrorReporter` (severity-driven `NSAlert`).
 - `Sources/JarvisApp/Capture/` — one-clock aggregate mic + system-audio capture with AEC3 echo cancellation + resampling (`AggregateEchoCapture`, `WebRTCEchoCanceller`, `Resampler`, `RealtimeTranscriber`, `Permissions`).
-- `Sources/JarvisApp/Settings/` — the unified Settings window (`SettingsWindow` hosting API-key / Overlay / Brain / Activity sections).
+- `Sources/JarvisApp/Settings/` — the unified Settings window (`SettingsWindow` hosting API-key / Overlay / Screen / Brain / Activity sections), plus the start-time capture-display prompt (`DisplaySection`, `DisplayPicker`, `NSScreen+DisplayTitles`).
 - `Sources/JarvisApp/Shortcuts/HotkeyController.swift` — the global Carbon ⌥⌘J on-demand-hint hotkey.
 - `Sources/JarvisApp/Viewer/ActivityViewer.swift` — the in-app `WKWebView` activity viewer.
 - `Sources/CJarvisAEC/lib/libjarvis-aec.a` — the prebuilt, zero-dylib WebRTC AEC3 C edge (the `CJarvisAEC` target; rebuilt by `scripts/build-aec.sh`).
