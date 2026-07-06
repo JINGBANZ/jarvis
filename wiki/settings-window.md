@@ -50,10 +50,11 @@ resizing; the API-key and overlay panels stay compact.
 |---|---|---|---|
 | `APIKeySection` | "API Key" | yes | `NSSecureTextField` to paste the OpenAI key; saves to an owner-only file on "Save", restarts the pipeline if already running. |
 | `OverlaySection` | "Overlay" | yes | Two groups, one per overlay surface — **Overlay Caption** (the transient on-screen tip) and **Overlay Box** (the persistent response history). Each has a header with an On/Off toggle (an `NSSwitch` + "On"/"Off" label) and a one-line description. When a surface is **on** it also shows its Text Size + Opacity sliders (with live readouts) and a live sample, **only while the Overlay tab is selected** (`didBecomeActive`/`didResignActive`); when **off**, its sliders and sample are hidden and the layout collapses. Persists via `OverlayAppearance`. |
+| `DisplaySection` | "Screen" | yes | One dropdown listing the connected displays — which one `capture_screen` screenshots; persists via `ScreenCapturePreferences`. Applies to the next screenshot. |
 | `BrainModelSection` | "Brain" | yes | Two dropdowns — the brain (LLM) model and the reasoning effort applied to it; persists via `BrainPreferences`. Takes effect on the next Start. |
 | `ActivitySection` | "Activity" | yes | Embeds the `ActivityViewer` content view (`makeContentView()` / `teardown()`); `prefersResizableWindow == true` so the log gets a larger, resizable window. |
 
-`AppDelegate` builds the section list at launch and passes it to `SettingsWindow`. All four sections
+`AppDelegate` builds the section list at launch and passes it to `SettingsWindow`. All five sections
 are always present.
 
 ## Activation-Policy Switch
@@ -119,6 +120,31 @@ not mid-session — hence the caption on the tab.
 | Brain model | `gpt-5.5` | `BrainModelCatalog` | `brain.model` |
 | Reasoning effort | `low` | `ReasoningEffort` | `brain.reasoningEffort` |
 
+## Capture Display
+
+Which display `capture_screen` screenshots is user-selectable, persisted through
+`ScreenCapturePreferences` (UserDefaults) as the **1-based index `screencapture -D` uses** (1 = the
+main display, the one with the menu bar). The dropdown enumerates `NSScreen.screens` — main display
+first, matching `screencapture`'s numbering — and refreshes when displays are plugged or unplugged
+while the tab is visible.
+
+Unlike the brain settings, the selection is read **at capture time** (`ScreenCaptureCLI`), so a
+change applies to the very next screenshot with no restart. Reads are validated twice: a stored
+value < 1 clamps to the main display, and if the selected display no longer exists (the monitor was
+unplugged since it was chosen) `screencapture -D` fails and `ScreenCaptureCLI` falls back to a plain
+main-display capture rather than dropping the screenshot.
+
+A user-initiated **Start with more than one display connected also prompts** for the screen to watch
+(`DisplayPicker`: an alert with the same dropdown, pre-selected to the persisted choice; Cancel
+aborts the Start untouched) — so a laptop-vs-monitor session never silently coaches from the wrong
+screen. One display → no prompt; an in-place restart (e.g. re-saving the API key while running)
+never prompts. The prompt writes through the same `ScreenCapturePreferences`, so it and the
+Settings tab are one setting.
+
+| Setting | Default | UserDefaults key |
+|---|---|---|
+| Capture display | `1` (main display) | `screen.captureDisplayIndex` |
+
 ## Key Files
 
 | File | Role |
@@ -127,11 +153,16 @@ not mid-session — hence the caption on the tab.
 | `Sources/JarvisApp/Settings/SettingsWindow.swift` | Host window + tab view |
 | `Sources/JarvisApp/Settings/APIKeySection.swift` | API-key tab |
 | `Sources/JarvisApp/Settings/OverlaySection.swift` | Overlay-appearance tab |
+| `Sources/JarvisApp/Settings/DisplaySection.swift` | Capture-display tab |
+| `Sources/JarvisApp/Settings/DisplayPicker.swift` | Start-time display prompt (>1 display) |
+| `Sources/JarvisApp/Settings/NSScreen+DisplayTitles.swift` | Shared display naming for the tab + prompt |
 | `Sources/JarvisApp/Settings/BrainModelSection.swift` | Brain model + reasoning-effort tab |
 | `Sources/JarvisApp/Settings/ActivitySection.swift` | Activity tab |
 | `Sources/JarvisCore/Coach/BrainModelCatalog.swift` | Curated model list (`BrainModel`) |
 | `Sources/JarvisCore/Coach/ReasoningEffort.swift` | The four effort levels |
 | `Sources/JarvisCore/Config/BrainPreferences.swift` | UserDefaults persistence + validation |
+| `Sources/JarvisCore/Config/ScreenCapturePreferences.swift` | Capture-display persistence + clamping |
+| `Sources/JarvisCore/Screen/ScreenCapture.swift` | `ScreenCaptureCLI` — reads the selection at capture time, falls back to the main display |
 | `Sources/JarvisCore/Config/Config.swift` | `overlayCaption*`/`overlayBox*` size + opacity ranges, enabled + appearance defaults |
 | `Sources/JarvisCore/Overlay/OverlayAppearance.swift` | UserDefaults persistence; `OverlayCaptionApplying` + `OverlayBoxApplying` protocols |
 | `Sources/JarvisCore/Overlay/BroadcastOverlay.swift` | Fans one `render` out to the caption + box |
