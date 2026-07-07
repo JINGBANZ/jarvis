@@ -146,7 +146,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Fan each spoken tip out to both the Overlay Caption and the persistent Overlay Box.
         let overlaySink = BroadcastOverlay([overlayCaption, overlayBox])
         let driver = CoachDriver(config: config, transcript: transcript,
-                                 brain: brain, screen: ScreenCaptureCLI(preferences: screenPreferences),
+                                 brain: brain, screen: WindowScopedScreenCapture(preferences: screenPreferences),
                                  overlay: overlaySink, clock: clock,
                                  onSpoke: { [weak self] in Task { @MainActor in self?.menuBar.noteSpoke() } })
 

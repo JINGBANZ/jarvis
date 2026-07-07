@@ -120,9 +120,35 @@ not mid-session — hence the caption on the tab.
 | Brain model | `gpt-5.5` | `BrainModelCatalog` | `brain.model` |
 | Reasoning effort | `low` | `ReasoningEffort` | `brain.reasoningEffort` |
 
+## Capture Scope
+
+What `capture_screen` shoots: the **active window** (default) or the **entire selected display**.
+Active-window mode reads the window server's single front-to-back z-order at capture time
+(`WindowScopedScreenCapture` in `JarvisApp/Capture`, with the pick itself pure logic in Core's
+`FrontWindowSelector`) and shoots the window the user last clicked or typed into — whichever
+display it lives on — via `screencapture -l`, which reads the window's own backing image (clean
+even when partially covered; `-o` omits the shadow). Jarvis's own windows, non-app layers (dock,
+panels), and tiny layer-0 helper windows are skipped.
+
+The window shot also gets an **on-device OCR sidecar**: `ScreenTextRecognizer` (Apple Vision,
+`.accurate`, language correction off so code identifiers survive) recognizes the text and Core's
+`RecognizedTextLayout` rebuilds reading order; `CoachDriver` sends it in the `capture_screen`
+tool-result text beside the image, flagged as fallible, so the model reads exact code instead of
+deciphering pixels. Nothing eligible on screen → fall back to the entire-display capture below;
+fallback and entire-display captures skip OCR deliberately (a whole display's text would feed the
+surrounding clutter back to the model as tokens).
+
+Persisted through `ScreenCapturePreferences` and read at capture time like the display index; an
+unrecognized stored value falls back to the default.
+
+| Setting | Default | UserDefaults key |
+|---|---|---|
+| Capture scope | `activeWindow` | `screen.captureScope` |
+
 ## Capture Display
 
-Which display `capture_screen` screenshots is user-selectable, persisted through
+Which display **entire-display captures** use — the Entire display scope and every fallback from
+the active-window scope — is user-selectable, persisted through
 `ScreenCapturePreferences` (UserDefaults) as the **1-based index `screencapture -D` uses** (1 = the
 main display, the one with the menu bar). The dropdown enumerates `NSScreen.screens` — main display
 first, matching `screencapture`'s numbering — and refreshes when displays are plugged or unplugged

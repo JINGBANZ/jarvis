@@ -32,6 +32,10 @@ Run the **human smoke run** — build, run, and validate live:
    session. The connect contract (`?intent=transcription`, the `session.update` payload) lives in
    `Sources/JarvisCore/Transcription/RealtimeSession.swift`; if the live connect fails, that's the file
    to adjust (e.g. swap `transcriptionModel` in `Config.swift`).
+5. **Brain-input PoC** (window-scoped capture + OCR sidecar — see the 2026-07-07
+   [decision](./decisions.md)): with a LeetCode window frontmost, a planted bug, and effort **Low**,
+   compare bug-found rate / input tokens / latency across capture scopes (full display vs. active
+   window vs. active window + OCR, 5 runs each) to confirm Low+clean-input replaces High.
 
 ## Built
 
@@ -42,13 +46,13 @@ thin OS shell, verified by the smoke run.
 - `Sources/JarvisCore/Transcription/` — realtime session wire contract + rolling transcript (`RealtimeSession`, `Transcript`, `NoiseReduction`).
 - `Sources/JarvisCore/Coach/` — the event loop and brain client: `CoachDriver`, `OpenAIBrainClient`, `ToolDefs`, `BrainModelCatalog` (default `gpt-5.5`), `ReasoningEffort`.
 - `Sources/JarvisCore/Triggers/` — turn/silence trigger detection + silence backoff (`Trigger`, `SilenceBackoff`).
-- `Sources/JarvisCore/Screen/ScreenCapture.swift` — the model-triggered screen-capture tool contract.
+- `Sources/JarvisCore/Screen/` — the model-triggered screen-capture tool contract + window-scoped capture logic (`ScreenCapture`, `ScreenSnapshot`, `FrontWindowSelector`, `RecognizedTextLayout`).
 - `Sources/JarvisCore/Overlay/` — overlay text model + length-proportional timing + fan-out (`OverlayRendering`, `OverlayTiming`, `OverlayAppearance`, `BroadcastOverlay`).
-- `Sources/JarvisCore/Config/` — config + owner-only secrets + brain preferences (`Config`, `Secrets`, `BrainPreferences`).
+- `Sources/JarvisCore/Config/` — config + owner-only secrets + brain/screen preferences (`Config`, `Secrets`, `BrainPreferences`, `ScreenCapturePreferences`, `ScreenCaptureScope`).
 - `Sources/JarvisCore/Diagnostics/` — logging, always-on activity log, session-history store, user-facing errors (`ActivityLog`, `SessionStore`, `UserFacingError`).
 - `Sources/JarvisOverlay/` — the capture-invisible `NSPanel` surfaces: `OverlayCaptionPanel` (transient), `OverlayBoxPanel` (persistent), `NSPanel+CaptureExclusion`.
 - `Sources/JarvisApp/App/` + `MenuBar/` — entry point, menu bar, Start/Stop, `ErrorReporter` (severity-driven `NSAlert`).
-- `Sources/JarvisApp/Capture/` — one-clock aggregate mic + system-audio capture with AEC3 echo cancellation + resampling (`AggregateEchoCapture`, `WebRTCEchoCanceller`, `Resampler`, `RealtimeTranscriber`, `Permissions`).
+- `Sources/JarvisApp/Capture/` — one-clock aggregate mic + system-audio capture with AEC3 echo cancellation + resampling (`AggregateEchoCapture`, `WebRTCEchoCanceller`, `Resampler`, `RealtimeTranscriber`, `Permissions`), plus the window-scoped screenshot + OCR edge (`WindowScopedScreenCapture`, `ScreenTextRecognizer`).
 - `Sources/JarvisApp/Settings/` — the unified Settings window (`SettingsWindow` hosting API-key / Overlay / Brain / Activity sections).
 - `Sources/JarvisApp/Shortcuts/HotkeyController.swift` — the global Carbon ⌥⌘J on-demand-hint hotkey.
 - `Sources/JarvisApp/Viewer/ActivityViewer.swift` — the in-app `WKWebView` activity viewer.

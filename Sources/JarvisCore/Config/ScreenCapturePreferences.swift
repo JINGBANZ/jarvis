@@ -14,6 +14,7 @@ public final class ScreenCapturePreferences: @unchecked Sendable {
 
     private enum Key {
         static let displayIndex = "screen.captureDisplayIndex"
+        static let scope = "screen.captureScope"
     }
 
     public init(defaults: UserDefaults = .standard) {
@@ -24,5 +25,12 @@ public final class ScreenCapturePreferences: @unchecked Sendable {
     public var displayIndex: Int {
         get { max(1, defaults.integer(forKey: Key.displayIndex)) }
         set { defaults.set(max(1, newValue), forKey: Key.displayIndex) }
+    }
+
+    /// What to capture: the active window (default) or the entire selected display. Absent or
+    /// unrecognized stored values fall back to the default, like `displayIndex` clamps.
+    public var scope: ScreenCaptureScope {
+        get { defaults.string(forKey: Key.scope).flatMap(ScreenCaptureScope.init(rawValue:)) ?? .activeWindow }
+        set { defaults.set(newValue.rawValue, forKey: Key.scope) }
     }
 }

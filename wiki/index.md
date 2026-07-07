@@ -17,7 +17,7 @@
 - **[overlay-timing.md](./overlay-timing.md)** — how long each coaching line stays on screen: a hybrid of the captioning reading-speed standard and our glance-not-watch situation (length-proportional time + a fixed notice buffer + an inter-line blank gap).
 - **[landscape-survey.md](./landscape-survey.md)** — every tool and product we tried or evaluated, and how each measured up. ("What I tried.")
 - **[fork-evaluation.md](./fork-evaluation.md)** — code-level evaluation of open-source apps as a fork base for the PoC, and why they're all Electron/Tauri rather than native Swift.
-- **[settings-window.md](./settings-window.md)** — the unified Settings window: one menu item → `SettingsWindow` hosting `APIKeySection`, `OverlaySection`, `DisplaySection`, `BrainModelSection`, and `ActivitySection`; the Overlay Caption and Overlay Box each have an on/off toggle + size/opacity, persisted via `OverlayAppearance`; the Screen tab picks which display `capture_screen` screenshots.
+- **[settings-window.md](./settings-window.md)** — the unified Settings window: one menu item → `SettingsWindow` hosting `APIKeySection`, `OverlaySection`, `DisplaySection`, `BrainModelSection`, and `ActivitySection`; the Overlay Caption and Overlay Box each have an on/off toggle + size/opacity, persisted via `OverlayAppearance`; the Screen tab picks what `capture_screen` shoots (the active window by default, with an on-device OCR sidecar) and which display entire-display/fallback captures use.
 
 ## Decisions
 
