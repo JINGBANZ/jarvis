@@ -243,8 +243,8 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
   retained) server-side at OpenAI for debugging (see [sandbox.md](./sandbox.md)).
 - **Behavioral restraint (model-governed):** there is **no cooldown or rate cap** in code. Every
   substantive utterance — from either speaker; only back-channel filler is skipped as pure cost —
-  reaches the brain, and the brain decides whether it has anything worth saying — that restraint
-  lives in the system prompt ("call stay_silent unless genuinely useful").
+  reaches the brain, and the brain decides whether it has anything worth
+  saying — that restraint lives in the system prompt (see [`coachSystemPrompt`](../Sources/JarvisCore/Coach/ToolDefs.swift)).
   This keeps
   conversation natural: a follow-up question is never stranded behind a timer. The hard control is
   the menu-bar **Start/Stop** — coaching never runs until explicitly started, and stopping tears the
