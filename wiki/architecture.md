@@ -55,23 +55,24 @@ moments the model judges worthwhile.
    tuned silence window) or a **silence check** fires (you've gone quiet, maybe stuck). The silence
    check carries *how long* you've been quiet and backs off across a long silence (the interval
    doubles each step up to a cap — see `Config`), resetting on speech.
-2. The CoachDriver calls the brain on every trigger that carries **new "me" speech** — there is no
+2. The CoachDriver calls the brain on every trigger that carries **substance** — there is no
    cooldown, rate cap, or wake-word gate. Whether to speak (and whether the user just addressed
    Jarvis) is the model's call, governed by the system prompt; the only hard gates are the user's
-   Start/Stop and the cost gate: a turn-end whose delta holds no new "me" line (only the other
-   side spoke, or nothing new at all) is skipped without a request — the prompt forbids replying
-   to "them" anyway, and the unsent lines ride along on the next real turn. Silence checks and the
-   hint hotkey always go through.
-3. It calls **`gpt-5.5`** with the coach system prompt, the recent **timestamped** transcript
-   window, the timing context (seconds silent, session elapsed), and the tool set
+   Start/Stop and the **substance gate** (`TurnSubstance`): a turn-end whose delta is pure
+   back-channel filler ("Hmm", "嗯" — from *either* speaker) or empty is skipped without a
+   request. The gate is speaker-neutral by design: an interviewer question is substance and may
+   draw a proactive tip for the user. Skipped lines ride along on the next substantive turn;
+   silence checks and the hint hotkey always go through.
+3. It calls **`gpt-5.5`** with the coach system prompt, the session memory (`CoachHistory`), the
+   new transcript delta, the timing context (seconds silent, session elapsed), and the tool set
    `[capture_screen, speak, stay_silent]`. The timing is what lets the model tell "thinking" from
    "stuck."
 4. The model may call `capture_screen`. The harness fulfills it (a silent screenshot) and
-   returns the image into the conversation. The model may now reason over what's on screen.
+   returns the image into the request. The model may now reason over what's on screen.
 5. The model calls `speak(lines)` — a tip of up to ~3 short lines, returned **already split**
    into an array (Structured Outputs / `strict:true`), so the client never splits prose on
    punctuation — or `stay_silent`. A tool call is **required** on every turn: silence is an
-   explicit tool, never plain text, so the stored conversation stays free of stray model prose
+   explicit tool, never plain text, so the session memory stays free of stray model prose
    (see [decisions.md](./decisions.md)).
 6. `speak` renders to the **Overlay**, one line at a time (per-line display time set in `Config`).
    A newer tip never interrupts one still showing — tips queue and play in order, so no hint is lost.
@@ -118,7 +119,7 @@ plugins ship only with full Xcode, and Jarvis builds **CLT-only** (see
 | **WebRTCEchoCanceller** | AEC3 echo canceller driven at 48 kHz on 10 ms frames inside the capture IOProc; far reference first, then the mic cleaned in place. | WebRTC **AEC3** (`webrtc-audio-processing`), vendored static + zero-dylib via `scripts/build-aec.sh`. |
 | **ErrorReporter** | The single funnel for user-facing failures. Severity on a Foundation-only `UserFacingError` (in Core) decides the response — `fatal` pops an `NSAlert` and tears the session down, `degraded` is logged only — so no startup failure is ever silent. The only place an *error* `NSAlert` is raised (confirmation prompts aside); diagnostics stay in `JarvisLog`. | AppKit (`NSAlert`). |
 | **Transcriber** | Maintain a rolling, speaker-labeled, **timestamped** transcript; emit turn-end events and backing-off silence checks (with quiet duration). Two instances run in parallel — one per side — tagging lines `me`/`them` into one shared transcript. | `gpt-4o-transcribe` (Realtime API; tuned `server_vad`). |
-| **CoachDriver** | The event loop. On every trigger carrying new "me" speech (plus every silence check and hint keypress), call the brain with the transcript + timing context and tools, route tool calls. No cooldown/rate cap — restraint is the model's; the only client-side skip is the them-only/empty turn-end cost gate. | `gpt-5.5` (vision + tool-use). |
+| **CoachDriver** | The event loop. On every substantive trigger (plus every silence check and hint keypress), call the brain with the session memory + transcript delta + timing context and tools, route tool calls, and compact the memory when it grows long. No cooldown/rate cap — restraint is the model's; the only client-side skip is the filler-only turn-end gate (`TurnSubstance`). | `gpt-5.5` (vision + tool-use); `gpt-5.4-mini` for memory summaries. |
 | **ScreenTool** | Fulfill `capture_screen`: take a silent screenshot of the active display, excluding the overlay window. | macOS `screencapture` CLI. |
 | **Overlay Caption** | Render `speak` output: up to ~3 short lines (model-split), shown one at a time and queued so a newer tip never cuts off the current one; non-activating, always-on-top, excluded from capture. Switchable from Settings — **off by default**; when off, tips are suppressed. | AppKit NSPanel; `OverlayCaptionPanel`. |
 | **Overlay Box** | A persistent window logging every `speak` tip in full, timestamped — the scrollable history of what the caption flashed one line at a time. Movable, resizable, opaque, also excluded from capture; switched on/off from Settings (**on by default**), cleared on each Start. Fed by the same `speak` call as the caption via **`BroadcastOverlay`**, which fans one `OverlayRendering.render` out to both sinks (so `CoachDriver` is unchanged). | AppKit NSPanel; `OverlayBoxPanel`. |
@@ -163,9 +164,9 @@ check. Diagnostics remain `JarvisLog`'s job; `ErrorReporter` owns surfacing + li
 ## 4. Data Flow & Cost Model
 
 - **Continuous (cheap):** audio → Realtime → transcript. This runs the whole session.
-- **Per-turn (cheap):** a text-only `gpt-5.5` call on each turn-end that carries new "me" speech,
-  and on each silence event. Turn-ends where only the other side spoke are skipped client-side —
-  free. No image unless the model asks.
+- **Per-turn (cheap):** a `gpt-5.5` call on each substantive turn-end and each silence event, with a
+  bounded, mostly-cached working set. Filler-only turn-ends (from either speaker) are skipped
+  client-side — free. No image unless the model asks.
 - **On-demand (expensive):** a screenshot + vision tokens, only when the model calls
   `capture_screen`. A coaching response, only when the model calls `speak`.
 
@@ -178,13 +179,16 @@ rather than a per-turn screenshot.
 - **Brain — `gpt-5.5` via the OpenAI Responses API** (`POST /v1/responses`), not Chat Completions:
   for the gpt-5 family, function/tool calling is the recommended (and least restricted) path on
   Responses. The tool loop is threaded with `function_call` / `function_call_output` items.
-- **Per-session memory — the Conversations API.** The coach needs to remember its *own* prior
-  replies (the transcript only holds user speech), so the brain opens one server-side conversation
-  per Start (`store:true`) and sends only the **new** transcript lines each turn — the server holds
-  the rest. (If the conversation can't be created, `CoachDriver` falls back to a **stateless** mode
-  that re-sends a recent transcript *window* every turn.) The retention tradeoff this creates
-  (transcript + screenshots retained ~30 days at OpenAI) is a deliberate quality-over-privacy choice,
-  documented in [sandbox.md](./sandbox.md).
+- **Per-session memory — client-managed (`CoachHistory`).** The coach needs to remember its *own*
+  prior replies (the transcript only holds user speech), so `CoachDriver` keeps the session memory
+  itself and rebuilds every request as `[system] + memory + new delta`. Owning the memory is what
+  keeps it small and cheap: it grows **append-only** (a byte-identical prefix, so OpenAI's prompt
+  cache keeps hitting at ~90% discount); `stay_silent` turns leave no trace; only the newest
+  screenshot stays as pixels (older ones become one-line stubs); and past a token threshold (see
+  `Config.historyCompactionTokenThreshold`) the oldest span is **compacted** into a short structured
+  summary written by a cheaper model (`gpt-5.4-mini`), so the problem statement never falls out of
+  context. Requests are sent `store:true` so they stay inspectable in the OpenAI dashboard for
+  debugging — the retention tradeoff is documented in [sandbox.md](./sandbox.md).
 - **Transcription — `gpt-4o-transcribe` over the GA Realtime API** with **tuned `server_vad`** (not
   `semantic_vad`, which is reported flaky in transcription-only mode — it can stop emitting
   `…transcription.completed` entirely). Turn-end fires on `…transcription.completed`, plus a
@@ -211,11 +215,12 @@ The always-on legs are built to survive transient failure rather than die on it:
 - **The brain call** is single-flighted (a turn can't double-speak) and runs under a generous request
   timeout — a hang backstop set well above the reasoning-turn tail, so a slow turn is waited out, not
   abandoned. It makes **one attempt** per turn: a failed request (a stuck/timed-out call, a dropped
-  connection, an HTTP error, or a `conversation_locked` while a prior turn still holds the per-session
-  conversation lock) fails the turn rather than retrying in place. Recovery is on the **next trigger** —
-  sent-state advances only on a successful send, so the next turn re-sends the still-unsent transcript
-  (the failed lines plus anything newer, fresher than a resend) and a held lock clears naturally instead
-  of being hammered.
+  connection, an HTTP error) fails the turn rather than retrying in place. Recovery is on the **next
+  trigger** — sent-state advances only on a successful send, so the next turn re-sends the still-unsent
+  transcript (the failed lines plus anything newer, fresher than a resend). Because session memory is
+  client-owned, every request is self-contained: there is no server-side conversation object to lock
+  or dangle. Memory **compaction** fails soft the same way — a failed summary just means the full
+  history rides along until the next attempt.
 
 ## 5. Safety Model
 
@@ -234,12 +239,12 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
   to `gpt-5.5` *only when the model triggers a capture/response*. The only screen-/audio-derived data
   written to **local** disk is the owner-only, bounded per-session **activity log** (spoken tips,
   transcribed lines, the screenshots the model saw); raw mic audio and the live transcript are never
-  archived. The per-session OpenAI conversation does retain transcript + screenshots server-side (see
-  [sandbox.md](./sandbox.md)).
+  archived. Requests are sent `store:true`, so what the model saw does remain inspectable (and
+  retained) server-side at OpenAI for debugging (see [sandbox.md](./sandbox.md)).
 - **Behavioral restraint (model-governed):** there is **no cooldown or rate cap** in code. Every
-  utterance by "me" reaches the brain (turn-ends carrying only "them" speech are skipped as pure
-  cost — the prompt forbids replying to them), and the brain decides whether it has anything worth
-  saying — that restraint lives in the system prompt ("call stay_silent unless genuinely useful").
+  substantive utterance — from either speaker; only back-channel filler is skipped as pure cost —
+  reaches the brain, and the brain decides whether it has anything worth saying — that restraint
+  lives in the system prompt ("call stay_silent unless genuinely useful").
   This keeps
   conversation natural: a follow-up question is never stranded behind a timer. The hard control is
   the menu-bar **Start/Stop** — coaching never runs until explicitly started, and stopping tears the

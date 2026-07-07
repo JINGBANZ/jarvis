@@ -76,11 +76,15 @@ public struct BrainResponse: Sendable {
     /// the reason (e.g. `"max_output_tokens"`). An empty `toolCalls` with a non-nil reason is
     /// *truncation*, not a deliberate decision to stay silent — the coach loop distinguishes them.
     public let incompleteReason: String?
+    /// The response's plain text output, if any. Coaching turns never use it (tool_choice is
+    /// required there); it exists for tool-less calls like the history summarizer.
+    public let outputText: String?
     public init(toolCalls: [ToolInvocation], rawToolCalls: [RawToolCall] = [],
-                incompleteReason: String? = nil) {
+                incompleteReason: String? = nil, outputText: String? = nil) {
         self.toolCalls = toolCalls
         self.rawToolCalls = rawToolCalls
         self.incompleteReason = incompleteReason
+        self.outputText = outputText
     }
 }
 
@@ -97,26 +101,16 @@ public enum ToolChoice: Sendable, Equatable {
     case force(String)
 }
 
-/// Abstraction over the brain model so CoachDriver is testable with a mock.
+/// Abstraction over the brain model so CoachDriver is testable with a mock. Every call is
+/// self-contained: the session's memory is CLIENT-managed (`CoachHistory`) and sent in `messages`,
+/// so there is no server-side conversation object to create, thread, or lock.
 public protocol BrainClient: Sendable {
-    /// `conversationId`, when non-nil, ties this turn into a server-side conversation so the model
-    /// remembers prior turns (its own replies included) without re-sending them — the caller sends
-    /// only the NEW input each turn.
-    func respond(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice,
-                 conversationId: String?) async throws -> BrainResponse
-    /// Create a server-side conversation and return its id. Default: a local stub (no server state),
-    /// so mocks/tests need not implement it.
-    func createConversation() async throws -> String
+    func respond(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice) async throws -> BrainResponse
 }
 
 public extension BrainClient {
-    func createConversation() async throws -> String { "conv_local" }
-
-    /// Convenience overloads so callers/tests need not pass every argument.
-    func respond(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice) async throws -> BrainResponse {
-        try await respond(messages: messages, tools: tools, toolChoice: toolChoice, conversationId: nil)
-    }
+    /// Convenience overload so callers/tests need not pass every argument.
     func respond(messages: [ChatMessage], tools: [ToolDef]) async throws -> BrainResponse {
-        try await respond(messages: messages, tools: tools, toolChoice: .auto, conversationId: nil)
+        try await respond(messages: messages, tools: tools, toolChoice: .auto)
     }
 }
