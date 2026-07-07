@@ -147,6 +147,7 @@ private func speakResponseBody(arguments: String) -> Data {
         #expect(body.contains("\"call_id\":\"call_1\""))
         #expect(body.contains("\"input_image\""))
         #expect(body.contains("\"reasoning\""))
+        #expect(body.contains("\"effort\":\"low\""))   // the effort VALUE reaches the wire, not just the key
         #expect(body.contains("\"store\":true"))   // requests stay inspectable in the OpenAI logs (debugging)
         #expect(body.contains("\"max_output_tokens\""))
         #expect(body.contains("\"parallel_tool_calls\":false"))
@@ -174,6 +175,28 @@ private func speakResponseBody(arguments: String) -> Data {
         _ = try await client.respond(messages: [.user("hi")], tools: coachTools)
         let body = String(data: box.get() ?? Data(), encoding: .utf8) ?? ""
         #expect(body.contains("\"max_output_tokens\":\(ReasoningEffort.default.maxOutputTokens)"))
+    }
+
+    /// The default client emits a stable `prompt_cache_key` — the single mechanism behind #46's ~7x
+    /// per-session cost cut. A stable key routes every request to the same warm prompt cache; if the
+    /// field is dropped, renamed, or drifts, cost silently regresses. Pin the default value.
+    @Test func encodesDefaultPromptCacheKey() async throws {
+        let box = CapturedBody()
+        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+                                       send: { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
+        _ = try await client.respond(messages: [.user("hi")], tools: coachTools)
+        let body = String(data: box.get() ?? Data(), encoding: .utf8) ?? ""
+        #expect(body.contains("\"prompt_cache_key\":\"jarvis-coach-v1\""))
+    }
+
+    /// A caller-supplied `promptCacheKey` is passed through verbatim — the value isn't hardcoded.
+    @Test func encodesCustomPromptCacheKey() async throws {
+        let box = CapturedBody()
+        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5", promptCacheKey: "jarvis-coach-v2",
+                                       send: { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
+        _ = try await client.respond(messages: [.user("hi")], tools: coachTools)
+        let body = String(data: box.get() ?? Data(), encoding: .utf8) ?? ""
+        #expect(body.contains("\"prompt_cache_key\":\"jarvis-coach-v2\""))
     }
 
     /// Tools are sent with `strict:true` so the model's function-call arguments are schema-guaranteed
