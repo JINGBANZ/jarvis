@@ -1,0 +1,25 @@
+# Caller template — copy to a target repo's .github/workflows/issue-opener.yml
+# Calls the reusable workflow in JINGBANZ/workflows. Requires two secrets in the target repo:
+#   CLAUDE_CODE_OAUTH_TOKEN — run /install-github-app or `claude setup-token`
+#   BOT_PAT — a PAT (issues + PRs + contents on this repo); issues it creates must trigger the
+#             issue-worker workflow, which the default GITHUB_TOKEN cannot do.
+name: Issue Opener
+
+on:
+  schedule:
+    - cron: '7 19 * * *' # daily 03:07 Beijing (UTC+8); off-the-hour minute dodges peak cron delays
+  workflow_dispatch: {} # manual runs; also re-enables the schedule after 60-day repo inactivity
+
+jobs:
+  open-issue:
+    uses: JINGBANZ/workflows/.github/workflows/issue-opener.yml@main
+    permissions:
+      contents: read
+      issues: write
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      BOT_PAT: ${{ secrets.BOT_PAT }}
+    # Optional: pick the engine/model (defaults: claude / claude-opus-4-8)
+    # with:
+    #   engine: claude
+    #   model: claude-sonnet-4-6

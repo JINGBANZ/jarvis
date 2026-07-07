@@ -1,0 +1,32 @@
+# Caller template — copy to a target repo's .github/workflows/issue-worker.yml
+# Calls the reusable workflow in JINGBANZ/workflows. Requires two secrets in the target repo:
+#   CLAUDE_CODE_OAUTH_TOKEN — run /install-github-app or `claude setup-token`
+#   BOT_PAT — a PAT (issues + PRs + contents on this repo); PRs it creates must trigger the
+#             PR-review workflow, which the default GITHUB_TOKEN cannot do.
+#
+# No gate here on purpose: the hub's reusable workflow verifies the issue author has write
+# access before any agent step runs, so callers stay trivial and the policy updates centrally.
+name: Issue Worker
+
+on:
+  issues:
+    types: [opened]
+
+concurrency:
+  group: issue-worker-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  work:
+    uses: JINGBANZ/workflows/.github/workflows/issue-worker.yml@main
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      BOT_PAT: ${{ secrets.BOT_PAT }}
+    # Optional: pick the engine/model (defaults: claude / claude-opus-4-8)
+    # with:
+    #   engine: claude
+    #   model: claude-sonnet-4-6
