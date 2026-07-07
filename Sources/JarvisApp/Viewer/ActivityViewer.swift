@@ -21,7 +21,9 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
     private var pendingMeta = ""           // header text to set after the shell loads
     private var viewingCurrent = true
 
-    private let renderCap = 400            // bound DOM rows when replaying a (possibly huge) past session
+    // Runaway backstop only — high enough that a whole multi-hour session replays in full (cutting a
+    // session's head off is worse than a big DOM; text rows are cheap and screenshots are bounded).
+    private let renderCap = 10_000
 
     init(log: ActivityLog, store: SessionStore) {
         self.log = log

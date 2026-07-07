@@ -96,13 +96,14 @@ the API and is dropped, the live transcript lives in memory, and the temp screen
 hand a frame to `screencapture` are deleted immediately after use. The one thing persisted *on this
 machine* is the **activity log** — owner-only and bounded; see below.
 
-> **Server-side retention for conversation quality (current behavior).** To give the coach real
-> multi-turn memory — so it remembers its *own* prior replies, not just the user's speech — the brain
-> uses the OpenAI **Conversations API** (`store:true`, one `conv_…` per coaching session;
-> `OpenAIBrainClient.swift`). This **does** retain the transcript and the screenshots sent to the
-> model server-side at OpenAI (≈30-day TTL), so the no-local-retention guarantee above does **not**
-> extend to OpenAI's servers. A deliberate *quality-over-retention* choice; revisiting it (encrypted
-> reasoning items / ephemeral conversations / client-side history) is tracked as a future privacy item.
+> **Server-side retention for debuggability (current behavior).** Session memory is client-managed
+> (`CoachHistory` — nothing at OpenAI is needed for continuity), but requests are still sent
+> `store:true` (`OpenAIBrainClient.swift`) so each request/response remains inspectable in the OpenAI
+> dashboard logs while the harness is being tuned. This **does** retain the transcript and the
+> screenshots sent to the model server-side at OpenAI (≈30-day TTL), so the no-local-retention
+> guarantee above does **not** extend to OpenAI's servers. A deliberate *debuggability-over-retention*
+> choice; flipping to `store:false` — now a one-line change with no quality cost — is tracked as a
+> future privacy item.
 
 **The activity log is the one bounded form of disk persistence, hardened to stay owner-only.** The
 log (the in-app `WKWebView` viewer's `jarvis-activity.jsonl` + the screenshots the model looked at,

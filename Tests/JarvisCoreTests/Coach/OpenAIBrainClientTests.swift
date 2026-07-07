@@ -1,6 +1,9 @@
 import Foundation
 import Testing
 @testable import JarvisCore
+#if canImport(FoundationNetworking)
+import FoundationNetworking   // HTTPURLResponse lives here on non-Darwin (Core tests on Linux)
+#endif
 
 private func http(_ code: Int, headers: [String: String]? = nil) -> HTTPURLResponse {
     HTTPURLResponse(url: URL(string: "https://api.openai.com/v1/responses")!,
@@ -46,6 +49,18 @@ private func speakResponseBody(arguments: String) -> Data {
         #expect(resp.rawToolCalls == [RawToolCall(id: "call_9", name: "capture_screen", argumentsJSON: "{}")])
     }
 
+    @Test func decodesStaySilentToolCall() async throws {
+        let json = """
+        {"output":[
+          {"type":"function_call","id":"fc_2","call_id":"call_2","name":"stay_silent","arguments":"{}"}
+        ]}
+        """
+        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+                                       send: { _ in (Data(json.utf8), http(200)) })
+        let resp = try await client.respond(messages: [.user("hi")], tools: coachTools)
+        #expect(resp.toolCalls == [.staySilent(callId: "call_2")])
+    }
+
     @Test func noToolCallsMeansSilent() async throws {
         let json = #"{"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"(thinking)"}]}]}"#
         let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
@@ -88,30 +103,20 @@ private func speakResponseBody(arguments: String) -> Data {
         #expect(resp.incompleteReason == nil)
     }
 
-    /// When a conversation id is supplied, it's sent as the Responses `conversation` field, and
-    /// state is stored server-side (store:true).
-    @Test func encodesConversationAndStore() async throws {
-        let box = CapturedBody()
-        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
-                                       send: { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
-        _ = try await client.respond(messages: [.user("hi")], tools: coachTools,
-                                     toolChoice: .auto, conversationId: "conv_abc")
-        let body = String(data: box.get() ?? Data(), encoding: .utf8) ?? ""
-        #expect(body.contains("\"conversation\":\"conv_abc\""))
-        #expect(body.contains("\"store\":true"))
-    }
-
-    /// createConversation POSTs to the conversations endpoint and returns the new id.
-    @Test func createConversationParsesId() async throws {
-        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
-                                       send: { _ in (Data(#"{"id":"conv_new123"}"#.utf8), http(200)) })
-        let id = try await client.createConversation()
-        #expect(id == "conv_new123")
+    /// Plain text output is surfaced (`outputText`) — the whole payload of a tool-less summarizer
+    /// call — and multiple text parts are joined.
+    @Test func decodesOutputTextForToollessCalls() async throws {
+        let json = #"{"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"the "},{"type":"output_text","text":"summary"}]}]}"#
+        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.4-mini",
+                                       send: { _ in (Data(json.utf8), http(200)) })
+        let resp = try await client.respond(messages: [.user("condense this")], tools: [])
+        #expect(resp.outputText == "the summary")
+        #expect(resp.toolCalls.isEmpty)
     }
 
     /// Any non-2xx fails fast — there is no in-request retry. A failure throws to the driver, which
-    /// recovers on the next trigger by re-sending the (still-uncommitted) backlog. This one-attempt
-    /// contract is what lets a held `conversation_locked` clear naturally instead of being hammered.
+    /// recovers on the next trigger by re-sending the (still-uncommitted) backlog — fresher than
+    /// retrying a stale body in place.
     @Test func httpErrorThrowsWithoutRetry() async {
         let attempts = Counter()
         let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
@@ -142,7 +147,7 @@ private func speakResponseBody(arguments: String) -> Data {
         #expect(body.contains("\"call_id\":\"call_1\""))
         #expect(body.contains("\"input_image\""))
         #expect(body.contains("\"reasoning\""))
-        #expect(body.contains("\"store\":true"))   // server-side conversation continuity
+        #expect(body.contains("\"store\":true"))   // requests stay inspectable in the OpenAI logs (debugging)
         #expect(body.contains("\"max_output_tokens\""))
         #expect(body.contains("\"parallel_tool_calls\":false"))
         #expect(body.contains("\"name\":\"capture_screen\""))
@@ -191,6 +196,17 @@ private func speakResponseBody(arguments: String) -> Data {
         _ = try await client.respond(messages: [.user("hi")], tools: coachTools)
         let body = String(data: box.get() ?? Data(), encoding: .utf8) ?? ""
         #expect(body.contains("\"tool_choice\":\"auto\""))
+    }
+
+    /// `.required` (what audio-driven coach turns use) encodes the Responses "required" string — some
+    /// tool call, the model's pick — so a stay-quiet decision must be the stay_silent tool, not text.
+    @Test func requiredToolChoiceEncodesRequiredString() async throws {
+        let box = CapturedBody()
+        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+                                       send: { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
+        _ = try await client.respond(messages: [.user("hi")], tools: coachTools, toolChoice: .required)
+        let body = String(data: box.get() ?? Data(), encoding: .utf8) ?? ""
+        #expect(body.contains("\"tool_choice\":\"required\""))
     }
 
     /// Forcing a specific function encodes the Responses tool_choice object shape.

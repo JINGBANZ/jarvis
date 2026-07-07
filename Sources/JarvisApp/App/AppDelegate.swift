@@ -143,10 +143,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let brain = OpenAIBrainClient(apiKey: key, model: brainPreferences.model.id,
                                       reasoningEffort: brainPreferences.effort.rawValue,
                                       maxOutputTokens: brainPreferences.effort.maxOutputTokens)
+        // History-compaction summaries don't need the coaching model — a mini model writes a
+        // 250-word briefing a few times an hour for a fraction of the price. Text-only and quick,
+        // so low effort with a modest token cap.
+        let summarizer = OpenAIBrainClient(apiKey: key, model: "gpt-5.4-mini",
+                                           reasoningEffort: ReasoningEffort.low.rawValue,
+                                           maxOutputTokens: 2_048)
         // Fan each spoken tip out to both the Overlay Caption and the persistent Overlay Box.
         let overlaySink = BroadcastOverlay([overlayCaption, overlayBox])
         let driver = CoachDriver(config: config, transcript: transcript,
-                                 brain: brain, screen: ScreenCaptureCLI(preferences: screenPreferences),
+                                 brain: brain, summarizer: summarizer,
+                                 screen: ScreenCaptureCLI(preferences: screenPreferences),
                                  overlay: overlaySink, clock: clock,
                                  onSpoke: { [weak self] in Task { @MainActor in self?.menuBar.noteSpoke() } })
 
