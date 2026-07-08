@@ -11,6 +11,15 @@ import Testing
         }
     }
 
+    /// Multi-letter back-channels whose spelling has a doubled letter ("cool", "I see") must still
+    /// match: the `fillers` set is normalized with the same collapse step as the input, so a doubled
+    /// letter can't silently drop an entry out of the set. Regression for the dead-entry bug.
+    @Test func doubledLetterBackChannelsAreFiller() {
+        for text in ["cool", "Cool.", "cooool", "I see", "I see.", "isee", "I  see"] {
+            #expect(!TurnSubstance.isSubstantive(text), "expected filler: \(text)")
+        }
+    }
+
     /// Elongation/repetition variants normalize onto their base form — the reason the closed-class
     /// list doesn't need to enumerate "hmmm", "mmmm", "嗯嗯", …
     @Test func elongationsCollapseOntoTheList() {
