@@ -9,7 +9,11 @@ public struct Config: Sendable {
     /// Upper bound on the silence-check interval as it backs off, so a long silence still gets an
     /// occasional gentle check rather than going dark forever.
     public var silenceMaxIntervalSeconds: TimeInterval
-    public var transcriptWindowSeconds: TimeInterval
+    /// When the client-managed session memory (`CoachHistory`) grows past this many estimated tokens,
+    /// the driver condenses its oldest span into a short summary (see `CoachDriver.compactIfNeeded`).
+    /// Sized to industry practice for conversational loads (~5–20k): big enough that compaction is
+    /// rare (a few times an hour), small enough that per-request input stays cheap.
+    public var historyCompactionTokenThreshold: Int
     /// Fixed time added to every overlay line before its reading time. Unlike a movie viewer (eyes on
     /// the screen, audio reinforcing the text), our user is mid-conversation and only *glances* at the
     /// overlay — so the dominant cost is noticing the tip and redirecting their gaze, which is constant
@@ -47,7 +51,7 @@ public struct Config: Sendable {
     public init(
         silenceTimeoutSeconds: TimeInterval = 120,
         silenceMaxIntervalSeconds: TimeInterval = 960,
-        transcriptWindowSeconds: TimeInterval = 90,
+        historyCompactionTokenThreshold: Int = 10_000,
         overlayNoticeBufferSeconds: TimeInterval = 2.0,
         overlaySecondsPerWord: TimeInterval = 0.35,
         overlayMaxDisplaySeconds: TimeInterval = 8,
@@ -59,7 +63,7 @@ public struct Config: Sendable {
     ) {
         self.silenceTimeoutSeconds = silenceTimeoutSeconds
         self.silenceMaxIntervalSeconds = silenceMaxIntervalSeconds
-        self.transcriptWindowSeconds = transcriptWindowSeconds
+        self.historyCompactionTokenThreshold = historyCompactionTokenThreshold
         self.overlayNoticeBufferSeconds = overlayNoticeBufferSeconds
         self.overlaySecondsPerWord = overlaySecondsPerWord
         self.overlayMaxDisplaySeconds = overlayMaxDisplaySeconds

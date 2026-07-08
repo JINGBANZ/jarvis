@@ -52,24 +52,16 @@ public final class RollingTranscript: @unchecked Sendable {
         return max(0, now - last)
     }
 
-    /// A timestamped window: lines within `seconds` of `now`, each `[mm:ss] speaker: text`,
-    /// rendered in spoken order (see `render`).
-    public func renderWindow(seconds: TimeInterval, now: TimeInterval) -> String {
-        lock.lock(); let snapshot = lines; lock.unlock()
-        let cutoff = now - seconds
-        return Self.render(snapshot.filter { $0.at >= cutoff })
-    }
-
-    /// Lines from `index` onward, formatted like `renderWindow`, AND the line count rendered up to —
+    /// The delta since `index`: the rendered text, the line count rendered up to, AND the raw lines —
     /// returned together from a SINGLE locked snapshot so the caller's "advance to" index exactly
     /// matches the lines actually rendered (no duplicate-on-concurrent-append race). The index is
-    /// clamped to a valid range (defensive against a stale caller index).
-    public func renderFrom(index: Int) -> (text: String, upTo: Int) {
+    /// clamped to a valid range (defensive against a stale caller index). The raw `lines` are what the
+    /// coach loop's substance gate inspects (see `TurnSubstance`) before spending a brain request.
+    public func renderFrom(index: Int) -> (text: String, upTo: Int, lines: [TranscriptLine]) {
         lock.lock(); let snapshot = lines; lock.unlock()
         let start = min(max(0, index), snapshot.count)
-        // Same spoken-order rendering as renderWindow, so the conversation-mode delta and the full
-        // window agree on ordering (the two sockets can append out of time order).
-        return (Self.render(snapshot[start...]), snapshot.count)
+        // Spoken-order rendering (see `render`): the two sockets can append out of time order.
+        return (Self.render(snapshot[start...]), snapshot.count, Array(snapshot[start...]))
     }
 
     /// Render lines as `[mm:ss] speaker: text`, one per line, in SPOKEN order. The two transcription

@@ -1,12 +1,15 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking   // URLSession/URLRequest live here on non-Darwin (Core tests on Linux)
+#endif
 
 /// Brain client over the OpenAI **Responses API** (`POST /v1/responses`) — the recommended
 /// endpoint for tool use with gpt-5.5. System text is passed via `instructions`; the conversation
 /// is sent as typed `input` items; function calls are threaded with `function_call` /
-/// `function_call_output`. Includes bounded retry-with-backoff on 429/5xx (honoring `Retry-After`)
-/// and a request timeout. Uses `store:true` + a per-session `conversation` for multi-turn continuity
-/// (this DOES retain transcripts/screenshots server-side — a documented quality-first choice; see
-/// wiki/sandbox.md).
+/// `function_call_output`. Every call is self-contained: session memory is client-managed
+/// (`CoachHistory`) and arrives in `messages`, built in stable append-only order so OpenAI's prompt
+/// cache keeps hitting. `store:true` keeps each request/response inspectable in the OpenAI dashboard
+/// logs for debugging (a documented retention tradeoff; see wiki/sandbox.md).
 public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
     /// Injected transport; returns the body and the HTTP response (for status + headers).
     public typealias Sender = @Sendable (URLRequest) async throws -> (Data, HTTPURLResponse?)
@@ -22,9 +25,8 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
 
     /// A generous request ceiling that is a HANG backstop, not a latency knob. Normal coaching turns
     /// finish in a few seconds; this only fires on a genuinely stuck request, so it sits well above the
-    /// slow-but-real reasoning tail. A tight value (the old 15s) abandons a still-generating turn while
-    /// the server keeps the per-session conversation lock — stranding every following turn with
-    /// `conversation_locked`. Waiting instead lets the turn finish and release the lock naturally.
+    /// slow-but-real reasoning tail — a tight value (the old 15s) abandons a still-generating turn
+    /// that would have finished.
     public static let defaultTimeout: TimeInterval = 60
 
     public init(apiKey: String,
@@ -53,20 +55,17 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
     }
 
     public func respond(messages: [ChatMessage], tools: [ToolDef],
-                        toolChoice: ToolChoice, conversationId: String?) async throws -> BrainResponse {
+                        toolChoice: ToolChoice) async throws -> BrainResponse {
         var request = URLRequest(url: endpoint, timeoutInterval: timeout)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        request.httpBody = try encodeBody(messages: messages, tools: tools, toolChoice: toolChoice,
-                                          conversationId: conversationId)
+        request.httpBody = try encodeBody(messages: messages, tools: tools, toolChoice: toolChoice)
 
         // One attempt, no in-request retry. Any failure — a client-side timeout past the ceiling, a
-        // dropped connection, an HTTP error, or a `conversation_locked` while a prior turn is still
-        // generating — throws to the driver, which recovers on the NEXT trigger: `sentCount` only
-        // advances on success, so the next turn's delta re-sends the failed lines PLUS everything newer.
-        // That's fresher than resending a stale body, and it lets a held conversation lock clear
-        // naturally instead of hammering it within the turn.
+        // dropped connection, or an HTTP error — throws to the driver, which recovers on the NEXT
+        // trigger: `sentCount` only advances on success, so the next turn's delta re-sends the failed
+        // lines PLUS everything newer. That's fresher than resending a stale body.
         let (data, http) = try await send(request)
         let status = http?.statusCode ?? 0
         guard (200..<300).contains(status) else {
@@ -76,29 +75,9 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
         return try decode(data)
     }
 
-    /// Create a server-side conversation (one per coaching session) so the model keeps continuity —
-    /// including its own prior replies — across triggers. Returns the `conv_…` id.
-    public func createConversation() async throws -> String {
-        let url = URL(string: endpoint.absoluteString.replacingOccurrences(of: "/responses", with: "/conversations")) ?? endpoint
-        var request = URLRequest(url: url, timeoutInterval: timeout)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        request.httpBody = Data("{}".utf8)
-        let (data, http) = try await send(request)
-        let status = http?.statusCode ?? 0
-        guard (200..<300).contains(status) else {
-            throw NSError(domain: "OpenAIBrainClient", code: status,
-                          userInfo: [NSLocalizedDescriptionKey: String(data: data, encoding: .utf8) ?? "http \(status)"])
-        }
-        struct Conversation: Decodable { let id: String }
-        return try JSONDecoder().decode(Conversation.self, from: data).id
-    }
-
     // MARK: - Encoding (Responses API)
 
-    private func encodeBody(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice,
-                            conversationId: String?) throws -> Data {
+    private func encodeBody(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice) throws -> Data {
         var instructions: [String] = []
         var input: [[String: Any]] = []
 
@@ -157,10 +136,12 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
                     "parameters": params, "strict": true]
         }
 
-        // Responses tool_choice: the string "auto", or a {type:function,name} object to force one.
+        // Responses tool_choice: the strings "auto"/"required", or a {type:function,name} object to
+        // force one specific function.
         let toolChoiceJSON: Any
         switch toolChoice {
         case .auto: toolChoiceJSON = "auto"
+        case .required: toolChoiceJSON = "required"
         case .force(let name): toolChoiceJSON = ["type": "function", "name": name]
         }
 
@@ -172,15 +153,12 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
             "parallel_tool_calls": false,      // the coach loop consumes one tool call per turn
             "reasoning": ["effort": reasoningEffort],
             "max_output_tokens": maxOutputTokens,
-            // store:true is required for server-side conversation continuity (the model remembers
-            // prior turns, its own replies included). This DOES retain transcripts/screenshots
-            // server-side — a deliberate quality-over-retention choice; see wiki/sandbox.md.
+            // store:true keeps each request/response inspectable in the OpenAI dashboard logs for
+            // debugging. This DOES retain transcripts/screenshots server-side — a deliberate
+            // debuggability-over-retention choice; see wiki/sandbox.md.
             "store": true,
             "prompt_cache_key": promptCacheKey, // stable system prompt → better cache routing
         ]
-        if let conversationId {
-            body["conversation"] = conversationId
-        }
         if !instructions.isEmpty {
             body["instructions"] = instructions.joined(separator: "\n\n")
         }
@@ -191,10 +169,15 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
 
     private struct Response: Decodable {
         struct Item: Decodable {
+            struct ContentPart: Decodable {
+                let type: String
+                let text: String?
+            }
             let type: String
             let call_id: String?
             let name: String?
             let arguments: String?
+            let content: [ContentPart]?
         }
         struct IncompleteDetails: Decodable { let reason: String? }
         struct Usage: Decodable {
@@ -220,6 +203,14 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
         }
         var invocations: [ToolInvocation] = []
         var raws: [RawToolCall] = []
+        // Plain text output — unused by coaching turns (tool_choice: required) but the whole payload
+        // of a tool-less summarizer call.
+        let outputText = decoded.output
+            .filter { $0.type == "message" }
+            .flatMap { $0.content ?? [] }
+            .filter { $0.type == "output_text" }
+            .compactMap(\.text)
+            .joined()
         for item in decoded.output where item.type == "function_call" {
             guard let callId = item.call_id, let name = item.name else { continue }
             let args = item.arguments ?? "{}"
@@ -233,6 +224,8 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
                 let lines = (try? JSONDecoder().decode([String: [String]].self,
                                                        from: Data(args.utf8)))?["lines"] ?? []
                 invocations.append(.speak(callId: callId, lines: lines))
+            case "stay_silent":
+                invocations.append(.staySilent(callId: callId))
             default:
                 jlog("Jarvis coach: ignoring unknown tool '\(name)'")
             }
@@ -243,6 +236,8 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
         let incompleteReason = decoded.status == "incomplete"
             ? (decoded.incomplete_details?.reason ?? "incomplete")
             : nil
-        return BrainResponse(toolCalls: invocations, rawToolCalls: raws, incompleteReason: incompleteReason)
+        return BrainResponse(toolCalls: invocations, rawToolCalls: raws,
+                             incompleteReason: incompleteReason,
+                             outputText: outputText.isEmpty ? nil : outputText)
     }
 }

@@ -2,25 +2,16 @@ import Testing
 @testable import JarvisCore
 
 @Suite struct TranscriptTests {
-    @Test func windowFiltersByAgeAndFormatsTimestamps() {
-        let t = RollingTranscript()
-        t.append(.init(speaker: .me, text: "let me read the problem", at: 0))
-        t.append(.init(speaker: .me, text: "maybe a hash map", at: 102))   // 01:42
-        let rendered = t.renderWindow(seconds: 90, now: 120)
-        #expect(!rendered.contains("read the problem"))
-        #expect(rendered.contains("[01:42] me: maybe a hash map"))
-    }
-
-    /// Both sides of a call render with their own speaker tag (mic → `me`, system audio → `them`),
-    /// and the window is ordered by SPOKEN time, not append order. Here the `me` line is appended
-    /// FIRST but spoken LATER (at:8) than the `them` line (at:5) — mimicking a slow "them"
+    /// Both sides of a call render with their own speaker tag (mic → `me`, system audio → `them`)
+    /// and a `[mm:ss]` stamp, ordered by SPOKEN time, not append order. Here the `me` line is
+    /// appended FIRST but spoken LATER (at:8) than the `them` line (at:5) — mimicking a slow "them"
     /// transcription completing after a quicker "me" one across the two concurrent sockets — so this
-    /// fails unless renderWindow sorts by `.at`.
-    @Test func windowRendersBothSpeakersInSpokenOrder() {
+    /// fails unless the delta rendering sorts by `.at`.
+    @Test func rendersBothSpeakersStampedInSpokenOrder() {
         let t = RollingTranscript()
         t.append(.init(speaker: .me, text: "I'd use two pointers", at: 8))      // appended first…
         t.append(.init(speaker: .them, text: "how would you reverse a list?", at: 5)) // …but spoken earlier
-        let rendered = t.renderWindow(seconds: 90, now: 10)
+        let rendered = t.renderFrom(index: 0).text
         #expect(rendered.contains("[00:05] them: how would you reverse a list?"))
         #expect(rendered.contains("[00:08] me: I'd use two pointers"))
         // them (00:05) renders before me (00:08) despite the reversed append order.
@@ -52,8 +43,8 @@ import Testing
         #expect(abs(t.silenceDuration(now: 120) - 20) < 0.001)    // 120 - 100, not 120 - 95
     }
 
-    /// For server-side conversation state we send only NEW lines each turn (the rest is already in
-    /// the conversation), tracked by line INDEX — no clock-domain confusion possible.
+    /// The brain sees only NEW lines each turn (the rest live in the client-managed history),
+    /// tracked by line INDEX — no clock-domain confusion possible.
     @Test func renderFromReturnsOnlyLinesAtOrAfterIndex() {
         let t = RollingTranscript()
         t.append(.init(speaker: .me, text: "first", at: 10))
@@ -74,6 +65,17 @@ import Testing
         t.append(.init(speaker: .them, text: "reverse a list?", at: 5))
         let text = t.renderFrom(index: 0).text
         #expect(text.range(of: "them:")!.lowerBound < text.range(of: "me:")!.lowerBound)
+    }
+
+    /// `lines` exposes the DELTA's raw lines (not the whole transcript) — what the coach loop's
+    /// substance gate inspects before spending a brain request.
+    @Test func renderFromExposesTheDeltaLines() {
+        let t = RollingTranscript()
+        t.append(.init(speaker: .me, text: "my idea", at: 1))
+        t.append(.init(speaker: .them, text: "hmm", at: 5))
+        #expect(t.renderFrom(index: 0).lines.map(\.text) == ["my idea", "hmm"])
+        #expect(t.renderFrom(index: 1).lines.map(\.speaker) == [.them])
+        #expect(t.renderFrom(index: t.count).lines.isEmpty)
     }
 
     @Test func renderFromEmptyWhenCaughtUp() {

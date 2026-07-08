@@ -38,7 +38,11 @@ public final class ActivityLog: @unchecked Sendable {
         let s: String?      // shot filename, if any
     }
 
-    private let maxLines = 400
+    /// In-memory replay cap for a late-attaching viewer. Sized for hours of coaching (an hour-long
+    /// session logs a few thousand lines) — a cap this high exists only as a runaway backstop, so the
+    /// viewer shows the WHOLE session, not just its tail. Entries are small (text + a filename; shot
+    /// bytes stay on disk), so memory is not a concern.
+    private let maxLines = 10_000
     private let queue = DispatchQueue(label: "jarvis.activitylog")   // serializes state + disk writes
     private var entries: [Entry] = []
     private var totalCount = 0    // everything recorded this session (survives the maxLines cap)
