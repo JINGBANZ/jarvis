@@ -35,4 +35,21 @@ import Foundation
         p.displayIndex = 0
         #expect(p.displayIndex == 1)
     }
+
+    @Test func scopeDefaultsToActiveWindowWhenUnset() {
+        #expect(ScreenCapturePreferences(defaults: freshDefaults()).scope == .activeWindow)
+    }
+
+    @Test func scopeRoundTripsThroughDefaults() {
+        let d = freshDefaults()
+        ScreenCapturePreferences(defaults: d).scope = .entireDisplay
+        #expect(ScreenCapturePreferences(defaults: d).scope == .entireDisplay)
+    }
+
+    @Test func unrecognizedStoredScopeFallsBackToActiveWindow() {
+        // A hand-edited or stale value must never crash or silently mean "entire display".
+        let d = freshDefaults()
+        d.set("holographic", forKey: "screen.captureScope")
+        #expect(ScreenCapturePreferences(defaults: d).scope == .activeWindow)
+    }
 }

@@ -153,7 +153,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let overlaySink = BroadcastOverlay([overlayCaption, overlayBox])
         let driver = CoachDriver(config: config, transcript: transcript,
                                  brain: brain, summarizer: summarizer,
-                                 screen: ScreenCaptureCLI(preferences: screenPreferences),
+                                 screen: WindowScopedScreenCapture(preferences: screenPreferences),
                                  overlay: overlaySink, clock: clock,
                                  onSpoke: { [weak self] in Task { @MainActor in self?.menuBar.noteSpoke() } })
 

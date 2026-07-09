@@ -163,10 +163,19 @@ public final class CoachDriver: @unchecked Sendable {
         // off-pool capture + post-capture cancellation guard as the capture_screen tool branch.
         if reason == .manualHint {
             let screen = self.screen
-            let img = await Task.detached(priority: .userInitiated, operation: { screen.capture() }).value
+            let shot = await Task.detached(priority: .userInitiated, operation: { screen.capture() }).value
             if Task.isCancelled { jlog("… turn cancelled (stopped) after capture"); return .cancelled }
-            if let img { jlog("👁 looking at your screen", image: img); turnMessages.append(.userImage(img)) }
-            else { jlog("👁 screenshot failed") }   // still force a hint from transcript/history
+            if let shot {
+                jlog("👁 looking at your screen", image: shot.imageBase64)
+                turnMessages.append(.userImage(shot.imageBase64))
+                // OCR sidecar: the same window as exact text, so the model reads code instead of
+                // deciphering pixels. Rides as its own user message — there's no tool result to
+                // carry it on this pre-injected path.
+                if let text = shot.recognizedText {
+                    jlog("🔤 read \(text.count(where: { $0 == "\n" }) + 1) lines of on-screen text")
+                    turnMessages.append(.user(Self.recognizedTextBlock(text)))
+                }
+            } else { jlog("👁 screenshot failed") }   // still force a hint from transcript/history
         }
 
         // Force `speak` ONLY for an explicit manual hint; audio-driven turns use `.required` — SOME
@@ -222,7 +231,7 @@ public final class CoachDriver: @unchecked Sendable {
                 // ScreenCaptureCLI shells out to `screencapture` and blocks for 100s of ms; run it
                 // off the cooperative pool so it doesn't stall a pool thread while holding the slot.
                 let screen = self.screen
-                let img = await Task.detached(priority: .userInitiated, operation: { screen.capture() }).value
+                let shot = await Task.detached(priority: .userInitiated, operation: { screen.capture() }).value
                 // Stop may have fired during the (un-cancellable, detached) capture. Bail before
                 // emitting: otherwise this screenshot — and the reasoning that follows — would be
                 // logged into whatever session is now current (a Start rotates the log mid-turn).
@@ -231,15 +240,20 @@ public final class CoachDriver: @unchecked Sendable {
                     history.commit(turnMessages)
                     return .cancelled
                 }
-                if let img { jlog("👁 looking at your screen", image: img) }   // thumbnail in the activity viewer
-                else { jlog("👁 screenshot failed") }
+                if let shot {
+                    jlog("👁 looking at your screen", image: shot.imageBase64)   // thumbnail in the activity viewer
+                    if let text = shot.recognizedText {
+                        jlog("🔤 read \(text.count(where: { $0 == "\n" }) + 1) lines of on-screen text")
+                    }
+                } else { jlog("👁 screenshot failed") }
                 // Thread the call + its result into this turn's messages; the next iteration's
                 // request carries them (and they land in history at commit, where old screenshots
-                // are stubbed down to the newest one).
+                // are stubbed down to the newest one). The OCR sidecar travels in the tool-result
+                // text, right next to the image.
                 turnMessages.append(.assistantToolCalls(response.rawToolCalls))
-                if let img {
-                    turnMessages.append(.init(role: .tool, text: "screenshot captured", toolCallId: callId))
-                    turnMessages.append(.userImage(img))
+                if let shot {
+                    turnMessages.append(.init(role: .tool, text: Self.captureResultText(shot), toolCallId: callId))
+                    turnMessages.append(.userImage(shot.imageBase64))
                 } else {
                     turnMessages.append(.init(role: .tool, text: "screenshot failed", toolCallId: callId))
                 }
@@ -274,6 +288,23 @@ public final class CoachDriver: @unchecked Sendable {
         history.commit(turnMessages)   // captures + speech stay in memory even on the backstop path
         await compactIfNeeded()
         return .exhausted
+    }
+
+    /// The capture_screen tool-result text: the OCR sidecar rides here when present, so exact text
+    /// and the image arrive as one result the model reasons over together.
+    private static func captureResultText(_ shot: ScreenSnapshot) -> String {
+        guard let text = shot.recognizedText else { return "screenshot captured" }
+        return "screenshot captured\n\n\(recognizedTextBlock(text))"
+    }
+
+    /// Framed so the model treats OCR as a reading aid, not gospel — recognition mangles the odd
+    /// identifier, and the screenshot stays the ground truth to verify against.
+    private static func recognizedTextBlock(_ text: String) -> String {
+        """
+        Text recognized on the captured window (on-device OCR — may contain errors; \
+        the screenshot image is ground truth):
+        \(text)
+        """
     }
 
     // MARK: - History compaction

@@ -6,7 +6,7 @@ import Testing
 /// screenshot is available — the hint must still be forced from transcript/conversation context.
 private final class FailingScreen: ScreenCapturing, @unchecked Sendable {
     private(set) var captureCount = 0
-    func capture() -> String? { captureCount += 1; return nil }
+    func capture() -> ScreenSnapshot? { captureCount += 1; return nil }
 }
 
 /// The on-demand hint shortcut (`.manualHint`): the driver itself captures the screenshot and
@@ -50,6 +50,28 @@ private final class FailingScreen: ScreenCapturing, @unchecked Sendable {
         let userText = brain.calls[0].compactMap { $0.text }.joined(separator: " ")
         #expect(userText.contains("hint shortcut"))   // the synthetic manual-hint message
         #expect(userText.contains("two-sum"))         // …alongside the real transcript context
+    }
+
+    /// D2 (OCR sidecar) on the pre-injected manual-hint path: there's no tool result to carry the
+    /// recognized text, so it rides as its own user message in the SAME single trip as the image.
+    @Test func manualHintCarriesRecognizedTextAlongsideTheScreenshot() async {
+        let brain = ScriptedBrain(script: [
+            .init(toolCalls: [.speak(callId: "s1", lines: ["groupEnd can be null on the last group."])],
+                  rawToolCalls: [RawToolCall(id: "s1", name: "speak",
+                                             argumentsJSON: #"{"lines":["groupEnd can be null on the last group."]}"#)]),
+        ])
+        let screen = FakeScreen(recognizedText: "ListNode next = groupEnd.next;")
+        let (driver, _) = makeDriver(brain: brain, screen: screen,
+                                     overlay: FakeOverlay(), clock: ManualClock(now: 100))
+
+        let outcome = await driver.handleTrigger(.manualHint)
+
+        #expect(outcome == .spoke)
+        #expect(brain.calls.count == 1)   // OCR must not cost an extra trip
+        #expect(brain.calls[0].contains { $0.imageBase64JPEG != nil })
+        let userText = brain.calls[0].compactMap { $0.text }.joined(separator: "\n")
+        #expect(userText.contains("ListNode next = groupEnd.next;"))
+        #expect(userText.contains("may contain errors"))
     }
 
     /// If the screenshot fails, the hint is still forced from transcript/conversation context — one

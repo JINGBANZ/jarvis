@@ -33,8 +33,14 @@ final class ScriptedThrowBrain: BrainClient, @unchecked Sendable {
 final class FakeScreen: ScreenCapturing, @unchecked Sendable {
     var captureCount = 0
     let payload: String
-    init(payload: String = "ZmFrZS1qcGVn") { self.payload = payload } // "fake-jpeg"
-    func capture() -> String? { captureCount += 1; return payload }
+    let recognizedText: String?
+    init(payload: String = "ZmFrZS1qcGVn", recognizedText: String? = nil) { // "fake-jpeg"
+        self.payload = payload; self.recognizedText = recognizedText
+    }
+    func capture() -> ScreenSnapshot? {
+        captureCount += 1
+        return ScreenSnapshot(imageBase64: payload, recognizedText: recognizedText)
+    }
 }
 
 /// A screen whose `capture()` parks until released, so a test can cancel the turn *while the
@@ -46,11 +52,11 @@ final class GatedScreen: ScreenCapturing, @unchecked Sendable {
     private(set) var captureCount = 0
     let payload: String
     init(payload: String = "ZmFrZS1qcGVn") { self.payload = payload }
-    func capture() -> String? {
+    func capture() -> ScreenSnapshot? {
         captureCount += 1
         entered.signal()
         release.wait()
-        return payload
+        return ScreenSnapshot(imageBase64: payload)
     }
 }
 
@@ -110,6 +116,33 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(brain.calls[1].contains { $0.role == .assistant && $0.toolCalls?.first?.name == "capture_screen" })
         #expect(brain.calls[1].contains { $0.role == .tool && $0.toolCallId == "c1" })
         #expect(brain.calls[1].contains { $0.imageBase64JPEG != nil })
+        // No OCR text on this snapshot → the tool result stays the plain marker.
+        #expect(brain.calls[1].first { $0.role == .tool }?.text == "screenshot captured")
+    }
+
+    /// D2 (OCR sidecar): when the capture carries recognized text, it rides in the capture_screen
+    /// tool-result text — flagged as fallible OCR — right next to the image, so the model reads
+    /// the exact code instead of deciphering pixels.
+    @Test func recognizedTextRidesInTheCaptureToolResult() async {
+        let brain = ScriptedBrain(script: [
+            .init(toolCalls: [.captureScreen(callId: "c1")],
+                  rawToolCalls: [RawToolCall(id: "c1", name: "capture_screen", argumentsJSON: "{}")]),
+            .init(toolCalls: [.speak(callId: "s1", lines: ["Check groupEnd for null before .next"])],
+                  rawToolCalls: [RawToolCall(id: "s1", name: "speak",
+                                             argumentsJSON: #"{"lines":["Check groupEnd for null before .next"]}"#)]),
+        ])
+        let screen = FakeScreen(recognizedText: "class Solution {\n    while(true){ cnt--; }")
+        let (driver, transcript) = makeDriver(brain: brain, screen: screen,
+                                              overlay: FakeOverlay(), clock: ManualClock(now: 100))
+        transcript.append(.init(speaker: .me, text: "why is this throwing NPE", at: 100))
+
+        await driver.handleTrigger(.turnEnd)
+
+        let toolResult = brain.calls[1].first { $0.role == .tool && $0.toolCallId == "c1" }?.text ?? ""
+        #expect(toolResult.contains("screenshot captured"))
+        #expect(toolResult.contains("while(true){ cnt--; }"))     // the OCR text, verbatim
+        #expect(toolResult.contains("may contain errors"))        // …flagged as fallible
+        #expect(brain.calls[1].contains { $0.imageBase64JPEG != nil })   // image still ground truth
     }
 
     /// End-to-end: a real capture→speak turn through the production `CoachDriver` with the activity
