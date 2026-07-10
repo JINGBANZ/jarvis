@@ -5,7 +5,7 @@ import Foundation
 // below is valid under strict (no properties, none required).
 public let captureScreenTool = ToolDef(
     name: "capture_screen",
-    description: "Take a screenshot of the user's screen to see the LeetCode problem and their code. Call this only when you need to see the screen to give a useful, specific tip. Returns an image.",
+    description: "Take a screenshot of the user's screen to see the LeetCode problem and their code. Call this only when you need to see the screen to give a useful, specific tip. Returns an image of the captured window plus on-device OCR text of that window, so you can read exact identifiers and code directly instead of deciphering pixels; the OCR may contain errors, so treat the image as ground truth.",
     parametersJSON: #"{"type":"object","properties":{},"required":[],"additionalProperties":false}"#
 )
 
@@ -37,7 +37,9 @@ requirement, or points out a problem, you may proactively offer "me" a short tip
 you decide, and staying quiet remains the default when "me" is doing fine.
 
 You cannot see the screen unless you call capture_screen — do that when you need to read the problem or
-their code to be specific and correct.
+their code to be specific and correct. A capture returns both an image and on-device recognized text of
+that window, so you can read exact identifiers and code from the text; OCR can err, so the image is
+authoritative.
 
 Each turn you get timing context: a transcript (each line stamped [mm:ss]), why the turn fired (the
 user spoke, a silence, or a manual hint), and how long the session has run. Use it: early in a session

@@ -25,6 +25,15 @@ import Testing
         #expect(coachSystemPrompt.contains("line"))   // brevity is now framed as overlay lines
     }
 
+    /// The capture tool advertises the OCR-text sidecar (PR #54) so the model leans on the exact
+    /// recognized text, with the image kept as ground truth — matching CoachDriver's framing.
+    @Test func captureToolAdvertisesRecognizedText() {
+        #expect(captureScreenTool.description.contains("OCR"))
+        #expect(captureScreenTool.description.contains("text"))
+        #expect(captureScreenTool.description.contains("ground truth"))
+        #expect(coachSystemPrompt.contains("recognized text"))
+    }
+
     /// Silence is a TOOL now: the prompt must direct the model to stay_silent (never free text),
     /// or a required tool_choice would leave it no sanctioned way to stay quiet.
     @Test func coachPromptDirectsSilenceToTheStaySilentTool() {
