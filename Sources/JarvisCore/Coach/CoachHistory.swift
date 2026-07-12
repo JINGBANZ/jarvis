@@ -19,6 +19,9 @@ public final class CoachHistory: @unchecked Sendable {
     /// stale one rarely helps — the model can always capture a fresh look.
     private let maxImagesRetained = 1
     static let imageStub = "[an earlier screenshot was here — no longer available; call capture_screen for a fresh look]"
+    /// Replaces a stale standalone OCR message (the manual-hint path's `.user` sidecar). Tool-result
+    /// OCR is instead truncated back to `CoachDriver.captureResultBase`, keeping the call linkage.
+    static let ocrStub = "[earlier on-screen text was here — no longer available; call capture_screen for a fresh look]"
 
     public init() {}
 
@@ -35,10 +38,32 @@ public final class CoachHistory: @unchecked Sendable {
         guard !turn.isEmpty else { return }
         lock.lock(); defer { lock.unlock() }
         messages.append(contentsOf: turn)
+
         let imageIndices = messages.indices.filter { messages[$0].imageBase64JPEG != nil }
+        let retained = Set(imageIndices.suffix(maxImagesRetained))
+
+        // Mask the OCR sidecar of every stale observation alongside its screenshot: the recognized
+        // text (often hundreds of tokens of dense code) is re-billed on every later request just like
+        // a stale image would be. OCR sits immediately next to its screenshot — before it on the
+        // capture_screen tool-result path, after it on the manual-hint `.user` path — so an OCR
+        // message is stale exactly when neither neighbor is a still-retained image.
+        for index in messages.indices where messages[index].text?.contains(CoachDriver.recognizedTextMarker) == true {
+            let accompaniesRetainedImage = retained.contains(index - 1) || retained.contains(index + 1)
+            if !accompaniesRetainedImage { messages[index] = Self.neutralizeOCR(messages[index]) }
+        }
+
         for index in imageIndices.dropLast(maxImagesRetained) {
             messages[index] = .user(Self.imageStub)
         }
+    }
+
+    /// Strip the OCR block from a stale observation. A tool result keeps its role + `toolCallId` (the
+    /// wire format requires the tool message to stay paired with its assistant call) and drops to the
+    /// marker-free base line; a standalone `.user` OCR message becomes a tiny stub.
+    private static func neutralizeOCR(_ m: ChatMessage) -> ChatMessage {
+        m.role == .tool
+            ? .init(role: .tool, text: CoachDriver.captureResultBase, toolCallId: m.toolCallId)
+            : .user(ocrStub)
     }
 
     /// Rough size of the memory in tokens (chars/4 for text, a flat estimate per screenshot) — used

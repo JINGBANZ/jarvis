@@ -290,21 +290,27 @@ public final class CoachDriver: @unchecked Sendable {
         return .exhausted
     }
 
+    /// The capture_screen tool-result text with no OCR sidecar. Also what `CoachHistory` truncates a
+    /// stale capture result down to once its screenshot is stubbed (the OCR is masked with the image).
+    static let captureResultBase = "screenshot captured"
+
+    /// The fixed opening line of the OCR sidecar block. Exposed (rather than kept private to
+    /// `recognizedTextBlock`) so `CoachHistory` can recognize a stale observation's OCR at commit time
+    /// and neutralize it alongside the stubbed screenshot — without duplicating the literal.
+    static let recognizedTextMarker =
+        "Text recognized on the captured window (on-device OCR — may contain errors; the screenshot image is ground truth):"
+
     /// The capture_screen tool-result text: the OCR sidecar rides here when present, so exact text
     /// and the image arrive as one result the model reasons over together.
     private static func captureResultText(_ shot: ScreenSnapshot) -> String {
-        guard let text = shot.recognizedText else { return "screenshot captured" }
-        return "screenshot captured\n\n\(recognizedTextBlock(text))"
+        guard let text = shot.recognizedText else { return captureResultBase }
+        return "\(captureResultBase)\n\n\(recognizedTextBlock(text))"
     }
 
     /// Framed so the model treats OCR as a reading aid, not gospel — recognition mangles the odd
     /// identifier, and the screenshot stays the ground truth to verify against.
     private static func recognizedTextBlock(_ text: String) -> String {
-        """
-        Text recognized on the captured window (on-device OCR — may contain errors; \
-        the screenshot image is ground truth):
-        \(text)
-        """
+        "\(recognizedTextMarker)\n\(text)"
     }
 
     // MARK: - History compaction
