@@ -11,6 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private lazy var secrets = ChainedSecretStore([secretFile, EnvSecretStore()])
     /// The single funnel for user-facing failures (alerts + fatal session teardown). See `ErrorReporter`.
     private let errorReporter = ErrorReporter()
+    private let networkDiagnostics = NetworkPathDiagnostics()
 
     private var overlayCaption: OverlayCaptionPanel!   // transient on-screen tip
     private var overlayBox: OverlayBoxPanel!            // persistent, movable history of every spoken response
@@ -23,6 +24,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Two transcription sockets feeding one shared transcript: mic → `.me`, system audio → `.them`.
     private var transcriber: RealtimeTranscriber?       // "me" (mic)
     private var themTranscriber: RealtimeTranscriber?   // "them" (system audio)
+    private var micConnectionState: RealtimeConnectionState = .stopped
+    private var systemConnectionState: RealtimeConnectionState = .stopped
+    private var reportedCoachingReady = false
     /// One-clock capture: a single private aggregate device (built-in mic + system-output tap on one
     /// drift-compensated clock) feeds both transcription sockets, running AEC3 inside its IOProc so the
     /// other side's speaker bleed is cancelled from the mic. Replaces the separate AVAudioEngine mic +
@@ -47,6 +51,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory) // menu-bar app, no Dock icon
         MainMenu.install() // an Edit menu so ⌘X/⌘C/⌘V/⌘A work in the Settings text fields
+        networkDiagnostics.start()
 
         // The activity viewer lives for the whole app run, but a *session* is one coaching run: each
         // Start opens a fresh session dir + logs (see `beginNewSession`). No session exists until the
@@ -78,7 +83,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // Re-saving a key while running only re-applies it to the pipeline — it is NOT a new
                 // coaching run, so keep the current session (don't rotate logs). Session rotation is
                 // reserved for an explicit user Start.
-                self.menuBar.setRunning(self.start(freshSession: false))
+                self.start(freshSession: false)
             }),
             OverlaySection(appearance: appearance, caption: overlayCaption, box: overlayBox),
             DisplaySection(preferences: screenPreferences),
@@ -95,7 +100,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // A fatal error tears the session down and corrects the menu — one place owns that.
         errorReporter.onFatal = { [weak self] in
             self?.stop()
-            self?.menuBar.setRunning(false)
         }
 
         // Global hint hotkey: while a session is running, screenshot + ask the brain for a hint in one
@@ -140,9 +144,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             overlayBox.clear()      // …and a fresh response history for the new conversation
         }
 
-        let brain = OpenAIBrainClient(apiKey: key, model: brainPreferences.model.id,
-                                      reasoningEffort: brainPreferences.effort.rawValue,
-                                      maxOutputTokens: brainPreferences.effort.maxOutputTokens)
+        let brain = RetryingBrainClient(base:
+            OpenAIBrainClient(apiKey: key, model: brainPreferences.model.id,
+                              reasoningEffort: brainPreferences.effort.rawValue,
+                              maxOutputTokens: brainPreferences.effort.maxOutputTokens))
         // History-compaction summaries don't need the coaching model — a mini model writes a
         // 250-word briefing a few times an hour for a fraction of the price. Text-only and quick,
         // so low effort with a modest token cap.
@@ -171,7 +176,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // transcriber simply drops the tap audio. Still report it (a non-blocking .degraded notice) so
         // it flows through the one funnel; the menu stays 🟢.
         let onThemTerminalFailure: @Sendable () -> Void = { [weak self, errorReporter] in
-            Task { @MainActor in self?.themTranscriber?.stop(); self?.themTranscriber = nil }
+            Task { @MainActor in
+                guard let self else { return }
+                self.themTranscriber?.stop()
+                self.themTranscriber = nil
+                // The transcriber's asynchronous `.stopped` callback is identity-guarded and will
+                // be ignored after nil-ing it, so commit the degraded state explicitly here.
+                self.systemConnectionState = .failed
+                self.refreshConnectionUI()
+            }
             errorReporter.report(.systemAudioStopped)
         }
 
@@ -183,7 +196,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                               silenceDurationMs: config.vadSilenceDurationMs,
                                               noiseReduction: config.audioNoiseReduction,
                                               turnDebounce: config.turnDebounceSeconds,
-                                              maxBufferedAudioSeconds: config.maxBufferedAudioSeconds)
+                                              maxBufferedAudioSeconds: config.maxBufferedAudioSeconds,
+                                              readyTimeout: config.realtimeReadyTimeoutSeconds,
+                                              pingInterval: config.realtimePingIntervalSeconds,
+                                              pongTimeout: config.realtimePongTimeoutSeconds,
+                                              networkStatus: { [networkDiagnostics] in
+                                                  networkDiagnostics.currentSummary
+                                              })
         transcriber.onTurnEnd = { turns.run { await driver.handleTrigger(.turnEnd) } }
         transcriber.onSilence = { secs in turns.run { await driver.handleTrigger(.silence(secondsQuiet: secs)) } }
         transcriber.onTerminalFailure = onMicTerminalFailure
@@ -198,7 +217,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                                   silenceDurationMs: config.vadSilenceDurationMs,
                                                   noiseReduction: config.audioNoiseReduction,
                                                   turnDebounce: config.turnDebounceSeconds,
-                                                  maxBufferedAudioSeconds: config.maxBufferedAudioSeconds)
+                                                  maxBufferedAudioSeconds: config.maxBufferedAudioSeconds,
+                                                  readyTimeout: config.realtimeReadyTimeoutSeconds,
+                                                  pingInterval: config.realtimePingIntervalSeconds,
+                                                  pongTimeout: config.realtimePongTimeoutSeconds,
+                                                  networkStatus: { [networkDiagnostics] in
+                                                      networkDiagnostics.currentSummary
+                                                  })
         themTranscriber.onTurnEnd = { turns.run { await driver.handleTrigger(.turnEnd) } }
         themTranscriber.onTerminalFailure = onThemTerminalFailure
 
@@ -216,6 +241,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.themTranscriber = themTranscriber
         self.aggregateCapture = capture
         self.turns = turns
+        micConnectionState = .connecting
+        systemConnectionState = .connecting
+        reportedCoachingReady = false
+        menuBar.setState(.starting)
+        transcriber.onConnectionStateChange = { [weak self, weak transcriber] state in
+            guard let transcriber else { return }
+            Task { @MainActor [weak self] in
+                guard let self, self.transcriber === transcriber else { return }
+                self.micConnectionState = state
+                self.refreshConnectionUI()
+            }
+        }
+        themTranscriber.onConnectionStateChange = { [weak self, weak themTranscriber] state in
+            guard let themTranscriber else { return }
+            Task { @MainActor [weak self] in
+                guard let self, self.themTranscriber === themTranscriber else { return }
+                self.systemConnectionState = state
+                self.refreshConnectionUI()
+            }
+        }
         // Arm the hint hotkey for this session: capture the screen and force a one-trip hint, routed
         // through the same turn box as audio triggers (so Stop cancels it and rapid presses coalesce).
         self.requestManualHint = { turns.run { await driver.handleTrigger(.manualHint) } }
@@ -226,7 +271,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             errorReporter.report(.captureFailed(reason: reason))
             return false
         }
-        jlog("Jarvis: coaching started (one-clock capture + AEC).")
+        jlog("Jarvis: coaching starting — verifying realtime transcription connections.")
+        jlog("Jarvis network path at start: \(networkDiagnostics.currentSummary)")
         return true
     }
 
@@ -244,7 +290,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         themTranscriber?.stop()
         transcriber = nil
         themTranscriber = nil
+        micConnectionState = .stopped
+        systemConnectionState = .stopped
+        reportedCoachingReady = false
+        menuBar?.setState(.stopped)
         if wasRunning { jlog("Jarvis: stopped.") }
+    }
+
+    /// The mic socket is the truth for whether Jarvis is listening. System audio may reconnect or
+    /// fail independently; that degrades the other side of a call without pretending the mic is down.
+    private func refreshConnectionUI() {
+        guard transcriber != nil else {
+            menuBar.setState(.stopped)
+            return
+        }
+        switch micConnectionState {
+        case .connecting:
+            menuBar.setState(.starting)
+        case .reconnecting(let attempt):
+            menuBar.setState(.reconnecting(attempt: attempt))
+        case .ready:
+            if systemConnectionState == .ready {
+                menuBar.setState(.listening)
+                if !reportedCoachingReady {
+                    reportedCoachingReady = true
+                    jlog("Jarvis: coaching ready (mic + system audio).")
+                }
+            } else if systemConnectionState == .failed || systemConnectionState == .stopped {
+                menuBar.setState(.microphoneOnly)
+            } else {
+                menuBar.setState(.systemAudioConnecting)
+            }
+        case .failed:
+            // `onTerminalFailure` immediately routes through ErrorReporter and stops the session.
+            menuBar.setState(.reconnecting(attempt: 6))
+        case .stopped:
+            menuBar.setState(.stopped)
+        }
     }
 
 
