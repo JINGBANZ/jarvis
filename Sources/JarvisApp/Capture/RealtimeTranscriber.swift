@@ -40,6 +40,9 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
     /// Backs off the proactive silence-check interval across a long quiet stretch. Mutated only on
     /// the main queue (where the silence timer is scheduled and fires), so it needs no extra lock.
     private var silenceBackoff: SilenceBackoff
+    /// Whether the idle-cutoff pause has been logged for the current quiet stretch (log it once, not
+    /// on every dormant re-check). Main-queue only, like `silenceBackoff`.
+    private var silencePausedLogged = false
     private var pingTimer: Timer?
     private var debounceTimer: Timer?         // coalesces rapid fragments into one trigger
     private let pending = UtteranceBuffer()   // fragments heard since the last fired trigger
@@ -343,6 +346,7 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.silenceBackoff.reset()
+            self.silencePausedLogged = false
             self.armSilenceTimer()
         }
     }
@@ -352,13 +356,7 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
     /// next, longer interval — so a long silence is gently re-checked (the interval doubles each step
     /// up to a cap; see `Config`) rather than nudged once and never again. Must be called on the main queue.
     private func armSilenceTimer() {
-        // Past the idle cutoff the user has stepped away — stop probing entirely (each probe bills a
-        // full brain request). The next utterance re-arms via resetSilenceTimer as usual.
-        let quiet = transcript.silenceDuration(now: clock.now() - sessionStart)
-        guard let interval = silenceBackoff.next(quietSoFar: quiet) else {
-            jlog("🤫 quiet for \(Int(quiet))s — pausing silence checks until speech resumes")
-            return
-        }
+        let interval = silenceBackoff.next()
         lock.lock(); silenceTimer?.invalidate()
         silenceTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
             guard let self else { return }
@@ -373,10 +371,22 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
             // covers the them side, which only feeds the shared transcript and doesn't reset the timer.)
             guard quiet >= interval else {
                 self.silenceBackoff.reset()
+                self.silencePausedLogged = false
                 self.armSilenceTimer()
                 return
             }
-            self.onSilence?(quiet)
+            // Idle cutoff, enforced at FIRE time (a timer scheduled just under the cutoff must not
+            // bill one last probe past it). Past the cutoff the user has stepped away, so suppress
+            // the probe but keep this (free, local) check chain alive: it is the only path that can
+            // revive probing on "them" speech — that side only feeds the shared transcript, and the
+            // guard above then resets the backoff. Mic speech revives via resetSilenceTimer as usual.
+            if self.silenceBackoff.shouldProbe(quietSoFar: quiet) {
+                self.silencePausedLogged = false
+                self.onSilence?(quiet)
+            } else if !self.silencePausedLogged {
+                self.silencePausedLogged = true   // log the pause once, not every capped interval
+                jlog("🤫 quiet for \(Int(quiet))s — pausing silence checks until speech resumes")
+            }
             self.armSilenceTimer()             // re-arm with the next (backed-off) interval
         }
         lock.unlock()

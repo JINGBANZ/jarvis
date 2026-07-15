@@ -8,9 +8,10 @@ import Foundation
 /// (a flat short timer firing every few seconds) and under-nudging (a single one-shot timer that
 /// never checks again through a long silence).
 ///
-/// Past `idleCutoff` of continuous quiet, `next(quietSoFar:)` returns nil: the user has stepped
-/// away, and each probe into the empty room still costs a full brain request. Speech re-arms via
-/// `reset()` as usual.
+/// Past `idleCutoff` of continuous quiet, `shouldProbe(quietSoFar:)` turns false: the user has
+/// stepped away, and each probe into the empty room still costs a full brain request. Only the
+/// probe is suppressed — the caller keeps its (free, local) check running, so probing resumes as
+/// soon as speech from either side restarts the quiet stretch.
 public struct SilenceBackoff {
     private let base: TimeInterval
     private let maxInterval: TimeInterval
@@ -23,14 +24,19 @@ public struct SilenceBackoff {
         self.idleCutoff = idleCutoff
     }
 
-    /// The interval to wait before the next silence check (advancing the backoff one step) — or nil
-    /// once `quietSoFar` (how long the user has already been quiet) reaches the idle cutoff, meaning:
-    /// stop probing until speech resumes.
-    public mutating func next(quietSoFar: TimeInterval = 0) -> TimeInterval? {
-        guard quietSoFar < idleCutoff else { return nil }
+    /// The interval to wait before the next silence check, then advance the backoff one step.
+    public mutating func next() -> TimeInterval {
         let interval = min(base * pow(2, Double(step)), maxInterval)
         step += 1
         return interval
+    }
+
+    /// Whether a check that just fired should actually probe (drive a brain request): true while
+    /// the current quiet stretch is under the idle cutoff. Evaluated at FIRE time, not schedule
+    /// time, so a timer that crosses the cutoff mid-wait stays quiet instead of billing one last
+    /// request past the deadline.
+    public func shouldProbe(quietSoFar: TimeInterval) -> Bool {
+        quietSoFar < idleCutoff
     }
 
     /// Reset to the base interval — call when speech is heard.
