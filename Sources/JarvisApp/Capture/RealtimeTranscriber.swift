@@ -46,6 +46,9 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
     /// Backs off the proactive silence-check interval across a long quiet stretch. Mutated only on
     /// the main queue (where the silence timer is scheduled and fires), so it needs no extra lock.
     private var silenceBackoff: SilenceBackoff
+    /// Whether the idle-cutoff pause has been logged for the current quiet stretch (log it once, not
+    /// on every dormant re-check). Main-queue only, like `silenceBackoff`.
+    private var silencePausedLogged = false
     private var pingTimer: Timer?
     private var readyTimer: Timer?
     private var pongTimer: Timer?
@@ -63,6 +66,7 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
 
     init(apiKey: String, model: String, speaker: Speaker = .me, transcript: RollingTranscript, clock: Clock,
          silenceTimeout: TimeInterval, silenceMaxInterval: TimeInterval,
+         silenceIdleCutoff: TimeInterval = .infinity,
          silenceDurationMs: Int = 1000, noiseReduction: NoiseReductionMode = .auto,
          turnDebounce: TimeInterval = 0.4, maxBufferedAudioSeconds: TimeInterval = 60,
          readyTimeout: TimeInterval = 10, pingInterval: TimeInterval = 20,
@@ -74,7 +78,8 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         self.transcript = transcript
         self.clock = clock
         self.sessionStart = clock.now()
-        self.silenceBackoff = SilenceBackoff(base: silenceTimeout, maxInterval: silenceMaxInterval)
+        self.silenceBackoff = SilenceBackoff(base: silenceTimeout, maxInterval: silenceMaxInterval,
+                                             idleCutoff: silenceIdleCutoff)
         self.silenceDurationMs = silenceDurationMs
         self.noiseReduction = noiseReduction
         self.turnDebounce = turnDebounce
@@ -559,6 +564,7 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.silenceBackoff.reset()
+            self.silencePausedLogged = false
             self.armSilenceTimer()
         }
     }
@@ -583,10 +589,22 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
             // covers the them side, which only feeds the shared transcript and doesn't reset the timer.)
             guard quiet >= interval else {
                 self.silenceBackoff.reset()
+                self.silencePausedLogged = false
                 self.armSilenceTimer()
                 return
             }
-            self.onSilence?(quiet)
+            // Idle cutoff, enforced at FIRE time (a timer scheduled just under the cutoff must not
+            // bill one last probe past it). Past the cutoff the user has stepped away, so suppress
+            // the probe but keep this (free, local) check chain alive: it is the only path that can
+            // revive probing on "them" speech — that side only feeds the shared transcript, and the
+            // guard above then resets the backoff. Mic speech revives via resetSilenceTimer as usual.
+            if self.silenceBackoff.shouldProbe(quietSoFar: quiet) {
+                self.silencePausedLogged = false
+                self.onSilence?(quiet)
+            } else if !self.silencePausedLogged {
+                self.silencePausedLogged = true   // log the pause once, not every capped interval
+                jlog("🤫 quiet for \(Int(quiet))s — pausing silence checks until speech resumes")
+            }
             self.armSilenceTimer()             // re-arm with the next (backed-off) interval
         }
         lock.unlock()

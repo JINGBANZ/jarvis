@@ -54,7 +54,9 @@ moments the model judges worthwhile.
 1. The Transcriber emits a **turn-end** event (`gpt-4o-transcribe` server VAD ends the turn after a
    tuned silence window) or a **silence check** fires (you've gone quiet, maybe stuck). The silence
    check carries *how long* you've been quiet and backs off across a long silence (the interval
-   doubles each step up to a cap — see `Config`), resetting on speech.
+   doubles each step up to a cap — see `Config`), resetting on speech; past an idle cutoff it stops
+   probing entirely (you've stepped away — a nudge into an empty room still bills a request) until
+   speech re-arms it.
 2. The CoachDriver calls the brain on every trigger that carries **substance** — there is no
    cooldown, rate cap, or wake-word gate. Whether to speak (and whether the user just addressed
    Jarvis) is the model's call, governed by the system prompt; the only hard gates are the user's

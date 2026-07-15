@@ -9,6 +9,10 @@ public struct Config: Sendable {
     /// Upper bound on the silence-check interval as it backs off, so a long silence still gets an
     /// occasional gentle check rather than going dark forever.
     public var silenceMaxIntervalSeconds: TimeInterval
+    /// Stop the silence checks entirely once the user has been continuously quiet this long — they
+    /// have stepped away, and every probe into the empty room still bills a full-history brain
+    /// request (often plus a screenshot). Speech re-arms the checks from the base interval.
+    public var silenceIdleCutoffSeconds: TimeInterval
     /// When the client-managed session memory (`CoachHistory`) grows past this many estimated tokens,
     /// the driver condenses its oldest span into a short summary (see `CoachDriver.compactIfNeeded`).
     /// Sized to industry practice for conversational loads (~5–20k): big enough that compaction is
@@ -58,6 +62,7 @@ public struct Config: Sendable {
     public init(
         silenceTimeoutSeconds: TimeInterval = 120,
         silenceMaxIntervalSeconds: TimeInterval = 960,
+        silenceIdleCutoffSeconds: TimeInterval = 1_800,
         historyCompactionTokenThreshold: Int = 10_000,
         overlayNoticeBufferSeconds: TimeInterval = 2.0,
         overlaySecondsPerWord: TimeInterval = 0.35,
@@ -73,6 +78,7 @@ public struct Config: Sendable {
     ) {
         self.silenceTimeoutSeconds = silenceTimeoutSeconds
         self.silenceMaxIntervalSeconds = silenceMaxIntervalSeconds
+        self.silenceIdleCutoffSeconds = silenceIdleCutoffSeconds
         self.historyCompactionTokenThreshold = historyCompactionTokenThreshold
         self.overlayNoticeBufferSeconds = overlayNoticeBufferSeconds
         self.overlaySecondsPerWord = overlaySecondsPerWord

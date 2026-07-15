@@ -289,6 +289,43 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(!second.contains { $0.role == .tool })                                       // no dangling result
     }
 
+    /// A silence check the model shrugs at (stay_silent, nothing new said) leaves NO trace in the
+    /// session memory: committing its bare trigger note would pile up answerless user messages,
+    /// re-billed on every later request and confusing to read back in the request log.
+    @Test func silentSilenceCheckLeavesNoTriggerNoteInHistory() async {
+        let clock = ManualClock(now: 0)
+        let brain = ScriptedBrain(script: [.init(toolCalls: [.staySilent(callId: "q1")],
+                                                 rawToolCalls: [RawToolCall(id: "q1", name: "stay_silent", argumentsJSON: "{}")])])
+        let (driver, transcript) = makeDriver(brain: brain, clock: clock)
+        #expect(await driver.handleTrigger(.silence(secondsQuiet: 120)) == .silentByModel)
+
+        transcript.append(.init(speaker: .me, text: "ok here is an idea", at: 5))
+        await driver.handleTrigger(.turnEnd)
+        // Scoped to user messages: the system prompt legitimately shows a "(no speech for …)" example.
+        #expect(!brain.calls[1].contains { $0.role == .user && ($0.text ?? "").contains("no speech for") })
+    }
+
+    /// But a silence check where the model DID look at the screen keeps the whole turn in memory —
+    /// the capture (and the note that prompted it) is context a later turn can build on.
+    @Test func silenceCheckWithCaptureIsKeptInHistory() async {
+        let clock = ManualClock(now: 0)
+        let brain = ScriptedThrowBrain(script: [
+            .init(toolCalls: [.captureScreen(callId: "c1")],
+                  rawToolCalls: [RawToolCall(id: "c1", name: "capture_screen", argumentsJSON: "{}")]),
+            .init(toolCalls: [.staySilent(callId: "q1")],
+                  rawToolCalls: [RawToolCall(id: "q1", name: "stay_silent", argumentsJSON: "{}")]),
+            .init(toolCalls: []),
+        ])
+        let (driver, transcript) = makeDriver(brain: brain, clock: clock)
+        #expect(await driver.handleTrigger(.silence(secondsQuiet: 120)) == .silentByModel)
+
+        transcript.append(.init(speaker: .me, text: "ok here is an idea", at: 5))
+        await driver.handleTrigger(.turnEnd)
+        let last = brain.calls.last!
+        #expect(last.contains { $0.role == .user && ($0.text ?? "").contains("no speech for") })   // the note survives
+        #expect(last.contains { $0.role == .tool && $0.toolCallId == "c1" })                        // with its capture
+    }
+
     /// Defensive: a model that answers with NO tool call despite `required` still reads as deliberate
     /// silence — render nothing rather than fail the turn.
     @Test func noToolCallsStillRendersNothing() async {
