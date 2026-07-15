@@ -5,6 +5,8 @@ import Network
 /// Records whether macOS considers the local network path usable and which interface carries it.
 /// Realtime transport errors include this snapshot, separating a local route outage from an
 /// apparently-healthy path whose connection was lost farther upstream.
+// SAFETY: `summary` is the only cross-queue mutable state and every access is guarded by `lock`.
+// `NWPathMonitor` invokes its handler on `queue`, so actor isolation cannot express this ownership.
 final class NetworkPathDiagnostics: @unchecked Sendable {
     private let monitor = NWPathMonitor()
     private let queue = DispatchQueue(label: "jarvis.network-path")

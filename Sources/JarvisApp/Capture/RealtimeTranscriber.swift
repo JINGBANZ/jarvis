@@ -379,11 +379,20 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         }
         connected = false
         pendingPingGeneration = nil
+        let failedSession = session
+        // Remove the failed task immediately. A receive callback can pass `isCurrent` just before
+        // this failure wins the lock; `markReady` checks the installed task again, so clearing it
+        // prevents a late session acknowledgement from resetting backoff or draining buffered audio
+        // into the canceled socket during the reconnect delay.
+        task = nil
+        session = nil
         if reconnectAttempt >= maxReconnects {
             isReconnecting = true
             lock.unlock()
             if let diagnostic { logTransportFailure(diagnostic, generation: failedGeneration) }
             invalidateConnectionTimers()
+            failedTask.cancel(with: .goingAway, reason: nil)
+            failedSession?.invalidateAndCancel()
             emitState(.failed)
             jlog("Jarvis realtime [\(speaker.rawValue)]: giving up after \(maxReconnects) reconnect attempts — stopping")
             onTerminalFailure?()
@@ -392,7 +401,6 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         isReconnecting = true
         let attempt = reconnectAttempt
         reconnectAttempt = attempt + 1
-        let failedSession = session
         lock.unlock()
 
         if let diagnostic { logTransportFailure(diagnostic, generation: failedGeneration) }
@@ -507,7 +515,8 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
     private func isCurrent(task candidate: URLSessionWebSocketTask, generation candidateGeneration: Int) -> Bool {
         lock.lock(); defer { lock.unlock() }
         guard let currentTask = task else { return false }
-        return !stopped && currentTask === candidate && generation == candidateGeneration
+        return !stopped && !isReconnecting
+            && currentTask === candidate && generation == candidateGeneration
     }
 
     private func invalidateReadyTimer(task: URLSessionWebSocketTask, generation socketGeneration: Int) {

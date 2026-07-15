@@ -53,6 +53,7 @@ import Testing
     }
 }
 
+// SAFETY: `script` and `calls` are the only mutable state and every access is guarded by `lock`.
 private final class RetryScriptBrain: BrainClient, @unchecked Sendable {
     private let lock = NSLock()
     private var script: [Result<BrainResponse, Error>]
