@@ -46,6 +46,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// unwinding when Stop → Start rotates sessions must record into the session that made it, not
     /// contaminate the new session's audit data.
     private var sessionTraffic: BrainTrafficLog?
+    /// Stops whose cancelled turns haven't finished unwinding yet. Cancellation only *requests* the
+    /// stop — an in-flight brain request unwinds asynchronously and records its final traffic line on
+    /// the way out — so a just-stopped session isn't evaluable until its drain completes, or a quick
+    /// Evaluate click would audit an incomplete `brain-traffic.jsonl`. A count (not a Bool) so a rapid
+    /// Stop → Start → Stop can't have the first drain's completion unmask the second's.
+    private var drainingStops = 0
 
     /// How many past session log *directories* to keep on disk; older ones are pruned at each Start so
     /// the always-on activity log stays bounded across launches. This caps session count, not the size
@@ -77,8 +83,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return SessionEvaluator(brain: brain)
         }
         // Evaluation is for finished conversations only: the viewer disables its Evaluate button for
-        // the live session while coaching runs (start()/stop() ping it via coachingStateDidChange).
-        activityViewer.isCoachingRunning = { [weak self] in self?.transcriber != nil }
+        // the live session while coaching runs — or while a cancelled turn is still draining its
+        // final traffic line (start()/stop() ping it via coachingStateDidChange).
+        activityViewer.isCoachingRunning = { [weak self] in
+            guard let self else { return false }
+            return self.transcriber != nil || self.drainingStops > 0
+        }
 
         // Ask for Microphone + Screen Recording up front, not lazily mid-session.
         Permissions.primeAll()
@@ -311,7 +321,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func stop() {
         let wasRunning = transcriber != nil || themTranscriber != nil
         requestManualHint = nil              // hotkey beeps again once there's no live session
-        turns?.cancelAll(); turns = nil      // cancel any in-flight coaching turn
+        let cancelled = turns?.cancelAll() ?? []; turns = nil   // cancel any in-flight coaching turn
         aggregateCapture?.stop(); aggregateCapture = nil   // stop the IOProc, tear down tap+aggregate
         transcriber?.stop()
         themTranscriber?.stop()
@@ -322,7 +332,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         reportedCoachingReady = false
         menuBar?.setState(.stopped)
         if wasRunning { jlog("Jarvis: stopped.") }
-        activityViewer?.coachingStateDidChange()   // the just-stopped session became evaluable
+        // The just-stopped session becomes evaluable only once any cancelled turn has actually
+        // finished unwinding — its brain request records a final traffic line on the way out, and an
+        // Evaluate click before that line lands would audit an incomplete brain-traffic.jsonl.
+        if !cancelled.isEmpty {
+            drainingStops += 1
+            Task { @MainActor [weak self] in
+                for task in cancelled { await task.value }
+                guard let self else { return }
+                self.drainingStops -= 1
+                self.activityViewer?.coachingStateDidChange()
+            }
+        }
+        activityViewer?.coachingStateDidChange()
     }
 
     /// The mic socket is the truth for whether Jarvis is listening. System audio may reconnect or

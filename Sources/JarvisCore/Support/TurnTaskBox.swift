@@ -17,8 +17,15 @@ public final class TurnTaskBox: @unchecked Sendable {
         lock.unlock()
     }
 
-    public func cancelAll() {
+    /// Cancel every tracked task and return them so a caller can await their *completion*.
+    /// Cancellation only requests the stop: a turn's brain request unwinds asynchronously and still
+    /// does final bookkeeping on the way out (recording the cancelled round trip to the session's
+    /// brain-traffic log) — a caller that needs the session's files complete (e.g. gating the
+    /// Evaluate button) must drain the returned tasks, not just cancel.
+    @discardableResult
+    public func cancelAll() -> [Task<Void, Never>] {
         lock.lock(); let snapshot = tasks; tasks.removeAll(); lock.unlock()
         snapshot.forEach { $0.cancel() }
+        return snapshot
     }
 }
