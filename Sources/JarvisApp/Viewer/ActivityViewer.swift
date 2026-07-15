@@ -11,8 +11,15 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
     private let log: ActivityLog
     private var store: SessionStore   // rebuilt when a new session opens (see `sessionDidChange`)
 
+    /// Builds the evaluation pipeline for the "Evaluate" button, read at click time so it always
+    /// uses the current API key + model selection. Nil result ⇒ no key yet. Wired by AppDelegate;
+    /// explicitly `@MainActor` because it reads AppDelegate's main-actor state (secrets, preferences).
+    var makeEvaluator: (@MainActor () -> SessionEvaluator?)?
+
     private var webView: WKWebView?
     private var picker: NSPopUpButton?
+    private var evaluateButton: NSButton?
+    private var reportWindow: NSWindow?   // keeps the evaluation report window alive
     private var sessions: [SessionStore.Session] = []
 
     private var loaded = false             // page navigation finished?
@@ -53,13 +60,21 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         sessionLabel.textColor = .secondaryLabelColor
         header.addSubview(sessionLabel)
 
-        let pop = NSPopUpButton(frame: NSRect(x: 76, y: 8, width: 280, height: 26))
+        let pop = NSPopUpButton(frame: NSRect(x: 76, y: 8, width: 240, height: 26))
         pop.target = self
         pop.action = #selector(sessionChanged)
         pop.toolTip = "Switch between this and previous sessions"
         pop.autoresizingMask = [.maxXMargin]
         header.addSubview(pop)
         self.picker = pop
+
+        let evaluate = NSButton(title: "Evaluate", target: self, action: #selector(evaluateTapped))
+        evaluate.bezelStyle = .rounded
+        evaluate.toolTip = "Send this session's recorded LLM traffic to the brain model for a context-engineering audit"
+        evaluate.frame = NSRect(x: content.bounds.width - 232, y: 8, width: 90, height: 28)
+        evaluate.autoresizingMask = [.minXMargin]
+        header.addSubview(evaluate)
+        self.evaluateButton = evaluate
 
         let clear = NSButton(title: "Clear history", target: self, action: #selector(clearHistoryTapped))
         clear.bezelStyle = .rounded
@@ -86,6 +101,7 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         log.detach()
         webView = nil
         picker = nil
+        evaluateButton = nil
         loaded = false
         pending = []
         snapshotRows = []
@@ -180,6 +196,74 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         snapshotRows = []
         pending = []
         webView.evaluateJavaScript("setMeta(\(jsString(pendingMeta)));", completionHandler: nil)
+    }
+
+    // MARK: - Session evaluation
+
+    /// One click: send the selected session's recorded brain traffic to the evaluation model and
+    /// show (and persist) the resulting audit report. Works for the live session and past ones —
+    /// each session dir carries its own `brain-traffic.jsonl`.
+    @objc private func evaluateTapped() {
+        guard let idx = picker?.indexOfSelectedItem, sessions.indices.contains(idx) else { return }
+        let session = sessions[idx]
+        guard SessionEvaluator.hasTraffic(in: session.url) else {
+            info("Nothing to evaluate",
+                 "This session has no recorded LLM traffic yet. Traffic is captured from the first coaching turn onward.")
+            return
+        }
+        guard let evaluator = makeEvaluator?() else {
+            info("No API key", "Paste your API key in Settings first — the evaluation runs on the same key.")
+            return
+        }
+        evaluateButton?.isEnabled = false
+        evaluateButton?.title = "Evaluating…"
+        Task { [weak self] in
+            defer {
+                self?.evaluateButton?.title = "Evaluate"
+                self?.evaluateButton?.isEnabled = true
+            }
+            do {
+                let report = try await evaluator.evaluate(sessionDir: session.url)
+                self?.showReport(report, for: session)
+            } catch {
+                self?.info("Evaluation failed", error.localizedDescription)
+            }
+        }
+    }
+
+    /// Show the report in its own scrollable window. Plain text is enough: the report is markdown
+    /// meant for reading and copy-pasting; it's also saved as `eval-report.md` in the session dir.
+    private func showReport(_ report: String, for session: SessionStore.Session) {
+        let window = reportWindow ?? {
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 560),
+                             styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+            w.isReleasedWhenClosed = false   // we hold the reference; AppKit must not free it on close
+            w.center()
+            reportWindow = w
+            return w
+        }()
+        window.title = "Session evaluation — \(session.label)"
+
+        // The factory wires the text view's resizing/container tracking correctly for scrolling.
+        let scroll = NSTextView.scrollableTextView()
+        scroll.frame = window.contentLayoutRect
+        scroll.autoresizingMask = [.width, .height]
+        if let text = scroll.documentView as? NSTextView {
+            text.isEditable = false
+            text.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+            text.textContainerInset = NSSize(width: 12, height: 12)
+            text.string = report
+        }
+        window.contentView = scroll
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func info(_ title: String, _ message: String) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.runModal()
     }
 
     // MARK: - Clear history

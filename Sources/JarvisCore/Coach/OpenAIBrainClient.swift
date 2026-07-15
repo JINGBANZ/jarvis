@@ -22,6 +22,11 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
     private let maxOutputTokens: Int
     private let promptCacheKey: String
     private let send: Sender
+    /// When set, every round trip (request body, response body, status, latency — or the transport
+    /// error) is recorded to the session's `brain-traffic.jsonl`, tagged with `trafficTag` so the
+    /// coach and the summarizer are distinguishable. Nil (tests, the evaluator itself) records nothing.
+    private let traffic: BrainTrafficLog?
+    private let trafficTag: String
 
     /// A generous request ceiling that is a HANG backstop, not a latency knob. Normal coaching turns
     /// finish in a few seconds; this only fires on a genuinely stuck request, so it sits well above the
@@ -40,6 +45,8 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
                 // default mirrors the default effort so there's one source of truth, never a magic number.
                 maxOutputTokens: Int = ReasoningEffort.default.maxOutputTokens,
                 promptCacheKey: String = "jarvis-coach-v1",
+                traffic: BrainTrafficLog? = nil,
+                trafficTag: String = "coach",
                 send: Sender? = nil) {
         self.apiKey = apiKey
         self.model = model
@@ -48,6 +55,8 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
         self.timeout = timeout
         self.maxOutputTokens = maxOutputTokens
         self.promptCacheKey = promptCacheKey
+        self.traffic = traffic
+        self.trafficTag = trafficTag
         self.send = send ?? { request in
             let (data, response) = try await URLSession.shared.data(for: request)
             return (data, response as? HTTPURLResponse)
@@ -60,19 +69,38 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        request.httpBody = try encodeBody(messages: messages, tools: tools, toolChoice: toolChoice)
+        let body = try encodeBody(messages: messages, tools: tools, toolChoice: toolChoice)
+        request.httpBody = body
 
         // One attempt, no in-request retry. Any failure — a client-side timeout past the ceiling, a
         // dropped connection, or an HTTP error — throws to the driver, which recovers on the NEXT
         // trigger: `sentCount` only advances on success, so the next turn's delta re-sends the failed
         // lines PLUS everything newer. That's fresher than resending a stale body.
-        let (data, http) = try await send(request)
+        let started = Date()
+        let data: Data
+        let http: HTTPURLResponse?
+        do {
+            (data, http) = try await send(request)
+        } catch {
+            // Record the failed round trip too — a transport error (timeout, dropped connection) is
+            // exactly the kind of issue the session evaluation should see.
+            traffic?.record(tag: trafficTag, request: body, response: nil, status: nil,
+                            latencyMs: Self.elapsedMs(since: started),
+                            error: error.localizedDescription)
+            throw error
+        }
         let status = http?.statusCode ?? 0
+        traffic?.record(tag: trafficTag, request: body, response: data, status: status,
+                        latencyMs: Self.elapsedMs(since: started))
         guard (200..<300).contains(status) else {
             throw NSError(domain: "OpenAIBrainClient", code: status,
                           userInfo: [NSLocalizedDescriptionKey: String(data: data, encoding: .utf8) ?? "http \(status)"])
         }
         return try decode(data)
+    }
+
+    private static func elapsedMs(since started: Date) -> Int {
+        Int(Date().timeIntervalSince(started) * 1000)
     }
 
     // MARK: - Encoding (Responses API)

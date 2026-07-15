@@ -53,6 +53,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // first Start, so the viewer starts with no current session to browse.
         activityViewer = ActivityViewer(log: .shared,
                                         store: SessionStore(base: logDirectory(), current: nil))
+        // The one-click session evaluation: audit the recorded brain traffic with the selected brain
+        // model at high effort (an audit is a depth task, not a latency one). Built at click time so
+        // it always uses the current key/model; its own traffic is NOT recorded (`traffic` stays nil)
+        // — the audit must not pollute the session it audits.
+        activityViewer.makeEvaluator = { [weak self] in
+            guard let self, let key = self.secrets.apiKey(), !key.isEmpty else { return nil }
+            let brain = OpenAIBrainClient(apiKey: key, model: self.brainPreferences.model.id,
+                                          reasoningEffort: ReasoningEffort.high.rawValue,
+                                          timeout: 300,   // a big session transcript takes minutes, not seconds
+                                          maxOutputTokens: ReasoningEffort.high.maxOutputTokens,
+                                          promptCacheKey: "jarvis-eval-v1")
+            return SessionEvaluator(brain: brain)
+        }
 
         // Ask for Microphone + Screen Recording up front, not lazily mid-session.
         Permissions.primeAll()
@@ -140,15 +153,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             overlayBox.clear()      // …and a fresh response history for the new conversation
         }
 
+        // Both clients record their wire traffic into the session's `brain-traffic.jsonl` (enabled in
+        // `beginNewSession`), tagged so the evaluation can tell the coach and summarizer apart.
         let brain = OpenAIBrainClient(apiKey: key, model: brainPreferences.model.id,
                                       reasoningEffort: brainPreferences.effort.rawValue,
-                                      maxOutputTokens: brainPreferences.effort.maxOutputTokens)
+                                      maxOutputTokens: brainPreferences.effort.maxOutputTokens,
+                                      traffic: .shared, trafficTag: "coach")
         // History-compaction summaries don't need the coaching model — a mini model writes a
         // 250-word briefing a few times an hour for a fraction of the price. Text-only and quick,
         // so low effort with a modest token cap.
         let summarizer = OpenAIBrainClient(apiKey: key, model: "gpt-5.4-mini",
                                            reasoningEffort: ReasoningEffort.low.rawValue,
-                                           maxOutputTokens: 2_048)
+                                           maxOutputTokens: 2_048,
+                                           traffic: .shared, trafficTag: "summarizer")
         // Fan each spoken tip out to both the Overlay Caption and the persistent Overlay Box.
         let overlaySink = BroadcastOverlay([overlayCaption, overlayBox])
         let driver = CoachDriver(config: config, transcript: transcript,
@@ -265,6 +282,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: base.path)
         JarvisLog.enableFileLogging(directory: dir)     // <dir>/jarvis-debug.log, 0600, fresh
         ActivityLog.shared.enable(directory: dir)        // <dir>/jarvis-activity.jsonl, 0600, fresh
+        BrainTrafficLog.shared.enable(directory: dir)    // <dir>/brain-traffic.jsonl, 0600, fresh
         // Now that logging is always on, sessions accumulate every launch. Bound it: keep only the most
         // recent few (the just-created one is current, so it's always spared).
         SessionStore(base: base, current: dir).pruneToMostRecent(Self.retainedSessions)

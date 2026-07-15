@@ -36,6 +36,9 @@ Run the **human smoke run** — build, run, and validate live:
    [decision](./decisions.md)): with a LeetCode window frontmost, a planted bug, and effort **Low**,
    compare bug-found rate / input tokens / latency across capture scopes (full display vs. active
    window vs. active window + OCR, 5 runs each) to confirm Low+clean-input replaces High.
+6. **One-click session evaluation** (see the 2026-07-15 [decision](./decisions.md)): after a run,
+   Settings → Activity → **Evaluate**; expect `brain-traffic.jsonl` in the session dir, the audit
+   report window, and `eval-report.md` saved beside the traffic it audits.
 
 ## Built
 
@@ -49,13 +52,13 @@ thin OS shell, verified by the smoke run.
 - `Sources/JarvisCore/Screen/` — the model-triggered screen-capture tool contract + window-scoped capture logic (`ScreenCapture`, `ScreenSnapshot`, `FrontWindowSelector`, `RecognizedTextLayout`).
 - `Sources/JarvisCore/Overlay/` — overlay text model + length-proportional timing + fan-out (`OverlayRendering`, `OverlayTiming`, `OverlayAppearance`, `BroadcastOverlay`).
 - `Sources/JarvisCore/Config/` — config + owner-only secrets + brain/screen preferences (`Config`, `Secrets`, `BrainPreferences`, `ScreenCapturePreferences`, `ScreenCaptureScope`).
-- `Sources/JarvisCore/Diagnostics/` — logging, always-on activity log, session-history store, user-facing errors (`ActivityLog`, `SessionStore`, `UserFacingError`).
+- `Sources/JarvisCore/Diagnostics/` — logging, always-on activity log, session-history store, wire-level brain traffic capture + one-click session evaluation, user-facing errors (`ActivityLog`, `SessionStore`, `BrainTrafficLog`, `SessionEvaluator`, `UserFacingError`).
 - `Sources/JarvisOverlay/` — the capture-invisible `NSPanel` surfaces: `OverlayCaptionPanel` (transient), `OverlayBoxPanel` (persistent), `NSPanel+CaptureExclusion`.
 - `Sources/JarvisApp/App/` + `MenuBar/` — entry point, menu bar, Start/Stop, `ErrorReporter` (severity-driven `NSAlert`).
 - `Sources/JarvisApp/Capture/` — one-clock aggregate mic + system-audio capture with AEC3 echo cancellation + resampling (`AggregateEchoCapture`, `WebRTCEchoCanceller`, `Resampler`, `RealtimeTranscriber`, `Permissions`), plus the window-scoped screenshot + OCR edge (`WindowScopedScreenCapture`, `ScreenTextRecognizer`).
 - `Sources/JarvisApp/Settings/` — the unified Settings window (`SettingsWindow` hosting API-key / Overlay / Brain / Activity sections).
 - `Sources/JarvisApp/Shortcuts/HotkeyController.swift` — the global Carbon ⌥⌘J on-demand-hint hotkey.
-- `Sources/JarvisApp/Viewer/ActivityViewer.swift` — the in-app `WKWebView` activity viewer.
+- `Sources/JarvisApp/Viewer/ActivityViewer.swift` — the in-app `WKWebView` activity viewer, with the one-click **Evaluate** session audit.
 - `Sources/CJarvisAEC/lib/libjarvis-aec.a` — the prebuilt, zero-dylib WebRTC AEC3 C edge (the `CJarvisAEC` target; rebuilt by `scripts/build-aec.sh`).
 
 ## Not yet built

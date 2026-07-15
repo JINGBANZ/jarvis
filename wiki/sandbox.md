@@ -94,7 +94,7 @@ There is **no rolling screen/audio archive and no "recall" database** — Jarvis
 recording of what it sees or hears. The **raw captured streams stay transient**: mic audio streams to
 the API and is dropped, the live transcript lives in memory, and the temp screenshot files used to
 hand a frame to `screencapture` are deleted immediately after use. The one thing persisted *on this
-machine* is the **activity log** — owner-only and bounded; see below.
+machine* is the **per-session log directory** — owner-only and bounded; see below.
 
 > **Server-side retention for debuggability (current behavior).** Session memory is client-managed
 > (`CoachHistory` — nothing at OpenAI is needed for continuity), but requests are still sent
@@ -105,10 +105,14 @@ machine* is the **activity log** — owner-only and bounded; see below.
 > choice; flipping to `store:false` — now a one-line change with no quality cost — is tracked as a
 > future privacy item.
 
-**The activity log is the one bounded form of disk persistence, hardened to stay owner-only.** The
-log (the in-app `WKWebView` viewer's `jarvis-activity.jsonl` + the screenshots the model looked at,
-alongside `jarvis-debug.log`) records the model's spoken tips and the transcribed "heard:" lines so a
-session can be reviewed afterward. It is written on **every** launch — it was previously gated to a
+**The per-session log directory is the one bounded form of disk persistence, hardened to stay
+owner-only.** It holds the **activity log** (the in-app `WKWebView` viewer's `jarvis-activity.jsonl` +
+the screenshots the model looked at, alongside `jarvis-debug.log`) — the model's spoken tips and the
+transcribed "heard:" lines so a session can be reviewed afterward — plus the **brain traffic record**
+(`brain-traffic.jsonl`: the exact request/response bodies exchanged with the LLM provider, with
+base64 screenshots redacted to stubs since the pixels are already the shot files) and, once the user
+runs the one-click session evaluation, its `eval-report.md`. All of it is written on **every**
+launch — the activity log was previously gated to a
 `--dev` flag (now removed), an explicit decision to make session review a default affordance. The
 hardening that made the old dev affordance safe still applies in full: the files go to a per-session
 directory in the **gitignored, workspace-local `.jarvis/`** (passed to the `open`-launched app via

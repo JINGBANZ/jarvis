@@ -220,6 +220,45 @@ private func speakResponseBody(arguments: String) -> Data {
         #expect(body.contains("\"type\":\"function\""))
         #expect(body.contains("\"name\":\"speak\""))
     }
+
+    /// With a traffic log wired, a successful round trip lands in `brain-traffic.jsonl` — the raw
+    /// eval pipeline input — tagged, with the request body and response body both present.
+    @Test func successfulRoundTripIsRecordedToTrafficLog() async throws {
+        let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
+        let traffic = BrainTrafficLog(); traffic.enable(directory: dir)
+        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+                                       traffic: traffic, trafficTag: "coach",
+                                       send: { _ in (Data(#"{"output":[]}"#.utf8), http(200)) })
+        _ = try await client.respond(messages: [.user("hi")], tools: coachTools)
+
+        let text = try String(contentsOf: dir.appendingPathComponent(BrainTrafficLog.filename),
+                              encoding: .utf8)
+        let entry = try #require(try JSONSerialization.jsonObject(
+            with: Data(text.split(separator: "\n")[0].utf8)) as? [String: Any])
+        #expect(entry["tag"] as? String == "coach")
+        #expect(entry["status"] as? Int == 200)
+        #expect((entry["request"] as? [String: Any])?["model"] as? String == "gpt-5.5")
+        #expect(entry["response"] != nil)
+    }
+
+    /// A transport failure still records the attempt (request + error, no response) and rethrows.
+    @Test func transportErrorIsRecordedToTrafficLogAndRethrown() async throws {
+        let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
+        let traffic = BrainTrafficLog(); traffic.enable(directory: dir)
+        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+                                       traffic: traffic, trafficTag: "coach",
+                                       send: { _ in throw URLError(.timedOut) })
+        await #expect(throws: (any Error).self) {
+            try await client.respond(messages: [.user("hi")], tools: coachTools)
+        }
+        let text = try String(contentsOf: dir.appendingPathComponent(BrainTrafficLog.filename),
+                              encoding: .utf8)
+        let entry = try #require(try JSONSerialization.jsonObject(
+            with: Data(text.split(separator: "\n")[0].utf8)) as? [String: Any])
+        #expect(entry["error"] != nil)
+        #expect(entry["response"] == nil)
+        #expect((entry["request"] as? [String: Any])?["model"] as? String == "gpt-5.5")
+    }
 }
 
 /// Thread-safe capture box for inspecting the request body from a @Sendable send closure.
