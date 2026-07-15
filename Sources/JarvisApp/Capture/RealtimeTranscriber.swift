@@ -53,6 +53,7 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
 
     init(apiKey: String, model: String, speaker: Speaker = .me, transcript: RollingTranscript, clock: Clock,
          silenceTimeout: TimeInterval, silenceMaxInterval: TimeInterval,
+         silenceIdleCutoff: TimeInterval = .infinity,
          silenceDurationMs: Int = 1000, noiseReduction: NoiseReductionMode = .auto,
          turnDebounce: TimeInterval = 0.4, maxBufferedAudioSeconds: TimeInterval = 60) {
         self.apiKey = apiKey
@@ -61,7 +62,8 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         self.transcript = transcript
         self.clock = clock
         self.sessionStart = clock.now()
-        self.silenceBackoff = SilenceBackoff(base: silenceTimeout, maxInterval: silenceMaxInterval)
+        self.silenceBackoff = SilenceBackoff(base: silenceTimeout, maxInterval: silenceMaxInterval,
+                                             idleCutoff: silenceIdleCutoff)
         self.silenceDurationMs = silenceDurationMs
         self.noiseReduction = noiseReduction
         self.turnDebounce = turnDebounce
@@ -350,7 +352,13 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
     /// next, longer interval — so a long silence is gently re-checked (the interval doubles each step
     /// up to a cap; see `Config`) rather than nudged once and never again. Must be called on the main queue.
     private func armSilenceTimer() {
-        let interval = silenceBackoff.next()
+        // Past the idle cutoff the user has stepped away — stop probing entirely (each probe bills a
+        // full brain request). The next utterance re-arms via resetSilenceTimer as usual.
+        let quiet = transcript.silenceDuration(now: clock.now() - sessionStart)
+        guard let interval = silenceBackoff.next(quietSoFar: quiet) else {
+            jlog("🤫 quiet for \(Int(quiet))s — pausing silence checks until speech resumes")
+            return
+        }
         lock.lock(); silenceTimer?.invalidate()
         silenceTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
             guard let self else { return }

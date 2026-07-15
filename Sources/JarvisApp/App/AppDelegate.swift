@@ -6,7 +6,9 @@ import JarvisOverlay
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let clock = SystemClock()
     private let config = Config.default
-    private let transcript = RollingTranscript()
+    /// Recreated on every `start()`: the transcript must live and die with the driver/transcriber
+    /// pair built there — they carry its [mm:ss] clock base and the driver's sent-index into it.
+    private var transcript = RollingTranscript()
     private let secretFile = FileSecretStore()
     private lazy var secrets = ChainedSecretStore([secretFile, EnvSecretStore()])
     /// The single funnel for user-facing failures (alerts + fatal session teardown). See `ErrorReporter`.
@@ -134,6 +136,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return false
         }
         stop() // tear down any existing pipeline so we start cleanly
+        // A fresh transcript for the fresh pipeline (even on an in-place restart, which rebuilds the
+        // driver and transcribers too). Reusing the old one would re-send a dead run's lines as "new
+        // since last turn" — their [mm:ss] stamps minted against the previous transcriber's clock —
+        // and anchor the silence math to that run's last utterance instead of real quiet time.
+        transcript = RollingTranscript()
         if freshSession {
             beginNewSession()       // rotate to a fresh session dir + activity/debug log
             menuBar.resetCounter()  // a user Start begins a fresh session
@@ -180,6 +187,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                               speaker: .me, transcript: transcript, clock: clock,
                                               silenceTimeout: config.silenceTimeoutSeconds,
                                               silenceMaxInterval: config.silenceMaxIntervalSeconds,
+                                              silenceIdleCutoff: config.silenceIdleCutoffSeconds,
                                               silenceDurationMs: config.vadSilenceDurationMs,
                                               noiseReduction: config.audioNoiseReduction,
                                               turnDebounce: config.turnDebounceSeconds,

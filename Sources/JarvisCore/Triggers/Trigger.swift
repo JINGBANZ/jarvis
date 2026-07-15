@@ -17,16 +17,33 @@ public struct TriggerContext: Sendable {
         self.sessionElapsedSeconds = sessionElapsedSeconds
     }
 
-    /// A one-line natural-language summary appended to the user message.
-    public var promptLine: String {
-        let elapsed = Int(sessionElapsedSeconds)
+    /// The trigger note appended to the user message — or nil when the message already says it all.
+    /// A turn-end adds nothing: the "New since last turn" block IS the signal, its [mm:ss] stamps
+    /// carry the timing, and a boilerplate sentence on top would be committed to memory and re-billed
+    /// on every later request. The notes that remain (silence, manual hint) open with the same
+    /// [mm:ss] session stamp as transcript lines, so the model reads all timing in one idiom.
+    public var promptLine: String? {
+        let stamp = RollingTranscript.stamp(sessionElapsedSeconds)
         switch reason {
         case .turnEnd:
-            return "Trigger: a turn just ended. The session has been running for \(elapsed)s."
+            return nil
         case .silence(let secs):
-            return "Trigger: the user has been silent for \(Int(secs))s. The session has been running for \(elapsed)s."
+            return "[\(stamp)] (no speech for \(Self.durationPhrase(secs)))"
         case .manualHint:
-            return "Trigger: the user pressed the hint shortcut. They want your single most useful hint about what's on their screen right now — answer using the attached screenshot and the recent transcript. The session has been running for \(elapsed)s."
+            return "[\(stamp)] The user pressed the hint shortcut. They want your single most useful hint about what's on their screen right now — answer using the attached screenshot and the recent transcript."
         }
+    }
+
+    /// Human-readable duration ("45s", "2m 26s", "3h 30m"): a quiet stretch can run to hours, where
+    /// a raw seconds count makes the model (and anyone reading the request log) do arithmetic.
+    static func durationPhrase(_ seconds: TimeInterval) -> String {
+        let total = Int(seconds.rounded(.down))
+        if total < 60 { return "\(total)s" }
+        if total < 3600 {
+            let (m, s) = (total / 60, total % 60)
+            return s == 0 ? "\(m)m" : "\(m)m \(s)s"
+        }
+        let (h, m) = (total / 3600, (total % 3600) / 60)
+        return m == 0 ? "\(h)h" : "\(h)h \(m)m"
     }
 }

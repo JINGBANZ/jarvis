@@ -32,4 +32,30 @@ import Testing
         b.reset()
         #expect(b.next() == 30)
     }
+
+    /// Once the quiet stretch reaches the idle cutoff, probing stops (nil): the user has stepped
+    /// away, and each probe into the empty room still bills a full brain request.
+    @Test func idleCutoffStopsProbing() {
+        var b = SilenceBackoff(base: 30, maxInterval: 240, idleCutoff: 1800)
+        #expect(b.next(quietSoFar: 0) == 30)
+        #expect(b.next(quietSoFar: 1799) != nil)   // just under the cutoff: still probing
+        #expect(b.next(quietSoFar: 1800) == nil)   // at the cutoff: stop
+        #expect(b.next(quietSoFar: 9999) == nil)
+    }
+
+    /// The cutoff gates on the CURRENT quiet stretch, so speech (which resets the stretch) re-arms
+    /// probing — the next gap is measured afresh from zero.
+    @Test func probingResumesOnceQuietStretchRestarts() {
+        var b = SilenceBackoff(base: 30, maxInterval: 240, idleCutoff: 1800)
+        _ = b.next(quietSoFar: 0); _ = b.next(quietSoFar: 30)   // advance to 120
+        #expect(b.next(quietSoFar: 2000) == nil)                // gone idle
+        b.reset()                                               // speech heard
+        #expect(b.next(quietSoFar: 10) == 30)                   // probing again, from the base
+    }
+
+    /// Without an explicit cutoff, probing never stops (the default keeps old behavior).
+    @Test func defaultHasNoIdleCutoff() {
+        var b = SilenceBackoff(base: 30, maxInterval: 240)
+        #expect(b.next(quietSoFar: 1e9) == 30)
+    }
 }

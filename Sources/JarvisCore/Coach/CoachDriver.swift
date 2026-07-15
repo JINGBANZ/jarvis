@@ -126,7 +126,7 @@ public final class CoachDriver: @unchecked Sendable {
         // A hotkey trigger leaves no "🗣 heard:" line (the user pressed a key, didn't speak), so record
         // it — with the synthetic request we pre-fill as the user's message — so the activity viewer
         // shows what the shortcut sent to the brain.
-        if reason == .manualHint { jlog("⌨️ hint shortcut — \(ctx.promptLine)") }
+        if reason == .manualHint, let line = ctx.promptLine { jlog("⌨️ hint shortcut — \(line)") }
 
         // The delta: only the lines the brain hasn't seen yet (the rest live in `history`).
         let delta = transcript.renderFrom(index: currentSentCount())
@@ -150,11 +150,11 @@ public final class CoachDriver: @unchecked Sendable {
         // snapshotted once, so the prefix is stable across the turn's tool-loop iterations (and
         // across turns, history being append-only — that's what keeps the prompt cache hitting).
         let historyBase: [ChatMessage] = [.system(coachSystemPrompt)] + history.snapshot()
-        // Lead with the trigger line; prepend new speech only when there is any (a manual hint often
-        // has none, and an empty "New since last turn" block just buries the real signal).
-        let userText = delta.text.isEmpty
-            ? ctx.promptLine
-            : "New since last turn:\n\(delta.text)\n\n\(ctx.promptLine)"
+        // New speech (when there is any) followed by the trigger note (when there is one — a
+        // turn-end has none, the stamped delta already carries that signal). Never both empty:
+        // an empty turn-end delta is gated above, and silence/manual-hint always have a note.
+        let userText = [delta.text.isEmpty ? nil : "New since last turn:\n\(delta.text)",
+                        ctx.promptLine].compactMap { $0 }.joined(separator: "\n\n")
         var turnMessages: [ChatMessage] = [.user(userText)]
 
         // Manual hint (hotkey): the user explicitly asked for help, so capture the screen HERE and
@@ -200,7 +200,7 @@ public final class CoachDriver: @unchecked Sendable {
                 // Speech already marked sent (a later-iteration failure) must not vanish from memory —
                 // commit what this turn accumulated. A first-request failure commits nothing; the
                 // un-advanced sentCount re-sends the delta next turn instead.
-                if committed { history.commit(turnMessages) }
+                if committed { commitIfWorthKeeping(turnMessages, deltaText: delta.text) }
                 return .brainError
             }
             // The input provably reached the server — NOW mark the delta as sent.
@@ -208,7 +208,7 @@ public final class CoachDriver: @unchecked Sendable {
 
             if Task.isCancelled {
                 jlog("… turn cancelled (stopped) mid-think")
-                history.commit(turnMessages)   // the delta was sent; keep memory consistent with it
+                commitIfWorthKeeping(turnMessages, deltaText: delta.text)   // the delta was sent; keep memory consistent with it
                 return .cancelled
             }
 
@@ -216,7 +216,7 @@ public final class CoachDriver: @unchecked Sendable {
             // model ignoring `tool_choice: required`. Treat the latter as silence — rendering nothing
             // is the safe interpretation. Either way the sent delta must land in memory.
             guard let call = response.toolCalls.first else {
-                history.commit(turnMessages)
+                commitIfWorthKeeping(turnMessages, deltaText: delta.text)
                 if let reasonText = response.incompleteReason {
                     jlog("⚠️ response truncated (\(reasonText)) — not deliberate silence")
                     return .truncated
@@ -279,7 +279,7 @@ public final class CoachDriver: @unchecked Sendable {
                 // The model's explicit stay-quiet decision. Deliberately NOT recorded: the call and
                 // its non-answer would only bloat every later request — silence needs no memory.
                 jlog("… nothing useful to add, staying silent")
-                history.commit(turnMessages)
+                commitIfWorthKeeping(turnMessages, deltaText: delta.text)
                 await compactIfNeeded()
                 return .silentByModel
             }
@@ -288,6 +288,16 @@ public final class CoachDriver: @unchecked Sendable {
         history.commit(turnMessages)   // captures + speech stay in memory even on the backstop path
         await compactIfNeeded()
         return .exhausted
+    }
+
+    /// Commit a finished turn to session memory ONLY when it left something a later turn can use —
+    /// new transcript lines, or tool activity (a capture the model may refer back to). A turn that
+    /// was just a trigger note the model shrugged at (a silence check → stay_silent) is dropped
+    /// whole: committing it would pile up answerless user messages in memory, re-billed on every
+    /// later request and confusing to read back.
+    private func commitIfWorthKeeping(_ turn: [ChatMessage], deltaText: String) {
+        guard !deltaText.isEmpty || turn.count > 1 else { return }
+        history.commit(turn)
     }
 
     /// The capture_screen tool-result text: the OCR sidecar rides here when present, so exact text

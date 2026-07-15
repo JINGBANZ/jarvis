@@ -6,6 +6,7 @@ import Testing
         let c = Config.default
         #expect(c.silenceTimeoutSeconds == 120)
         #expect(c.silenceMaxIntervalSeconds == 960)
+        #expect(c.silenceIdleCutoffSeconds == 1_800)
         #expect(c.historyCompactionTokenThreshold == 10_000)
         #expect(c.overlayNoticeBufferSeconds == 2.0)
         #expect(c.overlaySecondsPerWord == 0.35)
