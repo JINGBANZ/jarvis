@@ -72,10 +72,12 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
         let body = try encodeBody(messages: messages, tools: tools, toolChoice: toolChoice)
         request.httpBody = body
 
-        // One attempt, no in-request retry. Any failure — a client-side timeout past the ceiling, a
-        // dropped connection, or an HTTP error — throws to the driver, which recovers on the NEXT
-        // trigger: `sentCount` only advances on success, so the next turn's delta re-sends the failed
-        // lines PLUS everything newer. That's fresher than resending a stale body.
+        // This transport makes one attempt. The app wraps it in `RetryingBrainClient`, which may
+        // repeat the same self-contained request once for a transient transport/server failure.
+        // After that, the error reaches the driver and the NEXT trigger recovers: `sentCount` only
+        // advances on success, so the next turn's delta includes the failed lines plus newer ones.
+        // Each attempt records its own traffic entry (the retry re-enters this method), so a failed
+        // round trip AND its retry are both visible to the session audit.
         let started = Date()
         let data: Data
         let http: HTTPURLResponse?

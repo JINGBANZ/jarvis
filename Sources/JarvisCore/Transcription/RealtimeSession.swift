@@ -51,6 +51,13 @@ public enum RealtimeSession {
         ["type": "input_audio_buffer.append", "audio": base64PCM]
     }
 
+    /// A socket is usable only after the server acknowledges `session.update`. The earlier created
+    /// event proves the handshake opened, but not that the requested transcription model/format/VAD
+    /// configuration was accepted.
+    public static func isConfiguredSessionEventType(_ type: String) -> Bool {
+        type == "session.updated" || type == "transcription_session.updated"
+    }
+
     /// True if a parsed wire event is the server's `session_expired` error — emitted when a transcription
     /// session hits its maximum lifetime (~60 min) and the socket rotates. An EXPECTED rotation, not a
     /// fault (callers log it calmly and quiet the reconnect noise; see `RealtimeTranscriber`).
