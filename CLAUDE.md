@@ -160,8 +160,9 @@ The squash-merge subject carries the PR number (`type: summary (#N)`).
 - **No secrets in code, ever** — not in source, tests, or examples. The API key lives in an owner-only
   `0600` file (`OPENAI_API_KEY` env var is a headless fallback only); see
   [`wiki/sandbox.md`](./wiki/sandbox.md) for why not the Keychain.
-- **The only screen-/audio-derived data persisted to disk is the activity log** (the spoken tips, the
-  transcribed "heard:" lines, and the screenshots the model looked at). It is written every run to an
+- **The only screen-/audio-derived data persisted to disk is the per-session log directory** (the
+  activity log — spoken tips, transcribed "heard:" lines, the screenshots the model looked at — plus
+  the wire-level brain traffic record and its on-demand evaluation report). It is written every run to an
   **owner-only** (`0600` files in a `0700` dir) per-session directory in the gitignored, workspace-local
   `.jarvis/`, pruned to the most recent few sessions, never `/tmp`. The raw mic audio and the live
   transcript are **never** archived. Keep the owner-only, no-`/tmp`, workspace-local posture.
