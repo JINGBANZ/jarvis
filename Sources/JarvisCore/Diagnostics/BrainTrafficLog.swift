@@ -7,13 +7,15 @@ import Foundation
 /// tool schemas, usage/cached-token counts), not a paraphrase — and having it locally replaces
 /// pulling the same data by hand from the OpenAI dashboard logs.
 ///
-/// Mirrors `ActivityLog`'s lifecycle: `.shared`, enabled per session via `enable(directory:)`,
-/// no-op until then. Base64 screenshot payloads are redacted before persisting (the pixels already
-/// live in the session dir as `shot-N.jpg`), so the file stays reviewable and owner-only text.
+/// One instance **per session**, bound to that session's directory via `enable(directory:)` and a
+/// no-op until then. Deliberately NOT a shared singleton: the brain clients hold their own session's
+/// recorder, so a request still unwinding when Stop → Start rotates to a new session records into
+/// the session that made it — never into the next session's file (which would contaminate its audit).
+/// Base64 screenshot payloads are redacted before persisting (the pixels already live in the session
+/// dir as `shot-N.jpg`), so the file stays reviewable and owner-only text.
 ///
 /// `@unchecked Sendable`: all mutable state is confined to the serial `queue`.
 public final class BrainTrafficLog: @unchecked Sendable {
-    public static let shared = BrainTrafficLog()
     public static let filename = "brain-traffic.jsonl"
 
     /// On-disk line: one round trip. `request`/`response` are the parsed JSON bodies (nested, not
@@ -24,8 +26,7 @@ public final class BrainTrafficLog: @unchecked Sendable {
     private var dir: URL?         // nil ⇒ disabled (no disk writes)
     private let df: DateFormatter
 
-    /// Internal so tests can spin up an isolated instance; the app uses `.shared`.
-    init() {
+    public init() {
         df = DateFormatter()
         // Fixed-format formatter: pin to en_US_POSIX + Gregorian so output is stable regardless of
         // the user's locale or system calendar (Apple QA1480) — same as ActivityLog.
@@ -43,11 +44,6 @@ public final class BrainTrafficLog: @unchecked Sendable {
             FileManager.default.createFile(atPath: url.path, contents: Data(),
                                            attributes: [.posixPermissions: 0o600])
         }
-    }
-
-    /// Turn recording back off (no further disk writes).
-    public func disable() {
-        queue.sync { dir = nil }
     }
 
     /// Record one round trip. `response`/`status` are nil when the transport threw (then `error`

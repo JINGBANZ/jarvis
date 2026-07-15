@@ -41,6 +41,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// cleared in `stop()` — so the hotkey beeps when there's no session. Captures the Sendable driver
     /// + turn box (not `@MainActor` self), like the transcriber callbacks do.
     private var requestManualHint: (() -> Void)?
+    /// The current session's brain-traffic recorder, rotated by `beginNewSession` and handed to the
+    /// clients built in `start()`. Per-session (not a shared singleton) on purpose: a request still
+    /// unwinding when Stop → Start rotates sessions must record into the session that made it, not
+    /// contaminate the new session's audit data.
+    private var sessionTraffic: BrainTrafficLog?
 
     /// How many past session log *directories* to keep on disk; older ones are pruned at each Start so
     /// the always-on activity log stays bounded across launches. This caps session count, not the size
@@ -167,14 +172,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             OpenAIBrainClient(apiKey: key, model: brainPreferences.model.id,
                               reasoningEffort: brainPreferences.effort.rawValue,
                               maxOutputTokens: brainPreferences.effort.maxOutputTokens,
-                              traffic: .shared, trafficTag: "coach"))
+                              traffic: sessionTraffic, trafficTag: "coach"))
         // History-compaction summaries don't need the coaching model — a mini model writes a
         // 250-word briefing a few times an hour for a fraction of the price. Text-only and quick,
         // so low effort with a modest token cap.
         let summarizer = OpenAIBrainClient(apiKey: key, model: "gpt-5.4-mini",
                                            reasoningEffort: ReasoningEffort.low.rawValue,
                                            maxOutputTokens: 2_048,
-                                           traffic: .shared, trafficTag: "summarizer")
+                                           traffic: sessionTraffic, trafficTag: "summarizer")
         // Fan each spoken tip out to both the Overlay Caption and the persistent Overlay Box.
         let overlaySink = BroadcastOverlay([overlayCaption, overlayBox])
         let driver = CoachDriver(config: config, transcript: transcript,
@@ -370,7 +375,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: base.path)
         JarvisLog.enableFileLogging(directory: dir)     // <dir>/jarvis-debug.log, 0600, fresh
         ActivityLog.shared.enable(directory: dir)        // <dir>/jarvis-activity.jsonl, 0600, fresh
-        BrainTrafficLog.shared.enable(directory: dir)    // <dir>/brain-traffic.jsonl, 0600, fresh
+        let traffic = BrainTrafficLog()                  // fresh recorder BOUND to this session's dir
+        traffic.enable(directory: dir)                   // <dir>/brain-traffic.jsonl, 0600, fresh
+        sessionTraffic = traffic
         // Now that logging is always on, sessions accumulate every launch. Bound it: keep only the most
         // recent few (the just-created one is current, so it's always spared).
         SessionStore(base: base, current: dir).pruneToMostRecent(Self.retainedSessions)

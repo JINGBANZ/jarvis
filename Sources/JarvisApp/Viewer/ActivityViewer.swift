@@ -154,9 +154,12 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
 
     /// Evaluate is enabled only for a *finished* conversation: any past session, or the current one
     /// once coaching is stopped. A live session's traffic file is still being appended to, so an
-    /// audit of it would judge half a story.
+    /// audit of it would judge half a story. Owns the title too: `isEvaluating` survives a Settings
+    /// close/reopen (the viewer outlives its content view), so a rebuilt button mid-audit correctly
+    /// shows "Evaluating…" disabled instead of inviting a duplicate audit.
     private func refreshEvaluateButtonState() {
         guard let button = evaluateButton else { return }
+        button.title = isEvaluating ? "Evaluating…" : "Evaluate"
         if isEvaluating { button.isEnabled = false; return }
         guard let idx = picker?.indexOfSelectedItem, sessions.indices.contains(idx) else {
             button.isEnabled = false
@@ -250,12 +253,10 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
             return
         }
         isEvaluating = true
-        evaluateButton?.title = "Evaluating…"
         refreshEvaluateButtonState()
         Task { [weak self] in
             defer {
                 self?.isEvaluating = false
-                self?.evaluateButton?.title = "Evaluate"
                 self?.refreshEvaluateButtonState()
             }
             do {
