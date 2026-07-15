@@ -301,7 +301,8 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
         transcript.append(.init(speaker: .me, text: "ok here is an idea", at: 5))
         await driver.handleTrigger(.turnEnd)
-        #expect(!brain.calls[1].contains { ($0.text ?? "").contains("no speech for") })
+        // Scoped to user messages: the system prompt legitimately shows a "(no speech for …)" example.
+        #expect(!brain.calls[1].contains { $0.role == .user && ($0.text ?? "").contains("no speech for") })
     }
 
     /// But a silence check where the model DID look at the screen keeps the whole turn in memory —
@@ -321,8 +322,8 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         transcript.append(.init(speaker: .me, text: "ok here is an idea", at: 5))
         await driver.handleTrigger(.turnEnd)
         let last = brain.calls.last!
-        #expect(last.contains { ($0.text ?? "").contains("no speech for") })          // the note survives
-        #expect(last.contains { $0.role == .tool && $0.toolCallId == "c1" })          // with its capture
+        #expect(last.contains { $0.role == .user && ($0.text ?? "").contains("no speech for") })   // the note survives
+        #expect(last.contains { $0.role == .tool && $0.toolCallId == "c1" })                        // with its capture
     }
 
     /// Defensive: a model that answers with NO tool call despite `required` still reads as deliberate
