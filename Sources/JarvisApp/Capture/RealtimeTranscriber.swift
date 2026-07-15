@@ -11,11 +11,13 @@ import JarvisCore
 /// auto-commits the audio buffer per utterance and emits `…transcription.completed` — no manual
 /// `input_audio_buffer.commit` is required.
 ///
-/// Robustness: reconnects with capped exponential backoff on socket failure/close, and sends a
-/// periodic ping keepalive so idle NAT/proxy timeouts don't silently kill transcription.
+/// Robustness: waits for the server's configuration acknowledgement before reporting ready, probes
+/// ready sockets with ping/pong, and reconnects with capped exponential backoff on every detected
+/// send, receive, close, startup-timeout, or liveness failure.
 final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @unchecked Sendable {
     var onTurnEnd: (@Sendable () -> Void)?
     var onSilence: (@Sendable (TimeInterval) -> Void)?
+    var onConnectionStateChange: (@Sendable (RealtimeConnectionState) -> Void)?
     /// Fired when reconnection is abandoned after `maxReconnects` consecutive failures (e.g. a bad
     /// key / quota), so the app can flip the menu back to ⚪️ stopped instead of lying green.
     var onTerminalFailure: (@Sendable () -> Void)?
@@ -32,6 +34,10 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
     private let silenceDurationMs: Int
     private let noiseReduction: NoiseReductionMode
     private let turnDebounce: TimeInterval
+    private let readyTimeout: TimeInterval
+    private let pingInterval: TimeInterval
+    private let pongTimeout: TimeInterval
+    private let networkStatus: @Sendable () -> String
 
     private let lock = NSLock()
     private var session: URLSession?     // retained so stop() can invalidate it (URLSession holds its delegate)
@@ -41,6 +47,8 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
     /// the main queue (where the silence timer is scheduled and fires), so it needs no extra lock.
     private var silenceBackoff: SilenceBackoff
     private var pingTimer: Timer?
+    private var readyTimer: Timer?
+    private var pongTimer: Timer?
     private var debounceTimer: Timer?         // coalesces rapid fragments into one trigger
     private let pending = UtteranceBuffer()   // fragments heard since the last fired trigger
     private let audioBuffer: PCMBuffer        // mic audio captured while the socket is down
@@ -50,11 +58,16 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
     private var connected = false        // true only between "session ready" and the next drop/close
     private var everConnected = false    // distinguishes the first connect from a reconnect
     private var rotating = false         // an EXPECTED server rotation is mid-flight; quiet the noise it makes
+    private var generation = 0           // rejects late callbacks from a replaced socket
+    private var pendingPingGeneration: Int?
 
     init(apiKey: String, model: String, speaker: Speaker = .me, transcript: RollingTranscript, clock: Clock,
          silenceTimeout: TimeInterval, silenceMaxInterval: TimeInterval,
          silenceDurationMs: Int = 1000, noiseReduction: NoiseReductionMode = .auto,
-         turnDebounce: TimeInterval = 0.4, maxBufferedAudioSeconds: TimeInterval = 60) {
+         turnDebounce: TimeInterval = 0.4, maxBufferedAudioSeconds: TimeInterval = 60,
+         readyTimeout: TimeInterval = 10, pingInterval: TimeInterval = 20,
+         pongTimeout: TimeInterval = 10,
+         networkStatus: @escaping @Sendable () -> String = { "unavailable" }) {
         self.apiKey = apiKey
         self.model = model
         self.speaker = speaker
@@ -65,6 +78,10 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         self.silenceDurationMs = silenceDurationMs
         self.noiseReduction = noiseReduction
         self.turnDebounce = turnDebounce
+        self.readyTimeout = readyTimeout
+        self.pingInterval = pingInterval
+        self.pongTimeout = pongTimeout
+        self.networkStatus = networkStatus
         // PCM16 mono at the realtime sample rate → 2 bytes/sample.
         let bytesPerSecond = RealtimeSession.sampleRate * 2
         self.audioBuffer = PCMBuffer(maxBytes: Int(maxBufferedAudioSeconds) * bytesPerSecond)
@@ -74,6 +91,7 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
     func connect() {
         // Start clean: clear the stopped flag AND any stale backoff state from a prior session.
         lock.lock(); stopped = false; reconnectAttempt = 0; isReconnecting = false; rotating = false; lock.unlock()
+        emitState(.connecting)
         openSocket()
         // Arm the proactive silence check exactly once, here on the first connect. A reconnect (session
         // rotation) re-enters via openSocket() directly, NOT connect(), so the running timer is left
@@ -88,14 +106,19 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         let session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
         let task = session.webSocketTask(with: req)
         lock.lock()
-        self.session?.invalidateAndCancel()   // release the previous session's delegate retain
+        let previousSession = self.session
+        generation += 1
+        let socketGeneration = generation
         self.session = session
-        self.task = task; isReconnecting = false; connected = false
+        self.task = task; isReconnecting = false; connected = false; pendingPingGeneration = nil
         lock.unlock()
+        previousSession?.invalidateAndCancel()   // release the previous session's delegate retain
+        invalidateConnectionTimers()
+        jlog("Jarvis realtime [\(speaker.rawValue)]: opening socket #\(socketGeneration)")
         task.resume()
         configureSession()
-        receiveLoop()
-        startPing()
+        receiveLoop(task: task, generation: socketGeneration)
+        armReadyTimeout(task: task, generation: socketGeneration)
     }
 
     func stop() {
@@ -103,19 +126,26 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         stopped = true; connected = false
         let st = silenceTimer; silenceTimer = nil
         let pt = pingTimer; pingTimer = nil
+        let rt = readyTimer; readyTimer = nil
+        let pot = pongTimer; pongTimer = nil
         let db = debounceTimer; debounceTimer = nil
         let t = task; task = nil
         let s = session; session = nil
+        pendingPingGeneration = nil
+        generation += 1                 // invalidate every callback retained by the old task
         lock.unlock()
         // Timers must be invalidated on the thread that scheduled them (main); doing it synchronously
         // from an off-main Stop (e.g. the onTerminalFailure Task) would silently fail to cancel and
         // could let a stray timer fire onSilence on a torn-down pipeline.
-        DispatchQueue.main.async { st?.invalidate(); pt?.invalidate(); db?.invalidate() }
+        DispatchQueue.main.async {
+            st?.invalidate(); pt?.invalidate(); rt?.invalidate(); pot?.invalidate(); db?.invalidate()
+        }
         pending.clear()
         audioBuffer.clear()   // a user Stop discards buffered audio; don't replay it on a later Start
         // A user-initiated Stop is a normal closure (1000), not "going away" (1001).
         t?.cancel(with: .normalClosure, reason: nil)
         s?.invalidateAndCancel()             // breaks the URLSession→delegate(self)→closures→driver retain chain
+        emitState(.stopped)
     }
 
     private func configureSession() {
@@ -129,8 +159,8 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
     func sendAudio(_ pcm: Data) {
         // Audio streams continuously from the mic tap. While the socket is down (between a drop and
         // the reconnect's "session ready"), BUFFER it instead of discarding, so a mid-sentence drop
-        // doesn't lose the user's words — it's flushed into the new session on reconnect. We still
-        // never log a failed send, so the disconnect stays quiet.
+        // doesn't lose the user's words — it's flushed into the new session on reconnect. A failed
+        // send is also a liveness signal and moves the socket into this buffering state immediately.
         lock.lock(); let isConnected = connected; let isStopped = stopped; lock.unlock()
         if isStopped { return }
         if isConnected {
@@ -157,41 +187,47 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
                 send(json: RealtimeSession.appendAudio(base64PCM: chunk.base64EncodedString()))
             }
         }
-        if isReconnect && total > 0 { jlog("⏩ replayed \(total) buffered audio chunks after reconnect") }
+        if isReconnect && total > 0 {
+            jlog("⏩ realtime [\(speaker.rawValue)] replayed \(total) buffered audio chunks after reconnect")
+        }
     }
 
     private func send(json: [String: Any]) {
         guard let data = try? JSONSerialization.data(withJSONObject: json),
               let str = String(data: data, encoding: .utf8) else { return }
-        lock.lock(); let t = task; lock.unlock()
-        // Don't log send failures: they're non-actionable and arrive in bulk on a drop; the
-        // receive/close paths are what detect the disconnect and drive reconnect.
-        t?.send(.string(str)) { _ in }
+        lock.lock(); let t = task; let socketGeneration = generation; lock.unlock()
+        t?.send(.string(str)) { [weak self, weak t] error in
+            guard let self, let t, let error else { return }
+            self.failConnection(task: t, generation: socketGeneration,
+                                diagnostic: "send failed: \(error)")
+        }
     }
 
-    private func receiveLoop() {
-        lock.lock(); let t = task; lock.unlock()
-        t?.receive { [weak self] result in
+    private func receiveLoop(task: URLSessionWebSocketTask, generation socketGeneration: Int) {
+        task.receive { [weak self, weak task] result in
+            guard let task else { return }
             guard let self else { return }
+            guard self.isCurrent(task: task, generation: socketGeneration) else { return }
             switch result {
             case .failure(let err):
                 // A failed pending receive is the EXPECTED artifact of an intentional Stop
                 // (cancel → ENOTCONN/POSIX 57). Suppress it then; only a live failure reconnects.
-                self.lock.lock(); let isStopped = self.stopped; let quiet = self.rotating; self.connected = false; self.lock.unlock()
+                self.lock.lock(); let isStopped = self.stopped; let quiet = self.rotating; self.lock.unlock()
                 if isStopped { return }
                 // During an expected rotation the failing receive is just the old socket going away — the
                 // rotation line already covers it, so don't surface "Socket is not connected" on top.
-                if !quiet { jlog("Jarvis realtime receive failed: \(err)") }
-                self.scheduleReconnect()
+                self.failConnection(task: task, generation: socketGeneration,
+                                    diagnostic: quiet ? nil : "receive failed: \(err)")
             case .success(let message):
-                self.lock.lock(); self.reconnectAttempt = 0; self.lock.unlock() // healthy
-                if case .string(let text) = message { self.handle(text) }
-                self.receiveLoop()
+                if case .string(let text) = message {
+                    self.handle(text, task: task, generation: socketGeneration)
+                }
+                self.receiveLoop(task: task, generation: socketGeneration)
             }
         }
     }
 
-    private func handle(_ text: String) {
+    private func handle(_ text: String, task: URLSessionWebSocketTask, generation socketGeneration: Int) {
         // A buffered message can still arrive after an intentional Stop; don't mutate the transcript
         // or log on a torn-down pipeline (mirrors the failure/close-path gates).
         lock.lock(); let isStopped = stopped; lock.unlock()
@@ -199,6 +235,12 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         guard let data = text.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let type = obj["type"] as? String else { return }
+
+        if RealtimeSession.isConfiguredSessionEventType(type) {
+            let sessionID = (obj["session"] as? [String: Any])?["id"] as? String
+            markReady(task: task, generation: socketGeneration, sessionID: sessionID)
+            return
+        }
 
         switch type {
         case RealtimeSession.completedTranscriptionType:
@@ -219,23 +261,50 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
             // handled on the completed event above. Just refresh the silence timer here.
             resetSilenceTimer()
         case "session.created", "transcription_session.created":
-            // A fresh session is up: the rotation (if any) completed, so re-enable normal drop logging.
-            lock.lock(); let wasReconnect = everConnected; everConnected = true; rotating = false; lock.unlock()
-            jlog("Jarvis realtime: transcription session ready")
-            // Flush buffered audio BEFORE marking connected, so live mic audio (which keeps buffering
-            // while !connected) can't be sent ahead of the older buffered chunks and scramble order.
-            flushBufferedAudio(isReconnect: wasReconnect)
-            lock.lock(); connected = true; lock.unlock()
+            // The WebSocket handshake succeeded, but our transcription configuration has not yet
+            // been acknowledged. Stay in `connecting` and keep buffering until the updated event.
+            break
         case "error":
             // A session_expired error is the server telling us this session hit its lifetime cap. That's
             // an expected rotation, not a fault: announce it once, calmly, and mark `rotating` so the
             // close / receive-failure it triggers next don't pile on scary lines. The reconnect itself is
             // driven by those paths as usual. Any OTHER error is a real fault — log it verbatim.
-            if RealtimeSession.isSessionExpired(obj) { noteRotation("reached its time limit") }
-            else { jlog("Jarvis realtime error event: \(text)") }
+            if RealtimeSession.isSessionExpired(obj) {
+                noteRotation("reached its time limit")
+                failConnection(task: task, generation: socketGeneration, diagnostic: nil)
+            } else {
+                jlog("Jarvis realtime [\(speaker.rawValue)] error event: \(text)")
+            }
         default:
             break
         }
+    }
+
+    private func markReady(task: URLSessionWebSocketTask, generation socketGeneration: Int,
+                           sessionID: String?) {
+        lock.lock()
+        guard let currentTask = self.task, currentTask === task,
+              generation == socketGeneration, !connected else {
+            lock.unlock(); return
+        }
+        let wasReconnect = everConnected
+        everConnected = true; rotating = false; reconnectAttempt = 0
+        lock.unlock()
+        invalidateReadyTimer(task: task, generation: socketGeneration)
+        let id = sessionID.map { ", session \($0)" } ?? ""
+        jlog("Jarvis realtime [\(speaker.rawValue)]: transcription session ready (socket #\(socketGeneration)\(id))")
+        // Flush buffered audio BEFORE marking connected, so live mic audio (which keeps buffering
+        // while !connected) can't be sent ahead of the older buffered chunks and scramble order.
+        flushBufferedAudio(isReconnect: wasReconnect)
+        lock.lock()
+        guard let currentTask = self.task, currentTask === task,
+              generation == socketGeneration, !stopped, !isReconnecting else {
+            lock.unlock(); return
+        }
+        connected = true
+        lock.unlock()
+        emitState(.ready)
+        startPing(task: task, generation: socketGeneration)
     }
 
     /// Coalesce rapid completed-fragments: (re)start a short timer on each fragment; when it settles
@@ -274,30 +343,58 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
 
     func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask,
                     didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
-        // An intentional Stop closes the socket on purpose; don't alarm the user with it.
-        lock.lock(); let isStopped = stopped; let quiet = rotating; connected = false; lock.unlock()
-        if isStopped { return }
+        lock.lock()
+        guard let currentTask = task, currentTask === webSocketTask else { lock.unlock(); return }
+        let socketGeneration = generation
+        let isStopped = stopped
+        let quiet = rotating
+        lock.unlock()
+        if isStopped { return } // An intentional Stop closes the socket on purpose.
         // A server "going away" (1001) is a routine rotation/restart we just reconnect through. Treat it
         // as expected even if no session_expired error preceded it (the two can arrive in either order);
         // any other close code is unexpected and stays visible.
         if closeCode == .goingAway { noteRotation("server going away") }
-        else if !quiet { jlog("Jarvis realtime socket closed: code \(closeCode.rawValue)") }
-        scheduleReconnect()
+        let diagnostic = quiet ? nil : "socket closed: code \(closeCode.rawValue)"
+        failConnection(task: webSocketTask, generation: socketGeneration, diagnostic: diagnostic)
     }
 
     /// Announce an expected server-initiated rotation exactly once, then mark `rotating` so the close /
     /// receive-failure it produces stay quiet until the replacement session is ready (which clears it).
     private func noteRotation(_ reason: String) {
         lock.lock(); let already = rotating; rotating = true; lock.unlock()
-        if !already { jlog("Jarvis realtime: session rotating (\(reason)) — reconnecting") }
+        if !already {
+            jlog("Jarvis realtime [\(speaker.rawValue)]: session rotating (\(reason)) — reconnecting")
+        }
     }
 
-    private func scheduleReconnect() {
+    /// Move the current socket into reconnect exactly once. Every failure source (receive, close,
+    /// send, readiness deadline, and pong deadline) funnels through here; `generation` prevents a late
+    /// callback from an old socket from disrupting its healthy replacement.
+    private func failConnection(task failedTask: URLSessionWebSocketTask, generation failedGeneration: Int,
+                                diagnostic: String?) {
         lock.lock()
-        if stopped || isReconnecting { lock.unlock(); return }
+        guard let currentTask = task else { lock.unlock(); return }
+        if stopped || isReconnecting || generation != failedGeneration || currentTask !== failedTask {
+            lock.unlock(); return
+        }
+        connected = false
+        pendingPingGeneration = nil
+        let failedSession = session
+        // Remove the failed task immediately. A receive callback can pass `isCurrent` just before
+        // this failure wins the lock; `markReady` checks the installed task again, so clearing it
+        // prevents a late session acknowledgement from resetting backoff or draining buffered audio
+        // into the canceled socket during the reconnect delay.
+        task = nil
+        session = nil
         if reconnectAttempt >= maxReconnects {
+            isReconnecting = true
             lock.unlock()
-            jlog("Jarvis realtime: giving up after \(maxReconnects) reconnect attempts — stopping")
+            if let diagnostic { logTransportFailure(diagnostic, generation: failedGeneration) }
+            invalidateConnectionTimers()
+            failedTask.cancel(with: .goingAway, reason: nil)
+            failedSession?.invalidateAndCancel()
+            emitState(.failed)
+            jlog("Jarvis realtime [\(speaker.rawValue)]: giving up after \(maxReconnects) reconnect attempts — stopping")
             onTerminalFailure?()
             return
         }
@@ -306,28 +403,149 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         reconnectAttempt = attempt + 1
         lock.unlock()
 
+        if let diagnostic { logTransportFailure(diagnostic, generation: failedGeneration) }
+        invalidateConnectionTimers()
+        failedTask.cancel(with: .goingAway, reason: nil)
+        failedSession?.invalidateAndCancel()
+        emitState(.reconnecting(attempt: attempt + 1))
+
         let delay = min(30.0, pow(2.0, Double(attempt)))   // 1, 2, 4, 8, 16, 30…
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             guard let self else { return }
-            self.lock.lock(); let stop = self.stopped; self.lock.unlock()
-            guard !stop else { return }
-            jlog("Jarvis realtime: reconnecting (attempt \(attempt + 1))")
+            self.lock.lock()
+            let shouldReconnect = !self.stopped && self.generation == failedGeneration
+            self.lock.unlock()
+            guard shouldReconnect else { return }
+            jlog("Jarvis realtime [\(self.speaker.rawValue)]: reconnecting (attempt \(attempt + 1))")
             self.openSocket()
         }
     }
 
-    private func startPing() {
+    private func armReadyTimeout(task: URLSessionWebSocketTask, generation socketGeneration: Int) {
+        DispatchQueue.main.async { [weak self, weak task] in
+            guard let self, let task else { return }
+            self.lock.lock()
+            let isPending = self.task === task && self.generation == socketGeneration
+                && !self.connected && !self.isReconnecting && !self.stopped
+            self.lock.unlock()
+            guard isPending else { return }
+            self.readyTimer?.invalidate()
+            self.readyTimer = Timer.scheduledTimer(withTimeInterval: self.readyTimeout, repeats: false) {
+                [weak self, weak task] _ in
+                guard let self, let task else { return }
+                self.lock.lock()
+                let isStillPending = self.task === task && self.generation == socketGeneration
+                    && !self.connected && !self.isReconnecting && !self.stopped
+                self.lock.unlock()
+                guard isStillPending else { return }
+                self.failConnection(task: task, generation: socketGeneration,
+                                    diagnostic: "session readiness timed out after \(self.readyTimeout)s")
+            }
+        }
+    }
+
+    private func startPing(task: URLSessionWebSocketTask, generation socketGeneration: Int) {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            self.lock.lock(); self.pingTimer?.invalidate()
-            self.pingTimer = Timer.scheduledTimer(withTimeInterval: 20, repeats: true) { [weak self] _ in
-                guard let self else { return }
-                self.lock.lock(); let t = self.task; let isConnected = self.connected; self.lock.unlock()
-                guard isConnected else { return }   // no keepalive on a dropped/reconnecting socket
-                t?.sendPing { _ in }                // a failed ping is handled by the receive/close path
-            }
+            self.lock.lock()
+            let isReady = self.task === task && self.generation == socketGeneration
+                && self.connected && !self.isReconnecting && !self.stopped
             self.lock.unlock()
+            guard isReady else { return }
+            self.pingTimer?.invalidate()
+            self.pingTimer = Timer.scheduledTimer(withTimeInterval: self.pingInterval, repeats: true) {
+                [weak self, weak task] _ in
+                guard let self, let task else { return }
+                self.sendHealthPing(task: task, generation: socketGeneration)
+            }
         }
+    }
+
+    private func sendHealthPing(task: URLSessionWebSocketTask, generation socketGeneration: Int) {
+        lock.lock()
+        guard let currentTask = self.task, currentTask === task,
+              generation == socketGeneration, connected,
+              pendingPingGeneration == nil else { lock.unlock(); return }
+        pendingPingGeneration = socketGeneration
+        lock.unlock()
+
+        DispatchQueue.main.async { [weak self, weak task] in
+            guard let self, let task else { return }
+            self.pongTimer?.invalidate()
+            self.pongTimer = Timer.scheduledTimer(withTimeInterval: self.pongTimeout, repeats: false) {
+                [weak self, weak task] _ in
+                guard let self, let task else { return }
+                self.lock.lock()
+                let isStillPending = self.task === task && self.generation == socketGeneration
+                    && self.pendingPingGeneration == socketGeneration && self.connected
+                    && !self.isReconnecting && !self.stopped
+                self.lock.unlock()
+                guard isStillPending else { return }
+                self.failConnection(task: task, generation: socketGeneration,
+                                    diagnostic: "pong timed out after \(self.pongTimeout)s")
+            }
+        }
+
+        task.sendPing { [weak self, weak task] error in
+            guard let self, let task else { return }
+            if let error {
+                self.failConnection(task: task, generation: socketGeneration,
+                                    diagnostic: "ping failed: \(error)")
+                return
+            }
+            self.lock.lock()
+            guard let currentTask = self.task, currentTask === task,
+                  self.generation == socketGeneration else {
+                self.lock.unlock(); return
+            }
+            self.pendingPingGeneration = nil
+            self.lock.unlock()
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.lock.lock()
+                let isSameSocket = self.task === task && self.generation == socketGeneration
+                self.lock.unlock()
+                guard isSameSocket else { return }
+                self.pongTimer?.invalidate()
+                self.pongTimer = nil
+            }
+        }
+    }
+
+    private func isCurrent(task candidate: URLSessionWebSocketTask, generation candidateGeneration: Int) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard let currentTask = task else { return false }
+        return !stopped && !isReconnecting
+            && currentTask === candidate && generation == candidateGeneration
+    }
+
+    private func invalidateReadyTimer(task: URLSessionWebSocketTask, generation socketGeneration: Int) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.lock.lock()
+            let isSameSocket = self.task === task && self.generation == socketGeneration
+            self.lock.unlock()
+            guard isSameSocket else { return }
+            self.readyTimer?.invalidate()
+            self.readyTimer = nil
+        }
+    }
+
+    private func invalidateConnectionTimers() {
+        DispatchQueue.main.async { [weak self] in
+            self?.readyTimer?.invalidate(); self?.readyTimer = nil
+            self?.pingTimer?.invalidate(); self?.pingTimer = nil
+            self?.pongTimer?.invalidate(); self?.pongTimer = nil
+        }
+    }
+
+    private func logTransportFailure(_ diagnostic: String, generation socketGeneration: Int) {
+        jlog("Jarvis realtime [\(speaker.rawValue)] socket #\(socketGeneration) \(diagnostic) "
+             + "(network: \(networkStatus()))")
+    }
+
+    private func emitState(_ state: RealtimeConnectionState) {
+        onConnectionStateChange?(state)
     }
 
     /// (Re)start the proactive silence check from its base interval — called from `connect()` (the first

@@ -47,6 +47,13 @@ public struct Config: Sendable {
     /// new session on reconnect so a mid-sentence drop isn't lost. Capped so a long outage can't grow
     /// memory without bound (the oldest audio is evicted past the cap).
     public var maxBufferedAudioSeconds: TimeInterval
+    /// Maximum time for a new Realtime socket to receive the server's session-ready event. Audio is
+    /// buffered during this window; a silent handshake/configuration hang is then reconnected.
+    public var realtimeReadyTimeoutSeconds: TimeInterval
+    /// Interval between WebSocket ping/pong health probes while a transcription session is ready.
+    public var realtimePingIntervalSeconds: TimeInterval
+    /// Maximum time to receive a pong before declaring the apparently-open socket unhealthy.
+    public var realtimePongTimeoutSeconds: TimeInterval
 
     public init(
         silenceTimeoutSeconds: TimeInterval = 120,
@@ -59,7 +66,10 @@ public struct Config: Sendable {
         vadSilenceDurationMs: Int = 1000,
         audioNoiseReduction: NoiseReductionMode = .auto,
         turnDebounceSeconds: TimeInterval = 0.4,
-        maxBufferedAudioSeconds: TimeInterval = 60
+        maxBufferedAudioSeconds: TimeInterval = 60,
+        realtimeReadyTimeoutSeconds: TimeInterval = 10,
+        realtimePingIntervalSeconds: TimeInterval = 20,
+        realtimePongTimeoutSeconds: TimeInterval = 10
     ) {
         self.silenceTimeoutSeconds = silenceTimeoutSeconds
         self.silenceMaxIntervalSeconds = silenceMaxIntervalSeconds
@@ -72,6 +82,9 @@ public struct Config: Sendable {
         self.audioNoiseReduction = audioNoiseReduction
         self.turnDebounceSeconds = turnDebounceSeconds
         self.maxBufferedAudioSeconds = maxBufferedAudioSeconds
+        self.realtimeReadyTimeoutSeconds = realtimeReadyTimeoutSeconds
+        self.realtimePingIntervalSeconds = realtimePingIntervalSeconds
+        self.realtimePongTimeoutSeconds = realtimePongTimeoutSeconds
     }
 
     // Overlay appearance: defaults + allowed ranges. The persisted values live in UserDefaults via
