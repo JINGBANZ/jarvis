@@ -3,6 +3,8 @@ import Foundation
 @testable import JarvisCore
 
 /// A brain that returns a canned report and remembers what it was asked.
+/// `@unchecked Sendable`: `received` is written by `respond` and only read by the test after the
+/// `await` returns — the sequential test flow means no concurrent access can occur.
 private final class CannedBrain: BrainClient, @unchecked Sendable {
     let text: String?
     var received: [ChatMessage] = []
