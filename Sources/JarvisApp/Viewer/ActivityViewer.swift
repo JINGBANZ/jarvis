@@ -16,10 +16,16 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
     /// explicitly `@MainActor` because it reads AppDelegate's main-actor state (secrets, preferences).
     var makeEvaluator: (@MainActor () -> SessionEvaluator?)?
 
+    /// Whether a coaching session is currently running (wired by AppDelegate). Read at click time —
+    /// evaluation is for *finished* conversations, so the live session is off-limits until Stop:
+    /// its traffic file is still being appended to, and a mid-session audit would judge half a story.
+    var isCoachingRunning: (@MainActor () -> Bool)?
+
     private var webView: WKWebView?
     private var picker: NSPopUpButton?
     private var evaluateButton: NSButton?
     private var reportWindow: NSWindow?   // keeps the evaluation report window alive
+    private var isEvaluating = false      // an audit is in flight; keep the button disabled meanwhile
     private var sessions: [SessionStore.Session] = []
 
     private var loaded = false             // page navigation finished?
@@ -70,7 +76,7 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
 
         let evaluate = NSButton(title: "Evaluate", target: self, action: #selector(evaluateTapped))
         evaluate.bezelStyle = .rounded
-        evaluate.toolTip = "Send this session's recorded LLM traffic to the brain model for a context-engineering audit"
+        evaluate.toolTip = "Send this session's recorded LLM traffic to the brain model for a context-engineering audit (stopped sessions only)"
         evaluate.frame = NSRect(x: content.bounds.width - 232, y: 8, width: 90, height: 28)
         evaluate.autoresizingMask = [.minXMargin]
         header.addSubview(evaluate)
@@ -130,12 +136,33 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         if let idx = sessions.firstIndex(where: { $0.isCurrent }) {
             picker?.selectItem(at: idx)
         }
+        refreshEvaluateButtonState()
     }
 
     @objc private func sessionChanged() {
         guard let idx = picker?.indexOfSelectedItem, sessions.indices.contains(idx) else { return }
         let s = sessions[idx]
         if s.isCurrent { loadCurrent() } else { loadPast(s) }
+        refreshEvaluateButtonState()
+    }
+
+    /// Coaching started or stopped (AppDelegate calls this from Start/Stop): the live session just
+    /// became off-limits for evaluation, or the now-stopped one became evaluable.
+    func coachingStateDidChange() {
+        refreshEvaluateButtonState()
+    }
+
+    /// Evaluate is enabled only for a *finished* conversation: any past session, or the current one
+    /// once coaching is stopped. A live session's traffic file is still being appended to, so an
+    /// audit of it would judge half a story.
+    private func refreshEvaluateButtonState() {
+        guard let button = evaluateButton else { return }
+        if isEvaluating { button.isEnabled = false; return }
+        guard let idx = picker?.indexOfSelectedItem, sessions.indices.contains(idx) else {
+            button.isEnabled = false
+            return
+        }
+        button.isEnabled = !(sessions[idx].isCurrent && (isCoachingRunning?() ?? false))
     }
 
     // MARK: - Loading
@@ -201,26 +228,35 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
     // MARK: - Session evaluation
 
     /// One click: send the selected session's recorded brain traffic to the evaluation model and
-    /// show (and persist) the resulting audit report. Works for the live session and past ones —
-    /// each session dir carries its own `brain-traffic.jsonl`.
+    /// show (and persist) the resulting audit report. Only *stopped* conversations qualify: any past
+    /// session, or the current one once coaching is stopped. The button is already disabled for the
+    /// live session (`refreshEvaluateButtonState`); the guard here is the race-proof backstop for a
+    /// click that lands exactly as a Start flips the state.
     @objc private func evaluateTapped() {
         guard let idx = picker?.indexOfSelectedItem, sessions.indices.contains(idx) else { return }
         let session = sessions[idx]
+        if session.isCurrent, isCoachingRunning?() == true {
+            info("Session still running",
+                 "Evaluation works on a finished conversation. Stop Jarvis first, then evaluate this session.")
+            return
+        }
         guard SessionEvaluator.hasTraffic(in: session.url) else {
             info("Nothing to evaluate",
-                 "This session has no recorded LLM traffic yet. Traffic is captured from the first coaching turn onward.")
+                 "This session has no recorded LLM traffic. Traffic is captured from the first coaching turn onward.")
             return
         }
         guard let evaluator = makeEvaluator?() else {
             info("No API key", "Paste your API key in Settings first — the evaluation runs on the same key.")
             return
         }
-        evaluateButton?.isEnabled = false
+        isEvaluating = true
         evaluateButton?.title = "Evaluating…"
+        refreshEvaluateButtonState()
         Task { [weak self] in
             defer {
+                self?.isEvaluating = false
                 self?.evaluateButton?.title = "Evaluate"
-                self?.evaluateButton?.isEnabled = true
+                self?.refreshEvaluateButtonState()
             }
             do {
                 let report = try await evaluator.evaluate(sessionDir: session.url)

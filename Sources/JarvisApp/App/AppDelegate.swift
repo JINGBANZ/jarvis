@@ -66,6 +66,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                           promptCacheKey: "jarvis-eval-v1")
             return SessionEvaluator(brain: brain)
         }
+        // Evaluation is for finished conversations only: the viewer disables its Evaluate button for
+        // the live session while coaching runs (start()/stop() ping it via coachingStateDidChange).
+        activityViewer.isCoachingRunning = { [weak self] in self?.transcriber != nil }
 
         // Ask for Microphone + Screen Recording up front, not lazily mid-session.
         Permissions.primeAll()
@@ -244,6 +247,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return false
         }
         jlog("Jarvis: coaching started (one-clock capture + AEC).")
+        activityViewer.coachingStateDidChange()   // the live session is no longer evaluable
         return true
     }
 
@@ -262,6 +266,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         transcriber = nil
         themTranscriber = nil
         if wasRunning { jlog("Jarvis: stopped.") }
+        activityViewer?.coachingStateDidChange()   // the just-stopped session became evaluable
     }
 
 

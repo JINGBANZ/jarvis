@@ -36,9 +36,10 @@ Run the **human smoke run** — build, run, and validate live:
    [decision](./decisions.md)): with a LeetCode window frontmost, a planted bug, and effort **Low**,
    compare bug-found rate / input tokens / latency across capture scopes (full display vs. active
    window vs. active window + OCR, 5 runs each) to confirm Low+clean-input replaces High.
-6. **One-click session evaluation** (see the 2026-07-15 [decision](./decisions.md)): after a run,
-   Settings → Activity → **Evaluate**; expect `brain-traffic.jsonl` in the session dir, the audit
-   report window, and `eval-report.md` saved beside the traffic it audits.
+6. **One-click session evaluation** (see the 2026-07-15 [decision](./decisions.md)): while coaching
+   runs, Settings → Activity → **Evaluate** stays disabled for the live session; after Stop it
+   enables — click it and expect `brain-traffic.jsonl` in the session dir, the audit report window,
+   and `eval-report.md` saved beside the traffic it audits.
 
 ## Built
 
