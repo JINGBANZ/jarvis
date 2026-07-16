@@ -258,8 +258,8 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
   This keeps
   conversation natural: a follow-up question is never stranded behind a timer. The hard control is
   the menu-bar **Start/Stop** — coaching never runs until explicitly started, and stopping tears the
-  pipeline down entirely. A session interjection counter in the menu bar makes over-talking visible;
-  cost is accepted as tracking usage for now (a future improvement, not a v1 guardrail).
+  pipeline down entirely. Cost is accepted as tracking usage for now (a future improvement, not a
+  v1 guardrail).
 
 ## 6. Non-Goals (v1)
 

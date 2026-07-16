@@ -177,9 +177,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // and anchor the silence math to that run's last utterance instead of real quiet time.
         transcript = RollingTranscript()
         if freshSession {
-            beginNewSession()       // rotate to a fresh session dir + activity/debug log
-            menuBar.resetCounter()  // a user Start begins a fresh session
-            overlayBox.clear()      // …and a fresh response history for the new conversation
+            beginNewSession()  // rotate to a fresh session dir + activity/debug log
+            overlayBox.clear() // …and a fresh response history for the new conversation
         }
 
         // Both clients record their wire traffic into the session's `brain-traffic.jsonl` (enabled in
@@ -202,8 +201,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let driver = CoachDriver(config: config, transcript: transcript,
                                  brain: brain, summarizer: summarizer,
                                  screen: WindowScopedScreenCapture(preferences: screenPreferences),
-                                 overlay: overlaySink, clock: clock,
-                                 onSpoke: { [weak self] in Task { @MainActor in self?.menuBar.noteSpoke() } })
+                                 overlay: overlaySink, clock: clock)
 
         // CoachDriver is @unchecked Sendable; capture it (not @MainActor self) in the callbacks.
         // Route turns through TurnTaskBox so Stop can cancel an in-flight one. Concurrent triggers are
