@@ -112,6 +112,24 @@ private final class CannedBrain: BrainClient, @unchecked Sendable {
         #expect(perms?.int16Value == 0o600)
     }
 
+    /// `savedReport` is the "Show report" gate: nil until an evaluation persisted a report, then the
+    /// exact saved text — and an empty file (a failed/interrupted write) must not count as a report.
+    @Test func savedReportReturnsPersistedReportOnly() async throws {
+        let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
+        #expect(SessionEvaluator.savedReport(in: dir) == nil)
+
+        let traffic = BrainTrafficLog(); traffic.enable(directory: dir)
+        traffic.record(tag: "coach",
+                       request: Data(#"{"model":"gpt-5.5","input":[]}"#.utf8),
+                       response: Data(#"{"status":"completed","output":[]}"#.utf8),
+                       status: 200, latencyMs: 300)
+        let report = try await SessionEvaluator(brain: CannedBrain(text: "## Audit\nfine")).evaluate(sessionDir: dir)
+        #expect(SessionEvaluator.savedReport(in: dir) == report)
+
+        try Data().write(to: dir.appendingPathComponent(SessionEvaluator.reportFilename))
+        #expect(SessionEvaluator.savedReport(in: dir) == nil)
+    }
+
     @Test func evaluateThrowsWhenSessionHasNoTraffic() async throws {
         let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         #expect(!SessionEvaluator.hasTraffic(in: dir))
