@@ -14,14 +14,14 @@ protocol SettingsSection: AnyObject {
     func didResignActive()
     /// Called when the Settings window closes. Default: no-op.
     func windowWillClose()
-    /// Whether the window should be user-resizable (and shown larger) while this tab is selected.
-    /// Default: false — most panels are fixed-size.
-    var prefersResizableWindow: Bool { get }
+    /// Whether this section's view should stretch to fill the whole tab. Default: false — the
+    /// fixed-form panels keep their designed size, pinned to the top of the tab.
+    var fillsTab: Bool { get }
 }
 
 extension SettingsSection {
     func didBecomeActive() {}
     func didResignActive() {}
     func windowWillClose() {}
-    var prefersResizableWindow: Bool { false }
+    var fillsTab: Bool { false }
 }
