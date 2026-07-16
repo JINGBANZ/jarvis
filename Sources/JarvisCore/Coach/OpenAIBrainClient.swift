@@ -211,7 +211,10 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
         }
         struct IncompleteDetails: Decodable { let reason: String? }
         struct Usage: Decodable {
+            struct InputDetails: Decodable { let cached_tokens: Int? }
             struct OutputDetails: Decodable { let reasoning_tokens: Int? }
+            let input_tokens: Int?
+            let input_tokens_details: InputDetails?
             let output_tokens: Int?
             let output_tokens_details: OutputDetails?
         }
@@ -225,11 +228,15 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
         let decoded = try JSONDecoder().decode(Response.self, from: data)
         // Log per-turn token usage so the per-effort `max_output_tokens` budgets can be tuned DOWN
         // from real consumption (OpenAI's own advice). `reasoning` is the share spent thinking — the
-        // part that silently ate the whole cap at high effort.
+        // part that silently ate the whole cap at high effort. `cached` is the prompt-cache hit for
+        // this call: history is built append-only precisely so this stays high, so a run of zeros
+        // here is the signal to investigate (per the session-audit finding), not a per-call anomaly.
         if let usage = decoded.usage {
+            let input = usage.input_tokens ?? 0
+            let cached = usage.input_tokens_details?.cached_tokens ?? 0
             let reasoning = usage.output_tokens_details?.reasoning_tokens ?? 0
             let truncated = decoded.status == "incomplete" ? " [incomplete]" : ""
-            jlog("Jarvis coach: tokens — reasoning \(reasoning), output \(usage.output_tokens ?? 0), cap \(maxOutputTokens)\(truncated)")
+            jlog("Jarvis coach: tokens — input \(input) (\(cached) cached), reasoning \(reasoning), output \(usage.output_tokens ?? 0), cap \(maxOutputTokens)\(truncated)")
         }
         var invocations: [ToolInvocation] = []
         var raws: [RawToolCall] = []
