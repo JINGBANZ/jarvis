@@ -76,8 +76,7 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
 
         let evaluate = NSButton(title: "Evaluate", target: self, action: #selector(evaluateTapped))
         evaluate.bezelStyle = .rounded
-        evaluate.toolTip = "Send this session's recorded LLM traffic to the brain model for a context-engineering audit (stopped sessions only)"
-        evaluate.frame = NSRect(x: content.bounds.width - 232, y: 8, width: 90, height: 28)
+        evaluate.frame = NSRect(x: content.bounds.width - 246, y: 8, width: 104, height: 28)
         evaluate.autoresizingMask = [.minXMargin]
         header.addSubview(evaluate)
         self.evaluateButton = evaluate
@@ -154,18 +153,33 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
 
     /// Evaluate is enabled only for a *finished* conversation: any past session, or the current one
     /// once coaching is stopped. A live session's traffic file is still being appended to, so an
-    /// audit of it would judge half a story. Owns the title too: `isEvaluating` survives a Settings
-    /// close/reopen (the viewer outlives its content view), so a rebuilt button mid-audit correctly
-    /// shows "Evaluating…" disabled instead of inviting a duplicate audit.
+    /// audit of it would judge half a story. A session that already has a persisted report flips the
+    /// button to "Show report" instead — reopening the saved audit is free and always safe, so it
+    /// stays enabled regardless of coaching state. Owns the title too: `isEvaluating` survives a
+    /// Settings close/reopen (the viewer outlives its content view), so a rebuilt button mid-audit
+    /// correctly shows "Evaluating…" disabled instead of inviting a duplicate audit.
     private func refreshEvaluateButtonState() {
         guard let button = evaluateButton else { return }
-        button.title = isEvaluating ? "Evaluating…" : "Evaluate"
-        if isEvaluating { button.isEnabled = false; return }
-        guard let idx = picker?.indexOfSelectedItem, sessions.indices.contains(idx) else {
+        if isEvaluating {
+            button.title = "Evaluating…"
             button.isEnabled = false
             return
         }
-        button.isEnabled = !(sessions[idx].isCurrent && (isCoachingRunning?() ?? false))
+        guard let idx = picker?.indexOfSelectedItem, sessions.indices.contains(idx) else {
+            button.title = "Evaluate"
+            button.isEnabled = false
+            return
+        }
+        let session = sessions[idx]
+        if SessionEvaluator.savedReport(in: session.url) != nil {
+            button.title = "Show report"
+            button.toolTip = "Open the evaluation report already generated for this session"
+            button.isEnabled = true
+        } else {
+            button.title = "Evaluate"
+            button.toolTip = "Send this session's recorded LLM traffic to the brain model for a context-engineering audit (stopped sessions only)"
+            button.isEnabled = !(session.isCurrent && (isCoachingRunning?() ?? false))
+        }
     }
 
     // MARK: - Loading
@@ -231,13 +245,18 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
     // MARK: - Session evaluation
 
     /// One click: send the selected session's recorded brain traffic to the evaluation model and
-    /// show (and persist) the resulting audit report. Only *stopped* conversations qualify: any past
-    /// session, or the current one once coaching is stopped. The button is already disabled for the
-    /// live session (`refreshEvaluateButtonState`); the guard here is the race-proof backstop for a
-    /// click that lands exactly as a Start flips the state.
+    /// show (and persist) the resulting audit report. A session that was already evaluated just
+    /// reopens its saved report — no re-billing. Only *stopped* conversations qualify for a fresh
+    /// audit: any past session, or the current one once coaching is stopped. The button is already
+    /// disabled for the live session (`refreshEvaluateButtonState`); the guard here is the
+    /// race-proof backstop for a click that lands exactly as a Start flips the state.
     @objc private func evaluateTapped() {
         guard let idx = picker?.indexOfSelectedItem, sessions.indices.contains(idx) else { return }
         let session = sessions[idx]
+        if let report = SessionEvaluator.savedReport(in: session.url) {
+            showReport(report, for: session)
+            return
+        }
         if session.isCurrent, isCoachingRunning?() == true {
             info("Session still running",
                  "Evaluation works on a finished conversation. Stop Jarvis first, then evaluate this session.")
