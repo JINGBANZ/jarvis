@@ -23,22 +23,15 @@ public struct ScreenCaptureCLI: ScreenCapturing {
     }
 
     public func capture() -> ScreenSnapshot? {
-        let args = Self.arguments(scope: preferences.scope, displayIndex: preferences.displayIndex)
-        if let jpeg = Self.runScreencapture(arguments: args) {
+        // Which display (if any) needs explicit targeting is the preferences' decision; a stale
+        // -D pointing at a disconnected display fails, and we fall through to the plain capture.
+        if let display = preferences.explicitDisplay,
+           let jpeg = Self.runScreencapture(arguments: ["-x", "-t", "jpg", "-D", "\(display)"]) {
             return ScreenSnapshot(imageBase64: jpeg.base64EncodedString())
         }
-        // The stale-index fallback: a -D pointing at a disconnected display fails; reshoot plain.
-        guard args != Self.plainArguments,
-              let jpeg = Self.runScreencapture(arguments: Self.plainArguments) else { return nil }
+        // A plain capture IS the main display — no -D needed.
+        guard let jpeg = Self.runScreencapture(arguments: ["-x", "-t", "jpg"]) else { return nil }
         return ScreenSnapshot(imageBase64: jpeg.base64EncodedString())
-    }
-
-    /// A plain capture IS the main display, so index 1 (and every active-window fallback) adds no `-D`.
-    private static let plainArguments = ["-x", "-t", "jpg"]
-
-    /// The `screencapture` arguments the scope + display selection produce — pure so tests reach it.
-    static func arguments(scope: ScreenCaptureScope, displayIndex: Int) -> [String] {
-        scope == .entireDisplay && displayIndex > 1 ? plainArguments + ["-D", "\(displayIndex)"] : plainArguments
     }
 
     /// Runs `screencapture` with `arguments` + a tmpfile path, returning the captured image bytes.

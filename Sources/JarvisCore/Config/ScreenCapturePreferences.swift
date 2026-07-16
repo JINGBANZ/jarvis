@@ -35,4 +35,12 @@ public final class ScreenCapturePreferences: @unchecked Sendable {
         get { defaults.string(forKey: Key.scope).flatMap(ScreenCaptureScope.init(rawValue:)) ?? .activeWindow }
         set { defaults.set(newValue.rawValue, forKey: Key.scope) }
     }
+
+    /// The display a capture must explicitly target (`screencapture -D`), or nil when a plain
+    /// capture — which shoots the main display — is right: active-window scope, where fallbacks
+    /// must not be steered by an index left over from an old entire-display selection, and
+    /// entire-display scope on the main display itself.
+    public var explicitDisplay: Int? {
+        scope == .entireDisplay && displayIndex > 1 ? displayIndex : nil
+    }
 }
