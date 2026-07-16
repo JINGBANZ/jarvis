@@ -183,14 +183,17 @@ rather than a per-turn screenshot.
 
 - **Brain — `gpt-5.5` via the OpenAI Responses API** (`POST /v1/responses`), not Chat Completions:
   for the gpt-5 family, function/tool calling is the recommended (and least restricted) path on
-  Responses. The tool loop is threaded with `function_call` / `function_call_output` items.
+  Responses. The tool loop is threaded with `function_call` / `function_call_output` items, with the
+  model's `reasoning` items replayed verbatim ahead of the call — OpenAI's requirement for the model
+  to continue its chain of thought over a tool result instead of re-reasoning from scratch.
 - **Per-session memory — client-managed (`CoachHistory`).** The coach needs to remember its *own*
   prior replies (the transcript only holds user speech), so `CoachDriver` keeps the session memory
   itself and rebuilds every request as `[system] + memory + new delta`. Owning the memory is what
   keeps it small and cheap: it grows **append-only** (a byte-identical prefix, so OpenAI's prompt
-  cache keeps hitting at ~90% discount); `stay_silent` turns leave no trace; screenshots live only inside
-  the turn that produced them — at commit, the pixels become a one-line stub and the capture's OCR
-  text (in the tool result) is what persists; and past a token threshold (see
+  cache keeps hitting at ~90% discount); `stay_silent` turns leave no trace; screenshots and reasoning
+  items live only inside the turn that produced them — at commit, the pixels become a one-line stub
+  and the capture's OCR text (in the tool result) is what persists, and reasoning items are dropped;
+  and past a token threshold (see
   `Config.historyCompactionTokenThreshold`) the oldest span is **compacted** into a short structured
   summary written by a cheaper model (`gpt-5.4-mini`), so the problem statement never falls out of
   context. Requests are sent `store:true` so they stay inspectable in the OpenAI dashboard for

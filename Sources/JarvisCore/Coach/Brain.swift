@@ -25,20 +25,27 @@ public struct ChatMessage: Sendable {
     public let toolCallId: String?
     /// For assistant messages that made tool calls: the calls to replay.
     public let toolCalls: [RawToolCall]?
+    /// Provider items replayed VERBATIM, one JSON object per string (e.g. Responses reasoning
+    /// items). The client re-emits them untouched: OpenAI requires the reasoning items that
+    /// preceded a function call to ride along with its output, byte-for-byte and in order.
+    public let rawItemsJSON: [String]?
 
     public init(role: Role, text: String? = nil, imageBase64JPEG: String? = nil,
-                toolCallId: String? = nil, toolCalls: [RawToolCall]? = nil) {
+                toolCallId: String? = nil, toolCalls: [RawToolCall]? = nil,
+                rawItemsJSON: [String]? = nil) {
         self.role = role
         self.text = text
         self.imageBase64JPEG = imageBase64JPEG
         self.toolCallId = toolCallId
         self.toolCalls = toolCalls
+        self.rawItemsJSON = rawItemsJSON
     }
 
     public static func system(_ t: String) -> ChatMessage { .init(role: .system, text: t) }
     public static func user(_ t: String) -> ChatMessage { .init(role: .user, text: t) }
     public static func userImage(_ base64JPEG: String) -> ChatMessage { .init(role: .user, imageBase64JPEG: base64JPEG) }
     public static func assistantToolCalls(_ calls: [RawToolCall]) -> ChatMessage { .init(role: .assistant, toolCalls: calls) }
+    public static func rawItems(_ itemsJSON: [String]) -> ChatMessage { .init(role: .assistant, rawItemsJSON: itemsJSON) }
 }
 
 /// A tool definition exposed to the model.
@@ -72,6 +79,12 @@ public enum ToolInvocation: Sendable, Equatable {
 public struct BrainResponse: Sendable {
     public let toolCalls: [ToolInvocation]
     public let rawToolCalls: [RawToolCall]
+    /// The response's reasoning items, verbatim (one JSON object per string, in output order).
+    /// OpenAI's function-calling guidance: when a tool call is fulfilled client-side, the reasoning
+    /// items that preceded it MUST be replayed with the tool output, or the model discards its
+    /// chain-of-thought and re-reasons from scratch (worse answers, more reasoning tokens). Only the
+    /// within-turn tool loop needs them; they are never committed to session memory.
+    public let reasoningItemsJSON: [String]
     /// Non-nil when the model run did NOT finish cleanly (Responses `status:"incomplete"`), carrying
     /// the reason (e.g. `"max_output_tokens"`). An empty `toolCalls` with a non-nil reason is
     /// *truncation*, not a deliberate decision to stay silent — the coach loop distinguishes them.
@@ -80,11 +93,13 @@ public struct BrainResponse: Sendable {
     /// required there); it exists for tool-less calls like the history summarizer.
     public let outputText: String?
     public init(toolCalls: [ToolInvocation], rawToolCalls: [RawToolCall] = [],
-                incompleteReason: String? = nil, outputText: String? = nil) {
+                incompleteReason: String? = nil, outputText: String? = nil,
+                reasoningItemsJSON: [String] = []) {
         self.toolCalls = toolCalls
         self.rawToolCalls = rawToolCalls
         self.incompleteReason = incompleteReason
         self.outputText = outputText
+        self.reasoningItemsJSON = reasoningItemsJSON
     }
 }
 

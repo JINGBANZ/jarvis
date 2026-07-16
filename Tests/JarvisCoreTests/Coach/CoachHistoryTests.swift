@@ -22,6 +22,15 @@ import Testing
         #expect(snap.compactMap(\.text).first == "a")   // non-image messages untouched
     }
 
+    /// Raw passthrough items (reasoning) live only inside their turn's tool loop — commit drops
+    /// them whole; later turns don't need them and a model switch would invalidate them anyway.
+    @Test func rawPassthroughItemsAreDroppedAtCommit() {
+        let h = CoachHistory()
+        h.commit([.user("a"), .rawItems([#"{"type":"reasoning","id":"rs_1"}"#]), .user("b")])
+        #expect(h.snapshot().compactMap(\.text) == ["a", "b"])
+        #expect(!h.snapshot().contains { $0.rawItemsJSON != nil })
+    }
+
     /// The compaction prefix always leaves the newest message verbatim and hands out at least one —
     /// a single oversized message must still be compactable once a second one exists.
     @Test func compactionPrefixBoundsRespectTheTail() {

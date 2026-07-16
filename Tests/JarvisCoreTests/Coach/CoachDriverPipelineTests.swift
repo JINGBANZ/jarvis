@@ -446,6 +446,33 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(brain.calls.last!.contains { ($0.text ?? "").contains("important words") })   // re-sent
     }
 
+    /// Reasoning passthrough: the reasoning items preceding a capture_screen call ride into the tool
+    /// loop's next request — before the replayed function_call, as the API requires — and are
+    /// dropped at commit, so the next turn's request carries none.
+    @Test func reasoningItemsRideTheToolLoopButNotMemory() async {
+        let brain = ScriptedBrain(script: [
+            .init(toolCalls: [.captureScreen(callId: "c1")],
+                  rawToolCalls: [RawToolCall(id: "c1", name: "capture_screen", argumentsJSON: "{}")],
+                  reasoningItemsJSON: [#"{"type":"reasoning","id":"rs_1"}"#]),
+            .init(toolCalls: [.speak(callId: "s1", lines: ["tip"])],
+                  rawToolCalls: [RawToolCall(id: "s1", name: "speak", argumentsJSON: "{}")]),
+            .init(toolCalls: []),
+        ])
+        let (driver, transcript) = makeDriver(brain: brain, clock: ManualClock(now: 0))
+        transcript.append(.init(speaker: .me, text: "look at this", at: 0))
+        await driver.handleTrigger(.turnEnd)
+        transcript.append(.init(speaker: .me, text: "another thought", at: 5))
+        await driver.handleTrigger(.turnEnd)
+
+        let second = brain.calls[1]
+        let reasoningIndex = second.firstIndex { $0.rawItemsJSON != nil }
+        let callIndex = second.firstIndex { $0.toolCalls != nil }
+        #expect(reasoningIndex != nil && callIndex != nil)
+        if let r = reasoningIndex, let c = callIndex { #expect(r < c) }
+        #expect(second.first { $0.rawItemsJSON != nil }?.rawItemsJSON == [#"{"type":"reasoning","id":"rs_1"}"#])
+        #expect(!brain.calls[2].contains { $0.rawItemsJSON != nil })   // dropped at commit
+    }
+
     /// Observation masking: a screenshot only lives within the turn that took it — once the turn
     /// commits, later requests carry a text stub instead of pixels.
     @Test func screenshotsStubbedAfterTheirTurnCommits() async {

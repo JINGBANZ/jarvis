@@ -49,6 +49,46 @@ private func speakResponseBody(arguments: String) -> Data {
         #expect(resp.rawToolCalls == [RawToolCall(id: "call_9", name: "capture_screen", argumentsJSON: "{}")])
     }
 
+    /// A reasoning model emits `reasoning` items before its function call. They surface verbatim so
+    /// the tool loop can replay them with the tool output — OpenAI's requirement for continuing the
+    /// chain of thought (the id and any encrypted payload must survive untouched).
+    @Test func decodeSurfacesReasoningItemsVerbatim() async throws {
+        let json = """
+        {"output":[
+          {"type":"reasoning","id":"rs_1","summary":[],"encrypted_content":"opaque-blob"},
+          {"type":"function_call","id":"fc_9","call_id":"call_9","name":"capture_screen","arguments":"{}"}
+        ]}
+        """
+        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+                                       send: { _ in (Data(json.utf8), http(200)) })
+        let resp = try await client.respond(messages: [.user("hi")], tools: coachTools)
+        #expect(resp.toolCalls == [.captureScreen(callId: "call_9")])
+        #expect(resp.reasoningItemsJSON.count == 1)
+        let item = resp.reasoningItemsJSON.first ?? ""
+        #expect(item.contains(#""id":"rs_1""#))
+        #expect(item.contains(#""encrypted_content":"opaque-blob""#))
+    }
+
+    /// `.rawItems` passthrough is re-emitted into `input` exactly as recorded, positioned before the
+    /// function_call it belongs to — the order the API requires.
+    @Test func encodesRawItemsVerbatimBeforeFunctionCall() async throws {
+        let box = CapturedBody()
+        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+                                       send: { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
+        let convo: [ChatMessage] = [
+            .user("transcript"),
+            .rawItems([#"{"type":"reasoning","id":"rs_1","summary":[]}"#]),
+            .assistantToolCalls([RawToolCall(id: "call_1", name: "capture_screen", argumentsJSON: "{}")]),
+            .init(role: .tool, text: "screenshot captured", toolCallId: "call_1"),
+        ]
+        _ = try await client.respond(messages: convo, tools: coachTools)
+        let body = try JSONSerialization.jsonObject(with: box.get() ?? Data()) as? [String: Any]
+        let input = body?["input"] as? [[String: Any]] ?? []
+        let kinds = input.map { ($0["type"] as? String) ?? ($0["role"] as? String) ?? "?" }
+        #expect(kinds == ["user", "reasoning", "function_call", "function_call_output"])
+        #expect(input.count == 4 && input[1]["id"] as? String == "rs_1")
+    }
+
     @Test func decodesStaySilentToolCall() async throws {
         let json = """
         {"output":[

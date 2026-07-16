@@ -25,17 +25,23 @@ public final class CoachHistory: @unchecked Sendable {
     }
 
     /// Commit a finished turn's messages (the user delta, and any capture/speak calls with their
-    /// results). Callers must NOT pass `stay_silent` traces — silence needs no memory. Screenshots
-    /// never survive commit as pixels: each is replaced with a text stub (observation masking). The
-    /// capture's OCR text — what the model actually reads — rides in the tool-result message and stays
-    /// verbatim; the pixels are ~1–2k tokens re-billed on every later request, and the model can
-    /// always capture a fresh look. The rewrite costs one prompt-cache divergence at the tail of the
-    /// just-finished turn — far cheaper than re-billing the image on every request for the rest of
-    /// the session.
+    /// results). Callers must NOT pass `stay_silent` traces — silence needs no memory. Two kinds of
+    /// message never survive commit:
+    /// - **Screenshots** are replaced with a text stub (observation masking). The capture's OCR text
+    ///   — what the model actually reads — rides in the tool-result message and stays verbatim; the
+    ///   pixels are ~1–2k tokens re-billed on every later request, and the model can always capture
+    ///   a fresh look.
+    /// - **Raw passthrough items** (reasoning) are dropped whole: OpenAI only needs them WITHIN the
+    ///   turn's tool loop, ignores stale ones across turns, and a reasoning item can be invalidated
+    ///   outright by a model change — memory keeps only what later turns can use.
+    /// Both rewrites cost one prompt-cache divergence at the tail of the just-finished turn — far
+    /// cheaper than re-billing the content on every request for the rest of the session.
     public func commit(_ turn: [ChatMessage]) {
         guard !turn.isEmpty else { return }
         lock.lock(); defer { lock.unlock() }
-        messages.append(contentsOf: turn.map { $0.imageBase64JPEG != nil ? .user(Self.imageStub) : $0 })
+        messages.append(contentsOf: turn
+            .filter { $0.rawItemsJSON == nil }
+            .map { $0.imageBase64JPEG != nil ? .user(Self.imageStub) : $0 })
     }
 
     /// Rough size of the memory in tokens (chars/4) — used only to decide WHEN to compact, so

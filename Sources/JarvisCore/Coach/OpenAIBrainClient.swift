@@ -131,6 +131,16 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
                 }
 
             case .assistant:
+                // Verbatim passthrough items (reasoning) go back exactly as the model emitted them —
+                // OpenAI requires the reasoning items preceding a function call to accompany its
+                // output, unmodified and in order, or the model re-reasons from scratch.
+                if let raw = m.rawItemsJSON {
+                    for itemJSON in raw {
+                        if let item = (try? JSONSerialization.jsonObject(with: Data(itemJSON.utf8))) as? [String: Any] {
+                            input.append(item)
+                        }
+                    }
+                }
                 // Replay the model's function calls as `function_call` input items (the tool loop).
                 if let calls = m.toolCalls {
                     for c in calls {
@@ -275,6 +285,21 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
             : nil
         return BrainResponse(toolCalls: invocations, rawToolCalls: raws,
                              incompleteReason: incompleteReason,
-                             outputText: outputText.isEmpty ? nil : outputText)
+                             outputText: outputText.isEmpty ? nil : outputText,
+                             reasoningItemsJSON: Self.reasoningItems(in: data))
+    }
+
+    /// The response's reasoning items, re-serialized whole so the tool loop can replay them
+    /// untouched (ids and any encrypted payload preserved). Extracted from the raw bytes — the typed
+    /// `Response` above deliberately doesn't model every provider field, and replay must lose none.
+    private static func reasoningItems(in data: Data) -> [String] {
+        guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let output = root["output"] as? [[String: Any]] else { return [] }
+        return output
+            .filter { $0["type"] as? String == "reasoning" }
+            .compactMap { item in
+                guard let bytes = try? JSONSerialization.data(withJSONObject: item) else { return nil }
+                return String(data: bytes, encoding: .utf8)
+            }
     }
 }
