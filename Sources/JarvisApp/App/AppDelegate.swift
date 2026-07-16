@@ -163,13 +163,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             errorReporter.report(.noAPIKey)
             return false
         }
-        // With more than one display connected, confirm which screen to coach from before anything
-        // is torn down or rotated — a Cancel here must leave the app exactly as it was. Only for a
-        // user-initiated Start; an in-place restart (e.g. re-saving the API key) must not prompt.
-        if freshSession, !DisplayPicker.confirmSelection(preferences: screenPreferences) {
-            jlog("Jarvis: start cancelled at the display prompt.")
-            return false
-        }
         stop() // tear down any existing pipeline so we start cleanly
         // A fresh transcript for the fresh pipeline (even on an in-place restart, which rebuilds the
         // driver and transcribers too). Reusing the old one would re-send a dead run's lines as "new
