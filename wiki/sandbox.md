@@ -133,8 +133,7 @@ readable by this user account and by nothing else. See [build-and-run.md](./buil
 - **Manual Start/Stop** in the menu bar — the only hard gate. Coaching never runs until started, and
   Stop tears the pipeline down entirely.
 - **Visible "listening" indicator** — the user always knows when Jarvis is active (also a consent cue).
-- **Session interjection counter** in the menu bar (reset on each Start), so over-talking is visible
-  immediately. Cost is accepted as tracking usage for now (a future improvement, not a v1 guardrail).
+  Cost is accepted as tracking usage for now (a future improvement, not a v1 guardrail).
 
 ## Consent Note
 
