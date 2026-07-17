@@ -129,9 +129,11 @@ public final class RealtimeTranscriptionLedger: @unchecked Sendable {
     }
 
     /// A failed transcription still represents detected speech. Preserve streamed text when there
-    /// is any; otherwise emit an explicit marker so downstream coaching knows its context is partial.
+    /// is any; otherwise emit an explicit marker only for VAD-confirmed speech long enough to be
+    /// conversational. Short or untimed empty failures remain ordinary noise blips.
     public func recordFailed(itemID: String, speaker: Speaker) -> FinalizedItem? {
-        finalizeInterruptedItem(itemID: itemID, requireSpeechStopped: false, speaker: speaker)
+        finalizeInterruptedItem(itemID: itemID, requireSpeechStopped: false,
+                                suppressShortEmptyItem: true, speaker: speaker)
     }
 
     /// Resolves a speech-stopped item whose completed/failed event never arrived. The caller owns the

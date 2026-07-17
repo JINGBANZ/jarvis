@@ -37,6 +37,7 @@ import Testing
     @Test func failedItemWithoutUsableTextEmitsExplicitContextGap() throws {
         let ledger = RealtimeTranscriptionLedger()
         ledger.recordSpeechStarted(itemID: "item", audioStartMilliseconds: 250, timelineOrigin: 7)
+        ledger.recordSpeechStopped(itemID: "item", audioEndMilliseconds: 1_000)
         ledger.recordDelta(itemID: "item", delta: "...")
 
         let result = try #require(ledger.recordFailed(itemID: "item", speaker: .them))
@@ -44,6 +45,20 @@ import Testing
         #expect(result.spokenAt == 7.25)
         #expect(!result.recoveredFromDeltas)
         #expect(result.isContextGap)
+    }
+
+    @Test func failedShortOrUntimedEmptyVADBlipsStaySilent() {
+        let short = RealtimeTranscriptionLedger()
+        short.recordSpeechStarted(itemID: "short", audioStartMilliseconds: 1_000,
+                                  timelineOrigin: 0)
+        short.recordSpeechStopped(itemID: "short", audioEndMilliseconds: 1_200)
+        #expect(short.recordFailed(itemID: "short", speaker: .them) == nil)
+        #expect(!short.hasPendingItems)
+
+        let untimed = RealtimeTranscriptionLedger()
+        untimed.recordSpeechStopped(itemID: "untimed")
+        #expect(untimed.recordFailed(itemID: "untimed", speaker: .them) == nil)
+        #expect(!untimed.hasPendingItems)
     }
 
     @Test func stoppedWithoutTerminalEventSalvagesDeltasAtDeadline() throws {
