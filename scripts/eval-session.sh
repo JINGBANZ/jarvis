@@ -23,8 +23,10 @@ cd "$(dirname "$0")/.."
 # under the workspace-local .jarvis/ (where the app writes per-session logs).
 SESSION_DIR="${1:-}"
 if [[ -z "$SESSION_DIR" ]]; then
-  SESSION_DIR="$(find .jarvis -mindepth 1 -maxdepth 1 -type d 2>/dev/null \
-    | xargs -I{} stat -f '%m %N' {} 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)"
+  for d in .jarvis/*/; do   # portable newest-dir pick (GNU and BSD stat disagree on flags)
+    [[ -d "$d" ]] || continue
+    [[ -z "$SESSION_DIR" || "$d" -nt "$SESSION_DIR" ]] && SESSION_DIR="$d"
+  done
   if [[ -z "$SESSION_DIR" ]]; then
     echo "no session directory found under .jarvis/ — pass one explicitly" >&2
     exit 1
@@ -52,18 +54,19 @@ if [[ -z "$AGENT" ]]; then
 fi
 
 echo "▶ running $AGENT over the repo + session (this explores the code; give it a minute)…"
-# Write to a temp file and mv into place only on success, so a failed run (auth, network,
-# interrupt) never truncates a previous report; chmod before the move so the final file is
-# never observable at default umask. `--ephemeral` keeps Codex from persisting a rollout copy
-# of the session transcript outside the owner-only .jarvis/ dir.
+# Write to an owner-only temp file and mv into place only on success, so a failed run (auth,
+# network, interrupt) never truncates a previous report and the report bytes are 0600 from
+# birth. `--ephemeral` keeps Codex from persisting a rollout copy of the session transcript
+# outside the owner-only .jarvis/ dir.
 REPORT_TMP="$REPORT.tmp"
 trap 'rm -f "$REPORT_TMP"' EXIT
+rm -f "$REPORT_TMP"
+(umask 077; : > "$REPORT_TMP")
 case "$AGENT" in
   claude) claude -p "$PROMPT" > "$REPORT_TMP" ;;
   codex)  codex exec --ephemeral "$PROMPT" > "$REPORT_TMP" ;;
   *)      echo "unknown EVAL_AGENT: $AGENT (expected 'claude' or 'codex')" >&2; exit 2 ;;
 esac
-chmod 600 "$REPORT_TMP"
 mv "$REPORT_TMP" "$REPORT"
 
 # Render the browsable page (with its Copy-as-Markdown button) from what the agent wrote.
