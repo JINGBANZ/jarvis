@@ -391,9 +391,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let wasRunning = transcriber != nil || themTranscriber != nil
         requestManualHint = nil              // hotkey beeps again once there's no live session
         let cancelled = turns?.cancelAll() ?? []; turns = nil   // cancel any in-flight coaching turn
-        aggregateCapture?.stop(); aggregateCapture = nil   // stop the IOProc, tear down tap+aggregate
+        // Mark both delivery endpoints stopped before draining the IOProc. Aggregate capture hands
+        // chunks off asynchronously, so callbacks already queued during teardown must see the
+        // transcribers' stopped guards and become no-ops.
         transcriber?.stop()
         themTranscriber?.stop()
+        aggregateCapture?.stop(); aggregateCapture = nil   // stop the IOProc, tear down tap+aggregate
         transcriber = nil
         themTranscriber = nil
         micConnectionState = .stopped
