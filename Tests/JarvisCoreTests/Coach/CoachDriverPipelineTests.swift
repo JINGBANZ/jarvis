@@ -446,9 +446,9 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(brain.calls.last!.contains { ($0.text ?? "").contains("important words") })   // re-sent
     }
 
-    /// Observation masking: once a NEWER screenshot exists, older ones in memory become text stubs —
-    /// the next request carries exactly one image plus the stub.
-    @Test func olderScreenshotStubbedAfterNewerCapture() async {
+    /// Observation masking: a screenshot only lives within the turn that took it — once the turn
+    /// commits, later requests carry a text stub instead of pixels.
+    @Test func screenshotsStubbedAfterTheirTurnCommits() async {
         let clock = ManualClock(now: 0)
         // Every turn: capture then speak. ScriptedBrain repeats the last entry, so we script one
         // capture+speak pair and run it twice, then inspect the request of a third turn.
@@ -472,8 +472,8 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         await driver.handleTrigger(.turnEnd)
 
         let last = brain.calls.last!
-        #expect(last.filter { $0.imageBase64JPEG != nil }.count == 1)                    // newest only
-        #expect(last.contains { ($0.text ?? "").contains("no longer available") })       // stub for the old one
+        #expect(!last.contains { $0.imageBase64JPEG != nil })                            // no pixels survive
+        #expect(last.filter { ($0.text ?? "").contains("no longer available") }.count == 2)   // a stub each
     }
 
     // MARK: - Compaction

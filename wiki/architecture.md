@@ -188,8 +188,9 @@ rather than a per-turn screenshot.
   prior replies (the transcript only holds user speech), so `CoachDriver` keeps the session memory
   itself and rebuilds every request as `[system] + memory + new delta`. Owning the memory is what
   keeps it small and cheap: it grows **append-only** (a byte-identical prefix, so OpenAI's prompt
-  cache keeps hitting at ~90% discount); `stay_silent` turns leave no trace; only the newest
-  screenshot stays as pixels (older ones become one-line stubs); and past a token threshold (see
+  cache keeps hitting at ~90% discount); `stay_silent` turns leave no trace; screenshots live only inside
+  the turn that produced them — at commit, the pixels become a one-line stub and the capture's OCR
+  text (in the tool result) is what persists; and past a token threshold (see
   `Config.historyCompactionTokenThreshold`) the oldest span is **compacted** into a short structured
   summary written by a cheaper model (`gpt-5.4-mini`), so the problem statement never falls out of
   context. Requests are sent `store:true` so they stay inspectable in the OpenAI dashboard for

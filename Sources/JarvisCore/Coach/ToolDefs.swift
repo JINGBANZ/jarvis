@@ -11,7 +11,7 @@ public let captureScreenTool = ToolDef(
 
 public let speakTool = ToolDef(
     name: "speak",
-    description: "Say a short coaching tip to the user via the on-screen overlay. `lines` is the tip split into short standalone lines, shown one at a time — at most 3, one idea per line, each line short (aim under ~12 words); keep any code snippet on a single line. Only call this when you have something genuinely useful to add; otherwise do not call any tool (stay silent).",
+    description: "Say a short coaching tip to the user via the on-screen overlay. `lines` is the tip split into short standalone lines, shown one at a time — at most 3, one idea per line, each line short (aim under ~12 words); keep any code snippet on a single line. Only call this when you have something genuinely useful to add; otherwise call stay_silent.",
     parametersJSON: #"{"type":"object","properties":{"lines":{"type":"array","items":{"type":"string"}}},"required":["lines"],"additionalProperties":false}"#
 )
 

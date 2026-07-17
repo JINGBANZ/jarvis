@@ -2,8 +2,8 @@ import Foundation
 
 /// The session's conversation memory, CLIENT-managed: `CoachDriver` commits each finished turn here
 /// and rebuilds every request as `[system] + snapshot() + <this turn>`. Owning the memory (instead of
-/// a server-side conversation object) is what lets the harness keep it small: old screenshots are
-/// stubbed, `stay_silent` turns leave no trace, and once the estimate passes the compaction threshold
+/// a server-side conversation object) is what lets the harness keep it small: screenshots are stubbed
+/// at commit, `stay_silent` turns leave no trace, and once the estimate passes the compaction threshold
 /// the oldest span is replaced with a short summary (see `CoachDriver.compactIfNeeded`).
 ///
 /// Growth is strictly append-only between compactions — the message prefix stays byte-identical
@@ -14,10 +14,6 @@ public final class CoachHistory: @unchecked Sendable {
     private let lock = NSLock()
     private var messages: [ChatMessage] = []
 
-    /// How many screenshots stay in history as pixels; older ones become one-line text stubs
-    /// (observation masking). A screenshot is ~1–2k tokens re-billed on every later request, and a
-    /// stale one rarely helps — the model can always capture a fresh look.
-    private let maxImagesRetained = 1
     static let imageStub = "[an earlier screenshot was here — no longer available; call capture_screen for a fresh look]"
 
     public init() {}
@@ -29,20 +25,21 @@ public final class CoachHistory: @unchecked Sendable {
     }
 
     /// Commit a finished turn's messages (the user delta, and any capture/speak calls with their
-    /// results). Callers must NOT pass `stay_silent` traces — silence needs no memory. Any screenshot
-    /// beyond the newest `maxImagesRetained` is replaced with a text stub.
+    /// results). Callers must NOT pass `stay_silent` traces — silence needs no memory. Screenshots
+    /// never survive commit as pixels: each is replaced with a text stub (observation masking). The
+    /// capture's OCR text — what the model actually reads — rides in the tool-result message and stays
+    /// verbatim; the pixels are ~1–2k tokens re-billed on every later request, and the model can
+    /// always capture a fresh look. The rewrite costs one prompt-cache divergence at the tail of the
+    /// just-finished turn — far cheaper than re-billing the image on every request for the rest of
+    /// the session.
     public func commit(_ turn: [ChatMessage]) {
         guard !turn.isEmpty else { return }
         lock.lock(); defer { lock.unlock() }
-        messages.append(contentsOf: turn)
-        let imageIndices = messages.indices.filter { messages[$0].imageBase64JPEG != nil }
-        for index in imageIndices.dropLast(maxImagesRetained) {
-            messages[index] = .user(Self.imageStub)
-        }
+        messages.append(contentsOf: turn.map { $0.imageBase64JPEG != nil ? .user(Self.imageStub) : $0 })
     }
 
-    /// Rough size of the memory in tokens (chars/4 for text, a flat estimate per screenshot) — used
-    /// only to decide WHEN to compact, so precision doesn't matter.
+    /// Rough size of the memory in tokens (chars/4) — used only to decide WHEN to compact, so
+    /// precision doesn't matter. No image term: screenshots are stubbed to text at commit.
     public var estimatedTokens: Int {
         lock.lock(); defer { lock.unlock() }
         return Self.estimate(messages)
@@ -51,7 +48,6 @@ public final class CoachHistory: @unchecked Sendable {
     private static func estimate(_ messages: [ChatMessage]) -> Int {
         messages.reduce(0) { total, m in
             var t = total + ((m.text?.count ?? 0) / 4)
-            if m.imageBase64JPEG != nil { t += 1_500 }
             if let calls = m.toolCalls { t += calls.reduce(0) { $0 + ($1.argumentsJSON.count / 4) + 8 } }
             return t
         }

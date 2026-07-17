@@ -263,6 +263,7 @@
 - **Why:** A server conversation can only grow: every screenshot and every stored reply was re-billed as input on all ~350 turns of an hour session (~$12.60 of the observed $13). Owning the memory bounds the per-request working set (~5–6k tokens, mostly cached), keeps the problem statement in context forever via the summary, and removes a failure class outright (`conversation_locked`, dangling tool-call closes). The industry patterns adopted (compaction, observation masking, cache-ordered prefixes) and the cost model live in PR #46's design notes.
 - **Rejected:** (a) Keeping conversations and rotating them with a summary seed — same summarization work, but retains the unbounded-growth window and the lock failure mode. (b) `store:false` for privacy — deferred by choice; debuggability wins while the harness is being tuned, and it's now a one-line flip.
 - **Detail:** `Sources/JarvisCore/Coach/CoachHistory.swift`, `CoachDriver.compactIfNeeded`, [sandbox.md](./sandbox.md) for the retention posture.
+- **Superseded (in part) by:** the 2026-07-16 entry — screenshots now never outlive their turn as pixels; the rest of this entry stands.
 
 ### 2026-07-07 — `capture_screen` is window-scoped with an on-device OCR sidecar
 
@@ -293,3 +294,10 @@
 - **Rejected:** (a) Removing the display choice outright — entire-display scope still needs it. (b) Keeping the Start prompt for entire-display scope only — the scope entry now names its display explicitly; re-confirming an explicit setting on every Start is ceremony.
 - **Supersedes:** the picker/prompt parts of the two entries marked above (2026-07-06 capture display, 2026-07-07 window-scoped capture).
 - **Detail:** [settings-window.md → Capture Scope](./settings-window.md#capture-scope).
+
+### 2026-07-16 — Screenshots never outlive their turn as pixels
+
+- **Chose:** `CoachHistory.commit` stubs **every** screenshot to its one-line text marker as the turn commits — no image survives into later requests (previously the newest one rode along until displaced by the next capture). The model sees the pixels for the full tool loop of the turn that captured them; after that, the capture's OCR sidecar (riding in the tool-result text) is what persists, and a fresh look is one `capture_screen` call away. Two smaller fixes from the same audit landed alongside: the brain client logs per-call `input`/`cached_tokens` so the prompt-cache hit rate is visible live, and the `speak` tool description says "call stay_silent" instead of "do not call any tool" (matching `tool_choice: "required"`).
+- **Why:** The first one-click session audit (2026-07-15 entry) showed the retained screenshot as the dominant per-request cost: prompts jumped from ~1.2k to ~4.9k tokens after a single capture and stayed there for every later call — billed in full whenever the prompt cache missed (3 of 4 follow-up calls in the audited session had 0 cached tokens). A stale screenshot buys little after its turn: the OCR text is what the model actually reads back, and the screen has usually changed.
+- **Rejected:** (a) Keeping the newest image (status quo) — ~1.5–3.7k tokens on every subsequent request of the session for a shot that's stale the moment the turn ends. (b) Dropping the OCR text too — it's the exact code text later turns reason over, and it's cheap next to pixels. (c) The audit's suggestion to shrink `max_output_tokens` to ~64–128 — the cap is a combined reasoning+output budget (`ReasoningEffort.maxOutputTokens`); a tight cap recreates the `status:"incomplete"` truncation failure, and actual cost tracks usage, not the ceiling.
+- **Detail:** `Sources/JarvisCore/Coach/CoachHistory.swift` (commit-time stubbing), `OpenAIBrainClient.swift` (cache-hit log line), `ToolDefs.swift`.

@@ -244,9 +244,9 @@ public final class CoachDriver: @unchecked Sendable {
                     }
                 } else { jlog("👁 screenshot failed") }
                 // Thread the call + its result into this turn's messages; the next iteration's
-                // request carries them (and they land in history at commit, where old screenshots
-                // are stubbed down to the newest one). The OCR sidecar travels in the tool-result
-                // text, right next to the image.
+                // request carries them (and they land in history at commit, where the screenshot
+                // becomes a text stub — only the OCR text outlives the turn). The OCR sidecar
+                // travels in the tool-result text, right next to the image.
                 turnMessages.append(.assistantToolCalls(response.rawToolCalls))
                 if let shot {
                     turnMessages.append(.init(role: .tool, text: Self.captureResultText(shot), toolCallId: callId))
