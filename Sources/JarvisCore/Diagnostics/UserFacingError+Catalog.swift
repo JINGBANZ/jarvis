@@ -5,10 +5,19 @@ import Foundation
 /// named failure; dynamic copy composed at the failure site (e.g. a capture reason) is passed through.
 /// Call sites reference these so the loudness policy is centralized and unit-testable.
 public extension UserFacingError {
-    /// No API key on Start. The session never comes up, so this is fatal.
+    /// No API key on Start. Realtime voice transcription always runs on the OpenAI key — whichever
+    /// brain provider is selected — so the session never comes up: fatal.
     static var noAPIKey: UserFacingError {
         .init(title: "No OpenAI API key set",
-              message: "Open \u{201C}Settings\u{2026}\u{201D} from the Jarvis menu, paste your key, then press Start.",
+              message: "Voice transcription needs an OpenAI API key even when the brain runs on a local CLI. Open \u{201C}Settings\u{2026}\u{201D} \u{2192} Brain, paste your key, then press Start.",
+              severity: .fatal)
+    }
+
+    /// The selected brain provider's CLI isn't installed (or was removed since it was selected).
+    /// The brain can't answer a single turn, so this is fatal on Start.
+    static func brainCLIMissing(provider: String) -> UserFacingError {
+        .init(title: "\(provider) not found",
+              message: "The \(provider) command-line tool isn't installed on this Mac. Install and sign in to it, or switch the brain provider back to the OpenAI API in Settings \u{2192} Brain.",
               severity: .fatal)
     }
 

@@ -23,6 +23,27 @@ public let staySilentTool = ToolDef(
 
 public let coachTools: [ToolDef] = [captureScreenTool, speakTool, staySilentTool]
 
+public extension ToolInvocation {
+    /// Map a wire-level tool call (name + JSON arguments) to a typed invocation — the one place the
+    /// coach tool names are interpreted, shared by every brain client. Unknown tool → nil (callers
+    /// log and skip). `speak`'s arguments are decoded directly: the schema guarantees
+    /// `{"lines": [string, …]}`, so there is nothing to split client-side.
+    static func parse(callId: String, name: String, argumentsJSON: String) -> ToolInvocation? {
+        switch name {
+        case captureScreenTool.name:
+            return .captureScreen(callId: callId)
+        case speakTool.name:
+            let lines = (try? JSONDecoder().decode([String: [String]].self,
+                                                   from: Data(argumentsJSON.utf8)))?["lines"] ?? []
+            return .speak(callId: callId, lines: lines)
+        case staySilentTool.name:
+            return .staySilent(callId: callId)
+        default:
+            return nil
+        }
+    }
+}
+
 /// The coach system prompt — the only place response behavior is governed (no code-side guardrail).
 public let coachSystemPrompt = """
 You are Jarvis, a calm, sharp LeetCode coach sitting beside the user while they solve a problem.

@@ -12,8 +12,12 @@
 the end-to-end pipeline and exposed intermittent startup/mid-session socket losses plus a brain
 request timeout. The app now verifies the two real transcription sockets, actively monitors them,
 shows connection health in the menu, preserves audio across reconnects, and retries one transient
-primary brain failure. The implementation builds and the full tested harness is green; the new
-OS/network behavior still needs a human smoke run.
+primary brain failure. The brain can now also run through a locally installed Claude Code / Codex
+CLI on the user's subscription (auto-detected in Settings → Brain, which absorbed the API-key tab) —
+the CLI integration itself is live-validated end-to-end against real `claude` 2.1.211 / `codex` 0.144
+binaries (coach turns, screenshot vision via the file handoff, summarizer calls, cleanup); the
+in-app flow awaits the same macOS smoke run. The implementation builds and
+the full tested harness is green; the new OS/network behavior still needs a human smoke run.
 
 ## Next action
 
@@ -21,7 +25,7 @@ Run the **reliability smoke run** from the reliability branch — build, run, an
 
 1. `./scripts/build-app.sh release` → `open ./Jarvis.app`; grant Microphone + Screen Recording
    (one-time; they persist afterward — see [build-and-run.md](./build-and-run.md)).
-2. Paste your OpenAI key via the menu bar ("Set OpenAI API Key…") — it saves to an owner-only file. Jarvis
+2. Paste your OpenAI key in Settings → Brain — it saves to an owner-only file. Jarvis
    does **not** auto-start; press **Start Jarvis** in the menu to begin. Confirm the status progresses
    from Starting to final, unqualified Listening only after both transcription sessions report ready,
    then use **Stop Jarvis** to halt. Model IDs are doc-verified; no edit expected.
@@ -46,6 +50,12 @@ Run the **reliability smoke run** from the reliability branch — build, run, an
    runs, Settings → Activity → **Evaluate** stays disabled for the live session; after Stop it
    enables — click it and expect `brain-traffic.jsonl` in the session dir, the audit report window,
    and `eval-report.md` saved beside the traffic it audits.
+8. **CLI brain provider** (see the 2026-07-16 [decision](./decisions.md)): with Claude Code (or
+   Codex) installed and signed in, Settings → Brain should show it "detected"; select it, Start, and
+   confirm a coaching turn speaks, a "check my screen" request produces a `capture_screen` (the
+   screenshot handed to the CLI as a session-dir file, deleted after the turn), turns land in
+   `brain-traffic.jsonl` with the CLI argv, and a session with the CLI uninstalled fails Start
+   loudly with the missing-CLI alert.
 
 ## Built
 
@@ -54,7 +64,7 @@ thin OS shell, verified by the smoke run.
 
 - `Sources/JarvisCore/Audio/` — PCM + utterance buffering (`PCMBuffer`, `UtteranceBuffer`, `PCM16Framer`, `AudioDownmix`).
 - `Sources/JarvisCore/Transcription/` — realtime session wire contract + rolling transcript (`RealtimeSession`, `Transcript`, `NoiseReduction`).
-- `Sources/JarvisCore/Coach/` — the event loop and brain clients: `CoachDriver`, `OpenAIBrainClient`, `RetryingBrainClient`, `ToolDefs`, `BrainModelCatalog` (default `gpt-5.5`), `ReasoningEffort`.
+- `Sources/JarvisCore/Coach/` — the event loop and brain clients: `CoachDriver`, `OpenAIBrainClient`, `CLIBrainClient` + `AgentCLIProcessRunner` + `AgentCLIDetector` (the local Claude Code / Codex brain providers), `RetryingBrainClient`, `ToolDefs`, `BrainProvider`, `BrainModelCatalog` (default `gpt-5.5`), `ReasoningEffort`.
 - `Sources/JarvisCore/Triggers/` — turn/silence trigger detection + silence backoff (`Trigger`, `SilenceBackoff`).
 - `Sources/JarvisCore/Screen/` — the model-triggered screen-capture tool contract + window-scoped capture logic (`ScreenCapture`, `ScreenSnapshot`, `FrontWindowSelector`, `RecognizedTextLayout`).
 - `Sources/JarvisCore/Overlay/` — overlay text model + length-proportional timing + fan-out (`OverlayRendering`, `OverlayTiming`, `OverlayAppearance`, `BroadcastOverlay`).
@@ -63,7 +73,7 @@ thin OS shell, verified by the smoke run.
 - `Sources/JarvisOverlay/` — the capture-invisible `NSPanel` surfaces: `OverlayCaptionPanel` (transient), `OverlayBoxPanel` (persistent), `NSPanel+CaptureExclusion`.
 - `Sources/JarvisApp/App/` + `MenuBar/` — entry point, connection-aware menu status, Start/Stop, `ErrorReporter` (severity-driven `NSAlert`).
 - `Sources/JarvisApp/Capture/` — one-clock aggregate mic + system-audio capture with AEC3 echo cancellation + resampling (`AggregateEchoCapture`, `WebRTCEchoCanceller`, `Resampler`), readiness/liveness/reconnect monitoring (`RealtimeTranscriber`, `NetworkPathDiagnostics`), permissions, plus the window-scoped screenshot + OCR edge (`WindowScopedScreenCapture`, `ScreenTextRecognizer`).
-- `Sources/JarvisApp/Settings/` — the unified Settings window (`SettingsWindow` hosting API-key / Overlay / Brain / Activity sections).
+- `Sources/JarvisApp/Settings/` — the unified Settings window (`SettingsWindow` hosting Brain (provider + model + API key) / Overlay / Screen / Activity sections).
 - `Sources/JarvisApp/Shortcuts/HotkeyController.swift` — the global Carbon ⌥⌘J on-demand-hint hotkey.
 - `Sources/JarvisApp/Viewer/ActivityViewer.swift` — the in-app `WKWebView` activity viewer, with the one-click **Evaluate** session audit.
 - `Sources/CJarvisAEC/lib/libjarvis-aec.a` — the prebuilt, zero-dylib WebRTC AEC3 C edge (the `CJarvisAEC` target; rebuilt by `scripts/build-aec.sh`).

@@ -17,4 +17,30 @@ import Testing
         #expect(BrainModelCatalog.model(id: "gpt-5.4-mini")?.displayName == "GPT-5.4 mini")
         #expect(BrainModelCatalog.model(id: "gpt-9000") == nil)
     }
+
+    @Test func everyProviderHasModelsAndAContainedDefault() {
+        for provider in BrainProvider.allCases {
+            let models = BrainModelCatalog.models(for: provider)
+            #expect(!models.isEmpty)
+            #expect(Set(models.map(\.id)).count == models.count)
+            #expect(models.contains(BrainModelCatalog.defaultModel(for: provider)))
+        }
+    }
+
+    @Test func openAIProviderListMatchesLegacyCatalog() {
+        #expect(BrainModelCatalog.models(for: .openAI) == BrainModelCatalog.all)
+        #expect(BrainModelCatalog.defaultModel(for: .openAI) == BrainModelCatalog.default)
+    }
+
+    @Test func perProviderLookupIsScopedToThatProvider() {
+        #expect(BrainModelCatalog.model(id: "sonnet", for: .claudeCode) != nil)
+        #expect(BrainModelCatalog.model(id: "sonnet", for: .openAI) == nil)
+        #expect(BrainModelCatalog.model(id: "gpt-5.5", for: .claudeCode) == nil)
+    }
+
+    @Test func summarizerModelIsCheaperTierOrCLIDefault() {
+        #expect(BrainModelCatalog.summarizerModelID(for: .openAI) == "gpt-5.4-mini")
+        #expect(BrainModelCatalog.summarizerModelID(for: .claudeCode) == "haiku")
+        #expect(BrainModelCatalog.summarizerModelID(for: .codexCLI).isEmpty)
+    }
 }
