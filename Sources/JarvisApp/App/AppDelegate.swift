@@ -37,6 +37,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// In-flight coaching turns, so Stop can cancel one mid-brain-call (otherwise it could speak
     /// after the user pressed Stop).
     private var turns: TurnTaskBox?
+    /// Watches low-rate, one-shot downscaled captures for stable visual changes without creating a
+    /// persistent macOS sharing session. One full local capture follows quiescence; only the snapshot
+    /// accepted by CoachDriver becomes auditable.
+    private var screenChangeMonitor: ScreenChangeMonitor?
+    /// Rejects a late screenshot callback from a stopped driver after a rapid Stop → Start. Without
+    /// this identity token, that old point-in-time image could seed the new session's monitor.
+    private var screenMonitorGeneration = 0
     /// The global hint hotkey. Lives for the whole app run; its callback beeps when no session runs.
     private var hotkeys: HotkeyController?
     /// Fires an on-demand hint for the running session. Non-nil only while running — set in `start()`,
@@ -247,15 +254,62 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let brain = RetryingBrainClient(base: coachBase)
         // Fan each spoken tip out to both the Overlay Caption and the persistent Overlay Box.
         let overlaySink = BroadcastOverlay([overlayCaption, overlayBox])
+        // Share one capture surface between the driver and change monitor so both observe the same
+        // selected display/window policy. The monitor seeds itself locally when the session starts;
+        // every real coach capture still acknowledges/resets its baseline through `onScreenCaptured`.
+        let screen = WindowScopedScreenCapture(preferences: screenPreferences)
+        let screenMonitorGeneration = self.screenMonitorGeneration
         let driver = CoachDriver(config: config, transcript: transcript,
                                  brain: brain, summarizer: summarizer,
-                                 screen: WindowScopedScreenCapture(preferences: screenPreferences),
-                                 overlay: overlaySink, clock: clock)
+                                 screen: screen,
+                                 overlay: overlaySink, clock: clock,
+                                 onScreenCaptured: { [weak self] snapshot in
+                                     Task { @MainActor [weak self] in
+                                         guard let self,
+                                               self.screenMonitorGeneration == screenMonitorGeneration
+                                         else { return }
+                                         self.screenChangeMonitor?.observe(snapshot)
+                                     }
+                                 },
+                                 onScreenCaptureRejected: { [weak self] in
+                                     Task { @MainActor [weak self] in
+                                         guard let self,
+                                               self.screenMonitorGeneration == screenMonitorGeneration
+                                         else { return }
+                                         self.screenChangeMonitor?.retryUnacknowledgedChange()
+                                     }
+                                 })
 
         // CoachDriver is @unchecked Sendable; capture it (not @MainActor self) in the callbacks.
         // Route turns through TurnTaskBox so Stop can cancel an in-flight one. Concurrent triggers are
         // coalesced inside CoachDriver (the running turn batches them in), so we don't cancel here.
         let turns = TurnTaskBox()
+        let monitorCapture = InMemoryScreenCapture(preferences: screenPreferences)
+        let screenChangeMonitor = ScreenChangeMonitor(
+            preferences: screenPreferences,
+            capture: { await monitorCapture.capture() },
+            config: config
+        ) {
+            [turns, driver] snapshot in
+            turns.run { await driver.handleScreenChange(snapshot) }
+        }
+        self.screenChangeMonitor = screenChangeMonitor
+        screenChangeMonitor.start()
+        // Give a stable visual candidate to the next audio turn whenever possible. The request is
+        // already required by the transcript, so this improves context without adding model cost.
+        let handleAudioTurn: @Sendable () -> Void = {
+            [weak self, turns, driver] in
+            Task { @MainActor [weak self] in
+                guard let self,
+                      self.screenMonitorGeneration == screenMonitorGeneration,
+                      self.screenChangeMonitor != nil else { return }
+                if let snapshot = self.screenChangeMonitor?.takePendingSnapshotForSpeech() {
+                    turns.run { await driver.handleTurnEnd(screenSnapshot: snapshot) }
+                } else {
+                    turns.run { await driver.handleTrigger(.turnEnd) }
+                }
+            }
+        }
         // Mic socket gave up (bad key / quota / network): coaching can't continue. Report fatal — the
         // reporter's onFatal stops the session and corrects the menu (no more lying 🟢).
         let onMicTerminalFailure: @Sendable () -> Void = { [errorReporter] in
@@ -294,7 +348,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                               networkStatus: { [networkDiagnostics] in
                                                   networkDiagnostics.currentSummary
                                               })
-        transcriber.onTurnEnd = { turns.run { await driver.handleTrigger(.turnEnd) } }
+        transcriber.onTurnEnd = handleAudioTurn
         transcriber.onSilence = { secs in turns.run { await driver.handleTrigger(.silence(secondsQuiet: secs)) } }
         transcriber.onTerminalFailure = onMicTerminalFailure
 
@@ -315,13 +369,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                                   networkStatus: { [networkDiagnostics] in
                                                       networkDiagnostics.currentSummary
                                                   })
-        themTranscriber.onTurnEnd = { turns.run { await driver.handleTrigger(.turnEnd) } }
+        themTranscriber.onTurnEnd = handleAudioTurn
         themTranscriber.onTerminalFailure = onThemTerminalFailure
 
         // One-clock capture + echo cancellation: a single aggregate device (mic + system tap) feeds
         // the cleaned mic to the "me" socket and the sample-preserving system timeline to the "them"
-        // socket, with AEC3 run inside its IOProc. If the device can't be built, the whole capture is
-        // gone, so treat it as a full (mic-side) terminal failure.
+        // socket, with AEC3 run inside its IOProc. If the device can't be built, the whole capture is gone, so treat it
+        // as a full (mic-side) terminal failure.
         let capture = AggregateEchoCapture(
             onMicCaptured: { [weak transcriber] sequence, samples, capturedAt in
                 transcriber?.recordCapturedAudio(
@@ -390,6 +444,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func stop() {
         let wasRunning = transcriber != nil || themTranscriber != nil
         requestManualHint = nil              // hotkey beeps again once there's no live session
+        screenMonitorGeneration &+= 1
+        screenChangeMonitor?.stop(); screenChangeMonitor = nil
         let cancelled = turns?.cancelAll() ?? []; turns = nil   // cancel any in-flight coaching turn
         aggregateCapture?.stop(); aggregateCapture = nil   // stop the IOProc, tear down tap+aggregate
         transcriber?.stop()

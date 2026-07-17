@@ -86,16 +86,44 @@ public final class ActivityLog: @unchecked Sendable {
     /// reference always points at a file that exists.
     public func record(_ message: String, imageBase64: String? = nil, at date: Date = Date()) {
         queue.async { [self] in
-            guard let dir else { return }
-            let shotName = imageBase64.flatMap { saveShot($0, in: dir) }
-            let entry = Entry(time: df.string(from: date), message: message, imageFile: shotName)
-            appendJSONL(entry, in: dir)
-            entries.append(entry)
-            totalCount += 1
-            if entries.count > maxLines { entries.removeFirst(entries.count - maxLines) }
-            // Push with the live bytes in hand (no disk read on the hot path).
-            onAppend?(Self.rowScript(time: entry.time, message: entry.message, imageBase64: imageBase64))
+            _ = recordLocked(message, imageBase64: imageBase64, at: date,
+                             requirePersistence: false)
         }
+    }
+
+    /// Audit-critical variant used immediately before a monitor screenshot can leave the machine.
+    /// Returns true only after the owner-only JPEG and its JSONL reference have reached the
+    /// filesystem. A false result lets the caller abort network transmission rather than create an
+    /// unaudited screen request.
+    @discardableResult
+    public func recordSynchronously(_ message: String, imageBase64: String? = nil,
+                                    at date: Date = Date()) -> Bool {
+        queue.sync {
+            recordLocked(message, imageBase64: imageBase64, at: date,
+                         requirePersistence: true)
+        }
+    }
+
+    private func recordLocked(_ message: String, imageBase64: String?, at date: Date,
+                              requirePersistence: Bool) -> Bool {
+        guard let dir else { return false }
+        let shotName = imageBase64.flatMap { saveShot($0, in: dir) }
+        if requirePersistence, imageBase64 != nil, shotName == nil { return false }
+        let entry = Entry(time: df.string(from: date), message: message, imageFile: shotName)
+        let jsonPersisted = appendJSONL(entry, in: dir)
+        if requirePersistence, !jsonPersisted {
+            if let shotName {
+                try? FileManager.default.removeItem(at: dir.appendingPathComponent(shotName))
+            }
+            return false
+        }
+        entries.append(entry)
+        totalCount += 1
+        if entries.count > maxLines { entries.removeFirst(entries.count - maxLines) }
+        // Push with the live bytes in hand (no disk read on the hot path).
+        onAppend?(Self.rowScript(time: entry.time, message: entry.message,
+                                 imageBase64: imageBase64))
+        return jsonPersisted && (imageBase64 == nil || shotName != nil)
     }
 
     /// Atomically register the live observer and capture the current snapshot, so every subsequent
@@ -132,15 +160,20 @@ public final class ActivityLog: @unchecked Sendable {
 
     /// Append one JSON line to `jarvis-activity.jsonl`. Best-effort; a failed write just means that
     /// line won't survive into history (the live push already happened). Must run on `queue`.
-    private func appendJSONL(_ entry: Entry, in dir: URL) {
+    private func appendJSONL(_ entry: Entry, in dir: URL) -> Bool {
         let pe = PersistedEntry(t: entry.time, m: entry.message, s: entry.imageFile)
-        guard let data = try? JSONEncoder().encode(pe) else { return }
+        guard let data = try? JSONEncoder().encode(pe) else { return false }
         let url = dir.appendingPathComponent("jarvis-activity.jsonl")
-        guard let fh = try? FileHandle(forWritingTo: url) else { return }
+        guard let fh = try? FileHandle(forWritingTo: url) else { return false }
         defer { try? fh.close() }
-        _ = try? fh.seekToEnd()
-        try? fh.write(contentsOf: data)
-        try? fh.write(contentsOf: Data([0x0A]))   // newline
+        do {
+            _ = try fh.seekToEnd()
+            try fh.write(contentsOf: data)
+            try fh.write(contentsOf: Data([0x0A]))   // newline
+            return true
+        } catch {
+            return false
+        }
     }
 
     // MARK: - Pure rendering (testable without a WebView)
@@ -172,7 +205,7 @@ public final class ActivityLog: @unchecked Sendable {
     static func cssClass(for message: String) -> String {
         let m = message.trimmingCharacters(in: .whitespaces)
         if m.hasPrefix("💬") { return "say" }
-        if m.hasPrefix("👁") { return "see" }
+        if m.hasPrefix("👁") || m.hasPrefix("🖥") { return "see" }
         if m.hasPrefix("🗣") || m.hasPrefix("🤫") { return "hear" }
         if m.hasPrefix("💭") || m.hasPrefix("…") { return "think" }
         let low = m.lowercased()

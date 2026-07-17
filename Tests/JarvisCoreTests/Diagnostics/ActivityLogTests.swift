@@ -6,6 +6,7 @@ import Foundation
     @Test func cssClassKeysOnLeadingMarker() {
         #expect(ActivityLog.cssClass(for: "💬 use a hash map") == "say")
         #expect(ActivityLog.cssClass(for: "👁 looking at your screen") == "see")
+        #expect(ActivityLog.cssClass(for: "🖥 stable screen change detected") == "see")
         #expect(ActivityLog.cssClass(for: "🗣 heard: \"hello\"") == "hear")
         #expect(ActivityLog.cssClass(for: "🤫 quiet for 8s") == "hear")
         #expect(ActivityLog.cssClass(for: "💭 thinking…") == "think")
@@ -89,6 +90,21 @@ import Foundation
         let snap = log.attach { _ in }
         #expect(snap.total == 0)
         #expect(snap.rows.isEmpty)
+    }
+
+    @Test func synchronousRecordReportsWhetherTheAuditImageWasPersisted() throws {
+        let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
+        let log = ActivityLog(); log.enable(directory: dir)
+
+        #expect(log.recordSynchronously(
+            "👁 looking", imageBase64: TestFixtures.tinyJpegBase64))
+        #expect(!log.recordSynchronously("👁 invalid", imageBase64: "A"))
+
+        let snapshot = log.attach { _ in }
+        #expect(snapshot.total == 1)
+        let files = try FileManager.default.contentsOfDirectory(
+            at: dir, includingPropertiesForKeys: nil)
+        #expect(files.filter { $0.pathExtension == "jpg" }.count == 1)
     }
 
     /// Shared temp-dir helper (also used by SessionStoreTests). Owner-only dir, like the real app.

@@ -5,7 +5,7 @@ import Foundation
 // below is valid under strict (no properties, none required).
 public let captureScreenTool = ToolDef(
     name: "capture_screen",
-    description: "Take a screenshot of the user's screen to see the LeetCode problem and their code. Call this only when you need to see the screen to give a useful, specific tip. Returns an image.",
+    description: "Take a fresh point-in-time screenshot of the user's screen to see the interview question and their current code. Screenshots become stale after typing, navigation, or newly displayed content, so call this whenever the current visual state matters and no fresh screenshot is already attached. Returns an image.",
     parametersJSON: #"{"type":"object","properties":{},"required":[],"additionalProperties":false}"#
 )
 
@@ -36,8 +36,17 @@ the interviewer asks "me" a question, sets a new requirement, or points out a pr
 proactively offer "me" a short tip for handling it. Only "me" can trigger the must-reply rule below;
 for "them:" lines you decide, and staying quiet remains the default when "me" is doing fine.
 
-You cannot see the screen unless you call capture_screen — do that when you need to read the problem or
-their code to be specific and correct.
+You do not receive a live screen feed. You can see the screen only by calling capture_screen or when
+a screenshot is attached to the CURRENT request. Every screenshot and its OCR are point-in-time
+observations: they can become stale as soon as someone types, navigates, or displays a question. After
+a turn ends, screenshot pixels are discarded; only its capture marker and OCR text may remain in
+conversation history, and those historical observations never prove the current screen. When the
+current request already contains a fresh screenshot, reason from it directly; do not capture the same
+unchanged screen again. When new speech means that a question, prompt, code, or solution may have
+appeared, may be about to appear, or may have changed, and no current screenshot proves the state,
+call capture_screen before giving screen-specific advice. If the capture happens before the expected
+update and still looks blank or unchanged, call stay_silent; a later stable screen-change turn will
+carry the updated screen.
 
 Each turn you get timing context. New speech arrives under "New since last turn", each line stamped
 [mm:ss] with session time — its presence means someone just finished speaking. A quiet stretch

@@ -26,17 +26,34 @@ struct WindowScopedScreenCapture: ScreenCapturing {
     }
 
     func capture() -> ScreenSnapshot? {
-        guard preferences.scope == .activeWindow,   // read at capture time, like the display index
-              let windowID = Self.frontWindowID(),
-              let jpeg = ScreenCaptureCLI.runScreencapture(
-                  arguments: ["-x", "-o", "-t", "jpg", "-l", "\(windowID)"])
-        else { return fallback.capture() }
-        return ScreenSnapshot(imageBase64: jpeg.base64EncodedString(),
-                              recognizedText: recognizer.recognizedText(inJPEG: jpeg))
+        if preferences.scope == .activeWindow,   // read at capture time, like the display index
+           let windowID = Self.frontWindowID() {
+            let capturedAt = ProcessInfo.processInfo.systemUptime
+            if let jpeg = ScreenCaptureCLI.runScreencapture(
+               arguments: ["-x", "-o", "-t", "jpg", "-l", "\(windowID)"]) {
+                let recognizedText = recognizer.recognizedText(inJPEG: jpeg)
+                return ScreenSnapshot(
+                    capturedAt: capturedAt,
+                    imageBase64: jpeg.base64EncodedString(),
+                    recognizedText: recognizedText,
+                    changeFingerprint: recognizedText.flatMap(
+                        ScreenChangeDetector.privacyPreservingTextFingerprint),
+                    visualFingerprint: ScreenPerceptualHash.make(fromJPEG: jpeg))
+            }
+        }
+        guard let shot = fallback.capture() else { return nil }
+        let visualFingerprint = Data(base64Encoded: shot.imageBase64)
+            .flatMap { ScreenPerceptualHash.make(fromJPEG: $0) }
+        return ScreenSnapshot(
+            capturedAt: shot.capturedAt,
+            imageBase64: shot.imageBase64,
+            recognizedText: shot.recognizedText,
+            changeFingerprint: shot.changeFingerprint,
+            visualFingerprint: visualFingerprint)
     }
 
     /// Dumps the on-screen window list (front-to-back, all displays) into Core's selector.
-    private static func frontWindowID() -> Int? {
+    static func frontWindowID() -> Int? {
         guard let entries = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements],
                                                        kCGNullWindowID) as? [[String: Any]]
         else { return nil }
