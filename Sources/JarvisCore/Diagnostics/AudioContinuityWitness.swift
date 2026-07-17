@@ -274,7 +274,12 @@ public final class AudioContinuityWitness: @unchecked Sendable {
                 trimLocalActivityEpisodesLocked()
             }
             if serverSpeechActive, let start = activeServerSpeechStartedAt {
-                return matchServerStartLocked(start, observedAt: timestamp)
+                // A server utterance can span several local amplitude episodes. While its VAD
+                // interval is still open, match activity against the interval observed so far;
+                // comparing each later episode only with the original start creates a temporary
+                // false warning that is retracted only when speech_stopped supplies the end.
+                return matchServerIntervalLocked(start: start, end: timestamp,
+                                                 observedAt: timestamp)
             }
         } else {
             if localActivityOpen, let lastActiveAt = localActivityEpisodes.last?.lastActiveAt,
