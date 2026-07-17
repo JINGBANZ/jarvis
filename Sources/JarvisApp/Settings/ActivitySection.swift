@@ -17,6 +17,6 @@ final class ActivitySection: NSObject, SettingsSection {
     func makeView() -> NSView { viewer.makeContentView() }
     func windowWillClose() { viewer.teardown() }
 
-    /// The log benefits from a larger, user-resizable window (unlike the fixed-size panels).
-    var prefersResizableWindow: Bool { true }
+    /// The embedded viewer stretches with the window, unlike the fixed-form panels.
+    var fillsTab: Bool { true }
 }

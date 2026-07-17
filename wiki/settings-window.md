@@ -26,7 +26,7 @@ protocol SettingsSection: AnyObject {
     func didBecomeActive()            // default: no-op — this tab became visible
     func didResignActive()            // default: no-op — another tab chosen, or window closing
     func windowWillClose()            // default: no-op
-    var prefersResizableWindow: Bool { get }   // default: false
+    var fillsTab: Bool { get }        // default: false — fixed-form panels pin to the top
 }
 ```
 
@@ -36,13 +36,14 @@ change it pairs `didResignActive()` on the outgoing section with `didBecomeActiv
 one (and resigns the active section on window close). This lets a panel run side effects **only while
 its tab is visible** rather than for the whole time the window is open.
 
-### Per-tab window sizing
+### Window sizing
 
-The simple panels are fixed-size (560×460); a section can opt into a larger, user-resizable window
-by returning `prefersResizableWindow == true`. When such a tab becomes active, `SettingsWindow`
-inserts `.resizable` into the style mask and grows the window to 820×600 (min 520×380); leaving the
-tab restores the fixed compact size. Only `ActivitySection` opts in — the log benefits from room and
-resizing; the API-key and overlay panels stay compact.
+One user-resizable window size for every tab — 820×600 by default, minimum 560×460 (which keeps the
+fixed-form panels fully visible). Switching tabs never resizes the window; whatever size the user
+set stays. A section whose content should stretch with the window returns `fillsTab == true` (only
+`ActivitySection` — the embedded log viewer); the fixed-form panels keep their designed frame,
+wrapped so they pin to the top of the tab and center horizontally (AppKit's y-origin is the bottom,
+so an unwrapped fixed-frame view would ride the bottom edge in a taller window).
 
 ### Sections
 
@@ -50,9 +51,9 @@ resizing; the API-key and overlay panels stay compact.
 |---|---|---|---|
 | `APIKeySection` | "API Key" | yes | `NSSecureTextField` to paste the OpenAI key; saves to an owner-only file on "Save", restarts the pipeline if already running. |
 | `OverlaySection` | "Overlay" | yes | Two groups, one per overlay surface — **Overlay Caption** (the transient on-screen tip) and **Overlay Box** (the persistent response history). Each has a header with an On/Off toggle (an `NSSwitch` + "On"/"Off" label) and a one-line description. When a surface is **on** it also shows its Text Size + Opacity sliders (with live readouts) and a live sample, **only while the Overlay tab is selected** (`didBecomeActive`/`didResignActive`); when **off**, its sliders and sample are hidden and the layout collapses. Persists via `OverlayAppearance`. |
-| `DisplaySection` | "Screen" | yes | One dropdown listing the connected displays — which one `capture_screen` screenshots; persists via `ScreenCapturePreferences`. Applies to the next screenshot. |
+| `DisplaySection` | "Screen" | yes | One dropdown — the capture scope: **Active window** (default) or one **Entire display** entry per connected display; persists via `ScreenCapturePreferences`. Applies to the next screenshot. |
 | `BrainModelSection` | "Brain" | yes | Two dropdowns — the brain (LLM) model and the reasoning effort applied to it; persists via `BrainPreferences`. Takes effect on the next Start. |
-| `ActivitySection` | "Activity" | yes | Embeds the `ActivityViewer` content view (`makeContentView()` / `teardown()`); `prefersResizableWindow == true` so the log gets a larger, resizable window. Its header carries **Evaluate** — one click sends the selected session's recorded LLM wire traffic (`brain-traffic.jsonl`) to the brain model at high effort for a context-engineering audit (`SessionEvaluator`), shown in a report window and saved as `eval-report.md` in the session dir. Only *finished* conversations qualify: the button is disabled while the selected session is the live, still-running one (a mid-session audit would judge half a story) and re-enables once Stop has drained any in-flight turn — the cancelled request's final traffic line must land before the audit reads the file. |
+| `ActivitySection` | "Activity" | yes | Embeds the `ActivityViewer` content view (`makeContentView()` / `teardown()`); `fillsTab == true` so the log stretches with the window. Its header carries **Evaluate** — one click sends the selected session's recorded LLM wire traffic (`brain-traffic.jsonl`) to the brain model at high effort for a context-engineering audit (`SessionEvaluator`), shown in a report window and saved as `eval-report.md` in the session dir. Only *finished* conversations qualify: the button is disabled while the selected session is the live, still-running one (a mid-session audit would judge half a story) and re-enables once Stop has drained any in-flight turn — the cancelled request's final traffic line must land before the audit reads the file. |
 
 `AppDelegate` builds the section list at launch and passes it to `SettingsWindow`. All five sections
 are always present.
@@ -122,8 +123,9 @@ not mid-session — hence the caption on the tab.
 
 ## Capture Scope
 
-What `capture_screen` shoots: the **active window** (default) or the **entire selected display**.
-Active-window mode reads the window server's single front-to-back z-order at capture time
+What `capture_screen` shoots — one dropdown covering both the scope and, for entire-display
+capture, the display: **Active window (recommended)** plus one **Entire display** entry per
+connected display. Active-window mode reads the window server's single front-to-back z-order at capture time
 (`WindowScopedScreenCapture` in `JarvisApp/Capture`, with the pick itself pure logic in Core's
 `FrontWindowSelector`) and shoots the window the user last clicked or typed into — whichever
 display it lives on — via `screencapture -l`, which reads the window's own backing image (clean
@@ -134,42 +136,27 @@ The window shot also gets an **on-device OCR sidecar**: `ScreenTextRecognizer` (
 `.accurate`, language correction off so code identifiers survive) recognizes the text and Core's
 `RecognizedTextLayout` rebuilds reading order; `CoachDriver` sends it in the `capture_screen`
 tool-result text beside the image, flagged as fallible, so the model reads exact code instead of
-deciphering pixels. Nothing eligible on screen → fall back to the entire-display capture below;
+deciphering pixels. Nothing eligible on screen → fall back to a full shot of the **main display**;
 fallback and entire-display captures skip OCR deliberately (a whole display's text would feed the
 surrounding clutter back to the model as tokens).
 
-Persisted through `ScreenCapturePreferences` and read at capture time like the display index; an
-unrecognized stored value falls back to the default.
+The **Entire display** entries are named and numbered the way `screencapture -D` counts displays
+(1 = the main display, the one with the menu bar; the dropdown enumerates `NSScreen.screens`, main
+first, matching that order) and refresh when displays are plugged or unplugged while the tab is
+visible. The chosen display persists as the 1-based `-D` index alongside the scope.
+
+Both values are read **at capture time** (`WindowScopedScreenCapture` / `ScreenCaptureCLI`), so a
+change applies to the very next screenshot with no restart. Reads are validated: an unrecognized
+stored scope falls back to the default, a stored index < 1 clamps to the main display, and if the
+chosen display no longer exists (the monitor was unplugged since it was chosen) `screencapture -D`
+fails and `ScreenCaptureCLI` reshoots the main display rather than dropping the screenshot.
+Fallbacks from active-window scope always capture the main display — a display index left over
+from an old entire-display selection never steers them.
 
 | Setting | Default | UserDefaults key |
 |---|---|---|
 | Capture scope | `activeWindow` | `screen.captureScope` |
-
-## Capture Display
-
-Which display **entire-display captures** use — the Entire display scope and every fallback from
-the active-window scope — is user-selectable, persisted through
-`ScreenCapturePreferences` (UserDefaults) as the **1-based index `screencapture -D` uses** (1 = the
-main display, the one with the menu bar). The dropdown enumerates `NSScreen.screens` — main display
-first, matching `screencapture`'s numbering — and refreshes when displays are plugged or unplugged
-while the tab is visible.
-
-Unlike the brain settings, the selection is read **at capture time** (`ScreenCaptureCLI`), so a
-change applies to the very next screenshot with no restart. Reads are validated twice: a stored
-value < 1 clamps to the main display, and if the selected display no longer exists (the monitor was
-unplugged since it was chosen) `screencapture -D` fails and `ScreenCaptureCLI` falls back to a plain
-main-display capture rather than dropping the screenshot.
-
-A user-initiated **Start with more than one display connected also prompts** for the screen to watch
-(`DisplayPicker`: an alert with the same dropdown, pre-selected to the persisted choice; Cancel
-aborts the Start untouched) — so a laptop-vs-monitor session never silently coaches from the wrong
-screen. One display → no prompt; an in-place restart (e.g. re-saving the API key while running)
-never prompts. The prompt writes through the same `ScreenCapturePreferences`, so it and the
-Settings tab are one setting.
-
-| Setting | Default | UserDefaults key |
-|---|---|---|
-| Capture display | `1` (main display) | `screen.captureDisplayIndex` |
+| Entire-display display | `1` (main display) | `screen.captureDisplayIndex` |
 
 ## Key Files
 
@@ -179,15 +166,14 @@ Settings tab are one setting.
 | `Sources/JarvisApp/Settings/SettingsWindow.swift` | Host window + tab view |
 | `Sources/JarvisApp/Settings/APIKeySection.swift` | API-key tab |
 | `Sources/JarvisApp/Settings/OverlaySection.swift` | Overlay-appearance tab |
-| `Sources/JarvisApp/Settings/DisplaySection.swift` | Capture-display tab |
-| `Sources/JarvisApp/Settings/DisplayPicker.swift` | Start-time display prompt (>1 display) |
-| `Sources/JarvisApp/Settings/NSScreen+DisplayTitles.swift` | Shared display naming for the tab + prompt |
+| `Sources/JarvisApp/Settings/DisplaySection.swift` | Capture-scope tab (scope + display in one dropdown) |
+| `Sources/JarvisApp/Settings/NSScreen+DisplayTitles.swift` | Display naming for the dropdown's entire-display entries |
 | `Sources/JarvisApp/Settings/BrainModelSection.swift` | Brain model + reasoning-effort tab |
 | `Sources/JarvisApp/Settings/ActivitySection.swift` | Activity tab |
 | `Sources/JarvisCore/Coach/BrainModelCatalog.swift` | Curated model list (`BrainModel`) |
 | `Sources/JarvisCore/Coach/ReasoningEffort.swift` | The four effort levels |
 | `Sources/JarvisCore/Config/BrainPreferences.swift` | UserDefaults persistence + validation |
-| `Sources/JarvisCore/Config/ScreenCapturePreferences.swift` | Capture-display persistence + clamping |
+| `Sources/JarvisCore/Config/ScreenCapturePreferences.swift` | Capture scope + display persistence + clamping |
 | `Sources/JarvisCore/Screen/ScreenCapture.swift` | `ScreenCaptureCLI` — reads the selection at capture time, falls back to the main display |
 | `Sources/JarvisCore/Config/Config.swift` | `overlayCaption*`/`overlayBox*` size + opacity ranges, enabled + appearance defaults |
 | `Sources/JarvisCore/Overlay/OverlayAppearance.swift` | UserDefaults persistence; `OverlayCaptionApplying` + `OverlayBoxApplying` protocols |

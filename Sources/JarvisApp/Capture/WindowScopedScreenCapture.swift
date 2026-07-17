@@ -4,9 +4,10 @@ import JarvisCore
 
 /// Captures just the frontmost app window (`screencapture -l`) when the capture scope is
 /// `.activeWindow`, with an on-device OCR of the shot riding along as `recognizedText`. Falls back
-/// to the Settings-selected display (`ScreenCaptureCLI`) when the scope is `.entireDisplay`, no
-/// eligible window is on screen, or the window capture fails — full-display fallbacks skip OCR
-/// deliberately (a whole display's text would feed the clutter back as tokens).
+/// to a full-display capture (`ScreenCaptureCLI` — the Settings-chosen display in `.entireDisplay`
+/// scope, the main display otherwise) when no eligible window is on screen or the window capture
+/// fails — full-display captures skip OCR deliberately (a whole display's text would feed the
+/// clutter back as tokens).
 ///
 /// Window choice reads the window server's single front-to-back z-order
 /// (`CGWindowListCopyWindowInfo`), which spans all displays — so the pick is the window the user

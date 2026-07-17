@@ -163,13 +163,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             errorReporter.report(.noAPIKey)
             return false
         }
-        // With more than one display connected, confirm which screen to coach from before anything
-        // is torn down or rotated — a Cancel here must leave the app exactly as it was. Only for a
-        // user-initiated Start; an in-place restart (e.g. re-saving the API key) must not prompt.
-        if freshSession, !DisplayPicker.confirmSelection(preferences: screenPreferences) {
-            jlog("Jarvis: start cancelled at the display prompt.")
-            return false
-        }
         stop() // tear down any existing pipeline so we start cleanly
         // A fresh transcript for the fresh pipeline (even on an in-place restart, which rebuilds the
         // driver and transcribers too). Reusing the old one would re-send a dead run's lines as "new
@@ -177,9 +170,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // and anchor the silence math to that run's last utterance instead of real quiet time.
         transcript = RollingTranscript()
         if freshSession {
-            beginNewSession()       // rotate to a fresh session dir + activity/debug log
-            menuBar.resetCounter()  // a user Start begins a fresh session
-            overlayBox.clear()      // …and a fresh response history for the new conversation
+            beginNewSession()  // rotate to a fresh session dir + activity/debug log
+            overlayBox.clear() // …and a fresh response history for the new conversation
         }
 
         // Both clients record their wire traffic into the session's `brain-traffic.jsonl` (enabled in
@@ -202,8 +194,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let driver = CoachDriver(config: config, transcript: transcript,
                                  brain: brain, summarizer: summarizer,
                                  screen: WindowScopedScreenCapture(preferences: screenPreferences),
-                                 overlay: overlaySink, clock: clock,
-                                 onSpoke: { [weak self] in Task { @MainActor in self?.menuBar.noteSpoke() } })
+                                 overlay: overlaySink, clock: clock)
 
         // CoachDriver is @unchecked Sendable; capture it (not @MainActor self) in the callbacks.
         // Route turns through TurnTaskBox so Stop can cancel an in-flight one. Concurrent triggers are

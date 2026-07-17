@@ -29,7 +29,6 @@ public final class CoachDriver: @unchecked Sendable {
     private let overlay: OverlayRendering
     private let clock: Clock
     private let sessionStart: TimeInterval
-    private let onSpoke: (@Sendable () -> Void)?
     private let history = CoachHistory()
 
     /// Safety backstop against a pathological model that loops on capture_screen forever.
@@ -47,8 +46,7 @@ public final class CoachDriver: @unchecked Sendable {
 
     public init(config: Config, transcript: RollingTranscript,
                 brain: BrainClient, summarizer: BrainClient? = nil,
-                screen: ScreenCapturing, overlay: OverlayRendering, clock: Clock,
-                onSpoke: (@Sendable () -> Void)? = nil) {
+                screen: ScreenCapturing, overlay: OverlayRendering, clock: Clock) {
         self.config = config
         self.transcript = transcript
         self.brain = brain
@@ -57,7 +55,6 @@ public final class CoachDriver: @unchecked Sendable {
         self.overlay = overlay
         self.clock = clock
         self.sessionStart = clock.now()
-        self.onSpoke = onSpoke
     }
 
     // Synchronous lock accessors — NSLock can't be held across an `await`, so all critical sections
@@ -261,13 +258,12 @@ public final class CoachDriver: @unchecked Sendable {
 
             case .speak(let callId, let lines):
                 // Last gate before side effects: a turn cancelled by Stop (or a Stop→Start that
-                // rotated the session) must not render a stale tip, bump the counter, or log into
-                // the new session. This is the "speak after Stop" guard the TurnTaskBox relies on.
+                // rotated the session) must not render a stale tip or log into the new session.
+                // This is the "speak after Stop" guard the TurnTaskBox relies on.
                 if Task.isCancelled { jlog("… turn cancelled (stopped) before speaking"); return .cancelled }
                 jlog("💬 \(lines.joined(separator: " "))")
                 let perLine = lines.map { OverlayTiming.displaySeconds(for: $0, config: config) }
                 overlay.render(lines, perLineSeconds: perLine)
-                onSpoke?()
                 // Close the call locally — we own the history, so no follow-up round trip is needed.
                 turnMessages.append(.assistantToolCalls(response.rawToolCalls))
                 turnMessages.append(.init(role: .tool, text: "shown to the user", toolCallId: callId))
