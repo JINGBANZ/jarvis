@@ -25,6 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      issues: write # release-please labels the Release PR via the issues API
       pull-requests: write
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
@@ -84,10 +85,17 @@ jobs:
           export NOTARY_KEY_PATH
           ./scripts/package-app.sh
 
-      - name: Attach to the GitHub Release
+      # The Release is created as a draft (release-please-config.json), so a failed build/sign/
+      # notarize run never leaves a public Release without its app — publishing happens only after
+      # the asset is attached. gh resolves draft releases by tag even though the git tag itself
+      # only materializes on publish.
+      - name: Attach the app and publish the Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload '${{ needs.release-please.outputs.tag_name }}' Jarvis-*.zip
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          gh release upload "$TAG" Jarvis-*.zip
+          gh release edit "$TAG" --draft=false --latest
 
       # Hosted runners are ephemeral, but scrubbing the signing key is cheap insurance (and
       # required hygiene if this ever moves to a self-hosted runner).
