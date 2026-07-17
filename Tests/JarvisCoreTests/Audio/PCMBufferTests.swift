@@ -56,7 +56,7 @@ import Testing
         let first = try #require(b.claimNext())
         #expect(first.chunk.sequenceNumber == 1)
         #expect(b.claimNext() == nil)
-        #expect(b.completeSend(first))
+        #expect(b.completeSend(first) != nil)
 
         let second = try #require(b.claimNext())
         #expect(second.chunk.sequenceNumber == 2)
@@ -72,8 +72,8 @@ import Testing
         let retry = try #require(b.claimNext())
         #expect(retry.chunk.sequenceNumber == 41)
         #expect(retry != failed) // a stale callback cannot complete the replacement claim
-        #expect(!b.completeSend(failed))
-        #expect(b.completeSend(retry))
+        #expect(b.completeSend(failed) == nil)
+        #expect(b.completeSend(retry) != nil)
         #expect(b.claimNext()?.chunk.sequenceNumber == 42)
     }
 
@@ -104,7 +104,7 @@ import Testing
         let b = PCMBuffer(maxBytes: 100)
         b.append(Data([1, 2]), sequenceNumber: 41, capturedAt: 10, duration: 0.01)
         let locallySent = try #require(b.claimNext())
-        #expect(b.completeSend(locallySent))
+        #expect(b.completeSend(locallySent) != nil)
         #expect(b.claimNext() == nil)
 
         let recovery = b.prepareForReconnect()
@@ -117,7 +117,7 @@ import Testing
         let b = PCMBuffer(maxBytes: 100)
         b.append(Data([1]), sequenceNumber: 1, capturedAt: 1, duration: 0.01)
         let sent = try #require(b.claimNext())
-        #expect(b.completeSend(sent))
+        #expect(b.completeSend(sent) != nil)
         b.append(Data([2]), sequenceNumber: 2, capturedAt: 2, duration: 0.01)
 
         b.prepareForReconnect()
@@ -130,7 +130,7 @@ import Testing
             b.append(Data([UInt8(sequence)]), sequenceNumber: UInt64(sequence),
                      capturedAt: TimeInterval(sequence), duration: 0.5)
             let claim = try #require(b.claimNext())
-            #expect(b.completeSend(claim))
+            #expect(b.completeSend(claim) != nil)
         }
 
         #expect(b.discardSent(through: 2.5).map(\.sequenceNumber) == [1, 2])
@@ -145,8 +145,8 @@ import Testing
 
         b.prepareForReconnect()
         let replacementClaim = try #require(b.claimNext())
-        #expect(!b.completeSend(oldClaim))
-        #expect(b.completeSend(replacementClaim))
+        #expect(b.completeSend(oldClaim) == nil)
+        #expect(b.completeSend(replacementClaim) != nil)
 
         b.prepareForReconnect()
         #expect(b.claimNext()?.chunk.sequenceNumber == 1)
@@ -156,29 +156,38 @@ import Testing
         let b = PCMBuffer(maxBytes: 3)
         b.append(Data([1, 1]), sequenceNumber: 1, capturedAt: 1, duration: 0.01)
         let sent = try #require(b.claimNext())
-        #expect(b.completeSend(sent))
+        #expect(b.completeSend(sent) != nil)
 
-        b.append(Data([2, 2]), sequenceNumber: 2, capturedAt: 2, duration: 0.01)
+        let evicted = b.append(Data([2, 2]), sequenceNumber: 2, capturedAt: 2, duration: 0.01)
+        #expect(evicted.map(\.sequenceNumber) == [1])
         #expect(b.bufferedBytes <= 3)
         b.prepareForReconnect()
         #expect(b.drainChunks().map(\.sequenceNumber) == [2])
     }
 
-    /// A full rolling recovery tail is expected to age out its oldest, already-locally-sent chunk
-    /// as fresh outage audio arrives. Only eviction of audio that has never reached a socket is an
-    /// unrecoverable continuity gap worth recording in diagnostics.
-    @Test func reportsOverflowOnlyAfterNeverSentAudioAgesOut() throws {
+    @Test func reportsOverflowWhenUnconfirmedLocallySentAudioAgesOut() throws {
         let b = PCMBuffer(maxBytes: 2)
         for sequence in 1...2 {
             b.append(Data([UInt8(sequence)]), sequenceNumber: UInt64(sequence))
             let claim = try #require(b.claimNext())
-            #expect(b.completeSend(claim))
+            #expect(b.completeSend(claim) != nil)
         }
         b.prepareForReconnect()
 
-        #expect(b.append(Data([3]), sequenceNumber: 3).isEmpty)
-        #expect(b.append(Data([4]), sequenceNumber: 4).isEmpty)
+        #expect(b.append(Data([3]), sequenceNumber: 3).map(\.sequenceNumber) == [1])
+        #expect(b.append(Data([4]), sequenceNumber: 4).map(\.sequenceNumber) == [2])
         #expect(b.append(Data([5]), sequenceNumber: 5).map(\.sequenceNumber) == [3])
         #expect(b.drainChunks().map(\.sequenceNumber) == [4, 5])
+    }
+
+    @Test func completionReportsRecoveryTailEvictedAroundAnInFlightClaim() throws {
+        let b = PCMBuffer(maxBytes: 3)
+        b.append(Data([1, 1, 1]), sequenceNumber: 1)
+        let inFlight = try #require(b.claimNext())
+        #expect(b.append(Data([2, 2, 2]), sequenceNumber: 2).isEmpty)
+
+        let completion = try #require(b.completeSend(inFlight))
+        #expect(completion.evicted.map(\.sequenceNumber) == [1])
+        #expect(b.drainChunks().map(\.sequenceNumber) == [2])
     }
 }

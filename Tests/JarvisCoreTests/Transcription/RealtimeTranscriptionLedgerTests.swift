@@ -73,6 +73,32 @@ import Testing
         #expect(result.recoveredFromDeltas)
     }
 
+    @Test func lateSpeechStartPreservesAnAlreadyRecordedStop() throws {
+        let ledger = RealtimeTranscriptionLedger()
+        ledger.recordSpeechStopped(itemID: "item", audioEndMilliseconds: 1_500)
+        ledger.recordDelta(itemID: "item", delta: "late ordered text")
+        ledger.recordSpeechStarted(itemID: "item", audioStartMilliseconds: 500,
+                                  timelineOrigin: 4)
+
+        let result = try #require(
+            ledger.resolveStoppedItemTimeout(itemID: "item", speaker: .them))
+        #expect(result.text == "late ordered text")
+        #expect(result.spokenAt == 4.5)
+        #expect(result.spokenEndAt == 5.5)
+        #expect(!ledger.hasPendingItems)
+    }
+
+    @Test func deltaOnlyItemRequestsOneActiveDeadline() throws {
+        let ledger = RealtimeTranscriptionLedger()
+        #expect(ledger.recordDelta(itemID: "item", delta: "partial "))
+        #expect(!ledger.recordDelta(itemID: "item", delta: "question"))
+
+        let result = try #require(
+            ledger.resolveActiveItemTimeout(itemID: "item", speaker: .them))
+        #expect(result.text == "partial question")
+        #expect(!ledger.hasPendingItems)
+    }
+
     @Test func stoppedTimeoutSuppressesShortOrUntimedEmptyVADBlips() throws {
         let short = RealtimeTranscriptionLedger()
         short.recordSpeechStarted(itemID: "short", audioStartMilliseconds: 1_000,

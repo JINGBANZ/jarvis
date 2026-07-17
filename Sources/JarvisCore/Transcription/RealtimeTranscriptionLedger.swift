@@ -62,7 +62,8 @@ public final class RealtimeTranscriptionLedger: @unchecked Sendable {
         var item = items[itemID] ?? Item()
         item.audioStartMilliseconds = audioStartMilliseconds
         item.timelineOrigin = timelineOrigin
-        item.speechStopped = false
+        // Event delivery is not guaranteed to follow VAD order. A late start adds timing metadata;
+        // it must not reopen an item that already received speech_stopped and has a short deadline.
         items[itemID] = item
         return true
     }
@@ -83,15 +84,18 @@ public final class RealtimeTranscriptionLedger: @unchecked Sendable {
         return true
     }
 
+    /// Returns true only when this delta creates the item. The caller can use that signal to arm the
+    /// active-item backstop when speech_started was missing, without scheduling one timer per delta.
     @discardableResult
     public func recordDelta(itemID: String, delta: String) -> Bool {
         guard !itemID.isEmpty, !delta.isEmpty else { return false }
         lock.lock(); defer { lock.unlock() }
         guard !finalizedItemIDs.contains(itemID) else { return false }
+        let createdItem = items[itemID] == nil
         var item = items[itemID] ?? Item()
         item.deltas += delta
         items[itemID] = item
-        return true
+        return createdItem
     }
 
     /// Final text is authoritative. If it is empty/unusable but streamed text is available, retain

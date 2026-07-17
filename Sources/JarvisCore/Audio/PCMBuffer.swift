@@ -41,10 +41,6 @@ public final class PCMBuffer: @unchecked Sendable {
     private var chunks: [Chunk] = []
     /// Chunks accepted by the local WebSocket stack but not yet covered by server audio progress.
     private var sentChunks: [Chunk] = []
-    /// Sequence numbers whose append was accepted by a local WebSocket. After reconnect those
-    /// chunks re-enter `chunks`, so this preserves the distinction between normal recovery-window
-    /// expiry and actual loss of audio that has never reached any socket.
-    private var locallySentSequences: Set<UInt64> = []
     private var queuedByteCount = 0
     private var sentByteCount = 0
     private var activeClaim: Claim?
@@ -55,8 +51,9 @@ public final class PCMBuffer: @unchecked Sendable {
 
     /// Append a chunk, evicting the oldest chunks if the cap is exceeded. The most recently appended
     /// chunk is always retained (an in-progress utterance matters more than stale audio). The return
-    /// value contains only evicted chunks that had never completed a local send; expiry of an older
-    /// recovery-tail chunk is the normal behavior of the bounded rolling window, not a new gap.
+    /// value contains every evicted chunk. A local WebSocket send completion is not a server
+    /// acknowledgement, so expiry from either the pending queue or recovery tail is a real,
+    /// diagnostic-worthy loss of replay coverage.
     @discardableResult
     public func append(_ data: Data, sequenceNumber: UInt64? = nil,
                        capturedAt: TimeInterval? = nil, duration: TimeInterval = 0) -> [Chunk] {
@@ -67,8 +64,8 @@ public final class PCMBuffer: @unchecked Sendable {
         queuedByteCount += data.count
         // The recovery tail and never-sent queue share one memory budget. Retire the oldest local
         // send first; the newest captured audio is more valuable during a prolonged outage.
-        trimSentTailLocked()
         var evicted: [Chunk] = []
+        trimSentTailLocked(recordingIn: &evicted)
         // Never evict the chunk URLSession may currently be sending. While it is claimed, apply the
         // cap to the waiting tail; the FIFO can exceed `maxBytes` by at most that one in-flight chunk.
         let claimedBytes = activeClaim?.chunk.data.count ?? 0
@@ -76,7 +73,7 @@ public final class PCMBuffer: @unchecked Sendable {
             let index = activeClaim == nil ? 0 : 1
             let removed = chunks.remove(at: index)
             queuedByteCount -= removed.data.count
-            recordEvictionIfNeverSentLocked(removed, in: &evicted)
+            evicted.append(removed)
         }
         return evicted
     }
@@ -95,18 +92,23 @@ public final class PCMBuffer: @unchecked Sendable {
     /// Moves a chunk into the recovery tail after the exact asynchronous *local* send succeeds.
     /// This is intentionally not called an acknowledgement: the Realtime server does not confirm
     /// append events, so the chunk must remain replayable until `discardSent(through:)` advances it.
+    public struct SendCompletion: Equatable, Sendable {
+        /// Unconfirmed recovery-tail chunks dropped to preserve the shared byte cap.
+        public let evicted: [Chunk]
+    }
+
     @discardableResult
-    public func completeSend(_ claim: Claim) -> Bool {
+    public func completeSend(_ claim: Claim) -> SendCompletion? {
         lock.lock(); defer { lock.unlock() }
-        guard activeClaim?.id == claim.id, chunks.first == claim.chunk else { return false }
+        guard activeClaim?.id == claim.id, chunks.first == claim.chunk else { return nil }
         let sent = chunks.removeFirst()
         queuedByteCount -= sent.data.count
         sentChunks.append(sent)
         sentByteCount += sent.data.count
-        if let sequence = sent.sequenceNumber { locallySentSequences.insert(sequence) }
         activeClaim = nil
-        trimSentTailLocked()
-        return true
+        var evicted: [Chunk] = []
+        trimSentTailLocked(recordingIn: &evicted)
+        return SendCompletion(evicted: evicted)
     }
 
     /// Makes the exact failed claim available for ordered retry. Stale callbacks are harmless.
@@ -146,7 +148,7 @@ public final class PCMBuffer: @unchecked Sendable {
         while queuedByteCount > maxBytes, chunks.count > 1 {
             let removed = chunks.removeFirst()
             queuedByteCount -= removed.data.count
-            recordEvictionIfNeverSentLocked(removed, in: &evicted)
+            evicted.append(removed)
         }
         return ReplayPreparation(replayedChunks: replayed,
                                  oldestCapturedAt: chunks.first?.capturedAt,
@@ -163,7 +165,6 @@ public final class PCMBuffer: @unchecked Sendable {
               let end = first.capturedEnd, end <= capturedTime {
             let removed = sentChunks.removeFirst()
             sentByteCount -= removed.data.count
-            if let sequence = removed.sequenceNumber { locallySentSequences.remove(sequence) }
             discarded.append(removed)
         }
         return discarded
@@ -180,7 +181,6 @@ public final class PCMBuffer: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         let out = sentChunks + chunks
         chunks = []; sentChunks = []
-        locallySentSequences.removeAll(keepingCapacity: true)
         queuedByteCount = 0; sentByteCount = 0; activeClaim = nil
         return out
     }
@@ -188,7 +188,6 @@ public final class PCMBuffer: @unchecked Sendable {
     public func clear() {
         lock.lock()
         chunks = []; sentChunks = []
-        locallySentSequences.removeAll(keepingCapacity: true)
         queuedByteCount = 0; sentByteCount = 0; activeClaim = nil
         lock.unlock()
     }
@@ -213,23 +212,12 @@ public final class PCMBuffer: @unchecked Sendable {
         return chunks.first?.capturedAt
     }
 
-    private func trimSentTailLocked() {
+    private func trimSentTailLocked(recordingIn evicted: inout [Chunk]) {
         while sentByteCount + queuedByteCount > maxBytes, !sentChunks.isEmpty,
               sentChunks.count > 1 || !chunks.isEmpty {
             let removed = sentChunks.removeFirst()
             sentByteCount -= removed.data.count
-            if let sequence = removed.sequenceNumber { locallySentSequences.remove(sequence) }
+            evicted.append(removed)
         }
-    }
-
-    /// Dropping an already-locally-sent chunk merely advances the configured recovery horizon. A
-    /// dropped never-sent chunk is different: no replacement socket can recover its words, so the
-    /// caller must surface that continuity gap.
-    private func recordEvictionIfNeverSentLocked(_ chunk: Chunk, in report: inout [Chunk]) {
-        guard let sequence = chunk.sequenceNumber else {
-            report.append(chunk)
-            return
-        }
-        if locallySentSequences.remove(sequence) == nil { report.append(chunk) }
     }
 }

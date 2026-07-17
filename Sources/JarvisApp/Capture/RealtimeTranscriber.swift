@@ -290,9 +290,12 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
             self.lock.lock()
             let isCurrentLease = self.task === task && self.generation == socketGeneration
                 && self.connected && !self.stopped && !self.isReconnecting
-            let completed = isCurrentLease && self.audioBuffer.completeSend(claim)
+            let completion = isCurrentLease ? self.audioBuffer.completeSend(claim) : nil
             self.lock.unlock()
-            if completed { self.pumpAudioIfReady() }
+            if let completion {
+                self.reportBufferEviction(completion.evicted)
+                self.pumpAudioIfReady()
+            }
         }
     }
 
@@ -355,7 +358,8 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
                                        sessionAudioTime: timelineOrigin
                                            + TimeInterval(audioStartMilliseconds) / 1_000,
                                        socketGeneration: socketGeneration)
-                scheduleTranscriptionActiveDeadline(itemID: itemID)
+                scheduleTranscriptionActiveDeadline(
+                    itemID: itemID, socketGeneration: socketGeneration)
             }
         case RealtimeSession.deltaTranscriptionType:
             guard let itemID = obj["item_id"] as? String else {
@@ -366,7 +370,12 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
                 recordServerContinuity(.transcriptionDelta,
                                        audioTimeMilliseconds: nil,
                                        socketGeneration: socketGeneration)
-                transcriptionLedger.recordDelta(itemID: itemID, delta: delta)
+                if transcriptionLedger.recordDelta(itemID: itemID, delta: delta) {
+                    // A delta can be the first event for an item when speech_started is missing or
+                    // malformed. Give that item the same finite active backstop as a normal start.
+                    scheduleTranscriptionActiveDeadline(
+                        itemID: itemID, socketGeneration: socketGeneration)
+                }
             }
         case RealtimeSession.completedTranscriptionType:
             // A completed utterance fragment: record it immediately (so the model's context is
@@ -433,7 +442,8 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
                 itemID: itemID, audioEndMilliseconds: audioEndMilliseconds
             ) {
                 discardServerConfirmedAudio()
-                scheduleTranscriptionTerminalDeadline(itemID: itemID)
+                scheduleTranscriptionTerminalDeadline(
+                    itemID: itemID, socketGeneration: socketGeneration)
             }
             // Do not reset proactive silence here. Bare VAD start/stop events contain no usable
             // context; only an appended final/salvaged line begins a fresh silence interval.
@@ -469,6 +479,11 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         activeAudioTimelineOrigin = audioBuffer.oldestQueuedCaptureTime
             ?? pendingAudioTimelineOrigin
         let bufferedChunks = audioBuffer.queuedChunkCount
+        // Keep old-socket deltas throughout reconnect attempts so terminal failure can still salvage
+        // them. Once a replacement is ready, its replayed PCM becomes authoritative and old item IDs
+        // must leave before the replacement emits its own lifecycle events.
+        let interruptedItems = wasReconnect ? transcriptionLedger.pendingItemCount : 0
+        if wasReconnect { transcriptionLedger.clear() }
         connected = true
         bufferOverflowEpisodeReported = false
         lock.unlock()
@@ -477,6 +492,10 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         jlog("Jarvis realtime [\(speaker.rawValue)]: transcription session ready (socket #\(socketGeneration)\(id))")
         if wasReconnect && bufferedChunks > 0 {
             jlog("⏩ realtime [\(speaker.rawValue)] replaying \(bufferedChunks) buffered audio chunks after reconnect")
+        }
+        if interruptedItems > 0 {
+            jlog("Jarvis realtime [\(speaker.rawValue)] replacement session ready; replaying audio "
+                 + "for \(interruptedItems) interrupted transcription item(s)")
         }
         // Producers always append to the same claimed FIFO. Making readiness visible before this
         // pump is safe: a racing producer may claim the oldest chunk itself, but cannot bypass it or
@@ -518,10 +537,10 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         onTurnEnd?()
     }
 
-    private func scheduleTranscriptionTerminalDeadline(itemID: String) {
+    private func scheduleTranscriptionTerminalDeadline(itemID: String, socketGeneration: Int) {
         let timeout = transcriptionTerminalTimeout
         DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { [weak self] in
-            guard let self,
+            guard let self, self.isReady(socketGeneration: socketGeneration),
                   let item = self.transcriptionLedger.resolveStoppedItemTimeout(
                     itemID: itemID, speaker: self.speaker
                   ) else { return }
@@ -534,10 +553,10 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         }
     }
 
-    private func scheduleTranscriptionActiveDeadline(itemID: String) {
+    private func scheduleTranscriptionActiveDeadline(itemID: String, socketGeneration: Int) {
         let timeout = transcriptionActiveTimeout
         DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { [weak self] in
-            guard let self,
+            guard let self, self.isReady(socketGeneration: socketGeneration),
                   let item = self.transcriptionLedger.resolveActiveItemTimeout(
                     itemID: itemID, speaker: self.speaker
                   ) else { return }
@@ -548,6 +567,11 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
                  + "after \(timeout)s (item \(itemID)); \(recovery)")
             self.appendFinalizedItem(item, reason: "active-item timeout")
         }
+    }
+
+    private func isReady(socketGeneration: Int) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return generation == socketGeneration && connected && !isReconnecting && !stopped
     }
 
     private func finalizeInterruptedTranscriptions(reason: String) {
@@ -763,15 +787,15 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         pendingAudioTimelineOrigin = replay.oldestCapturedAt ?? failureAt
         lock.unlock()
 
-        reportBufferEviction(replay.evicted)
         let interruptedItems = transcriptionLedger.pendingItemCount
-        // Those items' PCM is in the reconnect tail. Clear their old socket IDs and let the new
-        // session transcribe the audio once, rather than appending a partial/gap and then duplicating
-        // it with the recovered final transcript.
-        transcriptionLedger.clear()
-        if interruptedItems > 0 {
-            jlog("Jarvis realtime [\(speaker.rawValue)] replaying audio for \(interruptedItems) "
-                 + "interrupted transcription item(s) after socket reconnect")
+        reportBufferEviction(replay.evicted)
+        // Do not clear old-socket deltas until a replacement session is actually ready. If every
+        // attempt fails during its handshake, the terminal-failure path can still salvage the text.
+        // Generation-aware deadlines above stay dormant during reconnect, avoiding partial+replay
+        // duplication while this fallback evidence is retained.
+        if interruptedItems > 0 && attempt == 0 {
+            jlog("Jarvis realtime [\(speaker.rawValue)] retaining \(interruptedItems) interrupted "
+                 + "transcription item(s) until replacement replay is ready")
         }
         if replay.replayedChunks > 0 {
             jlog("Jarvis realtime [\(speaker.rawValue)] retained \(replay.replayedChunks) "
