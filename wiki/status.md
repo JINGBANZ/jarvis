@@ -64,7 +64,8 @@ thin OS shell, verified by the smoke run.
 
 - `Sources/JarvisCore/Audio/` — PCM + utterance buffering (`PCMBuffer`, `UtteranceBuffer`, `PCM16Framer`, `AudioDownmix`).
 - `Sources/JarvisCore/Transcription/` — realtime session wire contract + rolling transcript (`RealtimeSession`, `Transcript`, `NoiseReduction`).
-- `Sources/JarvisCore/Coach/` — the event loop and brain clients: `CoachDriver`, `OpenAIBrainClient`, `CLIBrainClient` + `AgentCLIProcessRunner` + `AgentCLIDetector` (the local Claude Code / Codex brain providers), `RetryingBrainClient`, `ToolDefs`, `BrainProvider`, `BrainModelCatalog` (default `gpt-5.5`), `ReasoningEffort`.
+- `Sources/JarvisCore/Brain/` — the LLM integration: the `BrainClient` contract (`Brain`), `OpenAIBrainClient`, `CLIBrainClient` + `AgentCLIProcessRunner` + `AgentCLIDetector` (the local Claude Code / Codex brain providers), `RetryingBrainClient`, `BrainProvider`, `BrainModelCatalog` (default `gpt-5.5`), `ReasoningEffort`.
+- `Sources/JarvisCore/Coach/` — the event loop: `CoachDriver`, `CoachHistory` (client-managed session memory), `ToolDefs` (coach tools + system prompt).
 - `Sources/JarvisCore/Triggers/` — turn/silence trigger detection + silence backoff (`Trigger`, `SilenceBackoff`).
 - `Sources/JarvisCore/Screen/` — the model-triggered screen-capture tool contract + window-scoped capture logic (`ScreenCapture`, `ScreenSnapshot`, `FrontWindowSelector`, `RecognizedTextLayout`).
 - `Sources/JarvisCore/Overlay/` — overlay text model + length-proportional timing + fan-out (`OverlayRendering`, `OverlayTiming`, `OverlayAppearance`, `BroadcastOverlay`).

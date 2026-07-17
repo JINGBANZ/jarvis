@@ -190,10 +190,10 @@ from an old entire-display selection never steers them.
 | `Sources/JarvisApp/Settings/DisplaySection.swift` | Capture-scope tab (scope + display in one dropdown) |
 | `Sources/JarvisApp/Settings/NSScreen+DisplayTitles.swift` | Display naming for the dropdown's entire-display entries |
 | `Sources/JarvisApp/Settings/ActivitySection.swift` | Activity tab |
-| `Sources/JarvisCore/Coach/BrainProvider.swift` | The three providers |
-| `Sources/JarvisCore/Coach/AgentCLIDetector.swift` | CLI auto-detection (binary + auth markers) |
-| `Sources/JarvisCore/Coach/BrainModelCatalog.swift` | Curated per-provider model lists (`BrainModel`) |
-| `Sources/JarvisCore/Coach/ReasoningEffort.swift` | The four effort levels |
+| `Sources/JarvisCore/Brain/BrainProvider.swift` | The three providers |
+| `Sources/JarvisCore/Brain/AgentCLIDetector.swift` | CLI auto-detection (binary + auth markers) |
+| `Sources/JarvisCore/Brain/BrainModelCatalog.swift` | Curated per-provider model lists (`BrainModel`) |
+| `Sources/JarvisCore/Brain/ReasoningEffort.swift` | The four effort levels |
 | `Sources/JarvisCore/Config/BrainPreferences.swift` | UserDefaults persistence + validation |
 | `Sources/JarvisCore/Config/ScreenCapturePreferences.swift` | Capture scope + display persistence + clamping |
 | `Sources/JarvisCore/Screen/ScreenCapture.swift` | `ScreenCaptureCLI` — reads the selection at capture time, falls back to the main display |
