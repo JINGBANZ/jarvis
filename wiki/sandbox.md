@@ -89,6 +89,17 @@ Narrow and explicit. Data leaves the machine only via:
 - **Audio → `gpt-4o-transcribe`** on the OpenAI Realtime API (continuous, for transcription).
 - **Screenshot + transcript window → `gpt-5.5`** — and *only* when the model triggers a
   `capture_screen` and/or a coaching turn. No screen content leaves the machine on idle turns.
+- **With a local CLI brain provider selected** ([architecture.md §4](./architecture.md#local-cli-brain-providers)),
+  the same brain payload instead goes to the `claude` / `codex` subprocess, which sends it to
+  Anthropic / OpenAI under the *user's own signed-in account* and that vendor's consumer retention
+  terms. The subprocess runs with the CLI's own privileges (Codex is invoked `--sandbox read-only`;
+  Claude with every built-in tool disabled, cwd pinned to the session dir), and **no user-configured
+  MCP server is loaded** in a Jarvis turn (`--strict-mcp-config` / `-c mcp_servers={}`) — the coach
+  must never see or trigger that tool surface. This trusts a CLI the user already runs on this
+  machine, not widening what Jarvis itself may touch. The CLIs run with
+  **session persistence off** (`--no-session-persistence` / `--ephemeral`), so they keep no local
+  transcript of the coaching conversation in `~/.claude` / `~/.codex` — the owner-only session dir
+  stays the only on-disk copy. Transcription audio still goes to the OpenAI Realtime API regardless.
 
 There is **no rolling screen/audio archive and no "recall" database** — Jarvis keeps no continuous
 recording of what it sees or hears. The **raw captured streams stay transient**: mic audio streams to

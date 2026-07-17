@@ -77,9 +77,9 @@ then just run the script) for packaging without CI. Distributed builds run on Ap
 - **Always launch with `open ./Jarvis.app`**, never the bare binary — running it from a shell makes
   TCC attribute the grant to the *terminal*, so the app reports Microphone/Screen Recording as
   "denied" even when granted. Pass flags with `open ./Jarvis.app --args …`.
-- Jarvis does **not** auto-start: set the OpenAI key once via the menu bar ("Set OpenAI API Key…",
-  saved to an owner-only file; `OPENAI_API_KEY` is a headless fallback), then **Start / Stop** from the
-  menu. The icon shows two states only: ⚪️ stopped, 🟢 running.
+- Jarvis does **not** auto-start: set the OpenAI key once (Settings → Brain, saved to an owner-only
+  file; `OPENAI_API_KEY` is a headless fallback), then **Start / Stop** from the menu. The icon shows
+  two states only: ⚪️ stopped, 🟢 running.
 
 ## The live activity viewer
 

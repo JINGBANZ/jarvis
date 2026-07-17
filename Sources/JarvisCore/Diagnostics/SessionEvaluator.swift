@@ -173,6 +173,11 @@ public struct SessionEvaluator: Sendable {
             // The tool loop replays reasoning items verbatim (opaque ids, possibly a large
             // `encrypted_content` blob) — no audit signal in the bytes, so stub them like images.
             return "assistant reasoning (replayed verbatim — \(compact(dict).count) chars)"
+        // CLI-provider records (`CLIBrainClient`): plain content blocks, images already stubbed.
+        case "text":
+            return "text: \(dict["text"] as? String ?? "")"
+        case "image":
+            return "image: \(dict["image"] as? String ?? "(redacted)")"
         default:
             return compact(dict)
         }
@@ -184,6 +189,7 @@ public struct SessionEvaluator: Sendable {
         var header = "response:"
         if let status = dict["status"] as? String { header += " status=\(status)" }
         if let details = dict["incomplete_details"] { header += " incomplete_details=\(compact(details))" }
+        if let exit = dict["exitCode"] as? Int { header += " exit=\(exit)" }   // CLI-provider record
         lines.append(header)
         for item in dict["output"] as? [[String: Any]] ?? [] {
             switch item["type"] as? String {
@@ -200,6 +206,11 @@ public struct SessionEvaluator: Sendable {
                 lines.append("  → \(compact(item))")
             }
         }
+        // CLI-provider records carry the reply as one string plus the CLI's own envelope metadata
+        // (usage/duration for claude) instead of a Responses `output` array.
+        if let reply = dict["reply"] as? String, !reply.isEmpty { lines.append("  → text: \(reply)") }
+        if let cli = dict["cli"] { lines.append("  cli: \(compact(cli))") }
+        if let stderr = dict["stderr"] as? String, !stderr.isEmpty { lines.append("  stderr: \(stderr)") }
         // Usage is the quantitative core of the audit: `input_tokens_details.cached_tokens` vs
         // `input_tokens` is the prompt-cache hit rate, per call.
         if let usage = dict["usage"] { lines.append("  usage: \(compact(usage))") }

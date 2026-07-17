@@ -38,6 +38,42 @@ import Foundation
         #expect(BrainPreferences(defaults: d).effort == .default)
     }
 
+    @Test func providerDefaultsToOpenAIAndRoundTrips() {
+        let d = freshDefaults()
+        #expect(BrainPreferences(defaults: d).provider == .openAI)
+        BrainPreferences(defaults: d).provider = .claudeCode
+        #expect(BrainPreferences(defaults: d).provider == .claudeCode)
+    }
+
+    @Test func unknownStoredProviderFallsBackToOpenAI() {
+        let d = freshDefaults()
+        d.set("gemini-cli", forKey: "brain.provider")
+        #expect(BrainPreferences(defaults: d).provider == .openAI)
+    }
+
+    @Test func eachProviderRemembersItsOwnModel() {
+        let d = freshDefaults()
+        let p = BrainPreferences(defaults: d)
+        p.setModel(BrainModelCatalog.model(id: "gpt-5.4-mini", for: .openAI)!, for: .openAI)
+        p.setModel(BrainModelCatalog.model(id: "opus", for: .claudeCode)!, for: .claudeCode)
+        // Switching providers keeps each one's model; the OpenAI model stays under the legacy
+        // "brain.model" key so pre-provider installs keep their selection.
+        #expect(p.model(for: .openAI).id == "gpt-5.4-mini")
+        #expect(p.model(for: .claudeCode).id == "opus")
+        #expect(d.string(forKey: "brain.model") == "gpt-5.4-mini")
+        p.provider = .claudeCode
+        #expect(p.model.id == "opus")
+    }
+
+    @Test func modelStoredForOneProviderNeverLeaksToAnother() {
+        let d = freshDefaults()
+        let p = BrainPreferences(defaults: d)
+        p.setModel(BrainModelCatalog.model(id: "haiku", for: .claudeCode)!, for: .claudeCode)
+        // A claude alias is not a valid codex/openai model — those providers stay on their defaults.
+        #expect(p.model(for: .openAI) == BrainModelCatalog.default)
+        #expect(p.model(for: .codexCLI) == BrainModelCatalog.defaultModel(for: .codexCLI))
+    }
+
     @Test func modelAndEffortPersistIndependently() {
         // The effort is set once and applies to whichever model is selected: changing the model must
         // not disturb the stored effort.

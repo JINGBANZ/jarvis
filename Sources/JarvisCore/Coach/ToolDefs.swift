@@ -23,6 +23,7 @@ public let staySilentTool = ToolDef(
 
 public let coachTools: [ToolDef] = [captureScreenTool, speakTool, staySilentTool]
 
+
 /// The coach system prompt — the only place response behavior is governed (no code-side guardrail).
 public let coachSystemPrompt = """
 You are Jarvis, a calm, sharp LeetCode coach sitting beside the user while they solve a problem.

@@ -5,11 +5,42 @@ import Foundation
 /// named failure; dynamic copy composed at the failure site (e.g. a capture reason) is passed through.
 /// Call sites reference these so the loudness policy is centralized and unit-testable.
 public extension UserFacingError {
-    /// No API key on Start. The session never comes up, so this is fatal.
+    /// No API key on Start. Realtime voice transcription always runs on the OpenAI key — whichever
+    /// brain provider is selected — so the session never comes up: fatal.
     static var noAPIKey: UserFacingError {
         .init(title: "No OpenAI API key set",
-              message: "Open \u{201C}Settings\u{2026}\u{201D} from the Jarvis menu, paste your key, then press Start.",
+              message: "Voice transcription needs an OpenAI API key even when the brain runs on a local CLI. Open \u{201C}Settings\u{2026}\u{201D} \u{2192} Brain, paste your key, then press Start.",
               severity: .fatal)
+    }
+
+    /// The selected brain provider's CLI isn't installed (or was removed since it was selected).
+    /// A *preflight* failure: the Start is refused before anything is torn down, so it must alert
+    /// without stopping — an in-place restart (e.g. a key re-save while running) that trips this
+    /// guard has a live session that must survive.
+    static func brainCLIMissing(provider: String) -> UserFacingError {
+        .init(title: "\(provider) not found",
+              message: "The \(provider) command-line tool isn't installed on this Mac. Install and sign in to it, or switch the brain provider back to the OpenAI API in Settings \u{2192} Brain.",
+              severity: .warning)
+    }
+
+    /// The selected CLI is installed but definitively signed out (Codex: `auth.json` is its only
+    /// credential store, so an absent marker is authoritative). Every brain turn would fail, so
+    /// refuse the Start instead of opening a pipeline that can never coach. Same preflight
+    /// semantics as `brainCLIMissing`: alert, but never stop a session that's already running.
+    static func brainCLINotSignedIn(provider: String) -> UserFacingError {
+        .init(title: "\(provider) isn't signed in",
+              message: "Sign in by running the \(provider) command once in Terminal, or switch the brain provider in Settings \u{2192} Brain, then press Start again.",
+              severity: .warning)
+    }
+
+    /// The selected CLI is installed but its sign-in couldn't be confirmed (Claude Code may keep
+    /// credentials only in the macOS Keychain, which Jarvis deliberately doesn't probe). A false
+    /// negative is possible, so this is a degraded notice, not a Start blocker — but it makes a
+    /// never-working brain visible in the activity log instead of silent.
+    static func brainCLISignInUnconfirmed(provider: String) -> UserFacingError {
+        .init(title: "\(provider) sign-in unconfirmed",
+              message: "Couldn't confirm \(provider) is signed in \u{2014} coaching turns may fail. If they do, run the CLI once in Terminal to sign in, then Stop and Start.",
+              severity: .degraded)
     }
 
     /// Audio capture couldn't be built or started. `reason` is the human-readable cause from the capture
