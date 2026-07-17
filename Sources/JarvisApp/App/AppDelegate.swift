@@ -319,12 +319,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         themTranscriber.onTerminalFailure = onThemTerminalFailure
 
         // One-clock capture + echo cancellation: a single aggregate device (mic + system tap) feeds
-        // the cleaned mic to the "me" socket and the raw system audio to the "them" socket, with AEC3
-        // run inside its IOProc. If the device can't be built, the whole capture is gone, so treat it
-        // as a full (mic-side) terminal failure.
+        // the cleaned mic to the "me" socket and the sample-preserving system timeline to the "them"
+        // socket, with AEC3 run inside its IOProc. If the device can't be built, the whole capture is
+        // gone, so treat it as a full (mic-side) terminal failure.
         let capture = AggregateEchoCapture(
-            onMicClean: { [weak transcriber] data in transcriber?.sendAudio(data) },
-            onSystem: { [weak themTranscriber] data in themTranscriber?.sendAudio(data) })
+            onMicCaptured: { [weak transcriber] sequence, samples, capturedAt in
+                transcriber?.recordCapturedAudio(
+                    sequenceNumber: sequence, sampleCount: samples, capturedAt: capturedAt)
+            },
+            onSystemCaptured: { [weak themTranscriber] sequence, samples, capturedAt in
+                themTranscriber?.recordCapturedAudio(
+                    sequenceNumber: sequence, sampleCount: samples, capturedAt: capturedAt)
+            },
+            onMicClean: { [weak transcriber] data, sequence, capturedAt in
+                transcriber?.sendAudio(
+                    data, sequenceNumber: sequence, capturedAt: capturedAt)
+            },
+            onSystem: { [weak themTranscriber] data, sequence, capturedAt in
+                themTranscriber?.sendAudio(
+                    data, sequenceNumber: sequence, capturedAt: capturedAt)
+            })
         capture.onUnavailable = { [errorReporter] reason in
             errorReporter.report(.captureFailed(reason: reason))
         }

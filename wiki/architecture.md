@@ -61,10 +61,11 @@ moments the model judges worthwhile.
    cooldown, rate cap, or wake-word gate. Whether to speak (and whether the user just addressed
    Jarvis) is the model's call, governed by the system prompt; the only hard gates are the user's
    Start/Stop and the **substance gate** (`TurnSubstance`): a turn-end whose delta is pure
-   back-channel filler ("Hmm", "嗯" — from *either* speaker) or empty is skipped without a
-   request. The gate is speaker-neutral by design: an interviewer question is substance and may
-   draw a proactive tip for the user. Skipped lines ride along on the next substantive turn;
-   silence checks and the hint hotkey always go through.
+   back-channel filler ("Hmm", "嗯") or empty is skipped without a request. Classification is
+   speaker-aware only where conversational meaning demands it: a short interviewer rejection such
+   as "No" is substantive, even though the same user-side fragment is normally filler. Interviewer
+   questions remain first-class and may draw a proactive tip. Skipped lines ride along on the next
+   substantive turn; silence checks and the hint hotkey always go through.
 3. It calls **`gpt-5.5`** with the coach system prompt, the session memory (`CoachHistory`), the
    new transcript delta, the timing context (seconds silent, session elapsed), and the tool set
    `[capture_screen, speak, stay_silent]`. The timing is what lets the model tell "thinking" from
@@ -117,10 +118,10 @@ plugins ship only with full Xcode, and Jarvis builds **CLT-only** (see
 
 | Component | Responsibility | Built on (borrowed) |
 |---|---|---|
-| **AggregateEchoCapture** | The whole capture path: one **private Core Audio aggregate device** = the built-in mic (`me`, clock master) + a system-output **process tap** (`them`, drift-compensated onto the mic's clock). A single IOProc delivers both sample-synced at the device's **native rate** — the one-clock case AEC3 needs; the capture **reads that rate and resamples mic+tap up to 48 kHz** for AEC3 (a no-op when the device is already 48 kHz). So **any input device works** — built-in, USB, 44.1 kHz gear, or AirPods (Bluetooth HFP at 16/24 kHz) — instead of the old hard 48 kHz pin that silently failed to start on Bluetooth mics. Inside the callback it runs AEC3 (tap = far reference, mic = near), removing the other side's speaker bleed from the mic *before* transcription — no headphones, and double-talk works (measured 30–50 dB cancellation). Then downsamples to 24 kHz: cleaned mic → `me` socket, raw tap → `them` socket. Replaces the old separate `AVAudioEngine` mic + `SCStream`. | Core Audio (`AudioHardwareCreateProcessTap`, private aggregate device, drift compensation) + `AVAudioConverter` resampling + WebRTC **AEC3**. |
+| **AggregateEchoCapture** | The whole capture path: one **private Core Audio aggregate device** = the built-in mic (`me`, clock master) + a system-output **process tap** (`them`, drift-compensated onto the mic's clock). A single IOProc delivers both sample-synced at the device's **native rate** — the one-clock case AEC3 needs; the capture **reads that rate and resamples mic+tap up to 48 kHz** for AEC3 (a no-op when the device is already 48 kHz). So **any input device works** — built-in, USB, 44.1 kHz gear, or AirPods (Bluetooth HFP at 16/24 kHz) — instead of the old hard 48 kHz pin that silently failed to start on Bluetooth mics. Inside the callback it runs AEC3 (tap = far reference, mic = near), removing the other side's speaker bleed from the mic *before* transcription — no headphones, and double-talk works (measured 30–50 dB cancellation). The untouched resampled tap remains the `them` source while a separate padded/truncated copy aligns AEC; wire delivery is serialized off the realtime IOProc. Then both sides downsample to 24 kHz. Replaces the old separate `AVAudioEngine` mic + `SCStream`. | Core Audio (`AudioHardwareCreateProcessTap`, private aggregate device, drift compensation) + `AVAudioConverter` resampling + WebRTC **AEC3**. |
 | **WebRTCEchoCanceller** | AEC3 echo canceller driven at 48 kHz on 10 ms frames inside the capture IOProc; far reference first, then the mic cleaned in place. | WebRTC **AEC3** (`webrtc-audio-processing`), vendored static + zero-dylib via `scripts/build-aec.sh`. |
 | **ErrorReporter** | The single funnel for user-facing failures. Severity on a Foundation-only `UserFacingError` (in Core) decides the response — `fatal` pops an `NSAlert` and tears the session down, `warning` alerts without touching a running session (preflight refusals), `degraded` is logged only — so no startup failure is ever silent. The only place an *error* `NSAlert` is raised (confirmation prompts aside); diagnostics stay in `JarvisLog`. | AppKit (`NSAlert`). |
-| **Transcriber** | Maintain a rolling, speaker-labeled, **timestamped** transcript; emit turn-end events and backing-off silence checks (with quiet duration). Two instances run in parallel — one per side — tagging lines `me`/`them` into one shared transcript. A socket is ready only after the server acknowledges its configuration; active ping/pong probes, send/receive errors, and startup timeouts all drive the same reconnect path. | `gpt-4o-transcribe` (Realtime API; tuned `server_vad`). |
+| **Transcriber** | Maintain a rolling, speaker-labeled, **spoken-time timestamped** transcript; emit turn-end events and backing-off silence checks (with quiet duration). Two instances run in parallel — one per side — tagging lines `me`/`them` into one shared transcript. A per-`item_id` ledger reconciles out-of-order delta/completed/failed/VAD events, salvages streamed text, and emits an explicit context-gap marker when a detected utterance cannot be recovered. A privacy-preserving continuity witness records content-free capture/delivery/socket/server checkpoints and locally derived activity, so the session log can locate a future gap without retaining PCM. A socket is ready only after the server acknowledges its configuration; active ping/pong probes, send/receive errors, and startup timeouts all drive the same reconnect path. | `gpt-4o-transcribe` (Realtime API; tuned `server_vad`). |
 | **CoachDriver** | The event loop. On every substantive trigger (plus every silence check and hint keypress), call the brain with the session memory + transcript delta + timing context and tools, route tool calls, and compact the memory when it grows long. No cooldown/rate cap — restraint is the model's; the only client-side skip is the filler-only turn-end gate (`TurnSubstance`). | `gpt-5.5` (vision + tool-use) with `gpt-5.4-mini` for memory summaries — or a local Claude Code / Codex CLI on the user's subscription (see [§4 Local CLI brain providers](#local-cli-brain-providers)). |
 | **ScreenTool** | Fulfill `capture_screen`: silently shoot the **active window** (default scope) — the window-server frontmost, on whichever display, clean even when partially covered — and attach an **on-device OCR** of the shot to the tool result so the model reads exact text instead of pixels. Falls back to a full-display capture (no OCR) — the Settings-chosen display in Entire-display scope, the main display when no window is eligible; the overlay window is excluded either way. See [settings-window.md](./settings-window.md#capture-scope). | macOS `screencapture` CLI + Apple Vision (`VNRecognizeTextRequest`). |
 | **Overlay Caption** | Render `speak` output: up to ~3 short lines (model-split), shown one at a time and queued so a newer tip never cuts off the current one; non-activating, always-on-top, excluded from capture. Switchable from Settings — **off by default**; when off, tips are suppressed. | AppKit NSPanel; `OverlayCaptionPanel`. |
@@ -260,6 +261,11 @@ streamed (one buffered request; the overlay just paces the display).
 
 ### Resilience
 
+The capture edge keeps two system-audio representations for different contracts: transcription
+preserves every real tap sample and pads only a short/empty callback's missing silence so Realtime
+VAD keeps advancing; AEC receives a separate exact mic-length padded/truncated reference. Neither
+path disables AEC or changes the configured Realtime noise-reduction profile.
+
 The always-on legs are built to survive transient failure rather than die on it:
 
 - **The realtime transcription socket *will* drop** (network blips, server resets, the ~60-min
@@ -270,9 +276,25 @@ The always-on legs are built to survive transient failure rather than die on it:
   startup-timeout, and liveness failures all enter one idempotent reconnect path. Each replacement
   socket has a generation so stale callbacks cannot damage the new one, and diagnostics label the
   `me`/`them` side, socket generation, server session, and current macOS network-path summary. While
-  reconnecting, audio is **buffered** (`PCMBuffer`, capped at `maxBufferedAudioSeconds`, oldest
-  evicted) and **flushed into the new session** — a mid-sentence drop no longer loses the user's
-  words. Reconnect uses capped exponential backoff.
+  reconnecting, audio remains in one **transactional FIFO plus recovery tail** (`PCMBuffer`, capped at
+  `maxBufferedAudioSeconds`). Exactly one oldest chunk is claimed at a time. A successful URLSession
+  callback moves it into the in-memory tail rather than deleting it, because Realtime intentionally
+  sends no confirmation for `input_audio_buffer.append`; only server VAD/transcription audio-clock
+  progress retires a safe prefix. On failure, the unconfirmed tail is requeued ahead of audio captured
+  during reconnect backoff. This closes the ready-transition, asynchronous-send, and idle half-open
+  loss edges; deliberate cap eviction is logged and carried as an explicit context warning. Within a
+  healthy socket, streamed transcript deltas survive a failed or missing terminal event; an
+  unrecoverable detected utterance becomes an explicit context-gap line instead of disappearing.
+  Sequence, sample, timestamp, and socket-generation checkpoints cover the capture, delivery,
+  WebSocket attempt/completion, and server-event boundaries. Periodic content-free summaries and
+  typed anomalies show which boundary stopped advancing; sustained local activity without a server
+  speech event leaves an explicit warning for the next real coach turn. This evidence diagnoses loss
+  but cannot reconstruct words that never reached transcription. VAD-only start/stop events do not
+  restart silence checks without contributing context. Pending items are finalized by bounded
+  stopped/active deadlines. On a recoverable socket failure, their old server IDs are cleared and
+  their retained PCM is transcribed by the replacement session instead of first emitting a partial
+  or gap that the replay would duplicate. Stale speech state therefore cannot suppress silence
+  coaching after reconnect. Reconnect uses capped exponential backoff.
 - **The brain call** is single-flighted (a turn can't double-speak) and runs under a generous request
   timeout — a hang backstop set well above the reasoning-turn tail, so a slow turn is waited out, not
   abandoned. Because client-owned memory makes every request self-contained and tool effects happen
@@ -297,7 +319,9 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
 - **Built and run in the main `forrest` account inside a git worktree** (recoverability). The
   separate-restricted-account requirement is waived for the personal build; see [sandbox.md](./sandbox.md).
 - **Egress is narrow and explicit:** audio to `gpt-4o-transcribe`; a screenshot + transcript window
-  to `gpt-5.5` *only when the model triggers a capture/response*. The only screen-/audio-derived data
+  to `gpt-5.5` *only when the model triggers a capture/response*. The audio witness persists only
+  counters, sequence/sample metadata, timestamps, socket generations, server audio-clock values, and
+  a local activity bit in the owner-only session log — never PCM or recovered words. The only screen-/audio-derived data
   written to **local** disk is the owner-only, bounded per-session **activity log** (spoken tips,
   transcribed lines, the screenshots the model saw); raw mic audio and the live transcript are never
   archived. Requests are sent `store:true`, so what the model saw does remain inspectable (and
