@@ -47,7 +47,7 @@ public enum TurnSubstance {
         if lower.contains("jarvis") { return true }
         if lower.contains("?") || lower.contains("？") { return true }
 
-        let collapsed = normalize(lower)
+        let collapsed = normalize(line)
 
         if collapsed.isEmpty { return false }              // pure punctuation / noise
         if fillers.contains(collapsed) { return false }    // closed-class back-channel
