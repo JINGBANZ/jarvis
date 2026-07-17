@@ -116,16 +116,17 @@ private func speakResponseBody(arguments: String) -> Data {
     }
 
     /// `strict:true` makes malformed `speak` arguments unlikely, but the decode must still degrade
-    /// gracefully to an EMPTY `lines` array (never nil/throw/dropped call) for every off-contract
-    /// shape: a missing key, a non-array value, an explicitly empty array, or broken JSON. Pin that
-    /// fallback so a future refactor can't silently change it.
-    @Test func speakDecodeFallsBackToEmptyLinesOnOffContractArguments() async throws {
-        for args in [#"{}"#, #"{"lines":"hi"}"#, #"{"lines":[]}"#, "not json"] {
+    /// gracefully — and an off-contract shape (missing key, non-array value, empty array, broken
+    /// JSON) is DROPPED, never accepted as a speak with empty lines: an empty overlay would still
+    /// count as a spoken turn (history, counter). The driver treats the empty tool-call list as
+    /// silence. Pin that fallback so a future refactor can't silently change it.
+    @Test func speakDecodeDropsOffContractArgumentsAsSilence() async throws {
+        for args in [#"{}"#, #"{"lines":"hi"}"#, #"{"lines":[]}"#, #"{"lines":["  "]}"#, "not json"] {
             let body = speakResponseBody(arguments: args)
             let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
                                            send: { _ in (body, http(200)) })
             let resp = try await client.respond(messages: [.user("hi")], tools: coachTools)
-            #expect(resp.toolCalls == [.speak(callId: "c", lines: [])], "args=\(args)")
+            #expect(resp.toolCalls.isEmpty, "args=\(args)")
         }
     }
 

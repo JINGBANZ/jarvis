@@ -3,6 +3,7 @@ import JarvisCore
 
 /// The single funnel for user-facing failures. Every error in the app is reported here; severity
 /// decides the response — `.fatal` pops a modal alert AND tears the session down (`onFatal`),
+/// `.warning` pops the alert but leaves any running session untouched (preflight failures),
 /// `.degraded` is logged only. The only place an *error* `NSAlert` is raised (confirmation prompts,
 /// e.g. ActivityViewer's clear-history, are a separate concern and don't route here).
 ///

@@ -132,10 +132,13 @@ Then:
    `open`, never the bare binary, or macOS misattributes the permission grants and they look "denied".
 2. **Grant Microphone and Screen Recording** when prompted on first run (System Settings → Privacy &
    Security). They persist afterward.
-3. **Set your OpenAI API key** via the menu bar → **"Set OpenAI API Key…"** (saved to an owner-only
-   file on this Mac; an `OPENAI_API_KEY` env var works as a headless fallback). Upgrading from an
-   older build that used the Keychain? Re-paste your key once (the file starts empty); you can delete
-   the orphaned Keychain entry with `security delete-generic-password -s com.jarvis.coach`.
+3. **Set your OpenAI API key** via the menu bar → **Settings… → Brain** (saved to an owner-only
+   file on this Mac; an `OPENAI_API_KEY` env var works as a headless fallback). The key is always
+   needed — voice transcription runs on it — even if you point the brain at a locally installed
+   Claude Code / Codex CLI on the same tab (auto-detected; billed to that subscription instead).
+   Upgrading from an older build that used the Keychain? Re-paste your key once (the file starts
+   empty); you can delete the orphaned Keychain entry with
+   `security delete-generic-password -s com.jarvis.coach`.
 4. **Start / Stop** coaching from the menu bar. Jarvis does **not** auto-start. The icon shows the
    only two states: **⚪️ stopped** and **🟢 running**.
 

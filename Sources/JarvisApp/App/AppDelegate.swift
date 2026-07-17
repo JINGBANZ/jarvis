@@ -48,6 +48,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// unwinding when Stop → Start rotates sessions must record into the session that made it, not
     /// contaminate the new session's audit data.
     private var sessionTraffic: BrainTrafficLog?
+    /// The current session's log directory (set by `beginNewSession`) — also where `CLIBrainClient`
+    /// materializes screenshots for a CLI brain, keeping all screen-derived bytes in one owner-only place.
+    private var currentSessionDir: URL?
     /// Stops whose cancelled turns haven't finished unwinding yet. Cancellation only *requests* the
     /// stop — an in-flight brain request unwinds asynchronously and records its final traffic line on
     /// the way out — so a just-stopped session isn't evaluable until its drain completes, or a quick
@@ -76,7 +79,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // it always uses the current key/model; its own traffic is NOT recorded (`traffic` stays nil)
         // — the audit must not pollute the session it audits.
         activityViewer.makeEvaluator = { [weak self] in
-            guard let self, let key = self.secrets.apiKey(), !key.isEmpty else { return nil }
+            guard let self else { return nil }
+            let provider = self.brainPreferences.provider
+            if provider.usesLocalCLI {
+                guard let cli = AgentCLIDetector().detect(provider) else { return nil }
+                let brain = CLIBrainClient(provider: provider, executable: cli.executableURL,
+                                           model: self.brainPreferences.model(for: provider).id,
+                                           reasoningEffort: ReasoningEffort.high.rawValue,
+                                           workDirectory: self.currentSessionDir ?? self.logDirectory(),
+                                           timeout: 600)   // a big session transcript takes minutes, not seconds
+                return SessionEvaluator(brain: brain)
+            }
+            guard let key = self.secrets.apiKey(), !key.isEmpty else { return nil }
             let brain = OpenAIBrainClient(apiKey: key, model: self.brainPreferences.model.id,
                                           reasoningEffort: ReasoningEffort.high.rawValue,
                                           timeout: 300,   // a big session transcript takes minutes, not seconds
@@ -107,11 +121,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menuBar = MenuBarController()
 
-        // Unified Settings window: API key + overlay appearance + the activity log. A pasted key is
-        // stored but does not auto-start; restart only if already running, reflecting the real
-        // outcome back into the menu state.
+        // Unified Settings window: brain (provider + model + API key) + overlay appearance + the
+        // activity log. A pasted key is stored but does not auto-start; restart only if already
+        // running, reflecting the real outcome back into the menu state.
         let sections: [SettingsSection] = [
-            APIKeySection(store: secretFile, onKeySaved: { [weak self] _ in
+            BrainSection(preferences: brainPreferences, detector: AgentCLIDetector(),
+                         keyStore: secretFile, onKeySaved: { [weak self] _ in
                 guard let self, self.transcriber != nil else { return }
                 // Re-saving a key while running only re-applies it to the pipeline — it is NOT a new
                 // coaching run, so keep the current session (don't rotate logs). Session rotation is
@@ -120,7 +135,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }),
             OverlaySection(appearance: appearance, caption: overlayCaption, box: overlayBox),
             DisplaySection(preferences: screenPreferences),
-            BrainModelSection(preferences: brainPreferences),
             ActivitySection(viewer: activityViewer),
         ]
         settingsWindow = SettingsWindow(sections: sections)
@@ -151,7 +165,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Build the brain + driver and start the transcription pipeline. Returns `false` (and stays
-    /// stopped) if no API key is available yet.
+    /// stopped) if no API key is available yet (transcription always needs it), or if the selected
+    /// brain provider's CLI is missing.
     ///
     /// `freshSession` is true for a user-initiated Start (rotate to a fresh session + logs) and
     /// false for an in-place restart that only re-applies a setting — e.g. saving a new API key while
@@ -162,6 +177,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             jlog("Jarvis: can't start — no API key.")
             errorReporter.report(.noAPIKey)
             return false
+        }
+        // A CLI brain provider's binary must exist before anything is torn down — a failed Start
+        // must leave the app exactly as it was.
+        let brainProvider = brainPreferences.provider
+        var brainCLI: DetectedAgentCLI?
+        if brainProvider.usesLocalCLI {
+            guard let cli = AgentCLIDetector().detect(brainProvider) else {
+                jlog("Jarvis: can't start — \(brainProvider.displayName) CLI not found.")
+                errorReporter.report(.brainCLIMissing(provider: brainProvider.displayName))
+                return false
+            }
+            if !cli.authenticated {
+                // Codex's auth.json is its only credential store — an absent marker means signed
+                // out for real, and every brain turn would fail: don't open a pipeline that can
+                // never coach. Claude may keep credentials only in the macOS Keychain (a false
+                // negative), so it proceeds with a visible degraded notice instead of a lockout.
+                if brainProvider == .codexCLI {
+                    jlog("Jarvis: can't start — \(brainProvider.displayName) isn't signed in.")
+                    errorReporter.report(.brainCLINotSignedIn(provider: brainProvider.displayName))
+                    return false
+                }
+                errorReporter.report(.brainCLISignInUnconfirmed(provider: brainProvider.displayName))
+            }
+            brainCLI = cli
         }
         stop() // tear down any existing pipeline so we start cleanly
         // A fresh transcript for the fresh pipeline (even on an in-place restart, which rebuilds the
@@ -177,18 +216,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Both clients record their wire traffic into the session's `brain-traffic.jsonl` (enabled in
         // `beginNewSession`), tagged so the evaluation can tell the coach and summarizer apart. The
         // recording sits INSIDE the retry wrapper, so each retry attempt is its own audit-visible entry.
-        let brain = RetryingBrainClient(base:
-            OpenAIBrainClient(apiKey: key, model: brainPreferences.model.id,
-                              reasoningEffort: brainPreferences.effort.rawValue,
-                              maxOutputTokens: brainPreferences.effort.maxOutputTokens,
-                              traffic: sessionTraffic, trafficTag: "coach"))
-        // History-compaction summaries don't need the coaching model — a mini model writes a
-        // 250-word briefing a few times an hour for a fraction of the price. Text-only and quick,
-        // so low effort with a modest token cap.
-        let summarizer = OpenAIBrainClient(apiKey: key, model: "gpt-5.4-mini",
+        // History-compaction summaries don't need the coaching model — each provider's cheap tier
+        // (see `BrainModelCatalog.summarizerModelID`) writes a 250-word briefing a few times an hour.
+        let coachBase: BrainClient
+        let summarizer: BrainClient
+        if let cli = brainCLI {
+            // Brain on the local CLI: turns are billed to the user's Claude/ChatGPT subscription.
+            // Screenshots for the CLI are materialized inside the session dir (owner-only posture).
+            let sessionDir = currentSessionDir ?? logDirectory()
+            coachBase = CLIBrainClient(provider: brainProvider, executable: cli.executableURL,
+                                       model: brainPreferences.model(for: brainProvider).id,
+                                       reasoningEffort: brainPreferences.effort.rawValue,
+                                       workDirectory: sessionDir,
+                                       traffic: sessionTraffic, trafficTag: "coach")
+            summarizer = CLIBrainClient(provider: brainProvider, executable: cli.executableURL,
+                                        model: BrainModelCatalog.summarizerModelID(for: brainProvider),
+                                        reasoningEffort: ReasoningEffort.low.rawValue,
+                                        workDirectory: sessionDir,
+                                        traffic: sessionTraffic, trafficTag: "summarizer")
+        } else {
+            coachBase = OpenAIBrainClient(apiKey: key, model: brainPreferences.model.id,
+                                          reasoningEffort: brainPreferences.effort.rawValue,
+                                          maxOutputTokens: brainPreferences.effort.maxOutputTokens,
+                                          traffic: sessionTraffic, trafficTag: "coach")
+            summarizer = OpenAIBrainClient(apiKey: key, model: BrainModelCatalog.summarizerModelID(for: .openAI),
                                            reasoningEffort: ReasoningEffort.low.rawValue,
                                            maxOutputTokens: 2_048,
                                            traffic: sessionTraffic, trafficTag: "summarizer")
+        }
+        let brain = RetryingBrainClient(base: coachBase)
         // Fan each spoken tip out to both the Overlay Caption and the persistent Overlay Box.
         let overlaySink = BroadcastOverlay([overlayCaption, overlayBox])
         let driver = CoachDriver(config: config, transcript: transcript,
@@ -399,6 +455,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let traffic = BrainTrafficLog()                  // fresh recorder BOUND to this session's dir
         traffic.enable(directory: dir)                   // <dir>/brain-traffic.jsonl, 0600, fresh
         sessionTraffic = traffic
+        currentSessionDir = dir
         // Now that logging is always on, sessions accumulate every launch. Bound it: keep only the most
         // recent few (the just-created one is current, so it's always spared).
         SessionStore(base: base, current: dir).pruneToMostRecent(Self.retainedSessions)

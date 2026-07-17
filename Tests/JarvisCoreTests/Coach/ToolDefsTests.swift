@@ -31,4 +31,26 @@ import Testing
         #expect(coachSystemPrompt.contains("stay_silent"))
         #expect(!coachSystemPrompt.contains("call no tool"))
     }
+
+    // MARK: - ToolInvocation.parse (the shared wire-call mapping)
+
+    @Test func parseMapsEachCoachTool() {
+        if case .captureScreen? = ToolInvocation.parse(callId: "c", name: "capture_screen", argumentsJSON: "{}") {} else { Issue.record("capture_screen") }
+        if case .staySilent? = ToolInvocation.parse(callId: "c", name: "stay_silent", argumentsJSON: "{}") {} else { Issue.record("stay_silent") }
+        guard case .speak(_, let lines)? = ToolInvocation.parse(
+            callId: "c", name: "speak", argumentsJSON: #"{"lines":["a","b"]}"#) else {
+            Issue.record("speak"); return
+        }
+        #expect(lines == ["a", "b"])
+    }
+
+    @Test func parseRejectsUnknownToolsAndMalformedSpeak() {
+        #expect(ToolInvocation.parse(callId: "c", name: "self_destruct", argumentsJSON: "{}") == nil)
+        // speak without at least one non-blank line is a malformed call, not an empty spoken turn
+        // (the CLI protocol has no Structured Outputs guarantee).
+        for args in [#"{}"#, #"{"lines":[]}"#, #"{"lines":["", "  "]}"#, #"{"text":"hi"}"#, "junk"] {
+            #expect(ToolInvocation.parse(callId: "c", name: "speak", argumentsJSON: args) == nil,
+                    "args=\(args)")
+        }
+    }
 }

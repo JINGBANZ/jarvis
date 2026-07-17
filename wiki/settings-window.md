@@ -49,13 +49,12 @@ so an unwrapped fixed-frame view would ride the bottom edge in a taller window).
 
 | Section class | Tab title | Always present | Description |
 |---|---|---|---|
-| `APIKeySection` | "API Key" | yes | `NSSecureTextField` to paste the OpenAI key; saves to an owner-only file on "Save", restarts the pipeline if already running. |
+| `BrainSection` | "Brain" | yes | Everything that decides who answers a coaching turn, in one tab: the provider radios (OpenAI API / Claude Code / Codex CLI — see [Brain](#brain)), a per-provider model dropdown, the reasoning-effort dropdown (one global setting, mapped onto each provider's scale), and the OpenAI API-key controls (`APIKeyControls`: an `NSSecureTextField` that saves to an owner-only file and restarts the pipeline if already running). Takes effect on the next Start. |
 | `OverlaySection` | "Overlay" | yes | Two groups, one per overlay surface — **Overlay Caption** (the transient on-screen tip) and **Overlay Box** (the persistent response history). Each has a header with an On/Off toggle (an `NSSwitch` + "On"/"Off" label) and a one-line description. When a surface is **on** it also shows its Text Size + Opacity sliders (with live readouts) and a live sample, **only while the Overlay tab is selected** (`didBecomeActive`/`didResignActive`); when **off**, its sliders and sample are hidden and the layout collapses. Persists via `OverlayAppearance`. |
 | `DisplaySection` | "Screen" | yes | One dropdown — the capture scope: **Active window** (default) or one **Entire display** entry per connected display; persists via `ScreenCapturePreferences`. Applies to the next screenshot. |
-| `BrainModelSection` | "Brain" | yes | Two dropdowns — the brain (LLM) model and the reasoning effort applied to it; persists via `BrainPreferences`. Takes effect on the next Start. |
 | `ActivitySection` | "Activity" | yes | Embeds the `ActivityViewer` content view (`makeContentView()` / `teardown()`); `fillsTab == true` so the log stretches with the window. Its header carries **Evaluate** — one click sends the selected session's recorded LLM wire traffic (`brain-traffic.jsonl`) to the brain model at high effort for a context-engineering audit (`SessionEvaluator`), shown in a report window and saved as `eval-report.md` in the session dir. Only *finished* conversations qualify: the button is disabled while the selected session is the live, still-running one (a mid-session audit would judge half a story) and re-enables once Stop has drained any in-flight turn — the cancelled request's final traffic line must land before the audit reads the file. |
 
-`AppDelegate` builds the section list at launch and passes it to `SettingsWindow`. All five sections
+`AppDelegate` builds the section list at launch and passes it to `SettingsWindow`. All four sections
 are always present.
 
 ## Activation-Policy Switch
@@ -101,25 +100,45 @@ tracks intent separately from `panel.isVisible` so the setting can't desync). Th
 (`setFontSize`/`setBackgroundOpacity`/`setOpacity`) only change appearance and don't touch
 `sharingType`. See [overlay-invisibility.md](./overlay-invisibility.md).
 
-## Brain Model
+## Brain
 
-The brain (LLM) model and its reasoning effort are user-selectable, persisted through
-`BrainPreferences` (UserDefaults). Two independent dropdowns: a **Model** picker drawn from
-`BrainModelCatalog` — the curated, code-owned list of OpenAI brain models (the single source of truth,
-bumped by a one-line edit when OpenAI ships a new one) — and a **Reasoning Effort** picker over the
-fixed `ReasoningEffort` levels (None / Low / Medium / High, default Low). The effort is stored
-independently of the model, so it's set once and carries across model changes.
+The Brain tab owns the whole "who answers a coaching turn" decision, persisted through
+`BrainPreferences` (UserDefaults).
 
-Reads are validated: a persisted model id no longer in the catalog (or an unrecognized effort) falls
-back to the default rather than reaching the API. The transcription model is deliberately **not**
-here — it's a separate field and code path (`Config.transcriptionModel`). Both values are read in
-`AppDelegate.start()` when the brain client is built, so a change takes effect on the **next Start**,
-not mid-session — hence the caption on the tab.
+**Provider.** Three radios (`BrainProvider`): the **OpenAI API** (metered by the key), or a locally
+installed **Claude Code** / **Codex CLI** — in which case coaching turns are spawned as CLI
+subprocesses and billed to the user's existing Claude / ChatGPT *subscription* instead of the key
+(`CLIBrainClient`; see [architecture.md](./architecture.md#local-cli-brain-providers)). Installed
+CLIs are auto-detected by `AgentCLIDetector` — pure file probes over $PATH + the CLIs' known install
+dirs and on-disk auth markers, re-run every time the tab is shown, so no subprocess is spawned and
+switching to a detected CLI is a single click. An uninstalled CLI shows as "not installed" and is
+disabled; a detected-but-unconfirmed sign-in still selects (the auth probe is a hint — macOS
+Keychain-only credentials are invisible to it).
 
-| Setting | Default | Source of truth | UserDefaults key |
-|---|---|---|---|
-| Brain model | `gpt-5.5` | `BrainModelCatalog` | `brain.model` |
-| Reasoning effort | `low` | `ReasoningEffort` | `brain.reasoningEffort` |
+**Model + effort.** A **Model** dropdown drawn from `BrainModelCatalog` per provider (OpenAI ids for
+the API; CLI aliases like `sonnet` for the CLIs, plus a "CLI default" entry meaning "no model flag" —
+for Codex that is its built-in default, since harness runs ignore the user's codex config). Each
+provider remembers its own model. The **Reasoning
+Effort** picker (`ReasoningEffort`: None / Low / Medium / High, default Low) is stored once and
+applies uniformly to whichever provider is active — `CLIBrainClient` maps it onto each CLI's own
+scale (Claude Code `--effort`, floor `low`; Codex `model_reasoning_effort`, passed through
+unchanged), so model + effort behave the same way across all three providers.
+
+**API key.** The OpenAI key controls (`APIKeyControls`) live at the bottom of the same tab because
+the key is part of the same decision — and it stays **required regardless of provider**: realtime
+voice transcription always runs on the OpenAI Realtime API. A CLI provider moves only the brain off
+the key.
+
+Reads are validated: a persisted model id no longer in that provider's catalog (or an unrecognized
+provider/effort) falls back to the default rather than reaching the API. The transcription model is
+deliberately **not** here — it's a separate field and code path (`Config.transcriptionModel`). The
+values are read in `AppDelegate.start()` when the brain client is built, so a change takes effect on
+the **next Start**, not mid-session — hence the caption on the tab.
+
+All four selections persist via `BrainPreferences` —
+`Sources/JarvisCore/Config/BrainPreferences.swift` is the single source for the UserDefaults keys,
+defaults, and validation (the catalogs themselves live in
+`Sources/JarvisCore/Brain/BrainModelCatalog.swift`).
 
 ## Capture Scope
 
@@ -164,14 +183,16 @@ from an old entire-display selection never steers them.
 |---|---|
 | `Sources/JarvisApp/Settings/SettingsSection.swift` | Protocol definition |
 | `Sources/JarvisApp/Settings/SettingsWindow.swift` | Host window + tab view |
-| `Sources/JarvisApp/Settings/APIKeySection.swift` | API-key tab |
+| `Sources/JarvisApp/Settings/BrainSection.swift` | Brain tab: provider + model + effort + key |
+| `Sources/JarvisApp/Settings/APIKeyControls.swift` | The API-key rows embedded in the Brain tab |
 | `Sources/JarvisApp/Settings/OverlaySection.swift` | Overlay-appearance tab |
 | `Sources/JarvisApp/Settings/DisplaySection.swift` | Capture-scope tab (scope + display in one dropdown) |
 | `Sources/JarvisApp/Settings/NSScreen+DisplayTitles.swift` | Display naming for the dropdown's entire-display entries |
-| `Sources/JarvisApp/Settings/BrainModelSection.swift` | Brain model + reasoning-effort tab |
 | `Sources/JarvisApp/Settings/ActivitySection.swift` | Activity tab |
-| `Sources/JarvisCore/Coach/BrainModelCatalog.swift` | Curated model list (`BrainModel`) |
-| `Sources/JarvisCore/Coach/ReasoningEffort.swift` | The four effort levels |
+| `Sources/JarvisCore/Brain/BrainProvider.swift` | The three providers |
+| `Sources/JarvisCore/Brain/AgentCLIDetector.swift` | CLI auto-detection (binary + auth markers) |
+| `Sources/JarvisCore/Brain/BrainModelCatalog.swift` | Curated per-provider model lists (`BrainModel`) |
+| `Sources/JarvisCore/Brain/ReasoningEffort.swift` | The four effort levels |
 | `Sources/JarvisCore/Config/BrainPreferences.swift` | UserDefaults persistence + validation |
 | `Sources/JarvisCore/Config/ScreenCapturePreferences.swift` | Capture scope + display persistence + clamping |
 | `Sources/JarvisCore/Screen/ScreenCapture.swift` | `ScreenCaptureCLI` — reads the selection at capture time, falls back to the main display |

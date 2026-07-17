@@ -119,9 +119,9 @@ plugins ship only with full Xcode, and Jarvis builds **CLT-only** (see
 |---|---|---|
 | **AggregateEchoCapture** | The whole capture path: one **private Core Audio aggregate device** = the built-in mic (`me`, clock master) + a system-output **process tap** (`them`, drift-compensated onto the mic's clock). A single IOProc delivers both sample-synced at the device's **native rate** — the one-clock case AEC3 needs; the capture **reads that rate and resamples mic+tap up to 48 kHz** for AEC3 (a no-op when the device is already 48 kHz). So **any input device works** — built-in, USB, 44.1 kHz gear, or AirPods (Bluetooth HFP at 16/24 kHz) — instead of the old hard 48 kHz pin that silently failed to start on Bluetooth mics. Inside the callback it runs AEC3 (tap = far reference, mic = near), removing the other side's speaker bleed from the mic *before* transcription — no headphones, and double-talk works (measured 30–50 dB cancellation). Then downsamples to 24 kHz: cleaned mic → `me` socket, raw tap → `them` socket. Replaces the old separate `AVAudioEngine` mic + `SCStream`. | Core Audio (`AudioHardwareCreateProcessTap`, private aggregate device, drift compensation) + `AVAudioConverter` resampling + WebRTC **AEC3**. |
 | **WebRTCEchoCanceller** | AEC3 echo canceller driven at 48 kHz on 10 ms frames inside the capture IOProc; far reference first, then the mic cleaned in place. | WebRTC **AEC3** (`webrtc-audio-processing`), vendored static + zero-dylib via `scripts/build-aec.sh`. |
-| **ErrorReporter** | The single funnel for user-facing failures. Severity on a Foundation-only `UserFacingError` (in Core) decides the response — `fatal` pops an `NSAlert` and tears the session down, `degraded` is logged only — so no startup failure is ever silent. The only place an *error* `NSAlert` is raised (confirmation prompts aside); diagnostics stay in `JarvisLog`. | AppKit (`NSAlert`). |
+| **ErrorReporter** | The single funnel for user-facing failures. Severity on a Foundation-only `UserFacingError` (in Core) decides the response — `fatal` pops an `NSAlert` and tears the session down, `warning` alerts without touching a running session (preflight refusals), `degraded` is logged only — so no startup failure is ever silent. The only place an *error* `NSAlert` is raised (confirmation prompts aside); diagnostics stay in `JarvisLog`. | AppKit (`NSAlert`). |
 | **Transcriber** | Maintain a rolling, speaker-labeled, **timestamped** transcript; emit turn-end events and backing-off silence checks (with quiet duration). Two instances run in parallel — one per side — tagging lines `me`/`them` into one shared transcript. A socket is ready only after the server acknowledges its configuration; active ping/pong probes, send/receive errors, and startup timeouts all drive the same reconnect path. | `gpt-4o-transcribe` (Realtime API; tuned `server_vad`). |
-| **CoachDriver** | The event loop. On every substantive trigger (plus every silence check and hint keypress), call the brain with the session memory + transcript delta + timing context and tools, route tool calls, and compact the memory when it grows long. No cooldown/rate cap — restraint is the model's; the only client-side skip is the filler-only turn-end gate (`TurnSubstance`). | `gpt-5.5` (vision + tool-use); `gpt-5.4-mini` for memory summaries. |
+| **CoachDriver** | The event loop. On every substantive trigger (plus every silence check and hint keypress), call the brain with the session memory + transcript delta + timing context and tools, route tool calls, and compact the memory when it grows long. No cooldown/rate cap — restraint is the model's; the only client-side skip is the filler-only turn-end gate (`TurnSubstance`). | `gpt-5.5` (vision + tool-use) with `gpt-5.4-mini` for memory summaries — or a local Claude Code / Codex CLI on the user's subscription (see [§4 Local CLI brain providers](#local-cli-brain-providers)). |
 | **ScreenTool** | Fulfill `capture_screen`: silently shoot the **active window** (default scope) — the window-server frontmost, on whichever display, clean even when partially covered — and attach an **on-device OCR** of the shot to the tool result so the model reads exact text instead of pixels. Falls back to a full-display capture (no OCR) — the Settings-chosen display in Entire-display scope, the main display when no window is eligible; the overlay window is excluded either way. See [settings-window.md](./settings-window.md#capture-scope). | macOS `screencapture` CLI + Apple Vision (`VNRecognizeTextRequest`). |
 | **Overlay Caption** | Render `speak` output: up to ~3 short lines (model-split), shown one at a time and queued so a newer tip never cuts off the current one; non-activating, always-on-top, excluded from capture. Switchable from Settings — **off by default**; when off, tips are suppressed. | AppKit NSPanel; `OverlayCaptionPanel`. |
 | **Overlay Box** | A persistent window logging every `speak` tip in full, timestamped — the scrollable history of what the caption flashed one line at a time. Movable, resizable, opaque, also excluded from capture; switched on/off from Settings (**on by default**), cleared on each Start. Fed by the same `speak` call as the caption via **`BroadcastOverlay`**, which fans one `OverlayRendering.render` out to both sinks (so `CoachDriver` is unchanged). | AppKit NSPanel; `OverlayBoxPanel`. |
@@ -156,7 +156,8 @@ built-in mic.
 ### Failure surfacing — fail loud
 
 Every user-facing failure flows through one `ErrorReporter`: severity on a Foundation-only
-`UserFacingError` decides the response (`fatal` → `NSAlert` + session teardown; `degraded` →
+`UserFacingError` decides the response (`fatal` → `NSAlert` + session teardown; `warning` →
+`NSAlert` only, for preflight refusals that must not kill a live session; `degraded` →
 log only), so a startup failure can never again flip the menu green and silently revert. Per-failure
 copy and severity live in a Core **catalog** (`UserFacingError+Catalog`), the single source of truth
 for *which* failures are loud — unit-tested in Core (e.g. the system-audio degrade must stay quiet),
@@ -202,6 +203,52 @@ rather than a per-turn screenshot.
   `semantic_vad`, which is reported flaky in transcription-only mode — it can stop emitting
   `…transcription.completed` entirely). Turn-end fires on `…transcription.completed`, plus a
   client-side debounce so a brief mid-thought pause doesn't fragment one sentence into several turns.
+
+### Local CLI brain providers
+
+The brain can alternatively run through a locally installed **Claude Code** or **Codex** CLI
+(`BrainProvider`, selected in [Settings → Brain](./settings-window.md#brain)), so coaching turns are
+billed to the user's existing Claude / ChatGPT **subscription** instead of the metered API key.
+`CLIBrainClient` implements the same `BrainClient` protocol, so `CoachDriver`, the client-managed
+memory, retries, and traffic recording are all unchanged — only the transport differs:
+
+- **One stateless subprocess per turn** (`claude -p` / `codex exec`, spawned by
+  `AgentCLIProcessRunner`) — no CLI session is created, resumed, or left behind: every call is
+  self-contained (client-managed memory, same as the API path), the CLIs run with session
+  persistence off (`--no-session-persistence` / `--ephemeral`, so no transcript copy lands in
+  `~/.claude` / `~/.codex`), and the process dies with the turn — at reply, at the SIGTERM→SIGKILL
+  timeout watchdog, or **immediately when Stop cancels the turn** (task cancellation kills the pid,
+  so a cancelled turn never keeps burning quota). Since the CLI has no native function calling, the
+  `ToolDef`s are rendered as a **JSON tool protocol** — the model ends its reply with
+  `{"tool":…,"arguments":{…}}`, parsed back into the same `ToolInvocation`s (with prose/code-fence
+  tolerance, and a forced `speak` degrading to speaking the raw reply so a hotkey press never
+  silently vanishes).
+- **Every turn is one model call.** Claude takes its input as a stream-json message, so screenshots
+  ride **inline as base64 image blocks** — same call, no disk copy, no Read-tool round trip — and
+  with `--tools ""` (every built-in disabled) a turn can't go agentic at all. Codex has no inline
+  image input, so for it screenshots become 0600 files in the per-session log directory (which
+  already persists every screenshot the model sees — same data posture), attached via `-i` and
+  deleted when the run finishes; its coach turns have nothing to execute, so they're single-call in
+  practice. Codex runs `--sandbox read-only`; Claude runs with its persona replaced
+  (`--system-prompt`) and no settings sources, and the one reasoning-effort setting maps onto each
+  CLI's own scale.
+- **Installed CLIs are auto-detected** (`AgentCLIDetector`: file probes over $PATH + known install
+  dirs + on-disk auth markers — no subprocess, no Keychain prompt), so selecting one is one click.
+- **The OpenAI key stays required**: transcription always runs on the Realtime API. A CLI provider
+  moves the brain/summarizer/evaluator off the key, not the ears. **Latency is the tradeoff**,
+  though a modest one now that every turn is one model call: measured coach turns run ~2.6s (text)
+  / ~3.3s (with screenshot) on claude sonnet at low effort, ~5–8s on codex — versus the direct
+  API's sub-2s target. The invocation is kept deliberately slim (persona replaced, no settings
+  sources or personal codex config — `--ignore-user-config` — **zero MCP servers** via
+  `--strict-mcp-config` / `-c mcp_servers={}`, no built-in tools),
+  so what remains is irreducible from outside: claude's floor is ~0.7s of process overhead + model
+  time; codex's is ~4.7s even for a trivial prompt because its fixed coding-agent scaffold (a
+  built-in multi-thousand-token system prompt that `exec` offers no flag to replace) rides every
+  call. The pipeline absorbs it (single-in-flight turns coalesce; the overlay paces display). If
+  more is ever needed, the escalation is a long-lived interactive CLI process (stream-json in/out
+  with `/clear` between turns — verified to work) — worth its lifecycle complexity only for
+  claude's last ~0.7s, so it's deliberately not built; per-turn session *resume* is pointless (it
+  still pays startup per call).
 
 ### Latency
 

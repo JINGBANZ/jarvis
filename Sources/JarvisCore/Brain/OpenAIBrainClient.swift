@@ -263,18 +263,9 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
             guard let callId = item.call_id, let name = item.name else { continue }
             let args = item.arguments ?? "{}"
             raws.append(RawToolCall(id: callId, name: name, argumentsJSON: args))
-            switch name {
-            case "capture_screen":
-                invocations.append(.captureScreen(callId: callId))
-            case "speak":
-                // `strict:true` guarantees the shape: { "lines": [string, …] }. Decode it directly —
-                // the model already split the tip into overlay lines, so there's nothing to split here.
-                let lines = (try? JSONDecoder().decode([String: [String]].self,
-                                                       from: Data(args.utf8)))?["lines"] ?? []
-                invocations.append(.speak(callId: callId, lines: lines))
-            case "stay_silent":
-                invocations.append(.staySilent(callId: callId))
-            default:
+            if let invocation = ToolInvocation.parse(callId: callId, name: name, argumentsJSON: args) {
+                invocations.append(invocation)
+            } else {
                 jlog("Jarvis coach: ignoring unknown tool '\(name)'")
             }
         }
