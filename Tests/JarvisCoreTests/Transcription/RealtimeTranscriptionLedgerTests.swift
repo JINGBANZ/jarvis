@@ -31,20 +31,20 @@ import Testing
         #expect(result.text == "What is a semaphore?")
         #expect(result.spokenAt == 4.5)
         #expect(result.recoveredFromDeltas)
-        #expect(!result.isContextGap)
+        #expect(!result.isTranscriptUnavailable)
     }
 
-    @Test func failedItemWithoutUsableTextEmitsExplicitContextGap() throws {
+    @Test func failedItemWithoutUsableTextIsDiagnosticOnly() throws {
         let ledger = RealtimeTranscriptionLedger()
         ledger.recordSpeechStarted(itemID: "item", audioStartMilliseconds: 250, timelineOrigin: 7)
         ledger.recordSpeechStopped(itemID: "item", audioEndMilliseconds: 1_000)
         ledger.recordDelta(itemID: "item", delta: "...")
 
         let result = try #require(ledger.recordFailed(itemID: "item", speaker: .them))
-        #expect(result.text == RealtimeTranscriptionLedger.contextGapMarker)
+        #expect(result.text == nil)
         #expect(result.spokenAt == 7.25)
         #expect(!result.recoveredFromDeltas)
-        #expect(result.isContextGap)
+        #expect(result.isTranscriptUnavailable)
     }
 
     @Test func failedShortOrUntimedEmptyVADBlipsStaySilent() {
@@ -91,9 +91,10 @@ import Testing
         speech.recordSpeechStarted(itemID: "speech", audioStartMilliseconds: 1_000,
                                    timelineOrigin: 0)
         speech.recordSpeechStopped(itemID: "speech", audioEndMilliseconds: 1_750)
-        let gap = try #require(
+        let unavailable = try #require(
             speech.resolveStoppedItemTimeout(itemID: "speech", speaker: .them))
-        #expect(gap.isContextGap)
+        #expect(unavailable.text == nil)
+        #expect(unavailable.isTranscriptUnavailable)
     }
 
     @Test func timeoutOnlyFinalizesStoppedItemsAndLateTerminalIsIgnored() throws {
@@ -125,7 +126,7 @@ import Testing
         #expect(ledger.recordCompleted(itemID: "noise", transcript: ".", speaker: .me) == nil)
     }
 
-    @Test func longDetectedSpeechWithEmptyCompletionEmitsContextGap() throws {
+    @Test func longDetectedSpeechWithEmptyCompletionIsDiagnosticOnly() throws {
         let ledger = RealtimeTranscriptionLedger()
         ledger.recordSpeechStarted(itemID: "question", audioStartMilliseconds: 2_000,
                                    timelineOrigin: 10)
@@ -133,9 +134,9 @@ import Testing
 
         let result = try #require(ledger.recordCompleted(itemID: "question", transcript: "",
                                                         speaker: .them))
-        #expect(result.text == RealtimeTranscriptionLedger.contextGapMarker)
+        #expect(result.text == nil)
         #expect(result.spokenAt == 12)
-        #expect(result.isContextGap)
+        #expect(result.isTranscriptUnavailable)
 
         let shortNoise = RealtimeTranscriptionLedger()
         shortNoise.recordSpeechStarted(itemID: "noise", audioStartMilliseconds: 1_000,
@@ -163,7 +164,8 @@ import Testing
         let recovered = disconnected.resolveAllInterruptedItems(speaker: .them)
         #expect(recovered.map(\.itemID) == ["first", "second"])
         #expect(recovered[0].text == "first partial")
-        #expect(recovered[1].isContextGap)
+        #expect(recovered[1].text == nil)
+        #expect(recovered[1].isTranscriptUnavailable)
         #expect(!disconnected.hasPendingItems)
     }
 

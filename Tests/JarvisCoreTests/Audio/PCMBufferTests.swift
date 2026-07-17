@@ -166,7 +166,7 @@ import Testing
 
     /// A full rolling recovery tail is expected to age out its oldest, already-locally-sent chunk
     /// as fresh outage audio arrives. Only eviction of audio that has never reached a socket is an
-    /// unrecoverable continuity gap worth reporting to the coach.
+    /// unrecoverable continuity gap worth recording in diagnostics.
     @Test func reportsOverflowOnlyAfterNeverSentAudioAgesOut() throws {
         let b = PCMBuffer(maxBytes: 2)
         for sequence in 1...2 {

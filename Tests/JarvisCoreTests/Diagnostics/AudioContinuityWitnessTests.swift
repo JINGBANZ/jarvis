@@ -210,6 +210,74 @@ import Testing
         }))
     }
 
+    @Test func oneServerIntervalMatchesLocalEpisodesSplitByAQuietDip() {
+        let witness = makeWitness(sustainedActivityDuration: 0.5, serverSpeechGrace: 0.5)
+        func deliver(_ sequence: UInt64, at time: TimeInterval, amplitude: Int16) {
+            _ = witness.recordCapture(sequence: sequence, sampleCount: 480, at: time)
+            _ = witness.recordDelivery(sequence: sequence, pcm16: pcm(amplitude: amplitude),
+                                       at: time)
+        }
+
+        deliver(0, at: 0, amplitude: 1_000)
+        _ = witness.recordServerSpeech(.speechStarted, audioTimeMilliseconds: 100,
+                                       socketGeneration: 1, sessionAudioTime: 0.1,
+                                       observedAt: 0.1)
+        deliver(1, at: 0.3, amplitude: 1_000)
+        deliver(2, at: 0.6, amplitude: 1_000)
+        deliver(3, at: 1.2, amplitude: 0)
+        deliver(4, at: 1.3, amplitude: 1_000)
+        deliver(5, at: 1.6, amplitude: 1_000)
+        deliver(6, at: 1.9, amplitude: 1_000)
+        _ = witness.recordServerSpeech(.speechStopped, audioTimeMilliseconds: 2_000,
+                                       socketGeneration: 1, sessionAudioTime: 2,
+                                       observedAt: 2.1)
+
+        #expect(!witness.poll(at: 3).anomalies.contains(where: {
+            if case .localActivityUnmatched = $0 { true } else { false }
+        }))
+    }
+
+    @Test func delayedReplayResolvesEveryWarnedEpisodeItsServerIntervalCovers() {
+        let witness = makeWitness(sustainedActivityDuration: 0.5, serverSpeechGrace: 0.5)
+        var emitted: [AudioContinuityWitness.Anomaly] = []
+        func deliver(_ sequence: UInt64, at time: TimeInterval, amplitude: Int16) {
+            emitted += witness.recordCapture(sequence: sequence, sampleCount: 480,
+                                             at: time).anomalies
+            emitted += witness.recordDelivery(sequence: sequence, pcm16: pcm(amplitude: amplitude),
+                                              at: time).anomalies
+        }
+
+        deliver(0, at: 3, amplitude: 1_000)
+        deliver(1, at: 3.3, amplitude: 1_000)
+        deliver(2, at: 3.6, amplitude: 1_000)
+        deliver(3, at: 4.2, amplitude: 0)
+        deliver(4, at: 4.3, amplitude: 1_000)
+        deliver(5, at: 4.6, amplitude: 1_000)
+        deliver(6, at: 4.9, amplitude: 1_000)
+        deliver(7, at: 5.5, amplitude: 0)
+        let warnings = emitted + witness.poll(at: 6.1).anomalies
+        #expect(warnings.filter {
+            if case .localActivityUnmatched = $0 { true } else { false }
+        }.count == 2)
+
+        let startResolution = witness.recordServerSpeech(
+            .speechStarted, audioTimeMilliseconds: 3_100,
+            socketGeneration: 2, sessionAudioTime: 3.1,
+            observedAt: 7).anomalies
+        let stopResolution = witness.recordServerSpeech(
+            .speechStopped, audioTimeMilliseconds: 5_000,
+            socketGeneration: 2, sessionAudioTime: 5,
+            observedAt: 7.1).anomalies
+        let resolved = startResolution + stopResolution
+
+        #expect(resolved.filter {
+            if case .serverSpeechObservedAfterUnmatchedActivity = $0 { true } else { false }
+        }.count == 2)
+        #expect(!witness.poll(at: 8).anomalies.contains(where: {
+            if case .localActivityUnmatched = $0 { true } else { false }
+        }))
+    }
+
     @Test func speechEndingBeforeServerGraceStillProducesAnUnmatchedActivityAnomaly() {
         let witness = makeWitness(sustainedActivityDuration: 0.5, serverSpeechGrace: 0.5)
         for (sequence, time) in [(0, 0.0), (1, 0.25), (2, 0.55)] {
@@ -239,6 +307,27 @@ import Testing
         #expect(snapshot.socketGenerations[0].sendFailures == 1)
         #expect(snapshot.socketGenerations[1].sendSuccesses == 1)
         #expect(snapshot.latestSocketGeneration == 4)
+    }
+
+    @Test func reconnectGenerationCannotUnmatchAnAlreadyMatchedEpisode() {
+        let witness = makeWitness(sustainedActivityDuration: 0.5, serverSpeechGrace: 0.5)
+        for (sequence, time) in [(0, 0.0), (1, 0.3), (2, 0.6)] {
+            _ = witness.recordCapture(sequence: UInt64(sequence), sampleCount: 480, at: time)
+            _ = witness.recordDelivery(sequence: UInt64(sequence),
+                                       pcm16: pcm(amplitude: 1_000), at: time)
+        }
+        _ = witness.recordServerSpeech(.speechStarted, audioTimeMilliseconds: 0,
+                                       socketGeneration: 1, sessionAudioTime: 0,
+                                       observedAt: 0.7)
+        _ = witness.recordServerSpeech(.speechStopped, audioTimeMilliseconds: 700,
+                                       socketGeneration: 1, sessionAudioTime: 0.7,
+                                       observedAt: 0.8)
+
+        _ = witness.recordSendAttempt(sequence: 3, socketGeneration: 2, at: 1)
+
+        #expect(!witness.poll(at: 2).anomalies.contains(where: {
+            if case .localActivityUnmatched = $0 { true } else { false }
+        }))
     }
 
     @Test func reconnectBufferOverflowRecordsOnlyContentFreeSequenceEvidence() {

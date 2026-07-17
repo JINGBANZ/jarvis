@@ -7,17 +7,15 @@ import Foundation
 /// `item_id` until the item completes, fails, or the caller declares its terminal event overdue.
 // @unchecked Sendable: all mutable state is guarded by `lock`.
 public final class RealtimeTranscriptionLedger: @unchecked Sendable {
-    public static let contextGapMarker =
-        "[context gap: speech was detected, but its transcript is unavailable]"
     private static let minimumContextGapDurationMilliseconds = 750
 
     public struct FinalizedItem: Equatable, Sendable {
         public let itemID: String
-        public let text: String
+        public let text: String?
         public let spokenAt: TimeInterval?
         public let spokenEndAt: TimeInterval?
         public let recoveredFromDeltas: Bool
-        public let isContextGap: Bool
+        public let isTranscriptUnavailable: Bool
     }
 
     private struct Item {
@@ -98,7 +96,7 @@ public final class RealtimeTranscriptionLedger: @unchecked Sendable {
 
     /// Final text is authoritative. If it is empty/unusable but streamed text is available, retain
     /// that partial text rather than dropping the spoken turn. A long VAD-confirmed item with neither
-    /// becomes an explicit gap; very short/no-timing items stay ignored as ordinary noise blips.
+    /// remains a diagnostic-only resolution; very short/no-timing items stay ignored as noise blips.
     public func recordCompleted(itemID: String, transcript: String,
                                 speaker: Speaker) -> FinalizedItem? {
         guard !itemID.isEmpty else { return nil }
@@ -111,26 +109,26 @@ public final class RealtimeTranscriptionLedger: @unchecked Sendable {
         if let final = RealtimeSession.meaningfulTranscript(transcript, speaker: speaker) {
             return FinalizedItem(itemID: itemID, text: final, spokenAt: item.spokenAt,
                                  spokenEndAt: item.spokenEndAt,
-                                 recoveredFromDeltas: false, isContextGap: false)
+                                 recoveredFromDeltas: false, isTranscriptUnavailable: false)
         }
         guard let partial = RealtimeSession.meaningfulTranscript(item.deltas, speaker: speaker) else {
             guard let duration = item.detectedSpeechDurationMilliseconds,
                   duration >= Self.minimumContextGapDurationMilliseconds else {
                 return nil
             }
-            return FinalizedItem(itemID: itemID, text: Self.contextGapMarker,
+            return FinalizedItem(itemID: itemID, text: nil,
                                  spokenAt: item.spokenAt, spokenEndAt: item.spokenEndAt,
                                  recoveredFromDeltas: false,
-                                 isContextGap: true)
+                                 isTranscriptUnavailable: true)
         }
         return FinalizedItem(itemID: itemID, text: partial, spokenAt: item.spokenAt,
                              spokenEndAt: item.spokenEndAt,
-                             recoveredFromDeltas: true, isContextGap: false)
+                             recoveredFromDeltas: true, isTranscriptUnavailable: false)
     }
 
     /// A failed transcription still represents detected speech. Preserve streamed text when there
-    /// is any; otherwise emit an explicit marker only for VAD-confirmed speech long enough to be
-    /// conversational. Short or untimed empty failures remain ordinary noise blips.
+    /// is any; otherwise return a diagnostic-only resolution only for VAD-confirmed speech long
+    /// enough to be conversational. Short or untimed empty failures remain ordinary noise blips.
     public func recordFailed(itemID: String, speaker: Speaker) -> FinalizedItem? {
         finalizeInterruptedItem(itemID: itemID, requireSpeechStopped: false,
                                 suppressShortEmptyItem: true, speaker: speaker)
@@ -226,19 +224,19 @@ public final class RealtimeTranscriptionLedger: @unchecked Sendable {
         if let partial = RealtimeSession.meaningfulTranscript(item.deltas, speaker: speaker) {
             return FinalizedItem(itemID: itemID, text: partial, spokenAt: item.spokenAt,
                                  spokenEndAt: item.spokenEndAt,
-                                 recoveredFromDeltas: true, isContextGap: false)
+                                 recoveredFromDeltas: true, isTranscriptUnavailable: false)
         }
         // A missing terminal event does not turn a click/typing blip into missing conversational
         // context. Match the completed-event path: only a VAD-confirmed duration long enough to be
-        // plausible speech gets a gap marker. The item is still finalized above, so a late terminal
-        // event cannot append a duplicate.
+        // plausible speech gets a diagnostic resolution. The item is still finalized above, so a
+        // late terminal event cannot append a duplicate.
         if suppressShortEmptyItem {
             guard let duration = item.detectedSpeechDurationMilliseconds,
                   duration >= Self.minimumContextGapDurationMilliseconds else { return nil }
         }
-        return FinalizedItem(itemID: itemID, text: Self.contextGapMarker,
+        return FinalizedItem(itemID: itemID, text: nil,
                              spokenAt: item.spokenAt, spokenEndAt: item.spokenEndAt,
-                             recoveredFromDeltas: false, isContextGap: true)
+                             recoveredFromDeltas: false, isTranscriptUnavailable: true)
     }
 
     private func recordFinalizedAudioEndLocked(_ end: TimeInterval?) {

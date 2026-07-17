@@ -62,7 +62,8 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
     private let pending = UtteranceBuffer()   // fragments heard since the last fired trigger
     private let transcriptionLedger = RealtimeTranscriptionLedger()
     /// Content-free capture -> delivery -> socket -> server evidence. It inspects each PCM chunk
-    /// synchronously for a local activity bit, then retains metadata only (never PCM or words).
+    /// synchronously for local activity, then retains bounded interval metadata only (never PCM or
+    /// words). Its output is diagnostic-only and never enters the rolling transcript.
     private let continuityWitness: AudioContinuityWitness
     private let audioBuffer: PCMBuffer        // mic audio captured while the socket is down
     private var reconnectAttempt = 0
@@ -175,8 +176,7 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
             ct?.invalidate()
         }
         handleContinuityOutput(
-            continuityWitness.poll(at: clock.now() - sessionStart, forceSnapshot: true),
-            appendContextMarkers: false)
+            continuityWitness.poll(at: clock.now() - sessionStart, forceSnapshot: true))
         pending.clear()
         transcriptionLedger.clear()
         // A user-initiated Stop is a normal closure (1000), not "going away" (1001).
@@ -405,8 +405,8 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
             let recovery: String
             if item?.recoveredFromDeltas == true {
                 recovery = "salvaged streamed text"
-            } else if item?.isContextGap == true {
-                recovery = "recorded context gap"
+            } else if item?.isTranscriptUnavailable == true {
+                recovery = "recorded diagnostic; no transcript available"
             } else {
                 recovery = "item was already finalized"
             }
@@ -419,8 +419,12 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
                 break
             }
             let audioEndMilliseconds = obj["audio_end_ms"] as? Int
+            lock.lock(); let timelineOrigin = activeAudioTimelineOrigin; lock.unlock()
             recordServerContinuity(.speechStopped,
                                    audioTimeMilliseconds: audioEndMilliseconds,
+                                   sessionAudioTime: audioEndMilliseconds.map {
+                                       timelineOrigin + TimeInterval($0) / 1_000
+                                   },
                                    socketGeneration: socketGeneration)
             let endDetail = audioEndMilliseconds.map { ", audio_end_ms \($0)" } ?? ""
             jlog("Jarvis realtime [\(speaker.rawValue)] speech stopped "
@@ -521,7 +525,8 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
                   let item = self.transcriptionLedger.resolveStoppedItemTimeout(
                     itemID: itemID, speaker: self.speaker
                   ) else { return }
-            let recovery = item.recoveredFromDeltas ? "salvaged streamed text" : "recorded context gap"
+            let recovery = item.recoveredFromDeltas
+                ? "salvaged streamed text" : "recorded diagnostic; no transcript available"
             self.discardServerConfirmedAudio()
             jlog("Jarvis realtime [\(self.speaker.rawValue)] transcription terminal timed out "
                  + "after \(timeout)s (item \(itemID)); \(recovery)")
@@ -536,7 +541,8 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
                   let item = self.transcriptionLedger.resolveActiveItemTimeout(
                     itemID: itemID, speaker: self.speaker
                   ) else { return }
-            let recovery = item.recoveredFromDeltas ? "salvaged streamed text" : "recorded context gap"
+            let recovery = item.recoveredFromDeltas
+                ? "salvaged streamed text" : "recorded diagnostic; no transcript available"
             self.discardServerConfirmedAudio()
             jlog("Jarvis realtime [\(self.speaker.rawValue)] active transcription timed out "
                  + "after \(timeout)s (item \(itemID)); \(recovery)")
@@ -568,15 +574,17 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         lock.lock(); let isStopped = stopped; lock.unlock()
         guard !isStopped else { return }
         let at = item.spokenAt ?? (clock.now() - sessionStart)
-        transcript.append(.init(speaker: speaker, text: item.text, at: at))
-        if item.isContextGap {
-            jlog("⚠️ context gap (\(speaker.rawValue), item \(item.itemID)): \(item.text)")
-        } else {
-            let detail = reason.map { ", recovered after \($0)" } ?? ""
-            jlog("🗣 heard (\(speaker.rawValue)): \"\(item.text)\" "
-                 + "(item \(item.itemID)\(detail))")
+        guard let text = item.text else {
+            let detail = reason.map { ", after \($0)" } ?? ""
+            jlog("⚠️ transcription unavailable (\(speaker.rawValue), item \(item.itemID)\(detail)); "
+                 + "diagnostic only")
+            return
         }
-        pending.append(item.text)
+        transcript.append(.init(speaker: speaker, text: text, at: at))
+        let detail = reason.map { ", recovered after \($0)" } ?? ""
+        jlog("🗣 heard (\(speaker.rawValue)): \"\(text)\" "
+             + "(item \(item.itemID)\(detail))")
+        pending.append(text)
         resetSilenceTimer()
         scheduleTurnDebounce()
     }
@@ -625,12 +633,11 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
             guard let self else { return }
             self.lock.lock(); let isStopped = self.stopped; self.lock.unlock()
             guard !isStopped else { return }
-            self.handleContinuityOutput(output, appendContextMarkers: true)
+            self.handleContinuityOutput(output)
         }
     }
 
-    private func handleContinuityOutput(_ output: AudioContinuityWitness.Output,
-                                        appendContextMarkers: Bool) {
+    private func handleContinuityOutput(_ output: AudioContinuityWitness.Output) {
         if let snapshot = output.snapshot {
             let sockets = snapshot.socketGenerations.map { socket in
                 let lastSequence = socket.lastSendSequence.map(String.init) ?? "none"
@@ -667,34 +674,15 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
             case .reconnectBufferOverflow(let evictedChunks, let firstSequence, let lastSequence):
                 let first = firstSequence.map(String.init) ?? "unknown"
                 let last = lastSequence.map(String.init) ?? "unknown"
-                let marker = "[audio continuity warning: the bounded reconnect buffer overflowed; "
-                    + "some captured audio could not be replayed and its words are unavailable]"
                 jlog("⚠️ audio continuity [\(speaker.rawValue)] reconnect buffer overflow: "
                      + "evicted=\(evictedChunks), sequences=\(first)...\(last)")
-                if appendContextMarkers {
-                    transcript.append(.init(speaker: speaker, text: marker,
-                                            at: clock.now() - sessionStart))
-                }
             case .localActivityUnmatched(let activeSince, let duration):
-                let marker = "[audio continuity warning: sustained local activity was captured, "
-                    + "but no server speech event arrived within the diagnostic window; "
-                    + "speech content, if any, was unavailable at that time]"
                 jlog("⚠️ audio continuity [\(speaker.rawValue)] local activity had no server speech "
                      + "event: since=\(Self.seconds(activeSince)), window=\(Self.seconds(duration))")
-                // Do not invent words or trigger an extra coach request. The marker is carried by the
-                // next real turn, making the missing context explicit if this activity was speech.
-                if appendContextMarkers {
-                    transcript.append(.init(speaker: speaker, text: marker, at: activeSince))
-                }
             case .serverSpeechObservedAfterUnmatchedActivity(let activeSince, let serverObservedAt):
-                let marker = "[audio continuity update: a server speech event later arrived for "
-                    + "the locally observed activity]"
                 jlog("ℹ️ audio continuity [\(speaker.rawValue)] late server speech event resolved "
                      + "the prior warning: activity_since=\(Self.seconds(activeSince)), "
                      + "server_at=\(Self.seconds(serverObservedAt))")
-                if appendContextMarkers {
-                    transcript.append(.init(speaker: speaker, text: marker, at: serverObservedAt))
-                }
             }
         }
     }

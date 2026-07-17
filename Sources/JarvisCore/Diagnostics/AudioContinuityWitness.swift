@@ -2,7 +2,7 @@ import Foundation
 
 /// Privacy-preserving evidence that captured audio is continuing through local delivery and into a
 /// Realtime socket. It retains only content-free metadata: sequence/sample counts, timestamps,
-/// counters, socket generations, server audio-clock values, and one local activity bit.
+/// counters, socket generations, server audio-clock values, and bounded local activity intervals.
 ///
 /// Callers provide all timestamps and call `poll` while idle, so behavior is deterministic and this
 /// type owns no timer. PCM passed to `recordDelivery` is synchronously reduced to an activity decision
@@ -28,6 +28,21 @@ public final class AudioContinuityWitness: @unchecked Sendable {
         var lastServerSignal: ServerSpeechSignal?
         var lastServerObservedAt: TimeInterval?
         var lastServerAudioTimeMilliseconds: Int?
+    }
+
+    private enum LocalActivityState {
+        case pending
+        case matched
+        case warned
+    }
+
+    /// Content-free local activity interval retained long enough for delayed/replayed server VAD
+    /// events to resolve it. A bounded interval ledger is necessary because one server utterance can
+    /// span several local amplitude episodes, and several episodes can accumulate during an outage.
+    private struct LocalActivityEpisode {
+        let startedAt: TimeInterval
+        var lastActiveAt: TimeInterval
+        var state: LocalActivityState
     }
 
     private let configuration: Configuration
@@ -56,12 +71,10 @@ public final class AudioContinuityWitness: @unchecked Sendable {
     /// local-activity episode merely because it arrived later.
     private var activeServerSpeechStartedAt: TimeInterval?
 
-    private var localActivitySince: TimeInterval?
-    private var lastLocalActivityAt: TimeInterval?
-    private var localActivityMatched = false
+    private var localActivityEpisodes: [LocalActivityEpisode] = []
+    private var localActivityOpen = false
     private var captureStallReported = false
     private var deliveryLagReported = false
-    private var unmatchedActivityReported = false
 
     /// All subsequent timestamps must use the same session-relative monotonic clock as `startedAt`.
     public init(configuration: Configuration = .init(), startedAt: TimeInterval) {
@@ -133,10 +146,11 @@ public final class AudioContinuityWitness: @unchecked Sendable {
             } else {
                 deliveryLagReported = false
             }
-            updateLocalActivityLocked(isActive: activity.isActive, at: captured.capturedAt)
+            anomalies += updateLocalActivityLocked(isActive: activity.isActive,
+                                                    at: captured.capturedAt)
         } else {
             anomalies.append(.deliveryWithoutCapture(sequence: sequence))
-            updateLocalActivityLocked(isActive: activity.isActive, at: timestamp)
+            anomalies += updateLocalActivityLocked(isActive: activity.isActive, at: timestamp)
         }
         return finishLocked(at: timestamp, immediate: anomalies)
     }
@@ -218,16 +232,14 @@ public final class AudioContinuityWitness: @unchecked Sendable {
             case .speechStarted:
                 serverSpeechActive = true
                 activeServerSpeechStartedAt = sessionAudioTime
-                if let activeSince = localActivitySince,
-                   serverStartMatchesCurrentActivityLocked(sessionAudioTime) {
-                    if unmatchedActivityReported {
-                        anomalies.append(.serverSpeechObservedAfterUnmatchedActivity(
-                            activeSince: activeSince, serverObservedAt: timestamp))
-                    }
-                    localActivityMatched = true
-                    unmatchedActivityReported = false
+                if let sessionAudioTime {
+                    anomalies += matchServerStartLocked(sessionAudioTime, observedAt: timestamp)
                 }
             case .speechStopped:
+                if let start = activeServerSpeechStartedAt, let end = sessionAudioTime {
+                    anomalies += matchServerIntervalLocked(start: start, end: end,
+                                                           observedAt: timestamp)
+                }
                 serverSpeechActive = false
                 activeServerSpeechStartedAt = nil
             case .transcriptionDelta, .transcriptionCompleted, .transcriptionFailed:
@@ -246,42 +258,31 @@ public final class AudioContinuityWitness: @unchecked Sendable {
         return finishLocked(at: timestamp, forceSnapshot: forceSnapshot)
     }
 
-    private func updateLocalActivityLocked(isActive: Bool, at timestamp: TimeInterval) {
+    private func updateLocalActivityLocked(isActive: Bool,
+                                           at timestamp: TimeInterval) -> [Anomaly] {
         if isActive {
-            // Start a new episode after a reported/matched one even if no explicit quiet chunk was
-            // delivered between them. Short sub-threshold gaps remain inside one spoken phrase.
-            if let activeSince = localActivitySince, let lastActiveAt = lastLocalActivityAt,
+            if localActivityOpen, let lastActiveAt = localActivityEpisodes.last?.lastActiveAt,
                timestamp - lastActiveAt > configuration.activityHangover {
-                let observed = lastActiveAt - activeSince
-                if localActivityMatched || unmatchedActivityReported
-                    || observed < configuration.sustainedActivityDuration {
-                    localActivitySince = nil
-                    lastLocalActivityAt = nil
-                    localActivityMatched = false
-                    unmatchedActivityReported = false
-                }
+                localActivityOpen = false
             }
-            if localActivitySince == nil {
-                localActivitySince = timestamp
-                lastLocalActivityAt = timestamp
-                localActivityMatched = serverSpeechActive
-                    && serverStartMatchesCurrentActivityLocked(activeServerSpeechStartedAt)
-                unmatchedActivityReported = false
+            if localActivityOpen {
+                localActivityEpisodes[localActivityEpisodes.count - 1].lastActiveAt = timestamp
+            } else {
+                localActivityEpisodes.append(.init(startedAt: timestamp, lastActiveAt: timestamp,
+                                                   state: .pending))
+                localActivityOpen = true
+                trimLocalActivityEpisodesLocked()
             }
-            lastLocalActivityAt = timestamp
+            if serverSpeechActive, let start = activeServerSpeechStartedAt {
+                return matchServerStartLocked(start, observedAt: timestamp)
+            }
         } else {
-            // Do not erase an unmatched episode as soon as speech ends: the whole purpose of the
-            // grace window is to notice that local activity ended without any server speech event.
-            // Matched/reported episodes can be released once their short hangover has elapsed.
-            if let lastLocalActivityAt,
-               timestamp - lastLocalActivityAt >= configuration.activityHangover,
-               localActivityMatched || unmatchedActivityReported {
-                localActivitySince = nil
-                self.lastLocalActivityAt = nil
-                localActivityMatched = false
-                unmatchedActivityReported = false
+            if localActivityOpen, let lastActiveAt = localActivityEpisodes.last?.lastActiveAt,
+               timestamp - lastActiveAt >= configuration.activityHangover {
+                localActivityOpen = false
             }
         }
+        return []
     }
 
     private func selectSocketGenerationLocked(_ generation: Int) {
@@ -289,19 +290,47 @@ public final class AudioContinuityWitness: @unchecked Sendable {
         latestSocketGeneration = generation
         serverSpeechActive = false
         activeServerSpeechStartedAt = nil
-        if localActivitySince != nil {
-            localActivityMatched = false
-            // Keep an already-reported warning latched across reconnects so one continuous local
-            // activity episode cannot add duplicate transcript markers for each socket generation.
-        }
     }
 
-    private func serverStartMatchesCurrentActivityLocked(_ serverStart: TimeInterval?) -> Bool {
-        guard let serverStart, let activeSince = localActivitySince,
-              let lastActiveAt = lastLocalActivityAt else { return false }
+    private func matchServerStartLocked(_ serverStart: TimeInterval,
+                                        observedAt: TimeInterval) -> [Anomaly] {
         let tolerance = configuration.activityHangover
-        return serverStart >= activeSince - tolerance
-            && serverStart <= lastActiveAt + tolerance
+        return matchLocalActivityLocked(where: { episode in
+            serverStart >= episode.startedAt - tolerance
+                && serverStart <= episode.lastActiveAt + tolerance
+        }, observedAt: observedAt)
+    }
+
+    private func matchServerIntervalLocked(start: TimeInterval, end: TimeInterval,
+                                           observedAt: TimeInterval) -> [Anomaly] {
+        let tolerance = configuration.activityHangover
+        return matchLocalActivityLocked(where: { episode in
+            episode.startedAt <= end + tolerance
+                && start <= episode.lastActiveAt + tolerance
+        }, observedAt: observedAt)
+    }
+
+    private func matchLocalActivityLocked(
+        where overlaps: (LocalActivityEpisode) -> Bool,
+        observedAt: TimeInterval
+    ) -> [Anomaly] {
+        var anomalies: [Anomaly] = []
+        for index in localActivityEpisodes.indices where overlaps(localActivityEpisodes[index]) {
+            if localActivityEpisodes[index].state == .warned {
+                anomalies.append(.serverSpeechObservedAfterUnmatchedActivity(
+                    activeSince: localActivityEpisodes[index].startedAt,
+                    serverObservedAt: observedAt))
+            }
+            localActivityEpisodes[index].state = .matched
+        }
+        return anomalies
+    }
+
+    private func trimLocalActivityEpisodesLocked() {
+        let overflow = localActivityEpisodes.count - configuration.maximumActivityEpisodes
+        if overflow > 0 {
+            localActivityEpisodes.removeFirst(overflow)
+        }
     }
 
     private func finishLocked(at timestamp: TimeInterval, immediate: [Anomaly] = [],
@@ -322,15 +351,16 @@ public final class AudioContinuityWitness: @unchecked Sendable {
             }
         }
 
-        if let activeSince = localActivitySince, let lastActiveAt = lastLocalActivityAt,
-           !localActivityMatched,
-           !unmatchedActivityReported {
-            let duration = max(0, timestamp - activeSince)
-            let observedActivityDuration = max(0, lastActiveAt - activeSince)
+        for index in localActivityEpisodes.indices
+            where localActivityEpisodes[index].state == .pending {
+            let episode = localActivityEpisodes[index]
+            let duration = max(0, timestamp - episode.startedAt)
+            let observedActivityDuration = max(0, episode.lastActiveAt - episode.startedAt)
             if observedActivityDuration >= configuration.sustainedActivityDuration,
-               timestamp - lastActiveAt >= configuration.serverSpeechGrace {
-                anomalies.append(.localActivityUnmatched(activeSince: activeSince, duration: duration))
-                unmatchedActivityReported = true
+               timestamp - episode.lastActiveAt >= configuration.serverSpeechGrace {
+                anomalies.append(.localActivityUnmatched(activeSince: episode.startedAt,
+                                                         duration: duration))
+                localActivityEpisodes[index].state = .warned
             }
         }
 
@@ -378,8 +408,8 @@ public final class AudioContinuityWitness: @unchecked Sendable {
             lastDeliveryAt: lastDeliveryAt,
             pendingCapturedChunks: pendingCaptures.count,
             localActivityDetected: activityDetector.isActive,
-            localActivitySince: localActivitySince,
-            lastLocalActivityAt: lastLocalActivityAt,
+            localActivitySince: localActivityOpen ? localActivityEpisodes.last?.startedAt : nil,
+            lastLocalActivityAt: localActivityOpen ? localActivityEpisodes.last?.lastActiveAt : nil,
             latestSocketGeneration: latestSocketGeneration,
             socketGenerations: generations
         )

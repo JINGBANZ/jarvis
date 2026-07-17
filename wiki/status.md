@@ -10,9 +10,11 @@
 
 **Interview audio reliability and local CLI brain providers are implemented.** Realtime
 transcription reconciles each `item_id` across VAD, delta, completion, and failure events; salvages
-partial text or emits an explicit context gap; preserves every real system-audio sample while
-padding only missing tap silence for VAD; and keeps AEC on a separate exact-length reference.
-Content-free continuity checkpoints cover capture through server speech without archiving PCM.
+partial text while keeping unavailable items diagnostic-only; preserves every real system-audio
+sample while padding only missing tap silence for VAD; and keeps AEC on a separate exact-length
+reference. Content-free continuity checkpoints cover capture through server speech without
+archiving PCM, and timestamp-interval correlation handles locally split or replayed utterances
+without adding diagnostic text to the brain transcript.
 Locally accepted WebSocket sends remain in a bounded memory-only recovery tail because Realtime does
 not acknowledge audio appends; server audio-clock progress retires only a safe prefix, and a
 replacement socket replays the rest after a half-open failure. A live Wi-Fi reconnect run confirms

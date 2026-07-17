@@ -39,6 +39,7 @@ extension AudioContinuityWitness {
         public let activityHangover: TimeInterval
         public let serverSpeechGrace: TimeInterval
         public let maximumPendingCaptures: Int
+        public let maximumActivityEpisodes: Int
         public let activity: ActivityConfiguration
 
         public init(snapshotInterval: TimeInterval = 15,
@@ -48,11 +49,12 @@ extension AudioContinuityWitness {
                     activityHangover: TimeInterval = 0.5,
                     serverSpeechGrace: TimeInterval = 3,
                     maximumPendingCaptures: Int = 4_096,
+                    maximumActivityEpisodes: Int = 256,
                     activity: ActivityConfiguration = .init()) {
             precondition(snapshotInterval > 0 && captureStallThreshold > 0)
             precondition(deliveryLagThreshold > 0 && sustainedActivityDuration >= 0)
             precondition(activityHangover >= 0 && serverSpeechGrace >= 0
-                         && maximumPendingCaptures > 0)
+                         && maximumPendingCaptures > 0 && maximumActivityEpisodes > 0)
             self.snapshotInterval = snapshotInterval
             self.captureStallThreshold = captureStallThreshold
             self.deliveryLagThreshold = deliveryLagThreshold
@@ -60,6 +62,7 @@ extension AudioContinuityWitness {
             self.activityHangover = activityHangover
             self.serverSpeechGrace = serverSpeechGrace
             self.maximumPendingCaptures = maximumPendingCaptures
+            self.maximumActivityEpisodes = maximumActivityEpisodes
             self.activity = activity
         }
     }

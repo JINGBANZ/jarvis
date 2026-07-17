@@ -344,6 +344,8 @@
   client's dropped event paths.
 - **Detail:** `Sources/JarvisCore/Transcription/RealtimeTranscriptionLedger.swift`,
   `Sources/JarvisApp/Capture/RealtimeTranscriber.swift`, `AggregateEchoCapture.swift`.
+- **Superseded in part by:** 2026-07-17 — Diagnostics never enter the brain transcript. Delta
+  salvage and per-item reconciliation stand; explicit context-gap lines do not.
 
 ### 2026-07-16 — Short interviewer rejection is substantive
 
@@ -387,4 +389,28 @@
   stage failed, while increasing fingerprinting risk.
 - **Detail:** `Sources/JarvisCore/Diagnostics/AudioContinuityWitness.swift`,
   `Sources/JarvisCore/Audio/AdaptiveAudioActivityDetector.swift`,
+  `Sources/JarvisApp/Capture/RealtimeTranscriber.swift`.
+- **Superseded in part by:** 2026-07-17 — Diagnostics never enter the brain transcript. The witness,
+  recovery tail, and anomaly logs stand; transcript warning insertion does not.
+
+### 2026-07-17 — Diagnostics never enter the brain transcript
+
+- **Chose:** Keep the rolling transcript semantic: only usable final or salvaged transcription text
+  can enter it or trigger a coach turn. Failed, timed-out, overflowed, or locally unmatched audio
+  remains diagnostic-only. The continuity witness correlates bounded local activity intervals with
+  overlapping server VAD intervals on the session audio clock, retaining warned metadata long enough
+  for reconnect replay to resolve it; a new socket generation never unmatches prior evidence.
+- **Why:** Live validation produced explicit missing-speech warnings immediately after five correctly
+  transcribed utterances. A quiet dip split one locally detected phrase into multiple episodes while
+  Realtime correctly reported one longer server interval; matching only the server start mislabeled
+  the later episodes. Those heuristic warnings then rode into later brain requests as if they were
+  speech, adding cost and misleading context without recovering a single word. Diagnostics can prove
+  where continuity stopped, but they are not language and do not belong in semantic context.
+- **Rejected:** (a) Increasing the grace timeout — delays real diagnostics without fixing interval
+  mismatch. (b) Treating completion/failure events as blanket matches — a late event from an older
+  item could hide a newer loss. (c) Sending hedged warning prose to the brain — it is still synthetic
+  context and can distort coaching.
+- **Detail:** [architecture.md → Resilience](./architecture.md#resilience),
+  `Sources/JarvisCore/Diagnostics/AudioContinuityWitness.swift`,
+  `Sources/JarvisCore/Transcription/RealtimeTranscriptionLedger.swift`,
   `Sources/JarvisApp/Capture/RealtimeTranscriber.swift`.
