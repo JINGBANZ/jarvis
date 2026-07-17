@@ -66,7 +66,7 @@ final class BrainSection: NSObject, SettingsSection {
         self.modelPopup = modelPopup
 
         // One effort for every provider, mapped onto each CLI's own scale by `CLIBrainClient`
-        // (Claude Code's floor is low, Codex's is minimal).
+        // (Claude Code's floor is low; Codex accepts the value unchanged).
         let effortLabel = NSTextField(labelWithString: "Reasoning Effort")
         effortLabel.frame = NSRect(x: 290, y: 256, width: 200, height: 20)
         view.addSubview(effortLabel)
@@ -129,7 +129,11 @@ final class BrainSection: NSObject, SettingsSection {
             radio.isEnabled = enabled || provider == selected
             radio.state = provider == selected ? .on : .off
         }
-        providerNote?.stringValue = Self.note(for: selected)
+        var note = Self.note(for: selected)
+        if selected.usesLocalCLI, let cli = detector.detect(selected), !cli.authenticated {
+            note += " Couldn't confirm it's signed in — run the CLI once if turns fail."
+        }
+        providerNote?.stringValue = note
         reloadModels(for: selected)
     }
 

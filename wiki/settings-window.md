@@ -121,8 +121,8 @@ for Codex that is its built-in default, since harness runs ignore the user's cod
 provider remembers its own model. The **Reasoning
 Effort** picker (`ReasoningEffort`: None / Low / Medium / High, default Low) is stored once and
 applies uniformly to whichever provider is active — `CLIBrainClient` maps it onto each CLI's own
-scale (Claude Code `--effort`, floor `low`; Codex `model_reasoning_effort`, floor `minimal`), so
-model + effort behave the same way across all three providers.
+scale (Claude Code `--effort`, floor `low`; Codex `model_reasoning_effort`, passed through
+unchanged), so model + effort behave the same way across all three providers.
 
 **API key.** The OpenAI key controls (`APIKeyControls`) live at the bottom of the same tab because
 the key is part of the same decision — and it stays **required regardless of provider**: realtime

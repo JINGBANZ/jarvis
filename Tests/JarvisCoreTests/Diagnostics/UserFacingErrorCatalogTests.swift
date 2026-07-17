@@ -27,4 +27,27 @@ import Testing
         #expect(!UserFacingError.systemAudioStopped.severity.showsAlert)
         #expect(!UserFacingError.systemAudioStopped.severity.stopsSession)
     }
+
+    @Test func brainCLIMissingIsFatalAndNamesTheProvider() {
+        let e = UserFacingError.brainCLIMissing(provider: "Claude Code")
+        #expect(e.severity == .fatal)
+        #expect(e.title.contains("Claude Code"))
+    }
+
+    @Test func brainCLINotSignedInIsFatal() {
+        // An authoritative signed-out marker (Codex) must fail the Start — a pipeline whose brain
+        // can never answer would otherwise sit green while every turn errors.
+        let e = UserFacingError.brainCLINotSignedIn(provider: "Codex CLI")
+        #expect(e.severity == .fatal)
+        #expect(e.severity.stopsSession)
+    }
+
+    @Test func brainCLISignInUnconfirmedStaysQuiet() {
+        // The heuristic marker (Claude, Keychain-only credentials) can false-negative, so this must
+        // warn without blocking the session.
+        let e = UserFacingError.brainCLISignInUnconfirmed(provider: "Claude Code")
+        #expect(e.severity == .degraded)
+        #expect(!e.severity.showsAlert)
+        #expect(!e.severity.stopsSession)
+    }
 }

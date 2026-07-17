@@ -21,6 +21,25 @@ public extension UserFacingError {
               severity: .fatal)
     }
 
+    /// The selected CLI is installed but definitively signed out (Codex: `auth.json` is its only
+    /// credential store, so an absent marker is authoritative). Every brain turn would fail, so
+    /// fail the Start instead of opening a pipeline that can never coach.
+    static func brainCLINotSignedIn(provider: String) -> UserFacingError {
+        .init(title: "\(provider) isn't signed in",
+              message: "Sign in by running the \(provider) command once in Terminal, or switch the brain provider in Settings \u{2192} Brain, then press Start again.",
+              severity: .fatal)
+    }
+
+    /// The selected CLI is installed but its sign-in couldn't be confirmed (Claude Code may keep
+    /// credentials only in the macOS Keychain, which Jarvis deliberately doesn't probe). A false
+    /// negative is possible, so this is a degraded notice, not a Start blocker — but it makes a
+    /// never-working brain visible in the activity log instead of silent.
+    static func brainCLISignInUnconfirmed(provider: String) -> UserFacingError {
+        .init(title: "\(provider) sign-in unconfirmed",
+              message: "Couldn't confirm \(provider) is signed in \u{2014} coaching turns may fail. If they do, run the CLI once in Terminal to sign in, then Stop and Start.",
+              severity: .degraded)
+    }
+
     /// Audio capture couldn't be built or started. `reason` is the human-readable cause from the capture
     /// layer (no input device, permission, unreadable rate, …). Fatal — there's nothing to coach from.
     static func captureFailed(reason: String) -> UserFacingError {

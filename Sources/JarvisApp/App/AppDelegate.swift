@@ -188,6 +188,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 errorReporter.report(.brainCLIMissing(provider: brainProvider.displayName))
                 return false
             }
+            if !cli.authenticated {
+                // Codex's auth.json is its only credential store — an absent marker means signed
+                // out for real, and every brain turn would fail: don't open a pipeline that can
+                // never coach. Claude may keep credentials only in the macOS Keychain (a false
+                // negative), so it proceeds with a visible degraded notice instead of a lockout.
+                if brainProvider == .codexCLI {
+                    jlog("Jarvis: can't start — \(brainProvider.displayName) isn't signed in.")
+                    errorReporter.report(.brainCLINotSignedIn(provider: brainProvider.displayName))
+                    return false
+                }
+                errorReporter.report(.brainCLISignInUnconfirmed(provider: brainProvider.displayName))
+            }
             brainCLI = cli
         }
         stop() // tear down any existing pipeline so we start cleanly
