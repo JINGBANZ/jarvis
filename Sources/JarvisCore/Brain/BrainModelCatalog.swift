@@ -1,16 +1,5 @@
 import Foundation
 
-/// One selectable brain (LLM) model: its API id and the label shown in Settings.
-public struct BrainModel: Sendable, Equatable {
-    public let id: String
-    public let displayName: String
-
-    public init(id: String, displayName: String) {
-        self.id = id
-        self.displayName = displayName
-    }
-}
-
 /// The curated brain models the user can pick from, per provider — the single source of truth for
 /// the Settings model dropdown and the defaults. Bump a list when a provider ships a new model — a
 /// one-line edit. (Transcription models are a separate concern and are NOT listed here.)

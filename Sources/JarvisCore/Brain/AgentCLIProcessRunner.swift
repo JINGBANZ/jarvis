@@ -5,39 +5,9 @@ import Darwin
 import Glibc
 #endif
 
-/// One fully-described CLI invocation — the runner contract `CLIBrainClient` speaks, injectable in
-/// tests so no real process is spawned there.
-public struct AgentCLIRun: Sendable {
-    public let executable: URL
-    public let arguments: [String]
-    public let stdin: String?
-    public let workingDirectory: URL
-    public let timeout: TimeInterval
-
-    public init(executable: URL, arguments: [String], stdin: String?,
-                workingDirectory: URL, timeout: TimeInterval) {
-        self.executable = executable
-        self.arguments = arguments
-        self.stdin = stdin
-        self.workingDirectory = workingDirectory
-        self.timeout = timeout
-    }
-}
-
-public struct AgentCLIOutput: Sendable {
-    public let stdout: String
-    public let stderr: String
-    public let exitCode: Int32
-
-    public init(stdout: String, stderr: String, exitCode: Int32) {
-        self.stdout = stdout
-        self.stderr = stderr
-        self.exitCode = exitCode
-    }
-}
-
-/// Spawns one CLI invocation and captures its output. All blocking work (pipe I/O, `waitUntilExit`)
-/// happens on a GCD thread, never the cooperative pool; a watchdog SIGTERMs a hung CLI at `timeout`,
+/// Spawns one CLI invocation (`AgentCLIRun`) and captures its output (`AgentCLIOutput`). All
+/// blocking work (pipe I/O, `waitUntilExit`) happens on a GCD thread, never the cooperative pool;
+/// a watchdog SIGTERMs a hung CLI at `timeout`,
 /// and cancelling the calling task (Stop pressed mid-turn) kills the subprocess immediately — a
 /// cancelled turn's reply can never be used, so the CLI must not keep burning the user's quota.
 public enum AgentCLIProcessRunner {
