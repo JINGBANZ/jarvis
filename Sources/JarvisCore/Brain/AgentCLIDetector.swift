@@ -28,12 +28,13 @@ public struct AgentCLIDetector: Sendable {
                                 authenticated: isAuthenticated(provider))
     }
 
-    /// $PATH first, then the common install locations. The fallbacks matter because the app is
-    /// launched via `open` and inherits launchd's minimal PATH (`/usr/bin:/bin:…`), which contains
-    /// none of the places these CLIs actually install to.
-    private func firstExecutable(named name: String) -> URL? {
-        var dirs = (pathVariable ?? "").split(separator: ":").map(String.init)
-        dirs += [
+    /// The common install locations consulted after $PATH — the single source of truth, also used
+    /// by `AgentCLIProcessRunner` to seed the subprocess PATH: a CLI *found* in one of these dirs
+    /// may need its interpreter or helpers from another (an npm-shim `claude` whose
+    /// `/usr/bin/env node` lives in `/opt/homebrew/bin`), so detection and execution must see the
+    /// same directories or Settings says "detected" while every spawned turn fails.
+    static func fallbackDirectories(home: URL) -> [String] {
+        [
             home.appendingPathComponent(".claude/local").path,   // claude's self-managed install
             "/opt/homebrew/bin",
             "/usr/local/bin",
@@ -42,6 +43,14 @@ public struct AgentCLIDetector: Sendable {
             home.appendingPathComponent(".npm-global/bin").path,
             home.appendingPathComponent(".cargo/bin").path,       // codex's rust install
         ]
+    }
+
+    /// $PATH first, then the common install locations. The fallbacks matter because the app is
+    /// launched via `open` and inherits launchd's minimal PATH (`/usr/bin:/bin:…`), which contains
+    /// none of the places these CLIs actually install to.
+    private func firstExecutable(named name: String) -> URL? {
+        let dirs = (pathVariable ?? "").split(separator: ":").map(String.init)
+            + Self.fallbackDirectories(home: home)
         for dir in dirs where !dir.isEmpty {
             let candidate = URL(fileURLWithPath: dir).appendingPathComponent(name)
             if FileManager.default.isExecutableFile(atPath: candidate.path) { return candidate }

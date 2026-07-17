@@ -28,18 +28,22 @@ import Testing
         #expect(!UserFacingError.systemAudioStopped.severity.stopsSession)
     }
 
-    @Test func brainCLIMissingIsFatalAndNamesTheProvider() {
+    @Test func brainCLIMissingAlertsWithoutStoppingAndNamesTheProvider() {
+        // A preflight refusal: the Start never opened anything, and an in-place restart that trips
+        // it has a LIVE session that must survive — alert, never stop.
         let e = UserFacingError.brainCLIMissing(provider: "Claude Code")
-        #expect(e.severity == .fatal)
+        #expect(e.severity == .warning)
+        #expect(e.severity.showsAlert)
+        #expect(!e.severity.stopsSession)
         #expect(e.title.contains("Claude Code"))
     }
 
-    @Test func brainCLINotSignedInIsFatal() {
-        // An authoritative signed-out marker (Codex) must fail the Start — a pipeline whose brain
-        // can never answer would otherwise sit green while every turn errors.
+    @Test func brainCLINotSignedInAlertsWithoutStopping() {
+        // An authoritative signed-out marker (Codex) refuses the Start — same preflight semantics.
         let e = UserFacingError.brainCLINotSignedIn(provider: "Codex CLI")
-        #expect(e.severity == .fatal)
-        #expect(e.severity.stopsSession)
+        #expect(e.severity == .warning)
+        #expect(e.severity.showsAlert)
+        #expect(!e.severity.stopsSession)
     }
 
     @Test func brainCLISignInUnconfirmedStaysQuiet() {

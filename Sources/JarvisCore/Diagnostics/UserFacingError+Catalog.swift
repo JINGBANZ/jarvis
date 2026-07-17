@@ -14,20 +14,23 @@ public extension UserFacingError {
     }
 
     /// The selected brain provider's CLI isn't installed (or was removed since it was selected).
-    /// The brain can't answer a single turn, so this is fatal on Start.
+    /// A *preflight* failure: the Start is refused before anything is torn down, so it must alert
+    /// without stopping — an in-place restart (e.g. a key re-save while running) that trips this
+    /// guard has a live session that must survive.
     static func brainCLIMissing(provider: String) -> UserFacingError {
         .init(title: "\(provider) not found",
               message: "The \(provider) command-line tool isn't installed on this Mac. Install and sign in to it, or switch the brain provider back to the OpenAI API in Settings \u{2192} Brain.",
-              severity: .fatal)
+              severity: .warning)
     }
 
     /// The selected CLI is installed but definitively signed out (Codex: `auth.json` is its only
     /// credential store, so an absent marker is authoritative). Every brain turn would fail, so
-    /// fail the Start instead of opening a pipeline that can never coach.
+    /// refuse the Start instead of opening a pipeline that can never coach. Same preflight
+    /// semantics as `brainCLIMissing`: alert, but never stop a session that's already running.
     static func brainCLINotSignedIn(provider: String) -> UserFacingError {
         .init(title: "\(provider) isn't signed in",
               message: "Sign in by running the \(provider) command once in Terminal, or switch the brain provider in Settings \u{2192} Brain, then press Start again.",
-              severity: .fatal)
+              severity: .warning)
     }
 
     /// The selected CLI is installed but its sign-in couldn't be confirmed (Claude Code may keep

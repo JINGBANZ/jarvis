@@ -226,6 +226,9 @@ import Foundation
             Issue.record("expected forced speak, got \(response.toolCalls)"); return
         }
         #expect(lines == ["Try a hash map here."])
+        // The recorded call must carry the lines actually shown — it's committed to session
+        // history and replayed on later turns, so `speak({})` there would misreport the turn.
+        #expect(response.rawToolCalls.first?.argumentsJSON.contains("Try a hash map here.") == true)
     }
 
     @Test func forcedSpeakWithNoUsableProseFallsSilent() async throws {

@@ -59,10 +59,14 @@ public enum AgentCLIProcessRunner {
         process.arguments = run.arguments
         process.currentDirectoryURL = run.workingDirectory
         // The app is launched via `open` and inherits launchd's minimal PATH; append the CLI's own
-        // directory so it can locate any sibling helpers it spawns.
+        // directory plus the detector's fallback dirs, so a CLI shim found in one of them can also
+        // resolve its interpreter/helpers from another (an npm-shim `claude` needing Homebrew's
+        // `node`) — otherwise Settings says "detected" while every spawned turn fails.
         var environment = ProcessInfo.processInfo.environment
-        environment["PATH"] = [environment["PATH"], run.executable.deletingLastPathComponent().path]
-            .compactMap { $0 }.joined(separator: ":")
+        let extraDirs = [run.executable.deletingLastPathComponent().path]
+            + AgentCLIDetector.fallbackDirectories(home: URL(fileURLWithPath: NSHomeDirectory()))
+        environment["PATH"] = ([environment["PATH"]].compactMap { $0 } + extraDirs)
+            .joined(separator: ":")
         // Jarvis's own secret must not widen its exposure: when the documented OPENAI_API_KEY
         // fallback is in use, the transcription key would otherwise be inherited by the brain CLI
         // (and anything its config loads), which authenticates with its own credentials.
