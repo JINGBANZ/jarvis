@@ -67,6 +67,16 @@ public struct CLIBrainClient: BrainClient, @unchecked Sendable {
 
         let invocation: AgentCLIRun
         var codexReplyFile: URL?
+        // The session-audit record, built alongside the invocation with screenshots already
+        // redacted (never the raw stdin — an inline base64 image inside a JSON string would slip
+        // past `BrainTrafficLog.redactingImages`, which only recognizes parsed `data:` URIs). It
+        // reuses the evaluator's schema keys (model / instructions / input), so `SessionEvaluator`
+        // renders and prefix-elides CLI traffic exactly like API traffic.
+        var auditRequest: [String: Any] = [
+            "provider": provider.rawValue,
+            "model": model.isEmpty ? "(CLI default)" : model,
+            "executable": executable.path,
+        ]
         switch provider {
         case .claudeCode:
             // --system-prompt REPLACES Claude Code's coding-agent persona with our instructions
@@ -94,9 +104,11 @@ public struct CLIBrainClient: BrainClient, @unchecked Sendable {
                         "--effort", Self.claudeEffort(reasoningEffort),
                         "--tools", ""]
             if !model.isEmpty { args += ["--model", model] }
-            let stdin = try Self.claudeStreamMessage(segments: rendered.segments,
-                                                     hasTools: !tools.isEmpty)
-            invocation = AgentCLIRun(executable: executable, arguments: args, stdin: stdin,
+            let message = try Self.claudeStreamMessage(segments: rendered.segments,
+                                                       hasTools: !tools.isEmpty)
+            auditRequest["instructions"] = instructions
+            auditRequest["input"] = message.auditInput
+            invocation = AgentCLIRun(executable: executable, arguments: args, stdin: message.stdin,
                                      workingDirectory: workDirectory, timeout: timeout)
         case .codexCLI:
             // Codex exec has no system-prompt flag, so instructions + conversation travel as one
@@ -109,28 +121,36 @@ public struct CLIBrainClient: BrainClient, @unchecked Sendable {
             transientFiles.append(replyFile)
             // --ephemeral mirrors claude's --no-session-persistence: no rollout transcript in
             // ~/.codex/sessions/ — the conversation must exist only in our owner-only session dir.
-            // mcp_servers={} disables every user-configured MCP server for this invocation — same
-            // slimness rationale as claude's --strict-mcp-config (measured ~0.1s, but it keeps MCP
-            // tool schemas out of the billed prompt and side-effecting servers out of a decision turn).
+            // --ignore-user-config mirrors claude's --setting-sources ""/--strict-mcp-config: no
+            // personal config, instructions, or MCP servers ahead of the harness's own protocol
+            // (auth still comes from CODEX_HOME per the CLI's docs); mcp_servers={} stays as belt
+            // and braces. "CLI default" model therefore means codex's built-in default here.
             var args = ["exec", "--skip-git-repo-check", "--sandbox", "read-only", "--ephemeral",
+                        "--ignore-user-config",
                         "--output-last-message", replyFile.path,
                         "-c", "mcp_servers={}",
                         "-c", "model_reasoning_effort=\(Self.codexEffort(reasoningEffort))"]
             if !model.isEmpty { args += ["-m", model] }
             var blocks: [String] = []
+            var auditInput: [[String: Any]] = []
             for segment in rendered.segments {
                 switch segment {
-                case .text(let block): blocks.append(block)
+                case .text(let block):
+                    blocks.append(block)
+                    auditInput.append(["type": "text", "text": block])
                 case .imageJPEG(let base64):
                     let url = try writeImage(base64)
                     transientFiles.append(url)
                     args += ["-i", url.path]
                     blocks.append("[user]\n(screenshot attached as an image input)")
+                    auditInput.append(["type": "image", "image": Self.imageStub(base64)])
                 }
             }
             var document = instructions.isEmpty ? "" : instructions + "\n\n"
             document += "## Conversation\n\n" + blocks.joined(separator: "\n\n")
             if !tools.isEmpty { document += "\n\nAnswer now, following the tool protocol." }
+            auditRequest["instructions"] = instructions
+            auditRequest["input"] = auditInput
             invocation = AgentCLIRun(executable: executable, arguments: args, stdin: document,
                                      workingDirectory: workDirectory, timeout: timeout)
         case .openAI:
@@ -142,21 +162,22 @@ public struct CLIBrainClient: BrainClient, @unchecked Sendable {
         do {
             output = try await run(invocation)
         } catch {
-            traffic?.record(tag: trafficTag, request: Self.requestRecord(invocation),
+            traffic?.record(tag: trafficTag, request: Self.recordData(auditRequest),
                             response: nil, status: nil,
                             latencyMs: Self.elapsedMs(since: started),
                             error: error.localizedDescription)
             throw error
         }
-        // Record the raw round trip for the session audit, mapped to the HTTP-ish status the audit
-        // understands (exit 0 → 200, anything else → 500).
-        traffic?.record(tag: trafficTag, request: Self.requestRecord(invocation),
-                        response: Self.responseRecord(output),
+        // Record the round trip for the session audit — the extracted reply (not raw stdout, which
+        // is stream noise), mapped to the HTTP-ish status the audit understands (exit 0 → 200,
+        // anything else → 500). Extraction happens first so a parse failure is still recorded.
+        let reply = Result { try extractReply(output, codexReplyFile: codexReplyFile) }
+        traffic?.record(tag: trafficTag, request: Self.recordData(auditRequest),
+                        response: responseRecord(output, reply: try? reply.get()),
                         status: output.exitCode == 0 ? 200 : 500,
                         latencyMs: Self.elapsedMs(since: started))
 
-        let reply = try extractReply(output, codexReplyFile: codexReplyFile)
-        return parse(reply: reply, tools: tools, toolChoice: toolChoice)
+        return parse(reply: try reply.get(), tools: tools, toolChoice: toolChoice)
     }
 
     // MARK: - Prompt composition
@@ -206,13 +227,19 @@ public struct CLIBrainClient: BrainClient, @unchecked Sendable {
     /// One stream-json user message carrying the whole conversation: text blocks coalesced,
     /// screenshots as inline base64 image blocks in their original positions. Inline images are why
     /// claude uses stream-json input at all — they reach the model in the same single call, where a
-    /// file + Read tool would cost a second model round trip (and an on-disk copy).
-    static func claudeStreamMessage(segments: [Segment], hasTools: Bool) throws -> String {
+    /// file + Read tool would cost a second model round trip (and an on-disk copy). Also returns the
+    /// audit copy of the content — same blocks with every image reduced to a stub — so the traffic
+    /// log never receives the base64 bytes in any form.
+    static func claudeStreamMessage(segments: [Segment], hasTools: Bool)
+        throws -> (stdin: String, auditInput: [[String: Any]]) {
         var content: [[String: Any]] = []
+        var auditInput: [[String: Any]] = []
         var textRun: [String] = ["## Conversation"]
         func flushText() {
             if !textRun.isEmpty {
-                content.append(["type": "text", "text": textRun.joined(separator: "\n\n")])
+                let block: [String: Any] = ["type": "text", "text": textRun.joined(separator: "\n\n")]
+                content.append(block)
+                auditInput.append(block)
                 textRun = []
             }
         }
@@ -226,6 +253,7 @@ public struct CLIBrainClient: BrainClient, @unchecked Sendable {
                 content.append(["type": "image",
                                 "source": ["type": "base64", "media_type": "image/jpeg",
                                            "data": base64]])
+                auditInput.append(["type": "image", "image": imageStub(base64)])
             }
         }
         if hasTools { textRun.append("Answer now, following the tool protocol.") }
@@ -233,7 +261,13 @@ public struct CLIBrainClient: BrainClient, @unchecked Sendable {
         let message: [String: Any] = ["type": "user",
                                       "message": ["role": "user", "content": content]]
         let data = try JSONSerialization.data(withJSONObject: message)
-        return String(decoding: data, as: UTF8.self) + "\n"
+        return (String(decoding: data, as: UTF8.self) + "\n", auditInput)
+    }
+
+    /// The audit-log stand-in for a screenshot — the pixels are already persisted as the session's
+    /// `shot-N.jpg` files, so the record only needs to say one was sent (and how big).
+    static func imageStub(_ base64: String) -> String {
+        "[image/jpeg — \(base64.count) base64 chars, redacted]"
     }
 
     /// The instruction block: the system text plus the tool protocol. Passed as `--system-prompt`
@@ -292,13 +326,10 @@ public struct CLIBrainClient: BrainClient, @unchecked Sendable {
     /// Codex's from the `--output-last-message` file. A failed run throws with the most useful
     /// text available.
     private func extractReply(_ output: AgentCLIOutput, codexReplyFile: URL?) throws -> String {
-        if provider == .claudeCode {
-            for line in output.stdout.split(separator: "\n").reversed() {
-                guard let obj = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
-                      let result = obj["result"] as? String else { continue }
-                if obj["is_error"] as? Bool == true { throw Self.error(result, code: Int(output.exitCode)) }
-                return result
-            }
+        if provider == .claudeCode, let envelope = Self.claudeResultEnvelope(in: output.stdout),
+           let result = envelope["result"] as? String {
+            if envelope["is_error"] as? Bool == true { throw Self.error(result, code: Int(output.exitCode)) }
+            return result
         }
         if let codexReplyFile, let reply = try? String(contentsOf: codexReplyFile, encoding: .utf8),
            !reply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -317,43 +348,70 @@ public struct CLIBrainClient: BrainClient, @unchecked Sendable {
         return output.stdout
     }
 
+    /// Claude's `type:"result"` stream event — the last line whose object carries a string
+    /// `result` (the stream also emits system/assistant events).
+    static func claudeResultEnvelope(in stdout: String) -> [String: Any]? {
+        for line in stdout.split(separator: "\n").reversed() {
+            if let obj = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
+               obj["result"] is String {
+                return obj
+            }
+        }
+        return nil
+    }
+
     /// Map the reply back into the brain contract. No tools → the text IS the payload (summarizer /
-    /// evaluator). Otherwise parse the protocol JSON; a forced `speak` whose JSON didn't parse
-    /// degrades to speaking the raw reply — an explicit hotkey press must produce a visible hint,
-    /// not silently vanish on a formatting slip.
+    /// evaluator). Otherwise parse the protocol JSON. Unlike the Responses API, a forced tool is
+    /// only *prompted* here, so it's enforced client-side: a `force(speak)` turn (the hint hotkey)
+    /// never accepts a different tool, and degrades to speaking the reply's prose — an explicit
+    /// keypress must produce a visible hint, not silently vanish on a formatting slip.
     private func parse(reply: String, tools: [ToolDef], toolChoice: ToolChoice) -> BrainResponse {
         let text = reply.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !tools.isEmpty else {
             return BrainResponse(toolCalls: [], outputText: text.isEmpty ? nil : text)
         }
-        if let (name, argumentsJSON) = Self.extractToolCall(from: text) {
+        let extracted = Self.extractToolCall(from: text)
+        if let (name, argumentsJSON, _) = extracted {
             let callId = "cli_\(UUID().uuidString.prefix(8))"
-            if let invocation = ToolInvocation.parse(callId: callId, name: name,
-                                                     argumentsJSON: argumentsJSON) {
+            if case .force(let forced) = toolChoice, name != forced {
+                jlog("Jarvis coach: CLI called '\(name)' where '\(forced)' was forced — recovering")
+            } else if let invocation = ToolInvocation.parse(callId: callId, name: name,
+                                                            argumentsJSON: argumentsJSON) {
                 return BrainResponse(toolCalls: [invocation],
                                      rawToolCalls: [RawToolCall(id: callId, name: name,
                                                                 argumentsJSON: argumentsJSON)])
+            } else {
+                jlog("Jarvis coach: CLI tool call '\(name)' was unknown or malformed")
             }
-            jlog("Jarvis coach: CLI called unknown tool '\(name)'")
         }
-        if case .force(let name) = toolChoice, name == speakTool.name, !text.isEmpty {
-            let lines = text.split(separator: "\n").map(String.init)
+        if case .force(let name) = toolChoice, name == speakTool.name {
+            // Speak the reply's prose — everything before the (wrong or malformed) protocol
+            // object, or the whole reply when there was none.
+            let prose = extracted.map { String(text[..<$0.jsonStart]) } ?? text
+            let lines = prose.split(separator: "\n").map(String.init)
+                .map { $0.trimmingCharacters(in: .whitespaces) }
                 .filter { !$0.isEmpty }.prefix(3)
-            let callId = "cli_\(UUID().uuidString.prefix(8))"
-            return BrainResponse(toolCalls: [.speak(callId: callId, lines: Array(lines))],
-                                 rawToolCalls: [RawToolCall(id: callId, name: speakTool.name,
-                                                            argumentsJSON: "{}")])
+            if !lines.isEmpty {
+                let callId = "cli_\(UUID().uuidString.prefix(8))"
+                return BrainResponse(toolCalls: [.speak(callId: callId, lines: Array(lines))],
+                                     rawToolCalls: [RawToolCall(id: callId, name: speakTool.name,
+                                                                argumentsJSON: "{}")])
+            }
         }
-        // No parseable tool call: surface the text and let the driver treat it as silence.
+        // No usable tool call: surface the text and let the driver treat it as silence.
         return BrainResponse(toolCalls: [], outputText: text.isEmpty ? nil : text)
     }
 
     /// Find the protocol object in the reply — the LAST parseable JSON object carrying a "tool" key,
     /// tolerating prose before it, a code fence around it, or `lines` flattened to the top level.
-    static func extractToolCall(from text: String) -> (name: String, argumentsJSON: String)? {
+    /// `jsonStart` is where the object begins in `text`, so callers can recover the prose before it.
+    static func extractToolCall(from text: String)
+        -> (name: String, argumentsJSON: String, jsonStart: String.Index)? {
+        // Length-preserving fence blanking (7 and 3 chars respectively), so indices into `cleaned`
+        // remain valid indices into `text`.
         let cleaned = text
-            .replacingOccurrences(of: "```json", with: "\n")
-            .replacingOccurrences(of: "```", with: "\n")
+            .replacingOccurrences(of: "```json", with: "\n      ")
+            .replacingOccurrences(of: "```", with: "\n  ")
         var braceIndices: [String.Index] = []
         var search = cleaned.startIndex
         while let r = cleaned.range(of: "{", range: search..<cleaned.endIndex) {
@@ -372,7 +430,8 @@ public struct CLIBrainClient: BrainClient, @unchecked Sendable {
                 let args = (obj["arguments"] as? [String: Any]) ?? obj.filter { $0.key != "tool" }
                 let argsJSON = (try? JSONSerialization.data(withJSONObject: args))
                     .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
-                return (name, argsJSON)
+                // The fence replacements above are length-preserving, so `start` is valid in `text`.
+                return (name, argsJSON, start)
             }
         }
         return nil
@@ -393,22 +452,23 @@ public struct CLIBrainClient: BrainClient, @unchecked Sendable {
         effort == ReasoningEffort.none.rawValue ? ReasoningEffort.low.rawValue : effort
     }
 
-    private static func requestRecord(_ invocation: AgentCLIRun) -> Data {
-        let record: [String: Any] = [
-            "executable": invocation.executable.path,
-            "arguments": invocation.arguments,
-            "prompt": invocation.stdin ?? "",
-        ]
-        return (try? JSONSerialization.data(withJSONObject: record)) ?? Data()
+    private static func recordData(_ record: [String: Any]) -> Data {
+        (try? JSONSerialization.data(withJSONObject: record)) ?? Data()
     }
 
-    private static func responseRecord(_ output: AgentCLIOutput) -> Data {
-        let record: [String: Any] = [
-            "exitCode": Int(output.exitCode),
-            "stdout": output.stdout,
-            "stderr": tail(output.stderr),
-        ]
-        return (try? JSONSerialization.data(withJSONObject: record)) ?? Data()
+    /// The audit-side view of one run: the extracted reply (raw stdout is stream noise), the exit
+    /// code, any stderr, and — for claude — the result envelope's metadata (usage, duration,
+    /// num_turns) with the reply itself removed rather than duplicated.
+    private func responseRecord(_ output: AgentCLIOutput, reply: String?) -> Data {
+        var record: [String: Any] = ["exitCode": Int(output.exitCode)]
+        if let reply { record["reply"] = reply }
+        let stderr = Self.tail(output.stderr)
+        if !stderr.isEmpty { record["stderr"] = stderr }
+        if provider == .claudeCode, var envelope = Self.claudeResultEnvelope(in: output.stdout) {
+            envelope.removeValue(forKey: "result")
+            record["cli"] = envelope
+        }
+        return Self.recordData(record)
     }
 
     private static func tail(_ s: String, max: Int = 2_000) -> String {

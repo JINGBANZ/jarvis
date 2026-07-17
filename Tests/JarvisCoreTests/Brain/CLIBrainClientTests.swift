@@ -153,7 +153,8 @@ import Foundation
                                            tools: coachTools, toolChoice: .required)
         let run = try #require(captured.value)
         #expect(run.arguments.contains("exec"))
-        #expect(run.arguments.contains("--ephemeral"))  // no rollout transcript in ~/.codex
+        #expect(run.arguments.contains("--ephemeral"))            // no rollout transcript in ~/.codex
+        #expect(run.arguments.contains("--ignore-user-config"))   // no personal config/rules injected
         #expect(run.arguments.contains("-i"))
         #expect(!run.arguments.contains("-m"))          // empty model = the CLI's own default
         guard case .staySilent = response.toolCalls.first else {
@@ -207,6 +208,79 @@ import Foundation
                                            tools: [], toolChoice: .auto)
         #expect(response.outputText == "a tidy briefing")
         #expect(response.toolCalls.isEmpty)
+    }
+
+    @Test func forcedSpeakRejectsAnotherToolAndSpeaksTheProse() async throws {
+        // The Responses API enforces a forced tool server-side; the CLI protocol is prompt text,
+        // so a stay_silent reply to the hint hotkey must not eat the hint.
+        let workDir = try makeWorkDir()
+        let c = client(.claudeCode, workDir: workDir) { _ in
+            AgentCLIOutput(stdout: self.claudeEnvelope("""
+            Try a hash map here.
+            {"tool":"stay_silent","arguments":{}}
+            """), stderr: "", exitCode: 0)
+        }
+        let response = try await c.respond(messages: [.user("help")], tools: coachTools,
+                                           toolChoice: .force(speakTool.name))
+        guard case .speak(_, let lines) = response.toolCalls.first else {
+            Issue.record("expected forced speak, got \(response.toolCalls)"); return
+        }
+        #expect(lines == ["Try a hash map here."])
+    }
+
+    @Test func forcedSpeakWithNoUsableProseFallsSilent() async throws {
+        // A wrong-tool reply with no prose has nothing worth rendering — silence over an empty tip.
+        let workDir = try makeWorkDir()
+        let c = client(.claudeCode, workDir: workDir) { _ in
+            AgentCLIOutput(stdout: self.claudeEnvelope(#"{"tool":"stay_silent","arguments":{}}"#),
+                           stderr: "", exitCode: 0)
+        }
+        let response = try await c.respond(messages: [.user("help")], tools: coachTools,
+                                           toolChoice: .force(speakTool.name))
+        #expect(response.toolCalls.isEmpty)
+    }
+
+    @Test func malformedSpeakArgumentsAreNotAnEmptySpokenTurn() async throws {
+        // No Structured Outputs on the CLI path: {"tool":"speak","arguments":{}} must not become a
+        // .speak with empty lines (an empty overlay that still counts as a spoken turn).
+        let workDir = try makeWorkDir()
+        let c = client(.claudeCode, workDir: workDir) { _ in
+            AgentCLIOutput(stdout: self.claudeEnvelope(#"{"tool":"speak","arguments":{}}"#),
+                           stderr: "", exitCode: 0)
+        }
+        let response = try await c.respond(messages: [.user("hm")], tools: coachTools,
+                                           toolChoice: .required)
+        #expect(response.toolCalls.isEmpty)
+    }
+
+    @Test func trafficRecordRedactsScreenshotsAndSpeaksTheEvaluatorSchema() async throws {
+        // The audit record must carry instructions/input/reply in the evaluator's shape, with the
+        // inline base64 image reduced to a stub — never the raw stream-json stdin, whose embedded
+        // image bytes would slip past BrainTrafficLog's data:-URI redaction.
+        let workDir = try makeWorkDir()
+        let traffic = BrainTrafficLog()
+        traffic.enable(directory: workDir)
+        let base64 = Data("fake-jpeg-payload".utf8).base64EncodedString()
+        let c = CLIBrainClient(provider: .claudeCode, executable: URL(fileURLWithPath: "/fake/bin/cli"),
+                               model: "sonnet", reasoningEffort: "low", workDirectory: workDir,
+                               traffic: traffic, trafficTag: "coach") { _ in
+            AgentCLIOutput(stdout: self.claudeEnvelope(#"{"tool":"stay_silent","arguments":{}}"#),
+                           stderr: "", exitCode: 0)
+        }
+        _ = try await c.respond(messages: [.system("coach prompt"), .user("look"), .userImage(base64)],
+                                tools: coachTools, toolChoice: .required)
+        let jsonl = try String(contentsOf: workDir.appendingPathComponent(BrainTrafficLog.filename),
+                               encoding: .utf8)
+        #expect(!jsonl.contains(base64))                    // no screenshot bytes in the audit log
+        let entry = try #require(try JSONSerialization.jsonObject(
+            with: Data(jsonl.split(separator: "\n").first.map(String.init)!.utf8)) as? [String: Any])
+        let request = try #require(entry["request"] as? [String: Any])
+        let instructions = try #require(request["instructions"] as? String)
+        #expect(instructions.hasPrefix("coach prompt"))   // system text + the tool protocol
+        let input = try #require(request["input"] as? [[String: Any]])
+        #expect(input.contains { ($0["image"] as? String)?.contains("redacted") == true })
+        let response = try #require(entry["response"] as? [String: Any])
+        #expect((response["reply"] as? String)?.contains("stay_silent") == true)
     }
 
     @Test func forcedSpeakDegradesToSpeakingTheRawReply() async throws {

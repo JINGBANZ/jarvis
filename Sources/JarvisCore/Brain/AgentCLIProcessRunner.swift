@@ -93,6 +93,10 @@ public enum AgentCLIProcessRunner {
         var environment = ProcessInfo.processInfo.environment
         environment["PATH"] = [environment["PATH"], run.executable.deletingLastPathComponent().path]
             .compactMap { $0 }.joined(separator: ":")
+        // Jarvis's own secret must not widen its exposure: when the documented OPENAI_API_KEY
+        // fallback is in use, the transcription key would otherwise be inherited by the brain CLI
+        // (and anything its config loads), which authenticates with its own credentials.
+        environment.removeValue(forKey: "OPENAI_API_KEY")
         process.environment = environment
 
         let stdinPipe = Pipe(), stdoutPipe = Pipe(), stderrPipe = Pipe()

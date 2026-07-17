@@ -238,7 +238,8 @@ memory, retries, and traffic recording are all unchanged — only the transport 
   though a modest one now that every turn is one model call: measured coach turns run ~2.6s (text)
   / ~3.3s (with screenshot) on claude sonnet at low effort, ~5–8s on codex — versus the direct
   API's sub-2s target. The invocation is kept deliberately slim (persona replaced, no settings
-  sources, **zero MCP servers** — `--strict-mcp-config` / `-c mcp_servers={}` — no built-in tools),
+  sources or personal codex config — `--ignore-user-config` — **zero MCP servers** via
+  `--strict-mcp-config` / `-c mcp_servers={}`, no built-in tools),
   so what remains is irreducible from outside: claude's floor is ~0.7s of process overhead + model
   time; codex's is ~4.7s even for a trivial prompt because its fixed coding-agent scaffold (a
   built-in multi-thousand-token system prompt that `exec` offers no flag to replace) rides every

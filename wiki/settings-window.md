@@ -116,8 +116,9 @@ disabled; a detected-but-unconfirmed sign-in still selects (the auth probe is a 
 Keychain-only credentials are invisible to it).
 
 **Model + effort.** A **Model** dropdown drawn from `BrainModelCatalog` per provider (OpenAI ids for
-the API; CLI aliases like `sonnet` for the CLIs, plus a "CLI default" entry meaning "no model flag —
-whatever the CLI is configured to run"). Each provider remembers its own model. The **Reasoning
+the API; CLI aliases like `sonnet` for the CLIs, plus a "CLI default" entry meaning "no model flag" —
+for Codex that is its built-in default, since harness runs ignore the user's codex config). Each
+provider remembers its own model. The **Reasoning
 Effort** picker (`ReasoningEffort`: None / Low / Medium / High, default Low) is stored once and
 applies uniformly to whichever provider is active — `CLIBrainClient` maps it onto each CLI's own
 scale (Claude Code `--effort`, floor `low`; Codex `model_reasoning_effort`, floor `minimal`), so
@@ -134,12 +135,10 @@ deliberately **not** here — it's a separate field and code path (`Config.trans
 values are read in `AppDelegate.start()` when the brain client is built, so a change takes effect on
 the **next Start**, not mid-session — hence the caption on the tab.
 
-| Setting | Default | Source of truth | UserDefaults key |
-|---|---|---|---|
-| Brain provider | `openai` | `BrainProvider` | `brain.provider` |
-| Brain model (OpenAI) | `gpt-5.5` | `BrainModelCatalog` | `brain.model` |
-| Brain model (CLI providers) | per catalog | `BrainModelCatalog` | `brain.model.<provider>` |
-| Reasoning effort | `low` | `ReasoningEffort` | `brain.reasoningEffort` |
+All four selections persist via `BrainPreferences` —
+`Sources/JarvisCore/Config/BrainPreferences.swift` is the single source for the UserDefaults keys,
+defaults, and validation (the catalogs themselves live in
+`Sources/JarvisCore/Brain/BrainModelCatalog.swift`).
 
 ## Capture Scope
 
