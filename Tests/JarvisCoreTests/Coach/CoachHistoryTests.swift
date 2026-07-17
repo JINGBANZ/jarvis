@@ -22,6 +22,33 @@ import Testing
         #expect(snap.compactMap(\.text).first == "a")   // non-image messages untouched
     }
 
+    /// Raw passthrough items live only inside their turn's tool loop — commit converts them: the
+    /// function_call survives as the synthetic id-less call (so the committed tool result never
+    /// orphans) and reasoning is dropped; later turns don't need it and a model switch would
+    /// invalidate it anyway.
+    @Test func rawPassthroughItemsAreConvertedAtCommit() {
+        let h = CoachHistory()
+        h.commit([.user("a"),
+                  .rawItems([#"{"type":"reasoning","id":"rs_1","encrypted_content":"blob"}"#,
+                             #"{"type":"function_call","id":"fc_1","call_id":"c1","name":"capture_screen","arguments":"{}"}"#]),
+                  .init(role: .tool, text: "screenshot captured", toolCallId: "c1")])
+        let snap = h.snapshot()
+        #expect(!snap.contains { $0.rawItemsJSON != nil })                       // nothing verbatim survives
+        #expect(!snap.contains { ($0.toolCalls?.first?.argumentsJSON ?? "").contains("blob") })
+        #expect(snap.compactMap(\.toolCalls).flatMap { $0 }
+                == [RawToolCall(id: "c1", name: "capture_screen", argumentsJSON: "{}")])
+        #expect(snap.contains { $0.role == .tool && $0.toolCallId == "c1" })     // the pair stays whole
+    }
+
+    /// A passthrough message with no function_call in it (reasoning only) leaves no trace at commit —
+    /// there is nothing a later turn could use.
+    @Test func reasoningOnlyPassthroughIsDroppedWholeAtCommit() {
+        let h = CoachHistory()
+        h.commit([.user("a"), .rawItems([#"{"type":"reasoning","id":"rs_1"}"#]), .user("b")])
+        #expect(h.snapshot().compactMap(\.text) == ["a", "b"])
+        #expect(!h.snapshot().contains { $0.rawItemsJSON != nil || $0.toolCalls != nil })
+    }
+
     /// The compaction prefix always leaves the newest message verbatim and hands out at least one —
     /// a single oversized message must still be compactable once a second one exists.
     @Test func compactionPrefixBoundsRespectTheTail() {

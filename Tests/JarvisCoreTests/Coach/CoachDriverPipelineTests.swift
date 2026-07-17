@@ -446,6 +446,44 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(brain.calls.last!.contains { ($0.text ?? "").contains("important words") })   // re-sent
     }
 
+    /// Reasoning passthrough: a capture_screen response's WHOLE output (reasoning + the function_call
+    /// with its item id) rides verbatim into the tool loop's next request, ahead of the tool result —
+    /// the canonical `input.push(...response.output)` loop. Commit converts it: the next turn's
+    /// request carries the id-less synthetic call instead, and no reasoning.
+    @Test func reasoningItemsRideTheToolLoopButNotMemory() async {
+        let outputItems = [
+            #"{"type":"reasoning","id":"rs_1"}"#,
+            #"{"type":"function_call","id":"fc_1","call_id":"c1","name":"capture_screen","arguments":"{}"}"#,
+        ]
+        let brain = ScriptedBrain(script: [
+            .init(toolCalls: [.captureScreen(callId: "c1")],
+                  rawToolCalls: [RawToolCall(id: "c1", name: "capture_screen", argumentsJSON: "{}")],
+                  outputItemsJSON: outputItems),
+            .init(toolCalls: [.speak(callId: "s1", lines: ["tip"])],
+                  rawToolCalls: [RawToolCall(id: "s1", name: "speak", argumentsJSON: "{}")]),
+            .init(toolCalls: []),
+        ])
+        let (driver, transcript) = makeDriver(brain: brain, clock: ManualClock(now: 0))
+        transcript.append(.init(speaker: .me, text: "look at this", at: 0))
+        await driver.handleTrigger(.turnEnd)
+        transcript.append(.init(speaker: .me, text: "another thought", at: 5))
+        await driver.handleTrigger(.turnEnd)
+
+        // Within the turn: one verbatim passthrough message, whole and in order, before the result.
+        let second = brain.calls[1]
+        let rawIndex = second.firstIndex { $0.rawItemsJSON != nil }
+        let resultIndex = second.firstIndex { $0.role == .tool && $0.toolCallId == "c1" }
+        #expect(rawIndex != nil && resultIndex != nil)
+        if let r = rawIndex, let t = resultIndex { #expect(r < t) }
+        #expect(second.first { $0.rawItemsJSON != nil }?.rawItemsJSON == outputItems)
+        #expect(!second.contains { $0.toolCalls?.contains { $0.name == "capture_screen" } ?? false })   // no duplicate synthetic call
+
+        // After commit: reasoning gone, the call converted to the id-less synthetic history shape.
+        let third = brain.calls[2]
+        #expect(!third.contains { $0.rawItemsJSON != nil })
+        #expect(third.contains { $0.toolCalls == [RawToolCall(id: "c1", name: "capture_screen", argumentsJSON: "{}")] })
+    }
+
     /// Observation masking: a screenshot only lives within the turn that took it — once the turn
     /// commits, later requests carry a text stub instead of pixels.
     @Test func screenshotsStubbedAfterTheirTurnCommits() async {

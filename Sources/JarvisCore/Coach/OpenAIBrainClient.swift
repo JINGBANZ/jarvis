@@ -131,6 +131,17 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
                 }
 
             case .assistant:
+                // Verbatim passthrough items (a prior response's whole `output` array) go back
+                // exactly as the model emitted them — OpenAI requires a function call's output items
+                // (reasoning included) to accompany its result, unmodified and in order, or the
+                // request fails linkage validation / the model re-reasons from scratch.
+                if let raw = m.rawItemsJSON {
+                    for itemJSON in raw {
+                        if let item = (try? JSONSerialization.jsonObject(with: Data(itemJSON.utf8))) as? [String: Any] {
+                            input.append(item)
+                        }
+                    }
+                }
                 // Replay the model's function calls as `function_call` input items (the tool loop).
                 if let calls = m.toolCalls {
                     for c in calls {
@@ -275,6 +286,20 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
             : nil
         return BrainResponse(toolCalls: invocations, rawToolCalls: raws,
                              incompleteReason: incompleteReason,
-                             outputText: outputText.isEmpty ? nil : outputText)
+                             outputText: outputText.isEmpty ? nil : outputText,
+                             outputItemsJSON: Self.outputItemsJSON(in: data))
+    }
+
+    /// The response's entire `output` array, each item re-serialized whole so the tool loop can
+    /// replay it untouched (`input.push(...response.output)` — reasoning ids, function_call item
+    /// ids, any encrypted payload all preserved). Extracted from the raw bytes — the typed
+    /// `Response` above deliberately doesn't model every provider field, and replay must lose none.
+    private static func outputItemsJSON(in data: Data) -> [String] {
+        guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let output = root["output"] as? [[String: Any]] else { return [] }
+        return output.compactMap { item in
+            guard let bytes = try? JSONSerialization.data(withJSONObject: item) else { return nil }
+            return String(data: bytes, encoding: .utf8)
+        }
     }
 }

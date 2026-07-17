@@ -246,8 +246,21 @@ public final class CoachDriver: @unchecked Sendable {
                 // Thread the call + its result into this turn's messages; the next iteration's
                 // request carries them (and they land in history at commit, where the screenshot
                 // becomes a text stub — only the OCR text outlives the turn). The OCR sidecar
-                // travels in the tool-result text, right next to the image.
-                turnMessages.append(.assistantToolCalls(response.rawToolCalls))
+                // travels in the tool-result text, right next to the image. The model's output goes
+                // back WHOLE and verbatim — reasoning then function_call, item ids intact, the
+                // canonical `input.push(...response.output)` loop: pairing a raw reasoning item with
+                // a rebuilt, id-less call trips the provider's reasoning/function-call linkage
+                // validation, and dropping the reasoning makes the model re-reason from scratch.
+                // (`CoachHistory.commit` converts this back to the proven id-less call and drops the
+                // reasoning — later turns don't need it.)
+                if !response.outputItemsJSON.isEmpty {
+                    turnMessages.append(.rawItems(response.outputItemsJSON))
+                } else {
+                    // No raw bytes to replay (a scripted test brain, or a response whose raw output
+                    // failed to re-serialize): fall back to the synthetic id-less call so the tool
+                    // result below never orphans.
+                    turnMessages.append(.assistantToolCalls(response.rawToolCalls))
+                }
                 if let shot {
                     turnMessages.append(.init(role: .tool, text: Self.captureResultText(shot), toolCallId: callId))
                     turnMessages.append(.userImage(shot.imageBase64))
