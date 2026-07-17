@@ -1,0 +1,96 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+# A release runs to completion before the next one starts; never cancel a half-finished publish.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+# Least privilege by default; each job widens only what it needs.
+permissions: {}
+
+jobs:
+  # Runs on every push to main. Reads conventional commits and maintains the standing Release PR
+  # (bumps the version in Resources/Info.plist + CHANGELOG). It does not execute repo code.
+  # release_created flips true only on the push that merges the Release PR — that push creates
+  # the tag and the GitHub Release, and gates the publish job below.
+  #
+  # Note: the Release PR is authored by GITHUB_TOKEN, whose PRs don't trigger ci.yml. If CI is
+  # ever made a *required* check, the Release PR becomes unmergeable — switch to a GitHub App
+  # token at that point (see the evolving repo's release.yml for the worked example).
+  release-please:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@v5
+        id: release
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  # Build, sign, notarize, and attach Jarvis-<version>.zip to the Release just created. Gate
+  # (tests) and publish share one job — macOS minutes bill at 10x, and re-running the Swift build
+  # in a second job would double the cost for no extra safety: any failing step here still aborts
+  # before the upload. This deliberately lives in the same workflow rather than a tag-triggered
+  # one: tags created with GITHUB_TOKEN never trigger other workflows.
+  publish:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    runs-on: macos-15
+    permissions:
+      contents: write # upload the release asset
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run tests (gate)
+        run: ./scripts/run-tests.sh
+
+      # GitHub's documented recipe for signing on a hosted runner: decode the Developer ID
+      # certificate into a fresh temporary keychain. set-key-partition-list is what lets codesign
+      # use the key without a GUI prompt (which would hang forever headless); the keychain
+      # password is throwaway, so it's generated here rather than stored as a secret.
+      - name: Import Developer ID certificate
+        env:
+          MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          CERT_PATH="$RUNNER_TEMP/certificate.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          echo -n "$MACOS_CERTIFICATE_P12_BASE64" | base64 --decode -o "$CERT_PATH"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -P "$MACOS_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+
+      - name: Build, sign, notarize, package
+        env:
+          NOTARY_KEY_BASE64: ${{ secrets.NOTARY_KEY_BASE64 }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+        run: |
+          NOTARY_KEY_PATH="$RUNNER_TEMP/AuthKey.p8"
+          echo -n "$NOTARY_KEY_BASE64" | base64 --decode -o "$NOTARY_KEY_PATH"
+          export NOTARY_KEY_PATH
+          ./scripts/package-app.sh
+
+      - name: Attach to the GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload '${{ needs.release-please.outputs.tag_name }}' Jarvis-*.zip
+
+      # Hosted runners are ephemeral, but scrubbing the signing key is cheap insurance (and
+      # required hygiene if this ever moves to a self-hosted runner).
+      - name: Delete temporary keychain
+        if: ${{ always() }}
+        run: security delete-keychain "$RUNNER_TEMP/app-signing.keychain-db" || true
