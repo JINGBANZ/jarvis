@@ -6,7 +6,7 @@
 
 > **Scope:** This page describes the **native Swift app** — the thing being built. The earlier
 > two-phase plan (a Natively fork PoC first) was **dropped on 2026-06-14**; we build this directly,
-> including the model-triggered `capture_screen` tool-loop. See [decisions.md](./decisions.md).
+> including the hybrid screen-context loop. See [decisions.md](./decisions.md).
 > Exact schemas, the coach prompt, and config are **not duplicated here** — they live in code
 > (`Sources/JarvisCore/`, esp. `ToolDefs.swift`, `Config.swift`, `CoachDriver.swift`); this page is
 > the *why*, the code is the *what*.
@@ -42,36 +42,50 @@ glue that wires them into a proactive coach. We write the least code possible an
 ```
 
 Always-on and cheap: audio streams continuously to the Realtime API, producing a rolling,
-speaker-labeled transcript. The transcript — not the screen — is the constant input signal.
+speaker-labeled transcript. The transcript — not the screen — is the constant remote input signal.
 
-On demand and expensive: the screen is **only** captured when the model asks for it via the
-`capture_screen` tool, and a coaching response is **only** produced when the model calls `speak`.
-This is what keeps Jarvis cheap and fast — the costly vision and generation steps fire only at
-moments the model judges worthwhile.
+Screen context is hybrid and still bounded. On ordinary speech, the model applies a general
+freshness rule and can call `capture_screen` whenever the meaning of the conversation suggests a
+question, prompt, code, or solution may have appeared or changed; there is no phrase list. The
+harness pre-captures on silence/manual-hint checks and after a locally detected stable screen
+change. Low-rate, low-resolution one-shot ScreenCaptureKit screenshots compare visible pixels
+locally without opening a persistent screen-sharing session. After visible content settles, one full
+capture plus on-device OCR verifies that it actually changed. The snapshot first waits to join the
+next speech request at no extra request cost; a tightly rate-limited screen-only request is the
+fallback. Silent monitor turns that produce no tip are not retained in conversation memory. The exact
+accepted snapshot becomes the auditable coaching image; intermediate frames are neither sent nor
+retained. A coaching response is still produced only when the model calls `speak`.
 
 ### The turn
 
 1. The Transcriber emits a **turn-end** event (`gpt-4o-transcribe` server VAD ends the turn after a
-   tuned silence window) or a **silence check** fires (you've gone quiet, maybe stuck). The silence
+   tuned silence window), a **silence check** fires (you've gone quiet, maybe stuck), or the local
+   screen monitor reports a stable visual change. The silence
    check carries *how long* you've been quiet and backs off across a long silence (the interval
    doubles each step up to a cap — see `Config`), resetting on speech; past an idle cutoff it stops
    probing entirely (you've stepped away — a nudge into an empty room still bills a request) until
    speech re-arms it.
-2. The CoachDriver calls the brain on every trigger that carries **substance** — there is no
-   cooldown, rate cap, or wake-word gate. Whether to speak (and whether the user just addressed
+2. The CoachDriver calls the brain on every trigger that carries **substance** — there is no general
+   audio-turn cooldown, rate cap, or wake-word gate (the screen-only monitor fallback is bounded
+   before it reaches the driver). Whether to speak (and whether the user just addressed
    Jarvis) is the model's call, governed by the system prompt; the only hard gates are the user's
    Start/Stop and the **substance gate** (`TurnSubstance`): a turn-end whose delta is pure
    back-channel filler ("Hmm", "嗯") or empty is skipped without a request. Classification is
    speaker-aware only where conversational meaning demands it: a short interviewer rejection such
    as "No" is substantive, even though the same user-side fragment is normally filler. Interviewer
    questions remain first-class and may draw a proactive tip. Skipped lines ride along on the next
-   substantive turn; silence checks and the hint hotkey always go through.
+   substantive turn; silence checks, visual changes, and the hint hotkey always go through.
 3. It calls **`gpt-5.5`** with the coach system prompt, the session memory (`CoachHistory`), the
    new transcript delta, the timing context (seconds silent, session elapsed), and the tool set
    `[capture_screen, speak, stay_silent]`. The timing is what lets the model tell "thinking" from
    "stuck."
-4. The model may call `capture_screen`. The harness fulfills it (a silent screenshot) and
-   returns the image into the request. The model may now reason over what's on screen.
+4. Silence, manual hints, and stable local screen changes arrive with a harness-captured image plus
+   OCR. A stable monitor snapshot piggybacks on the next speech request when possible; only the
+   fallback creates a screen-only request, under the monitor's cost interval. On ordinary speech,
+   the model decides from the meaning of the turn whether it needs to call `capture_screen`; a
+   screenshot from conversation history is explicitly not evidence of current state. Every
+   successful capture resets the local monitor's baseline. If an early capture is still blank, the
+   monitor supplies a new turn after the subsequently updated screen becomes stable.
 5. The model calls `speak(lines)` — a tip of up to ~3 short lines, returned **already split**
    into an array (Structured Outputs / `strict:true`), so the client never splits prose on
    punctuation — or `stay_silent`. A tool call is **required** on every turn: silence is an
@@ -97,11 +111,11 @@ path still works for testing/practice; it is simply not latency-critical there.)
 
 Proactive coaching is the default, but the user can also **pull** a hint on demand. Pressing the
 global hotkey **⌥⌘J** while a session is running fires a `manualHint` trigger that does in **one**
-brain round-trip what the proactive screen path needs two for: the harness captures the screenshot
+brain round-trip what a model-requested screen path needs two for: the harness captures the screenshot
 *itself* and injects it — plus a synthetic "give me a hint now" user message — into the *first*
-request, and forces the `speak` tool, so a screen-aware hint always comes straight back. (The
-proactive path, by contrast, must first let the model decide to call `capture_screen`, then reason
-over the returned image on a second trip — the latency this hotkey exists to skip.) It reuses the
+request, and forces the `speak` tool, so a screen-aware hint always comes straight back. Other
+deterministic visual triggers also pre-capture, but do not force speech; ordinary audio turns may
+still let the model call `capture_screen` and reason over the result on a second trip. It reuses the
 live session's brain, conversation, and transcript, so the hint has full context, and it routes
 through the same single-in-flight turn box as audio triggers (a press coalesces, never stacks). It is
 inert — a beep — when no session is running, since there is no live conversation to hint from. The
@@ -122,8 +136,9 @@ plugins ship only with full Xcode, and Jarvis builds **CLT-only** (see
 | **WebRTCEchoCanceller** | AEC3 echo canceller driven at 48 kHz on 10 ms frames inside the capture IOProc; far reference first, then the mic cleaned in place. | WebRTC **AEC3** (`webrtc-audio-processing`), vendored static + zero-dylib via `scripts/build-aec.sh`. |
 | **ErrorReporter** | The single funnel for user-facing failures. Severity on a Foundation-only `UserFacingError` (in Core) decides the response — `fatal` pops an `NSAlert` and tears the session down, `warning` alerts without touching a running session (preflight refusals), `degraded` is logged only — so no startup failure is ever silent. The only place an *error* `NSAlert` is raised (confirmation prompts aside); diagnostics stay in `JarvisLog`. | AppKit (`NSAlert`). |
 | **Transcriber** | Maintain a rolling, speaker-labeled, **spoken-time timestamped** transcript; emit turn-end events and backing-off silence checks (with quiet duration). Two instances run in parallel — one per side — tagging lines `me`/`them` into one shared transcript. A per-`item_id` ledger reconciles out-of-order delta/completed/failed/VAD events, salvages streamed text, and emits an explicit context-gap marker when a detected utterance cannot be recovered. A privacy-preserving continuity witness records content-free capture/delivery/socket/server checkpoints and locally derived activity, so the session log can locate a future gap without retaining PCM. A socket is ready only after the server acknowledges its configuration; active ping/pong probes, send/receive errors, and startup timeouts all drive the same reconnect path. | `gpt-4o-transcribe` (Realtime API; tuned `server_vad`). |
-| **CoachDriver** | The event loop. On every substantive trigger (plus every silence check and hint keypress), call the brain with the session memory + transcript delta + timing context and tools, route tool calls, and compact the memory when it grows long. No cooldown/rate cap — restraint is the model's; the only client-side skip is the filler-only turn-end gate (`TurnSubstance`). | `gpt-5.5` (vision + tool-use) with `gpt-5.4-mini` for memory summaries — or a local Claude Code / Codex CLI on the user's subscription (see [§4 Local CLI brain providers](#local-cli-brain-providers)). |
+| **CoachDriver** | The event loop. On every substantive trigger (plus every silence check, stable visual change, and hint keypress), call the brain with the session memory + transcript delta + timing context and tools, route tool calls, and compact the memory when it grows long. It attaches harness-provided snapshots for silence/manual/change triggers and otherwise leaves capture judgment to the model. No cooldown/rate cap — restraint is the model's; the only client-side skip is the filler-only turn-end gate (`TurnSubstance`). | `gpt-5.5` (vision + tool-use) with `gpt-5.4-mini` for memory summaries — or a local Claude Code / Codex CLI on the user's subscription (see [§4 Local CLI brain providers](#local-cli-brain-providers)). |
 | **ScreenTool** | Fulfill `capture_screen`: silently shoot the **active window** (default scope) — the window-server frontmost, on whichever display, clean even when partially covered — and attach an **on-device OCR** of the shot to the tool result so the model reads exact text instead of pixels. Falls back to a full-display capture (no OCR) — the Settings-chosen display in Entire-display scope, the main display when no window is eligible; the overlay window is excluded either way. See [settings-window.md](./settings-window.md#capture-scope). | macOS `screencapture` CLI + Apple Vision (`VNRecognizeTextRequest`). |
+| **ScreenChangeMonitor** | From session start, take low-rate one-shot ScreenCaptureKit screenshots at a bounded resolution, avoiding a persistent macOS sharing session. `ScreenFrameActivityClassifier` compares one grayscale byte per pixel with the prior poll; visible changes feed `ScreenActivityDetector`, and unchanged polls advance quiescence. Only then does `InMemoryScreenCapture` take one full capture and use a content-free OCR/image fingerprint to suppress duplicates. The stable snapshot waits briefly to piggyback on speech, then falls back to a screen-only request under a strict minimum interval. Intermediate pixels remain memory-only; the accepted snapshot enters `CoachDriver`, and failed delivery re-arms it. | `SCScreenshotManager` + Foundation-only frame/activity/content state machines. |
 | **Overlay Caption** | Render `speak` output: up to ~3 short lines (model-split), shown one at a time and queued so a newer tip never cuts off the current one; non-activating, always-on-top, excluded from capture. Switchable from Settings — **off by default**; when off, tips are suppressed. | AppKit NSPanel; `OverlayCaptionPanel`. |
 | **Overlay Box** | A persistent window logging every `speak` tip in full, timestamped — the scrollable history of what the caption flashed one line at a time. Movable, resizable, opaque, also excluded from capture; switched on/off from Settings (**on by default**), cleared on each Start. Fed by the same `speak` call as the caption via **`BroadcastOverlay`**, which fans one `OverlayRendering.render` out to both sinks (so `CoachDriver` is unchanged). | AppKit NSPanel; `OverlayBoxPanel`. |
 | **MenuBar** | Manual **Start/Stop** of the pipeline (no auto-start), an explicit connection state (starting, listening, reconnecting, system-audio connecting, microphone-only, or stopped), and one-time API-key entry. It turns green only when the microphone transcription socket is configured and ready. The two overlay surfaces are switched from Settings, not the menu. | AppKit menu-bar item; owner-only file for the key. |
@@ -173,13 +188,19 @@ lifecycle consequence.
 - **Continuous (cheap):** audio → Realtime → transcript. This runs the whole session.
 - **Per-turn (cheap):** a `gpt-5.5` call on each substantive turn-end and each silence event, with a
   bounded, mostly-cached working set. Filler-only turn-ends (from either speaker) are skipped
-  client-side — free. No image unless the model asks.
-- **On-demand (expensive):** a screenshot + vision tokens, only when the model calls
-  `capture_screen`. A coaching response, only when the model calls `speak`.
+  client-side — free. No per-turn screenshot default.
+- **Local visual watch (bounded):** low-resolution one-shot ScreenCaptureKit captures compare visible
+  pixels locally without an ongoing sharing session. A full capture and OCR happen only after
+  quiescence; unchanged content is suppressed, and intermediate poll pixels are never sent, encoded,
+  OCR'd, or persisted (only the immediately previous grayscale frame is held).
+- **On-demand (expensive):** a screenshot + vision tokens when the model calls `capture_screen`, or
+  when a silence/manual hint or stable local screen change requires current visual context. Stable
+  changes first piggyback on a speech call; a screen-only fallback is rate-limited. A coaching
+  response is still produced only when the model calls `speak`.
 
-The model is the cost governor: it spends vision tokens and screen real estate only when it
-judges them worthwhile. That is the whole point of making screen capture a model-invoked tool
-rather than a per-turn screenshot.
+The model remains the response governor, while the harness guarantees freshness at the few points
+where stale or missing visual context would make that judgment unreliable. This avoids both a
+per-turn screenshot tax and the failure mode where a screen-blind model elects not to look.
 
 ### Models and APIs
 
@@ -202,8 +223,11 @@ rather than a per-turn screenshot.
   debugging — the retention tradeoff is documented in [sandbox.md](./sandbox.md).
 - **Transcription — `gpt-4o-transcribe` over the GA Realtime API** with **tuned `server_vad`** (not
   `semantic_vad`, which is reported flaky in transcription-only mode — it can stop emitting
-  `…transcription.completed` entirely). Turn-end fires on `…transcription.completed`, plus a
-  client-side debounce so a brief mid-thought pause doesn't fragment one sentence into several turns.
+  `…transcription.completed` entirely). Realtime events are reconciled by `item_id`: deltas are
+  retained until completed/failed, audio-start timestamps preserve spoken order, and a stopped item
+  without a terminal event is salvaged or marked as a context gap after a bounded deadline. Turn-end
+  fires only after usable text or that explicit gap lands, plus a client-side debounce so a brief
+  mid-thought pause doesn't fragment one sentence into several turns.
 
 ### Local CLI brain providers
 
@@ -266,6 +290,18 @@ preserves every real tap sample and pads only a short/empty callback's missing s
 VAD keeps advancing; AEC receives a separate exact mic-length padded/truncated reference. Neither
 path disables AEC or changes the configured Realtime noise-reduction profile.
 
+Stable-screen duplicate suppression likewise combines two local, content-free signals: normalized
+OCR and a tolerant 64-bit perceptual image hash. This keeps diagrams, highlighting, and OCR-missed
+edits visible without reacting to small JPEG/pixel drift. The one full snapshot bound to a request is
+persisted before network send for audit, but its monitor baseline advances only after success; a
+newer candidate that settled behind an older in-flight request is resumed rather than discarded.
+Monotonic capture ordering prevents an ordinary screenshot from clearing activity observed after
+that screenshot began, and switching the watched window/display forces a full-stage reconciliation.
+At the cheaper first stage, the downscaled pixels must visibly differ; identical one-shot polls
+advance quiescence regardless of how often an app redraws internally. Content-free witness counters
+separate changed polls, idle polls, failed polls, full captures, duplicates, piggybacks, and
+screen-only requests.
+
 The always-on legs are built to survive transient failure rather than die on it:
 
 - **The realtime transcription socket *will* drop** (network blips, server resets, the ~60-min
@@ -283,18 +319,20 @@ The always-on legs are built to survive transient failure rather than die on it:
   progress retires a safe prefix. On failure, the unconfirmed tail is requeued ahead of audio captured
   during reconnect backoff. This closes the ready-transition, asynchronous-send, and idle half-open
   loss edges; deliberate cap eviction is logged and carried as an explicit context warning. Within a
-  healthy socket, streamed transcript deltas survive a failed or missing terminal event; an
-  unrecoverable detected utterance becomes an explicit context-gap line instead of disappearing.
-  Sequence, sample, timestamp, and socket-generation checkpoints cover the capture, delivery,
-  WebSocket attempt/completion, and server-event boundaries. Periodic content-free summaries and
-  typed anomalies show which boundary stopped advancing; sustained local activity without a server
-  speech event leaves an explicit warning for the next real coach turn. This evidence diagnoses loss
-  but cannot reconstruct words that never reached transcription. VAD-only start/stop events do not
-  restart silence checks without contributing context. Pending items are finalized by bounded
-  stopped/active deadlines. On a recoverable socket failure, their old server IDs are cleared and
-  their retained PCM is transcribed by the replacement session instead of first emitting a partial
-  or gap that the replay would duplicate. Stale speech state therefore cannot suppress silence
-  coaching after reconnect. Reconnect uses capped exponential backoff.
+  healthy socket, streamed transcript deltas survive
+  a failed/missing terminal event;
+  an unrecoverable detected utterance becomes an explicit context-gap line instead of disappearing.
+  Sequence/sample/timestamp checkpoints cover the capture, delivery, WebSocket attempt/completion,
+  and server-event boundaries. Periodic content-free summaries and typed anomalies show which
+  boundary stopped advancing; sustained local activity without a server speech event leaves an
+  explicit warning for the next real coach turn. This evidence diagnoses loss but cannot reconstruct
+  words that never reached transcription.
+  VAD-only start/stop events do not restart silence checks without contributing context. Pending
+  items are finalized by bounded stopped/active deadlines. On a recoverable socket failure, their old
+  server IDs are cleared and their retained PCM is transcribed by the replacement session instead of
+  first emitting a partial/gap that the replay would duplicate; terminal reconnect failure still
+  finalizes what text is available. Stale speech state therefore cannot suppress silence coaching
+  after reconnect. Reconnect uses capped exponential backoff.
 - **The brain call** is single-flighted (a turn can't double-speak) and runs under a generous request
   timeout — a hang backstop set well above the reasoning-turn tail, so a slow turn is waited out, not
   abandoned. Because client-owned memory makes every request self-contained and tool effects happen
@@ -319,14 +357,18 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
 - **Built and run in the main `forrest` account inside a git worktree** (recoverability). The
   separate-restricted-account requirement is waived for the personal build; see [sandbox.md](./sandbox.md).
 - **Egress is narrow and explicit:** audio to `gpt-4o-transcribe`; a screenshot + transcript window
-  to `gpt-5.5` *only when the model triggers a capture/response*. The audio witness persists only
-  counters, sequence/sample metadata, timestamps, socket generations, server audio-clock values, and
-  a local activity bit in the owner-only session log — never PCM or recovered words. The only screen-/audio-derived data
+  to `gpt-5.5` only on a model-requested or harness-provided fresh-screen coaching turn. Local change
+  frames are neither sent nor persisted. The audio witness persists only counters, sequence/sample
+  metadata, timestamps, socket generations, server audio-clock values, and a local activity bit in
+  the owner-only session log — never PCM or recovered words. The only screen-/audio-derived data
   written to **local** disk is the owner-only, bounded per-session **activity log** (spoken tips,
   transcribed lines, the screenshots the model saw); raw mic audio and the live transcript are never
   archived. Requests are sent `store:true`, so what the model saw does remain inspectable (and
   retained) server-side at OpenAI for debugging (see [sandbox.md](./sandbox.md)).
-- **Behavioral restraint (model-governed):** there is **no cooldown or rate cap** in code. Every
+- **Behavioral restraint (model-governed):** there is no general audio-turn cooldown or rate cap in
+  code; the stable-screen fallback alone has a strict cost interval because it can create a request
+  without speech. Pending screen context still joins the next speech request for free, and a silent
+  monitor turn that produces no tip does not enlarge later prompts. Every
   substantive utterance — from either speaker; only back-channel filler is skipped as pure cost —
   reaches the brain, and the brain decides whether it has anything worth
   saying — that restraint lives in the system prompt (see [`coachSystemPrompt`](../Sources/JarvisCore/Coach/ToolDefs.swift)).
@@ -339,19 +381,22 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
 ## 6. Non-Goals (v1)
 
 - Multiple modes / a tiered sensitivity dial. (One mode: LeetCode Coach.)
-- Continuous OCR or recording the screen/audio to disk ("recall").
+- Recording the screen/audio to disk for recall. Stable-change monitoring is in-memory during an active
+  coaching session and persists only the stable screenshots the brain actually sees.
 - A dedicated wake-word engine. Direct address is just the word "Jarvis" (or a question) appearing
   in the transcript, which the brain reads and answers — there is no wake-word detector. (A global
   **⌥⌘J** hotkey for an on-demand screen hint *does* exist — see [§2](#on-demand-hint-j) — but it
   complements the proactive default; it is not a trigger-to-listen wake key.)
-- Productization: auth, billing, onboarding, multi-provider.
+- Productization: auth, billing, onboarding.
 - Windows / cross-platform.
 
 ## 7. Design Principles
 
 1. **Build the harness, not the intelligence.** If a model or an OS framework can do it, we don't write it.
 2. **Least code wins.** Prefer a borrowed tool (`screencapture`, an Apple framework, an OpenAI API) over custom code, every time.
-3. **The model is the cost governor.** Expensive actions (vision, speaking) happen only when the model opts in.
+3. **The model is the response governor.** Speaking always requires a model tool call; vision is
+   model-requested on ordinary speech and harness-provided for silence/manual hints and stable local
+   changes, never a screenshot on every turn.
 4. **Proactive, but disciplined.** Speaking up unprompted is the whole point; the model's own restraint (a tuned system prompt) keeps it from being annoying.
 5. **Sees the screen, not the disk.** Security is enforced by the sandbox, not by good intentions.
 6. **Self-verifying.** Every build ships with tests and a smoke checklist the agent can run to prove it works.

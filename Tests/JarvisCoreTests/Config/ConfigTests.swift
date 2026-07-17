@@ -18,6 +18,11 @@ import Testing
         #expect(c.realtimeReadyTimeoutSeconds == 10)
         #expect(c.realtimePingIntervalSeconds == 20)
         #expect(c.realtimePongTimeoutSeconds == 10)
+        #expect(c.screenMonitorFrameIntervalSeconds == 1)
+        #expect(c.screenMonitorQuiescenceSeconds == 1.25)
+        #expect(c.screenMonitorMinimumRequestIntervalSeconds == 60)
+        #expect(c.screenMonitorPiggybackWaitSeconds == 2)
+        #expect(c.screenMonitorMinimumChangedAreaRatio == 0.0001)
     }
 
     @Test func overlayAppearanceConstants() {
@@ -59,6 +64,14 @@ import Testing
         #expect(c.realtimeReadyTimeoutSeconds > 0)
         #expect(c.realtimePingIntervalSeconds > 0)
         #expect(c.realtimePongTimeoutSeconds > 0)
+    }
+
+    @Test func screenMonitorConstantsAreCoherent() {
+        let c = Config.default
+        #expect(c.screenMonitorFrameIntervalSeconds > 0)
+        #expect(c.screenMonitorQuiescenceSeconds >= c.screenMonitorFrameIntervalSeconds)
+        #expect(c.screenMonitorMinimumRequestIntervalSeconds >= c.screenMonitorPiggybackWaitSeconds)
+        #expect((0..<1).contains(c.screenMonitorMinimumChangedAreaRatio))
     }
 
     @Test func envSecretStoreReadsKey() {

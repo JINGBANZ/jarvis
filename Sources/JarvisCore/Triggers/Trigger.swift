@@ -5,6 +5,7 @@ import Foundation
 public enum TriggerReason: Sendable, Equatable {
     case turnEnd                              // server VAD: the speaker finished an utterance
     case silence(secondsQuiet: TimeInterval)  // no speech for the current backoff interval
+    case screenChanged                        // visual monitor: meaningful change since the last capture
     case manualHint                           // user pressed the hint hotkey — capture + force a hint, one trip
 }
 
@@ -20,8 +21,8 @@ public struct TriggerContext: Sendable {
     /// The trigger note appended to the user message — or nil when the message already says it all.
     /// A turn-end adds nothing: the "New since last turn" block IS the signal, its [mm:ss] stamps
     /// carry the timing, and a boilerplate sentence on top would be committed to memory and re-billed
-    /// on every later request. The notes that remain (silence, manual hint) open with the same
-    /// [mm:ss] session stamp as transcript lines, so the model reads all timing in one idiom.
+    /// on every later request. The notes that remain (silence, screen change, manual hint) open with
+    /// the same [mm:ss] session stamp as transcript lines, so the model reads all timing in one idiom.
     public var promptLine: String? {
         let stamp = RollingTranscript.stamp(sessionElapsedSeconds)
         switch reason {
@@ -29,6 +30,8 @@ public struct TriggerContext: Sendable {
             return nil
         case .silence(let secs):
             return "[\(stamp)] (no speech for \(Self.durationPhrase(secs)))"
+        case .screenChanged:
+            return "[\(stamp)] (the screen changed since the last capture; use the attached fresh point-in-time screenshot)"
         case .manualHint:
             return "[\(stamp)] The user pressed the hint shortcut. They want your single most useful hint about what's on their screen right now — answer using the attached screenshot and the recent transcript."
         }

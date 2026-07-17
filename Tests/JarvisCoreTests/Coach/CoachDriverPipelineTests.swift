@@ -60,6 +60,20 @@ final class GatedScreen: ScreenCapturing, @unchecked Sendable {
     }
 }
 
+// @unchecked Sendable: `storedCaptureCount` is guarded by `lock`.
+final class PipelineFailingScreen: ScreenCapturing, @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedCaptureCount = 0
+    func capture() -> ScreenSnapshot? {
+        lock.lock(); storedCaptureCount += 1; lock.unlock()
+        return nil
+    }
+
+    var captureCount: Int {
+        lock.lock(); defer { lock.unlock() }; return storedCaptureCount
+    }
+}
+
 final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     /// One entry per `render` call: the lines the brain returned, passed straight through (no splitting).
     var rendered: [[String]] = []
@@ -71,18 +85,61 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     }
 }
 
+// @unchecked Sendable: `stored` is guarded by `lock`.
+final class ScreenCaptureRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: [ScreenSnapshot] = []
+
+    func record(_ snapshot: ScreenSnapshot) {
+        lock.lock(); stored.append(snapshot); lock.unlock()
+    }
+
+    var snapshots: [ScreenSnapshot] {
+        lock.lock(); defer { lock.unlock() }; return stored
+    }
+}
+
+// @unchecked Sendable: `storedCount` is guarded by `lock`.
+final class RejectionRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedCount = 0
+
+    func record() {
+        lock.lock(); storedCount += 1; lock.unlock()
+    }
+
+    var count: Int {
+        lock.lock(); defer { lock.unlock() }; return storedCount
+    }
+}
+
 // `.serialized`: two tests here drive the shared `ActivityLog` singleton (the screenshot e2e and the
 // manual-hint trigger-log e2e). Serializing the suite keeps their enable()/disable() from racing each
 // other — they are the only code that enables the shared log, so no other suite can collide.
 @Suite(.serialized) struct CoachDriverPipelineTests {
+    private func enableMonitorAuditLog() throws -> URL {
+        let directory = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(
+                "jarvis-monitor-audit-\(ProcessInfo.processInfo.globallyUniqueString)")
+        try FileManager.default.createDirectory(
+            at: directory, withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700])
+        ActivityLog.shared.enable(directory: directory)
+        return directory
+    }
+
     private func makeDriver(brain: BrainClient, summarizer: BrainClient? = nil,
                             screen: ScreenCapturing = FakeScreen(),
                             overlay: OverlayRendering = FakeOverlay(),
-                            clock: Clock, config: Config = .default) -> (CoachDriver, RollingTranscript) {
+                            clock: Clock, config: Config = .default,
+                            onScreenCaptured: (@Sendable (ScreenSnapshot) -> Void)? = nil,
+                            onScreenCaptureRejected: (@Sendable () -> Void)? = nil) -> (CoachDriver, RollingTranscript) {
         let transcript = RollingTranscript()
         let driver = CoachDriver(
             config: config, transcript: transcript,
-            brain: brain, summarizer: summarizer, screen: screen, overlay: overlay, clock: clock
+            brain: brain, summarizer: summarizer, screen: screen, overlay: overlay, clock: clock,
+            onScreenCaptured: onScreenCaptured,
+            onScreenCaptureRejected: onScreenCaptureRejected
         )
         return (driver, transcript)
     }
@@ -117,7 +174,163 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(brain.calls[1].contains { $0.role == .tool && $0.toolCallId == "c1" })
         #expect(brain.calls[1].contains { $0.imageBase64JPEG != nil })
         // No OCR text on this snapshot → the tool result stays the plain marker.
-        #expect(brain.calls[1].first { $0.role == .tool }?.text == "screenshot captured")
+        #expect(brain.calls[1].first { $0.role == .tool }?.text == "fresh point-in-time screenshot captured")
+    }
+
+    /// Interviewer language is interpreted by the model rather than a finite phrase matcher. The
+    /// first request carries the general freshness instructions; when the model decides the screen
+    /// is relevant, its normal tool loop obtains the current image and OCR.
+    @Test func interviewerScreenUpdateUsesTheGeneralModelCapturePolicy() async {
+        let brain = ScriptedBrain(script: [
+            .init(toolCalls: [.captureScreen(callId: "c1")],
+                  rawToolCalls: [RawToolCall(id: "c1", name: "capture_screen", argumentsJSON: "{}")]),
+            .init(toolCalls: [.staySilent(callId: "q1")],
+                  rawToolCalls: [RawToolCall(id: "q1", name: "stay_silent", argumentsJSON: "{}")]),
+        ])
+        let snapshot = ScreenSnapshot(imageBase64: "fresh-question", recognizedText: "Reverse a linked list")
+        let screen = FakeScreen(payload: snapshot.imageBase64, recognizedText: snapshot.recognizedText)
+        let recorder = ScreenCaptureRecorder()
+        let (driver, transcript) = makeDriver(
+            brain: brain, screen: screen, clock: ManualClock(now: 40),
+            onScreenCaptured: recorder.record)
+        transcript.append(.init(speaker: .them, text: "Okay, I'll put the question here.", at: 40))
+
+        #expect(await driver.handleTrigger(.turnEnd) == .silentByModel)
+
+        #expect(screen.captureCount == 1)
+        #expect(brain.calls.count == 2)
+        #expect(brain.toolChoices == [.required, .required])
+        #expect(!brain.calls[0].contains { $0.imageBase64JPEG != nil })
+        let firstRequestText = brain.calls[0].compactMap(\.text).joined(separator: "\n")
+        #expect(firstRequestText.contains("historical observations never prove the current screen"))
+        #expect(firstRequestText.contains("Okay, I'll put the question here."))
+        #expect(brain.calls[1].contains { $0.imageBase64JPEG == "fresh-question" })
+        #expect(brain.calls[1].contains { ($0.text ?? "").contains("Reverse a linked list") })
+        #expect(recorder.snapshots == [snapshot])
+    }
+
+    /// Silence is itself a reason to inspect progress. It no longer asks a screen-blind model to
+    /// decide whether to capture; the first request already carries the current screen.
+    @Test func silencePreCapturesIntoFirstRequestWithoutForcingSpeech() async {
+        let brain = ScriptedBrain(script: [
+            .init(toolCalls: [.staySilent(callId: "q1")],
+                  rawToolCalls: [RawToolCall(id: "q1", name: "stay_silent", argumentsJSON: "{}")]),
+        ])
+        let screen = FakeScreen(recognizedText: "int answer = 0;")
+        let (driver, _) = makeDriver(brain: brain, screen: screen, clock: ManualClock(now: 120))
+
+        #expect(await driver.handleTrigger(.silence(secondsQuiet: 120)) == .silentByModel)
+
+        #expect(screen.captureCount == 1)
+        #expect(brain.calls.count == 1)
+        #expect(brain.toolChoices == [.required])
+        #expect(brain.calls[0].contains { $0.imageBase64JPEG != nil })
+        #expect(brain.calls[0].contains { ($0.text ?? "").contains("int answer = 0;") })
+    }
+
+    /// The app's visual monitor supplies the stable snapshot it observed after typing/navigation.
+    /// CoachDriver sends that exact image without a second capture race; only a hotkey forces speak.
+    @Test func screenChangedUsesSuppliedSnapshotWithoutRecapturingOrForcingSpeech() async throws {
+        let directory = try enableMonitorAuditLog()
+        defer { ActivityLog.shared.disable(); try? FileManager.default.removeItem(at: directory) }
+        let brain = ScriptedBrain(script: [
+            .init(toolCalls: [.staySilent(callId: "q1")],
+                  rawToolCalls: [RawToolCall(id: "q1", name: "stay_silent", argumentsJSON: "{}")]),
+        ])
+        let screen = FakeScreen(recognizedText: "stale fallback")
+        let snapshot = ScreenSnapshot(imageBase64: TestFixtures.tinyJpegBase64,
+                                      recognizedText: "return left + right;")
+        let recorder = ScreenCaptureRecorder()
+        let (driver, _) = makeDriver(brain: brain, screen: screen, clock: ManualClock(now: 15),
+                                     onScreenCaptured: recorder.record)
+
+        #expect(await driver.handleScreenChange(snapshot) == .silentByModel)
+
+        #expect(screen.captureCount == 0)
+        #expect(brain.calls.count == 1)
+        #expect(brain.toolChoices == [.required])
+        #expect(brain.calls[0].contains {
+            $0.imageBase64JPEG == TestFixtures.tinyJpegBase64
+        })
+        let firstRequestText = brain.calls[0].compactMap(\.text).joined(separator: "\n")
+        #expect(firstRequestText.contains("screen changed"))
+        #expect(firstRequestText.contains("return left + right;"))
+        #expect(recorder.snapshots == [snapshot])
+
+        _ = ActivityLog.shared.attach { _ in }
+        let jsonl = try String(
+            contentsOf: directory.appendingPathComponent("jarvis-activity.jsonl"),
+            encoding: .utf8)
+        #expect(jsonl.contains("stable screen change detected"))
+    }
+
+    @Test func silentScreenChangeDoesNotInflateLaterRequestHistory() async throws {
+        let directory = try enableMonitorAuditLog()
+        defer { ActivityLog.shared.disable(); try? FileManager.default.removeItem(at: directory) }
+        let brain = ScriptedBrain(script: [
+            .init(toolCalls: [.staySilent(callId: "q1")]),
+            .init(toolCalls: [.staySilent(callId: "q2")]),
+        ])
+        let first = ScreenSnapshot(
+            imageBase64: TestFixtures.tinyJpegBase64,
+            recognizedText: "FIRST_TRANSIENT_SCREEN_ONLY_TEXT")
+        let second = ScreenSnapshot(
+            imageBase64: TestFixtures.tinyJpegBase64,
+            recognizedText: "SECOND_CURRENT_SCREEN_TEXT")
+        let (driver, _) = makeDriver(brain: brain, clock: ManualClock(now: 15))
+
+        #expect(await driver.handleScreenChange(first) == .silentByModel)
+        #expect(await driver.handleScreenChange(second) == .silentByModel)
+
+        #expect(brain.calls.count == 2)
+        let nextRequestText = brain.calls[1].compactMap(\.text).joined(separator: "\n")
+        #expect(!nextRequestText.contains("FIRST_TRANSIENT_SCREEN_ONLY_TEXT"))
+        #expect(nextRequestText.contains("SECOND_CURRENT_SCREEN_TEXT"))
+    }
+
+    @Test func audioTurnPiggybacksStableSnapshotWithoutAnExtraCaptureOrVisualTriggerNote() async throws {
+        let directory = try enableMonitorAuditLog()
+        defer { ActivityLog.shared.disable(); try? FileManager.default.removeItem(at: directory) }
+        let brain = ScriptedBrain(script: [
+            .init(toolCalls: [.staySilent(callId: "q1")],
+                  rawToolCalls: [RawToolCall(id: "q1", name: "stay_silent", argumentsJSON: "{}")]),
+        ])
+        let screen = FakeScreen(recognizedText: "stale fallback")
+        let snapshot = ScreenSnapshot(imageBase64: TestFixtures.tinyJpegBase64,
+                                      recognizedText: "return frequencies.size();")
+        let recorder = ScreenCaptureRecorder()
+        let (driver, transcript) = makeDriver(
+            brain: brain, screen: screen, clock: ManualClock(now: 15),
+            onScreenCaptured: recorder.record)
+        transcript.append(.init(speaker: .them, text: "Can you improve the complexity?", at: 14))
+
+        #expect(await driver.handleTurnEnd(screenSnapshot: snapshot) == .silentByModel)
+        #expect(screen.captureCount == 0)
+        #expect(brain.calls.count == 1)
+        #expect(brain.calls[0].contains {
+            $0.imageBase64JPEG == TestFixtures.tinyJpegBase64
+        })
+        let text = brain.calls[0].compactMap(\.text).joined(separator: "\n")
+        #expect(text.contains("Can you improve the complexity?"))
+        #expect(text.contains("return frequencies.size();"))
+        #expect(!text.contains("screen changed"))
+        #expect(recorder.snapshots == [snapshot])
+    }
+
+    @Test func stableSnapshotMakesAFillerAudioTurnWorthSending() async throws {
+        let directory = try enableMonitorAuditLog()
+        defer { ActivityLog.shared.disable(); try? FileManager.default.removeItem(at: directory) }
+        let brain = ScriptedBrain(script: [.init(toolCalls: [.staySilent(callId: "q")])])
+        let snapshot = ScreenSnapshot(imageBase64: TestFixtures.tinyJpegBase64,
+                                      recognizedText: "for (int value : values)")
+        let (driver, transcript) = makeDriver(brain: brain, clock: ManualClock(now: 1))
+        transcript.append(.init(speaker: .me, text: "Hmm.", at: 1))
+
+        #expect(await driver.handleTurnEnd(screenSnapshot: snapshot) == .silentByModel)
+        #expect(brain.calls.count == 1)
+        #expect(brain.calls[0].contains {
+            $0.imageBase64JPEG == TestFixtures.tinyJpegBase64
+        })
     }
 
     /// D2 (OCR sidecar): when the capture carries recognized text, it rides in the capture_screen
@@ -289,20 +502,21 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(!second.contains { $0.role == .tool })                                       // no dangling result
     }
 
-    /// A silence check the model shrugs at (stay_silent, nothing new said) leaves NO trace in the
-    /// session memory: committing its bare trigger note would pile up answerless user messages,
-    /// re-billed on every later request and confusing to read back in the request log.
-    @Test func silentSilenceCheckLeavesNoTriggerNoteInHistory() async {
+    /// A silence check pre-captures fresh pixels for its own request. Once that turn commits, the
+    /// trigger note and observation stub remain useful context, but stale pixels are not re-billed.
+    @Test func silentSilenceCheckStubsScreenPixelsAfterTheirTurn() async {
         let clock = ManualClock(now: 0)
         let brain = ScriptedBrain(script: [.init(toolCalls: [.staySilent(callId: "q1")],
                                                  rawToolCalls: [RawToolCall(id: "q1", name: "stay_silent", argumentsJSON: "{}")])])
         let (driver, transcript) = makeDriver(brain: brain, clock: clock)
         #expect(await driver.handleTrigger(.silence(secondsQuiet: 120)) == .silentByModel)
+        #expect(brain.calls[0].contains { $0.imageBase64JPEG != nil })
 
         transcript.append(.init(speaker: .me, text: "ok here is an idea", at: 5))
         await driver.handleTrigger(.turnEnd)
-        // Scoped to user messages: the system prompt legitimately shows a "(no speech for …)" example.
-        #expect(!brain.calls[1].contains { $0.role == .user && ($0.text ?? "").contains("no speech for") })
+        #expect(brain.calls[1].contains { $0.role == .user && ($0.text ?? "").contains("no speech for") })
+        #expect(!brain.calls[1].contains { $0.imageBase64JPEG != nil })
+        #expect(brain.calls[1].contains { ($0.text ?? "").contains("no longer available") })
     }
 
     /// But a silence check where the model DID look at the screen keeps the whole turn in memory —
@@ -620,6 +834,104 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(await driver.handleTrigger(.turnEnd) == .brainError)
     }
 
+    @Test func failedMonitorSnapshotRequestIsRejectedInsteadOfAcknowledged() async throws {
+        let directory = try enableMonitorAuditLog()
+        defer { ActivityLog.shared.disable(); try? FileManager.default.removeItem(at: directory) }
+        let accepted = ScreenCaptureRecorder()
+        let rejected = RejectionRecorder()
+        let snapshot = ScreenSnapshot(
+            imageBase64: TestFixtures.tinyJpegBase64, recognizedText: "Two Sum")
+        let (driver, _) = makeDriver(
+            brain: ThrowingBrain(), clock: ManualClock(now: 0),
+            onScreenCaptured: accepted.record,
+            onScreenCaptureRejected: rejected.record)
+
+        #expect(await driver.handleScreenChange(snapshot) == .brainError)
+        #expect(accepted.snapshots.isEmpty)
+        #expect(rejected.count == 1)
+    }
+
+    @Test func monitorAuditFailureAbortsTheBrainRequestAndRearmsTheCandidate() async throws {
+        let directory = try enableMonitorAuditLog()
+        defer { ActivityLog.shared.disable(); try? FileManager.default.removeItem(at: directory) }
+        let brain = ScriptedBrain(script: [.init(toolCalls: [.staySilent(callId: "q")])])
+        let accepted = ScreenCaptureRecorder()
+        let rejected = RejectionRecorder()
+        // One base64 character cannot form a decodable payload, so no owner-only JPEG can be saved.
+        let snapshot = ScreenSnapshot(imageBase64: "A", recognizedText: "Two Sum")
+        let (driver, _) = makeDriver(
+            brain: brain, clock: ManualClock(now: 0),
+            onScreenCaptured: accepted.record,
+            onScreenCaptureRejected: rejected.record)
+
+        #expect(await driver.handleScreenChange(snapshot) == .screenAuditError)
+        #expect(brain.calls.isEmpty)
+        #expect(accepted.snapshots.isEmpty)
+        #expect(rejected.count == 1)
+    }
+
+    @Test func ordinaryCaptureDoesNotAdvanceTheMonitorBaselineWhenItsRequestFails() async {
+        let brain = ScriptedThrowBrain(script: [
+            .init(toolCalls: [.captureScreen(callId: "c")],
+                  rawToolCalls: [RawToolCall(
+                    id: "c", name: "capture_screen", argumentsJSON: "{}")]),
+            nil,
+        ])
+        let accepted = ScreenCaptureRecorder()
+        let screen = FakeScreen(
+            payload: TestFixtures.tinyJpegBase64, recognizedText: "new question")
+        let (driver, transcript) = makeDriver(
+            brain: brain, screen: screen, clock: ManualClock(now: 0),
+            onScreenCaptured: accepted.record)
+        transcript.append(.init(speaker: .me, text: "check this problem", at: 0))
+
+        #expect(await driver.handleTrigger(.turnEnd) == .brainError)
+        #expect(screen.captureCount == 1)
+        #expect(brain.calls.count == 2)
+        #expect(accepted.snapshots.isEmpty)
+    }
+
+    @Test func monitorSnapshotIsPersistedBeforeFailedSendAndNotDuplicatedOnRetry() async throws {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("jarvis-monitor-audit-\(ProcessInfo.processInfo.globallyUniqueString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { ActivityLog.shared.disable(); try? FileManager.default.removeItem(at: dir) }
+        ActivityLog.shared.enable(directory: dir)
+
+        let success = BrainResponse(toolCalls: [.staySilent(callId: "q")])
+        let brain = ScriptedThrowBrain(script: [nil, success])
+        let accepted = ScreenCaptureRecorder()
+        let rejected = RejectionRecorder()
+        let snapshot = ScreenSnapshot(
+            imageBase64: TestFixtures.tinyJpegBase64, recognizedText: "Two Sum")
+        let (driver, _) = makeDriver(
+            brain: brain, clock: ManualClock(now: 0),
+            onScreenCaptured: accepted.record,
+            onScreenCaptureRejected: rejected.record)
+
+        #expect(await driver.handleScreenChange(snapshot) == .brainError)
+        // No ActivityLog barrier here: the audit-critical path must have completed before the brain
+        // was allowed to throw from its first request.
+        let afterFailure = try FileManager.default.contentsOfDirectory(
+            at: dir, includingPropertiesForKeys: nil
+        ).filter { $0.lastPathComponent.hasPrefix("shot-") && $0.pathExtension == "jpg" }
+        let persistedBeforeFailureReturned = try afterFailure.filter {
+            try Data(contentsOf: $0) == TestFixtures.tinyJpeg
+        }
+        #expect(persistedBeforeFailureReturned.count == 1)
+
+        #expect(await driver.handleScreenChange(snapshot) == .silentByModel)
+        _ = ActivityLog.shared.attach { _ in } // serial-queue persistence barrier
+
+        let shots = try FileManager.default.contentsOfDirectory(
+            at: dir, includingPropertiesForKeys: nil
+        ).filter { $0.lastPathComponent.hasPrefix("shot-") && $0.pathExtension == "jpg" }
+        let matching = try shots.filter { try Data(contentsOf: $0) == TestFixtures.tinyJpeg }
+        #expect(matching.count == 1)
+        #expect(rejected.count == 1)
+        #expect(accepted.snapshots == [snapshot])
+    }
+
     /// Audio-driven turns REQUIRE a tool call (never free text): the model picks which tool from the
     /// prompt — reply, look at the screen, or stay_silent — but must answer with one of them.
     @Test func everyAudioTurnRequiresAToolCall() async {
@@ -647,6 +959,77 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         await gate.release()
         _ = await first
         #expect(brain.callCount >= 2)                      // the original AND the coalesced turn ran
+    }
+
+    /// A visual-change event must not disappear behind an already-pending ordinary turn-end. The
+    /// speech itself rides in the delta, so replacing the pending reason preserves both inputs and
+    /// guarantees the follow-up first request contains a fresh screenshot.
+    @Test func pendingScreenChangeTakesPriorityOverPendingTurnEnd() async {
+        let gate = AsyncGate()
+        let brain = GatedBrain(
+            gate: gate,
+            response: .init(toolCalls: [.staySilent(callId: "q")]))
+        let screen = FakeScreen(recognizedText: "newly typed solution")
+        let (driver, transcript) = makeDriver(
+            brain: brain, screen: screen, clock: ManualClock(now: 0))
+        transcript.append(.init(speaker: .me, text: "first idea about the grid", at: 0))
+
+        async let first = driver.handleTrigger(.turnEnd)
+        await gate.waitUntilEntered()
+        transcript.append(.init(speaker: .me, text: "second idea about the rows", at: 1))
+        #expect(await driver.handleTrigger(.turnEnd) == .busy)
+        #expect(await driver.handleTrigger(.screenChanged) == .busy)
+        await gate.release()
+        _ = await first
+
+        #expect(brain.callCount >= 2)
+        #expect(screen.captureCount == 1)
+    }
+
+    /// A manual hint outranks a queued monitor change and normally supersedes it with an even fresher
+    /// capture. If that capture fails, the displaced stable snapshot must be rejected so the monitor
+    /// can emit it again instead of waiting forever for an acknowledgement that cannot arrive.
+    @Test func manualHintDisplacingPendingScreenChangeRearmsMonitorWhenCaptureFails() async throws {
+        let directory = try enableMonitorAuditLog()
+        defer { ActivityLog.shared.disable(); try? FileManager.default.removeItem(at: directory) }
+        let gate = AsyncGate()
+        let brain = GatedBrain(
+            gate: gate,
+            response: .init(toolCalls: [.staySilent(callId: "q")]))
+        let screen = PipelineFailingScreen()
+        let accepted = ScreenCaptureRecorder()
+        let rejected = RejectionRecorder()
+        let (driver, transcript) = makeDriver(
+            brain: brain, screen: screen, clock: ManualClock(now: 0),
+            onScreenCaptured: accepted.record,
+            onScreenCaptureRejected: rejected.record)
+        transcript.append(.init(speaker: .me, text: "first idea about the grid", at: 0))
+
+        async let first = driver.handleTrigger(.turnEnd)
+        await gate.waitUntilEntered()
+        let stableQuestion = ScreenSnapshot(
+            imageBase64: TestFixtures.tinyJpegBase64, recognizedText: "Two Sum")
+        #expect(await driver.handleScreenChange(stableQuestion) == .busy)
+        #expect(await driver.handleTrigger(.manualHint) == .busy)
+
+        // Replacement happens synchronously while the first turn owns the slot.
+        #expect(rejected.count == 1)
+        // A monitor retry while the manual hint is still pending also loses coalescing. It must be
+        // rejected again, not left awaiting an acknowledgement from a turn that never queued it.
+        #expect(await driver.handleScreenChange(stableQuestion) == .busy)
+        #expect(rejected.count == 2)
+        await gate.release()
+        _ = await first
+
+        #expect(screen.captureCount == 1)
+        #expect(accepted.snapshots.isEmpty)
+        #expect(rejected.count == 2)
+
+        // After the failed manual capture drains, the next monitor retry gets the slot and is
+        // acknowledged after its first successful brain request.
+        #expect(await driver.handleScreenChange(stableQuestion) == .silentByModel)
+        #expect(accepted.snapshots == [stableQuestion])
+        #expect(rejected.count == 2)
     }
 }
 

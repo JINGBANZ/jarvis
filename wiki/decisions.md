@@ -40,6 +40,8 @@
 - **Why:** Cheaper and smarter than capturing on every turn.
 - **Rejected:** Always-on screen capture.
 - **Detail:** [architecture.md §2](./architecture.md#2-core-loop).
+- **Superseded by:** The hybrid freshness policy of 2026-07-16. Model-requested capture remains,
+  while stable local changes no longer depend on a screen-blind model choosing to look.
 
 ### 2026-06-13 — Coach is time-aware
 
@@ -308,6 +310,7 @@
 - **Why:** OpenAI's function-calling and reasoning guides require reasoning items to accompany a client-fulfilled tool call's output; dropping them (our old behavior, and a known ecosystem anti-pattern — the Agents SDK, Vercel AI SDK, and LangChain all round-trip them) discards the chain of thought mid-turn, so the model re-reasons over the screenshot from scratch: worse answers, more reasoning tokens, and OpenAI's own cookbook measured a 40%→80% cache-utilization gain from replaying them.
 - **Rejected:** (a) `previous_response_id` server threading — reintroduces the server-side conversation the 2026-07-07 decision removed. (b) `store:false` + `include: reasoning.encrypted_content` — the fully stateless variant; deferred with the existing `store:true` debuggability choice, and it's the same replay path when flipped. (c) Keeping reasoning items across turns — OpenAI ignores stale ones, they'd bloat every later request, and a mid-session brain-model switch invalidates them. (d) A generic SDK/agent-framework dependency to manage the loop — none exists for Swift, and owning the message list is where the harness's cost machinery lives.
 - **Detail:** `Sources/JarvisCore/Brain/OpenAIBrainClient.swift` (verbatim extract/re-emit), `CoachDriver.swift` (whole-output threading), `CoachHistory.swift` (commit-time conversion), `Brain.swift` (`ChatMessage.rawItems`).
+
 ### 2026-07-16 — Local Claude Code / Codex CLIs as alternative brain providers
 
 - **Chose:** A `BrainProvider` selection (Settings → Brain): the OpenAI Responses API (default), or a locally installed **Claude Code** / **Codex** CLI spawned per turn (`CLIBrainClient` behind the same `BrainClient` protocol), so the brain — coach, summarizer, evaluator — bills to the user's existing Claude / ChatGPT **subscription** instead of the metered key. CLIs are auto-detected by pure file probes (`AgentCLIDetector`: $PATH + known install dirs + on-disk auth markers; no subprocess, no Keychain prompt) so selection is one radio click. Tool use rides a prompt-embedded JSON protocol generated from the same `ToolDef`s; every turn is a single model call — screenshots reach Claude inline as base64 image blocks (stream-json input, all built-in tools disabled) and Codex as 0600 session-dir files via `-i` (`--sandbox read-only`); both CLIs run with session persistence off so no transcript copy lands in their own stores. The API-key section merged into the Brain tab — the key stays required for Realtime transcription regardless of provider.
@@ -322,15 +325,15 @@
   streamed deltas, accepts out-of-order completion/failure, salvages delta text on failure or a
   missing-terminal deadline, and emits an explicit context-gap line when failed, timed-out, or
   long VAD-confirmed speech cannot be recovered from an empty completion. Transcript timestamps use
-  `audio_start_ms`, so inference completion order cannot reorder speakers. Bare `speech_stopped` no
-  longer resets the silence clock. Every real system-output sample is preserved for transcription;
-  a short/empty callback is padded only with its missing silence so the Realtime audio clock and
-  trailing-silence VAD keep advancing, while a separate exact-length padded/truncated copy feeds AEC.
-  Noise-reduction policy stays at its configured setting for both streams; source-specific tuning
-  requires representative live evaluation rather than assuming digital loopback is noise-free.
-  VAD-only starts/stops cannot restart the silence interval: a due check waits locally for the pending
-  item, while socket failure or a long active-item deadline resolves it so stale speech state cannot
-  suppress coaching forever.
+  `audio_start_ms`, so inference completion order cannot reorder
+  speakers. Bare `speech_stopped` no longer resets the silence clock. Every real system-output sample
+  is preserved for transcription; a short/empty callback is padded only with its missing silence so
+  the Realtime audio clock and trailing-silence VAD keep advancing, while a separate exact-length
+  padded/truncated copy feeds AEC. Noise-reduction policy stays
+  at its configured setting for both streams; source-specific tuning requires representative live
+  evaluation rather than assuming digital loopback is noise-free. VAD-only starts/stops cannot restart
+  the silence interval: a due check waits locally for the pending item, while socket failure or a long
+  active-item deadline resolves it so stale speech state cannot suppress coaching forever.
 - **Why:** In the 2026-07-16 interview session, the user's long answer about an AI project reached the
   mic transcript but the interviewer's question never appeared in either the activity log or the
   exact brain traffic. The gap was upstream of `CoachDriver`; the old client ignored documented delta
@@ -344,6 +347,33 @@
   client's dropped event paths.
 - **Detail:** `Sources/JarvisCore/Transcription/RealtimeTranscriptionLedger.swift`,
   `Sources/JarvisApp/Capture/RealtimeTranscriber.swift`, `AggregateEchoCapture.swift`.
+
+### 2026-07-16 — Screen context uses model freshness judgment plus a stable local monitor
+
+- **Chose:** Keep model-requested `capture_screen` for ordinary speech and tell the model that older
+  screenshots never prove current state; when the meaning of a turn suggests a question, prompt,
+  code, or solution may have appeared or changed, it must look before screen-specific advice. This is
+  semantic prompt/context policy, not a phrase list. Pre-capture into the first brain request for
+  manual hints, silence checks, and stable screen changes. `ScreenChangeMonitor` starts with the
+  active coaching session and uses its first local poll as a baseline; `ScreenChangeDetector`
+  combines normalized-OCR and tolerant perceptual-image fingerprints and requires the changed state
+  to repeat before
+  emitting it. ScreenCaptureKit keeps these polls off disk. That exact stable snapshot becomes the
+  logged image sent by `CoachDriver`, and only a successful first brain request advances the baseline;
+  a failed request re-arms the candidate. Screenshots and OCR are described as point-in-time
+  observations that become stale after typing or navigation.
+- **Why:** In the same interview, the last captured editor was blank. The interviewer then posted a
+  question and the user typed code, but the model repeatedly chose `stay_silent` from transcript-only
+  turns and never viewed the new state. Asking a model that cannot see the screen whether it needs to
+  see the screen is not a sufficient freshness guarantee. Stable local detection catches question and
+  solution changes without uploading or persisting every intermediate typing frame.
+- **Rejected:** (a) Send a screenshot on every speech turn — deterministic but costly, distracting,
+  and usually unchanged. (b) A finite transcript cue list — unscalable language matching that still
+  cannot catch silent typing/navigation. (c) Retaining or uploading intermediate monitor polls —
+  unnecessary exposure; only the stable screenshot consumed by a coaching turn belongs in the log.
+- **Detail:** `Sources/JarvisCore/Coach/ToolDefs.swift`, `ScreenChangeDetector.swift`,
+  `Sources/JarvisApp/Capture/InMemoryScreenCapture.swift`, `ScreenChangeMonitor.swift`,
+  `CoachDriver.swift`.
 
 ### 2026-07-16 — Short interviewer rejection is substantive
 
@@ -388,3 +418,77 @@
 - **Detail:** `Sources/JarvisCore/Diagnostics/AudioContinuityWitness.swift`,
   `Sources/JarvisCore/Audio/AdaptiveAudioActivityDetector.swift`,
   `Sources/JarvisApp/Capture/RealtimeTranscriber.swift`.
+
+### 2026-07-17 — Native frame metadata gates full screen capture and coach cost
+
+- **Chose:** Use a low-rate, low-resolution `SCStream` only as a local activity signal. Native
+  complete/idle status and dirty rectangles feed a Foundation-only quiescence state machine. One
+  full screenshot plus on-device OCR runs after the surface settles; a normalized-OCR hash plus a
+  tolerant 64-bit perceptual image hash suppress duplicates without hiding diagrams or OCR-missed
+  edits. A stable snapshot waits briefly to piggyback on the next speech request, then falls
+  back to a screen-only request under a minimum interval. Failed/cancelled delivery re-arms the exact
+  candidate, including a newer candidate that settled while an older request was in flight. A
+  watchdog ignores unusable blank/suspended frames and restarts interrupted streams; generation and
+  identity checks stop a stream whose asynchronous startup completed after Stop/restart.
+- **Why:** A full-resolution screenshot/OCR poll is unnecessary work, while a transcript cue list
+  cannot catch silent typing or navigation. ScreenCaptureKit already exposes change/idle metadata,
+  so the OS can cheaply gate the expensive stage. Piggybacking gives speech the newest visual context
+  without another request; the fallback still catches a silently posted question, and the interval
+  bounds cost during repeated typing pauses.
+- **Rejected:** (a) A fixed phrase list — incomplete and language-specific. (b) One model request per
+  frame or per full capture — unbounded cost and noise. (c) Adding Peekaboo, OBS, Pensieve, or an OCR
+  recorder as a dependency — useful behavioral references, but substantially larger, differently
+  licensed or privacy-oriented, and unnecessary beside the native framework already in the app.
+- **Detail:** `Sources/JarvisApp/Capture/ScreenChangeMonitor.swift`,
+  `Sources/JarvisCore/Screen/ScreenActivityDetector.swift`,
+  `ScreenChangeDetector.swift`.
+- **Superseded by:** 2026-07-17 — Visible pixel stability outranks full-surface redraw metadata.
+
+### 2026-07-17 — Visible pixel stability outranks full-surface redraw metadata
+
+- **Chose:** Keep the low-rate, low-resolution `SCStream`, but compare its actual downscaled pixels
+  locally. A visible pixel delta is a change; a bounded dirty region remains supporting evidence for
+  tiny edits; broad/full-surface dirty metadata alone is not. Complete frames whose visible pixels are
+  unchanged count as idle for quiescence. Content-free counters distinguish native idle, stable
+  redraws, pixel versus dirty-region changes, missing/broad metadata, and unclassifiable frames; the
+  latter cannot keep the watchdog alive. Full screenshot/OCR, persistence, piggybacking, request-rate
+  bounds, and acknowledgement/retry behavior stay unchanged.
+- **Why:** A live active-window run against the interview browser produced 121 complete frames and no
+  native idle for a full minute, so the metadata-only monitor took zero full captures and made zero
+  coach requests. Browsers may continuously repaint a visually static page, and invalid/missing dirty
+  metadata was conservatively treated as a full change. Neither case is evidence that the question or
+  code is still moving. Comparing the already-bounded frame restores liveness without recurring OCR,
+  disk writes, or model cost.
+- **Rejected:** (a) Wait indefinitely for native idle — disproved by the live browser. (b) Treat every
+  complete/full-dirty frame as meaningful — recreates the failure. (c) Poll full-resolution screenshots
+  and Vision OCR continuously — more CPU and screen-derived data lifetime than the low-resolution
+  signal needs. (d) Ignore dirty metadata entirely — risks missing a tiny code edit lost in
+  downsampling.
+- **Supersedes:** the metadata-only activity classification in the preceding entry; its two-stage
+  capture, deduplication, piggyback, retry, and cost bounds stand.
+- **Detail:** `Sources/JarvisCore/Screen/ScreenFrameActivityClassifier.swift`,
+  `Sources/JarvisApp/Capture/ScreenChangeMonitor.swift`.
+- **Superseded by:** 2026-07-17 — One-shot polling preserves capture invisibility and bounds silent cost.
+
+### 2026-07-17 — One-shot polling preserves capture invisibility and bounds silent cost
+
+- **Chose:** Replace the monitor's long-lived `SCStream` with low-rate, low-resolution one-shot
+  `SCScreenshotManager` captures. Keep the first stable silent change responsive, then enforce a
+  minute-scale minimum between visual-only brain requests; the latest pending snapshot can still
+  piggyback on speech without another request. Record every visual-only brain trigger explicitly in
+  the activity log, and discard monitor-only turns from conversation memory when the model stays
+  silent.
+- **Why:** Live validation showed macOS's persistent purple screen-sharing control for the lifetime of
+  the stream, violating the interview posture, and three short typing pauses produced three billed
+  brain requests in 51 seconds. Two of those requests returned `stay_silent` yet their OCR context
+  enlarged later prompts. One-shot local polls preserve freshness without an ongoing sharing session;
+  the hard fallback interval bounds silent cost, while speech piggybacking preserves timely context.
+- **Rejected:** (a) Hide or work around macOS's sharing indicator — it is an OS privacy surface, not
+  app UI Jarvis should suppress. (b) Disable silent screen monitoring — restores the original stale
+  blank-screen failure. (c) Let every settled edit call the model — model restraint governs whether to
+  speak, but cannot make the request itself free. (d) Continuous full-resolution OCR polling — more
+  CPU and screen-derived data lifetime than downscaled pixel comparison needs.
+- **Supersedes:** the persistent-stream portion of the two preceding screen-monitor decisions; their
+  quiescence, full-capture deduplication, piggyback, audit, and retry behavior stand.
+- **Detail:** `Sources/JarvisApp/Capture/ScreenActivityPoller.swift`, `ScreenChangeMonitor.swift`,
+  `Sources/JarvisCore/Screen/ScreenRequestTiming.swift`, `CoachDriver.swift`.

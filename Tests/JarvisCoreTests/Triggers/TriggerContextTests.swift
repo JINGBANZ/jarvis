@@ -22,6 +22,13 @@ import Testing
         #expect(ctx.promptLine == "[01:00] (no speech for 45s)")
     }
 
+    @Test func screenChangedPromptExplainsAttachedFreshSnapshot() {
+        let ctx = TriggerContext(reason: .screenChanged, sessionElapsedSeconds: 75)
+        #expect(ctx.promptLine?.hasPrefix("[01:15]") == true)
+        #expect(ctx.promptLine?.contains("screen changed") == true)
+        #expect(ctx.promptLine?.contains("fresh point-in-time screenshot") == true)
+    }
+
     @Test func hourLongSilenceSpellsHoursAndMinutes() {
         let ctx = TriggerContext(reason: .silence(secondsQuiet: 12640), sessionElapsedSeconds: 13719)
         #expect(ctx.promptLine == "[228:39] (no speech for 3h 30m)")

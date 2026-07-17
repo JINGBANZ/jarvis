@@ -25,13 +25,19 @@ public struct ScreenCaptureCLI: ScreenCapturing {
     public func capture() -> ScreenSnapshot? {
         // Which display (if any) needs explicit targeting is the preferences' decision; a stale
         // -D pointing at a disconnected display fails, and we fall through to the plain capture.
-        if let display = preferences.explicitDisplay,
-           let jpeg = Self.runScreencapture(arguments: ["-x", "-t", "jpg", "-D", "\(display)"]) {
-            return ScreenSnapshot(imageBase64: jpeg.base64EncodedString())
+        if let display = preferences.explicitDisplay {
+            let capturedAt = ProcessInfo.processInfo.systemUptime
+            if let jpeg = Self.runScreencapture(
+                arguments: ["-x", "-t", "jpg", "-D", "\(display)"]
+            ) {
+                return ScreenSnapshot(capturedAt: capturedAt,
+                                      imageBase64: jpeg.base64EncodedString())
+            }
         }
         // A plain capture IS the main display — no -D needed.
+        let capturedAt = ProcessInfo.processInfo.systemUptime
         guard let jpeg = Self.runScreencapture(arguments: ["-x", "-t", "jpg"]) else { return nil }
-        return ScreenSnapshot(imageBase64: jpeg.base64EncodedString())
+        return ScreenSnapshot(capturedAt: capturedAt, imageBase64: jpeg.base64EncodedString())
     }
 
     /// Runs `screencapture` with `arguments` + a tmpfile path, returning the captured image bytes.

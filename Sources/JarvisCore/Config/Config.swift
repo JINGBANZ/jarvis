@@ -58,6 +58,20 @@ public struct Config: Sendable {
     public var realtimePingIntervalSeconds: TimeInterval
     /// Maximum time to receive a pong before declaring the apparently-open socket unhealthy.
     public var realtimePongTimeoutSeconds: TimeInterval
+    /// Cadence for low-resolution, memory-only one-shot screen observations. Full-resolution capture
+    /// and OCR happen after visual quiescence, not per poll.
+    public var screenMonitorFrameIntervalSeconds: TimeInterval
+    /// How long the native stream must report no meaningful changes before the screen is considered
+    /// stable enough for one full capture.
+    public var screenMonitorQuiescenceSeconds: TimeInterval
+    /// Hard cost bound for monitor-originated coach requests. A pending snapshot may still piggyback
+    /// on an audio-triggered request inside this interval because that adds no request.
+    public var screenMonitorMinimumRequestIntervalSeconds: TimeInterval
+    /// Brief window for a stable snapshot to join the next spoken turn before a screen-only request.
+    public var screenMonitorPiggybackWaitSeconds: TimeInterval
+    /// Ignore visible pixel deltas smaller than this fraction of the captured surface
+    /// (caret/compositor noise).
+    public var screenMonitorMinimumChangedAreaRatio: Double
 
     public init(
         silenceTimeoutSeconds: TimeInterval = 120,
@@ -74,7 +88,12 @@ public struct Config: Sendable {
         maxBufferedAudioSeconds: TimeInterval = 60,
         realtimeReadyTimeoutSeconds: TimeInterval = 10,
         realtimePingIntervalSeconds: TimeInterval = 20,
-        realtimePongTimeoutSeconds: TimeInterval = 10
+        realtimePongTimeoutSeconds: TimeInterval = 10,
+        screenMonitorFrameIntervalSeconds: TimeInterval = 1,
+        screenMonitorQuiescenceSeconds: TimeInterval = 1.25,
+        screenMonitorMinimumRequestIntervalSeconds: TimeInterval = 60,
+        screenMonitorPiggybackWaitSeconds: TimeInterval = 2,
+        screenMonitorMinimumChangedAreaRatio: Double = 0.0001
     ) {
         self.silenceTimeoutSeconds = silenceTimeoutSeconds
         self.silenceMaxIntervalSeconds = silenceMaxIntervalSeconds
@@ -91,6 +110,11 @@ public struct Config: Sendable {
         self.realtimeReadyTimeoutSeconds = realtimeReadyTimeoutSeconds
         self.realtimePingIntervalSeconds = realtimePingIntervalSeconds
         self.realtimePongTimeoutSeconds = realtimePongTimeoutSeconds
+        self.screenMonitorFrameIntervalSeconds = screenMonitorFrameIntervalSeconds
+        self.screenMonitorQuiescenceSeconds = screenMonitorQuiescenceSeconds
+        self.screenMonitorMinimumRequestIntervalSeconds = screenMonitorMinimumRequestIntervalSeconds
+        self.screenMonitorPiggybackWaitSeconds = screenMonitorPiggybackWaitSeconds
+        self.screenMonitorMinimumChangedAreaRatio = screenMonitorMinimumChangedAreaRatio
     }
 
     // Overlay appearance: defaults + allowed ranges. The persisted values live in UserDefaults via

@@ -32,12 +32,31 @@ public enum JarvisLog {
 /// `image`, when set, is a base64-encoded JPEG screenshot to show as a thumbnail in the activity
 /// viewer (the file log and unified log stay text-only).
 public func jlog(_ message: String, image base64JPEG: String? = nil) {
-    NSLog("%@", message)
-    ActivityLog.shared.record(message, imageBase64: base64JPEG)  // HTML activity viewer (no-op until enabled)
+    _ = writeLog(message, image: base64JPEG, synchronousActivityWrite: false)
+}
 
-    guard let url = JarvisLog.debugLogURL else { return }
+/// Audit-critical logging path. Normal logging stays asynchronous; this blocks only for the one
+/// unique monitor screenshot immediately before its first network request.
+@discardableResult
+public func jlogSynchronously(_ message: String, image base64JPEG: String? = nil) -> Bool {
+    writeLog(message, image: base64JPEG, synchronousActivityWrite: true)
+}
+
+private func writeLog(_ message: String, image base64JPEG: String?,
+                      synchronousActivityWrite: Bool) -> Bool {
+    NSLog("%@", message)
+    let activityPersisted: Bool
+    if synchronousActivityWrite {
+        activityPersisted = ActivityLog.shared.recordSynchronously(
+            message, imageBase64: base64JPEG)
+    } else {
+        ActivityLog.shared.record(message, imageBase64: base64JPEG)
+        activityPersisted = true
+    }
+
+    guard let url = JarvisLog.debugLogURL else { return activityPersisted }
     let line = "\(logTimestamp()) \(message)\n"
-    guard let data = line.data(using: .utf8) else { return }
+    guard let data = line.data(using: .utf8) else { return activityPersisted }
     if let fh = try? FileHandle(forWritingTo: url) {
         defer { try? fh.close() }
         _ = try? fh.seekToEnd()
@@ -47,6 +66,7 @@ public func jlog(_ message: String, image base64JPEG: String? = nil) {
         FileManager.default.createFile(atPath: url.path, contents: data,
                                        attributes: [.posixPermissions: 0o600])
     }
+    return activityPersisted
 }
 
 private func logTimestamp() -> String {

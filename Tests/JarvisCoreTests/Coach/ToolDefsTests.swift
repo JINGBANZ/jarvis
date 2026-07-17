@@ -25,6 +25,21 @@ import Testing
         #expect(coachSystemPrompt.contains("line"))   // brevity is now framed as overlay lines
     }
 
+    @Test func screenObservationsAreExplicitlyPointInTimeAndCanBecomeStale() {
+        #expect(captureScreenTool.description.contains("point-in-time"))
+        #expect(captureScreenTool.description.contains("stale"))
+        #expect(coachSystemPrompt.contains("point-in-time"))
+        #expect(coachSystemPrompt.contains("stale"))
+    }
+
+    @Test func screenFreshnessPolicyTreatsHistoryAsStale() {
+        #expect(coachSystemPrompt.contains("CURRENT request"))
+        #expect(coachSystemPrompt.contains("historical observations never prove the current screen"))
+        #expect(coachSystemPrompt.contains("appeared, may be about to appear, or may have changed"))
+        #expect(!coachSystemPrompt.contains("Apply this by meaning"))
+        #expect(coachSystemPrompt.contains("later stable screen-change turn"))
+    }
+
     /// Silence is a TOOL now: the prompt must direct the model to stay_silent (never free text),
     /// or a required tool_choice would leave it no sanctioned way to stay quiet.
     @Test func coachPromptDirectsSilenceToTheStaySilentTool() {
