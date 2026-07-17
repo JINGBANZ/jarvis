@@ -25,9 +25,10 @@ public struct ChatMessage: Sendable {
     public let toolCallId: String?
     /// For assistant messages that made tool calls: the calls to replay.
     public let toolCalls: [RawToolCall]?
-    /// Provider items replayed VERBATIM, one JSON object per string (e.g. Responses reasoning
-    /// items). The client re-emits them untouched: OpenAI requires the reasoning items that
-    /// preceded a function call to ride along with its output, byte-for-byte and in order.
+    /// Provider items replayed VERBATIM, one JSON object per string (a Responses `output` array:
+    /// reasoning items, function_call items with their ids, …). The client re-emits them untouched:
+    /// OpenAI requires a response's output items to ride along with the tool output, byte-for-byte
+    /// and in order, or the reasoning/function-call linkage validation rejects the request.
     public let rawItemsJSON: [String]?
 
     public init(role: Role, text: String? = nil, imageBase64JPEG: String? = nil,
@@ -79,12 +80,15 @@ public enum ToolInvocation: Sendable, Equatable {
 public struct BrainResponse: Sendable {
     public let toolCalls: [ToolInvocation]
     public let rawToolCalls: [RawToolCall]
-    /// The response's reasoning items, verbatim (one JSON object per string, in output order).
-    /// OpenAI's function-calling guidance: when a tool call is fulfilled client-side, the reasoning
-    /// items that preceded it MUST be replayed with the tool output, or the model discards its
-    /// chain-of-thought and re-reasons from scratch (worse answers, more reasoning tokens). Only the
-    /// within-turn tool loop needs them; they are never committed to session memory.
-    public let reasoningItemsJSON: [String]
+    /// The response's ENTIRE `output` array, verbatim (one JSON object per string, in output
+    /// order — reasoning, function_call, everything, ids intact). OpenAI's function-calling
+    /// guidance: when a tool call is fulfilled client-side, replay the model's output items whole
+    /// and unmodified with the tool output (`input.push(...response.output)`) — a reasoning item
+    /// replayed next to a rebuilt, id-less function_call trips the provider's reasoning/function-call
+    /// linkage validation, and dropping the reasoning makes the model re-reason from scratch. Only
+    /// the within-turn tool loop needs this; `CoachHistory.commit` converts it before it reaches
+    /// session memory.
+    public let outputItemsJSON: [String]
     /// Non-nil when the model run did NOT finish cleanly (Responses `status:"incomplete"`), carrying
     /// the reason (e.g. `"max_output_tokens"`). An empty `toolCalls` with a non-nil reason is
     /// *truncation*, not a deliberate decision to stay silent — the coach loop distinguishes them.
@@ -94,12 +98,12 @@ public struct BrainResponse: Sendable {
     public let outputText: String?
     public init(toolCalls: [ToolInvocation], rawToolCalls: [RawToolCall] = [],
                 incompleteReason: String? = nil, outputText: String? = nil,
-                reasoningItemsJSON: [String] = []) {
+                outputItemsJSON: [String] = []) {
         self.toolCalls = toolCalls
         self.rawToolCalls = rawToolCalls
         self.incompleteReason = incompleteReason
         self.outputText = outputText
-        self.reasoningItemsJSON = reasoningItemsJSON
+        self.outputItemsJSON = outputItemsJSON
     }
 }
 

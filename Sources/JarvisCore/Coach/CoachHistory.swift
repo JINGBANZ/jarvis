@@ -26,22 +26,42 @@ public final class CoachHistory: @unchecked Sendable {
 
     /// Commit a finished turn's messages (the user delta, and any capture/speak calls with their
     /// results). Callers must NOT pass `stay_silent` traces — silence needs no memory. Two kinds of
-    /// message never survive commit:
+    /// message are rewritten at commit:
     /// - **Screenshots** are replaced with a text stub (observation masking). The capture's OCR text
     ///   — what the model actually reads — rides in the tool-result message and stays verbatim; the
     ///   pixels are ~1–2k tokens re-billed on every later request, and the model can always capture
     ///   a fresh look.
-    /// - **Raw passthrough items** (reasoning) are dropped whole: OpenAI only needs them WITHIN the
-    ///   turn's tool loop, ignores stale ones across turns, and a reasoning item can be invalidated
-    ///   outright by a model change — memory keeps only what later turns can use.
+    /// - **Raw passthrough items** (a response's verbatim `output` array, replayed whole within the
+    ///   turn's tool loop) are CONVERTED, not kept: the `function_call` items survive as one
+    ///   synthetic id-less call message — so the committed `function_call_output` never orphans —
+    ///   and `reasoning` (and any other) items are dropped. OpenAI only needs reasoning WITHIN the
+    ///   turn's tool loop; across turns a new user message follows and stale reasoning is ignored,
+    ///   retaining it would re-bill every later request, and a brain-model switch invalidates
+    ///   reasoning items outright. The id-less call + output pair is the long-proven history shape.
     /// Both rewrites cost one prompt-cache divergence at the tail of the just-finished turn — far
     /// cheaper than re-billing the content on every request for the rest of the session.
     public func commit(_ turn: [ChatMessage]) {
         guard !turn.isEmpty else { return }
         lock.lock(); defer { lock.unlock() }
-        messages.append(contentsOf: turn
-            .filter { $0.rawItemsJSON == nil }
-            .map { $0.imageBase64JPEG != nil ? .user(Self.imageStub) : $0 })
+        messages.append(contentsOf: turn.compactMap { m in
+            if let raw = m.rawItemsJSON { return Self.convertRawItems(raw) }
+            return m.imageBase64JPEG != nil ? .user(Self.imageStub) : m
+        })
+    }
+
+    /// The commit-time conversion of a verbatim passthrough message: keep its `function_call` items
+    /// as one synthetic id-less `assistantToolCalls` message, drop everything else. Nil when the
+    /// items carried no function call — nothing a later turn can use.
+    private static func convertRawItems(_ itemsJSON: [String]) -> ChatMessage? {
+        let calls = itemsJSON.compactMap { itemJSON -> RawToolCall? in
+            guard let item = (try? JSONSerialization.jsonObject(with: Data(itemJSON.utf8))) as? [String: Any],
+                  item["type"] as? String == "function_call",
+                  let callId = item["call_id"] as? String,
+                  let name = item["name"] as? String else { return nil }
+            return RawToolCall(id: callId, name: name,
+                               argumentsJSON: item["arguments"] as? String ?? "{}")
+        }
+        return calls.isEmpty ? nil : .assistantToolCalls(calls)
     }
 
     /// Rough size of the memory in tokens (chars/4) — used only to decide WHEN to compact, so

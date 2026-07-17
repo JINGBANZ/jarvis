@@ -131,9 +131,10 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
                 }
 
             case .assistant:
-                // Verbatim passthrough items (reasoning) go back exactly as the model emitted them —
-                // OpenAI requires the reasoning items preceding a function call to accompany its
-                // output, unmodified and in order, or the model re-reasons from scratch.
+                // Verbatim passthrough items (a prior response's whole `output` array) go back
+                // exactly as the model emitted them — OpenAI requires a function call's output items
+                // (reasoning included) to accompany its result, unmodified and in order, or the
+                // request fails linkage validation / the model re-reasons from scratch.
                 if let raw = m.rawItemsJSON {
                     for itemJSON in raw {
                         if let item = (try? JSONSerialization.jsonObject(with: Data(itemJSON.utf8))) as? [String: Any] {
@@ -286,20 +287,19 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
         return BrainResponse(toolCalls: invocations, rawToolCalls: raws,
                              incompleteReason: incompleteReason,
                              outputText: outputText.isEmpty ? nil : outputText,
-                             reasoningItemsJSON: Self.reasoningItems(in: data))
+                             outputItemsJSON: Self.outputItemsJSON(in: data))
     }
 
-    /// The response's reasoning items, re-serialized whole so the tool loop can replay them
-    /// untouched (ids and any encrypted payload preserved). Extracted from the raw bytes — the typed
+    /// The response's entire `output` array, each item re-serialized whole so the tool loop can
+    /// replay it untouched (`input.push(...response.output)` — reasoning ids, function_call item
+    /// ids, any encrypted payload all preserved). Extracted from the raw bytes — the typed
     /// `Response` above deliberately doesn't model every provider field, and replay must lose none.
-    private static func reasoningItems(in data: Data) -> [String] {
+    private static func outputItemsJSON(in data: Data) -> [String] {
         guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
               let output = root["output"] as? [[String: Any]] else { return [] }
-        return output
-            .filter { $0["type"] as? String == "reasoning" }
-            .compactMap { item in
-                guard let bytes = try? JSONSerialization.data(withJSONObject: item) else { return nil }
-                return String(data: bytes, encoding: .utf8)
-            }
+        return output.compactMap { item in
+            guard let bytes = try? JSONSerialization.data(withJSONObject: item) else { return nil }
+            return String(data: bytes, encoding: .utf8)
+        }
     }
 }
