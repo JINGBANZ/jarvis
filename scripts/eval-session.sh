@@ -52,11 +52,21 @@ if [[ -z "$AGENT" ]]; then
 fi
 
 echo "▶ running $AGENT over the repo + session (this explores the code; give it a minute)…"
+# Write to a temp file and mv into place only on success, so a failed run (auth, network,
+# interrupt) never truncates a previous report; chmod before the move so the final file is
+# never observable at default umask. `--ephemeral` keeps Codex from persisting a rollout copy
+# of the session transcript outside the owner-only .jarvis/ dir.
+REPORT_TMP="$REPORT.tmp"
+trap 'rm -f "$REPORT_TMP"' EXIT
 case "$AGENT" in
-  claude) claude -p "$PROMPT" > "$REPORT" ;;
-  codex)  codex exec "$PROMPT" > "$REPORT" ;;
+  claude) claude -p "$PROMPT" > "$REPORT_TMP" ;;
+  codex)  codex exec --ephemeral "$PROMPT" > "$REPORT_TMP" ;;
   *)      echo "unknown EVAL_AGENT: $AGENT (expected 'claude' or 'codex')" >&2; exit 2 ;;
 esac
+chmod 600 "$REPORT_TMP"
+mv "$REPORT_TMP" "$REPORT"
 
-chmod 600 "$REPORT"
+# Render the browsable page (with its Copy-as-Markdown button) from what the agent wrote.
+HTML="$(swift run EvalPrep --html "$SESSION_DIR")"
 echo "✓ report written to $REPORT"
+echo "✓ open in a browser: $HTML"

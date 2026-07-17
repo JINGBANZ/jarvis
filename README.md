@@ -104,7 +104,7 @@ by a live run. Folders are grouped **by subsystem**, following
 | `./scripts/run-tests.sh` | Build and run the unit + offline-pipeline tests (no key, no permissions needed). |
 | `./scripts/build-app.sh [release\|debug]` | Build, bundle, and sign `Jarvis.app` (defaults to `release`). Creates the stable `Jarvis Dev` signing identity automatically on first run. |
 | `./scripts/build-app.sh --run` | Same build, then launch the app. Per-session logs land in the workspace `.jarvis/`. |
-| `./scripts/eval-session.sh [session-dir]` | Audit a finished session with an agentic CLI (`claude -p` / `codex exec`) that reads the repo, not just the wire — writes `eval-report.md` into the session dir. Defaults to the most recent `.jarvis/` session. Dev-side; needs Claude Code or Codex on `PATH`. |
+| `./scripts/eval-session.sh [session-dir]` | Audit a finished session with an agentic CLI (`claude -p` / `codex exec`) that reads the repo, not just the wire — writes `eval-report.md` plus a browsable `eval-report.html` (with a Copy-as-Markdown button) into the session dir. Defaults to the most recent `.jarvis/` session. Dev-side; needs Claude Code or Codex on `PATH`. |
 
 ## Develop locally
 

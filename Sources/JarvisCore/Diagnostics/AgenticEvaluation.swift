@@ -73,7 +73,7 @@ public enum AgenticEvaluation {
         files: `Sources/JarvisCore/Coach/CoachHistory.swift` (client-managed memory: append-only \
         prefix, screenshot stubbing, compaction), `Sources/JarvisCore/Coach/CoachDriver.swift` (the \
         event loop, the filler substance gate, compaction trigger), `Sources/JarvisCore/Coach/ToolDefs.swift` \
-        (tool schemas + the coach prompt), `Sources/JarvisCore/Coach/ReasoningEffort.swift` \
+        (tool schemas + the coach prompt), `Sources/JarvisCore/Brain/ReasoningEffort.swift` \
         (`max_output_tokens` is a COMBINED reasoning+output budget — a tight cap recreates the \
         documented `status:"incomplete"` truncation), and `Sources/JarvisCore/Config/Config.swift`. \
         Before recommending a mechanism, grep for it: several (screenshot stubbing, bulky-tool-result \
