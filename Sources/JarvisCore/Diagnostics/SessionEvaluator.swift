@@ -169,6 +169,10 @@ public struct SessionEvaluator: Sendable {
             return "assistant → function_call \(dict["name"] as? String ?? "?")(\(dict["arguments"] as? String ?? ""))"
         case "function_call_output":
             return "tool result: \(dict["output"] as? String ?? "")"
+        case "reasoning":
+            // The tool loop replays reasoning items verbatim (opaque ids, possibly a large
+            // `encrypted_content` blob) — no audit signal in the bytes, so stub them like images.
+            return "assistant reasoning (replayed verbatim — \(compact(dict).count) chars)"
         default:
             return compact(dict)
         }

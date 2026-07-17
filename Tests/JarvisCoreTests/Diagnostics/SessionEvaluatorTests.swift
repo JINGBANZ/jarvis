@@ -93,6 +93,25 @@ private final class CannedBrain: BrainClient, @unchecked Sendable {
         #expect(out.contains("=== call #2"))
     }
 
+    /// Replayed reasoning items on the INPUT side (the tool loop's verbatim passthrough) render as a
+    /// one-line stub — the bytes are opaque (ids, possibly a large `encrypted_content` blob) and
+    /// would only bloat the audit transcript.
+    @Test func transcriptStubsReplayedReasoningInputItems() throws {
+        let blob = String(repeating: "A", count: 256)
+        let items: [[String: Any]] = [
+            userItem("look please"),
+            ["type": "reasoning", "id": "rs_1", "summary": [], "encrypted_content": blob],
+            ["type": "function_call", "call_id": "c1", "name": "capture_screen", "arguments": "{}"],
+            ["type": "function_call_output", "call_id": "c1", "output": "screenshot captured"],
+        ]
+        let out = SessionEvaluator.renderTranscript(jsonl: try line(request: ["model": "gpt-5.5",
+                                                                              "input": items]))
+        #expect(out.contains("assistant reasoning (replayed verbatim — "))
+        #expect(out.contains("chars)"))
+        #expect(!out.contains(blob))                              // the opaque payload never renders
+        #expect(out.contains("assistant → function_call capture_screen({})"))
+    }
+
     @Test func evaluateSendsTranscriptAndPersistsOwnerOnlyReport() async throws {
         let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         let traffic = BrainTrafficLog(); traffic.enable(directory: dir)
