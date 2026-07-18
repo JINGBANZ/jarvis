@@ -658,6 +658,28 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(recorder.messages == ["test brain failed"])
     }
 
+    @Test func terminalBrainErrorDropsCoalescedAndLaterTriggers() async {
+        let clock = ManualClock(now: 0)
+        let gate = AsyncGate()
+        let brain = GatedThrowingBrain(gate: gate)
+        let recorder = BrainFailureRecorder()
+        let (driver, transcript) = makeDriver(
+            brain: brain, clock: clock,
+            onBrainFailure: { recorder.record($0) }
+        )
+        transcript.append(.init(speaker: .me, text: "first substantial question", at: 0))
+        async let first = driver.handleTrigger(.turnEnd)
+        await gate.waitUntilEntered()
+        transcript.append(.init(speaker: .me, text: "second substantial question", at: 1))
+
+        #expect(await driver.handleTrigger(.turnEnd) == .busy)
+        await gate.release()
+        #expect(await first == .brainError)
+        #expect(await driver.handleTrigger(.turnEnd) == .brainError)
+        #expect(brain.callCount == 1)
+        #expect(recorder.messages == ["gated brain failed"])
+    }
+
     /// Audio-driven turns REQUIRE a tool call (never free text): the model picks which tool from the
     /// prompt — reply, look at the screen, or stay_silent — but must answer with one of them.
     @Test func everyAudioTurnRequiresAToolCall() async {
@@ -718,6 +740,24 @@ final class GatedBrain: BrainClient, @unchecked Sendable {
         record()
         await gate.enter()
         return response
+    }
+}
+
+/// A throwing brain with the same one-shot gate, so a second trigger can pend before the terminal
+/// failure is released.
+final class GatedThrowingBrain: BrainClient, @unchecked Sendable {
+    private let gate: AsyncGate
+    private let lock = NSLock()
+    private var _callCount = 0
+    var callCount: Int { lock.lock(); defer { lock.unlock() }; return _callCount }
+    init(gate: AsyncGate) { self.gate = gate }
+    private func recordCall() { lock.lock(); _callCount += 1; lock.unlock() }
+    func respond(messages: [ChatMessage], tools: [ToolDef],
+                 toolChoice: ToolChoice) async throws -> BrainResponse {
+        recordCall()
+        await gate.enter()
+        throw NSError(domain: "test", code: 401,
+                      userInfo: [NSLocalizedDescriptionKey: "gated brain failed"])
     }
 }
 

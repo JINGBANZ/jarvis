@@ -84,6 +84,10 @@ public struct AgentCLIDetector: Sendable {
         let loggedIn: Bool
     }
 
+    /// The status document is tiny. This is only a runaway-output backstop for a broken wrapper,
+    /// and keeps the post-timeout pipe drain bounded in both time and memory.
+    private static let maxClaudeAuthStatusBytes = 64 * 1_024
+
     /// Claude's own status command reads whichever credential store that installation uses and does
     /// not make a model request. A malformed result or timeout is `unknown`, never "signed out".
     private func claudeAuthenticationStatus(executable: URL) -> AgentCLIAuthenticationStatus {
@@ -122,10 +126,39 @@ public struct AgentCLIDetector: Sendable {
         process.waitUntilExit()
         terminator.cancel()
         killer.cancel()
-        let data = stdout.fileHandleForReading.readDataToEndOfFile()
+        let data = Self.readAvailableOutput(stdout.fileHandleForReading)
         guard let status = try? JSONDecoder().decode(ClaudeAuthStatus.self, from: data) else {
             return .unknown
         }
         return status.loggedIn ? .signedIn : .signedOut
+    }
+
+    /// Drain only bytes already available after the wrapper exits. A wrapper may leave a child
+    /// holding the inherited stdout pipe open; a blocking `readDataToEndOfFile()` would then defeat
+    /// the process watchdog while waiting for that unrelated child to close its writer.
+    private static func readAvailableOutput(_ handle: FileHandle) -> Data {
+        let descriptor = handle.fileDescriptor
+        let flags = fcntl(descriptor, F_GETFL)
+        guard flags >= 0, fcntl(descriptor, F_SETFL, flags | O_NONBLOCK) >= 0 else {
+            try? handle.close()
+            return Data()
+        }
+        defer { try? handle.close() }
+
+        var output = Data()
+        var buffer = [UInt8](repeating: 0, count: 4_096)
+        while output.count < maxClaudeAuthStatusBytes {
+            let capacity = min(buffer.count, maxClaudeAuthStatusBytes - output.count)
+            let count = read(descriptor, &buffer, capacity)
+            if count > 0 {
+                output.append(contentsOf: buffer.prefix(Int(count)))
+                continue
+            }
+            if count == 0 { break }
+            if errno == EINTR { continue }
+            if errno == EAGAIN || errno == EWOULDBLOCK { break }
+            return Data()
+        }
+        return output
     }
 }

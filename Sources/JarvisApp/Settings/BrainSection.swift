@@ -98,11 +98,12 @@ final class BrainSection: NSObject, SettingsSection {
 
         apiKey.addControls(to: view, top: 112)
 
-        refreshDetection()
         return view
     }
 
-    /// Re-probe on every show so an install or sign-in completed while the app was open appears.
+    /// Populate on initial activation and re-probe on every later show so an install or sign-in
+    /// completed while the app was open appears. `makeView()` deliberately does not probe: the
+    /// Settings host activates the initial tab immediately after building all section views.
     func didBecomeActive() {
         refreshDetection()
     }

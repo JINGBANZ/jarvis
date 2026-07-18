@@ -1,5 +1,10 @@
 import Testing
 import Foundation
+#if canImport(Darwin)
+import Darwin
+#else
+import Glibc
+#endif
 @testable import JarvisCore
 
 /// Detection runs against a real, throwaway home-directory fixture: executables are actual 0755
@@ -117,6 +122,31 @@ import Foundation
             """)
         let d = AgentCLIDetector(home: home, pathVariable: nil, authStatusTimeout: 0.01)
         #expect(d.detect(.claudeCode)?.authenticationStatus == .unknown)
+    }
+
+    @Test func claudeAuthStatusProbeDoesNotWaitForInheritedChildStdout() throws {
+        let home = try makeHome()
+        let childPID = home.appendingPathComponent("child.pid")
+        let childFinished = home.appendingPathComponent("child-finished")
+        try installBinary("claude", in: home.appendingPathComponent(".claude/local"), script: """
+            #!/bin/sh
+            (trap '' HUP; sleep 5; touch "$HOME/child-finished") &
+            printf '%s\\n' "$!" > "$HOME/child.pid"
+            exit 2
+            """)
+        let d = AgentCLIDetector(home: home, pathVariable: nil, authStatusTimeout: 0.01)
+
+        let status = d.detect(.claudeCode)?.authenticationStatus
+        defer {
+            if let contents = try? String(contentsOf: childPID, encoding: .utf8),
+               let pid = pid_t(contents.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                kill(pid, SIGKILL)
+            }
+        }
+
+        #expect(status == .unknown)
+        #expect(!fm.fileExists(atPath: childFinished.path),
+                "the auth probe must return without waiting for a child that inherited stdout")
     }
 
     @Test func codexAuthDetectedViaAuthJSON() throws {

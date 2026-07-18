@@ -180,7 +180,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // in-place reapply must remain ghost-safe even if the queued report executes after stop().
         let wasRunning = transcriber != nil || themTranscriber != nil
         let reportContext: UserFacingError.PresentationContext =
-            !wasRunning && drainingStops == 0 ? .startup : .runtime
+            wasRunning ? .runtime : .startup
         guard let key = secrets.apiKey(), !key.isEmpty else {
             jlog("Jarvis: can't start — no API key.")
             if wasRunning {
