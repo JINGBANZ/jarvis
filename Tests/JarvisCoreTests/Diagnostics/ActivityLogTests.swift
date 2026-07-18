@@ -44,8 +44,8 @@ import Foundation
         #expect(snap.rows.isEmpty)                       // empty session
         #expect(snap.total == 0)
         let pixel = Data([0xFF, 0xD8, 0xFF, 0xD9]).base64EncodedString()
-        log.record("👁 looking", imageBase64: pixel)
-        log.record("💬 tip")
+        log.record(.screenViewed(imageBase64JPEG: pixel))
+        log.record(.tip(lines: ["tip"]))
         _ = log.attach { _ in }                          // sync barrier: drains the serial queue
 
         let jsonl = try String(contentsOf: dir.appendingPathComponent("jarvis-activity.jsonl"), encoding: .utf8)
@@ -63,8 +63,8 @@ import Foundation
         let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         let log = ActivityLog(); log.enable(directory: dir)
         let pixel = Data([0xFF, 0xD8, 0xFF, 0xD9]).base64EncodedString()
-        log.record("👁 looking", imageBase64: pixel)
-        log.record("💬 tip")
+        log.record(.screenViewed(imageBase64JPEG: pixel))
+        log.record(.tip(lines: ["tip"]))
         let snap = log.attach { _ in }                   // late attach: snapshot must contain prior rows
         #expect(snap.rows.count == 2)
         #expect(snap.shown == 2)
@@ -85,10 +85,22 @@ import Foundation
 
     @Test func recordIsNoOpWhenDisabled() {
         let log = ActivityLog()                          // never enabled
-        log.record("💬 should not crash or write anything")
+        log.record(.tip(lines: ["should not crash or write anything"]))
         let snap = log.attach { _ in }
         #expect(snap.total == 0)
         #expect(snap.rows.isEmpty)
+    }
+
+    @Test func eventFormattingKeepsDiagnosticDetailsOut() throws {
+        let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
+        let log = ActivityLog(); log.enable(directory: dir)
+        log.record(.heard(speaker: .them, text: "How would you optimize it?"))
+        _ = log.attach { _ in }
+
+        let jsonl = try String(contentsOf: dir.appendingPathComponent("jarvis-activity.jsonl"), encoding: .utf8)
+        #expect(jsonl.contains(#"heard (them): \"How would you optimize it?\""#))
+        #expect(!jsonl.contains("item"))
+        #expect(!jsonl.contains("recovered"))
     }
 
     /// Shared temp-dir helper (also used by SessionStoreTests). Owner-only dir, like the real app.

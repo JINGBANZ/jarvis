@@ -161,6 +161,11 @@ The squash-merge subject carries the PR number (`type: summary (#N)`).
 - **No secrets in code, ever** — not in source, tests, or examples. The API key lives in an owner-only
   `0600` file (`OPENAI_API_KEY` env var is a headless fallback only); see
   [`wiki/sandbox.md`](./wiki/sandbox.md) for why not the Keychain.
+- **Keep human activity separate from agent diagnostics.** `ActivityLog` is the human-facing coaching
+  record: only finalized interviewer/user speech, manual hint requests, screens Jarvis actually viewed,
+  and tips Jarvis displayed belong there. Lifecycle, transport, retry, error, timing, and diagnosis
+  details go through `jlog` to `jarvis-debug.log`. Never mirror `jlog` into `ActivityLog`; when a real
+  coaching event is also useful diagnostically, record the typed activity event explicitly.
 - **The only screen-/audio-derived data persisted to disk is the per-session log directory** (the
   activity log — spoken tips, transcribed "heard:" lines, the screenshots the model looked at — plus
   the wire-level brain traffic record and its on-demand evaluation report). It is written every run to an

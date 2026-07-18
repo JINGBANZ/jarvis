@@ -31,16 +31,18 @@ import Foundation
 
     @Test func hidesContentlessPastSessionsButKeepsCurrentAndContentful() throws {
         let base = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: base) }
-        // A past session with only lifecycle breadcrumbs (no coaching class, no shot) — an aborted run.
+        // A past session with only lifecycle/diagnostic breadcrumbs — an aborted run.
         try makeSession(base, "2026-06-16_09-00-00_aaaa", lines: [
             "{\"t\":\"09:00:00\",\"m\":\"Jarvis: session …\"}",
-            "{\"t\":\"09:00:01\",\"m\":\"Jarvis: coaching started (mic + system audio).\"}",
-            "{\"t\":\"09:00:02\",\"m\":\"Jarvis: stopped.\"}",
+            "{\"t\":\"09:00:01\",\"m\":\"💭 thinking…\"}",
+            "{\"t\":\"09:00:02\",\"m\":\"Jarvis realtime error event: oops\"}",
         ])
         // A past session that actually coached (has a 💬 line) — keep it.
         try makeSession(base, "2026-06-16_10-00-00_bbbb", lines: ["{\"t\":\"10:00:00\",\"m\":\"💬 try this\"}"])
         // A past session whose only content is a screenshot reference — keep it.
-        try makeSession(base, "2026-06-16_10-30-00_cccc", lines: ["{\"t\":\"10:30:00\",\"m\":\"saw\",\"s\":\"shot-1.jpg\"}"])
+        try makeSession(base, "2026-06-16_10-30-00_cccc", lines: [
+            "{\"t\":\"10:30:00\",\"m\":\"👁 looking at your screen\",\"s\":\"shot-1.jpg\"}"
+        ], shot: ("shot-1.jpg", Data([0xFF, 0xD8, 0xFF, 0xD9])))
         // The current session, breadcrumbs only — always shown so the live run appears in the picker.
         try makeSession(base, "2026-06-16_11-00-00_dddd", lines: ["{\"t\":\"11:00:00\",\"m\":\"Jarvis: coaching started.\"}"])
 
@@ -56,26 +58,28 @@ import Foundation
         let base = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: base) }
         let id = "2026-06-16_10-00-00_aaaa"
         try makeSession(base, id, lines: [
-            "{\"t\":\"10:00:00\",\"m\":\"hi\",\"s\":\"shot-1.jpg\"}",
+            "{\"t\":\"10:00:00\",\"m\":\"👁 looking at your screen\",\"s\":\"shot-1.jpg\"}",
             "not valid json",
             "{\"t\":\"10:00:01\",\"m\":\"evil\",\"s\":\"../escape.jpg\"}",
-            "{\"t\":\"10:00:02\",\"m\":\"text only\"}",
+            "{\"t\":\"10:00:02\",\"m\":\"🗣 heard (me): text only\"}",
+            "{\"t\":\"10:00:03\",\"m\":\"💭 thinking…\"}",
         ], shot: ("shot-1.jpg", Data([0xFF, 0xD8, 0xFF, 0xD9])))
         let store = SessionStore(base: base, current: nil)
         let session = try #require(store.listSessions().first)
         let rows = store.entries(for: session)
-        #expect(rows.count == 3)                     // malformed line skipped
-        #expect(rows[0].0.message == "hi")
+        #expect(rows.count == 2)                     // malformed + diagnostic rows skipped
+        #expect(rows[0].0.message == "👁 looking at your screen")
         #expect(rows[0].1 != nil)                    // valid shot bytes loaded
-        #expect(rows[1].0.message == "evil")
-        #expect(rows[1].1 == nil)                    // traversal filename → no bytes
-        #expect(rows[2].1 == nil)                    // text-only line
+        #expect(rows[1].0.message == "🗣 heard (me): text only")
+        #expect(rows[1].1 == nil)                    // text-only coaching line
     }
 
     @Test func entriesDropImageWhenShotFileMissing() throws {
         let base = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: base) }
         let id = "2026-06-16_10-00-00_aaaa"
-        try makeSession(base, id, lines: ["{\"t\":\"1\",\"m\":\"m\",\"s\":\"shot-9.jpg\"}"])  // file absent
+        try makeSession(base, id, lines: [
+            "{\"t\":\"1\",\"m\":\"👁 looking at your screen\",\"s\":\"shot-9.jpg\"}"
+        ])  // file absent
         let store = SessionStore(base: base, current: nil)
         let rows = store.entries(for: try #require(store.listSessions().first))
         #expect(rows.count == 1)

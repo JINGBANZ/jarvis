@@ -123,7 +123,10 @@ public final class CoachDriver: @unchecked Sendable {
         // A hotkey trigger leaves no "🗣 heard:" line (the user pressed a key, didn't speak), so record
         // it — with the synthetic request we pre-fill as the user's message — so the activity viewer
         // shows what the shortcut sent to the brain.
-        if reason == .manualHint, let line = ctx.promptLine { jlog("⌨️ hint shortcut — \(line)") }
+        if reason == .manualHint, let line = ctx.promptLine {
+            jlog("⌨️ hint shortcut — \(line)")
+            ActivityLog.shared.record(.manualHint(prompt: line))
+        }
 
         // The delta: only the lines the brain hasn't seen yet (the rest live in `history`).
         let delta = transcript.renderFrom(index: currentSentCount())
@@ -135,7 +138,7 @@ public final class CoachDriver: @unchecked Sendable {
         // manual-hint triggers always go through. Logged so gate misfires are auditable.
         if reason == .turnEnd && !delta.lines.contains(where: TurnSubstance.isSubstantive) {
             // Log WHAT was skipped (not just that a skip happened) so a gate misfire — a real remark
-            // wrongly classified as filler — is visible in the activity viewer, not silent.
+            // wrongly classified as filler — is visible in the debug log, not silent.
             let preview = delta.lines.isEmpty
                 ? "nothing new"
                 : String(delta.lines.map(\.text).joined(separator: " · ").prefix(80))
@@ -163,7 +166,8 @@ public final class CoachDriver: @unchecked Sendable {
             let shot = await Task.detached(priority: .userInitiated, operation: { screen.capture() }).value
             if Task.isCancelled { jlog("… turn cancelled (stopped) after capture"); return .cancelled }
             if let shot {
-                jlog("👁 looking at your screen", image: shot.imageBase64)
+                jlog("👁 looking at your screen")
+                ActivityLog.shared.record(.screenViewed(imageBase64JPEG: shot.imageBase64))
                 turnMessages.append(.userImage(shot.imageBase64))
                 // OCR sidecar: the same window as exact text, so the model reads code instead of
                 // deciphering pixels. Rides as its own user message — there's no tool result to
@@ -238,7 +242,8 @@ public final class CoachDriver: @unchecked Sendable {
                     return .cancelled
                 }
                 if let shot {
-                    jlog("👁 looking at your screen", image: shot.imageBase64)   // thumbnail in the activity viewer
+                    jlog("👁 looking at your screen")
+                    ActivityLog.shared.record(.screenViewed(imageBase64JPEG: shot.imageBase64))
                     if let text = shot.recognizedText {
                         jlog("🔤 read \(text.count(where: { $0 == "\n" }) + 1) lines of on-screen text")
                     }
@@ -275,6 +280,7 @@ public final class CoachDriver: @unchecked Sendable {
                 // This is the "speak after Stop" guard the TurnTaskBox relies on.
                 if Task.isCancelled { jlog("… turn cancelled (stopped) before speaking"); return .cancelled }
                 jlog("💬 \(lines.joined(separator: " "))")
+                ActivityLog.shared.record(.tip(lines: lines))
                 let perLine = lines.map { OverlayTiming.displaySeconds(for: $0, config: config) }
                 overlay.render(lines, perLineSeconds: perLine)
                 // Close the call locally — we own the history, so no follow-up round trip is needed.
