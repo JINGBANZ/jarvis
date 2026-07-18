@@ -71,9 +71,9 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     }
 }
 
-// `.serialized`: two tests here drive the shared `ActivityLog` singleton (the screenshot e2e and the
-// manual-hint trigger-log e2e). Serializing the suite keeps their enable()/disable() from racing each
-// other — they are the only code that enables the shared log, so no other suite can collide.
+// `.serialized`: the activity-log end-to-end tests drive the shared `ActivityLog` singleton.
+// Serializing the suite keeps their enable()/disable() calls from racing each other — they are the
+// only code that enables the shared log, so no other suite can collide.
 @Suite(.serialized) struct CoachDriverPipelineTests {
     private func makeDriver(brain: BrainClient, summarizer: BrainClient? = nil,
                             screen: ScreenCapturing = FakeScreen(),
@@ -223,6 +223,29 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let jsonl = try String(contentsOf: dir.appendingPathComponent("jarvis-activity.jsonl"), encoding: .utf8)
         // The trigger marker carries the pre-filled synthetic request ("…pressed the hint shortcut…").
         #expect(jsonl.contains("hint shortcut"))
+    }
+
+    /// The activity viewer is the human coaching record, not a second debug console. Internal turn
+    /// state still belongs in `jarvis-debug.log`, while the tip produced by that turn remains visible.
+    @Test func activityLogExcludesCoachingDiagnostics() async throws {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("jarvis-activity-boundary-\(ProcessInfo.processInfo.globallyUniqueString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { ActivityLog.shared.disable(); try? FileManager.default.removeItem(at: dir) }
+        ActivityLog.shared.enable(directory: dir)
+
+        let brain = ScriptedBrain(script: [
+            .init(toolCalls: [.speak(callId: "s", lines: ["activity-boundary-tip-417"])])
+        ])
+        let (driver, _) = makeDriver(brain: brain, clock: ManualClock(now: 417))
+
+        #expect(await driver.handleTrigger(.silence(secondsQuiet: 417)) == .spoke)
+
+        _ = ActivityLog.shared.attach { _ in }   // sync barrier: all async records have landed
+        let jsonl = try String(contentsOf: dir.appendingPathComponent("jarvis-activity.jsonl"), encoding: .utf8)
+        #expect(jsonl.contains("activity-boundary-tip-417"))
+        #expect(!jsonl.contains("quiet for 417s"))
+        #expect(!jsonl.contains("thinking"))
     }
 
     /// Stop cancelling a turn *while the screenshot is being captured* must abort before emitting:
