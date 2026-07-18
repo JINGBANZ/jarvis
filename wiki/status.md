@@ -27,7 +27,10 @@ locally installed Claude Code or Codex CLI on the user's subscription; Settings 
 those providers, reports Claude's current sign-in state from its bounded status command, and keeps
 the OpenAI API-key path available. A failed CLI coaching request stops the unusable session without
 activating the app, leaves a discreet provider-only Activity notice, and keeps the detailed reason
-in `jarvis-debug.log` instead of leaving the listening state green.
+in `jarvis-debug.log` instead of leaving the listening state green. The same runtime ghost-mode rule
+now covers microphone transcription, audio-route loss, in-place CLI preflight, and Activity-audit
+completion: no runtime error autonomously activates Jarvis, opens a browser, or presents a modal;
+fixed notices remain available in Activity. The gate statically rejects unreviewed presentation APIs.
 
 ## Next action
 
@@ -54,7 +57,7 @@ thin OS shell, verified by the smoke run.
 - `Sources/JarvisCore/Config/` — config + owner-only secrets + brain/screen preferences (`Config`, `Secrets`, `BrainPreferences`, `ScreenCapturePreferences`, `ScreenCaptureScope`).
 - `Sources/JarvisCore/Diagnostics/` — logging, always-on activity log, privacy-preserving audio continuity evidence, session-history store, wire-level brain traffic capture + one-click session evaluation (single-call in-app **and** the agentic dev-side audit's prompt/transcript prep), user-facing errors (`ActivityLog`, `AudioContinuityWitness`, `SessionStore`, `BrainTrafficLog`, `SessionEvaluator`, `AgenticEvaluation`, `UserFacingError`).
 - `Sources/JarvisOverlay/` — the capture-invisible `NSPanel` surfaces: `OverlayCaptionPanel` (transient), `OverlayBoxPanel` (persistent), `NSPanel+CaptureExclusion`.
-- `Sources/JarvisApp/App/` + `MenuBar/` — entry point, connection-aware menu status, Start/Stop, `ErrorReporter` (severity-driven `NSAlert`, including terminal CLI brain failures).
+- `Sources/JarvisApp/App/` + `MenuBar/` — entry point, connection-aware menu status, Start/Stop, `ErrorReporter` (startup alerts plus an unconditional no-presentation runtime policy).
 - `Sources/JarvisApp/Capture/` — one-clock aggregate mic + sample-preserving system-audio capture with AEC3 echo cancellation + resampling (`AggregateEchoCapture`, `WebRTCEchoCanceller`, `Resampler`), Realtime item/readiness/liveness/transactional-reconnect/witness handling (`RealtimeTranscriber`, `NetworkPathDiagnostics`), permissions, plus the window-scoped screenshot + OCR edge (`WindowScopedScreenCapture`, `ScreenTextRecognizer`).
 - `Sources/JarvisApp/Settings/` — the unified Settings window (`SettingsWindow` hosting Brain (provider + model + API key) / Overlay / Screen / Activity sections).
 - `Sources/JarvisApp/Shortcuts/HotkeyController.swift` — the global Carbon ⌥⌘J on-demand-hint hotkey.

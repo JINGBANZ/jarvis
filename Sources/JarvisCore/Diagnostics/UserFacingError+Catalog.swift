@@ -1,9 +1,9 @@
 import Foundation
 
-/// The catalog of the app's user-facing failures: the single source of truth for *which* failures are
-/// loud (`.fatal` → alert + stop) versus quiet (`.degraded`). It owns the title + severity policy of each
-/// named failure; dynamic copy composed at the failure site (e.g. a capture reason) is passed through.
-/// Call sites reference these so the loudness policy is centralized and unit-testable.
+/// The catalog of the app's user-facing failures: the single source of truth for each failure's
+/// lifecycle consequence. Presentation additionally depends on startup versus runtime context; no
+/// runtime severity may reveal UI. Dynamic copy composed at the failure site (e.g. a capture reason)
+/// is passed through. Call sites reference these so the policy is centralized and unit-testable.
 public extension UserFacingError {
     /// No API key on Start. Realtime voice transcription always runs on the OpenAI key — whichever
     /// brain provider is selected — so the session never comes up: fatal.
@@ -56,12 +56,18 @@ public extension UserFacingError {
         .init(title: "Couldn't start audio capture", message: reason, severity: .fatal)
     }
 
+    /// Audio capture started, then became unavailable after a route rebuild. Coaching cannot
+    /// continue, but a runtime failure must stop without activating the app.
+    static func captureStopped(reason: String) -> UserFacingError {
+        .init(title: "Audio capture stopped", message: reason, severity: .terminal)
+    }
+
     /// The mic ("me") transcription socket gave up (bad key / quota / network) — NOT a mic-hardware
-    /// failure (that's `captureFailed`). Coaching can't continue, so it's fatal.
+    /// failure (that's `captureStopped`). Coaching can't continue, so stop without revealing UI.
     static var transcriptionStopped: UserFacingError {
         .init(title: "Transcription stopped",
               message: "Jarvis lost its connection to the transcription service (often a bad API key, quota, or network issue). Coaching has stopped.",
-              severity: .fatal)
+              severity: .terminal)
     }
 
     /// The system-audio ("them") socket gave up. The mic still works, so this is a graceful degrade —

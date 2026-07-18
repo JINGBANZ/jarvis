@@ -23,6 +23,20 @@ import Testing
         #expect(!UserFacingError.Severity.degraded.stopsSession)
     }
 
+    @Test func runtimeNeverAlertsForAnySeverity() {
+        let severities: [UserFacingError.Severity] = [.fatal, .terminal, .warning, .degraded]
+        for severity in severities {
+            #expect(!severity.showsAlert(in: .runtime))
+        }
+    }
+
+    @Test func startupPreservesSeverityAlertPolicy() {
+        #expect(UserFacingError.Severity.fatal.showsAlert(in: .startup))
+        #expect(UserFacingError.Severity.warning.showsAlert(in: .startup))
+        #expect(!UserFacingError.Severity.terminal.showsAlert(in: .startup))
+        #expect(!UserFacingError.Severity.degraded.showsAlert(in: .startup))
+    }
+
     @Test func carriesFields() {
         let e = UserFacingError(title: "T", message: "M", severity: .fatal)
         #expect(e.title == "T")

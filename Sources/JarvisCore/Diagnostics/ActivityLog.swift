@@ -27,6 +27,16 @@ public final class ActivityLog: @unchecked Sendable {
         /// never the raw error, so the notice cannot expose provider diagnostics during screen
         /// sharing.
         case coachingStopped(provider: BrainProvider)
+        /// Coaching ended because the microphone transcription connection was lost. No transport
+        /// detail is carried; the fixed copy points to diagnostics.
+        case transcriptionStopped
+        /// Coaching ended because the running audio capture became unavailable. No device or route
+        /// detail is carried; the fixed copy points to diagnostics.
+        case audioCaptureStopped
+        /// The secondary system-audio transcription stopped while microphone coaching continued.
+        case systemAudioStopped
+        /// An explicit Settings reapply failed its preflight while the existing session continued.
+        case settingsChangeNotApplied
     }
 
     /// One recorded line. `imageFile` is the relative `shot-N.jpg` name on disk (the bytes the DOM
@@ -123,6 +133,18 @@ public final class ActivityLog: @unchecked Sendable {
         case .coachingStopped(let provider):
             message = "⏹ coaching stopped — \(provider.displayName) couldn't respond; check Settings → Brain"
             imageBase64 = nil
+        case .transcriptionStopped:
+            message = "⏹ coaching stopped — transcription connection was lost; check jarvis-debug.log"
+            imageBase64 = nil
+        case .audioCaptureStopped:
+            message = "⏹ coaching stopped — audio capture became unavailable; check jarvis-debug.log"
+            imageBase64 = nil
+        case .systemAudioStopped:
+            message = "⚠️ system audio stopped — microphone coaching continues; check jarvis-debug.log"
+            imageBase64 = nil
+        case .settingsChangeNotApplied:
+            message = "⚠️ settings change wasn't applied — current coaching session continues; check Settings → Brain"
+            imageBase64 = nil
         }
         queue.async { [self] in
             guard let dir else { return }
@@ -215,6 +237,7 @@ public final class ActivityLog: @unchecked Sendable {
         if m.hasPrefix("🗣") || m.hasPrefix("🤫") { return "hear" }
         if m.hasPrefix("💭") || m.hasPrefix("…") { return "think" }
         if m.hasPrefix("⏹ coaching stopped") { return "think" }
+        if m.hasPrefix("⚠️") { return "think" }
         let low = m.lowercased()
         if low.contains("error") || low.contains("failed") || low.contains("denied") { return "err" }
         return ""
@@ -228,6 +251,8 @@ public final class ActivityLog: @unchecked Sendable {
         return m.hasPrefix("🗣 heard") || m.hasPrefix("⌨️ hint shortcut")
             || m.hasPrefix("👁 looking at your screen") || m.hasPrefix("💬")
             || m.hasPrefix("⏹ coaching stopped")
+            || m.hasPrefix("⚠️ system audio stopped")
+            || m.hasPrefix("⚠️ settings change wasn't applied")
     }
 
     /// The empty page shell: dark theme, a header with a live count, the row container, the lightbox

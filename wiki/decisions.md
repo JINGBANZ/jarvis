@@ -477,3 +477,27 @@
 - **Supersedes in part:** 2026-07-16 — Local Claude Code / Codex CLIs as alternative brain providers.
 - **Detail:** [settings-window.md → Brain](./settings-window.md#brain),
   `Sources/JarvisCore/Brain/AgentCLIDetector.swift`.
+
+### 2026-07-18 — Runtime failures preserve ghost mode
+
+- **Chose:** Treat startup and runtime failure presentation as separate policy. An explicit Start may
+  show a failure alert before a session exists; once a pipeline is live, every error path remains
+  non-presenting through terminal teardown. Terminal brain, microphone-transcription, and capture
+  failures stop silently; the system-audio path degrades silently. Fixed, non-sensitive notices go
+  to Activity and dynamic details go only to `jarvis-debug.log`. Activity evaluation/report opening
+  and history confirmation are disabled and race-guarded while coaching runs. A static gate requires
+  an inline reviewed exception on every API capable of presenting, activating, opening a URL,
+  requesting attention, notifying, or sounding.
+- **Why:** A modal or browser appearing during screen sharing exposes the assistant precisely when a
+  runtime failure makes it most likely. Severity alone also races: teardown can finish before a
+  queued main-actor alert executes. Capturing startup/runtime context at the failure site makes the
+  invariant independent of later session state, and the source guard prevents direct AppKit bypasses.
+- **Rejected:** (a) Alerting on terminal failures — operationally clear but violates ghost mode. (b)
+  Reading only current session state when the UI task executes — teardown turns a runtime failure
+  into a false startup state. (c) Hiding the persistent menu-bar item or blocking user-opened
+  Settings/Activity — those are named product surfaces and explicit user actions, not autonomous
+  disclosure. macOS privacy indicators remain unavoidable.
+- **Supersedes in part:** 2026-06-23 — Capture adapts to any input rate; startup fails loud. Startup
+  still fails loud; mid-session failures do not.
+- **Detail:** [architecture.md → Failure surfacing](./architecture.md#failure-surfacing--startup-loud-runtime-ghost),
+  `Sources/JarvisCore/Diagnostics/UserFacingError.swift`, `scripts/check-ghost-mode.sh`.

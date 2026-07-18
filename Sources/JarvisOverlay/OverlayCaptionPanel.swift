@@ -170,7 +170,7 @@ public final class OverlayCaptionPanel: NSObject, OverlayRendering, OverlayCapti
         }
         label.stringValue = tip.lines[line]
         resizeToFit()   // grow the panel so a long line isn't clipped
-        panel.orderFrontRegardless()
+        panel.orderFrontRegardless() // ghost-mode-allowed: capture-excluded coaching overlay
         active = (tip, line + 1)
         scheduleTick(after: tip.seconds[line]) { $0.gapThenAdvance() }
     }
@@ -250,7 +250,7 @@ public final class OverlayCaptionPanel: NSObject, OverlayRendering, OverlayCapti
             isPreviewing = true
             label.stringValue = Self.previewText
             resizeToFit()
-            panel.orderFrontRegardless()
+            panel.orderFrontRegardless() // ghost-mode-allowed: capture-excluded coaching overlay
         } else if isPreviewing {
             isPreviewing = false
             // If the caption was switched off *during* the preview, `setEnabled(false)` deferred its

@@ -175,7 +175,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         // Re-assert capture exclusion on every show — defense-in-depth against an activation-policy
         // flip dropping `sharingType` (same reason as OverlayCaptionPanel.show).
         reassertCaptureExclusion()
-        panel.orderFrontRegardless()
+        panel.orderFrontRegardless() // ghost-mode-allowed: capture-excluded coaching overlay
     }
 
     public func hide() {
@@ -215,7 +215,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
             isPreviewing = true
             reassertCaptureExclusion()
             setEntriesText(Self.sampleEntries)
-            panel.orderFrontRegardless()
+            panel.orderFrontRegardless() // ghost-mode-allowed: capture-excluded coaching overlay
         } else if isPreviewing {
             isPreviewing = false
             rerender()                                  // restore the real log…

@@ -161,11 +161,20 @@ The squash-merge subject carries the PR number (`type: summary (#N)`).
 - **No secrets in code, ever** — not in source, tests, or examples. The API key lives in an owner-only
   `0600` file (`OPENAI_API_KEY` env var is a headless fallback only); see
   [`wiki/sandbox.md`](./wiki/sandbox.md) for why not the Keychain.
+- **Preserve ghost mode for the whole coaching lifecycle.** From a live pipeline through terminal
+  teardown, no autonomous path may activate Jarvis, change its activation policy, present an alert,
+  sheet, or window, open another app or URL, request attention, post a notification, or play a sound.
+  Only `OverlayCaptionPanel` and `OverlayBoxPanel` may present automatically; both must remain
+  nonactivating and capture-excluded. Runtime failures stop or degrade silently, append fixed typed
+  copy to Activity, and put raw detail only in `jarvis-debug.log`. The persistent menu-bar item,
+  explicit user actions that open Settings/Activity, and unavoidable macOS privacy UI are the named
+  exceptions. Every presentation API call needs an inline `ghost-mode-allowed` reason so
+  `scripts/check-ghost-mode.sh` can enforce the boundary in the normal test gate.
 - **Keep human activity separate from agent diagnostics.** `ActivityLog` is the human-facing coaching
   record: only finalized interviewer/user speech, manual hint requests, screens Jarvis actually viewed,
-  and tips Jarvis displayed belong there. Lifecycle, transport, retry, error, timing, and diagnosis
-  details go through `jlog` to `jarvis-debug.log`. Never mirror `jlog` into `ActivityLog`; when a real
-  coaching event is also useful diagnostically, record the typed activity event explicitly.
+  tips Jarvis displayed, and fixed typed runtime-failure notices belong there. Lifecycle, transport,
+  retry, raw error, timing, and diagnosis details go through `jlog` to `jarvis-debug.log`. Never
+  mirror `jlog` into `ActivityLog`; record the corresponding typed activity event explicitly.
 - **The only screen-/audio-derived data persisted to disk is the per-session log directory** (the
   activity log — spoken tips, transcribed "heard:" lines, the screenshots the model looked at — plus
   the wire-level brain traffic record and its on-demand evaluation report). It is written every run to an

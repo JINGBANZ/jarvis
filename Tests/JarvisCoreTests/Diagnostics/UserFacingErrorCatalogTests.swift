@@ -17,8 +17,18 @@ import Testing
         #expect(e.message.contains("no input device"))
     }
 
-    @Test func transcriptionStoppedIsFatal() {
-        #expect(UserFacingError.transcriptionStopped.severity == .fatal)
+    @Test func runtimeCaptureFailureStopsQuietlyAndCarriesReason() {
+        let e = UserFacingError.captureStopped(reason: "route disappeared")
+        #expect(e.severity == .terminal)
+        #expect(e.severity.stopsSession)
+        #expect(!e.severity.showsAlert)
+        #expect(e.message.contains("route disappeared"))
+    }
+
+    @Test func transcriptionStoppedIsTerminal() {
+        #expect(UserFacingError.transcriptionStopped.severity == .terminal)
+        #expect(UserFacingError.transcriptionStopped.severity.stopsSession)
+        #expect(!UserFacingError.transcriptionStopped.severity.showsAlert)
     }
 
     @Test func systemAudioStoppedStaysQuiet() {
