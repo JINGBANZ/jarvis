@@ -86,7 +86,7 @@ never archived. Full design: [`wiki/architecture.md`](./wiki/architecture.md); p
 │   ├── JarvisCoreTests/      # unit + offline-pipeline tests (mirrors the Core subsystems)
 │   ├── JarvisOverlayTests/   # overlay + response-box behavior & screen-capture-invisibility checks
 │   └── JarvisViewerTests/    # WebKit end-to-end tests of the viewer HTML/JS
-├── Resources/Info.plist       # bundle id, mic usage string
+├── Resources/                 # bundle metadata, entitlements, and the app icon
 ├── scripts/                   # build / run / test (see below)
 └── wiki/                      # design & decision docs (single source of truth)
 ```
