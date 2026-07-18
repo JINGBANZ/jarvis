@@ -381,6 +381,7 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
         transcript.append(.init(speaker: speaker, text: text, at: at))
         let detail = reason.map { ", recovered after \($0)" } ?? ""
         jlog("🗣 heard (\(speaker.rawValue)): \"\(text)\" (item \(item.itemID)\(detail))")
+        ActivityLog.shared.record(.heard(speaker: speaker, text: text))
         pending.append(text)
         resetSilenceTimer()
         scheduleTurnDebounce()

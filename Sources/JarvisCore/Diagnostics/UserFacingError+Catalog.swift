@@ -36,7 +36,7 @@ public extension UserFacingError {
     /// The selected CLI is installed but its sign-in couldn't be confirmed (Claude Code may keep
     /// credentials only in the macOS Keychain, which Jarvis deliberately doesn't probe). A false
     /// negative is possible, so this is a degraded notice, not a Start blocker — but it makes a
-    /// never-working brain visible in the activity log instead of silent.
+    /// never-working brain visible in the debug log instead of silent.
     static func brainCLISignInUnconfirmed(provider: String) -> UserFacingError {
         .init(title: "\(provider) sign-in unconfirmed",
               message: "Couldn't confirm \(provider) is signed in \u{2014} coaching turns may fail. If they do, run the CLI once in Terminal to sign in, then Stop and Start.",

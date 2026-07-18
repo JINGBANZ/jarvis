@@ -5,8 +5,10 @@
   <key>CFBundleName</key><string>Jarvis</string>
   <key>CFBundleDisplayName</key><string>Jarvis</string>
   <key>CFBundleIdentifier</key><string>com.jarvis.coach</string>
-  <key>CFBundleVersion</key><string>1</string>
-  <key>CFBundleShortVersionString</key><string>0.1</string>
+  <!-- Versions are bumped by release-please (the generic updater rewrites the semver on any line
+       carrying the annotation) — don't edit them by hand. -->
+  <key>CFBundleVersion</key><string>0.1.1</string> <!-- x-release-please-version -->
+  <key>CFBundleShortVersionString</key><string>0.1.1</string> <!-- x-release-please-version -->
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleExecutable</key><string>JarvisApp</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>

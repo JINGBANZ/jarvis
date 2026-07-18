@@ -34,7 +34,7 @@ public struct SessionEvaluator: Sendable {
     }
 
     /// The report persisted by an earlier `evaluate`, if any. Lets the viewer reopen a finished
-    /// audit ("Show report") instead of re-billing an evaluation of the same session.
+    /// audit ("Open report") instead of re-billing an evaluation of the same session.
     public static func savedReport(in sessionDir: URL) -> String? {
         let url = sessionDir.appendingPathComponent(reportFilename)
         guard let report = try? String(contentsOf: url, encoding: .utf8), !report.isEmpty
@@ -64,7 +64,7 @@ public struct SessionEvaluator: Sendable {
         guard let report = response.outputText, !report.isEmpty else {
             throw EvaluationError.emptyReport
         }
-        // A failed write is tolerable: the report is still shown; only "Show report" reuse is lost.
+        // A failed write is tolerable: the report is still shown; only "Open report" reuse is lost.
         _ = FileManager.default.createFile(
             atPath: sessionDir.appendingPathComponent(Self.reportFilename).path,
             contents: Data(report.utf8), attributes: [.posixPermissions: 0o600])

@@ -42,6 +42,30 @@ relaunches. On the first build macOS prompts once to let `codesign` use the new 
 - Screen Recording + Microphone are granted by **TCC prompts at first run**, not an App-Sandbox
   entitlement file. `Permissions.primeAll()` requests them at launch and is idempotent.
 
+## Distribution — signed, notarized releases from CI
+
+The `Jarvis Dev` identity above is a **local-dev** device: on any other Mac it's untrusted and
+Gatekeeper blocks the app. Distributable builds go through `scripts/package-app.sh`, which builds and
+signs the bundle once with a **Developer ID Application** certificate — hardened runtime + secure
+timestamp (both notarization requirements) — submits it to Apple's notary service, staples the
+ticket, and re-zips the stapled bundle into `Jarvis-<version>.zip` (a zip itself can't be stapled,
+so the archive is rebuilt after stapling). Hardened runtime denies microphone capture outright
+without the `audio-input` entitlement, so the script signs with `Resources/Jarvis.entitlements`.
+
+Releases are cut by `.github/workflows/release.yml`, not by hand: on every push to `main`,
+**release-please** maintains a standing Release PR from the conventional-commit history (bumping both
+version keys in `Resources/Info.plist` via `x-release-please-version` annotations, plus the
+CHANGELOG — config in `release-please-config.json`). Merging that PR creates the GitHub Release **as
+a draft**; a `macos-15` job then runs the test gate, signs/notarizes via repo secrets (the base64
+`.p12` certificate and an App Store Connect API key — names in the workflow), attaches the zip, and
+only then publishes the Release. A failed sign/notarize run therefore never leaves a public Release
+without its app. The publish job lives in the same workflow because tags created with
+`GITHUB_TOKEN` never trigger other workflows.
+
+`package-app.sh` also runs locally (one-time `xcrun notarytool store-credentials jarvis-notary …`,
+then just run the script) for packaging without CI. Distributed builds run on Apple Silicon only —
+`libjarvis-aec.a` is arm64-only — and users supply their own OpenAI key at first run.
+
 ## Running
 
 | Command | What it does |
@@ -59,23 +83,26 @@ relaunches. On the first build macOS prompts once to let `codesign` use the new 
 
 ## The live activity viewer
 
-Settings → **Activity** opens an **in-app `WKWebView`** window into which Swift *pushes* each `jlog`
-line (and `capture_screen` thumbnails as in-memory `data:` URIs). Chosen over a local HTTP server +
-SSE: for an app that already holds the entries in memory, pushing into an embedded WebView is less
-code, has zero network surface, and is the most testable (the production runtime *is* the test
-runtime). It also sidesteps the `file://` `fetch()` restriction that forced the original viewer's
-`<meta refresh>` reload.
+Settings → **Activity** opens an **in-app `WKWebView`** into which `ActivityLog` pushes the typed,
+human-facing coaching exchange: finalized interviewer/user speech, manual hint requests, screens
+Jarvis viewed, and tips Jarvis displayed. Screen-view events carry their thumbnails as in-memory
+`data:` URIs. Chosen over a local HTTP server + SSE: for an app that already holds the entries in
+memory, pushing into an embedded WebView is less code, has zero network surface, and is the most
+testable (the production runtime *is* the test runtime). It also sidesteps the `file://` `fetch()`
+restriction that forced the original viewer's `<meta refresh>` reload.
 
 - New events stream in live (no reload, no flicker); thumbnails open in an in-page lightbox.
 - Each Start opens a fresh session (a Stop→Start gets a new log, never resuming the previous run),
   persisted as owner-only `jarvis-activity.jsonl` + `shot-N.jpg`, so past runs can be browsed and the
   history cleared from the viewer. Old sessions are pruned to the most recent few at each Start.
 - **The viewer and its file logging are always on** (they used to be `--dev`-gated; that flag is gone).
-  On every launch `jlog` writes to the unified log (Console.app) *and* the per-session files in the
-  gitignored, workspace-local `.jarvis/<session>/` (`0600` files in a `0700` dir). `build-app.sh --run`
-  passes that path via `--log-dir`, since the `open`-launched app can't find the repo itself; opening
-  the bundle directly with no `--log-dir` falls back to `~/Library/Application Support/Jarvis/sessions/`.
-  The full privacy posture is in [sandbox.md](./sandbox.md).
+  On every Start, `ActivityLog` writes the coaching exchange to `jarvis-activity.jsonl` while `jlog`
+  writes agent-facing diagnostics to the unified log (Console.app) and `jarvis-debug.log`. Both files
+  live in the gitignored, workspace-local `.jarvis/<session>/` (`0600` files in a `0700` dir).
+  `build-app.sh --run` passes that path via `--log-dir`, since the `open`-launched app can't find the
+  repo itself; opening the bundle directly with no `--log-dir` falls back to
+  `~/Library/Application Support/Jarvis/sessions/`. The full privacy posture is in
+  [sandbox.md](./sandbox.md).
 - The viewer's rendering logic (`htmlShell`/`rowScript`) and history reader (`SessionStore`) live in
   `JarvisCore` so they're unit/WebKit-tested; `ActivityViewer` in `JarvisApp` is the thin window.
 
@@ -83,4 +110,5 @@ runtime). It also sidesteps the `file://` `fetch()` restriction that forced the 
 
 Some behavior can only be verified by a human with a real key, a mic, and granted permissions — see
 the checklist in the [README](../README.md#live-smoke-checklist). Run via `./scripts/build-app.sh
---run` and watch each step in the activity viewer (Settings → Activity).
+--run`; review the coaching exchange in the activity viewer (Settings → Activity) and use the
+session's `jarvis-debug.log` for readiness and diagnostic detail.
