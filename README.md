@@ -113,22 +113,3 @@ The package boundaries are intentionally small:
 
 Contributor workflow, subsystem placement, and testing rules live in
 [`CLAUDE.md`](./CLAUDE.md).
-
-## Live smoke checklist
-
-Run `./scripts/build-app.sh --run`, choose **Start Jarvis**, and use the new
-`.jarvis/<session>/jarvis-debug.log` for readiness and diagnostics. Use **Settings → Activity** only
-for the human-facing coaching record.
-
-- Wait for `Jarvis: coaching ready (mic + system audio).` in the debug log. Speak into the microphone
-  and play speech through system audio; confirm both appear as finalized `heard:` entries in Activity.
-- Show an interview question without speaking its details, then ask, “Jarvis, how can I solve this in
-  one pass?” Confirm Activity shows exactly one screen view followed by a screen-specific tip. A fully
-  stated behavioral question should not cause an unnecessary capture.
-- Press **⌥⌘J** with a question visible; confirm a shortcut entry, one screen view, and a tip appear in
-  Activity.
-- Confirm saved screenshots exclude both overlay surfaces. Toggle each overlay in Settings, verify its
-  controls and preview follow the toggle, and confirm the choice survives relaunch.
-- If validating realtime recovery, disconnect the network, say a unique phrase, reconnect, and confirm
-  the debug log reports buffered replay and the phrase appears exactly once after recovery.
-- Choose **Stop Jarvis** and confirm no later transcription or coaching events are produced.
