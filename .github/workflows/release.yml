@@ -87,8 +87,9 @@ jobs:
 
       # The Release is created as a draft (release-please-config.json), so a failed build/sign/
       # notarize run never leaves a public Release without its app — publishing happens only after
-      # the asset is attached. gh resolves draft releases by tag even though the git tag itself
-      # only materializes on publish.
+      # the asset is attached. force-tag-creation makes release-please create the git tag
+      # immediately (GitHub otherwise defers tagging drafts until publish, and a lingering untagged
+      # draft would make later release-please runs miss the previous release and garble changelogs).
       - name: Attach the app and publish the Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
