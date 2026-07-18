@@ -50,6 +50,10 @@ public final class RealtimeTranscriptionLedger: @unchecked Sendable {
     /// Highest audio-clock boundary belonging to a terminal item in this socket generation. Kept
     /// separately because transcription completions may arrive out of spoken order.
     private var latestFinalizedAudioEndAt: TimeInterval?
+    /// A terminal event proves the item completed, but without `audio_end_ms` its exact replay
+    /// retirement boundary is unknowable. Retain its start until a later VAD start proves where the
+    /// earlier item must have ended; guessing from terminal arrival time could discard newer speech.
+    private var finalizedStartsAwaitingLaterBoundary: [TimeInterval] = []
 
     public init() {}
 
@@ -62,6 +66,14 @@ public final class RealtimeTranscriptionLedger: @unchecked Sendable {
         var item = items[itemID] ?? Item()
         item.audioStartMilliseconds = audioStartMilliseconds
         item.timelineOrigin = timelineOrigin
+        let spokenAt = item.spokenAt
+        if let spokenAt {
+            let resolvedStarts = finalizedStartsAwaitingLaterBoundary.filter { $0 < spokenAt }
+            if !resolvedStarts.isEmpty {
+                latestFinalizedAudioEndAt = max(latestFinalizedAudioEndAt ?? spokenAt, spokenAt)
+                finalizedStartsAwaitingLaterBoundary.removeAll { $0 < spokenAt }
+            }
+        }
         // Event delivery is not guaranteed to follow VAD order. A late start adds timing metadata;
         // it must not reopen an item that already received speech_stopped and has a short deadline.
         items[itemID] = item
@@ -108,7 +120,7 @@ public final class RealtimeTranscriptionLedger: @unchecked Sendable {
         guard !finalizedItemIDs.contains(itemID) else { return nil }
         let item = items.removeValue(forKey: itemID) ?? Item()
         finalizedItemIDs.insert(itemID)
-        recordFinalizedAudioEndLocked(item.spokenEndAt)
+        recordFinalizedAudioBoundaryLocked(item)
 
         if let final = RealtimeSession.meaningfulTranscript(transcript, speaker: speaker) {
             return FinalizedItem(itemID: itemID, text: final, spokenAt: item.spokenAt,
@@ -183,6 +195,14 @@ public final class RealtimeTranscriptionLedger: @unchecked Sendable {
         return items.count
     }
 
+    /// Number of already-appended items that remain in the reconnect tail because their terminal
+    /// event had no stop timestamp. Replay starts at each such item's known start, so the recovery
+    /// coordinator suppresses the corresponding replacement item instead of duplicating context.
+    public var replayDuplicateRiskItemCount: Int {
+        lock.lock(); defer { lock.unlock() }
+        return finalizedStartsAwaitingLaterBoundary.count
+    }
+
     /// Session-relative capture boundary that can leave the reconnect tail safely.
     ///
     /// If any item remains unresolved, retain audio from the earliest such speech start. Once every
@@ -195,6 +215,9 @@ public final class RealtimeTranscriptionLedger: @unchecked Sendable {
         if let earliestPending = items.values.compactMap(\.spokenAt).min() {
             return earliestPending
         }
+        if let unresolvedStart = finalizedStartsAwaitingLaterBoundary.min() {
+            return min(latestFinalizedAudioEndAt ?? unresolvedStart, unresolvedStart)
+        }
         return latestFinalizedAudioEndAt
     }
 
@@ -203,6 +226,7 @@ public final class RealtimeTranscriptionLedger: @unchecked Sendable {
         items.removeAll(keepingCapacity: false)
         finalizedItemIDs.removeAll(keepingCapacity: false)
         latestFinalizedAudioEndAt = nil
+        finalizedStartsAwaitingLaterBoundary.removeAll(keepingCapacity: false)
     }
 
     private func finalizeInterruptedItem(itemID: String, requireSpeechStopped: Bool,
@@ -223,7 +247,7 @@ public final class RealtimeTranscriptionLedger: @unchecked Sendable {
                                                 speaker: Speaker) -> FinalizedItem? {
         items.removeValue(forKey: itemID)
         finalizedItemIDs.insert(itemID)
-        recordFinalizedAudioEndLocked(item.spokenEndAt)
+        recordFinalizedAudioBoundaryLocked(item)
 
         if let partial = RealtimeSession.meaningfulTranscript(item.deltas, speaker: speaker) {
             return FinalizedItem(itemID: itemID, text: partial, spokenAt: item.spokenAt,
@@ -246,5 +270,13 @@ public final class RealtimeTranscriptionLedger: @unchecked Sendable {
     private func recordFinalizedAudioEndLocked(_ end: TimeInterval?) {
         guard let end else { return }
         latestFinalizedAudioEndAt = max(latestFinalizedAudioEndAt ?? end, end)
+    }
+
+    private func recordFinalizedAudioBoundaryLocked(_ item: Item) {
+        if let end = item.spokenEndAt {
+            recordFinalizedAudioEndLocked(end)
+        } else if let start = item.spokenAt {
+            finalizedStartsAwaitingLaterBoundary.append(start)
+        }
     }
 }

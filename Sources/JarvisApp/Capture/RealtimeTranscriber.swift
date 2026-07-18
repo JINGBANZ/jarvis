@@ -33,22 +33,12 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
     private let sessionStart: TimeInterval
     private let silenceDurationMs: Int
     private let noiseReduction: NoiseReductionMode
-    private let turnDebounce: TimeInterval
-    /// How long a VAD-stopped item may wait for completed/failed before streamed text is salvaged.
-    private let transcriptionTerminalTimeout: TimeInterval
-    /// Hard backstop for a speech-started item that never receives VAD stop or any terminal event.
-    /// Kept far above a normal interview answer so genuine continuous speech is not cut off.
-    private let transcriptionActiveTimeout: TimeInterval
     private let readyTimeout: TimeInterval
     private let pingInterval: TimeInterval
     private let pongTimeout: TimeInterval
     private let networkStatus: @Sendable () -> String
 
     private let lock = NSLock()
-    /// Serializes ledger mutations with pending-turn drain decisions. Without this boundary, a timer
-    /// could observe an item as terminal just before its text reaches `pending`, or drain just before
-    /// a concurrently delivered `speech_started` records the next fragment.
-    private let turnStateLock = NSLock()
     private var session: URLSession?     // retained so stop() can invalidate it (URLSession holds its delegate)
     private var task: URLSessionWebSocketTask?
     private var silenceTimer: Timer?
@@ -61,21 +51,14 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
     private var pingTimer: Timer?
     private var readyTimer: Timer?
     private var pongTimer: Timer?
-    private var debounceTimer: Timer?         // coalesces rapid fragments into one trigger
-    private var continuityTimer: Timer?
-    private let pending = UtteranceBuffer()   // fragments heard since the last fired trigger
-    private let transcriptionLedger = RealtimeTranscriptionLedger()
-    /// Content-free capture -> delivery -> socket -> server evidence. It inspects each PCM chunk
-    /// synchronously for local activity, then retains bounded interval metadata only (never PCM or
-    /// words). Its output is diagnostic-only and never enters the rolling transcript.
-    private let continuityWitness: AudioContinuityWitness
+    private var transcriptionLifecycle: RealtimeTranscriptionLifecycle!
+    private let continuityReporter: RealtimeContinuityReporter
     private let audioBuffer: PCMBuffer        // mic audio captured while the socket is down
     private var reconnectAttempt = 0
     private var isReconnecting = false
     private var stopped = false
     private var connected = false        // true only between "session ready" and the next drop/close
     private var everConnected = false    // distinguishes the first connect from a reconnect
-    private var bufferOverflowEpisodeReported = false
     private var rotating = false         // an EXPECTED server rotation is mid-flight; quiet the noise it makes
     private var generation = 0           // rejects late callbacks from a replaced socket
     private var pendingPingGeneration: Int?
@@ -99,14 +82,12 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         self.speaker = speaker
         self.transcript = transcript
         self.clock = clock
-        self.sessionStart = clock.now()
+        let sessionStart = clock.now()
+        self.sessionStart = sessionStart
         self.silenceBackoff = SilenceBackoff(base: silenceTimeout, maxInterval: silenceMaxInterval,
                                              idleCutoff: silenceIdleCutoff)
         self.silenceDurationMs = silenceDurationMs
         self.noiseReduction = noiseReduction
-        self.turnDebounce = turnDebounce
-        self.transcriptionTerminalTimeout = transcriptionTerminalTimeout
-        self.transcriptionActiveTimeout = transcriptionActiveTimeout
         self.readyTimeout = readyTimeout
         self.pingInterval = pingInterval
         self.pongTimeout = pongTimeout
@@ -114,20 +95,31 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         // PCM16 mono at the realtime sample rate → 2 bytes/sample.
         let bytesPerSecond = RealtimeSession.sampleRate * 2
         self.audioBuffer = PCMBuffer(maxBytes: Int(maxBufferedAudioSeconds) * bytesPerSecond)
-        self.continuityWitness = AudioContinuityWitness(startedAt: 0)
+        self.continuityReporter = RealtimeContinuityReporter(
+            speaker: speaker, clock: clock, sessionStart: sessionStart)
         super.init()
+        self.transcriptionLifecycle = RealtimeTranscriptionLifecycle(
+            speaker: speaker, transcript: transcript, clock: clock, sessionStart: sessionStart,
+            turnDebounce: turnDebounce, terminalTimeout: transcriptionTerminalTimeout,
+            activeTimeout: transcriptionActiveTimeout,
+            isCurrentGeneration: { [weak self] generation in
+                self?.isLive(socketGeneration: generation) == true
+            },
+            isReady: { [weak self] generation in self?.isReady(socketGeneration: generation) == true },
+            discardConfirmedAudio: { [weak self] boundary in
+                _ = self?.audioBuffer.discardSent(through: boundary)
+            },
+            resetSilenceTimer: { [weak self] in self?.resetSilenceTimer() },
+            onTurnEnd: { [weak self] in self?.onTurnEnd?() })
     }
 
     func connect() {
         // Start clean: clear the stopped flag AND any stale backoff state from a prior session.
         lock.lock()
         stopped = false; reconnectAttempt = 0; isReconnecting = false; rotating = false
-        bufferOverflowEpisodeReported = false
         pendingAudioTimelineOrigin = 0; activeAudioTimelineOrigin = 0
         lock.unlock()
-        turnStateLock.lock()
-        transcriptionLedger.clear()
-        turnStateLock.unlock()
+        transcriptionLifecycle.start()
         emitState(.connecting)
         openSocket()
         // Arm the proactive silence check exactly once, here on the first connect. A reconnect (session
@@ -135,7 +127,7 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         // alone — its backoff step and elapsed quiet carry across the rotation instead of snapping back
         // to the base interval every ~hour. (Speech still resets it, via `handle`.)
         resetSilenceTimer()
-        startContinuityPolling()
+        continuityReporter.start()
     }
 
     private func openSocket() {
@@ -166,8 +158,6 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         let pt = pingTimer; pingTimer = nil
         let rt = readyTimer; readyTimer = nil
         let pot = pongTimer; pongTimer = nil
-        let db = debounceTimer; debounceTimer = nil
-        let ct = continuityTimer; continuityTimer = nil
         let t = task; task = nil
         let s = session; session = nil
         pendingPingGeneration = nil
@@ -178,15 +168,10 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         // from an off-main Stop (e.g. the onTerminalFailure Task) would silently fail to cancel and
         // could let a stray timer fire onSilence on a torn-down pipeline.
         DispatchQueue.main.async {
-            st?.invalidate(); pt?.invalidate(); rt?.invalidate(); pot?.invalidate(); db?.invalidate()
-            ct?.invalidate()
+            st?.invalidate(); pt?.invalidate(); rt?.invalidate(); pot?.invalidate()
         }
-        handleContinuityOutput(
-            continuityWitness.poll(at: clock.now() - sessionStart, forceSnapshot: true))
-        turnStateLock.lock()
-        pending.clear()
-        transcriptionLedger.clear()
-        turnStateLock.unlock()
+        continuityReporter.stop()
+        transcriptionLifecycle.stop()
         // A user-initiated Stop is a normal closure (1000), not "going away" (1001).
         t?.cancel(with: .normalClosure, reason: nil)
         s?.invalidateAndCancel()             // breaks the URLSession→delegate(self)→closures→driver retain chain
@@ -207,9 +192,8 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
                              capturedAt: TimeInterval) {
         lock.lock(); let isStopped = stopped; lock.unlock()
         guard !isStopped else { return }
-        consumeContinuityOutput(continuityWitness.recordCapture(
-            sequence: sequenceNumber, sampleCount: sampleCount,
-            at: capturedAt - sessionStart))
+        continuityReporter.recordCapture(
+            sequence: sequenceNumber, sampleCount: sampleCount, at: capturedAt - sessionStart)
     }
 
     func sendAudio(_ pcm: Data, sequenceNumber: UInt64, capturedAt: TimeInterval) {
@@ -225,22 +209,15 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
                                          capturedAt: sessionRelativeCaptureAt,
                                          duration: duration)
         lock.unlock()
-        consumeContinuityOutput(continuityWitness.recordDelivery(
-            sequence: sequenceNumber, pcm16: pcm, at: observedAt))
+        continuityReporter.recordDelivery(sequence: sequenceNumber, pcm16: pcm, at: observedAt)
         reportBufferEviction(evicted)
         pumpAudioIfReady()
     }
 
     private func reportBufferEviction(_ evicted: [PCMBuffer.Chunk]) {
         guard !evicted.isEmpty else { return }
-        lock.lock()
-        let shouldReport = !bufferOverflowEpisodeReported
-        bufferOverflowEpisodeReported = true
-        lock.unlock()
-        guard shouldReport else { return }
-        consumeContinuityOutput(continuityWitness.recordReconnectBufferOverflow(
-            evictedSequences: evicted.compactMap(\.sequenceNumber),
-            at: clock.now() - sessionStart))
+        transcriptionLifecycle.recordReplayCoverageLoss()
+        continuityReporter.recordBufferEviction(evicted)
     }
 
     private func pumpAudioIfReady() {
@@ -276,15 +253,13 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
             _ = audioBuffer.retry(claim)
             return
         }
-        consumeContinuityOutput(continuityWitness.recordSendAttempt(
-            sequence: sequence, socketGeneration: socketGeneration,
-            at: clock.now() - sessionStart))
+        continuityReporter.recordSendAttempt(
+            sequence: sequence, socketGeneration: socketGeneration)
         task.send(.string(text)) { [weak self, weak task] error in
             guard let self, let task else { return }
             if let error {
-                self.consumeContinuityOutput(self.continuityWitness.recordSendFailure(
-                    sequence: sequence, socketGeneration: socketGeneration,
-                    at: self.clock.now() - self.sessionStart))
+                self.continuityReporter.recordSendFailure(
+                    sequence: sequence, socketGeneration: socketGeneration)
                 // Disconnect first. Its state transition releases the current FIFO claim while no
                 // producer can select this failed socket; retrying before that transition would let
                 // a racing producer send the same head on the dead task.
@@ -292,9 +267,8 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
                                     diagnostic: "send failed: \(error)")
                 return
             }
-            self.consumeContinuityOutput(self.continuityWitness.recordSendSuccess(
-                sequence: sequence, socketGeneration: socketGeneration,
-                at: self.clock.now() - self.sessionStart))
+            self.continuityReporter.recordSendSuccess(
+                sequence: sequence, socketGeneration: socketGeneration)
             self.lock.lock()
             let isCurrentLease = self.task === task && self.generation == socketGeneration
                 && self.connected && !self.stopped && !self.isReconnecting
@@ -354,29 +328,18 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
                 break
             }
             lock.lock(); let timelineOrigin = activeAudioTimelineOrigin; lock.unlock()
-            turnStateLock.lock()
-            guard isCurrent(task: task, generation: socketGeneration) else {
-                turnStateLock.unlock()
-                return
-            }
-            let didStart = transcriptionLedger.recordSpeechStarted(
+            let didStart = transcriptionLifecycle.recordSpeechStarted(
                 itemID: itemID, audioStartMilliseconds: audioStartMilliseconds,
-                timelineOrigin: timelineOrigin
-            )
-            if didStart {
-                discardServerConfirmedAudio()
-            }
-            turnStateLock.unlock()
+                timelineOrigin: timelineOrigin, socketGeneration: socketGeneration)
             if didStart {
                 jlog("Jarvis realtime [\(speaker.rawValue)] speech started "
                      + "(item \(itemID), audio_start_ms \(audioStartMilliseconds))")
-                recordServerContinuity(.speechStarted,
+                continuityReporter.recordServerSpeech(.speechStarted,
                                        audioTimeMilliseconds: audioStartMilliseconds,
+                                       itemID: itemID,
                                        sessionAudioTime: timelineOrigin
                                            + TimeInterval(audioStartMilliseconds) / 1_000,
                                        socketGeneration: socketGeneration)
-                scheduleTranscriptionActiveDeadline(
-                    itemID: itemID, socketGeneration: socketGeneration)
             }
         case RealtimeSession.deltaTranscriptionType:
             guard let itemID = obj["item_id"] as? String else {
@@ -384,22 +347,12 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
                 break
             }
             if let delta = obj["delta"] as? String {
-                recordServerContinuity(.transcriptionDelta,
+                continuityReporter.recordServerSpeech(.transcriptionDelta,
                                        audioTimeMilliseconds: nil,
+                                       itemID: itemID,
                                        socketGeneration: socketGeneration)
-                turnStateLock.lock()
-                guard isCurrent(task: task, generation: socketGeneration) else {
-                    turnStateLock.unlock()
-                    return
-                }
-                let createdItem = transcriptionLedger.recordDelta(itemID: itemID, delta: delta)
-                turnStateLock.unlock()
-                if createdItem {
-                    // A delta can be the first event for an item when speech_started is missing or
-                    // malformed. Give that item the same finite active backstop as a normal start.
-                    scheduleTranscriptionActiveDeadline(
-                        itemID: itemID, socketGeneration: socketGeneration)
-                }
+                _ = transcriptionLifecycle.recordDelta(
+                    itemID: itemID, delta: delta, socketGeneration: socketGeneration)
             }
         case RealtimeSession.completedTranscriptionType:
             // A completed utterance fragment: record it immediately (so the model's context is
@@ -411,66 +364,39 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
                 break
             }
             let transcriptText = obj["transcript"] as? String ?? ""
-            recordServerContinuity(.transcriptionCompleted,
+            continuityReporter.recordServerSpeech(.transcriptionCompleted,
                                    audioTimeMilliseconds: nil,
+                                   itemID: itemID,
                                    socketGeneration: socketGeneration)
-            turnStateLock.lock()
-            guard isCurrent(task: task, generation: socketGeneration) else {
-                turnStateLock.unlock()
-                return
-            }
-            let item = transcriptionLedger.recordCompleted(
-                itemID: itemID, transcript: transcriptText, speaker: speaker
-            )
-            discardServerConfirmedAudio()
-            if let item {
-                appendFinalizedItem(item, reason: item.recoveredFromDeltas ? "completed without usable final" : nil)
-            } else {
-                jlog("Jarvis realtime [\(speaker.rawValue)] transcription completed "
-                     + "with no usable text (item \(itemID))")
-            }
-            let shouldResume = shouldResumeDeferredTurnIfSettledLocked()
-            turnStateLock.unlock()
-            if shouldResume { scheduleTurnDebounce() }
+            transcriptionLifecycle.recordCompleted(
+                itemID: itemID, transcript: transcriptText, socketGeneration: socketGeneration)
         case RealtimeSession.failedTranscriptionType:
             guard let itemID = obj["item_id"] as? String else {
                 jlog("Jarvis realtime [\(speaker.rawValue)]: failed transcription missing item_id: \(text)")
                 break
             }
             let error = Self.transcriptionErrorDescription(from: obj)
-            recordServerContinuity(.transcriptionFailed,
+            continuityReporter.recordServerSpeech(.transcriptionFailed,
                                    audioTimeMilliseconds: nil,
+                                   itemID: itemID,
                                    socketGeneration: socketGeneration)
-            turnStateLock.lock()
-            guard isCurrent(task: task, generation: socketGeneration) else {
-                turnStateLock.unlock()
-                return
-            }
-            let item = transcriptionLedger.recordFailed(itemID: itemID, speaker: speaker)
-            discardServerConfirmedAudio()
-            let recovery: String
-            if item?.recoveredFromDeltas == true {
-                recovery = "salvaged streamed text"
-            } else if item?.isTranscriptUnavailable == true {
-                recovery = "recorded diagnostic; no transcript available"
-            } else {
-                recovery = "item was already finalized"
-            }
-            jlog("Jarvis realtime [\(speaker.rawValue)] transcription failed "
-                 + "(item \(itemID), \(error)); \(recovery)")
-            if let item { appendFinalizedItem(item, reason: "transcription failed") }
-            let shouldResume = shouldResumeDeferredTurnIfSettledLocked()
-            turnStateLock.unlock()
-            if shouldResume { scheduleTurnDebounce() }
+            transcriptionLifecycle.recordFailed(
+                itemID: itemID, error: error, socketGeneration: socketGeneration)
         case RealtimeSession.speechStoppedType:
             guard let itemID = obj["item_id"] as? String else {
                 jlog("Jarvis realtime [\(speaker.rawValue)]: speech_stopped missing item_id")
                 break
             }
-            let audioEndMilliseconds = obj["audio_end_ms"] as? Int
+            let rawAudioEndMilliseconds = obj["audio_end_ms"] as? Int
+            let audioEndMilliseconds = rawAudioEndMilliseconds.flatMap { $0 >= 0 ? $0 : nil }
+            if let rawAudioEndMilliseconds, audioEndMilliseconds == nil {
+                jlog("Jarvis realtime [\(speaker.rawValue)]: speech_stopped had invalid "
+                     + "audio_end_ms \(rawAudioEndMilliseconds); retaining item without end timing")
+            }
             lock.lock(); let timelineOrigin = activeAudioTimelineOrigin; lock.unlock()
-            recordServerContinuity(.speechStopped,
+            continuityReporter.recordServerSpeech(.speechStopped,
                                    audioTimeMilliseconds: audioEndMilliseconds,
+                                   itemID: itemID,
                                    sessionAudioTime: audioEndMilliseconds.map {
                                        timelineOrigin + TimeInterval($0) / 1_000
                                    },
@@ -478,22 +404,9 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
             let endDetail = audioEndMilliseconds.map { ", audio_end_ms \($0)" } ?? ""
             jlog("Jarvis realtime [\(speaker.rawValue)] speech stopped "
                  + "(item \(itemID)\(endDetail))")
-            turnStateLock.lock()
-            guard isCurrent(task: task, generation: socketGeneration) else {
-                turnStateLock.unlock()
-                return
-            }
-            let didStop = transcriptionLedger.recordSpeechStopped(
-                itemID: itemID, audioEndMilliseconds: audioEndMilliseconds
-            )
-            if didStop {
-                discardServerConfirmedAudio()
-            }
-            turnStateLock.unlock()
-            if didStop {
-                scheduleTranscriptionTerminalDeadline(
-                    itemID: itemID, socketGeneration: socketGeneration)
-            }
+            _ = transcriptionLifecycle.recordSpeechStopped(
+                itemID: itemID, audioEndMilliseconds: audioEndMilliseconds,
+                socketGeneration: socketGeneration)
             // Do not reset proactive silence here. Bare VAD start/stop events contain no usable
             // context; only an appended final/salvaged line begins a fresh silence interval.
         case "session.created", "transcription_session.created":
@@ -532,26 +445,24 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         // them. Once a replacement is ready, its replayed PCM becomes authoritative and old item IDs
         // must leave before the replacement emits its own lifecycle events.
         connected = true
-        bufferOverflowEpisodeReported = false
         lock.unlock()
-        var interruptedItems = 0
-        if wasReconnect {
-            turnStateLock.lock()
-            interruptedItems = transcriptionLedger.pendingItemCount
-            transcriptionLedger.clear()
-            let shouldResume = shouldResumeDeferredTurnIfSettledLocked()
-            turnStateLock.unlock()
-            if shouldResume { scheduleTurnDebounce() }
-        }
+        let recovery = wasReconnect
+            ? transcriptionLifecycle.markReplacementReady(socketGeneration: socketGeneration)
+            : nil
         invalidateReadyTimer(task: task, generation: socketGeneration)
         let id = sessionID.map { ", session \($0)" } ?? ""
         jlog("Jarvis realtime [\(speaker.rawValue)]: transcription session ready (socket #\(socketGeneration)\(id))")
         if wasReconnect && bufferedChunks > 0 {
             jlog("⏩ realtime [\(speaker.rawValue)] replaying \(bufferedChunks) buffered audio chunks after reconnect")
         }
-        if interruptedItems > 0 {
-            jlog("Jarvis realtime [\(speaker.rawValue)] replacement session ready; replaying audio "
-                 + "for \(interruptedItems) interrupted transcription item(s)")
+        if let recovery, recovery.unresolvedItems > 0 {
+            if recovery.waitingForReplay {
+                jlog("Jarvis realtime [\(speaker.rawValue)] replacement session ready; waiting for "
+                     + "\(recovery.unresolvedItems) replayed transcription item(s)")
+            } else if recovery.fallbackItems > 0 {
+                jlog("Jarvis realtime [\(speaker.rawValue)] replacement session ready without complete "
+                     + "replay coverage; salvaged \(recovery.fallbackItems) interrupted item(s)")
+            }
         }
         // Producers always append to the same claimed FIFO. Making readiness visible before this
         // pump is safe: a racing producer may claim the oldest chunk itself, but cannot bypass it or
@@ -561,159 +472,14 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         startPing(task: task, generation: socketGeneration)
     }
 
-    /// Coalesce rapid completed fragments. The timer establishes a quiet window, while `fireTurn`
-    /// separately requires every Realtime item for this speaker to be terminal. Both conditions are
-    /// necessary: the next VAD item can start before the previous item's transcription completes.
-    private func scheduleTurnDebounce() {
-        let window = turnDebounce
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.lock.lock()
-            defer { self.lock.unlock() }
-            guard !self.stopped else { return }   // a block queued before stop() must not re-arm a timer
-            self.debounceTimer?.invalidate()
-            self.debounceTimer = Timer.scheduledTimer(withTimeInterval: window, repeats: false) { [weak self] _ in
-                self?.fireTurn()
-            }
-        }
-    }
-
-    private func fireTurn() {
-        turnStateLock.lock()
-        lock.lock()
-        if stopped {
-            lock.unlock()
-            turnStateLock.unlock()
-            return
-        }
-        debounceTimer?.invalidate(); debounceTimer = nil
-        lock.unlock()
-        let pendingItemCount = transcriptionLedger.pendingItemCount
-        let result = pending.drainIfSettled(hasPendingTranscriptions: pendingItemCount > 0)
-        turnStateLock.unlock()
-        switch result {
-        case .empty:
-            return
-        case .waitingForPendingTranscriptions:
-            jlog("… coaching turn waiting for \(pendingItemCount) active transcription item(s)")
-        case .ready(_, let fragments):
-            if fragments > 1 {
-                jlog("🧩 coalesced \(fragments) fragments into one turn")
-            }
-            onTurnEnd?()
-        }
-    }
-
-    /// A pending item can finish without usable text, so appending a fragment cannot be the only
-    /// wake-up path. Re-arm the normal debounce exactly once after the ledger becomes fully settled.
-    /// Caller holds `turnStateLock`, keeping the ledger count and pending-buffer transition atomic.
-    private func shouldResumeDeferredTurnIfSettledLocked() -> Bool {
-        pending.shouldResumeAfterPendingTranscriptionsSettle(
-            hasPendingTranscriptions: transcriptionLedger.hasPendingItems
-        )
-    }
-
-    private func scheduleTranscriptionTerminalDeadline(itemID: String, socketGeneration: Int) {
-        let timeout = transcriptionTerminalTimeout
-        DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { [weak self] in
-            guard let self else { return }
-            self.turnStateLock.lock()
-            guard self.isReady(socketGeneration: socketGeneration) else {
-                self.turnStateLock.unlock()
-                return
-            }
-            guard let item = self.transcriptionLedger.resolveStoppedItemTimeout(
-                itemID: itemID, speaker: self.speaker
-            ) else {
-                self.turnStateLock.unlock()
-                return
-            }
-            let recovery = item.recoveredFromDeltas
-                ? "salvaged streamed text" : "recorded diagnostic; no transcript available"
-            self.discardServerConfirmedAudio()
-            jlog("Jarvis realtime [\(self.speaker.rawValue)] transcription terminal timed out "
-                 + "after \(timeout)s (item \(itemID)); \(recovery)")
-            self.appendFinalizedItem(item, reason: "terminal timeout")
-            let shouldResume = self.shouldResumeDeferredTurnIfSettledLocked()
-            self.turnStateLock.unlock()
-            if shouldResume { self.scheduleTurnDebounce() }
-        }
-    }
-
-    private func scheduleTranscriptionActiveDeadline(itemID: String, socketGeneration: Int) {
-        let timeout = transcriptionActiveTimeout
-        DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { [weak self] in
-            guard let self else { return }
-            self.turnStateLock.lock()
-            guard self.isReady(socketGeneration: socketGeneration) else {
-                self.turnStateLock.unlock()
-                return
-            }
-            guard let item = self.transcriptionLedger.resolveActiveItemTimeout(
-                itemID: itemID, speaker: self.speaker
-            ) else {
-                self.turnStateLock.unlock()
-                return
-            }
-            let recovery = item.recoveredFromDeltas
-                ? "salvaged streamed text" : "recorded diagnostic; no transcript available"
-            self.discardServerConfirmedAudio()
-            jlog("Jarvis realtime [\(self.speaker.rawValue)] active transcription timed out "
-                 + "after \(timeout)s (item \(itemID)); \(recovery)")
-            self.appendFinalizedItem(item, reason: "active-item timeout")
-            let shouldResume = self.shouldResumeDeferredTurnIfSettledLocked()
-            self.turnStateLock.unlock()
-            if shouldResume { self.scheduleTurnDebounce() }
-        }
-    }
-
     private func isReady(socketGeneration: Int) -> Bool {
         lock.lock(); defer { lock.unlock() }
         return generation == socketGeneration && connected && !isReconnecting && !stopped
     }
 
-    private func finalizeInterruptedTranscriptions(reason: String) {
-        turnStateLock.lock()
-        let items = transcriptionLedger.resolveAllInterruptedItems(speaker: speaker)
-        discardServerConfirmedAudio()
-        if !items.isEmpty {
-            jlog("Jarvis realtime [\(speaker.rawValue)] resolving \(items.count) interrupted "
-                 + "transcription item(s) after \(reason)")
-            for item in items {
-                appendFinalizedItem(item, reason: reason)
-            }
-        }
-        let shouldResume = shouldResumeDeferredTurnIfSettledLocked()
-        turnStateLock.unlock()
-        if shouldResume { scheduleTurnDebounce() }
-    }
-
-    /// Realtime VAD timestamps are the first end-to-end evidence available for streamed audio.
-    /// The ledger holds the boundary behind the earliest unresolved item, including when terminal
-    /// events arrive out of order, so this never retires words that a reconnect may still need.
-    private func discardServerConfirmedAudio() {
-        guard let boundary = transcriptionLedger.safeReplayDiscardTime else { return }
-        _ = audioBuffer.discardSent(through: boundary)
-    }
-
-    private func appendFinalizedItem(_ item: RealtimeTranscriptionLedger.FinalizedItem,
-                                     reason: String?) {
-        lock.lock(); let isStopped = stopped; lock.unlock()
-        guard !isStopped else { return }
-        let at = item.spokenAt ?? (clock.now() - sessionStart)
-        guard let text = item.text else {
-            let detail = reason.map { ", after \($0)" } ?? ""
-            jlog("⚠️ transcription unavailable (\(speaker.rawValue), item \(item.itemID)\(detail)); "
-                 + "diagnostic only")
-            return
-        }
-        transcript.append(.init(speaker: speaker, text: text, at: at))
-        let detail = reason.map { ", recovered after \($0)" } ?? ""
-        jlog("🗣 heard (\(speaker.rawValue)): \"\(text)\" "
-             + "(item \(item.itemID)\(detail))")
-        pending.append(text)
-        resetSilenceTimer()
-        scheduleTurnDebounce()
+    private func isLive(socketGeneration: Int) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return generation == socketGeneration && task != nil && !isReconnecting && !stopped
     }
 
     private static func transcriptionErrorDescription(from event: [String: Any]) -> String {
@@ -722,100 +488,6 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         let message = error["message"] as? String
         let description = [code, message].compactMap { $0 }.joined(separator: ": ")
         return description.isEmpty ? "unknown error" : description
-    }
-
-    // MARK: - Privacy-preserving continuity evidence
-
-    private func startContinuityPolling() {
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.lock.lock(); let shouldStart = !self.stopped; self.lock.unlock()
-            guard shouldStart else { return }
-            self.continuityTimer?.invalidate()
-            self.continuityTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) {
-                [weak self] _ in
-                guard let self else { return }
-                self.consumeContinuityOutput(self.continuityWitness.poll(
-                    at: self.clock.now() - self.sessionStart))
-            }
-        }
-    }
-
-    private func recordServerContinuity(_ signal: AudioContinuityWitness.ServerSpeechSignal,
-                                        audioTimeMilliseconds: Int?,
-                                        sessionAudioTime: TimeInterval? = nil,
-                                        socketGeneration: Int) {
-        consumeContinuityOutput(continuityWitness.recordServerSpeech(
-            signal, audioTimeMilliseconds: audioTimeMilliseconds,
-            socketGeneration: socketGeneration, sessionAudioTime: sessionAudioTime,
-            observedAt: clock.now() - sessionStart))
-    }
-
-    /// Witness calls originate on the audio, URLSession, and main queues. Keep logging and transcript
-    /// mutation off the realtime audio callback while preserving the metadata observation itself at
-    /// the boundary where it occurred.
-    private func consumeContinuityOutput(_ output: AudioContinuityWitness.Output) {
-        guard output.snapshot != nil || !output.anomalies.isEmpty else { return }
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.lock.lock(); let isStopped = self.stopped; self.lock.unlock()
-            guard !isStopped else { return }
-            self.handleContinuityOutput(output)
-        }
-    }
-
-    private func handleContinuityOutput(_ output: AudioContinuityWitness.Output) {
-        if let snapshot = output.snapshot {
-            let sockets = snapshot.socketGenerations.map { socket in
-                let lastSequence = socket.lastSendSequence.map(String.init) ?? "none"
-                return "g\(socket.generation):attempt=\(socket.sendAttempts),ok=\(socket.sendSuccesses),"
-                    + "fail=\(socket.sendFailures),server=\(socket.serverSpeechSignals),"
-                    + "last_seq=\(lastSequence)"
-            }.joined(separator: ";")
-            jlog("Jarvis audio witness [\(speaker.rawValue)] @\(Self.seconds(snapshot.emittedAt)): "
-                 + "capture=\(snapshot.capturedChunks)/\(snapshot.capturedSamples), "
-                 + "delivery=\(snapshot.deliveredChunks)/\(snapshot.deliveredSamples), "
-                 + "pending=\(snapshot.pendingCapturedChunks), active=\(snapshot.localActivityDetected), "
-                 + "sockets=[\(sockets)]")
-        }
-
-        for anomaly in output.anomalies {
-            switch anomaly {
-            case .captureStalled(let lastCaptureAt, let duration):
-                let lastCapture = lastCaptureAt.map(Self.seconds) ?? "never"
-                jlog("⚠️ audio continuity [\(speaker.rawValue)] capture stalled for "
-                     + "\(Self.seconds(duration)) (last=\(lastCapture))")
-            case .sequenceGap(let stage, let expected, let observed):
-                let boundary = stage == .capture ? "capture" : "delivery"
-                jlog("⚠️ audio continuity [\(speaker.rawValue)] \(boundary) sequence gap: "
-                     + "expected=\(expected), observed=\(observed)")
-            case .deliveryWithoutCapture(let sequence):
-                jlog("⚠️ audio continuity [\(speaker.rawValue)] delivery had no capture record: "
-                     + "sequence=\(sequence)")
-            case .deliverySampleCountMismatch(let sequence, let captured, let delivered):
-                jlog("⚠️ audio continuity [\(speaker.rawValue)] sample count changed before delivery: "
-                     + "sequence=\(sequence), captured=\(captured), delivered=\(delivered)")
-            case .captureToDeliveryLag(let sequence, let lag):
-                jlog("⚠️ audio continuity [\(speaker.rawValue)] capture-to-delivery lag: "
-                     + "sequence=\(sequence), lag=\(Self.seconds(lag))")
-            case .reconnectBufferOverflow(let evictedChunks, let firstSequence, let lastSequence):
-                let first = firstSequence.map(String.init) ?? "unknown"
-                let last = lastSequence.map(String.init) ?? "unknown"
-                jlog("⚠️ audio continuity [\(speaker.rawValue)] reconnect buffer overflow: "
-                     + "evicted=\(evictedChunks), sequences=\(first)...\(last)")
-            case .localActivityUnmatched(let activeSince, let duration):
-                jlog("⚠️ audio continuity [\(speaker.rawValue)] local activity had no server speech "
-                     + "event: since=\(Self.seconds(activeSince)), window=\(Self.seconds(duration))")
-            case .serverSpeechObservedAfterUnmatchedActivity(let activeSince, let serverObservedAt):
-                jlog("ℹ️ audio continuity [\(speaker.rawValue)] late server speech event resolved "
-                     + "the prior warning: activity_since=\(Self.seconds(activeSince)), "
-                     + "server_at=\(Self.seconds(serverObservedAt))")
-            }
-        }
-    }
-
-    private static func seconds(_ value: TimeInterval) -> String {
-        String(format: "%.3fs", value)
     }
 
     // MARK: - Reconnect / keepalive
@@ -870,7 +542,7 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
             isReconnecting = true
             lock.unlock()
             audioBuffer.retryInFlight()
-            finalizeInterruptedTranscriptions(reason: "socket failure")
+            transcriptionLifecycle.finalizeInterrupted(reason: "socket failure")
             if let diagnostic { logTransportFailure(diagnostic, generation: failedGeneration) }
             invalidateConnectionTimers()
             failedTask.cancel(with: .goingAway, reason: nil)
@@ -890,12 +562,12 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         pendingAudioTimelineOrigin = replay.oldestCapturedAt ?? failureAt
         lock.unlock()
 
-        let interruptedItems = transcriptionLedger.pendingItemCount
+        let interruptedItems = transcriptionLifecycle.beginReconnectRecovery(
+            replayAvailable: audioBuffer.bufferedChunkCount > 0)
         reportBufferEviction(replay.evicted)
-        // Do not clear old-socket deltas until a replacement session is actually ready. If every
-        // attempt fails during its handshake, the terminal-failure path can still salvage the text.
-        // Generation-aware deadlines above stay dormant during reconnect, avoiding partial+replay
-        // duplication while this fallback evidence is retained.
+        // Old-socket deltas are now held by the reconnect recovery gate. They remain a fallback if
+        // every handshake fails or bounded replay loses coverage, without keeping stale item IDs in
+        // the replacement ledger or releasing a partial coaching turn early.
         if interruptedItems > 0 && attempt == 0 {
             jlog("Jarvis realtime [\(speaker.rawValue)] retaining \(interruptedItems) interrupted "
                  + "transcription item(s) until replacement replay is ready")
@@ -1089,7 +761,7 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
     private func silenceTimerDidFire(quietThreshold interval: TimeInterval) {
         lock.lock(); let isStopped = stopped; lock.unlock()
         guard !isStopped else { return }   // don't drive a coaching turn on a torn-down pipeline
-        if transcriptionLedger.hasPendingItems {
+        if transcriptionLifecycle.hasUnsettledItems {
             scheduleSilenceTimer(after: 1, quietThreshold: interval)
             return
         }

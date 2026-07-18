@@ -138,6 +138,40 @@ import Testing
         #expect(b.drainChunks().map(\.sequenceNumber) == [3])
     }
 
+    @Test func serverProgressBeforeLocalCompletionPreventsLaterReplay() throws {
+        let b = PCMBuffer(maxBytes: 100)
+        b.append(Data([1]), sequenceNumber: 1, capturedAt: 1, duration: 0.5)
+        let inFlight = try #require(b.claimNext())
+
+        #expect(b.discardSent(through: 1.5).isEmpty)
+        #expect(b.completeSend(inFlight) != nil)
+
+        #expect(b.prepareForReconnect().replayedChunks == 0)
+        #expect(b.drainChunks().isEmpty)
+    }
+
+    @Test func reconnectDropsServerConfirmedClaimBeforeItsCallbackArrives() throws {
+        let b = PCMBuffer(maxBytes: 100)
+        b.append(Data([1]), sequenceNumber: 1, capturedAt: 1, duration: 0.5)
+        let staleClaim = try #require(b.claimNext())
+
+        #expect(b.discardSent(through: 1.5).isEmpty)
+        #expect(b.prepareForReconnect().replayedChunks == 0)
+        #expect(b.completeSend(staleClaim) == nil)
+        #expect(b.drainChunks().isEmpty)
+    }
+
+    @Test func serverBoundaryAfterReconnectPreparationDropsConfirmedReplayPrefix() throws {
+        let b = PCMBuffer(maxBytes: 100)
+        b.append(Data([1]), sequenceNumber: 1, capturedAt: 1, duration: 0.5)
+        let sent = try #require(b.claimNext())
+        #expect(b.completeSend(sent) != nil)
+        b.prepareForReconnect()
+
+        #expect(b.discardSent(through: 1.5).isEmpty)
+        #expect(b.drainChunks().isEmpty)
+    }
+
     @Test func staleLocalCompletionCannotRemoveRequeuedChunk() throws {
         let b = PCMBuffer(maxBytes: 100)
         b.append(Data([1]), sequenceNumber: 1, capturedAt: 1, duration: 0.01)

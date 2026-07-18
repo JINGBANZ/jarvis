@@ -179,6 +179,55 @@ import Testing
         }))
     }
 
+    @Test func terminalEventClosesMatchingOpenServerSpeechWhenStopIsMissing() {
+        let witness = makeWitness(sustainedActivityDuration: 0.5, serverSpeechGrace: 0.5)
+        func deliver(_ sequence: UInt64, at time: TimeInterval, amplitude: Int16) {
+            _ = witness.recordCapture(sequence: sequence, sampleCount: 480, at: time)
+            _ = witness.recordDelivery(sequence: sequence, pcm16: pcm(amplitude: amplitude), at: time)
+        }
+
+        deliver(0, at: 0, amplitude: 1_000)
+        _ = witness.recordServerSpeech(.speechStarted, audioTimeMilliseconds: 100,
+                                       socketGeneration: 1, itemID: "first",
+                                       sessionAudioTime: 0.1, observedAt: 0.1)
+        deliver(1, at: 0.3, amplitude: 1_000)
+        deliver(2, at: 0.6, amplitude: 1_000)
+        deliver(3, at: 1.2, amplitude: 0)
+        _ = witness.recordServerSpeech(.transcriptionCompleted, audioTimeMilliseconds: nil,
+                                       socketGeneration: 1, itemID: "first", observedAt: 1.3)
+
+        deliver(4, at: 3, amplitude: 1_000)
+        deliver(5, at: 3.3, amplitude: 1_000)
+        deliver(6, at: 3.6, amplitude: 1_000)
+
+        #expect(witness.poll(at: 4.11).anomalies.contains(where: {
+            guard case .localActivityUnmatched(let activeSince, _) = $0 else { return false }
+            return abs(activeSince - 3) < 0.001
+        }))
+    }
+
+    @Test func lateTerminalForOlderItemDoesNotCloseNewerOpenServerSpeech() {
+        let witness = makeWitness(sustainedActivityDuration: 0.5, serverSpeechGrace: 0.5)
+        _ = witness.recordServerSpeech(.speechStarted, audioTimeMilliseconds: 0,
+                                       socketGeneration: 1, itemID: "old",
+                                       sessionAudioTime: 0, observedAt: 0)
+        _ = witness.recordServerSpeech(.speechStarted, audioTimeMilliseconds: 3_000,
+                                       socketGeneration: 1, itemID: "new",
+                                       sessionAudioTime: 3, observedAt: 3)
+        _ = witness.recordServerSpeech(.transcriptionCompleted, audioTimeMilliseconds: nil,
+                                       socketGeneration: 1, itemID: "old", observedAt: 3.1)
+
+        for (sequence, time) in [(0, 3.0), (1, 3.3), (2, 3.6)] {
+            _ = witness.recordCapture(sequence: UInt64(sequence), sampleCount: 480, at: time)
+            _ = witness.recordDelivery(sequence: UInt64(sequence),
+                                       pcm16: pcm(amplitude: 1_000), at: time)
+        }
+
+        #expect(!witness.poll(at: 4.11).anomalies.contains(where: {
+            if case .localActivityUnmatched = $0 { true } else { false }
+        }))
+    }
+
     @Test func serverSpeechStartMatchesOnlyTheOverlappingLocalEpisode() {
         let witness = makeWitness(sustainedActivityDuration: 0.5, serverSpeechGrace: 0.5)
         for (sequence, time) in [(0, 3.0), (1, 3.3), (2, 3.6)] {

@@ -66,4 +66,23 @@ import Testing
         #expect(pending.drainIfSettled(hasPendingTranscriptions: ledger.hasPendingItems)
                 == .ready(text: "Keep this question.", fragments: 1))
     }
+
+    @Test func shortEmptyItemTimeoutStillReleasesEarlierCompletedFragment() throws {
+        let ledger = RealtimeTranscriptionLedger()
+        let pending = UtteranceBuffer()
+        pending.append("Keep this completed fragment.")
+
+        ledger.recordSpeechStarted(itemID: "noise", audioStartMilliseconds: 2_000,
+                                   timelineOrigin: 0)
+        ledger.recordSpeechStopped(itemID: "noise", audioEndMilliseconds: 2_200)
+        #expect(pending.drainIfSettled(hasPendingTranscriptions: ledger.hasPendingItems)
+                == .waitingForPendingTranscriptions)
+
+        #expect(ledger.resolveStoppedItemTimeout(itemID: "noise", speaker: .them) == nil)
+        #expect(!ledger.hasPendingItems)
+        #expect(pending.shouldResumeAfterPendingTranscriptionsSettle(
+            hasPendingTranscriptions: ledger.hasPendingItems))
+        #expect(pending.drainIfSettled(hasPendingTranscriptions: ledger.hasPendingItems)
+                == .ready(text: "Keep this completed fragment.", fragments: 1))
+    }
 }

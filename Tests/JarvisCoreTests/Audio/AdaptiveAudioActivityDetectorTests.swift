@@ -18,7 +18,8 @@ import Testing
         for _ in 0..<20 {
             #expect(!detector.observe(pcm16: pcm(amplitude: 150)).isActive)
         }
-        #expect(detector.noiseFloorRMS > 100)
+        // The floor adaptation is an implementation detail. Its public effect is that sustained
+        // background remains inactive while a later voice-level signal still activates detection.
         #expect(detector.observe(pcm16: pcm(amplitude: 1_000)).isActive)
         #expect(detector.observe(pcm16: pcm(amplitude: 700)).isActive)
         #expect(!detector.observe(pcm16: pcm(amplitude: 100)).isActive)

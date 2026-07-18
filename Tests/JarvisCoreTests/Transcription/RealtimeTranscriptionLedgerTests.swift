@@ -229,4 +229,35 @@ import Testing
         #expect(ledger.safeReplayDiscardTime == nil)
         #expect(ledger.pendingItemCount == 0)
     }
+
+    @Test func missingStopTimingWaitsForLaterVadBoundaryBeforeRetiringAudio() throws {
+        let ledger = RealtimeTranscriptionLedger()
+        ledger.recordSpeechStarted(itemID: "missing-stop", audioStartMilliseconds: 1_000,
+                                   timelineOrigin: 10)
+        _ = try #require(ledger.recordCompleted(itemID: "missing-stop", transcript: "done",
+                                                speaker: .them))
+
+        #expect(ledger.safeReplayDiscardTime == 11)
+
+        ledger.recordSpeechStarted(itemID: "later", audioStartMilliseconds: 4_000,
+                                   timelineOrigin: 10)
+        #expect(ledger.safeReplayDiscardTime == 14)
+        ledger.recordSpeechStopped(itemID: "later", audioEndMilliseconds: 5_000)
+        _ = try #require(ledger.recordCompleted(itemID: "later", transcript: "later",
+                                                speaker: .them))
+        #expect(ledger.safeReplayDiscardTime == 15)
+    }
+
+    @Test func negativeStopTimingIsIgnoredWithoutLosingTerminalText() throws {
+        let ledger = RealtimeTranscriptionLedger()
+        ledger.recordSpeechStarted(itemID: "item", audioStartMilliseconds: 1_000,
+                                   timelineOrigin: 10)
+        ledger.recordSpeechStopped(itemID: "item", audioEndMilliseconds: -1)
+
+        let item = try #require(ledger.recordCompleted(
+            itemID: "item", transcript: "preserved", speaker: .them))
+        #expect(item.text == "preserved")
+        #expect(item.spokenEndAt == nil)
+        #expect(ledger.safeReplayDiscardTime == 11)
+    }
 }

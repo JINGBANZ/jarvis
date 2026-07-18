@@ -45,6 +45,10 @@ public final class PCMBuffer: @unchecked Sendable {
     private var sentByteCount = 0
     private var activeClaim: Claim?
     private var nextClaimID: UInt64 = 1
+    /// Highest session-relative capture boundary proven by a server lifecycle event. A server event
+    /// can race ahead of URLSession's local send callback, so the boundary must outlive the immediate
+    /// `sentChunks` scan and be applied when that callback eventually arrives.
+    private var serverConfirmedThrough: TimeInterval?
     private let maxBytes: Int
 
     public init(maxBytes: Int) { self.maxBytes = max(0, maxBytes) }
@@ -103,8 +107,10 @@ public final class PCMBuffer: @unchecked Sendable {
         guard activeClaim?.id == claim.id, chunks.first == claim.chunk else { return nil }
         let sent = chunks.removeFirst()
         queuedByteCount -= sent.data.count
-        sentChunks.append(sent)
-        sentByteCount += sent.data.count
+        if !isServerConfirmedLocked(sent) {
+            sentChunks.append(sent)
+            sentByteCount += sent.data.count
+        }
         activeClaim = nil
         var evicted: [Chunk] = []
         trimSentTailLocked(recordingIn: &evicted)
@@ -137,6 +143,10 @@ public final class PCMBuffer: @unchecked Sendable {
     @discardableResult
     public func prepareForReconnect() -> ReplayPreparation {
         lock.lock(); defer { lock.unlock() }
+        // A socket failure can win before the local callback for a server-confirmed active claim.
+        // Drop only the proven prefix before rebuilding the replay FIFO; unknown-timestamp chunks
+        // stay conservative and replayable.
+        trimServerConfirmedQueuedPrefixLocked()
         let replayed = sentChunks.count
         chunks = sentChunks + chunks
         queuedByteCount += sentByteCount
@@ -160,12 +170,16 @@ public final class PCMBuffer: @unchecked Sendable {
     @discardableResult
     public func discardSent(through capturedTime: TimeInterval) -> [Chunk] {
         lock.lock(); defer { lock.unlock() }
+        serverConfirmedThrough = max(serverConfirmedThrough ?? capturedTime, capturedTime)
         var discarded: [Chunk] = []
         while let first = sentChunks.first,
               let end = first.capturedEnd, end <= capturedTime {
             let removed = sentChunks.removeFirst()
             sentByteCount -= removed.data.count
             discarded.append(removed)
+        }
+        if activeClaim == nil {
+            trimServerConfirmedQueuedPrefixLocked()
         }
         return discarded
     }
@@ -189,6 +203,7 @@ public final class PCMBuffer: @unchecked Sendable {
         lock.lock()
         chunks = []; sentChunks = []
         queuedByteCount = 0; sentByteCount = 0; activeClaim = nil
+        serverConfirmedThrough = nil
         lock.unlock()
     }
 
@@ -219,5 +234,17 @@ public final class PCMBuffer: @unchecked Sendable {
             sentByteCount -= removed.data.count
             evicted.append(removed)
         }
+    }
+
+    private func isServerConfirmedLocked(_ chunk: Chunk) -> Bool {
+        guard let boundary = serverConfirmedThrough, let end = chunk.capturedEnd else { return false }
+        return end <= boundary
+    }
+
+    private func trimServerConfirmedQueuedPrefixLocked() {
+        while let first = chunks.first, isServerConfirmedLocked(first) {
+            queuedByteCount -= chunks.removeFirst().data.count
+        }
+        activeClaim = nil
     }
 }

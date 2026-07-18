@@ -9,7 +9,7 @@ struct AdaptiveAudioActivityDetector {
     }
 
     private let configuration: AudioContinuityWitness.ActivityConfiguration
-    private(set) var noiseFloorRMS: Double
+    private var noiseFloorRMS: Double
     private(set) var isActive = false
 
     init(configuration: AudioContinuityWitness.ActivityConfiguration) {

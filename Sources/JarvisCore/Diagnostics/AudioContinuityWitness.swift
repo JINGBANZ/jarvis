@@ -30,25 +30,10 @@ public final class AudioContinuityWitness: @unchecked Sendable {
         var lastServerAudioTimeMilliseconds: Int?
     }
 
-    private enum LocalActivityState {
-        case pending
-        case matched
-        case warned
-    }
-
-    /// Content-free local activity interval retained long enough for delayed/replayed server VAD
-    /// events to resolve it. A bounded interval ledger is necessary because one server utterance can
-    /// span several local amplitude episodes, and several episodes can accumulate during an outage.
-    private struct LocalActivityEpisode {
-        let startedAt: TimeInterval
-        var lastActiveAt: TimeInterval
-        var state: LocalActivityState
-    }
-
     private let configuration: Configuration
     private let startedAt: TimeInterval
     private let lock = NSLock()
-    private var activityDetector: AdaptiveAudioActivityDetector
+    private var activityMatcher: AudioContinuityMatcher
     private var nextSnapshotAt: TimeInterval
 
     private var capturedChunks = 0
@@ -65,14 +50,6 @@ public final class AudioContinuityWitness: @unchecked Sendable {
 
     private var socketStats: [Int: SocketStats] = [:]
     private var latestSocketGeneration: Int?
-    private var serverSpeechActive = false
-    /// Session-relative audio-clock position of the latest active server VAD start. Observed arrival
-    /// time is insufficient: a delayed terminal/start event for older audio must not match a newer
-    /// local-activity episode merely because it arrived later.
-    private var activeServerSpeechStartedAt: TimeInterval?
-
-    private var localActivityEpisodes: [LocalActivityEpisode] = []
-    private var localActivityOpen = false
     private var captureStallReported = false
     private var deliveryLagReported = false
 
@@ -80,7 +57,7 @@ public final class AudioContinuityWitness: @unchecked Sendable {
     public init(configuration: Configuration = .init(), startedAt: TimeInterval) {
         self.configuration = configuration
         self.startedAt = startedAt
-        activityDetector = AdaptiveAudioActivityDetector(configuration: configuration.activity)
+        activityMatcher = AudioContinuityMatcher(configuration: configuration)
         nextSnapshotAt = startedAt + configuration.snapshotInterval
     }
 
@@ -127,10 +104,12 @@ public final class AudioContinuityWitness: @unchecked Sendable {
         lastDeliveryAt = timestamp
         deliveredChunks += 1
 
-        let activity = activityDetector.observe(pcm16: pcm16)
-        deliveredSamples += activity.sampleCount
         let captured = pendingCaptures.removeValue(forKey: sequence)
         prunePendingCaptureOrderLocked()
+        let activityTimestamp = captured?.capturedAt ?? timestamp
+        let activity = activityMatcher.recordDelivery(pcm16: pcm16, at: activityTimestamp)
+        deliveredSamples += activity.sampleCount
+        anomalies += activity.anomalies
         if let captured {
             if captured.sampleCount != activity.sampleCount {
                 anomalies.append(.deliverySampleCountMismatch(sequence: sequence,
@@ -146,11 +125,8 @@ public final class AudioContinuityWitness: @unchecked Sendable {
             } else {
                 deliveryLagReported = false
             }
-            anomalies += updateLocalActivityLocked(isActive: activity.isActive,
-                                                    at: captured.capturedAt)
         } else {
             anomalies.append(.deliveryWithoutCapture(sequence: sequence))
-            anomalies += updateLocalActivityLocked(isActive: activity.isActive, at: timestamp)
         }
         return finishLocked(at: timestamp, immediate: anomalies)
     }
@@ -213,6 +189,7 @@ public final class AudioContinuityWitness: @unchecked Sendable {
     @discardableResult
     public func recordServerSpeech(_ signal: ServerSpeechSignal,
                                    audioTimeMilliseconds: Int?, socketGeneration: Int,
+                                   itemID: String? = nil,
                                    sessionAudioTime: TimeInterval? = nil,
                                    observedAt timestamp: TimeInterval) -> Output {
         precondition(audioTimeMilliseconds == nil || audioTimeMilliseconds! >= 0)
@@ -226,28 +203,11 @@ public final class AudioContinuityWitness: @unchecked Sendable {
         if let audioTimeMilliseconds { stats.lastServerAudioTimeMilliseconds = audioTimeMilliseconds }
         socketStats[socketGeneration] = stats
 
-        var anomalies: [Anomaly] = []
-        if latestSocketGeneration == socketGeneration {
-            switch signal {
-            case .speechStarted:
-                serverSpeechActive = true
-                activeServerSpeechStartedAt = sessionAudioTime
-                if let sessionAudioTime {
-                    anomalies += matchServerStartLocked(sessionAudioTime, observedAt: timestamp)
-                }
-            case .speechStopped:
-                if let start = activeServerSpeechStartedAt, let end = sessionAudioTime {
-                    anomalies += matchServerIntervalLocked(start: start, end: end,
-                                                           observedAt: timestamp)
-                }
-                serverSpeechActive = false
-                activeServerSpeechStartedAt = nil
-            case .transcriptionDelta, .transcriptionCompleted, .transcriptionFailed:
-                // Terminal/delta events may arrive late for an earlier item. They remain useful
-                // transport metadata but are not evidence that the current local episode matched.
-                break
-            }
-        }
+        let anomalies = latestSocketGeneration == socketGeneration
+            ? activityMatcher.recordServerSpeech(signal, itemID: itemID,
+                                                 sessionAudioTime: sessionAudioTime,
+                                                 observedAt: timestamp)
+            : []
         return finishLocked(at: timestamp, immediate: anomalies)
     }
 
@@ -258,89 +218,15 @@ public final class AudioContinuityWitness: @unchecked Sendable {
         return finishLocked(at: timestamp, forceSnapshot: forceSnapshot)
     }
 
-    private func updateLocalActivityLocked(isActive: Bool,
-                                           at timestamp: TimeInterval) -> [Anomaly] {
-        if isActive {
-            if localActivityOpen, let lastActiveAt = localActivityEpisodes.last?.lastActiveAt,
-               timestamp - lastActiveAt > configuration.activityHangover {
-                localActivityOpen = false
-            }
-            if localActivityOpen {
-                localActivityEpisodes[localActivityEpisodes.count - 1].lastActiveAt = timestamp
-            } else {
-                localActivityEpisodes.append(.init(startedAt: timestamp, lastActiveAt: timestamp,
-                                                   state: .pending))
-                localActivityOpen = true
-                trimLocalActivityEpisodesLocked()
-            }
-            if serverSpeechActive, let start = activeServerSpeechStartedAt {
-                // A server utterance can span several local amplitude episodes. While its VAD
-                // interval is still open, match activity against the interval observed so far;
-                // comparing each later episode only with the original start creates a temporary
-                // false warning that is retracted only when speech_stopped supplies the end.
-                return matchServerIntervalLocked(start: start, end: timestamp,
-                                                 observedAt: timestamp)
-            }
-        } else {
-            if localActivityOpen, let lastActiveAt = localActivityEpisodes.last?.lastActiveAt,
-               timestamp - lastActiveAt >= configuration.activityHangover {
-                localActivityOpen = false
-            }
-        }
-        return []
-    }
-
     private func selectSocketGenerationLocked(_ generation: Int) {
         guard latestSocketGeneration == nil || generation > latestSocketGeneration! else { return }
         latestSocketGeneration = generation
-        serverSpeechActive = false
-        activeServerSpeechStartedAt = nil
-    }
-
-    private func matchServerStartLocked(_ serverStart: TimeInterval,
-                                        observedAt: TimeInterval) -> [Anomaly] {
-        let tolerance = configuration.activityHangover
-        return matchLocalActivityLocked(where: { episode in
-            serverStart >= episode.startedAt - tolerance
-                && serverStart <= episode.lastActiveAt + tolerance
-        }, observedAt: observedAt)
-    }
-
-    private func matchServerIntervalLocked(start: TimeInterval, end: TimeInterval,
-                                           observedAt: TimeInterval) -> [Anomaly] {
-        let tolerance = configuration.activityHangover
-        return matchLocalActivityLocked(where: { episode in
-            episode.startedAt <= end + tolerance
-                && start <= episode.lastActiveAt + tolerance
-        }, observedAt: observedAt)
-    }
-
-    private func matchLocalActivityLocked(
-        where overlaps: (LocalActivityEpisode) -> Bool,
-        observedAt: TimeInterval
-    ) -> [Anomaly] {
-        var anomalies: [Anomaly] = []
-        for index in localActivityEpisodes.indices where overlaps(localActivityEpisodes[index]) {
-            if localActivityEpisodes[index].state == .warned {
-                anomalies.append(.serverSpeechObservedAfterUnmatchedActivity(
-                    activeSince: localActivityEpisodes[index].startedAt,
-                    serverObservedAt: observedAt))
-            }
-            localActivityEpisodes[index].state = .matched
-        }
-        return anomalies
-    }
-
-    private func trimLocalActivityEpisodesLocked() {
-        let overflow = localActivityEpisodes.count - configuration.maximumActivityEpisodes
-        if overflow > 0 {
-            localActivityEpisodes.removeFirst(overflow)
-        }
+        activityMatcher.selectNewSocketGeneration()
     }
 
     private func finishLocked(at timestamp: TimeInterval, immediate: [Anomaly] = [],
                               forceSnapshot: Bool = false) -> Output {
-        var anomalies = immediate
+        var anomalies = immediate + activityMatcher.poll(at: timestamp)
         let captureReference = lastCaptureAt ?? startedAt
         let stalledFor = max(0, timestamp - captureReference)
         if stalledFor >= configuration.captureStallThreshold, !captureStallReported {
@@ -353,19 +239,6 @@ public final class AudioContinuityWitness: @unchecked Sendable {
             if lag >= configuration.deliveryLagThreshold {
                 anomalies.append(.captureToDeliveryLag(sequence: pending.sequence, lag: lag))
                 deliveryLagReported = true
-            }
-        }
-
-        for index in localActivityEpisodes.indices
-            where localActivityEpisodes[index].state == .pending {
-            let episode = localActivityEpisodes[index]
-            let duration = max(0, timestamp - episode.startedAt)
-            let observedActivityDuration = max(0, episode.lastActiveAt - episode.startedAt)
-            if observedActivityDuration >= configuration.sustainedActivityDuration,
-               timestamp - episode.lastActiveAt >= configuration.serverSpeechGrace {
-                anomalies.append(.localActivityUnmatched(activeSince: episode.startedAt,
-                                                         duration: duration))
-                localActivityEpisodes[index].state = .warned
             }
         }
 
@@ -412,9 +285,9 @@ public final class AudioContinuityWitness: @unchecked Sendable {
             lastCaptureAt: lastCaptureAt,
             lastDeliveryAt: lastDeliveryAt,
             pendingCapturedChunks: pendingCaptures.count,
-            localActivityDetected: activityDetector.isActive,
-            localActivitySince: localActivityOpen ? localActivityEpisodes.last?.startedAt : nil,
-            lastLocalActivityAt: localActivityOpen ? localActivityEpisodes.last?.lastActiveAt : nil,
+            localActivityDetected: activityMatcher.isActive,
+            localActivitySince: activityMatcher.activeSince,
+            lastLocalActivityAt: activityMatcher.lastActivityAt,
             latestSocketGeneration: latestSocketGeneration,
             socketGenerations: generations
         )
