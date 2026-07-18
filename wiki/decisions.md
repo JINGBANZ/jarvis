@@ -314,3 +314,103 @@
 - **Why:** For a subscription holder, per-turn API billing is the product's dominant marginal cost; the CLIs expose the same frontier models under flat-rate plans the user already pays for. The `BrainClient` seam meant the driver, client-managed memory, retry, and traffic audit all carry over unchanged; detection-by-file-probe keeps the Settings tab instant and side-effect-free.
 - **Rejected:** (a) Wiring the CLIs' MCP interfaces for native tool calling — a protocol server + handshake per turn for three tools; the JSON-line protocol does the same job with a parser that tolerates prose/fences and degrades a forced `speak` to speaking the raw reply. (b) Auth verification by running the CLI at detection time — slow, may bill a request, and a Keychain prompt from `security` would be worse; the marker heuristic is a UI hint, with failures surfacing loudly at Start. (c) Replacing transcription too — the CLIs have no realtime audio surface; the OpenAI key remains the ears.
 - **Detail:** [architecture.md → Local CLI brain providers](./architecture.md#local-cli-brain-providers), [settings-window.md → Brain](./settings-window.md#brain); egress note in [sandbox.md](./sandbox.md#data-egress).
+
+### 2026-07-16 — Realtime transcript integrity is tracked per audio item
+
+- **Chose:** Reconcile Realtime transcription by `item_id` instead of treating only
+  `…transcription.completed` as meaningful. `RealtimeTranscriptionLedger` records VAD start time and
+  streamed deltas, accepts out-of-order completion/failure, salvages delta text on failure or a
+  missing-terminal deadline, and emits an explicit context-gap line when failed, timed-out, or
+  long VAD-confirmed speech cannot be recovered from an empty completion. Transcript timestamps use
+  `audio_start_ms`, so inference completion order cannot reorder speakers. Bare `speech_stopped` no
+  longer resets the silence clock. Every real system-output sample is preserved for transcription;
+  a short/empty callback is padded only with its missing silence so the Realtime audio clock and
+  trailing-silence VAD keep advancing, while a separate exact-length padded/truncated copy feeds AEC.
+  Noise-reduction policy stays at its configured setting for both streams; source-specific tuning
+  requires representative live evaluation rather than assuming digital loopback is noise-free.
+  VAD-only starts/stops cannot restart the silence interval: a due check waits locally for the pending
+  item, while socket failure or a long active-item deadline resolves it so stale speech state cannot
+  suppress coaching forever.
+- **Why:** In the 2026-07-16 interview session, the user's long answer about an AI project reached the
+  mic transcript but the interviewer's question never appeared in either the activity log or the
+  exact brain traffic. The gap was upstream of `CoachDriver`; the old client ignored documented delta
+  and failed events, silently discarded unusable completion text, and mutated the system tap to the
+  mic buffer length before sending it. A sentence must either arrive or leave a visible integrity
+  failure — never disappear invisibly.
+- **Rejected:** (a) Logging only the failure event — observable but still deprives the coach of
+  streamed text. (b) Treating every VAD stop as a turn — it supplies no language context and, in the
+  old timer path, allowed noise/typing to postpone a silence check indefinitely. (c) Switching
+  transcription models as a first response — it changes the commit/VAD contract without fixing the
+  client's dropped event paths.
+- **Detail:** `Sources/JarvisCore/Transcription/RealtimeTranscriptionLedger.swift`,
+  `Sources/JarvisApp/Capture/RealtimeTranscriber.swift`, `AggregateEchoCapture.swift`.
+- **Superseded in part by:** 2026-07-17 — Diagnostics never enter the brain transcript. Delta
+  salvage and per-item reconciliation stand; explicit context-gap lines do not.
+
+### 2026-07-16 — Short interviewer rejection is substantive
+
+- **Chose:** Keep the closed-class filler gate, but classify exact interviewer-side “No”/“Nope” as
+  substantive. The same user-side fragments remain filler unless other substance rules apply.
+- **Why:** The interview log showed an interviewer “No.” correction skipped as filler and delivered
+  only with a later turn. Speaker identity changes the meaning here: an interviewer rejection is
+  actionable feedback, not a back-channel.
+- **Rejected:** Removing the filler gate — would restore the large steady-state cost from acknowledgments.
+- **Detail:** `Sources/JarvisCore/Triggers/TurnSubstance.swift`.
+
+### 2026-07-17 — Audio continuity evidence is content-free, not a recording
+
+- **Chose:** Add a per-side continuity witness across capture, delivery, WebSocket
+  attempt/completion, and Realtime server-speech boundaries. It retains sequence/sample counters,
+  timestamps, socket generations, server audio-clock values, and a locally derived activity bit;
+  periodic summaries and typed anomalies go only to the owner-only session log. Realtime item deltas
+  remain the only recoverable words. Sustained local activity without a server speech event adds an
+  explicit warning to the rolling transcript for the next real coach turn, without inventing text or
+  creating its own coach request. Capture timestamps are assigned in the IOProc, while witness locking
+  and PCM activity inspection run on the existing delivery queue so AEC timing is not disturbed.
+  Every delivered PCM chunk enters one byte-capped transactional FIFO plus an in-memory recovery
+  tail. One typed claim is sent at a time. URLSession completion moves it to that tail but cannot
+  retire it: the Realtime contract explicitly provides no confirmation event for
+  `input_audio_buffer.append`. Server VAD/transcription audio-clock progress advances only the prefix
+  behind the earliest unresolved item, including out-of-order completions. Socket failure requeues
+  the remaining tail before never-sent audio, then the replacement session transcribes interrupted
+  items from PCM instead of duplicating a partial old-session finalization. Thus the ready transition,
+  an asynchronous send error, and a half-open socket cannot silently strand a chunk. An overflow of
+  the deliberate cap is itself a typed anomaly and an explicit context warning.
+- **Why:** The prior session cannot retrospectively reveal whether the missing question disappeared
+  before capture, between capture and delivery, at the socket, or inside transcription. Boundary
+  evidence makes the next failure locatable while preserving the rule that raw audio is never
+  archived. Live reconnect validation then exposed the remaining boundary: macOS accepted offline
+  append messages locally for twelve seconds before ping detected the dead socket, so the old FIFO
+  deleted the exact missing phrases and replayed only later silence. The witness isolated that stage;
+  the bounded recovery tail now retains and retranscribes those words after reconnect.
+- **Rejected:** (a) Persist raw PCM — it would reveal the words but reverses the project's privacy
+  posture. (b) Send every stream to a second transcription provider — doubles audio egress and cost.
+  (c) Hash audio chunks as proof — a content hash does not reveal what was said or which downstream
+  stage failed, while increasing fingerprinting risk.
+- **Detail:** `Sources/JarvisCore/Diagnostics/AudioContinuityWitness.swift`,
+  `Sources/JarvisCore/Audio/AdaptiveAudioActivityDetector.swift`,
+  `Sources/JarvisApp/Capture/RealtimeTranscriber.swift`.
+- **Superseded in part by:** 2026-07-17 — Diagnostics never enter the brain transcript. The witness,
+  recovery tail, and anomaly logs stand; transcript warning insertion does not.
+
+### 2026-07-17 — Diagnostics never enter the brain transcript
+
+- **Chose:** Keep the rolling transcript semantic: only usable final or salvaged transcription text
+  can enter it or trigger a coach turn. Failed, timed-out, overflowed, or locally unmatched audio
+  remains diagnostic-only. The continuity witness correlates bounded local activity intervals with
+  overlapping server VAD intervals on the session audio clock, retaining warned metadata long enough
+  for reconnect replay to resolve it; a new socket generation never unmatches prior evidence.
+- **Why:** Live validation produced explicit missing-speech warnings immediately after five correctly
+  transcribed utterances. A quiet dip split one locally detected phrase into multiple episodes while
+  Realtime correctly reported one longer server interval; matching only the server start mislabeled
+  the later episodes. Those heuristic warnings then rode into later brain requests as if they were
+  speech, adding cost and misleading context without recovering a single word. Diagnostics can prove
+  where continuity stopped, but they are not language and do not belong in semantic context.
+- **Rejected:** (a) Increasing the grace timeout — delays real diagnostics without fixing interval
+  mismatch. (b) Treating completion/failure events as blanket matches — a late event from an older
+  item could hide a newer loss. (c) Sending hedged warning prose to the brain — it is still synthetic
+  context and can distort coaching.
+- **Detail:** [architecture.md → Resilience](./architecture.md#resilience),
+  `Sources/JarvisCore/Diagnostics/AudioContinuityWitness.swift`,
+  `Sources/JarvisCore/Transcription/RealtimeTranscriptionLedger.swift`,
+  `Sources/JarvisApp/Capture/RealtimeTranscriber.swift`.

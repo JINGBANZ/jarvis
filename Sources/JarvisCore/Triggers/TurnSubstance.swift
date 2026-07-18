@@ -12,6 +12,11 @@ import Foundation
 /// short-fragment fallback. Everything else FAILS OPEN to the brain — the model stays the judge of
 /// meaning; this is punctuation-level hygiene, not a wake-word gate.
 public enum TurnSubstance {
+    /// A bare rejection from the interviewer is not a back-channel: it corrects the user's current
+    /// understanding and needs an immediate coaching turn. The same words from the user remain
+    /// filler ("no, no" while thinking aloud), so this override must see the speaker label.
+    private static let interviewerCorrections: Set<String> = ["no", "nope"]
+
     /// Normalized (lowercased, punctuation-stripped, repeats-collapsed) back-channel forms.
     /// To add a language, add its dozen closed-class forms in normalized shape.
     private static let fillers: Set<String> = [
@@ -34,15 +39,29 @@ public enum TurnSubstance {
 
         // Keep only letters/digits (CJK ideographs are letters), dropping punctuation, whitespace,
         // and symbols; then collapse consecutive repeats so elongations match their base form.
-        var collapsed = ""
-        for scalar in lower.unicodeScalars where CharacterSet.alphanumerics.contains(scalar) {
-            let ch = Character(scalar)
-            if collapsed.last != ch { collapsed.append(ch) }
-        }
+        let collapsed = normalized(lower)
 
         if collapsed.isEmpty { return false }              // pure punctuation / noise
         if fillers.contains(collapsed) { return false }    // closed-class back-channel
         if collapsed.count <= 2 { return false }           // short fragment in ANY language
         return true
+    }
+
+    /// Speaker-aware entry point used by the coach's delta gate. Most filler behavior stays neutral,
+    /// but a terse interviewer rejection is a correction, not conversational noise.
+    public static func isSubstantive(_ line: TranscriptLine) -> Bool {
+        if line.speaker == .them, interviewerCorrections.contains(normalized(line.text.lowercased())) {
+            return true
+        }
+        return isSubstantive(line.text)
+    }
+
+    private static func normalized(_ lower: String) -> String {
+        var collapsed = ""
+        for scalar in lower.unicodeScalars where CharacterSet.alphanumerics.contains(scalar) {
+            let ch = Character(scalar)
+            if collapsed.last != ch { collapsed.append(ch) }
+        }
+        return collapsed
     }
 }
