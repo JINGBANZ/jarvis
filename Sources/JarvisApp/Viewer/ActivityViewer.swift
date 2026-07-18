@@ -23,7 +23,6 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
 
     private var webView: WKWebView?
     private var picker: NSPopUpButton?
-    private var sessionIDField: NSTextField?
     private var copySessionIDButton: NSButton?
     private var evaluateButton: NSButton?
     private var clearHistoryButton: NSButton?
@@ -57,7 +56,7 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         let content = NSView(frame: NSRect(x: 0, y: 0, width: 560, height: 420))
         content.autoresizingMask = [.width, .height]
 
-        let headerHeight: CGFloat = 72
+        let headerHeight: CGFloat = 44
         let header = NSVisualEffectView(frame: NSRect(x: 0,
                                                       y: content.bounds.height - headerHeight,
                                                       width: content.bounds.width,
@@ -68,54 +67,60 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         header.state = .active
 
         let sessionLabel = NSTextField(labelWithString: "Session")
-        sessionLabel.frame = NSRect(x: 14, y: 41, width: 60, height: 18)
+        sessionLabel.translatesAutoresizingMaskIntoConstraints = false
         sessionLabel.textColor = .secondaryLabelColor
         header.addSubview(sessionLabel)
 
-        let pop = NSPopUpButton(frame: NSRect(x: 76, y: 36, width: 230, height: 26))
+        let pop = NSPopUpButton(frame: .zero)
+        pop.translatesAutoresizingMaskIntoConstraints = false
         pop.target = self
         pop.action = #selector(sessionChanged)
         pop.toolTip = "Switch between this and previous sessions"
-        pop.autoresizingMask = [.maxXMargin]
+        pop.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         header.addSubview(pop)
         self.picker = pop
 
+        let copyID = NSButton(title: "Copy ID", target: self, action: #selector(copySessionIDTapped))
+        copyID.translatesAutoresizingMaskIntoConstraints = false
+        copyID.bezelStyle = .rounded
+        copyID.toolTip = "Copy the exact session ID"
+        header.addSubview(copyID)
+        self.copySessionIDButton = copyID
+
         let evaluate = NSButton(title: "Evaluate", target: self, action: #selector(evaluateTapped))
+        evaluate.translatesAutoresizingMaskIntoConstraints = false
         evaluate.bezelStyle = .rounded
-        evaluate.frame = NSRect(x: content.bounds.width - 246, y: 36, width: 104, height: 28)
-        evaluate.autoresizingMask = [.minXMargin]
         header.addSubview(evaluate)
         self.evaluateButton = evaluate
 
         let clear = NSButton(title: "Clear history", target: self, action: #selector(clearHistoryTapped))
+        clear.translatesAutoresizingMaskIntoConstraints = false
         clear.bezelStyle = .rounded
         clear.toolTip = "Delete all previous sessions (keeps the current one)"
-        clear.frame = NSRect(x: content.bounds.width - 134, y: 36, width: 120, height: 28)
-        clear.autoresizingMask = [.minXMargin]
         header.addSubview(clear)
         self.clearHistoryButton = clear
 
-        let idLabel = NSTextField(labelWithString: "Session ID")
-        idLabel.frame = NSRect(x: 14, y: 11, width: 60, height: 18)
-        idLabel.textColor = .secondaryLabelColor
-        header.addSubview(idLabel)
-
-        let idField = NSTextField(labelWithString: "")
-        idField.frame = NSRect(x: 76, y: 9, width: 240, height: 20)
-        idField.font = .monospacedSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
-        idField.isSelectable = true
-        idField.lineBreakMode = .byTruncatingTail
-        idField.toolTip = "Exact session directory ID; select it to copy"
-        header.addSubview(idField)
-        self.sessionIDField = idField
-
-        let copyID = NSButton(title: "Copy ID", target: self, action: #selector(copySessionIDTapped))
-        copyID.bezelStyle = .rounded
-        copyID.frame = NSRect(x: 324, y: 5, width: 78, height: 28)
-        copyID.toolTip = "Copy the exact session ID"
-        copyID.autoresizingMask = [.maxXMargin]
-        header.addSubview(copyID)
-        self.copySessionIDButton = copyID
+        let preferredPickerWidth = pop.widthAnchor.constraint(equalToConstant: 230)
+        // Prefer the full picker width, but let window resizing compress it.
+        preferredPickerWidth.priority = .init(rawValue: 490)
+        NSLayoutConstraint.activate([
+            sessionLabel.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 14),
+            sessionLabel.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            pop.leadingAnchor.constraint(equalTo: sessionLabel.trailingAnchor, constant: 2),
+            pop.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            pop.widthAnchor.constraint(greaterThanOrEqualToConstant: 120),
+            preferredPickerWidth,
+            copyID.leadingAnchor.constraint(equalTo: pop.trailingAnchor, constant: 8),
+            copyID.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            copyID.widthAnchor.constraint(equalToConstant: 78),
+            copyID.trailingAnchor.constraint(lessThanOrEqualTo: evaluate.leadingAnchor, constant: -8),
+            evaluate.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            evaluate.widthAnchor.constraint(equalToConstant: 104),
+            evaluate.trailingAnchor.constraint(equalTo: clear.leadingAnchor, constant: -8),
+            clear.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            clear.widthAnchor.constraint(equalToConstant: 120),
+            clear.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -14),
+        ])
 
         let wv = WKWebView(frame: NSRect(x: 0, y: 0,
                                         width: content.bounds.width,
@@ -137,7 +142,6 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         log.detach()
         webView = nil
         picker = nil
-        sessionIDField = nil
         copySessionIDButton = nil
         evaluateButton = nil
         clearHistoryButton = nil
@@ -169,7 +173,7 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         if let idx = sessions.firstIndex(where: { $0.isCurrent }) {
             picker?.selectItem(at: idx)
         }
-        refreshSessionID()
+        refreshCopySessionIDButtonState()
         refreshEvaluateButtonState()
     }
 
@@ -177,17 +181,15 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         guard let idx = picker?.indexOfSelectedItem, sessions.indices.contains(idx) else { return }
         let s = sessions[idx]
         if s.isCurrent { loadCurrent() } else { loadPast(s) }
-        refreshSessionID()
+        refreshCopySessionIDButtonState()
         refreshEvaluateButtonState()
     }
 
-    private func refreshSessionID() {
+    private func refreshCopySessionIDButtonState() {
         guard let idx = picker?.indexOfSelectedItem, sessions.indices.contains(idx) else {
-            sessionIDField?.stringValue = ""
             copySessionIDButton?.isEnabled = false
             return
         }
-        sessionIDField?.stringValue = sessions[idx].id
         copySessionIDButton?.isEnabled = true
     }
 
