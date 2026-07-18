@@ -4,7 +4,7 @@ import Foundation
 /// no flat file is created. On each Start the app calls `JarvisLog.enableFileLogging(directory:)`,
 /// after which `jlog` also appends to `<directory>/jarvis-debug.log` (created `0600`, truncated
 /// fresh for the session). The file is always owner-only and never lands in a world-readable path —
-/// see wiki/sandbox.md ("activity log persistence").
+/// see wiki/sandbox.md ("per-session log directory").
 public enum JarvisLog {
     private static let lock = NSLock()
     nonisolated(unsafe) private static var directory: URL?   // guarded by `lock`
@@ -27,13 +27,11 @@ public enum JarvisLog {
     }
 }
 
-/// Lightweight logger: always writes to the unified log (Console) and mirrors into the activity
-/// viewer; additionally appends to the session debug file when file logging is enabled.
-/// `image`, when set, is a base64-encoded JPEG screenshot to show as a thumbnail in the activity
-/// viewer (the file log and unified log stay text-only).
-public func jlog(_ message: String, image base64JPEG: String? = nil) {
+/// Agent-facing diagnostic logger: always writes to the unified log (Console) and additionally
+/// appends to the session debug file when file logging is enabled. It deliberately never writes to
+/// `ActivityLog`, whose entries are a separate, human-facing coaching record.
+public func jlog(_ message: String) {
     NSLog("%@", message)
-    ActivityLog.shared.record(message, imageBase64: base64JPEG)  // HTML activity viewer (no-op until enabled)
 
     guard let url = JarvisLog.debugLogURL else { return }
     let line = "\(logTimestamp()) \(message)\n"

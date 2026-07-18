@@ -146,16 +146,11 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     }
 
     /// End-to-end: a real capture→speak turn through the production `CoachDriver` with the activity
-    /// log enabled (as dev mode does). Proves the screenshot the model looked at lands in the
-    /// activity log as a genuine, owner-only JPEG rendered as a clickable thumbnail linked to the
-    /// full image — the behaviour verified by hand, now automated against regressions.
+    /// log enabled (as it is for every session). Proves the screenshot the model looked at lands in
+    /// the activity log as a genuine, owner-only JPEG rendered as a clickable thumbnail linked to
+    /// the full image — the behaviour verified by hand, now automated against regressions.
     ///
-    /// This drives the shared `ActivityLog` singleton (the real production path: CoachDriver → jlog →
-    /// ActivityLog.shared). Peer tests in this suite also call jlog() and can write into this dir
-    /// while it's the active sink — `.serialized` does NOT prevent that (swift-testing's serialization
-    /// doesn't isolate a test from its peers). Robustness instead comes from: (1) selecting the shot
-    /// by exact byte-match to our fixture, so another test's screenshot can't be mistaken for ours,
-    /// and (2) the append-only `jarvis-activity.jsonl`, so our line survives interleaved writes.
+    /// This drives the shared `ActivityLog` singleton through the real typed activity-event path.
     /// `disable()` in defer resets the singleton afterwards.
     @Test func screenshotLandsInActivityLogAsValidJpeg() async throws {
         let dir = URL(fileURLWithPath: NSTemporaryDirectory())
@@ -201,10 +196,9 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
     /// A hotkey trigger leaves no "🗣 heard:" transcript line (the user pressed a key, didn't speak),
     /// so the manual hint must record its OWN activity line — including the synthetic message we
-    /// pre-fill as the user's request — so the dev viewer shows what the shortcut sent to the brain.
-    /// Drives the shared `ActivityLog` like the screenshot e2e above; the suite is `.serialized` so the
-    /// two shared-log tests don't race. (Other suites' `jlog` calls may also land in this dir while it's
-    /// enabled; that only adds lines, so the `contains` check stays robust.)
+    /// pre-fill as the user's request — so the viewer shows what the shortcut sent to the brain.
+    /// Drives the shared `ActivityLog` like the screenshot e2e above; the suite is `.serialized` so
+    /// the shared-log tests don't race.
     @Test func manualHintTriggerAndPrefilledMessageLandInActivityLog() async throws {
         let dir = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("jarvis-hintlog-\(ProcessInfo.processInfo.globallyUniqueString)")
@@ -232,6 +226,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             .appendingPathComponent("jarvis-activity-boundary-\(ProcessInfo.processInfo.globallyUniqueString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { ActivityLog.shared.disable(); try? FileManager.default.removeItem(at: dir) }
+        JarvisLog.enableFileLogging(directory: dir)
         ActivityLog.shared.enable(directory: dir)
 
         let brain = ScriptedBrain(script: [
@@ -246,6 +241,11 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(jsonl.contains("activity-boundary-tip-417"))
         #expect(!jsonl.contains("quiet for 417s"))
         #expect(!jsonl.contains("thinking"))
+
+        let debug = try String(contentsOf: dir.appendingPathComponent("jarvis-debug.log"), encoding: .utf8)
+        #expect(debug.contains("quiet for 417s"))
+        #expect(debug.contains("thinking"))
+        #expect(debug.contains("activity-boundary-tip-417"))
     }
 
     /// Stop cancelling a turn *while the screenshot is being captured* must abort before emitting:

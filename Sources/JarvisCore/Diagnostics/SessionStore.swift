@@ -54,16 +54,19 @@ public struct SessionStore: Sendable {
             .sorted { $0.id > $1.id }   // id is a lexically-sortable timestamp ⇒ newest first
     }
 
-    /// Whether a session's log holds anything worth browsing: at least one coaching-class line
-    /// (`💬`/`👁`/`🗣`/`🤫`/`💭`/error — see `ActivityLog.cssClass`) or a captured screenshot. Pure
-    /// lifecycle noise ("coaching started"/"stopped") classifies as empty, so an aborted run is hidden.
+    /// Whether a session's log holds at least one human-facing coaching event. The classifier also
+    /// keeps lifecycle and diagnostic rows written by older builds from making aborted runs visible.
     private static func hasCoachingContent(_ sessionURL: URL) -> Bool {
         let url = sessionURL.appendingPathComponent("jarvis-activity.jsonl")
         guard let text = try? String(contentsOf: url, encoding: .utf8) else { return false }
         for raw in text.split(separator: "\n", omittingEmptySubsequences: true) {
             guard let line = try? JSONDecoder().decode(Line.self, from: Data(raw.utf8)) else { continue }
-            if line.s != nil { return true }
-            if !ActivityLog.cssClass(for: line.m).isEmpty { return true }
+            let shot = line.s.flatMap { name -> String? in
+                guard Self.isShotName(name), FileManager.default.fileExists(atPath:
+                    sessionURL.appendingPathComponent(name).path) else { return nil }
+                return name
+            }
+            if ActivityLog.isHumanFacing(message: line.m, imageFile: shot) { return true }
         }
         return false
     }
@@ -83,8 +86,10 @@ public struct SessionStore: Sendable {
                 shotName = s
                 bytes = try? Data(contentsOf: session.url.appendingPathComponent(s))
             }
+            if bytes == nil { shotName = nil }
+            guard ActivityLog.isHumanFacing(message: line.m, imageFile: shotName) else { continue }
             out.append((ActivityLog.Entry(time: line.t, message: line.m,
-                                          imageFile: bytes == nil ? nil : shotName), bytes))
+                                          imageFile: shotName), bytes))
         }
         return out
     }

@@ -7,8 +7,8 @@ import JarvisCore
 /// `.degraded` is logged only. The only place an *error* `NSAlert` is raised (confirmation prompts,
 /// e.g. ActivityViewer's clear-history, are a separate concern and don't route here).
 ///
-/// Diagnostics stay in `JarvisLog`/`jlog` (it still owns the debug + activity logs); this type owns
-/// *user-facing surfacing + session-lifecycle consequence*. `report(_:)` is `nonisolated` so any
+/// Diagnostics stay in the agent-facing `JarvisLog`/`jlog` debug log; this type owns *user-facing
+/// surfacing + session-lifecycle consequence*. `report(_:)` is `nonisolated` so any
 /// thread (the capture IOProc, a URLSession delegate) can call it directly; it hops to the main actor.
 @MainActor
 final class ErrorReporter {
