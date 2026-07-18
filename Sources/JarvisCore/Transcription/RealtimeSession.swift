@@ -67,8 +67,13 @@ public enum RealtimeSession {
         return error["code"] as? String == "session_expired"
     }
 
+    public static let speechStartedType = "input_audio_buffer.speech_started"
+    public static let speechStoppedType = "input_audio_buffer.speech_stopped"
+    public static let deltaTranscriptionType = "conversation.item.input_audio_transcription.delta"
+
     /// The event type the server emits when an utterance's transcription is final.
     public static let completedTranscriptionType = "conversation.item.input_audio_transcription.completed"
+    public static let failedTranscriptionType = "conversation.item.input_audio_transcription.failed"
 
     /// The transcript text from a parsed realtime event, if it is a **completed** input-audio
     /// transcription carrying real speech — otherwise nil. Pure and unit-testable; the live socket

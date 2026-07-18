@@ -133,7 +133,7 @@ public final class CoachDriver: @unchecked Sendable {
         // would re-bill the whole working set just to decide "stay silent". The unsent lines ride
         // along on the next substantive turn (sentCount only advances on a send); silence and
         // manual-hint triggers always go through. Logged so gate misfires are auditable.
-        if reason == .turnEnd && !delta.lines.contains(where: { TurnSubstance.isSubstantive($0.text) }) {
+        if reason == .turnEnd && !delta.lines.contains(where: TurnSubstance.isSubstantive) {
             // Log WHAT was skipped (not just that a skip happened) so a gate misfire — a real remark
             // wrongly classified as filler — is visible in the activity viewer, not silent.
             let preview = delta.lines.isEmpty
