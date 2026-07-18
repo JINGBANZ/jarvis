@@ -11,6 +11,7 @@
   <key>CFBundleShortVersionString</key><string>0.1.1</string> <!-- x-release-please-version -->
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleExecutable</key><string>JarvisApp</string>
+  <key>CFBundleIconFile</key><string>Jarvis.icns</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSUIElement</key><true/>
   <key>NSMicrophoneUsageDescription</key>
