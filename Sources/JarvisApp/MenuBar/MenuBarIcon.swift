@@ -1,26 +1,24 @@
 import AppKit
 import CoreImage
 
-/// The menu-bar glyph: the robot emoji, in colour while running and desaturated to black-and-white
-/// while stopped. Emoji are inherently colour glyphs, so the stopped variant is rendered and stripped
-/// of saturation. Both variants share one rendering pipeline — drawn centred into the same 2×-density
-/// bitmap at the same logical point size — so they match exactly and stay crisp on Retina displays.
-/// Rendered once and cached.
+/// The menu-bar glyph reuses the application icon, in colour while running and desaturated to
+/// black-and-white while stopped. Both variants share one rendering pipeline — drawn into the same
+/// 2×-density bitmap at the same logical point size — so they match exactly and stay crisp on Retina
+/// displays. Rendered once and cached.
 ///
 /// OS-bound (AppKit + CoreImage), so it lives in `JarvisApp` rather than Core and is verified by a
 /// live run, not unit tests. Main-actor-isolated: `NSImage` isn't `Sendable`, and the icons are only
 /// ever touched from the `@MainActor` `MenuBarController`.
 @MainActor
 enum MenuBarIcon {
-    private static let emoji = "🤖"
     /// Logical (point) side of the square status image — comfortable in the ~22pt menu bar.
     private static let side: CGFloat = 18
     /// Render at 2× the logical size so the glyph is crisp on Retina displays.
     private static let scale: CGFloat = 2
 
-    /// Full-colour robot, shown while the pipeline is running.
+    /// Full-colour Listening Lens, shown while the pipeline is running.
     static let running: NSImage = make(grayscale: false)
-    /// Desaturated robot, shown while stopped.
+    /// Desaturated Listening Lens, shown while stopped.
     static let stopped: NSImage = make(grayscale: true)
 
     private static func make(grayscale: Bool) -> NSImage {
@@ -33,7 +31,7 @@ enum MenuBarIcon {
         return image
     }
 
-    /// Draw the emoji centred into a 2×-density RGBA bitmap whose logical size is `side` points.
+    /// Draw the application icon into a 2×-density RGBA bitmap whose logical size is `side` points.
     private static func renderBitmap() -> NSBitmapImageRep {
         let px = Int((side * scale).rounded())
         let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: px, pixelsHigh: px,
@@ -42,12 +40,12 @@ enum MenuBarIcon {
                                    bytesPerRow: 0, bitsPerPixel: 0)!
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
-        let string = NSAttributedString(string: emoji,
-                                        attributes: [.font: NSFont.systemFont(ofSize: side * scale)])
-        let glyph = string.size()
-        // Centre in the (pixel-space) canvas so the glyph isn't clipped or baseline-offset.
-        string.draw(at: NSPoint(x: (CGFloat(px) - glyph.width) / 2,
-                                y: (CGFloat(px) - glyph.height) / 2))
+        guard let applicationIcon = NSApplication.shared.applicationIconImage else {
+            preconditionFailure("Jarvis application icon is missing")
+        }
+        applicationIcon.draw(in: NSRect(x: 0, y: 0, width: px, height: px),
+                             from: .zero, operation: .sourceOver, fraction: 1,
+                             respectFlipped: false, hints: [.interpolation: NSImageInterpolation.high])
         NSGraphicsContext.restoreGraphicsState()
         rep.size = NSSize(width: side, height: side)   // logical points → 2× pixel density
         return rep
