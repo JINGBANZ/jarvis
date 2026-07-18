@@ -10,8 +10,9 @@
 
 **General technical-interview coaching, audio reliability, and local CLI brain providers are
 implemented.** The coach covers behavioral, system-design, and coding questions. A direct request
-whose specific answer depends on visible context missing from the transcript calls `capture_screen`
-before `speak`; a fully stated question can be answered without a reflexive capture. Realtime
+whose specific answer depends on visible context missing from the conversation calls `capture_screen`
+before `speak`; a fresh screenshot/OCR satisfies that request, while a fully stated question can be
+answered without a reflexive capture. Realtime
 transcription reconciles each `item_id` across VAD, delta, completion, and failure events; salvages
 partial text while keeping unavailable items diagnostic-only; preserves every real system-audio
 sample while padding only missing tap silence for VAD; and keeps AEC on a separate exact-length
@@ -29,8 +30,8 @@ those providers and keeps the OpenAI API-key path available.
 
 Run the live prompt smoke on a fresh session: show an interview question without speaking its
 details, ask “Jarvis, how can I solve this in one pass?”, and confirm the first action is
-`capture_screen` followed by a screen-specific reply. Then ask a fully stated behavioral question
-and confirm it can answer without an unnecessary capture. Finish the remaining in-app CLI provider
+exactly one `capture_screen` followed by a screen-specific reply. Then ask a fully stated behavioral
+question and confirm it can answer without an unnecessary capture. Finish the remaining in-app CLI provider
 smoke: select a detected Claude Code or Codex provider, confirm a coaching turn and screen request,
 and confirm a missing CLI fails Start loudly. The standard release checklist remains in
 [build-and-run.md](./build-and-run.md).

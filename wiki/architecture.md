@@ -71,14 +71,16 @@ moments the model judges worthwhile.
    new transcript delta, the timing context (seconds silent, session elapsed), and the tool set
    `[capture_screen, speak, stay_silent]`. The timing is what lets the model tell "thinking" from
    "stuck."
-4. The model calls `capture_screen` before answering when a specific, correct reply depends on
-   visible context that is missing from the transcript — including indirect references such as
-   “this” or “here.” It may also capture when a silence trigger leaves progress unclear. The harness
-   fulfills the call (a silent screenshot) and returns the image into the request, after which the
-   model reasons over what's on screen. Fully stated questions do not require a reflexive capture.
+4. Before speaking, the model calls `capture_screen` when a specific, correct reply depends on
+   visible context missing from the conversation — including unresolved references such as “this”
+   or “here” — and no fresh capture is already available for that request. It may also capture when
+   a silence trigger leaves progress unclear. The harness returns a silent screenshot plus OCR; that
+   fresh result satisfies the screen gate, so the next model response must speak or stay silent
+   rather than capture the same request again. Fully stated questions do not require a reflexive
+   capture.
 5. The model calls `speak(lines)` — a tip of up to ~3 short lines, returned **already split**
    into an array (Structured Outputs / `strict:true`), so the client never splits prose on
-   punctuation — or `stay_silent`. A tool call is **required** on every turn: silence is an
+   punctuation — or `stay_silent`. A tool call is **required** on every model response: silence is an
    explicit tool, never plain text, so the session memory stays free of stray model prose
    (see [decisions.md](./decisions.md)).
 6. `speak` renders to the **Overlay**, one line at a time (per-line display time set in `Config`).
