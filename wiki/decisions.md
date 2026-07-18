@@ -315,6 +315,7 @@
 - **Chose:** A `BrainProvider` selection (Settings → Brain): the OpenAI Responses API (default), or a locally installed **Claude Code** / **Codex** CLI spawned per turn (`CLIBrainClient` behind the same `BrainClient` protocol), so the brain — coach, summarizer, evaluator — bills to the user's existing Claude / ChatGPT **subscription** instead of the metered key. CLIs are auto-detected by pure file probes (`AgentCLIDetector`: $PATH + known install dirs + on-disk auth markers; no subprocess, no Keychain prompt) so selection is one radio click. Tool use rides a prompt-embedded JSON protocol generated from the same `ToolDef`s; every turn is a single model call — screenshots reach Claude inline as base64 image blocks (stream-json input, all built-in tools disabled) and Codex as 0600 session-dir files via `-i` (`--sandbox read-only`); both CLIs run with session persistence off so no transcript copy lands in their own stores. The API-key section merged into the Brain tab — the key stays required for Realtime transcription regardless of provider.
 - **Why:** For a subscription holder, per-turn API billing is the product's dominant marginal cost; the CLIs expose the same frontier models under flat-rate plans the user already pays for. The `BrainClient` seam meant the driver, client-managed memory, retry, and traffic audit all carry over unchanged; detection-by-file-probe keeps the Settings tab instant and side-effect-free.
 - **Rejected:** (a) Wiring the CLIs' MCP interfaces for native tool calling — a protocol server + handshake per turn for three tools; the JSON-line protocol does the same job with a parser that tolerates prose/fences and degrades a forced `speak` to speaking the raw reply. (b) Auth verification by running the CLI at detection time — slow, may bill a request, and a Keychain prompt from `security` would be worse; the marker heuristic is a UI hint, with failures surfacing loudly at Start. (c) Replacing transcription too — the CLIs have no realtime audio surface; the OpenAI key remains the ears.
+- **Superseded in part by:** 2026-07-18 — Claude sign-in uses Claude's bounded auth-status command. Binary discovery and Codex's auth marker stand.
 - **Detail:** [architecture.md → Local CLI brain providers](./architecture.md#local-cli-brain-providers), [settings-window.md → Brain](./settings-window.md#brain); egress note in [sandbox.md](./sandbox.md#data-egress).
 
 ### 2026-07-16 — Realtime transcript integrity is tracked per audio item
@@ -455,3 +456,21 @@
 - **Supersedes:** 2026-06-13 — One mode for v1: LeetCode Coach.
 - **Detail:** [architecture.md §2](./architecture.md#2-core-loop),
   `Sources/JarvisCore/Coach/ToolDefs.swift`.
+
+### 2026-07-18 — Claude sign-in uses Claude's bounded auth-status command
+
+- **Chose:** Keep CLI binary discovery as file probes, but determine Claude Code authentication by
+  running its non-billing `claude auth status --json` command under a short timeout. Model the result
+  as signed in, signed out, or unknown; Settings shows all three, Start refuses only a confirmed
+  logout, and an actual coaching failure still stops the unusable session loudly. Codex continues to
+  use its auth-file marker.
+- **Why:** Session `2026-07-18_15-25-46_366D` had an expired OAuth session, but the persistent
+  `oauthAccount` metadata made Settings claim Claude was signed in. Claude's own status command reads
+  its real credential store without making a model request and correctly distinguishes that stale
+  marker from a working login.
+- **Rejected:** (a) Trusting the account marker as signed in — it caused the false status. (b) Treating
+  every failed probe as signed out — a slow or broken executable is unknown, not proof of logout.
+  (c) Making a model request as preflight — it bills usage and duplicates the first real turn.
+- **Supersedes in part:** 2026-07-16 — Local Claude Code / Codex CLIs as alternative brain providers.
+- **Detail:** [settings-window.md → Brain](./settings-window.md#brain),
+  `Sources/JarvisCore/Brain/AgentCLIDetector.swift`.

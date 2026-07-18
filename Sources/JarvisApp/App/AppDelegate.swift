@@ -188,16 +188,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 errorReporter.report(.brainCLIMissing(provider: brainProvider.displayName))
                 return false
             }
-            if !cli.authenticated {
-                // Codex's auth.json is its only credential store — an absent marker means signed
-                // out for real, and every brain turn would fail: don't open a pipeline that can
-                // never coach. Claude may keep credentials only in the macOS Keychain (a false
-                // negative), so it proceeds with a visible degraded notice instead of a lockout.
-                if brainProvider == .codexCLI {
-                    jlog("Jarvis: can't start — \(brainProvider.displayName) isn't signed in.")
-                    errorReporter.report(.brainCLINotSignedIn(provider: brainProvider.displayName))
-                    return false
-                }
+            switch cli.authenticationStatus {
+            case .signedIn:
+                break
+            case .signedOut:
+                jlog("Jarvis: can't start — \(brainProvider.displayName) isn't signed in.")
+                errorReporter.report(.brainCLINotSignedIn(provider: brainProvider.displayName))
+                return false
+            case .unknown:
                 errorReporter.report(.brainCLISignInUnconfirmed(provider: brainProvider.displayName))
             }
             brainCLI = cli
@@ -245,12 +243,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                            traffic: sessionTraffic, trafficTag: "summarizer")
         }
         let brain = RetryingBrainClient(base: coachBase)
+        // A token can expire after the bounded Start preflight, and other runtime failures remain
+        // possible. If the actual CLI request fails, surface the reason and stop the green-but-
+        // unusable session instead of silently ignoring every later utterance.
+        let onBrainFailure: (@Sendable (String) -> Void)?
+        if brainProvider.usesLocalCLI {
+            let signInCommand = brainProvider == .claudeCode ? "claude auth login" : "codex login"
+            onBrainFailure = { [errorReporter] reason in
+                errorReporter.report(.brainCLIStopped(provider: brainProvider.displayName,
+                                                       signInCommand: signInCommand,
+                                                       reason: reason))
+            }
+        } else {
+            onBrainFailure = nil
+        }
         // Fan each spoken tip out to both the Overlay Caption and the persistent Overlay Box.
         let overlaySink = BroadcastOverlay([overlayCaption, overlayBox])
         let driver = CoachDriver(config: config, transcript: transcript,
                                  brain: brain, summarizer: summarizer,
                                  screen: WindowScopedScreenCapture(preferences: screenPreferences),
-                                 overlay: overlaySink, clock: clock)
+                                 overlay: overlaySink, clock: clock,
+                                 onBrainFailure: onBrainFailure)
 
         // CoachDriver is @unchecked Sendable; capture it (not @MainActor self) in the callbacks.
         // Route turns through TurnTaskBox so Stop can cancel an in-flight one. Concurrent triggers are

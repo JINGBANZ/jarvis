@@ -28,6 +28,9 @@ public final class CoachDriver: @unchecked Sendable {
     private let screen: ScreenCapturing
     private let overlay: OverlayRendering
     private let clock: Clock
+    /// The app edge uses this to surface a provider failure and end a session that can no longer
+    /// coach. Nil keeps Core-only callers/tests free of UI policy.
+    private let onBrainFailure: (@Sendable (String) -> Void)?
     private let sessionStart: TimeInterval
     private let history = CoachHistory()
 
@@ -46,7 +49,8 @@ public final class CoachDriver: @unchecked Sendable {
 
     public init(config: Config, transcript: RollingTranscript,
                 brain: BrainClient, summarizer: BrainClient? = nil,
-                screen: ScreenCapturing, overlay: OverlayRendering, clock: Clock) {
+                screen: ScreenCapturing, overlay: OverlayRendering, clock: Clock,
+                onBrainFailure: (@Sendable (String) -> Void)? = nil) {
         self.config = config
         self.transcript = transcript
         self.brain = brain
@@ -54,6 +58,7 @@ public final class CoachDriver: @unchecked Sendable {
         self.screen = screen
         self.overlay = overlay
         self.clock = clock
+        self.onBrainFailure = onBrainFailure
         self.sessionStart = clock.now()
     }
 
@@ -197,7 +202,9 @@ public final class CoachDriver: @unchecked Sendable {
             } catch {
                 // A cancellation (barge-in / Stop) is expected — report it quietly, not as a failure.
                 if Task.isCancelled { jlog("… turn cancelled (interrupted)"); return .cancelled }
-                jlog("Jarvis coach: brain request failed on \(reason): \(error.localizedDescription)")
+                let detail = error.localizedDescription
+                jlog("Jarvis coach: brain request failed on \(reason): \(detail)")
+                onBrainFailure?(detail)
                 // Speech already marked sent (a later-iteration failure) must not vanish from memory —
                 // commit what this turn accumulated. A first-request failure commits nothing; the
                 // un-advanced sentCount re-sends the delta next turn instead.

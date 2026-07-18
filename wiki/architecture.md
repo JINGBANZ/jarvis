@@ -239,8 +239,11 @@ memory, retries, and traffic recording are all unchanged — only the transport 
   practice. Codex runs `--sandbox read-only`; Claude runs with its persona replaced
   (`--system-prompt`) and no settings sources, and the one reasoning-effort setting maps onto each
   CLI's own scale.
-- **Installed CLIs are auto-detected** (`AgentCLIDetector`: file probes over $PATH + known install
-  dirs + on-disk auth markers — no subprocess, no Keychain prompt), so selecting one is one click.
+- **Installed CLIs are auto-detected.** `AgentCLIDetector` discovers binaries through file probes
+  over $PATH + known install dirs. Claude's actual sign-in state comes from its non-billing
+  `auth status --json` command under a short timeout, because stale account metadata can survive an
+  expired OAuth session; Codex uses its auth-file marker. Settings distinguishes signed in, signed
+  out, and an unavailable probe, and Start refuses a confirmed logout.
 - **The OpenAI key stays required**: transcription always runs on the Realtime API. A CLI provider
   moves the brain/summarizer/evaluator off the key, not the ears. **Latency is the tradeoff**,
   though a modest one now that every turn is one model call: measured coach turns run ~2.6s (text)

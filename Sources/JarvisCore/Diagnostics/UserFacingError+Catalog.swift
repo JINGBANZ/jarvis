@@ -23,24 +23,31 @@ public extension UserFacingError {
               severity: .warning)
     }
 
-    /// The selected CLI is installed but definitively signed out (Codex: `auth.json` is its only
-    /// credential store, so an absent marker is authoritative). Every brain turn would fail, so
-    /// refuse the Start instead of opening a pipeline that can never coach. Same preflight
-    /// semantics as `brainCLIMissing`: alert, but never stop a session that's already running.
+    /// The selected CLI is installed but definitively signed out. Every brain turn would fail, so
+    /// refuse the Start instead of opening a pipeline that can never coach. Same preflight semantics
+    /// as `brainCLIMissing`: alert, but never stop a session that's already running.
     static func brainCLINotSignedIn(provider: String) -> UserFacingError {
         .init(title: "\(provider) isn't signed in",
               message: "Sign in by running the \(provider) command once in Terminal, or switch the brain provider in Settings \u{2192} Brain, then press Start again.",
               severity: .warning)
     }
 
-    /// The selected CLI is installed but its sign-in couldn't be confirmed (Claude Code may keep
-    /// credentials only in the macOS Keychain, which Jarvis deliberately doesn't probe). A false
-    /// negative is possible, so this is a degraded notice, not a Start blocker — but it makes a
-    /// never-working brain visible in the debug log instead of silent.
+    /// The selected CLI is installed but its status probe failed or timed out. That is not proof of
+    /// being signed out, so this is a degraded notice rather than a Start blocker.
     static func brainCLISignInUnconfirmed(provider: String) -> UserFacingError {
         .init(title: "\(provider) sign-in unconfirmed",
               message: "Couldn't confirm \(provider) is signed in \u{2014} coaching turns may fail. If they do, run the CLI once in Terminal to sign in, then Stop and Start.",
               severity: .degraded)
+    }
+
+    /// The selected CLI passed preflight but an actual coaching request failed.
+    /// The session cannot coach, so fail loudly and stop instead of leaving the listening indicator
+    /// green while every later turn is discarded.
+    static func brainCLIStopped(provider: String, signInCommand: String,
+                                reason: String) -> UserFacingError {
+        .init(title: "\(provider) couldn't respond",
+              message: "\(reason)\n\nCoaching has stopped. Run \u{201C}\(signInCommand)\u{201D} in Terminal, or choose another brain provider in Settings \u{2192} Brain, then Start again.",
+              severity: .fatal)
     }
 
     /// Audio capture couldn't be built or started. `reason` is the human-readable cause from the capture

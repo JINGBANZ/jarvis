@@ -23,6 +23,8 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
 
     private var webView: WKWebView?
     private var picker: NSPopUpButton?
+    private var sessionIDField: NSTextField?
+    private var copySessionIDButton: NSButton?
     private var evaluateButton: NSButton?
     private var isEvaluating = false      // an audit is in flight; keep the button disabled meanwhile
     private var sessions: [SessionStore.Session] = []
@@ -54,18 +56,22 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         let content = NSView(frame: NSRect(x: 0, y: 0, width: 560, height: 420))
         content.autoresizingMask = [.width, .height]
 
-        let header = NSVisualEffectView(frame: NSRect(x: 0, y: content.bounds.height - 44, width: content.bounds.width, height: 44))
+        let headerHeight: CGFloat = 72
+        let header = NSVisualEffectView(frame: NSRect(x: 0,
+                                                      y: content.bounds.height - headerHeight,
+                                                      width: content.bounds.width,
+                                                      height: headerHeight))
         header.autoresizingMask = [.width, .minYMargin]
         header.material = .headerView
         header.blendingMode = .withinWindow
         header.state = .active
 
         let sessionLabel = NSTextField(labelWithString: "Session")
-        sessionLabel.frame = NSRect(x: 14, y: 13, width: 60, height: 18)
+        sessionLabel.frame = NSRect(x: 14, y: 41, width: 60, height: 18)
         sessionLabel.textColor = .secondaryLabelColor
         header.addSubview(sessionLabel)
 
-        let pop = NSPopUpButton(frame: NSRect(x: 76, y: 8, width: 240, height: 26))
+        let pop = NSPopUpButton(frame: NSRect(x: 76, y: 36, width: 230, height: 26))
         pop.target = self
         pop.action = #selector(sessionChanged)
         pop.toolTip = "Switch between this and previous sessions"
@@ -75,7 +81,7 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
 
         let evaluate = NSButton(title: "Evaluate", target: self, action: #selector(evaluateTapped))
         evaluate.bezelStyle = .rounded
-        evaluate.frame = NSRect(x: content.bounds.width - 246, y: 8, width: 104, height: 28)
+        evaluate.frame = NSRect(x: content.bounds.width - 246, y: 36, width: 104, height: 28)
         evaluate.autoresizingMask = [.minXMargin]
         header.addSubview(evaluate)
         self.evaluateButton = evaluate
@@ -83,11 +89,35 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         let clear = NSButton(title: "Clear history", target: self, action: #selector(clearHistoryTapped))
         clear.bezelStyle = .rounded
         clear.toolTip = "Delete all previous sessions (keeps the current one)"
-        clear.frame = NSRect(x: content.bounds.width - 134, y: 8, width: 120, height: 28)
+        clear.frame = NSRect(x: content.bounds.width - 134, y: 36, width: 120, height: 28)
         clear.autoresizingMask = [.minXMargin]
         header.addSubview(clear)
 
-        let wv = WKWebView(frame: NSRect(x: 0, y: 0, width: content.bounds.width, height: content.bounds.height - 44))
+        let idLabel = NSTextField(labelWithString: "Session ID")
+        idLabel.frame = NSRect(x: 14, y: 11, width: 60, height: 18)
+        idLabel.textColor = .secondaryLabelColor
+        header.addSubview(idLabel)
+
+        let idField = NSTextField(labelWithString: "")
+        idField.frame = NSRect(x: 76, y: 9, width: 240, height: 20)
+        idField.font = .monospacedSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
+        idField.isSelectable = true
+        idField.lineBreakMode = .byTruncatingTail
+        idField.toolTip = "Exact session directory ID; select it to copy"
+        header.addSubview(idField)
+        self.sessionIDField = idField
+
+        let copyID = NSButton(title: "Copy ID", target: self, action: #selector(copySessionIDTapped))
+        copyID.bezelStyle = .rounded
+        copyID.frame = NSRect(x: 324, y: 5, width: 78, height: 28)
+        copyID.toolTip = "Copy the exact session ID"
+        copyID.autoresizingMask = [.maxXMargin]
+        header.addSubview(copyID)
+        self.copySessionIDButton = copyID
+
+        let wv = WKWebView(frame: NSRect(x: 0, y: 0,
+                                        width: content.bounds.width,
+                                        height: content.bounds.height - headerHeight))
         wv.autoresizingMask = [.width, .height]
         wv.navigationDelegate = self
 
@@ -105,6 +135,8 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         log.detach()
         webView = nil
         picker = nil
+        sessionIDField = nil
+        copySessionIDButton = nil
         evaluateButton = nil
         loaded = false
         pending = []
@@ -134,6 +166,7 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         if let idx = sessions.firstIndex(where: { $0.isCurrent }) {
             picker?.selectItem(at: idx)
         }
+        refreshSessionID()
         refreshEvaluateButtonState()
     }
 
@@ -141,7 +174,24 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         guard let idx = picker?.indexOfSelectedItem, sessions.indices.contains(idx) else { return }
         let s = sessions[idx]
         if s.isCurrent { loadCurrent() } else { loadPast(s) }
+        refreshSessionID()
         refreshEvaluateButtonState()
+    }
+
+    private func refreshSessionID() {
+        guard let idx = picker?.indexOfSelectedItem, sessions.indices.contains(idx) else {
+            sessionIDField?.stringValue = ""
+            copySessionIDButton?.isEnabled = false
+            return
+        }
+        sessionIDField?.stringValue = sessions[idx].id
+        copySessionIDButton?.isEnabled = true
+    }
+
+    @objc private func copySessionIDTapped() {
+        guard let idx = picker?.indexOfSelectedItem, sessions.indices.contains(idx) else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(sessions[idx].id, forType: .string)
     }
 
     /// Coaching started or stopped (AppDelegate calls this from Start/Stop): the live session just

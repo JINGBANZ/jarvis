@@ -78,11 +78,14 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     private func makeDriver(brain: BrainClient, summarizer: BrainClient? = nil,
                             screen: ScreenCapturing = FakeScreen(),
                             overlay: OverlayRendering = FakeOverlay(),
-                            clock: Clock, config: Config = .default) -> (CoachDriver, RollingTranscript) {
+                            clock: Clock, config: Config = .default,
+                            onBrainFailure: (@Sendable (String) -> Void)? = nil)
+        -> (CoachDriver, RollingTranscript) {
         let transcript = RollingTranscript()
         let driver = CoachDriver(
             config: config, transcript: transcript,
-            brain: brain, summarizer: summarizer, screen: screen, overlay: overlay, clock: clock
+            brain: brain, summarizer: summarizer, screen: screen, overlay: overlay, clock: clock,
+            onBrainFailure: onBrainFailure
         )
         return (driver, transcript)
     }
@@ -643,6 +646,18 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(await driver.handleTrigger(.turnEnd) == .brainError)
     }
 
+    @Test func brainErrorReportsTheFailureReason() async {
+        let recorder = BrainFailureRecorder()
+        let (driver, transcript) = makeDriver(
+            brain: ThrowingBrain(), clock: ManualClock(now: 0),
+            onBrainFailure: { recorder.record($0) }
+        )
+        transcript.append(.init(speaker: .me, text: "please help with this problem", at: 0))
+
+        #expect(await driver.handleTrigger(.turnEnd) == .brainError)
+        #expect(recorder.messages == ["test brain failed"])
+    }
+
     /// Audio-driven turns REQUIRE a tool call (never free text): the model picks which tool from the
     /// prompt — reply, look at the screen, or stay_silent — but must answer with one of them.
     @Test func everyAudioTurnRequiresAToolCall() async {
@@ -676,8 +691,17 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 /// A brain that always throws, to exercise the `.brainError` outcome.
 final class ThrowingBrain: BrainClient, @unchecked Sendable {
     func respond(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice) async throws -> BrainResponse {
-        throw NSError(domain: "test", code: 401)
+        throw NSError(domain: "test", code: 401,
+                      userInfo: [NSLocalizedDescriptionKey: "test brain failed"])
     }
+}
+
+/// Lock-guarded because `CoachDriver`'s failure callback is `@Sendable`.
+final class BrainFailureRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var recorded: [String] = []
+    var messages: [String] { lock.lock(); defer { lock.unlock() }; return recorded }
+    func record(_ message: String) { lock.lock(); recorded.append(message); lock.unlock() }
 }
 
 /// A brain that parks inside `respond` until released, so a second concurrent trigger can be

@@ -24,16 +24,18 @@ not acknowledge audio appends; server audio-clock progress retires only a safe p
 replacement socket replays the rest after a half-open failure. A live Wi-Fi reconnect run confirms
 that speech captured during the outage returns after recovery. The brain can also run through a
 locally installed Claude Code or Codex CLI on the user's subscription; Settings → Brain auto-detects
-those providers and keeps the OpenAI API-key path available.
+those providers, reports Claude's current sign-in state from its bounded status command, and keeps
+the OpenAI API-key path available. A failed CLI coaching request surfaces the provider error and
+stops the unusable session instead of leaving the listening state green.
 
 ## Next action
 
 Run the live prompt smoke on a fresh session: show an interview question without speaking its
 details, ask “Jarvis, how can I solve this in one pass?”, and confirm the first action is
 exactly one `capture_screen` followed by a screen-specific reply. Then ask a fully stated behavioral
-question and confirm it can answer without an unnecessary capture. Finish the remaining in-app CLI provider
-smoke: select a detected Claude Code or Codex provider, confirm a coaching turn and screen request,
-and confirm a missing CLI fails Start loudly. The standard release checklist remains in
+question and confirm it can answer without an unnecessary capture. Finish the in-app Claude Code
+provider smoke: confirm Settings shows it signed in, then confirm a coaching turn and screen request.
+Also confirm a missing or signed-out CLI fails loudly. The standard release checklist remains in
 [build-and-run.md](./build-and-run.md).
 
 ## Built
@@ -43,7 +45,7 @@ thin OS shell, verified by the smoke run.
 
 - `Sources/JarvisCore/Audio/` — transactional PCM + utterance buffering, adaptive content-free activity detection, non-destructive AEC reference alignment, and system-audio timeline preservation (`PCMBuffer`, `UtteranceBuffer`, `PCM16Framer`, `AudioDownmix`, `AdaptiveAudioActivityDetector`, `EchoReferenceAlignment`, `SystemAudioTimeline`).
 - `Sources/JarvisCore/Transcription/` — realtime session wire contract, per-item event ledger, and rolling transcript (`RealtimeSession`, `RealtimeTranscriptionLedger`, `Transcript`, `NoiseReduction`).
-- `Sources/JarvisCore/Brain/` — the LLM integration: the `BrainClient` contract (`Brain`), `OpenAIBrainClient`, `CLIBrainClient` + `AgentCLIProcessRunner` + `AgentCLIDetector` (the local Claude Code / Codex brain providers), `RetryingBrainClient`, `BrainProvider`, `BrainModelCatalog` (default `gpt-5.5`), `ReasoningEffort`.
+- `Sources/JarvisCore/Brain/` — the LLM integration: the `BrainClient` contract (`Brain`), `OpenAIBrainClient`, `CLIBrainClient` + `AgentCLIProcessRunner` + `AgentCLIDetector`/`AgentCLIAuthenticationStatus` (the local Claude Code / Codex brain providers and sign-in state), `RetryingBrainClient`, `BrainProvider`, `BrainModelCatalog` (default `gpt-5.5`), `ReasoningEffort`.
 - `Sources/JarvisCore/Coach/` — the event loop: `CoachDriver`, `CoachHistory` (client-managed session memory), `ToolDefs` (coach tools + system prompt).
 - `Sources/JarvisCore/Triggers/` — turn/silence trigger detection, substance classification, and silence backoff (`Trigger`, `TurnSubstance`, `SilenceBackoff`).
 - `Sources/JarvisCore/Screen/` — the model-triggered screen-capture tool contract + window-scoped capture logic (`ScreenCapture`, `ScreenSnapshot`, `FrontWindowSelector`, `RecognizedTextLayout`).
@@ -51,11 +53,11 @@ thin OS shell, verified by the smoke run.
 - `Sources/JarvisCore/Config/` — config + owner-only secrets + brain/screen preferences (`Config`, `Secrets`, `BrainPreferences`, `ScreenCapturePreferences`, `ScreenCaptureScope`).
 - `Sources/JarvisCore/Diagnostics/` — logging, always-on activity log, privacy-preserving audio continuity evidence, session-history store, wire-level brain traffic capture + one-click session evaluation (single-call in-app **and** the agentic dev-side audit's prompt/transcript prep), user-facing errors (`ActivityLog`, `AudioContinuityWitness`, `SessionStore`, `BrainTrafficLog`, `SessionEvaluator`, `AgenticEvaluation`, `UserFacingError`).
 - `Sources/JarvisOverlay/` — the capture-invisible `NSPanel` surfaces: `OverlayCaptionPanel` (transient), `OverlayBoxPanel` (persistent), `NSPanel+CaptureExclusion`.
-- `Sources/JarvisApp/App/` + `MenuBar/` — entry point, connection-aware menu status, Start/Stop, `ErrorReporter` (severity-driven `NSAlert`).
+- `Sources/JarvisApp/App/` + `MenuBar/` — entry point, connection-aware menu status, Start/Stop, `ErrorReporter` (severity-driven `NSAlert`, including terminal CLI brain failures).
 - `Sources/JarvisApp/Capture/` — one-clock aggregate mic + sample-preserving system-audio capture with AEC3 echo cancellation + resampling (`AggregateEchoCapture`, `WebRTCEchoCanceller`, `Resampler`), Realtime item/readiness/liveness/transactional-reconnect/witness handling (`RealtimeTranscriber`, `NetworkPathDiagnostics`), permissions, plus the window-scoped screenshot + OCR edge (`WindowScopedScreenCapture`, `ScreenTextRecognizer`).
 - `Sources/JarvisApp/Settings/` — the unified Settings window (`SettingsWindow` hosting Brain (provider + model + API key) / Overlay / Screen / Activity sections).
 - `Sources/JarvisApp/Shortcuts/HotkeyController.swift` — the global Carbon ⌥⌘J on-demand-hint hotkey.
-- `Sources/JarvisApp/Viewer/ActivityViewer.swift` — the in-app `WKWebView` activity viewer, with the one-click **Evaluate** session audit.
+- `Sources/JarvisApp/Viewer/ActivityViewer.swift` — the in-app `WKWebView` activity viewer, with an exact selectable/copyable session ID and the one-click **Evaluate** session audit.
 - `Sources/EvalPrep/main.swift` — the Foundation-only CLI half of the agentic session audit; `scripts/eval-session.sh` drives it through an agentic CLI (`claude -p` / `codex exec`) over the repo + session dir (see the 2026-07-17 [decision](./decisions.md)).
 - `Sources/CJarvisAEC/lib/libjarvis-aec.a` — the prebuilt, zero-dylib WebRTC AEC3 C edge (the `CJarvisAEC` target; rebuilt by `scripts/build-aec.sh`).
 - `.github/workflows/release.yml` + `scripts/package-app.sh` — automated releases: release-please Release PR → Developer ID-signed, notarized, stapled `Jarvis-<version>.zip` attached to a GitHub Release ([build-and-run.md → Distribution](./build-and-run.md#distribution--signed-notarized-releases-from-ci)).

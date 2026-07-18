@@ -47,11 +47,24 @@ import Testing
     }
 
     @Test func brainCLISignInUnconfirmedStaysQuiet() {
-        // The heuristic marker (Claude, Keychain-only credentials) can false-negative, so this must
-        // warn without blocking the session.
+        // A failed/timed-out probe is unknown rather than proof of logout, so warn without blocking.
         let e = UserFacingError.brainCLISignInUnconfirmed(provider: "Claude Code")
         #expect(e.severity == .degraded)
         #expect(!e.severity.showsAlert)
         #expect(!e.severity.stopsSession)
+    }
+
+    @Test func brainCLIRuntimeFailureAlertsStopsAndExplainsRecovery() {
+        let e = UserFacingError.brainCLIStopped(
+            provider: "Claude Code",
+            signInCommand: "claude auth login",
+            reason: "OAuth session expired"
+        )
+        #expect(e.severity == .fatal)
+        #expect(e.severity.showsAlert)
+        #expect(e.severity.stopsSession)
+        #expect(e.title.contains("Claude Code"))
+        #expect(e.message.contains("OAuth session expired"))
+        #expect(e.message.contains("claude auth login"))
     }
 }

@@ -6,11 +6,11 @@ import JarvisCore
 /// active, and the OpenAI API key — one tab, because the four choices are one decision. The model
 /// list is per provider (each remembers its own); the effort is one global setting applied to all
 /// three, mapped onto each CLI's scale by `CLIBrainClient`. Installed CLIs are auto-detected
-/// (re-probed every time the tab is shown, it's pure file checks), so switching to one is a single
-/// radio click. Selections persist immediately through `BrainPreferences`; changes take effect on
-/// the next Start, since the brain client is built once per coaching run. The transcription model
-/// is deliberately NOT here; it's a separate concern — which is also why the key stays required:
-/// transcription always runs on it.
+/// whenever the tab is shown; Claude's bounded status command distinguishes signed in, signed out,
+/// and an unavailable probe. Selections persist immediately through `BrainPreferences`; changes
+/// take effect on the next Start, since the brain client is built once per coaching run. The
+/// transcription model is deliberately NOT here; it's a separate concern — which is also why the
+/// key stays required: transcription always runs on it.
 @MainActor
 final class BrainSection: NSObject, SettingsSection {
     let title = "Brain"
@@ -102,8 +102,7 @@ final class BrainSection: NSObject, SettingsSection {
         return view
     }
 
-    /// Re-probe on every show: instant (file checks only), and it catches a CLI installed or signed
-    /// in while the app was already running.
+    /// Re-probe on every show so an install or sign-in completed while the app was open appears.
     func didBecomeActive() {
         refreshDetection()
     }
@@ -112,12 +111,17 @@ final class BrainSection: NSObject, SettingsSection {
     /// selected provider.
     private func refreshDetection() {
         let selected = preferences.provider
+        let detected = Dictionary(uniqueKeysWithValues: detector.detectAll().map { ($0.provider, $0) })
         for (provider, radio) in radios {
             var title = provider.displayName
             var enabled = true
             if provider.usesLocalCLI {
-                if let cli = detector.detect(provider) {
-                    title += cli.authenticated ? " — detected, signed in" : " — detected"
+                if let cli = detected[provider] {
+                    switch cli.authenticationStatus {
+                    case .signedIn: title += " — detected, signed in"
+                    case .signedOut: title += " — detected, signed out"
+                    case .unknown: title += " — detected, sign-in unknown"
+                    }
                 } else {
                     title += " — not installed"
                     enabled = false
@@ -130,8 +134,15 @@ final class BrainSection: NSObject, SettingsSection {
             radio.state = provider == selected ? .on : .off
         }
         var note = Self.note(for: selected)
-        if selected.usesLocalCLI, let cli = detector.detect(selected), !cli.authenticated {
-            note += " Couldn't confirm it's signed in — run the CLI once if turns fail."
+        if selected.usesLocalCLI, let cli = detected[selected] {
+            switch cli.authenticationStatus {
+            case .signedIn:
+                break
+            case .signedOut:
+                note += " Sign in through the CLI before starting Jarvis."
+            case .unknown:
+                note += " Couldn't check its sign-in status — run the CLI once if turns fail."
+            }
         }
         providerNote?.stringValue = note
         reloadModels(for: selected)
