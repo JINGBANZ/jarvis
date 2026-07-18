@@ -19,10 +19,44 @@ import Testing
         #expect(speakTool.parametersJSON.contains("\"additionalProperties\":false"))
     }
 
-    @Test func coachPromptMentionsCaptureAndBrevity() {
+    @Test func coachToolsDescribeCaptureAndOverlayContracts() {
         #expect(coachSystemPrompt.contains("capture_screen"))
-        #expect(coachSystemPrompt.contains("3"))
-        #expect(coachSystemPrompt.contains("line"))   // brevity is now framed as overlay lines
+        #expect(captureScreenTool.description.contains("one fresh result satisfies that request"))
+        #expect(speakTool.description.contains("up to 3 short standalone overlay lines"))
+        #expect(staySilentTool.description.contains("default for unsolicited turns"))
+    }
+
+    @Test func coachPromptRequiresMissingVisibleContextBeforeSpeaking() {
+        #expect(coachSystemPrompt.contains("Screen gate: before speaking, capture"))
+        #expect(coachSystemPrompt.contains("absent from the conversation"))
+        #expect(coachSystemPrompt.contains("This gate applies to either speaker"))
+        #expect(coachSystemPrompt.contains("Never guess missing content"))
+        #expect(coachSystemPrompt.contains("one pass\" without the problem"))
+    }
+
+    @Test func coachPromptTreatsFreshCaptureAsSatisfyingScreenGate() {
+        #expect(coachSystemPrompt.contains("A fresh screenshot or OCR in the current input"))
+        #expect(coachSystemPrompt.contains("A fresh capture result satisfies the screen gate"))
+        #expect(coachSystemPrompt.contains("do not capture again"))
+        #expect(coachSystemPrompt.contains("the same request"))
+    }
+
+    @Test func coachPromptRequiresOneActionPerModelResponse() {
+        #expect(coachSystemPrompt.contains("one action on each model response"))
+        #expect(!coachSystemPrompt.contains("one tool call each turn"))
+    }
+
+    @Test func coachContextCoversTechnicalInterviewFormatsWithoutBrandNarrowing() {
+        let modelContext = captureScreenTool.description + coachSystemPrompt
+        #expect(modelContext.contains("behavioral"))
+        #expect(modelContext.contains("system-design"))
+        #expect(modelContext.contains("coding"))
+        #expect(!modelContext.lowercased().contains("leetcode"))
+    }
+
+    @Test func coachPromptHasOneConsistentFullSolutionRule() {
+        #expect(coachSystemPrompt.contains("Give a full solution only when \"me\" explicitly asks"))
+        #expect(!coachSystemPrompt.contains("never the whole answer"))
     }
 
     /// Silence is a TOOL now: the prompt must direct the model to stay_silent (never free text),

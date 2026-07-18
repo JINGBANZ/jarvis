@@ -33,6 +33,7 @@
 - **Chose:** A single coaching mode, no tiers.
 - **Why:** Scope discipline for the MVP.
 - **Detail:** [architecture.md §6](./architecture.md#6-non-goals-v1).
+- **Superseded by:** 2026-07-18 — Technical-interview context is broad and screen-dependent.
 
 ### 2026-06-13 — Model-triggered `capture_screen`
 
@@ -435,3 +436,22 @@
 - **Chose:** "Open report" renders the saved `eval-report.md` to a self-contained `eval-report.html` beside it (`EvalReportPage`, a deliberate-subset markdown renderer in Core) and hands the page to the default browser; the page's **Copy as Markdown** button carries the raw report so it can be pasted into an agent chat to work on the findings. The markdown remains the only thing evaluators produce; the HTML is a derived view regenerated on every open (so an agentic re-audit that rewrites the `.md` can never leave a stale page). All report content is HTML-escaped — the report is LLM output and must not be able to inject script into a local page.
 - **Rejected:** (a) The prior in-app `NSTextView` window — raw markdown as monospace text; readable but unrendered, and copy meant select-all. (b) Having evaluators emit HTML directly — agents consume markdown, and two authored formats drift. (c) A real markdown dependency (swift-markdown/cmark) — a dependency for a report page whose imperfect corners are always recoverable from the embedded raw markdown fails the no-new-dependencies bar.
 - **Detail:** `Sources/JarvisCore/Diagnostics/EvalReportPage.swift`; opened by `ActivityViewer.openReport` and `scripts/eval-session.sh` (via `EvalPrep --html`).
+
+### 2026-07-18 — Technical-interview context is broad and screen-dependent
+
+- **Chose:** One technical-interview coach covers behavioral, system-design, and coding questions.
+  When a specific answer depends on visible context missing from the conversation — including an
+  unresolved reference such as “this” — the prompt uses a screen gate: `capture_screen` before
+  `speak`, with one fresh screenshot/OCR satisfying that request. Each model response chooses one
+  action, allowing the intended capture-then-answer tool loop without repeated captures.
+- **Why:** In a live session, “How can I solve this in one pass?” triggered a generic coding answer
+  because the prompt required capture only for explicit look-at-screen requests. The visible problem
+  was the missing referent, and a coding-platform-specific persona also understated the intended
+  interview scope.
+- **Rejected:** (a) Capturing before every direct answer — fully stated behavioral, system-design,
+  and coding questions do not need vision. (b) Recapturing after a fresh result. (c) A longer prompt
+  that repeats tool protocol already expressed by the tool definitions. (d) A coding-platform-
+  specific coaching identity.
+- **Supersedes:** 2026-06-13 — One mode for v1: LeetCode Coach.
+- **Detail:** [architecture.md §2](./architecture.md#2-core-loop),
+  `Sources/JarvisCore/Coach/ToolDefs.swift`.
