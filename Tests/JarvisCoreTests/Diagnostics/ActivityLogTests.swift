@@ -10,6 +10,7 @@ import Foundation
         #expect(ActivityLog.cssClass(for: "🤫 quiet for 8s") == "hear")
         #expect(ActivityLog.cssClass(for: "💭 thinking…") == "think")
         #expect(ActivityLog.cssClass(for: "… nothing useful to add, staying silent") == "think")
+        #expect(ActivityLog.cssClass(for: "⏹ coaching stopped — Claude Code couldn't respond") == "think")
         #expect(ActivityLog.cssClass(for: "Jarvis realtime error event: oops") == "err")
         #expect(ActivityLog.cssClass(for: "Jarvis: coaching started.") == "")
         // A spoken tip can legitimately contain "failed"; it must stay a 💬 say line.
@@ -101,6 +102,23 @@ import Foundation
         #expect(jsonl.contains(#"heard (them): \"How would you optimize it?\""#))
         #expect(!jsonl.contains("item"))
         #expect(!jsonl.contains("recovered"))
+    }
+
+    @Test func coachingStoppedPersistsOnlyADiscreetHumanFacingNotice() throws {
+        let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
+        let log = ActivityLog(); log.enable(directory: dir)
+        log.record(.coachingStopped(provider: .claudeCode))
+        let snapshot = log.attach { _ in }
+
+        let row = try #require(snapshot.rows.first)
+        #expect(row.contains("coaching stopped"))
+        #expect(row.contains("Claude Code"))
+        #expect(row.contains("Settings"))
+        #expect(!row.contains("OAuth"))
+        #expect(ActivityLog.isHumanFacing(
+            message: "⏹ coaching stopped — Claude Code couldn't respond; check Settings → Brain",
+            imageFile: nil
+        ))
     }
 
     /// Shared temp-dir helper (also used by SessionStoreTests). Owner-only dir, like the real app.

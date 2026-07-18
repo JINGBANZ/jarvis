@@ -54,14 +54,14 @@ import Testing
         #expect(!e.severity.stopsSession)
     }
 
-    @Test func brainCLIRuntimeFailureAlertsStopsAndExplainsRecovery() {
+    @Test func brainCLIRuntimeFailureStopsQuietlyAndKeepsDiagnosticRecoveryDetail() {
         let e = UserFacingError.brainCLIStopped(
             provider: "Claude Code",
             signInCommand: "claude auth login",
             reason: "OAuth session expired"
         )
-        #expect(e.severity == .fatal)
-        #expect(e.severity.showsAlert)
+        #expect(e.severity == .terminal)
+        #expect(!e.severity.showsAlert)
         #expect(e.severity.stopsSession)
         #expect(e.title.contains("Claude Code"))
         #expect(e.message.contains("OAuth session expired"))

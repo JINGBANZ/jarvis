@@ -13,6 +13,11 @@ import Testing
         #expect(!UserFacingError.Severity.warning.stopsSession)
     }
 
+    @Test func terminalStopsWithoutAlert() {
+        #expect(!UserFacingError.Severity.terminal.showsAlert)
+        #expect(UserFacingError.Severity.terminal.stopsSession)
+    }
+
     @Test func degradedNeitherAlertsNorStops() {
         #expect(!UserFacingError.Severity.degraded.showsAlert)
         #expect(!UserFacingError.Severity.degraded.stopsSession)

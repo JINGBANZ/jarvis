@@ -250,6 +250,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if brainProvider.usesLocalCLI {
             let signInCommand = brainProvider == .claudeCode ? "claude auth login" : "codex login"
             onBrainFailure = { [errorReporter] reason in
+                // Preserve ghost mode: the fixed Activity notice is enough for the human-facing
+                // record; the provider's detailed failure stays in jarvis-debug.log below.
+                ActivityLog.shared.record(.coachingStopped(provider: brainProvider))
                 errorReporter.report(.brainCLIStopped(provider: brainProvider.displayName,
                                                        signInCommand: signInCommand,
                                                        reason: reason))

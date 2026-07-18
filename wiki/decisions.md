@@ -462,15 +462,18 @@
 - **Chose:** Keep CLI binary discovery as file probes, but determine Claude Code authentication by
   running its non-billing `claude auth status --json` command under a short timeout. Model the result
   as signed in, signed out, or unknown; Settings shows all three, Start refuses only a confirmed
-  logout, and an actual coaching failure still stops the unusable session loudly. Codex continues to
-  use its auth-file marker.
+  logout, and an actual coaching failure stops the unusable session without activating the app. A
+  fixed provider-only Activity notice explains that coaching stopped; the detailed error remains in
+  `jarvis-debug.log`. Codex continues to use its auth-file marker.
 - **Why:** Session `2026-07-18_15-25-46_366D` had an expired OAuth session, but the persistent
   `oauthAccount` metadata made Settings claim Claude was signed in. Claude's own status command reads
   its real credential store without making a model request and correctly distinguishes that stale
   marker from a working login.
 - **Rejected:** (a) Trusting the account marker as signed in — it caused the false status. (b) Treating
   every failed probe as signed out — a slow or broken executable is unknown, not proof of logout.
-  (c) Making a model request as preflight — it bills usage and duplicates the first real turn.
+  (c) Making a model request as preflight — it bills usage and duplicates the first real turn. (d)
+  Showing a modal alert for a mid-session failure — activating Jarvis can expose it during screen
+  sharing and breaks the app's ghost behavior.
 - **Supersedes in part:** 2026-07-16 — Local Claude Code / Codex CLIs as alternative brain providers.
 - **Detail:** [settings-window.md → Brain](./settings-window.md#brain),
   `Sources/JarvisCore/Brain/AgentCLIDetector.swift`.

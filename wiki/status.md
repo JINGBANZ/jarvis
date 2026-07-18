@@ -25,8 +25,9 @@ replacement socket replays the rest after a half-open failure. A live Wi-Fi reco
 that speech captured during the outage returns after recovery. The brain can also run through a
 locally installed Claude Code or Codex CLI on the user's subscription; Settings → Brain auto-detects
 those providers, reports Claude's current sign-in state from its bounded status command, and keeps
-the OpenAI API-key path available. A failed CLI coaching request surfaces the provider error and
-stops the unusable session instead of leaving the listening state green.
+the OpenAI API-key path available. A failed CLI coaching request stops the unusable session without
+activating the app, leaves a discreet provider-only Activity notice, and keeps the detailed reason
+in `jarvis-debug.log` instead of leaving the listening state green.
 
 ## Next action
 

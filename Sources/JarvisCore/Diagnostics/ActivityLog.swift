@@ -1,9 +1,10 @@
 import Foundation
 
-/// The model behind the human-facing activity viewer. It records only the coaching exchange — heard
-/// speech, manual hint requests, screens Jarvis viewed, and tips Jarvis gave — then pushes those
+/// The model behind the human-facing activity viewer. It records the coaching exchange — heard
+/// speech, manual hint requests, screens Jarvis viewed, and tips Jarvis gave — plus a fixed,
+/// non-sensitive notice when coaching must stop without interrupting the user. It pushes those
 /// entries into an in-app `WKWebView` window (see `ActivityViewer` in JarvisApp) and persists them so
-/// past sessions can be browsed later. Diagnostics belong exclusively in `JarvisLog`.
+/// past sessions can be browsed later. Detailed diagnostics belong exclusively in `JarvisLog`.
 ///
 /// This type is UI-free (Foundation only): it generates the page HTML and the per-row JS as plain
 /// strings; the WebView lives in JarvisApp. See wiki/build-and-run.md.
@@ -11,8 +12,8 @@ public final class ActivityLog: @unchecked Sendable {
     public static let shared = ActivityLog()
 
     /// A human-visible event in the coaching exchange. Keeping this closed set typed prevents
-    /// lifecycle, transport, retry, error, and other diagnostic strings from leaking into the
-    /// activity viewer through a generic logging call.
+    /// transport, retry, error details, and other diagnostic strings from leaking into the activity
+    /// viewer through a generic logging call.
     public enum Event: Sendable {
         /// A finalized utterance from the user (`me`) or interviewer (`them`).
         case heard(speaker: Speaker, text: String)
@@ -22,6 +23,10 @@ public final class ActivityLog: @unchecked Sendable {
         case screenViewed(imageBase64JPEG: String)
         /// Jarvis displayed these coaching lines to the user.
         case tip(lines: [String])
+        /// Coaching ended because the selected brain could not respond. Carries only the provider,
+        /// never the raw error, so the notice cannot expose provider diagnostics during screen
+        /// sharing.
+        case coachingStopped(provider: BrainProvider)
     }
 
     /// One recorded line. `imageFile` is the relative `shot-N.jpg` name on disk (the bytes the DOM
@@ -115,6 +120,9 @@ public final class ActivityLog: @unchecked Sendable {
         case .tip(let lines):
             message = "💬 \(lines.joined(separator: " "))"
             imageBase64 = nil
+        case .coachingStopped(let provider):
+            message = "⏹ coaching stopped — \(provider.displayName) couldn't respond; check Settings → Brain"
+            imageBase64 = nil
         }
         queue.async { [self] in
             guard let dir else { return }
@@ -206,6 +214,7 @@ public final class ActivityLog: @unchecked Sendable {
         if m.hasPrefix("👁") { return "see" }
         if m.hasPrefix("🗣") || m.hasPrefix("🤫") { return "hear" }
         if m.hasPrefix("💭") || m.hasPrefix("…") { return "think" }
+        if m.hasPrefix("⏹ coaching stopped") { return "think" }
         let low = m.lowercased()
         if low.contains("error") || low.contains("failed") || low.contains("denied") { return "err" }
         return ""
@@ -218,6 +227,7 @@ public final class ActivityLog: @unchecked Sendable {
         let m = message.trimmingCharacters(in: .whitespaces)
         return m.hasPrefix("🗣 heard") || m.hasPrefix("⌨️ hint shortcut")
             || m.hasPrefix("👁 looking at your screen") || m.hasPrefix("💬")
+            || m.hasPrefix("⏹ coaching stopped")
     }
 
     /// The empty page shell: dark theme, a header with a live count, the row container, the lightbox

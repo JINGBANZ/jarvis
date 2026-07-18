@@ -114,8 +114,9 @@ known install dirs, while Claude sign-in uses its non-billing `auth status --jso
 short timeout because account metadata can outlive an expired OAuth session. Codex keeps using its
 auth-file marker. The radios show **signed in**, **signed out**, or **sign-in unknown**; a confirmed
 logout refuses Start, while an unavailable probe warns but does not falsely claim logout. An actual
-CLI request can still fail after preflight; Jarvis then shows the provider error and stops the
-unusable coaching session with the provider's sign-in command.
+CLI request can still fail after preflight; Jarvis then stops the unusable coaching session without
+activating the app, adds a discreet provider-only notice to Activity, and keeps the detailed error
+and sign-in command in `jarvis-debug.log`.
 
 **Model + effort.** A **Model** dropdown drawn from `BrainModelCatalog` per provider (OpenAI ids for
 the API; CLI aliases like `sonnet` for the CLIs, plus a "CLI default" entry meaning "no model flag" —

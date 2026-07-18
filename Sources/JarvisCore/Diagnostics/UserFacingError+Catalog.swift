@@ -40,14 +40,14 @@ public extension UserFacingError {
               severity: .degraded)
     }
 
-    /// The selected CLI passed preflight but an actual coaching request failed.
-    /// The session cannot coach, so fail loudly and stop instead of leaving the listening indicator
-    /// green while every later turn is discarded.
+    /// The selected CLI passed preflight but an actual coaching request failed. The session cannot
+    /// coach, so stop without activating the app; the Activity log gets a discreet fixed notice and
+    /// the detailed reason stays in diagnostics.
     static func brainCLIStopped(provider: String, signInCommand: String,
                                 reason: String) -> UserFacingError {
         .init(title: "\(provider) couldn't respond",
               message: "\(reason)\n\nCoaching has stopped. Run \u{201C}\(signInCommand)\u{201D} in Terminal, or choose another brain provider in Settings \u{2192} Brain, then Start again.",
-              severity: .fatal)
+              severity: .terminal)
     }
 
     /// Audio capture couldn't be built or started. `reason` is the human-readable cause from the capture
