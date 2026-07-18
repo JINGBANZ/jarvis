@@ -217,7 +217,9 @@ public enum EvalReportPage {
                                    options: .regularExpression)
         s = s.replacingOccurrences(of: "\\*\\*([^*]+)\\*\\*", with: "<strong>$1</strong>",
                                    options: .regularExpression)
-        s = s.replacingOccurrences(of: "\\[([^\\]]+)\\]\\(([^)\\s\"]+)\\)",
+        // http(s) only: the report is LLM output, so an active scheme (javascript:, data:,
+        // file:) must never become a live href — anything else stays escaped literal text.
+        s = s.replacingOccurrences(of: "\\[([^\\]]+)\\]\\((https?://[^)\\s\"]+)\\)",
                                    with: "<a href=\"$2\">$1</a>",
                                    options: .regularExpression)
         return s

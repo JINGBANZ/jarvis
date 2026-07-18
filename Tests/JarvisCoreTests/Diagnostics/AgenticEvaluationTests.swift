@@ -49,4 +49,22 @@ import Foundation
         #expect(!FileManager.default.fileExists(
             atPath: dir.appendingPathComponent(AgenticEvaluation.transcriptFilename).path))
     }
+
+    /// A transcript that can't be written must abort the audit — the prompt promises the agent the
+    /// transcript exists, so proceeding would spend an agentic run on a missing/stale file.
+    @Test func prepareThrowsWhenTranscriptCannotBeWritten() throws {
+        let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
+        let traffic = BrainTrafficLog(); traffic.enable(directory: dir)
+        traffic.record(tag: "coach",
+                       request: Data(#"{"model":"gpt-5.5","input":[]}"#.utf8),
+                       response: Data(#"{"status":"completed","output":[]}"#.utf8),
+                       status: 200, latencyMs: 300)
+        // A directory squatting on the transcript path makes createFile fail.
+        try FileManager.default.createDirectory(
+            at: dir.appendingPathComponent(AgenticEvaluation.transcriptFilename),
+            withIntermediateDirectories: false)
+        #expect(throws: (any Error).self) {
+            try AgenticEvaluation.prepare(sessionDir: dir)
+        }
+    }
 }

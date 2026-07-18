@@ -23,9 +23,11 @@ cd "$(dirname "$0")/.."
 # under the workspace-local .jarvis/ (where the app writes per-session logs).
 SESSION_DIR="${1:-}"
 if [[ -z "$SESSION_DIR" ]]; then
-  for d in .jarvis/*/; do   # portable newest-dir pick (GNU and BSD stat disagree on flags)
-    [[ -d "$d" ]] || continue
-    [[ -z "$SESSION_DIR" || "$d" -nt "$SESSION_DIR" ]] && SESSION_DIR="$d"
+  # Newest session by *name*: ids are sortable timestamps (2026-06-16_10-00-00_xxxx), and the
+  # glob is lexicographic, so the last match is the latest session. Mtime would lie here — merely
+  # re-auditing an old session (or regenerating its HTML) bumps its directory mtime.
+  for d in .jarvis/*/; do
+    [[ -d "$d" ]] && SESSION_DIR="$d"
   done
   if [[ -z "$SESSION_DIR" ]]; then
     echo "no session directory found under .jarvis/ — pass one explicitly" >&2
@@ -62,9 +64,17 @@ REPORT_TMP="$REPORT.tmp"
 trap 'rm -f "$REPORT_TMP"' EXIT
 rm -f "$REPORT_TMP"
 (umask 077; : > "$REPORT_TMP")
+# Both CLIs run read-only and stateless, mirroring the CLIBrainClient posture: the audit only
+# reads and prints, so a prompt-injected transcript/report must not be able to edit the checkout
+# (`--permission-mode plan` / `--sandbox read-only`), and no copy of the audit context may land
+# in the CLIs' own session stores (`--no-session-persistence` / `--ephemeral`). `--add-dir`
+# grants claude the session dir, which can live outside the repo (explicit path, app-default
+# Application Support location); codex's read-only sandbox already permits reads there.
 case "$AGENT" in
-  claude) claude -p "$PROMPT" > "$REPORT_TMP" ;;
-  codex)  codex exec --ephemeral "$PROMPT" > "$REPORT_TMP" ;;
+  # NB: the prompt must directly follow -p — --add-dir is variadic and would swallow it.
+  claude) claude -p "$PROMPT" --no-session-persistence --permission-mode plan \
+                 --add-dir "$SESSION_DIR" > "$REPORT_TMP" ;;
+  codex)  codex exec --ephemeral --sandbox read-only "$PROMPT" > "$REPORT_TMP" ;;
   *)      echo "unknown EVAL_AGENT: $AGENT (expected 'claude' or 'codex')" >&2; exit 2 ;;
 esac
 mv "$REPORT_TMP" "$REPORT"

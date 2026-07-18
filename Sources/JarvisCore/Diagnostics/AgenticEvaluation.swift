@@ -37,9 +37,12 @@ public enum AgenticEvaluation {
         guard !transcript.isEmpty else { throw SessionEvaluator.EvaluationError.noTraffic }
 
         let transcriptURL = sessionDir.appendingPathComponent(transcriptFilename)
-        _ = FileManager.default.createFile(
+        // A failed write must abort: the prompt tells the agent the transcript is its primary
+        // input, so silently proceeding would spend a whole agentic run on a missing/stale file.
+        guard FileManager.default.createFile(
             atPath: transcriptURL.path,
             contents: Data(transcript.utf8), attributes: [.posixPermissions: 0o600])
+        else { throw CocoaError(.fileWriteUnknown) }
 
         return prompt(sessionDirPath: sessionDir.path)
     }

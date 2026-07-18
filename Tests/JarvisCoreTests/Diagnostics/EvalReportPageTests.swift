@@ -51,6 +51,20 @@ struct EvalReportPageTests {
         #expect(body.contains(#"<a href="https://example.com/x">docs</a>"#))
     }
 
+    /// Only http(s) may become a live href — the report is LLM output, so an active scheme in a
+    /// markdown link must stay inert text.
+    @Test func unsafeLinkSchemesNeverBecomeHrefs() {
+        let body = EvalReportPage.body(from: """
+        [a](javascript:alert(1)) and [b](data:text/html;base64,x) and [c](file:///etc/passwd) \
+        but [ok](http://example.com)
+        """)
+        #expect(!body.contains(#"href="javascript:"#))
+        #expect(!body.contains(#"href="data:"#))
+        #expect(!body.contains(#"href="file:"#))
+        #expect(body.contains("[a](javascript:alert(1))"))   // left as escaped literal text
+        #expect(body.contains(#"<a href="http://example.com">ok</a>"#))
+    }
+
     // MARK: - Injection safety
 
     @Test func reportContentCannotInjectScript() {
