@@ -1,174 +1,115 @@
 # Jarvis
 
-**A personal, proactive AI assistant.** It watches and listens alongside you, and — when it judges
-it has something genuinely useful to add — speaks up **unprompted** with a short, well-timed tip.
-No hotkey, no prompting; the assistant decides when to help.
+Jarvis is a proactive macOS menu-bar coach for technical interviews. While a session is running, it
+follows the microphone and system-audio conversation, looks at the screen when visual context is
+needed, and shows short coaching tips in capture-invisible overlays.
 
-The guiding idea is *build the harness, not the intelligence*: the models already exist, so Jarvis
-is the thin layer of glue that wires perception (audio, screen) to a proactive voice.
+Coaching is proactive by default. Press **⌥⌘J** during a session when you want an immediate,
+screen-aware hint.
 
-## Use cases
-
-Jarvis is a general proactive-assistant harness; each concrete capability is a **use case** built on
-top of it. Today there is one. The list is meant to grow — the harness (perception → judgement → a
-proactive, unprompted voice) is designed to be reused across future use cases.
-
-### Technical interview coach (macOS) — *current focus*
-
-Jarvis hears you think aloud through behavioral, system-design, and coding questions. It looks at
-your screen on demand to read the current question, code, diagram, or notes, then proactively nudges
-you with short overlay tips — asking a pointed question or pointing at the next small step rather
-than dumping the answer. This is the first capability and what the current build targets; macOS and
-coaching are the *first step*, not the destination.
-
-Design docs live in [`wiki/`](./wiki/index.md) (start with [`wiki/status.md`](./wiki/status.md)).
-
-### More to come
-
-The same harness is meant to extend to other proactive scenarios; new use cases will be added here
-as they are designed and built.
+> Current implementation status and the next validation task live in
+> [`wiki/status.md`](./wiki/status.md). Start at the [`wiki index`](./wiki/index.md) for the design
+> documentation.
 
 ## How it works
 
-```
-  mic / system audio ──► Transcriber ──► rolling timestamped transcript
-                                              │  turn-end / silence
-                                              ▼
-                                         CoachDriver ──(brain + tools)──┐
-                                            ▲   │                       │
-                               capture_screen   │ speak(lines)          │
-                                            │   ▼                       │
-  screen ◄───────────────── ScreenTool ◄───┘  Overlay (on-screen) ◄─────┘
-```
-
-Audio streams continuously and cheaply into a transcript. The expensive steps — looking at the
-screen and speaking — happen **only when the model invokes a tool**, so the model itself governs
-cost. There's no cooldown or rate cap: every utterance reaches the brain and the brain decides
-whether to speak (restraint lives in the prompt); the manual Start/Stop is the only hard gate.
-Tips flash one line at a time in the **Overlay Caption**; the optional **Overlay Box** keeps the
-full, timestamped history. Each is switched on/off in the Settings → Overlay tab (caption off, box
-on by default). Both are hidden from screen capture.
-
-Nothing leaves the machine beyond the API calls; on disk, only an owner-only per-session **activity
-log** (the spoken tips, transcribed lines, and screenshots the model saw) is kept — pruned to the
-recent few and browsable live in **Settings → Activity**. The raw mic audio and live transcript are
-never archived. Full design: [`wiki/architecture.md`](./wiki/architecture.md); privacy posture:
-[`wiki/sandbox.md`](./wiki/sandbox.md).
-
-## Project structure
-
-```
-.
-├── Package.swift              # SwiftPM manifest (Swift 6, macOS 14+)
-├── CLAUDE.md                  # development rules for agents/humans working in the repo
-├── AGENTS.md                  # symlink → CLAUDE.md, for AGENTS.md-compatible tools
-├── Sources/
-│   ├── JarvisCore/            # the testable harness — Foundation-only, runs anywhere
-│   │   ├── Audio/                 # PCM + utterance buffering
-│   │   ├── Transcription/         # realtime session wire contract + rolling transcript
-│   │   ├── Coach/                 # the event loop: CoachDriver, brain client, tool defs
-│   │   ├── Triggers/              # turn / silence detection + silence backoff
-│   │   ├── Screen/                # screen-capture tool contract
-│   │   ├── Overlay/               # overlay text model + render fan-out (BroadcastOverlay)
-│   │   ├── Config/                # config + secrets (owner-only file)
-│   │   ├── Diagnostics/           # logging, activity log, session-history store
-│   │   └── Support/               # small primitives (Clock, TurnTaskBox)
-│   ├── JarvisOverlay/         # the on-screen NSPanels — own target so they're unit-testable
-│   │   ├── OverlayCaptionPanel.swift   # transient one-line coaching caption
-│   │   ├── OverlayBoxPanel.swift       # persistent, timestamped response-history box
-│   │   └── NSPanel+CaptureExclusion.swift  # shared screen-capture-exclusion helper
-│   └── JarvisApp/             # the macOS app shell — the native, OS-bound parts
-│       ├── App/                   # main.swift, AppDelegate
-│       ├── MenuBar/               # menu-bar item, Start/Stop, key entry
-│       ├── Capture/               # mic + system-audio capture, realtime transcriber, TCC priming
-│       └── Viewer/                # WKWebView activity viewer
-├── Tests/
-│   ├── JarvisCoreTests/      # unit + offline-pipeline tests (mirrors the Core subsystems)
-│   ├── JarvisOverlayTests/   # overlay + response-box behavior & screen-capture-invisibility checks
-│   └── JarvisViewerTests/    # WebKit end-to-end tests of the viewer HTML/JS
-├── Resources/Info.plist       # bundle id, mic usage string
-├── scripts/                   # build / run / test (see below)
-└── wiki/                      # design & decision docs (single source of truth)
+```text
+mic + system audio ──► realtime transcription ──► speaker-labeled transcript
+                                                        │ substantive turn / silence
+                                                        ▼
+                                                   CoachDriver
+                                                        │ selected brain
+                                  ┌─────────────────────┼──────────────────┐
+                                  ▼                     ▼                  ▼
+                           capture_screen          stay_silent          speak
+                                  │                                        │
+                         active window + OCR                 caption + overlay box
 ```
 
-The split is deliberate: **`JarvisCore`** holds all the logic (Foundation-only) and is unit-tested on
-any machine; **`JarvisOverlay`** is the AppKit overlay, split into its own target so its behavior is
-testable; **`JarvisApp`** is the thin macOS glue (menu bar, capture, permissions, activity viewer) verified
-by a live run. Folders are grouped **by subsystem**, following
-[`wiki/architecture.md`](./wiki/architecture.md). Working rules live in [`CLAUDE.md`](./CLAUDE.md).
+- Microphone and system audio are transcribed separately as `me` and `them`; WebRTC AEC3 reduces
+  speaker echo in the microphone stream.
+- Substantive turns and silence checks reach the coach. Empty and back-channel-only turns are skipped;
+  the model decides whether a useful tip warrants interrupting.
+- During proactive turns, screen capture is model-triggered. It captures the active window by default,
+  adds on-device OCR, and can instead target an entire display from **Settings → Screen**. The ⌥⌘J
+  shortcut captures immediately and forces a hint.
+- The coaching brain can use the OpenAI API or an installed Claude Code / Codex CLI. An OpenAI API key
+  is always required because realtime voice transcription still uses OpenAI.
+- The transient **Overlay Caption** is off by default; the persistent **Overlay Box** is on by default.
+  Both can be configured independently and are excluded from screen capture.
 
-## Scripts
+For the full loop and its design rationale, see
+[`wiki/architecture.md`](./wiki/architecture.md).
 
-| Script | What it does |
-|---|---|
-| `./scripts/run-tests.sh` | Build and run the unit + offline-pipeline tests (no key, no permissions needed). |
-| `./scripts/build-app.sh [release\|debug]` | Build, bundle, and sign `Jarvis.app` (defaults to `release`). Creates the stable `Jarvis Dev` signing identity automatically on first run. |
-| `./scripts/build-app.sh --run` | Same build, then launch the app. Per-session logs land in the workspace `.jarvis/`. |
-| `./scripts/eval-session.sh [session-dir]` | Audit a finished session with an agentic CLI (`claude -p` / `codex exec`) that reads the repo, not just the wire — writes `eval-report.md` plus a browsable `eval-report.html` (with a Copy-as-Markdown button) into the session dir. Defaults to the most recent `.jarvis/` session. Dev-side; needs Claude Code or Codex on `PATH`. |
+## Requirements
 
-## Develop locally
+- Apple silicon Mac running macOS 14 or later
+- Swift 6 and the macOS Command Line Tools; full Xcode is not required
+- An OpenAI API key
+- Microphone and Screen Recording permission
 
-No Xcode needed — **Swift 6 + the Command Line Tools** only.
+## Quick start
 
 ```bash
-swift build              # compile
-./scripts/run-tests.sh   # run the test suite (JarvisCore is fully testable here)
+./scripts/build-app.sh --run
 ```
 
-All the logic lives in `JarvisCore` precisely so you can iterate and test it without a Mac UI, a
-real API key, or granted permissions.
-
-## Quick start (run it on your Mac)
-
-```bash
-./scripts/build-app.sh --run   # build, sign, and launch Jarvis.app
-```
-
-On the **first** build macOS asks once to let `codesign` use a new key — click **"Always Allow"**.
-(Plain `./scripts/build-app.sh` builds without launching; then `open ./Jarvis.app`.)
+The first build creates a stable local `Jarvis Dev` signing identity. When macOS asks to let
+`codesign` use the key, choose **Always Allow** so permission grants persist across rebuilds.
 
 Then:
 
-1. **A ⚪️ Jarvis menu-bar item appears** (menu-bar-only app — no Dock icon). Always launch via
-   `open`, never the bare binary, or macOS misattributes the permission grants and they look "denied".
-2. **Grant Microphone and Screen Recording** when prompted on first run (System Settings → Privacy &
-   Security). They persist afterward.
-3. **Set your OpenAI API key** via the menu bar → **Settings… → Brain** (saved to an owner-only
-   file on this Mac; an `OPENAI_API_KEY` env var works as a headless fallback). The key is always
-   needed — voice transcription runs on it — even if you point the brain at a locally installed
-   Claude Code / Codex CLI on the same tab (auto-detected; billed to that subscription instead).
-   Upgrading from an older build that used the Keychain? Re-paste your key once (the file starts
-   empty); you can delete the orphaned Keychain entry with
-   `security delete-generic-password -s com.jarvis.coach`.
-4. **Start / Stop** coaching from the menu bar. Jarvis does **not** auto-start. The icon shows the
-   only two states: **⚪️ stopped** and **🟢 running**.
+1. Grant **Microphone** and **Screen Recording** when macOS prompts.
+2. Open the menu-bar item, choose **Settings… → Brain**, and save your OpenAI API key. The key is
+   stored in an owner-only file; `OPENAI_API_KEY` is available as a headless fallback.
+3. Optionally choose the brain provider, model, capture scope, and overlay appearance in Settings.
+4. Choose **Start Jarvis**. Use **Stop Jarvis** to end the session, or press **⌥⌘J** while it is
+   running to request a hint immediately.
 
-Permissions persist across rebuilds automatically (the app always signs with a stable identity); the
-mechanics are in [`wiki/build-and-run.md`](./wiki/build-and-run.md).
+Always launch the app with `open` (the script does this), never by executing the bare binary. macOS
+otherwise attributes privacy grants to the terminal instead of `Jarvis.app`. Permission recovery and
+signing details are in [`wiki/build-and-run.md`](./wiki/build-and-run.md).
 
-## Live smoke checklist
+## Session data
 
-Some behavior can only be verified by a human with a real key, a mic, and granted permissions. Run
-via `./scripts/build-app.sh --run`, then open **Settings → Activity**; it shows each
-step as it happens.
+When launched with `./scripts/build-app.sh --run`, each Start creates an owner-only directory under
+`.jarvis/` containing:
 
-- Confirm the transcription session connects end-to-end — watch for `transcription session ready`
-  (and any `error event` lines). This is the main thing only a live run can verify.
-- Press **Start Jarvis**, then speak — confirm transcript turns drive 🗣/💭 lines in the viewer.
-- With an interview question visible but not spoken, ask *"Jarvis, how can I solve this in one
-  pass?"* — expect a 👁 `looking at your screen` (`capture_screen`) line before the specific coaching
-  reply. A fully spoken question that needs no visible context should not trigger a reflexive capture.
-- Confirm the screenshot excludes the overlay window.
-- On a fresh run the **Overlay Box** is visible and the **Overlay Caption** is suppressed (the
-  defaults). In Settings → Overlay, toggling each surface off hides its sliders + preview; toggle
-  states survive a relaunch.
-- While you talk steadily, Jarvis stays mostly quiet (restraint is the model's, not a rate cap);
-  **Stop Jarvis** halts the pipeline entirely.
+- `jarvis-activity.jsonl` and any screenshots Jarvis actually viewed, shown in **Settings → Activity**;
+- `jarvis-debug.log` for lifecycle, transport, retry, and diagnostic detail;
+- `brain-traffic.jsonl` for the requests and responses exchanged with the selected brain provider;
+- `eval-report.md` and `eval-report.html` only after a session evaluation is requested.
 
-## Build status
+The history is pruned to the ten most recent sessions. Raw audio and the rolling in-memory transcript
+are not archived, although finalized `heard:` lines are part of the activity record. Audio is sent to
+OpenAI for transcription, and coaching context is sent to the selected brain provider. See
+[`wiki/sandbox.md`](./wiki/sandbox.md) for the complete local-persistence, egress, and retention model.
 
-The pure harness (config, transcript, silence backoff, the coach tool-loop, the OpenAI client) is
-**unit-tested and green**. The app shell, overlay, mic capture, and realtime transcriber
-**compile and launch**, but their live behavior is verified only by the checklist above — they were
-built without a real key or audio device. Current state and next steps live in
-[`wiki/status.md`](./wiki/status.md).
+## Development
+
+The repository uses SwiftPM and has no Xcode project.
+
+| Task | Command |
+|---|---|
+| Compile all targets | `swift build` |
+| Run all test targets | `./scripts/run-tests.sh` |
+| Run the pre-push gate | `swift build && ./scripts/run-tests.sh` |
+| Build the app without launching | `./scripts/build-app.sh [release\|debug]` |
+| Build and launch | `./scripts/build-app.sh --run` |
+| Audit a finished session | `./scripts/eval-session.sh [session-dir]` |
+
+Use `./scripts/run-tests.sh`, not raw `swift test`; the wrapper supplies the swift-testing paths
+needed by Command Line Tools-only installations.
+
+The package boundaries are intentionally small:
+
+| Target | Responsibility |
+|---|---|
+| `JarvisCore` | Foundation-only logic: audio, transcription, brain clients, coaching, screen contracts, configuration, and diagnostics |
+| `JarvisOverlay` | AppKit overlay panels and capture exclusion |
+| `CJarvisAEC` | Pure-C facade over the prebuilt WebRTC AEC3 archive |
+| `JarvisApp` | Thin macOS shell for capture, permissions, menu bar, settings, shortcuts, and the activity viewer |
+| `EvalPrep` | Foundation-only helper used by the developer-side session audit |
+
+Contributor workflow, subsystem placement, and testing rules live in
+[`CLAUDE.md`](./CLAUDE.md).
