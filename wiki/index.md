@@ -30,6 +30,7 @@
 
 ## What Jarvis Is, In One Sentence
 
-A personal, always-on macOS assistant that watches and listens while you solve a LeetCode
-problem and proactively coaches you with short tips in an on-screen overlay — built as a thin
-harness over Apple's capture frameworks and the OpenAI APIs, reinventing nothing.
+A personal, always-on macOS assistant that watches and listens during technical interviews and
+proactively coaches behavioral, system-design, and coding questions with short tips in an on-screen
+overlay — built as a thin harness over Apple's capture frameworks and the OpenAI APIs, reinventing
+nothing.

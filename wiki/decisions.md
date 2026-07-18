@@ -33,6 +33,7 @@
 - **Chose:** A single coaching mode, no tiers.
 - **Why:** Scope discipline for the MVP.
 - **Detail:** [architecture.md §6](./architecture.md#6-non-goals-v1).
+- **Superseded by:** 2026-07-18 — Technical-interview context is broad and screen-dependent.
 
 ### 2026-06-13 — Model-triggered `capture_screen`
 
@@ -414,3 +415,18 @@
   `Sources/JarvisCore/Diagnostics/AudioContinuityWitness.swift`,
   `Sources/JarvisCore/Transcription/RealtimeTranscriptionLedger.swift`,
   `Sources/JarvisApp/Capture/RealtimeTranscriber.swift`.
+
+### 2026-07-18 — Technical-interview context is broad and screen-dependent
+
+- **Chose:** One technical-interview coach covers behavioral, system-design, and coding questions.
+  When a specific answer depends on visible context missing from the transcript — including an
+  indirect reference such as “this” — the prompt requires `capture_screen` before `speak`.
+- **Why:** In a live session, “How can I solve this in one pass?” triggered a generic coding answer
+  because the prompt required capture only for explicit look-at-screen requests. The visible problem
+  was the missing referent, and a coding-platform-specific persona also understated the intended
+  interview scope.
+- **Rejected:** (a) Capturing before every direct answer — fully stated behavioral, system-design,
+  and coding questions do not need vision. (b) A coding-platform-specific coaching identity.
+- **Supersedes:** 2026-06-13 — One mode for v1: LeetCode Coach.
+- **Detail:** [architecture.md §2](./architecture.md#2-core-loop),
+  `Sources/JarvisCore/Coach/ToolDefs.swift`.

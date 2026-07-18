@@ -25,6 +25,23 @@ import Testing
         #expect(coachSystemPrompt.contains("line"))   // brevity is now framed as overlay lines
     }
 
+    @Test func coachPromptRequiresScreenDependentQuestionsToCaptureFirst() {
+        #expect(coachSystemPrompt.contains("screen-dependent"))
+        #expect(coachSystemPrompt.contains("either speaker"))
+        #expect(coachSystemPrompt.contains("You MUST call"))
+        #expect(coachSystemPrompt.contains("capture_screen before calling speak"))
+        #expect(coachSystemPrompt.contains("How can I solve this in one pass?"))
+        #expect(captureScreenTool.description.contains("must call this before answering"))
+    }
+
+    @Test func coachContextCoversTechnicalInterviewFormatsWithoutBrandNarrowing() {
+        let modelContext = captureScreenTool.description + coachSystemPrompt
+        #expect(modelContext.contains("behavioral"))
+        #expect(modelContext.contains("system design"))
+        #expect(modelContext.contains("coding"))
+        #expect(!modelContext.lowercased().contains("leetcode"))
+    }
+
     /// Silence is a TOOL now: the prompt must direct the model to stay_silent (never free text),
     /// or a required tool_choice would leave it no sanctioned way to stay quiet.
     @Test func coachPromptDirectsSilenceToTheStaySilentTool() {

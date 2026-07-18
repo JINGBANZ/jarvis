@@ -13,10 +13,11 @@
 
 ## 1. Vision
 
-Jarvis is a personal, always-on macOS assistant that **coaches you through a LeetCode problem**.
-It listens to you think aloud, and — when it decides it needs to — looks at your screen to see
-the problem statement and your code. When it has something genuinely useful to add, it speaks up
-**unprompted** with a short tip rendered in an on-screen overlay.
+Jarvis is a personal, always-on macOS assistant that **coaches you through technical interviews**:
+behavioral, system-design, and coding questions. It listens to you think aloud, and — when it needs
+visible context — looks at your screen to see the current question, code, diagram, or notes. When it
+has something genuinely useful to add, it speaks up **unprompted** with a short tip rendered in an
+on-screen overlay.
 
 The guiding belief: **build the harness, not the intelligence.** The intelligence already exists
 (`gpt-5.5`, the `gpt-4o-transcribe` model on the OpenAI Realtime API). The macOS capabilities already exist (ScreenCaptureKit,
@@ -70,8 +71,11 @@ moments the model judges worthwhile.
    new transcript delta, the timing context (seconds silent, session elapsed), and the tool set
    `[capture_screen, speak, stay_silent]`. The timing is what lets the model tell "thinking" from
    "stuck."
-4. The model may call `capture_screen`. The harness fulfills it (a silent screenshot) and
-   returns the image into the request. The model may now reason over what's on screen.
+4. The model calls `capture_screen` before answering when a specific, correct reply depends on
+   visible context that is missing from the transcript — including indirect references such as
+   “this” or “here.” It may also capture when a silence trigger leaves progress unclear. The harness
+   fulfills the call (a silent screenshot) and returns the image into the request, after which the
+   model reasons over what's on screen. Fully stated questions do not require a reflexive capture.
 5. The model calls `speak(lines)` — a tip of up to ~3 short lines, returned **already split**
    into an array (Structured Outputs / `strict:true`), so the client never splits prose on
    punctuation — or `stay_silent`. A tool call is **required** on every turn: silence is an
@@ -340,7 +344,8 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
 
 ## 6. Non-Goals (v1)
 
-- Multiple modes / a tiered sensitivity dial. (One mode: LeetCode Coach.)
+- Multiple coaching modes / a tiered sensitivity dial. (One technical-interview mode spans
+  behavioral, system-design, and coding questions.)
 - Continuous OCR or recording the screen/audio to disk ("recall").
 - A dedicated wake-word engine. Direct address is just the word "Jarvis" (or a question) appearing
   in the transcript, which the brain reads and answers — there is no wake-word detector. (A global
@@ -357,7 +362,7 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
 4. **Proactive, but disciplined.** Speaking up unprompted is the whole point; the model's own restraint (a tuned system prompt) keeps it from being annoying.
 5. **Sees the screen, not the disk.** Security is enforced by the sandbox, not by good intentions.
 6. **Self-verifying.** Every build ships with tests and a smoke checklist the agent can run to prove it works.
-7. **One mode, done well.** Ship the coach; expand later.
+7. **One domain, done well.** Ship the technical-interview coach; expand later.
 
 How Jarvis is built, signed, tested, and run — and the activity viewer — is its own
 operational page: [build-and-run.md](./build-and-run.md).
