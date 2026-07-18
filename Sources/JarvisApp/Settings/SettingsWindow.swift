@@ -32,14 +32,14 @@ final class SettingsWindow: NSObject, NSWindowDelegate, NSTabViewDelegate {
 
     func show() {
         if let window {
-            NSApp.activate(ignoringOtherApps: true)
-            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true) // ghost-mode-allowed: explicit Settings action
+            window.makeKeyAndOrderFront(nil) // ghost-mode-allowed: explicit Settings action
             return
         }
         build()
-        NSApp.setActivationPolicy(.regular)
-        NSApp.activate(ignoringOtherApps: true)
-        window?.makeKeyAndOrderFront(nil)
+        NSApp.setActivationPolicy(.regular) // ghost-mode-allowed: explicit Settings action
+        NSApp.activate(ignoringOtherApps: true) // ghost-mode-allowed: explicit Settings action
+        window?.makeKeyAndOrderFront(nil) // ghost-mode-allowed: explicit Settings action
     }
 
     private func build() {
@@ -99,7 +99,7 @@ final class SettingsWindow: NSObject, NSWindowDelegate, NSTabViewDelegate {
         activeSection?.didResignActive()        // e.g. turn the overlay preview off if Overlay was open
         activeSection = nil
         for section in sections { section.windowWillClose() }
-        NSApp.setActivationPolicy(.accessory)   // back to menu-bar-only
+        NSApp.setActivationPolicy(.accessory) // ghost-mode-allowed: close explicit Settings action
         window = nil
         tabView = nil
     }

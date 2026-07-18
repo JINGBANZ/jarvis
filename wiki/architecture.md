@@ -126,7 +126,7 @@ plugins ship only with full Xcode, and Jarvis builds **CLT-only** (see
 |---|---|---|
 | **AggregateEchoCapture** | The whole capture path: one **private Core Audio aggregate device** = the built-in mic (`me`, clock master) + a system-output **process tap** (`them`, drift-compensated onto the mic's clock). A single IOProc delivers both sample-synced at the device's **native rate** — the one-clock case AEC3 needs; the capture **reads that rate and resamples mic+tap up to 48 kHz** for AEC3 (a no-op when the device is already 48 kHz). So **any input device works** — built-in, USB, 44.1 kHz gear, or AirPods (Bluetooth HFP at 16/24 kHz) — instead of the old hard 48 kHz pin that silently failed to start on Bluetooth mics. Inside the callback it runs AEC3 (tap = far reference, mic = near), removing the other side's speaker bleed from the mic *before* transcription — no headphones, and double-talk works (measured 30–50 dB cancellation). The untouched resampled tap remains the `them` source while a separate padded/truncated copy aligns AEC; wire delivery is serialized off the realtime IOProc. Then both sides downsample to 24 kHz. Replaces the old separate `AVAudioEngine` mic + `SCStream`. | Core Audio (`AudioHardwareCreateProcessTap`, private aggregate device, drift compensation) + `AVAudioConverter` resampling + WebRTC **AEC3**. |
 | **WebRTCEchoCanceller** | AEC3 echo canceller driven at 48 kHz on 10 ms frames inside the capture IOProc; far reference first, then the mic cleaned in place. | WebRTC **AEC3** (`webrtc-audio-processing`), vendored static + zero-dylib via `scripts/build-aec.sh`. |
-| **ErrorReporter** | The single funnel for user-facing failures. Severity on a Foundation-only `UserFacingError` (in Core) decides the response — `fatal` pops an `NSAlert` and tears the session down, `warning` alerts without touching a running session (preflight refusals), `degraded` is logged only — so no startup failure is ever silent. The only place an *error* `NSAlert` is raised (confirmation prompts aside); diagnostics stay in `JarvisLog`. | AppKit (`NSAlert`). |
+| **ErrorReporter** | The single funnel for user-facing failures. Severity on a Foundation-only `UserFacingError` decides the lifecycle consequence; an explicit startup/runtime context decides presentation. Startup failures may alert, but runtime failures never activate Jarvis or present UI even when they stop the session. Fixed redacted notices go to Activity and raw detail stays in `JarvisLog`. | AppKit (`NSAlert`) for startup only. |
 | **Transcriber** | Maintain a rolling, speaker-labeled, **spoken-time timestamped** transcript; emit turn-end events and backing-off silence checks (with quiet duration). Two instances run in parallel — one per side — tagging lines `me`/`them` into one shared transcript. A per-`item_id` ledger reconciles out-of-order delta/completed/failed/VAD events and salvages streamed text; an item with no usable words is logged as diagnostic metadata and cannot enter the transcript or trigger the brain. A privacy-preserving continuity witness records content-free capture/delivery/socket/server checkpoints and locally derived activity intervals, so the session log can locate a future gap without retaining PCM or adding pseudo-speech to model context. A socket is ready only after the server acknowledges its configuration; active ping/pong probes, send/receive errors, and startup timeouts all drive the same reconnect path. | `gpt-4o-transcribe` (Realtime API; tuned `server_vad`). |
 | **CoachDriver** | The event loop. On every substantive trigger (plus every silence check and hint keypress), call the brain with the session memory + transcript delta + timing context and tools, route tool calls, and compact the memory when it grows long. No cooldown/rate cap — restraint is the model's; the only client-side skip is the filler-only turn-end gate (`TurnSubstance`). | `gpt-5.5` (vision + tool-use) with `gpt-5.4-mini` for memory summaries — or a local Claude Code / Codex CLI on the user's subscription (see [§4 Local CLI brain providers](#local-cli-brain-providers)). |
 | **ScreenTool** | Fulfill `capture_screen`: silently shoot the **active window** (default scope) — the window-server frontmost, on whichever display, clean even when partially covered — and attach an **on-device OCR** of the shot to the tool result so the model reads exact text instead of pixels. Falls back to a full-display capture (no OCR) — the Settings-chosen display in Entire-display scope, the main display when no window is eligible; the overlay window is excluded either way. See [settings-window.md](./settings-window.md#capture-scope). | macOS `screencapture` CLI + Apple Vision (`VNRecognizeTextRequest`). |
@@ -160,19 +160,23 @@ all routes — it's a near-passthrough on earbuds (no acoustic echo to cancel). 
 mic* are HFP narrowband and low-fidelity regardless of resampling; for input quality, use the
 built-in mic.
 
-### Failure surfacing — fail loud
+### Failure surfacing — startup loud, runtime ghost
 
 Every user-facing failure flows through one `ErrorReporter`: severity on a Foundation-only
-`UserFacingError` decides the response (`fatal` → `NSAlert` + session teardown; `warning` →
-`NSAlert` only, for preflight refusals that must not kill a live session; `degraded` →
-log only), so a startup failure can never again flip the menu green and silently revert. Per-failure
-copy and severity live in a Core **catalog** (`UserFacingError+Catalog`), the single source of truth
-for *which* failures are loud — unit-tested in Core (e.g. the system-audio degrade must stay quiet),
-since `JarvisApp` itself can't be headlessly tested and the `NSAlert` display stays a manual smoke
-check. Realtime health is a visible state rather than a fatal-only event: startup stays gray,
-reconnect attempts are shown, and microphone-only mode is explicit when the secondary system-audio
-socket cannot recover. Diagnostics remain `JarvisLog`'s job; `ErrorReporter` owns surfacing +
-lifecycle consequence.
+`UserFacingError` decides the lifecycle consequence while an explicit context captured at the
+failure site decides presentation. Startup failures caused by an explicit Start may alert; every
+runtime context suppresses alerts unconditionally, including after teardown, so a queued main-actor
+report cannot reveal Jarvis during screen sharing. Terminal brain, microphone-transcription, and
+audio-capture failures stop silently; the system-audio failure degrades to microphone-only. Each
+records fixed non-sensitive Activity copy while dynamic reasons remain only in `JarvisLog`.
+
+Ghost mode applies from a live pipeline through terminal teardown: no autonomous activation, alert,
+window, browser, notification, attention request, or sound is allowed outside the nonactivating,
+capture-excluded caption and box overlays. The persistent menu-bar item and user-invoked
+Settings/Activity surfaces are explicit exceptions, as is unavoidable macOS privacy UI. The Core
+presentation matrix is unit-tested, and `scripts/check-ghost-mode.sh` rejects unreviewed presentation
+API calls from the normal test gate. Realtime health remains visible only through the existing
+menu-bar status; `ErrorReporter` owns failure lifecycle and permitted startup surfacing.
 
 ## 4. Data Flow & Cost Model
 
@@ -239,8 +243,11 @@ memory, retries, and traffic recording are all unchanged — only the transport 
   practice. Codex runs `--sandbox read-only`; Claude runs with its persona replaced
   (`--system-prompt`) and no settings sources, and the one reasoning-effort setting maps onto each
   CLI's own scale.
-- **Installed CLIs are auto-detected** (`AgentCLIDetector`: file probes over $PATH + known install
-  dirs + on-disk auth markers — no subprocess, no Keychain prompt), so selecting one is one click.
+- **Installed CLIs are auto-detected.** `AgentCLIDetector` discovers binaries through file probes
+  over $PATH + known install dirs. Claude's actual sign-in state comes from its non-billing
+  `auth status --json` command under a short timeout, because stale account metadata can survive an
+  expired OAuth session; Codex uses its auth-file marker. Settings distinguishes signed in, signed
+  out, and an unavailable probe, and Start refuses a confirmed logout.
 - **The OpenAI key stays required**: transcription always runs on the Realtime API. A CLI provider
   moves the brain/summarizer/evaluator off the key, not the ears. **Latency is the tradeoff**,
   though a modest one now that every turn is one model call: measured coach turns run ~2.6s (text)

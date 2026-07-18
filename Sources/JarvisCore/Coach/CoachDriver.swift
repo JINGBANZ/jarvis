@@ -28,6 +28,9 @@ public final class CoachDriver: @unchecked Sendable {
     private let screen: ScreenCapturing
     private let overlay: OverlayRendering
     private let clock: Clock
+    /// The app edge uses this to surface a provider failure and end a session that can no longer
+    /// coach. Nil keeps Core-only callers/tests free of UI policy.
+    private let onBrainFailure: (@Sendable (String) -> Void)?
     private let sessionStart: TimeInterval
     private let history = CoachHistory()
 
@@ -43,10 +46,15 @@ public final class CoachDriver: @unchecked Sendable {
     /// nothing is dropped and turns don't pile up. The first such trigger is kept and the batched
     /// speech rides along via the sent-index, so a later trigger needn't displace it.
     private var pendingTrigger: TriggerReason?
+    /// Latched only when the app supplied `onBrainFailure`, which means this provider failure is
+    /// terminal for the session. It prevents pending or newly arriving triggers from issuing another
+    /// request while the app's main-actor stop is still being scheduled.
+    private var terminalBrainFailure = false
 
     public init(config: Config, transcript: RollingTranscript,
                 brain: BrainClient, summarizer: BrainClient? = nil,
-                screen: ScreenCapturing, overlay: OverlayRendering, clock: Clock) {
+                screen: ScreenCapturing, overlay: OverlayRendering, clock: Clock,
+                onBrainFailure: (@Sendable (String) -> Void)? = nil) {
         self.config = config
         self.transcript = transcript
         self.brain = brain
@@ -54,6 +62,7 @@ public final class CoachDriver: @unchecked Sendable {
         self.screen = screen
         self.overlay = overlay
         self.clock = clock
+        self.onBrainFailure = onBrainFailure
         self.sessionStart = clock.now()
     }
 
@@ -69,16 +78,31 @@ public final class CoachDriver: @unchecked Sendable {
 
     /// Atomically claim the single in-flight slot, OR (if busy) record the trigger as pending. One
     /// critical section so a trigger can never slip between "am I busy?" and "set pending" and be lost.
-    /// Returns true if this call now owns the turn loop. The first pending trigger is kept; the
-    /// coalesced speech rides along regardless, so a later trigger needn't displace it.
-    private func claimOrPend(_ reason: TriggerReason) -> Bool {
+    /// Returns whether this call owns the loop, was queued behind it, or arrived after a terminal
+    /// provider failure. The first pending trigger is kept; the coalesced speech rides along
+    /// regardless, so a later trigger needn't displace it.
+    private enum TriggerClaim {
+        case claimed
+        case pending
+        case terminalFailure
+    }
+
+    private func claimOrPend(_ reason: TriggerReason) -> TriggerClaim {
         stateLock.lock(); defer { stateLock.unlock() }
+        if terminalBrainFailure { return .terminalFailure }
         if isHandling {
             if pendingTrigger == nil { pendingTrigger = reason }
-            return false
+            return .pending
         }
         isHandling = true
-        return true
+        return .claimed
+    }
+
+    private func latchTerminalBrainFailure() {
+        stateLock.lock()
+        terminalBrainFailure = true
+        pendingTrigger = nil
+        stateLock.unlock()
     }
 
     /// Atomically take the next pending trigger (keeping the slot) OR release the slot. One critical
@@ -95,9 +119,15 @@ public final class CoachDriver: @unchecked Sendable {
         // Single-in-flight, but we COALESCE rather than drop: a trigger arriving while a turn runs is
         // recorded as pending and picked up by the running turn when it finishes — so nothing is lost
         // and turns can't pile up. The batched speech rides along automatically via the sent-index.
-        guard claimOrPend(reason) else {
+        switch claimOrPend(reason) {
+        case .claimed:
+            break
+        case .pending:
             jlog("… busy; batching this \(reason) into the running turn")
             return .busy
+        case .terminalFailure:
+            jlog("… terminal brain failure already ended this coaching session")
+            return .brainError
         }
         var current = reason
         var outcome: TurnOutcome = .silentByModel
@@ -197,7 +227,10 @@ public final class CoachDriver: @unchecked Sendable {
             } catch {
                 // A cancellation (barge-in / Stop) is expected — report it quietly, not as a failure.
                 if Task.isCancelled { jlog("… turn cancelled (interrupted)"); return .cancelled }
-                jlog("Jarvis coach: brain request failed on \(reason): \(error.localizedDescription)")
+                let detail = error.localizedDescription
+                jlog("Jarvis coach: brain request failed on \(reason): \(detail)")
+                if onBrainFailure != nil { latchTerminalBrainFailure() }
+                onBrainFailure?(detail)
                 // Speech already marked sent (a later-iteration failure) must not vanish from memory —
                 // commit what this turn accumulated. A first-request failure commits nothing; the
                 // un-advanced sentCount re-sends the delta next turn instead.

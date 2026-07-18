@@ -1,10 +1,14 @@
 import Testing
 import Foundation
+#if canImport(Darwin)
+import Darwin
+#else
+import Glibc
+#endif
 @testable import JarvisCore
 
-/// Detection runs against a real, throwaway home-directory fixture (no production probe seam):
-/// executables are actual 0755 files, auth markers actual files — only `home` and `pathVariable`
-/// are injected, the same way `BrainPreferences` takes a `UserDefaults(suiteName:)`.
+/// Detection runs against a real, throwaway home-directory fixture: executables are actual 0755
+/// shell scripts, so Claude auth tests exercise the production subprocess + JSON parsing path.
 @Suite struct AgentCLIDetectorTests {
     private let fm = FileManager.default
 
@@ -16,11 +20,13 @@ import Foundation
         return url
     }
 
-    /// Create a real executable file at `dir/name`.
-    private func installBinary(_ name: String, in dir: URL) throws {
+    /// Create a real executable file at `dir/name`. The default exits without a status document,
+    /// which represents an installed CLI whose sign-in state cannot be checked.
+    private func installBinary(_ name: String, in dir: URL,
+                               script: String = "#!/bin/sh\nexit 2\n") throws {
         try fm.createDirectory(at: dir, withIntermediateDirectories: true)
         #expect(fm.createFile(atPath: dir.appendingPathComponent(name).path,
-                              contents: Data("#!/bin/sh\n".utf8),
+                              contents: Data(script.utf8),
                               attributes: [.posixPermissions: 0o755]))
     }
 
@@ -45,7 +51,7 @@ import Foundation
         let d = AgentCLIDetector(home: home, pathVariable: "/nonexistent:\(bin.path)")
         let cli = d.detect(.claudeCode)
         #expect(cli?.executableURL.path == bin.appendingPathComponent("claude").path)
-        #expect(cli?.authenticated == false)
+        #expect(cli?.authenticationStatus == .unknown)
     }
 
     @Test func fallsBackToKnownInstallDirsWhenPATHIsMinimal() throws {
@@ -77,23 +83,70 @@ import Foundation
         #expect(d.detect(.claudeCode) == nil)
     }
 
-    @Test func claudeAuthDetectedViaCredentialsFile() throws {
+    @Test func claudeAuthStatusCommandReportsSignedIn() throws {
         let home = try makeHome()
-        try installBinary("claude", in: home.appendingPathComponent(".local/bin"))
-        try write("{}", to: home.appendingPathComponent(".claude/.credentials.json"))
-        let d = AgentCLIDetector(home: home, pathVariable: nil)
-        #expect(d.detect(.claudeCode)?.authenticated == true)
+        try installBinary("claude", in: home.appendingPathComponent(".claude/local"), script: """
+            #!/bin/sh
+            printf '%s\\n' '{"loggedIn":true,"authMethod":"claude.ai"}'
+            exit 0
+            """)
+        let d = AgentCLIDetector(home: home, pathVariable: nil, authStatusTimeout: 10)
+        #expect(d.detect(.claudeCode)?.authenticationStatus == .signedIn)
     }
 
-    @Test func claudeAuthDetectedViaOAuthAccountMarker() throws {
-        // macOS default stores credentials in the Keychain (unprobeable without a prompt); the
-        // oauthAccount record in ~/.claude.json is the visible sign-in marker there.
+    @Test func claudeAuthStatusOverridesStaleOAuthAccountMarker() throws {
         let home = try makeHome()
-        try installBinary("claude", in: home.appendingPathComponent(".local/bin"))
+        try installBinary("claude", in: home.appendingPathComponent(".claude/local"), script: """
+            #!/bin/sh
+            printf '%s\\n' '{"loggedIn":false,"authMethod":"none"}'
+            exit 1
+            """)
         try write(#"{"oauthAccount":{"emailAddress":"x@y.z"}}"#,
                   to: home.appendingPathComponent(".claude.json"))
+        let d = AgentCLIDetector(home: home, pathVariable: nil, authStatusTimeout: 10)
+        #expect(d.detect(.claudeCode)?.authenticationStatus == .signedOut)
+    }
+
+    @Test func claudeAuthStatusFailureIsUnknown() throws {
+        let home = try makeHome()
+        try installBinary("claude", in: home.appendingPathComponent(".claude/local"))
         let d = AgentCLIDetector(home: home, pathVariable: nil)
-        #expect(d.detect(.claudeCode)?.authenticated == true)
+        #expect(d.detect(.claudeCode)?.authenticationStatus == .unknown)
+    }
+
+    @Test func claudeAuthStatusProbeIsBounded() throws {
+        let home = try makeHome()
+        try installBinary("claude", in: home.appendingPathComponent(".claude/local"), script: """
+            #!/bin/sh
+            sleep 1
+            """)
+        let d = AgentCLIDetector(home: home, pathVariable: nil, authStatusTimeout: 0.01)
+        #expect(d.detect(.claudeCode)?.authenticationStatus == .unknown)
+    }
+
+    @Test func claudeAuthStatusProbeDoesNotWaitForInheritedChildStdout() throws {
+        let home = try makeHome()
+        let childPID = home.appendingPathComponent("child.pid")
+        let childFinished = home.appendingPathComponent("child-finished")
+        try installBinary("claude", in: home.appendingPathComponent(".claude/local"), script: """
+            #!/bin/sh
+            (trap '' HUP; sleep 5; touch "$HOME/child-finished") &
+            printf '%s\\n' "$!" > "$HOME/child.pid"
+            exit 2
+            """)
+        let d = AgentCLIDetector(home: home, pathVariable: nil, authStatusTimeout: 0.01)
+
+        let status = d.detect(.claudeCode)?.authenticationStatus
+        defer {
+            if let contents = try? String(contentsOf: childPID, encoding: .utf8),
+               let pid = pid_t(contents.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                kill(pid, SIGKILL)
+            }
+        }
+
+        #expect(status == .unknown)
+        #expect(!fm.fileExists(atPath: childFinished.path),
+                "the auth probe must return without waiting for a child that inherited stdout")
     }
 
     @Test func codexAuthDetectedViaAuthJSON() throws {
@@ -101,7 +154,7 @@ import Foundation
         try installBinary("codex", in: home.appendingPathComponent(".local/bin"))
         try write("{}", to: home.appendingPathComponent(".codex/auth.json"))
         let d = AgentCLIDetector(home: home, pathVariable: nil)
-        #expect(d.detect(.codexCLI)?.authenticated == true)
+        #expect(d.detect(.codexCLI)?.authenticationStatus == .signedIn)
     }
 
     @Test func missingBinaryDetectsNothing() throws {

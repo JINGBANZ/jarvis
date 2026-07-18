@@ -65,7 +65,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private static let retainedSessions = 10
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.accessory) // menu-bar app, no Dock icon
+        NSApp.setActivationPolicy(.accessory) // ghost-mode-allowed: launch configuration
         MainMenu.install() // an Edit menu so ⌘X/⌘C/⌘V/⌘A work in the Settings text fields
         networkDiagnostics.start()
 
@@ -153,7 +153,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // trip; otherwise beep — there's no live driver/conversation to hint from when stopped.
         hotkeys = HotkeyController()
         hotkeys?.onRequestHint = { [weak self] in
-            guard let self, let fire = self.requestManualHint else { NSSound.beep(); return }
+            guard let self, let fire = self.requestManualHint else {
+                NSSound.beep() // ghost-mode-allowed: explicit user hotkey while stopped
+                return
+            }
             fire()
         }
 
@@ -173,9 +176,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// running — which must NOT be misattributed as a new coaching run.
     @discardableResult
     private func start(freshSession: Bool = true) -> Bool {
+        // Capture whether this Start is replacing a live pipeline before any guard or teardown. An
+        // in-place reapply must remain ghost-safe even if the queued report executes after stop().
+        let wasRunning = transcriber != nil || themTranscriber != nil
+        let reportContext: UserFacingError.PresentationContext =
+            wasRunning ? .runtime : .startup
         guard let key = secrets.apiKey(), !key.isEmpty else {
             jlog("Jarvis: can't start — no API key.")
-            errorReporter.report(.noAPIKey)
+            if wasRunning {
+                ActivityLog.shared.record(.settingsChangeNotApplied)
+            }
+            errorReporter.report(.noAPIKey, context: reportContext)
             return false
         }
         // A CLI brain provider's binary must exist before anything is torn down — a failed Start
@@ -185,20 +196,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if brainProvider.usesLocalCLI {
             guard let cli = AgentCLIDetector().detect(brainProvider) else {
                 jlog("Jarvis: can't start — \(brainProvider.displayName) CLI not found.")
-                errorReporter.report(.brainCLIMissing(provider: brainProvider.displayName))
+                if wasRunning {
+                    ActivityLog.shared.record(.settingsChangeNotApplied)
+                }
+                errorReporter.report(.brainCLIMissing(provider: brainProvider.displayName),
+                                     context: reportContext)
                 return false
             }
-            if !cli.authenticated {
-                // Codex's auth.json is its only credential store — an absent marker means signed
-                // out for real, and every brain turn would fail: don't open a pipeline that can
-                // never coach. Claude may keep credentials only in the macOS Keychain (a false
-                // negative), so it proceeds with a visible degraded notice instead of a lockout.
-                if brainProvider == .codexCLI {
-                    jlog("Jarvis: can't start — \(brainProvider.displayName) isn't signed in.")
-                    errorReporter.report(.brainCLINotSignedIn(provider: brainProvider.displayName))
-                    return false
+            switch cli.authenticationStatus {
+            case .signedIn:
+                break
+            case .signedOut:
+                jlog("Jarvis: can't start — \(brainProvider.displayName) isn't signed in.")
+                if wasRunning {
+                    ActivityLog.shared.record(.settingsChangeNotApplied)
                 }
-                errorReporter.report(.brainCLISignInUnconfirmed(provider: brainProvider.displayName))
+                errorReporter.report(.brainCLINotSignedIn(provider: brainProvider.displayName),
+                                     context: reportContext)
+                return false
+            case .unknown:
+                errorReporter.report(.brainCLISignInUnconfirmed(provider: brainProvider.displayName),
+                                     context: reportContext)
             }
             brainCLI = cli
         }
@@ -245,21 +263,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                            traffic: sessionTraffic, trafficTag: "summarizer")
         }
         let brain = RetryingBrainClient(base: coachBase)
+        // A token can expire after the bounded Start preflight, and other runtime failures remain
+        // possible. If the actual CLI request fails, surface the reason and stop the green-but-
+        // unusable session instead of silently ignoring every later utterance.
+        let onBrainFailure: (@Sendable (String) -> Void)?
+        if brainProvider.usesLocalCLI {
+            let signInCommand = brainProvider == .claudeCode ? "claude auth login" : "codex login"
+            onBrainFailure = { [errorReporter] reason in
+                // Preserve ghost mode: the fixed Activity notice is enough for the human-facing
+                // record; the provider's detailed failure stays in jarvis-debug.log below.
+                ActivityLog.shared.record(.coachingStopped(provider: brainProvider))
+                errorReporter.report(.brainCLIStopped(provider: brainProvider.displayName,
+                                                       signInCommand: signInCommand,
+                                                       reason: reason),
+                                     context: .runtime)
+            }
+        } else {
+            onBrainFailure = nil
+        }
         // Fan each spoken tip out to both the Overlay Caption and the persistent Overlay Box.
         let overlaySink = BroadcastOverlay([overlayCaption, overlayBox])
         let driver = CoachDriver(config: config, transcript: transcript,
                                  brain: brain, summarizer: summarizer,
                                  screen: WindowScopedScreenCapture(preferences: screenPreferences),
-                                 overlay: overlaySink, clock: clock)
+                                 overlay: overlaySink, clock: clock,
+                                 onBrainFailure: onBrainFailure)
 
         // CoachDriver is @unchecked Sendable; capture it (not @MainActor self) in the callbacks.
         // Route turns through TurnTaskBox so Stop can cancel an in-flight one. Concurrent triggers are
         // coalesced inside CoachDriver (the running turn batches them in), so we don't cancel here.
         let turns = TurnTaskBox()
-        // Mic socket gave up (bad key / quota / network): coaching can't continue. Report fatal — the
-        // reporter's onFatal stops the session and corrects the menu (no more lying 🟢).
+        // Mic socket gave up (bad key / quota / network): coaching can't continue. Record only fixed
+        // human-facing copy, then stop through the ghost-safe runtime reporter.
         let onMicTerminalFailure: @Sendable () -> Void = { [errorReporter] in
-            errorReporter.report(.transcriptionStopped)
+            ActivityLog.shared.record(.transcriptionStopped)
+            errorReporter.report(.transcriptionStopped, context: .runtime)
         }
         // "Them" socket gave up: degrade gracefully — stop the system-audio transcriber, keep the mic
         // running. The shared aggregate capture keeps feeding the mic side; its now-nil "them"
@@ -275,7 +313,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.systemConnectionState = .failed
                 self.refreshConnectionUI()
             }
-            errorReporter.report(.systemAudioStopped)
+            ActivityLog.shared.record(.systemAudioStopped)
+            errorReporter.report(.systemAudioStopped, context: .runtime)
         }
 
         // "Me" side: the mic. Drives turn-end and the backing-off silence check ("are you stuck?").
@@ -340,7 +379,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     data, sequenceNumber: sequence, capturedAt: capturedAt)
             })
         capture.onUnavailable = { [errorReporter] reason in
-            errorReporter.report(.captureFailed(reason: reason))
+            ActivityLog.shared.record(.audioCaptureStopped)
+            errorReporter.report(.captureStopped(reason: reason), context: .runtime)
         }
         self.transcriber = transcriber
         self.themTranscriber = themTranscriber
@@ -373,7 +413,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         themTranscriber.connect()
         if let reason = capture.start() {
             stop()                      // tear down the sockets we just opened
-            errorReporter.report(.captureFailed(reason: reason))
+            if reportContext == .runtime {
+                ActivityLog.shared.record(.audioCaptureStopped)
+            }
+            errorReporter.report(.captureFailed(reason: reason), context: reportContext)
             return false
         }
         jlog("Jarvis: coaching starting — verifying realtime transcription connections.")
