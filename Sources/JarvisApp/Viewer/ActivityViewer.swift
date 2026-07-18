@@ -24,7 +24,6 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
     private var webView: WKWebView?
     private var picker: NSPopUpButton?
     private var evaluateButton: NSButton?
-    private var reportWindow: NSWindow?   // keeps the evaluation report window alive
     private var isEvaluating = false      // an audit is in flight; keep the button disabled meanwhile
     private var sessions: [SessionStore.Session] = []
 
@@ -154,7 +153,7 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
     /// Evaluate is enabled only for a *finished* conversation: any past session, or the current one
     /// once coaching is stopped. A live session's traffic file is still being appended to, so an
     /// audit of it would judge half a story. A session that already has a persisted report flips the
-    /// button to "Show report" instead — reopening the saved audit is free and always safe, so it
+    /// button to "Open report" instead — reopening the saved audit is free and always safe, so it
     /// stays enabled regardless of coaching state. Owns the title too: `isEvaluating` survives a
     /// Settings close/reopen (the viewer outlives its content view), so a rebuilt button mid-audit
     /// correctly shows "Evaluating…" disabled instead of inviting a duplicate audit.
@@ -172,8 +171,8 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         }
         let session = sessions[idx]
         if SessionEvaluator.savedReport(in: session.url) != nil {
-            button.title = "Show report"
-            button.toolTip = "Open the evaluation report already generated for this session"
+            button.title = "Open report"
+            button.toolTip = "Open this session's evaluation report in your browser"
             button.isEnabled = true
         } else {
             button.title = "Evaluate"
@@ -254,7 +253,7 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         guard let idx = picker?.indexOfSelectedItem, sessions.indices.contains(idx) else { return }
         let session = sessions[idx]
         if let report = SessionEvaluator.savedReport(in: session.url) {
-            showReport(report, for: session)
+            openReport(report, for: session)
             return
         }
         if session.isCurrent, isCoachingRunning?() == true {
@@ -280,39 +279,25 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
             }
             do {
                 let report = try await evaluator.evaluate(sessionDir: session.url)
-                self?.showReport(report, for: session)
+                self?.openReport(report, for: session)
             } catch {
                 self?.info("Evaluation failed", error.localizedDescription)
             }
         }
     }
 
-    /// Show the report in its own scrollable window. Plain text is enough: the report is markdown
-    /// meant for reading and copy-pasting; it's also saved as `eval-report.md` in the session dir.
-    private func showReport(_ report: String, for session: SessionStore.Session) {
-        let window = reportWindow ?? {
-            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 560),
-                             styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
-            w.isReleasedWhenClosed = false   // we hold the reference; AppKit must not free it on close
-            w.center()
-            reportWindow = w
-            return w
-        }()
-        window.title = "Session evaluation — \(session.label)"
-
-        // The factory wires the text view's resizing/container tracking correctly for scrolling.
-        let scroll = NSTextView.scrollableTextView()
-        scroll.frame = window.contentLayoutRect
-        scroll.autoresizingMask = [.width, .height]
-        if let text = scroll.documentView as? NSTextView {
-            text.isEditable = false
-            text.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
-            text.textContainerInset = NSSize(width: 12, height: 12)
-            text.string = report
+    /// Open the report in the user's browser: render the markdown to `eval-report.html` beside it
+    /// (regenerated every open, so it never goes stale after a dev-side agentic re-audit rewrites
+    /// the `.md`) and hand the page to the default browser. The page carries a "Copy as Markdown"
+    /// button so the raw report can be pasted into an agent chat to work on the findings.
+    private func openReport(_ report: String, for session: SessionStore.Session) {
+        do {
+            let url = try EvalReportPage.write(markdown: report, in: session.url,
+                                               title: "Session evaluation — \(session.label)")
+            NSWorkspace.shared.open(url)
+        } catch {
+            info("Couldn't write the report page", error.localizedDescription)
         }
-        window.contentView = scroll
-        window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
     }
 
     private func info(_ title: String, _ message: String) {
