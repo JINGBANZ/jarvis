@@ -40,9 +40,15 @@ public final class CoachHistory: @unchecked Sendable {
     /// - **Screenshots** are replaced with a text stub (observation masking). The capture's OCR text
     ///   — what the model actually reads — rides in the tool-result message and stays verbatim; the
     ///   pixels are ~1–2k tokens re-billed on every later request, and the model can always capture
-    ///   a fresh look. When the turn carries a NEW OCR block, every earlier OCR dump collapses to a
-    ///   one-line stub: near-identical screens re-billed forever, and a session-audit caught the
-    ///   model "correcting" code the user had already fixed by reading a stale dump.
+    ///   a fresh look. When the turn carries a NEW OCR block, every earlier OCR dump — committed
+    ///   history and any older capture within the same turn — collapses to a one-line stub:
+    ///   near-identical screens re-billed forever, and a session-audit caught the model
+    ///   "correcting" code the user had already fixed by reading a stale dump. Unlike the two
+    ///   tail-local rewrites above, this one re-diverges the prompt-cache prefix at the oldest
+    ///   collapsed block. That is deliberate: a bounded one-request re-read per capture (and free
+    ///   on the CLI providers, which serialize history into a single block no prefix cache can hit
+    ///   anyway) buys back ~1k stale tokens per dump on every later request plus the stale-context
+    ///   failure mode above.
     /// - **Raw passthrough items** (a response's verbatim `output` array, replayed whole within the
     ///   turn's tool loop) are CONVERTED, not kept: the `function_call` items survive as one
     ///   synthetic id-less call message — so the committed `function_call_output` never orphans —
@@ -55,8 +61,11 @@ public final class CoachHistory: @unchecked Sendable {
     public func commit(_ turn: [ChatMessage]) {
         guard !turn.isEmpty else { return }
         lock.lock(); defer { lock.unlock() }
-        if turn.contains(where: { $0.text?.contains(Self.ocrHeader) == true }) {
+        var turn = turn
+        if let newest = turn.lastIndex(where: { $0.text?.contains(Self.ocrHeader) == true }) {
             messages = messages.map(Self.collapsingSupersededOCR)
+            // One tool loop may capture more than once — only the turn's newest OCR stays verbatim.
+            for i in turn.indices where i < newest { turn[i] = Self.collapsingSupersededOCR(turn[i]) }
         }
         messages.append(contentsOf: turn.compactMap { m in
             if let raw = m.rawItemsJSON { return Self.convertRawItems(raw) }

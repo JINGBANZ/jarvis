@@ -50,6 +50,21 @@ import Testing
         #expect(h.snapshot().contains { $0.toolCallId == "c1" })     // tool-result pairing intact
     }
 
+    /// A single tool loop may capture more than once; only the turn's own newest OCR survives
+    /// verbatim — the earlier same-turn capture is as stale as any committed one.
+    @Test func multiCaptureTurnKeepsOnlyItsNewestOCR() {
+        let ocr = { (body: String) in "\(CoachHistory.ocrHeader)\n\(body)" }
+        let h = CoachHistory()
+        h.commit([.user("turn"),
+                  .init(role: .tool, text: "screenshot captured\n\n\(ocr("first look"))", toolCallId: "c1"),
+                  .init(role: .tool, text: "screenshot captured\n\n\(ocr("second look"))", toolCallId: "c2")])
+        let texts = h.snapshot().compactMap(\.text)
+        #expect(!texts.joined().contains("first look"))
+        #expect(texts.contains("screenshot captured\n\n\(CoachHistory.ocrStub)"))
+        #expect(texts.contains { $0.contains("second look") })
+        #expect(h.snapshot().contains { $0.toolCallId == "c1" })     // pairing intact, text collapsed
+    }
+
     /// Raw passthrough items live only inside their turn's tool loop — commit converts them: the
     /// function_call survives as the synthetic id-less call (so the committed tool result never
     /// orphans) and reasoning is dropped; later turns don't need it and a model switch would
