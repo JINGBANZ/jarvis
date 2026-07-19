@@ -12,7 +12,8 @@
 implemented.** The coach covers behavioral, system-design, and coding questions. A direct request
 whose specific answer depends on visible context missing from the conversation calls `capture_screen`
 before `speak`; a fresh screenshot/OCR satisfies that request, while a fully stated question can be
-answered without a reflexive capture. Realtime
+answered without a reflexive capture. Active Chrome/Chromium window captures remove the browser's
+tab strip and toolbar before both OCR and vision, while other app windows remain unchanged. Realtime
 transcription reconciles each `item_id` across VAD, delta, completion, and failure events; salvages
 partial text while keeping unavailable items diagnostic-only; preserves every real system-audio
 sample while padding only missing tap silence for VAD; and keeps AEC on a separate exact-length
@@ -36,11 +37,12 @@ fixed notices remain available in Activity. The gate statically rejects unreview
 
 Run the live prompt smoke on a fresh session: show an interview question without speaking its
 details, ask “Jarvis, how can I solve this in one pass?”, and confirm the first action is
-exactly one `capture_screen` followed by a screen-specific reply. Then ask a fully stated behavioral
-question and confirm it can answer without an unnecessary capture. Finish the in-app Claude Code
-provider smoke: confirm Settings shows it signed in, then confirm a coaching turn and screen request.
-Also confirm a missing or signed-out CLI fails loudly. The standard release checklist remains in
-[build-and-run.md](./build-and-run.md).
+exactly one `capture_screen` followed by a screen-specific reply; for a Chrome page, confirm the
+saved shot and OCR begin at the page rather than the tabs/address bar. Then ask a fully stated
+behavioral question and confirm it can answer without an unnecessary capture. Finish the in-app
+Claude Code provider smoke: confirm Settings shows it signed in, then confirm a coaching turn and
+screen request. Also confirm a missing or signed-out CLI fails loudly. The standard release
+checklist remains in [build-and-run.md](./build-and-run.md).
 
 ## Built
 
@@ -52,13 +54,13 @@ thin OS shell, verified by the smoke run.
 - `Sources/JarvisCore/Brain/` — the LLM integration: the `BrainClient` contract (`Brain`), `OpenAIBrainClient`, `CLIBrainClient` + `AgentCLIProcessRunner` + `AgentCLIDetector`/`AgentCLIAuthenticationStatus` (the local Claude Code / Codex brain providers and sign-in state), `RetryingBrainClient`, `BrainProvider`, `BrainModelCatalog` (default `gpt-5.5`), `ReasoningEffort`.
 - `Sources/JarvisCore/Coach/` — the event loop: `CoachDriver`, `CoachHistory` (client-managed session memory), `ToolDefs` (coach tools + system prompt).
 - `Sources/JarvisCore/Triggers/` — turn/silence trigger detection, substance classification, and silence backoff (`Trigger`, `TurnSubstance`, `SilenceBackoff`).
-- `Sources/JarvisCore/Screen/` — the model-triggered screen-capture tool contract + window-scoped capture logic (`ScreenCapture`, `ScreenSnapshot`, `FrontWindowSelector`, `RecognizedTextLayout`).
+- `Sources/JarvisCore/Screen/` — the model-triggered screen-capture tool contract + window-scoped capture logic (`ScreenCapture`, `ScreenSnapshot`, `FrontWindowSelector`, `BrowserChromeCrop`, `RecognizedTextLayout`).
 - `Sources/JarvisCore/Overlay/` — overlay text model + length-proportional timing + fan-out (`OverlayRendering`, `OverlayTiming`, `OverlayAppearance`, `BroadcastOverlay`).
 - `Sources/JarvisCore/Config/` — config + owner-only secrets + brain/screen preferences (`Config`, `Secrets`, `BrainPreferences`, `ScreenCapturePreferences`, `ScreenCaptureScope`).
 - `Sources/JarvisCore/Diagnostics/` — logging, always-on activity log, privacy-preserving audio continuity evidence, session-history store, wire-level brain traffic capture + one-click session evaluation (single-call in-app **and** the agentic dev-side audit's prompt/transcript prep), user-facing errors (`ActivityLog`, `AudioContinuityWitness`, `SessionStore`, `BrainTrafficLog`, `SessionEvaluator`, `AgenticEvaluation`, `UserFacingError`).
 - `Sources/JarvisOverlay/` — the capture-invisible `NSPanel` surfaces: `OverlayCaptionPanel` (transient), `OverlayBoxPanel` (persistent), `NSPanel+CaptureExclusion`.
 - `Sources/JarvisApp/App/` + `MenuBar/` — entry point, connection-aware menu status, Start/Stop, `ErrorReporter` (startup alerts plus an unconditional no-presentation runtime policy).
-- `Sources/JarvisApp/Capture/` — one-clock aggregate mic + sample-preserving system-audio capture with AEC3 echo cancellation + resampling (`AggregateEchoCapture`, `WebRTCEchoCanceller`, `Resampler`), Realtime item/readiness/liveness/transactional-reconnect/witness handling (`RealtimeTranscriber`, `NetworkPathDiagnostics`), permissions, plus the window-scoped screenshot + OCR edge (`WindowScopedScreenCapture`, `ScreenTextRecognizer`).
+- `Sources/JarvisApp/Capture/` — one-clock aggregate mic + sample-preserving system-audio capture with AEC3 echo cancellation + resampling (`AggregateEchoCapture`, `WebRTCEchoCanceller`, `Resampler`), Realtime item/readiness/liveness/transactional-reconnect/witness handling (`RealtimeTranscriber`, `NetworkPathDiagnostics`), permissions, plus the window-scoped screenshot/browser-content crop/OCR edge (`WindowScopedScreenCapture`, `BrowserJPEGContentCropper`, `ScreenTextRecognizer`).
 - `Sources/JarvisApp/Settings/` — the unified Settings window (`SettingsWindow` hosting Brain (provider + model + API key) / Overlay / Screen / Activity sections).
 - `Sources/JarvisApp/Shortcuts/HotkeyController.swift` — the global Carbon ⌥⌘J on-demand-hint hotkey.
 - `Sources/JarvisApp/Viewer/ActivityViewer.swift` — the in-app `WKWebView` activity viewer, with an exact selectable/copyable session ID and the one-click **Evaluate** session audit.

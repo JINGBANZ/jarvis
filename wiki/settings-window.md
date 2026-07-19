@@ -154,6 +154,12 @@ display it lives on — via `screencapture -l`, which reads the window's own bac
 even when partially covered; `-o` omits the shadow). Jarvis's own windows, non-app layers (dock,
 panels), and tiny layer-0 helper windows are skipped.
 
+For Chrome and Chromium, the captured JPEG is cropped to the page viewport before anything consumes
+it: the standard tab strip and address/toolbar rows are removed using the owning app's bundle ID and
+the window's backing scale. The cropped pixels are both the image sent to the brain and the input to
+OCR, so unrelated tab titles and toolbar controls disappear from both channels. Other apps and
+unknown browser layouts remain full-window, and any crop failure fails open to the original shot.
+
 The window shot also gets an **on-device OCR sidecar**: `ScreenTextRecognizer` (Apple Vision,
 `.accurate`, language correction off so code identifiers survive) recognizes the text and Core's
 `RecognizedTextLayout` rebuilds reading order; `CoachDriver` sends it in the `capture_screen`
@@ -199,6 +205,9 @@ from an old entire-display selection never steers them.
 | `Sources/JarvisCore/Config/BrainPreferences.swift` | UserDefaults persistence + validation |
 | `Sources/JarvisCore/Config/ScreenCapturePreferences.swift` | Capture scope + display persistence + clamping |
 | `Sources/JarvisCore/Screen/ScreenCapture.swift` | `ScreenCaptureCLI` — reads the selection at capture time, falls back to the main display |
+| `Sources/JarvisCore/Screen/BrowserChromeCrop.swift` | Tested Chrome/Chromium bundle allowlist + point-to-pixel crop geometry |
+| `Sources/JarvisApp/Capture/WindowScopedScreenCapture.swift` | Active-window selection and capture; resolves the owner bundle before cropping/OCR |
+| `Sources/JarvisApp/Capture/BrowserJPEGContentCropper.swift` | Core Graphics JPEG crop edge; preserves the original bytes on failure |
 | `Sources/JarvisCore/Config/Config.swift` | `overlayCaption*`/`overlayBox*` size + opacity ranges, enabled + appearance defaults |
 | `Sources/JarvisCore/Overlay/OverlayAppearance.swift` | UserDefaults persistence; `OverlayCaptionApplying` + `OverlayBoxApplying` protocols |
 | `Sources/JarvisCore/Overlay/BroadcastOverlay.swift` | Fans one `render` out to the caption + box |
