@@ -501,3 +501,21 @@
   still fails loud; mid-session failures do not.
 - **Detail:** [architecture.md → Failure surfacing](./architecture.md#failure-surfacing--startup-loud-runtime-ghost),
   `Sources/JarvisCore/Diagnostics/UserFacingError.swift`, `scripts/check-ghost-mode.sh`.
+
+### 2026-07-18 — Chrome captures start at page content
+
+- **Chose:** When active-window capture selects Chrome or Chromium, identify it from the owning app's
+  bundle ID and remove the standard tab strip plus address/toolbar rows from the JPEG before both
+  OCR and vision consume it. Convert the browser inset from window points to backing-image pixels;
+  unsupported apps and every failure preserve the original full-window capture.
+- **Why:** A live LeetCode capture spent pixels and OCR tokens on unrelated open-tab titles, browser
+  controls, extensions, and the address bar. Those rows cannot help answer the visible interview
+  question and can distract the model from the page content.
+- **Rejected:** (a) A universal top crop for every app/browser — toolbar height and layout are not a
+  generic window property, so it can discard real content. (b) Accessibility-derived viewport
+  geometry — adds a new TCC dependency and the per-browser fragility already rejected by the
+  window-scoped/OCR decision. (c) OCR-only filtering — the irrelevant pixels would still reach
+  vision.
+- **Detail:** [settings-window.md → Capture Scope](./settings-window.md#capture-scope),
+  `Sources/JarvisCore/Screen/BrowserChromeCrop.swift`,
+  `Sources/JarvisApp/Capture/BrowserJPEGContentCropper.swift`.
