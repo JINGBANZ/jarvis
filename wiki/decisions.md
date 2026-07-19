@@ -316,6 +316,7 @@
 - **Why:** For a subscription holder, per-turn API billing is the product's dominant marginal cost; the CLIs expose the same frontier models under flat-rate plans the user already pays for. The `BrainClient` seam meant the driver, client-managed memory, retry, and traffic audit all carry over unchanged; detection-by-file-probe keeps the Settings tab instant and side-effect-free.
 - **Rejected:** (a) Wiring the CLIs' MCP interfaces for native tool calling — a protocol server + handshake per turn for three tools; the JSON-line protocol does the same job with a parser that tolerates prose/fences and degrades a forced `speak` to speaking the raw reply. (b) Auth verification by running the CLI at detection time — slow, may bill a request, and a Keychain prompt from `security` would be worse; the marker heuristic is a UI hint, with failures surfacing loudly at Start. (c) Replacing transcription too — the CLIs have no realtime audio surface; the OpenAI key remains the ears.
 - **Superseded in part by:** 2026-07-18 — Claude sign-in uses Claude's bounded auth-status command. Binary discovery and Codex's auth marker stand.
+- **Superseded in part by:** 2026-07-18 — Codex coaching invocations are isolated and bounded.
 - **Detail:** [architecture.md → Local CLI brain providers](./architecture.md#local-cli-brain-providers), [settings-window.md → Brain](./settings-window.md#brain); egress note in [sandbox.md](./sandbox.md#data-egress).
 
 ### 2026-07-16 — Realtime transcript integrity is tracked per audio item
@@ -501,3 +502,30 @@
   still fails loud; mid-session failures do not.
 - **Detail:** [architecture.md → Failure surfacing](./architecture.md#failure-surfacing--startup-loud-runtime-ghost),
   `Sources/JarvisCore/Diagnostics/UserFacingError.swift`, `scripts/check-ghost-mode.sh`.
+
+### 2026-07-18 — Codex coaching invocations are isolated and bounded
+
+- **Chose:** Keep `codex exec` as the subscription-backed transport, but make a coaching turn a
+  direct-response decision rather than a coding-agent run: suppress project-root/document and rules
+  discovery, probe the installed CLI's advertised feature names and disable its supported
+  shell/code-mode/delegation/browser/app/plugin surfaces, explicitly forbid remaining built-in tools
+  in the prompt, and retain read-only sandboxing as the enforcement backstop. A missing capability
+  probe falls back to no guessed feature flags, so older or renamed CLIs are not rejected before the
+  direct-response safeguards run. Codex gets a shorter default stall timeout than Claude, and a
+  timed-out process includes its bounded stderr tail in the session diagnostic.
+- **Why:** Session `2026-07-18_20-50-10_4AC2` reached the first Codex request, then produced no reply
+  for 62.968 seconds; Stop was the only reason it ended, so the traffic record contained only a
+  generic cancellation. The installed 0.144.5 CLI still enabled its coding-agent feature surface,
+  while Jarvis incorrectly treated `--sandbox read-only` and `--ignore-user-config` as if they
+  disabled tools and instruction discovery. That let a three-way coach decision enter Codex's much
+  heavier agent runtime, where current GPT-5.6 Sol/macOS releases also have a reported code-mode-host
+  stall/failure path.
+- **Rejected:** (a) Silently falling back to the metered API or another CLI — changes the user's
+  selected provider and billing path. (b) Keeping the two-minute generic timeout — later speech only
+  batches behind the stuck turn. (c) Treating read-only as no-tools — it limits filesystem mutation
+  but does not remove shell, delegation, browser, or other tool definitions. (d) Replacing the
+  coaching transport with Codex app-server/SDK — substantially more lifecycle and protocol surface
+  when this call needs one final text object.
+- **Supersedes in part:** 2026-07-16 — Local Claude Code / Codex CLIs as alternative brain providers.
+- **Detail:** [architecture.md → Local CLI brain providers](./architecture.md#local-cli-brain-providers),
+  `Sources/JarvisCore/Brain/CLIBrainClient+Invocation.swift`, `AgentCLIProcessRunner.swift`.

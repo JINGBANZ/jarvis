@@ -28,9 +28,14 @@ import Foundation
 
     private func client(_ provider: BrainProvider, workDir: URL, model: String = "sonnet",
                         effort: String = "low",
+                        codexSupportedFeatures: Set<String>? = nil,
                         run: @escaping CLIBrainClient.Runner) -> CLIBrainClient {
         CLIBrainClient(provider: provider, executable: URL(fileURLWithPath: "/fake/bin/cli"),
-                       model: model, reasoningEffort: effort, workDirectory: workDir, run: run)
+                       model: model, reasoningEffort: effort, workDirectory: workDir,
+                       codexSupportedFeatures: codexSupportedFeatures
+                           ?? (provider == .codexCLI
+                               ? Set(CLIBrainClient.codexDisabledAgentFeatures) : []),
+                       run: run)
     }
 
     // MARK: - Claude invocation + parsing
@@ -154,7 +159,17 @@ import Foundation
         let run = try #require(captured.value)
         #expect(run.arguments.contains("exec"))
         #expect(run.arguments.contains("--ephemeral"))            // no rollout transcript in ~/.codex
-        #expect(run.arguments.contains("--ignore-user-config"))   // no personal config/rules injected
+        #expect(run.arguments.contains("--ignore-user-config"))   // no personal config injected
+        #expect(run.arguments.contains("--ignore-rules"))         // no exec-policy discovery
+        #expect(run.arguments.contains("project_root_markers=[]"))
+        #expect(run.arguments.contains("project_doc_max_bytes=0"))
+        let disabled = Set(zip(run.arguments, run.arguments.dropFirst()).compactMap {
+            flag, value in flag == "--disable" ? value : nil
+        })
+        #expect(disabled == Set(CLIBrainClient.codexDisabledAgentFeatures))
+        #expect(run.stdin?.hasPrefix(CLIBrainClient.codexDirectResponseInstruction) == true)
+        #expect(run.stdin?.contains("not callable Codex tools") == true)
+        #expect(run.timeout == CLIBrainClient.codexDefaultTimeout)
         #expect(run.arguments.contains("-i"))
         #expect(!run.arguments.contains("-m"))          // empty model = the CLI's own default
         guard case .staySilent = response.toolCalls.first else {
@@ -177,6 +192,25 @@ import Foundation
         #expect(run.arguments.contains("model_reasoning_effort=none"))
         #expect(run.arguments.contains("mcp_servers={}"))
         #expect(run.arguments.contains("gpt-5.5"))
+    }
+
+    @Test func codexDisablesOnlyFeaturesAdvertisedByTheInstalledCLI() async throws {
+        let workDir = try makeWorkDir()
+        let captured = Captured<AgentCLIRun>()
+        let c = client(.codexCLI, workDir: workDir, model: "",
+                       codexSupportedFeatures: ["shell_tool", "renamed_future_feature"]) { run in
+            captured.value = run
+            return AgentCLIOutput(stdout: "", stderr: "", exitCode: 0)
+        }
+
+        _ = try? await c.respond(messages: [.user("x")], tools: [], toolChoice: .auto)
+        let arguments = try #require(captured.value).arguments
+        let disabled = zip(arguments, arguments.dropFirst()).compactMap {
+            flag, value in flag == "--disable" ? value : nil
+        }
+        #expect(disabled == ["shell_tool"])
+        #expect(!arguments.contains("code_mode_host"))
+        #expect(!arguments.contains("renamed_future_feature"))
     }
 
     @Test func claudeEffortMapsNoneToItsFloorAndPassesTheRestThrough() async throws {

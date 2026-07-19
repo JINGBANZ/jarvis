@@ -23,6 +23,9 @@ public struct CLIBrainClient: BrainClient, @unchecked Sendable {
     /// starts at `low`), `-c model_reasoning_effort=…` on Codex (which accepts ours unchanged).
     let reasoningEffort: String
     let workDirectory: URL
+    /// Feature names advertised by this Codex installation. Empty is the compatible fallback: never
+    /// send a guessed `--disable` value that an older or renamed CLI would reject.
+    let codexSupportedFeatures: Set<String>
     let timeout: TimeInterval
     let traffic: BrainTrafficLog?
     let trafficTag: String
@@ -31,13 +34,17 @@ public struct CLIBrainClient: BrainClient, @unchecked Sendable {
     /// A CLI turn pays process startup + agentic overhead on top of model latency, so the hang
     /// backstop sits well above the API client's. Still a backstop, not a latency knob.
     public static let defaultTimeout: TimeInterval = 120
+    /// Healthy Codex coach turns take seconds. A silent agent-runtime stall must not leave the
+    /// listening session green for two minutes while later transcript turns only batch behind it.
+    public static let codexDefaultTimeout: TimeInterval = 30
 
     public init(provider: BrainProvider,
                 executable: URL,
                 model: String,
                 reasoningEffort: String = ReasoningEffort.default.rawValue,
                 workDirectory: URL,
-                timeout: TimeInterval = CLIBrainClient.defaultTimeout,
+                codexSupportedFeatures: Set<String> = [],
+                timeout: TimeInterval? = nil,
                 traffic: BrainTrafficLog? = nil,
                 trafficTag: String = "coach",
                 run: Runner? = nil) {
@@ -47,7 +54,9 @@ public struct CLIBrainClient: BrainClient, @unchecked Sendable {
         self.model = model
         self.reasoningEffort = reasoningEffort
         self.workDirectory = workDirectory
-        self.timeout = timeout
+        self.codexSupportedFeatures = codexSupportedFeatures
+        self.timeout = timeout ?? (provider == .codexCLI
+                                   ? Self.codexDefaultTimeout : Self.defaultTimeout)
         self.traffic = traffic
         self.trafficTag = trafficTag
         self.run = run ?? { try await AgentCLIProcessRunner.run($0) }

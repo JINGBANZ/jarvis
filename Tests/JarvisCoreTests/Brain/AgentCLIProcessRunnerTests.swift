@@ -35,15 +35,19 @@ import Foundation
     }
 
     @Test func hungProcessIsTerminatedAtTimeout() async {
-        // /bin/sleep directly (not `sh -c "sleep 30"`): a shell would FORK sleep, and the orphan
-        // holding the inherited pipe write-ends stalls corelibs-Foundation's exit detection on Linux
-        // until the grandchild dies — which would test the orphan, not the watchdog.
-        let run = AgentCLIRun(executable: URL(fileURLWithPath: "/bin/sleep"),
-                              arguments: ["30"], stdin: nil,
+        // `exec` replaces the shell instead of forking sleep, so the timeout tests the watchdog and
+        // also proves partial provider diagnostics survive into the reported error.
+        let run = AgentCLIRun(executable: URL(fileURLWithPath: "/bin/sh"),
+                              arguments: ["-c", "echo startup-stalled 1>&2; exec /bin/sleep 30"],
+                              stdin: nil,
                               workingDirectory: FileManager.default.temporaryDirectory,
                               timeout: 0.3)
-        await #expect(throws: (any Error).self) {
+        do {
             _ = try await AgentCLIProcessRunner.run(run)
+            Issue.record("expected timeout")
+        } catch {
+            #expect(error.localizedDescription.contains("timed out"))
+            #expect(error.localizedDescription.contains("startup-stalled"))
         }
     }
 }
