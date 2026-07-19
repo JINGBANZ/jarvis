@@ -34,6 +34,23 @@ import Foundation
         #expect(prompt.contains(AgenticEvaluation.reportFilename))
     }
 
+    /// The prompt teaches both provider envelopes and both cache models, points at the deterministic
+    /// metrics, requires cardinal counts from the un-elided record, and asks for a self-check — the
+    /// four failure modes the 2026-07-19 audit exhibited.
+    @Test func promptTeachesEnvelopesCacheModelsCountingAndSelfCheck() {
+        let prompt = AgenticEvaluation.prompt(sessionDirPath: "/tmp/session")
+        #expect(prompt.contains("deterministic metrics"))
+        #expect(prompt.contains("input_tokens_details.cached_tokens"))
+        #expect(prompt.contains("total_cost_usd"))
+        #expect(prompt.contains("modelUsage"))
+        #expect(prompt.contains("BLOCK-level"))
+        #expect(prompt.contains("--system-prompt"))
+        // Cardinal counts must come from the un-elided jsonl, not the elided transcript.
+        #expect(prompt.contains(BrainTrafficLog.filename))
+        #expect(prompt.contains("MUST be counted here"))
+        #expect(prompt.contains("re-check every number"))
+    }
+
     /// Shares the report filename with the single-call path, so "Show report" and the viewer find a
     /// report whichever evaluator produced it.
     @Test func reportFilenameMatchesSingleCallPath() {

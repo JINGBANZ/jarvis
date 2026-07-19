@@ -61,15 +61,24 @@ public struct SessionEvaluator: Sendable {
         let response = try await brain.respond(
             messages: [.system(Self.evalInstructions), .user(transcript)],
             tools: [], toolChoice: .auto)
-        guard let report = response.outputText, !report.isEmpty else {
+        guard let text = response.outputText, !text.isEmpty else {
             throw EvaluationError.emptyReport
         }
+        // Stamp provenance so a reader knows this is the wire-only audit, not the code-reading one.
+        let report = Self.provenanceStamp + "\n\n" + text
         // A failed write is tolerable: the report is still shown; only "Open report" reuse is lost.
         _ = FileManager.default.createFile(
             atPath: sessionDir.appendingPathComponent(Self.reportFilename).path,
             contents: Data(report.utf8), attributes: [.posixPermissions: 0o600])
         return report
     }
+
+    /// Prepended to every single-call report. This path audits the wire transcript only; the
+    /// code-reading agentic audit (`AgenticEvaluation` via `scripts/eval-session.sh`) is preferred
+    /// for a real audit — see the note it stamps.
+    static let provenanceStamp =
+        "> _Produced by the single-call `SessionEvaluator` (in-app wire-only audit). For a "
+        + "code-verified audit with `[confirmed]`/`[hypothesis]` labels, run `scripts/eval-session.sh`._"
 
     // MARK: - Transcript rendering (pure, testable)
 
@@ -108,7 +117,12 @@ public struct SessionEvaluator: Sendable {
             }
             blocks.append(lines.joined(separator: "\n"))
         }
-        return blocks.joined(separator: "\n\n")
+        guard !blocks.isEmpty else { return "" }
+        // Lead with the deterministic metrics table (computed, not eyeballed) so the auditor
+        // interprets numbers instead of summing usage blobs by hand — the source of the 2026-07-19
+        // audit's cost/cache arithmetic errors. Empty traffic still renders "" (callers guard on it).
+        let body = blocks.joined(separator: "\n\n")
+        return SessionMetrics.render(jsonl: jsonl) + "\n\n" + body
     }
 
     private static func renderRequest(_ request: [String: Any], tag: String,
@@ -238,11 +252,31 @@ public struct SessionEvaluator: Sendable {
     append-only so the provider's prompt cache keeps hitting; old history is periodically compacted \
     into a summary by a separate "summarizer" client.
 
-    The user message is the session's complete wire-level LLM traffic, one block per API call, in \
-    order. To keep it compact: content that is byte-identical to the previous call with the same tag \
+    The user message opens with a "=== deterministic metrics ===" table computed from the raw traffic \
+    (per-call and session-total input / cache-read / cache-write / output tokens and cost, plus a \
+    per-model breakdown). TRUST those numbers and interpret them; NEVER recompute a total by eye — \
+    quote the table. It follows with the session's complete wire-level LLM traffic, one block per API \
+    call, in order. To keep it compact: content byte-identical to the previous call with the same tag \
     is elided and explicitly marked "(unchanged)" — those markers are where the prompt cache SHOULD \
-    be hitting; base64 screenshots are redacted to a stub. Each response block includes the raw \
-    usage object (input_tokens_details.cached_tokens vs input_tokens is the cache hit rate).
+    be hitting; base64 screenshots are redacted to a stub.
+
+    Two provider envelopes appear, sometimes in one session — read the right fields for each:
+      - OpenAI Responses: `response.usage` with `input_tokens`, `input_tokens_details.cached_tokens` \
+    (the automatic prefix-cache hit; hit rate = cached_tokens / input_tokens), `output_tokens`; a \
+    truncated run shows `status:"incomplete"`. There is no per-call dollar cost.
+      - Local CLI (`claude -p`): `response.cli` with `total_cost_usd`, a call-level `usage` carrying \
+    Anthropic's `cache_creation_input_tokens` / `cache_read_input_tokens` split, and a `modelUsage` \
+    map with per-model usage + cost (including the CLI's internal sidecar models, e.g. a haiku pass). \
+    Anthropic caching is BLOCK-level, not automatic-prefix: a fresh, non-persisted `claude -p` turn \
+    sends the whole conversation as one giant block, so it can only ever cache-hit the reused \
+    `--system-prompt` — a small, flat cache-read across turns is that serialization, NOT the harness \
+    rewriting history. Do not attribute it to cache-busting without checking which envelope this is.
+
+    Before finalizing, re-check every number you wrote against the metrics table and correct or delete \
+    any that disagree. This transcript ELIDES byte-identical repeats, so it cannot support cardinal \
+    counts of repeated content (stub occurrences, OCR dumps, marker repetitions); take call counts \
+    from the metrics table and, for any other count the table doesn't give, say it is not determinable \
+    from the elided transcript rather than guessing.
 
     Write a markdown report with exactly these sections:
 

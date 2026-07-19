@@ -79,6 +79,15 @@ case "$AGENT" in
 esac
 mv "$REPORT_TMP" "$REPORT"
 
+# Stamp provenance so a reader knows this is the code-reading agentic audit (not the in-app
+# wire-only SessionEvaluator, which stamps its own). Prepend as one line, keeping the report
+# owner-only from birth; the HTML render below picks it up because it reads this .md back.
+STAMP="> _Produced by the agentic evaluator (\`$AGENT\` over the repo + session); recommendations labelled [confirmed] were checked against the code._"
+STAMPED_TMP="$REPORT.stamped"
+trap 'rm -f "$REPORT_TMP" "$STAMPED_TMP"' EXIT
+(umask 077; { printf '%s\n\n' "$STAMP"; cat "$REPORT"; } > "$STAMPED_TMP")
+mv "$STAMPED_TMP" "$REPORT"
+
 # Render the browsable page (with its Copy-as-Markdown button) from what the agent wrote.
 HTML="$(swift run EvalPrep --html "$SESSION_DIR")"
 echo "✓ report written to $REPORT"

@@ -63,12 +63,28 @@ public enum AgenticEvaluation {
         YOUR WORKSPACE is a checkout of the Jarvis source repository. The audited session lives at:
             \(sessionDirPath)
         with these inputs in that directory:
-          - `\(transcriptFilename)` — the session's wire-level LLM traffic rendered one block per API \
-        call, in order. This is your PRIMARY input. To keep it compact, content byte-identical to the \
-        previous same-tag call is elided and marked "(unchanged)" — those markers are exactly where \
-        the prompt cache SHOULD be hitting. Each response block includes the raw usage object \
-        (`input_tokens_details.cached_tokens` vs `input_tokens` is the per-call cache hit rate).
-          - `\(BrainTrafficLog.filename)` — the same traffic un-elided, if you need to inspect a full body.
+          - `\(transcriptFilename)` — the session's wire-level LLM traffic. It OPENS with a \
+        "=== deterministic metrics ===" table computed from the raw traffic (per-call and \
+        session-total input / cache-read / cache-write / output tokens and cost, plus a per-model \
+        breakdown). TRUST those numbers and quote them; never recompute a total by eye. The rest is \
+        one block per API call, in order — your PRIMARY narrative input. To keep it compact, content \
+        byte-identical to the previous same-tag call is elided and marked "(unchanged)" — those \
+        markers are exactly where the prompt cache SHOULD be hitting.
+          - `\(BrainTrafficLog.filename)` — the same traffic un-elided. Because the transcript elides \
+        byte-identical repeats, ANY cardinal count (stub occurrences, OCR dumps, marker repetitions) \
+        MUST be counted here, not from the elided transcript.
+
+        Two provider envelopes appear, sometimes in one session — read the right fields for each:
+          - OpenAI Responses: `response.usage` with `input_tokens`, \
+        `input_tokens_details.cached_tokens` (automatic prefix-cache hit), `output_tokens`; a \
+        truncated run shows `status:"incomplete"`. No per-call dollar cost.
+          - Local CLI (`claude -p`): `response.cli` with `total_cost_usd`, a call-level `usage` \
+        carrying Anthropic's `cache_creation_input_tokens` / `cache_read_input_tokens` split, and a \
+        `modelUsage` map (per-model usage + cost, including internal sidecar models like a haiku \
+        pass). Anthropic caching is BLOCK-level: a fresh, non-persisted `claude -p` turn sends the \
+        whole conversation as one block, so it can only cache-hit the reused `--system-prompt` — a \
+        small, flat cross-turn cache-read is that serialization (verify against \
+        `Sources/JarvisCore/Brain/CLIBrainClient+Invocation.swift`), NOT history rewriting.
           - `shot-N.jpg` — the screenshots the model actually saw (base64 was redacted from the traffic).
           - a prior `\(reportFilename)`, if this session was audited before.
 
@@ -109,8 +125,10 @@ public enum AgenticEvaluation {
           - `[hypothesis]` — plausible from the traffic but not (or not yet) checked against the code.
 
         Cite call numbers (call #N) as evidence throughout. If the data doesn't support a finding, say \
-        so rather than speculating. Output ONLY the markdown report — it is saved verbatim as \
-        `\(reportFilename)` in the session directory.
+        so rather than speculating. Before finalizing, re-check every number in your draft against the \
+        metrics table and against `\(BrainTrafficLog.filename)`, and correct or delete any that \
+        disagree. Output ONLY the markdown report — it is saved as `\(reportFilename)` in the session \
+        directory (the harness prepends a one-line provenance stamp, so don't add your own).
         """
     }
 }
