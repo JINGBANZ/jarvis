@@ -137,9 +137,12 @@ public enum AgentCLIProcessRunner {
         // Only a SIGTERM exit counts as our timeout — the flag alone could race a normal exit that
         // lands just as the watchdog fires.
         if timedOut.get() && process.terminationReason == .uncaughtSignal {
+            let stderr = String(decoding: stderrBox.get(), as: UTF8.self)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let detail = stderr.isEmpty ? "" : "; stderr: \(String(stderr.suffix(2_000)))"
             throw NSError(domain: "AgentCLIProcessRunner", code: NSURLErrorTimedOut, userInfo: [
                 NSLocalizedDescriptionKey:
-                    "\(run.executable.lastPathComponent) timed out after \(Int(run.timeout))s",
+                    "\(run.executable.lastPathComponent) timed out after \(Int(run.timeout))s\(detail)",
             ])
         }
         return AgentCLIOutput(stdout: String(decoding: stdoutBox.get(), as: UTF8.self),

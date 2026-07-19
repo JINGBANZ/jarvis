@@ -71,18 +71,25 @@ extension CLIBrainClient {
             // (deleted after the run). read-only sandbox: the brain must not touch the filesystem
             // beyond reading its inputs. The final reply lands in --output-last-message (stdout is
             // a human-formatted log). --ephemeral mirrors claude's --no-session-persistence: no
-            // rollout transcript in ~/.codex/sessions/. --ignore-user-config mirrors claude's
-            // --setting-sources ""/--strict-mcp-config: no personal config, instructions, or MCP
-            // servers ahead of the harness's own protocol (auth still comes from CODEX_HOME per the
-            // CLI's docs); mcp_servers={} stays as belt and braces. "CLI default" model therefore
-            // means codex's built-in default here. Verified against codex-cli 0.144.
+            // rollout transcript in ~/.codex/sessions/. --ignore-user-config removes config.toml,
+            // but NOT AGENTS.md or project discovery; explicit root/doc overrides keep the coding
+            // harness out of this decision-only call. Codex has no general disable-all-tools flag,
+            // so turn off its current agentic feature surfaces. The prompt below covers remaining
+            // non-feature-gated built-ins, while read-only stays the enforcement backstop. Auth
+            // still comes from CODEX_HOME. "CLI default" means the built-in default. Verified
+            // against codex-cli 0.144.5.
             let replyFile = workDirectory.appendingPathComponent("cli-reply-\(UUID().uuidString.prefix(8)).txt")
             var transientFiles = [replyFile]
             var args = ["exec", "--skip-git-repo-check", "--sandbox", "read-only", "--ephemeral",
-                        "--ignore-user-config",
+                        "--ignore-user-config", "--ignore-rules",
                         "--output-last-message", replyFile.path,
                         "-c", "mcp_servers={}",
+                        "-c", "project_root_markers=[]",
+                        "-c", "project_doc_max_bytes=0",
                         "-c", "model_reasoning_effort=\(Self.codexEffort(reasoningEffort))"]
+            for feature in Self.codexDisabledAgentFeatures {
+                args += ["--disable", feature]
+            }
             if !model.isEmpty { args += ["-m", model] }
             var blocks: [String] = []
             var auditInput: [[String: Any]] = []
@@ -99,7 +106,8 @@ extension CLIBrainClient {
                     auditInput.append(["type": "image", "image": Self.imageStub(base64)])
                 }
             }
-            var document = instructions.isEmpty ? "" : instructions + "\n\n"
+            var document = Self.codexDirectResponseInstruction + "\n\n"
+            if !instructions.isEmpty { document += instructions + "\n\n" }
             document += "## Conversation\n\n" + blocks.joined(separator: "\n\n")
             if !tools.isEmpty { document += "\n\nAnswer now, following the tool protocol." }
             auditRequest["input"] = auditInput
@@ -113,6 +121,28 @@ extension CLIBrainClient {
             preconditionFailure("guarded in init")
         }
     }
+
+    /// Codex is a coding agent even under `exec`; these stable 0.144 feature gates remove the
+    /// built-in surfaces that can turn a three-way text decision into an agentic run. Keep this
+    /// list narrow: an unknown feature name makes a future CLI reject the whole invocation.
+    static let codexDisabledAgentFeatures = [
+        "apps",
+        "browser_use",
+        "code_mode_host",
+        "computer_use",
+        "goals",
+        "image_generation",
+        "multi_agent",
+        "plugins",
+        "shell_tool",
+        "unified_exec",
+    ]
+
+    static let codexDirectResponseInstruction = """
+        Answer this decision request immediately without inspecting files, running commands,
+        browsing, planning, delegating, or invoking any Codex built-in tool. The capture_screen,
+        speak, and stay_silent names below are an output JSON protocol, not callable Codex tools.
+        """
 
     /// One stream-json user message carrying the whole conversation: text blocks coalesced,
     /// screenshots as inline base64 image blocks in their original positions. Inline images are why

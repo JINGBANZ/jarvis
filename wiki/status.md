@@ -25,9 +25,14 @@ replacement socket replays the rest after a half-open failure. A live Wi-Fi reco
 that speech captured during the outage returns after recovery. The brain can also run through a
 locally installed Claude Code or Codex CLI on the user's subscription; Settings → Brain auto-detects
 those providers, reports Claude's current sign-in state from its bounded status command, and keeps
-the OpenAI API-key path available. A failed CLI coaching request stops the unusable session without
-activating the app, leaves a discreet provider-only Activity notice, and keeps the detailed reason
-in `jarvis-debug.log` instead of leaving the listening state green. The same runtime ghost-mode rule
+the OpenAI API-key path available. Codex coaching calls suppress project instructions and its
+feature-gated agent tools, run as direct-response decisions, and stop under a provider-specific
+stall bound instead of leaving later speech batched indefinitely. A live synthetic greeting through
+the isolated Codex 0.144.5 invocation returned a valid `speak` action without entering a coding tool.
+A failed CLI coaching request
+stops the unusable session without activating the app, leaves a discreet provider-only Activity
+notice, and keeps the detailed reason in `jarvis-debug.log` instead of leaving the listening state
+green. The same runtime ghost-mode rule
 now covers microphone transcription, audio-route loss, in-place CLI preflight, and Activity-audit
 completion: no runtime error autonomously activates Jarvis, opens a browser, or presents a modal;
 fixed notices remain available in Activity. The gate statically rejects unreviewed presentation APIs.
@@ -39,8 +44,8 @@ details, ask “Jarvis, how can I solve this in one pass?”, and confirm the fi
 exactly one `capture_screen` followed by a screen-specific reply. Then ask a fully stated behavioral
 question and confirm it can answer without an unnecessary capture. Finish the in-app Claude Code
 provider smoke: confirm Settings shows it signed in, then confirm a coaching turn and screen request.
-Also confirm a missing or signed-out CLI fails loudly. The standard release checklist remains in
-[build-and-run.md](./build-and-run.md).
+Finish the in-app Codex smoke through audio and the overlay, then confirm a missing or signed-out CLI
+fails loudly. The standard release checklist remains in [build-and-run.md](./build-and-run.md).
 
 ## Built
 

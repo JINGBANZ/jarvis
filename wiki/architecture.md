@@ -239,10 +239,12 @@ memory, retries, and traffic recording are all unchanged — only the transport 
   with `--tools ""` (every built-in disabled) a turn can't go agentic at all. Codex has no inline
   image input, so for it screenshots become 0600 files in the per-session log directory (which
   already persists every screenshot the model sees — same data posture), attached via `-i` and
-  deleted when the run finishes; its coach turns have nothing to execute, so they're single-call in
-  practice. Codex runs `--sandbox read-only`; Claude runs with its persona replaced
-  (`--system-prompt`) and no settings sources, and the one reasoning-effort setting maps onto each
-  CLI's own scale.
+  deleted when the run finishes. Codex's feature-gated shell, code-mode, delegation, browser/app,
+  plugin, and other agentic surfaces are disabled; project-root/document discovery is suppressed;
+  and the leading instruction explicitly treats the three Jarvis tool names as an output protocol,
+  not Codex tools. `--sandbox read-only` remains the enforcement backstop for built-ins Codex does
+  not expose a disable switch for. Claude runs with its persona replaced (`--system-prompt`) and no
+  settings sources, and the one reasoning-effort setting maps onto each CLI's own scale.
 - **Installed CLIs are auto-detected.** `AgentCLIDetector` discovers binaries through file probes
   over $PATH + known install dirs. Claude's actual sign-in state comes from its non-billing
   `auth status --json` command under a short timeout, because stale account metadata can survive an
@@ -254,7 +256,7 @@ memory, retries, and traffic recording are all unchanged — only the transport 
   / ~3.3s (with screenshot) on claude sonnet at low effort, ~5–8s on codex — versus the direct
   API's sub-2s target. The invocation is kept deliberately slim (persona replaced, no settings
   sources or personal codex config — `--ignore-user-config` — **zero MCP servers** via
-  `--strict-mcp-config` / `-c mcp_servers={}`, no built-in tools),
+  `--strict-mcp-config` / `-c mcp_servers={}`, and no feature-gated Codex agent tools),
   so what remains is irreducible from outside: claude's floor is ~0.7s of process overhead + model
   time; codex's is ~4.7s even for a trivial prompt because its fixed coding-agent scaffold (a
   built-in multi-thousand-token system prompt that `exec` offers no flag to replace) rides every
@@ -310,9 +312,11 @@ The always-on legs are built to survive transient failure rather than die on it:
   their retained PCM is transcribed by the replacement session instead of first emitting a partial
   or gap that the replay would duplicate. Stale speech state therefore cannot suppress silence
   coaching after reconnect. Reconnect uses capped exponential backoff.
-- **The brain call** is single-flighted (a turn can't double-speak) and runs under a generous request
-  timeout — a hang backstop set well above the reasoning-turn tail, so a slow turn is waited out, not
-  abandoned. Because client-owned memory makes every request self-contained and tool effects happen
+- **The brain call** is single-flighted (a turn can't double-speak) and runs under a provider-aware
+  request timeout. The API and Claude ceilings stay well above the reasoning-turn tail; Codex has a
+  shorter bound because a healthy decision turn takes seconds and a silent agent-runtime stall would
+  otherwise batch every later transcript turn behind it. Because client-owned memory makes every
+  request self-contained and tool effects happen
   only after a response reaches the driver, a transient transport failure or retryable server error
   gets **one immediate automatic retry** without duplicating a screenshot or spoken tip. Cancellation,
   authentication, malformed requests, rate limits, and other permanent failures do not retry. If both

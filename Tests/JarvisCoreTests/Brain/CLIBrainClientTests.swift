@@ -154,7 +154,17 @@ import Foundation
         let run = try #require(captured.value)
         #expect(run.arguments.contains("exec"))
         #expect(run.arguments.contains("--ephemeral"))            // no rollout transcript in ~/.codex
-        #expect(run.arguments.contains("--ignore-user-config"))   // no personal config/rules injected
+        #expect(run.arguments.contains("--ignore-user-config"))   // no personal config injected
+        #expect(run.arguments.contains("--ignore-rules"))         // no exec-policy discovery
+        #expect(run.arguments.contains("project_root_markers=[]"))
+        #expect(run.arguments.contains("project_doc_max_bytes=0"))
+        let disabled = Set(zip(run.arguments, run.arguments.dropFirst()).compactMap {
+            flag, value in flag == "--disable" ? value : nil
+        })
+        #expect(disabled == Set(CLIBrainClient.codexDisabledAgentFeatures))
+        #expect(run.stdin?.hasPrefix(CLIBrainClient.codexDirectResponseInstruction) == true)
+        #expect(run.stdin?.contains("not callable Codex tools") == true)
+        #expect(run.timeout == CLIBrainClient.codexDefaultTimeout)
         #expect(run.arguments.contains("-i"))
         #expect(!run.arguments.contains("-m"))          // empty model = the CLI's own default
         guard case .staySilent = response.toolCalls.first else {
