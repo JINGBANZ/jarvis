@@ -5,10 +5,10 @@ import Darwin
 import Glibc
 #endif
 
-/// Finds installed `claude` / `codex` CLIs and checks their sign-in state. Binary discovery stays a
-/// pure filesystem probe. Claude authentication comes from its non-billing `auth status --json`
-/// command because its on-disk account marker can survive an expired OAuth session; the command is
-/// bounded so Settings cannot hang on a broken CLI. Codex's auth file remains authoritative.
+/// Finds installed `claude` / `codex` CLIs and checks the local facts Jarvis needs before invoking
+/// them. Binary discovery stays a pure filesystem probe. Bounded, non-billing local commands read
+/// Claude's authoritative auth status and Codex's advertised feature names; Codex's auth file marker
+/// remains authoritative.
 public struct AgentCLIDetector: Sendable {
     private let home: URL
     private let pathVariable: String?
@@ -32,8 +32,12 @@ public struct AgentCLIDetector: Sendable {
     public func detect(_ provider: BrainProvider) -> DetectedAgentCLI? {
         guard let name = provider.cliExecutableName else { return nil }
         guard let url = firstExecutable(named: name) else { return nil }
-        return DetectedAgentCLI(provider: provider, executableURL: url,
-                                authenticationStatus: authenticationStatus(provider, executable: url))
+        return DetectedAgentCLI(
+            provider: provider,
+            executableURL: url,
+            authenticationStatus: authenticationStatus(provider, executable: url),
+            supportedFeatures: provider == .codexCLI ? codexSupportedFeatures(executable: url) : []
+        )
     }
 
     /// The common install locations consulted after $PATH — the single source of truth, also used
@@ -84,16 +88,45 @@ public struct AgentCLIDetector: Sendable {
         let loggedIn: Bool
     }
 
-    /// The status document is tiny. This is only a runaway-output backstop for a broken wrapper,
+    /// Both probe documents are tiny. This is only a runaway-output backstop for a broken wrapper,
     /// and keeps the post-timeout pipe drain bounded in both time and memory.
-    private static let maxClaudeAuthStatusBytes = 64 * 1_024
+    private static let maxProbeOutputBytes = 64 * 1_024
 
     /// Claude's own status command reads whichever credential store that installation uses and does
     /// not make a model request. A malformed result or timeout is `unknown`, never "signed out".
     private func claudeAuthenticationStatus(executable: URL) -> AgentCLIAuthenticationStatus {
+        guard let output = runProbe(executable: executable,
+                                    arguments: ["auth", "status", "--json"]),
+              let status = try? JSONDecoder().decode(ClaudeAuthStatus.self, from: output.data)
+        else { return .unknown }
+        return status.loggedIn ? .signedIn : .signedOut
+    }
+
+    /// `--disable <feature>` rejects unknown names. Probe the installed binary's compiled feature
+    /// registry so Jarvis passes only names that installation advertises. Failure falls back to no
+    /// feature flags; the direct-response prompt, isolated project root, read-only sandbox, and short
+    /// timeout still bound the call without making an older or renamed CLI unusable.
+    private func codexSupportedFeatures(executable: URL) -> Set<String> {
+        guard let output = runProbe(executable: executable, arguments: ["features", "list"]),
+              output.status == 0,
+              let text = String(data: output.data, encoding: .utf8)
+        else { return [] }
+        return Set(text.split(separator: "\n").compactMap { line in
+            line.split(whereSeparator: \.isWhitespace).first.map(String.init)
+        })
+    }
+
+    private struct ProbeOutput {
+        let data: Data
+        let status: Int32
+    }
+
+    /// Run one local, non-model status/capability command under the same bounded process policy for
+    /// both CLIs. No API key is inherited, and stderr is irrelevant to the machine-readable probe.
+    private func runProbe(executable: URL, arguments: [String]) -> ProbeOutput? {
         let process = Process()
         process.executableURL = executable
-        process.arguments = ["auth", "status", "--json"]
+        process.arguments = arguments
         process.standardInput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
         let stdout = Pipe()
@@ -111,7 +144,7 @@ public struct AgentCLIDetector: Sendable {
         do {
             try process.run()
         } catch {
-            return .unknown
+            return nil
         }
 
         // `Process` termination callbacks can be delayed while the test runner or app is busy.
@@ -126,17 +159,15 @@ public struct AgentCLIDetector: Sendable {
         process.waitUntilExit()
         terminator.cancel()
         killer.cancel()
-        let data = Self.readAvailableOutput(stdout.fileHandleForReading)
-        guard let status = try? JSONDecoder().decode(ClaudeAuthStatus.self, from: data) else {
-            return .unknown
-        }
-        return status.loggedIn ? .signedIn : .signedOut
+        let data = Self.readAvailableOutput(stdout.fileHandleForReading,
+                                            maxBytes: Self.maxProbeOutputBytes)
+        return ProbeOutput(data: data, status: process.terminationStatus)
     }
 
     /// Drain only bytes already available after the wrapper exits. A wrapper may leave a child
     /// holding the inherited stdout pipe open; a blocking `readDataToEndOfFile()` would then defeat
     /// the process watchdog while waiting for that unrelated child to close its writer.
-    private static func readAvailableOutput(_ handle: FileHandle) -> Data {
+    private static func readAvailableOutput(_ handle: FileHandle, maxBytes: Int) -> Data {
         let descriptor = handle.fileDescriptor
         let flags = fcntl(descriptor, F_GETFL)
         guard flags >= 0, fcntl(descriptor, F_SETFL, flags | O_NONBLOCK) >= 0 else {
@@ -147,8 +178,8 @@ public struct AgentCLIDetector: Sendable {
 
         var output = Data()
         var buffer = [UInt8](repeating: 0, count: 4_096)
-        while output.count < maxClaudeAuthStatusBytes {
-            let capacity = min(buffer.count, maxClaudeAuthStatusBytes - output.count)
+        while output.count < maxBytes {
+            let capacity = min(buffer.count, maxBytes - output.count)
             let count = read(descriptor, &buffer, capacity)
             if count > 0 {
                 output.append(contentsOf: buffer.prefix(Int(count)))

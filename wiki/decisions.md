@@ -507,10 +507,12 @@
 
 - **Chose:** Keep `codex exec` as the subscription-backed transport, but make a coaching turn a
   direct-response decision rather than a coding-agent run: suppress project-root/document and rules
-  discovery, disable Codex's feature-gated shell/code-mode/delegation/browser/app/plugin surfaces,
-  explicitly forbid remaining built-in tools in the prompt, and retain read-only sandboxing as the
-  enforcement backstop. Codex gets a shorter default stall timeout than Claude, and a timed-out
-  process includes its bounded stderr tail in the session diagnostic.
+  discovery, probe the installed CLI's advertised feature names and disable its supported
+  shell/code-mode/delegation/browser/app/plugin surfaces, explicitly forbid remaining built-in tools
+  in the prompt, and retain read-only sandboxing as the enforcement backstop. A missing capability
+  probe falls back to no guessed feature flags, so older or renamed CLIs are not rejected before the
+  direct-response safeguards run. Codex gets a shorter default stall timeout than Claude, and a
+  timed-out process includes its bounded stderr tail in the session diagnostic.
 - **Why:** Session `2026-07-18_20-50-10_4AC2` reached the first Codex request, then produced no reply
   for 62.968 seconds; Stop was the only reason it ended, so the traffic record contained only a
   generic cancellation. The installed 0.144.5 CLI still enabled its coding-agent feature surface,

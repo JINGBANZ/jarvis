@@ -23,6 +23,9 @@ public struct CLIBrainClient: BrainClient, @unchecked Sendable {
     /// starts at `low`), `-c model_reasoning_effort=…` on Codex (which accepts ours unchanged).
     let reasoningEffort: String
     let workDirectory: URL
+    /// Feature names advertised by this Codex installation. Empty is the compatible fallback: never
+    /// send a guessed `--disable` value that an older or renamed CLI would reject.
+    let codexSupportedFeatures: Set<String>
     let timeout: TimeInterval
     let traffic: BrainTrafficLog?
     let trafficTag: String
@@ -40,6 +43,7 @@ public struct CLIBrainClient: BrainClient, @unchecked Sendable {
                 model: String,
                 reasoningEffort: String = ReasoningEffort.default.rawValue,
                 workDirectory: URL,
+                codexSupportedFeatures: Set<String> = [],
                 timeout: TimeInterval? = nil,
                 traffic: BrainTrafficLog? = nil,
                 trafficTag: String = "coach",
@@ -50,6 +54,7 @@ public struct CLIBrainClient: BrainClient, @unchecked Sendable {
         self.model = model
         self.reasoningEffort = reasoningEffort
         self.workDirectory = workDirectory
+        self.codexSupportedFeatures = codexSupportedFeatures
         self.timeout = timeout ?? (provider == .codexCLI
                                    ? Self.codexDefaultTimeout : Self.defaultTimeout)
         self.traffic = traffic

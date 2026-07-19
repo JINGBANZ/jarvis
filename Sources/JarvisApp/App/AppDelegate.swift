@@ -87,6 +87,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                            model: self.brainPreferences.model(for: provider).id,
                                            reasoningEffort: ReasoningEffort.high.rawValue,
                                            workDirectory: self.currentSessionDir ?? self.logDirectory(),
+                                           codexSupportedFeatures: cli.supportedFeatures,
                                            timeout: 600)   // a big session transcript takes minutes, not seconds
                 return SessionEvaluator(brain: brain)
             }
@@ -246,11 +247,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                        model: brainPreferences.model(for: brainProvider).id,
                                        reasoningEffort: brainPreferences.effort.rawValue,
                                        workDirectory: sessionDir,
+                                       codexSupportedFeatures: cli.supportedFeatures,
                                        traffic: sessionTraffic, trafficTag: "coach")
             summarizer = CLIBrainClient(provider: brainProvider, executable: cli.executableURL,
                                         model: BrainModelCatalog.summarizerModelID(for: brainProvider),
                                         reasoningEffort: ReasoningEffort.low.rawValue,
                                         workDirectory: sessionDir,
+                                        codexSupportedFeatures: cli.supportedFeatures,
                                         traffic: sessionTraffic, trafficTag: "summarizer")
         } else {
             coachBase = OpenAIBrainClient(apiKey: key, model: brainPreferences.model.id,

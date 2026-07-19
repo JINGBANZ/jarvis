@@ -74,10 +74,10 @@ extension CLIBrainClient {
             // rollout transcript in ~/.codex/sessions/. --ignore-user-config removes config.toml,
             // but NOT AGENTS.md or project discovery; explicit root/doc overrides keep the coding
             // harness out of this decision-only call. Codex has no general disable-all-tools flag,
-            // so turn off its current agentic feature surfaces. The prompt below covers remaining
-            // non-feature-gated built-ins, while read-only stays the enforcement backstop. Auth
-            // still comes from CODEX_HOME. "CLI default" means the built-in default. Verified
-            // against codex-cli 0.144.5.
+            // so turn off only agentic feature names advertised by this installation's bounded
+            // `features list` probe. The prompt below covers remaining/non-advertised built-ins,
+            // while read-only stays the enforcement backstop. Auth still comes from CODEX_HOME.
+            // "CLI default" means the built-in default. Verified against codex-cli 0.144.5.
             let replyFile = workDirectory.appendingPathComponent("cli-reply-\(UUID().uuidString.prefix(8)).txt")
             var transientFiles = [replyFile]
             var args = ["exec", "--skip-git-repo-check", "--sandbox", "read-only", "--ephemeral",
@@ -87,7 +87,7 @@ extension CLIBrainClient {
                         "-c", "project_root_markers=[]",
                         "-c", "project_doc_max_bytes=0",
                         "-c", "model_reasoning_effort=\(Self.codexEffort(reasoningEffort))"]
-            for feature in Self.codexDisabledAgentFeatures {
+            for feature in Self.codexDisabledAgentFeatures where codexSupportedFeatures.contains(feature) {
                 args += ["--disable", feature]
             }
             if !model.isEmpty { args += ["-m", model] }
@@ -122,9 +122,9 @@ extension CLIBrainClient {
         }
     }
 
-    /// Codex is a coding agent even under `exec`; these stable 0.144 feature gates remove the
-    /// built-in surfaces that can turn a three-way text decision into an agentic run. Keep this
-    /// list narrow: an unknown feature name makes a future CLI reject the whole invocation.
+    /// Codex is a coding agent even under `exec`; these feature gates remove built-in surfaces that
+    /// can turn a three-way text decision into an agentic run. The invocation intersects this list
+    /// with the installed CLI's advertised features, so renamed or unavailable names are omitted.
     static let codexDisabledAgentFeatures = [
         "apps",
         "browser_use",

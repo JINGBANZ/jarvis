@@ -239,17 +239,20 @@ memory, retries, and traffic recording are all unchanged — only the transport 
   with `--tools ""` (every built-in disabled) a turn can't go agentic at all. Codex has no inline
   image input, so for it screenshots become 0600 files in the per-session log directory (which
   already persists every screenshot the model sees — same data posture), attached via `-i` and
-  deleted when the run finishes. Codex's feature-gated shell, code-mode, delegation, browser/app,
-  plugin, and other agentic surfaces are disabled; project-root/document discovery is suppressed;
-  and the leading instruction explicitly treats the three Jarvis tool names as an output protocol,
-  not Codex tools. `--sandbox read-only` remains the enforcement backstop for built-ins Codex does
-  not expose a disable switch for. Claude runs with its persona replaced (`--system-prompt`) and no
-  settings sources, and the one reasoning-effort setting maps onto each CLI's own scale.
+  deleted when the run finishes. A bounded local capability probe reads the installed Codex CLI's
+  advertised feature names; its supported shell, code-mode, delegation, browser/app, plugin, and
+  other agentic surfaces are disabled without guessing flags that an older or renamed CLI rejects.
+  Project-root/document discovery is suppressed, and the leading instruction explicitly treats the
+  three Jarvis tool names as an output protocol, not Codex tools. `--sandbox read-only` remains the
+  enforcement backstop for built-ins Codex does not expose a disable switch for. Claude runs with
+  its persona replaced (`--system-prompt`) and no settings sources, and the one reasoning-effort
+  setting maps onto each CLI's own scale.
 - **Installed CLIs are auto-detected.** `AgentCLIDetector` discovers binaries through file probes
   over $PATH + known install dirs. Claude's actual sign-in state comes from its non-billing
   `auth status --json` command under a short timeout, because stale account metadata can survive an
-  expired OAuth session; Codex uses its auth-file marker. Settings distinguishes signed in, signed
-  out, and an unavailable probe, and Start refuses a confirmed logout.
+  expired OAuth session; Codex uses its auth-file marker and a bounded, non-model `features list`
+  capability probe. Settings distinguishes signed in, signed out, and an unavailable auth probe,
+  and Start refuses a confirmed logout.
 - **The OpenAI key stays required**: transcription always runs on the Realtime API. A CLI provider
   moves the brain/summarizer/evaluator off the key, not the ears. **Latency is the tradeoff**,
   though a modest one now that every turn is one model call: measured coach turns run ~2.6s (text)

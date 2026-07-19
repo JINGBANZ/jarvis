@@ -27,9 +27,7 @@ locally installed Claude Code or Codex CLI on the user's subscription; Settings 
 those providers, reports Claude's current sign-in state from its bounded status command, and keeps
 the OpenAI API-key path available. Codex coaching calls suppress project instructions and its
 feature-gated agent tools, run as direct-response decisions, and stop under a provider-specific
-stall bound instead of leaving later speech batched indefinitely. A live synthetic greeting through
-the isolated Codex 0.144.5 invocation returned a valid `speak` action without entering a coding tool.
-A failed CLI coaching request
+stall bound instead of leaving later speech batched indefinitely. A failed CLI coaching request
 stops the unusable session without activating the app, leaves a discreet provider-only Activity
 notice, and keeps the detailed reason in `jarvis-debug.log` instead of leaving the listening state
 green. The same runtime ghost-mode rule
