@@ -35,11 +35,12 @@ import Testing
     }
 
     /// Line-level claims must come from the image, not OCR — a live session audit caught the model
-    /// "correcting" an already-correct line it had misread from OCR noise.
+    /// "correcting" an already-correct line it had misread from OCR noise. OCR-only sightings turn
+    /// into a double-check tip (the overlay is one-way; there's no dialogue to "ask" in).
     @Test func coachPromptGroundsLineLevelClaimsInTheImage() {
         #expect(coachSystemPrompt.contains("the screenshot image is ground truth"))
         #expect(coachSystemPrompt.contains("verify it in the image"))
-        #expect(coachSystemPrompt.contains("ask about it instead of asserting"))
+        #expect(coachSystemPrompt.contains("frame the tip as something to double-check"))
     }
 
     @Test func coachPromptTreatsFreshCaptureAsSatisfyingScreenGate() {
