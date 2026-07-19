@@ -54,6 +54,13 @@ extension CLIBrainClient {
         return sections.joined(separator: "\n\n")
     }
 
+    /// The forced-tool sentence for a `.force` turn — appended to the conversation's uncacheable
+    /// tail (the "Answer now" trailer) rather than the instructions, which must stay byte-stable.
+    static func forcedToolDirective(_ toolChoice: ToolChoice) -> String? {
+        guard case .force(let name) = toolChoice else { return nil }
+        return "You MUST call the `\(name)` tool this turn."
+    }
+
     /// The CLI-side stand-in for the Responses API's native function calling: the model is told to
     /// end its reply with one JSON object naming the tool. Generated from the same `ToolDef`s the
     /// API client sends, so the two providers stay behaviorally interchangeable.
@@ -71,10 +78,12 @@ extension CLIBrainClient {
                      + "fence, nothing after it): {\"tool\":\"<tool name>\",\"arguments\":{…}}. "
                      + "Use {} for a tool with no arguments.")
         switch toolChoice {
-        case .required:
+        case .required, .force:
+            // .force gets the SAME instructions as .required — byte-identical instructions keep the
+            // provider's prompt cache hot across the whole session (a one-turn forced hint used to
+            // rewrite the system prompt and pay two full cache misses). The forced-tool directive
+            // rides in the turn's trailer instead (`forcedToolDirective`).
             lines.append("You MUST pick exactly one tool this turn — the JSON object is your entire answer.")
-        case .force(let name):
-            lines.append("You MUST call the `\(name)` tool this turn.")
         case .auto:
             lines.append("If no tool fits, reply with plain text instead of the JSON object.")
         }
