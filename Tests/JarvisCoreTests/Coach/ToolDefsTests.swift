@@ -34,6 +34,14 @@ import Testing
         #expect(coachSystemPrompt.contains("one pass\" without the problem"))
     }
 
+    /// Line-level claims must come from the image, not OCR — a live session audit caught the model
+    /// "correcting" an already-correct line it had misread from OCR noise.
+    @Test func coachPromptGroundsLineLevelClaimsInTheImage() {
+        #expect(coachSystemPrompt.contains("the screenshot image is ground truth"))
+        #expect(coachSystemPrompt.contains("verify it in the image"))
+        #expect(coachSystemPrompt.contains("ask about it instead of asserting"))
+    }
+
     @Test func coachPromptTreatsFreshCaptureAsSatisfyingScreenGate() {
         #expect(coachSystemPrompt.contains("A fresh screenshot or OCR in the current input"))
         #expect(coachSystemPrompt.contains("A fresh capture result satisfies the screen gate"))

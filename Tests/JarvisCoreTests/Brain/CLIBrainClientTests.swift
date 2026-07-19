@@ -244,6 +244,31 @@ import Foundation
         #expect(response.toolCalls.isEmpty)
     }
 
+    /// A one-turn forced hint must not rewrite the system prompt: instructions stay byte-identical
+    /// to a `.required` turn (they're the provider's cacheable prefix — a session audit showed the
+    /// old in-instructions directive paying two full cache misses per hint), and the directive rides
+    /// in the conversation's trailer instead.
+    @Test func forcedToolKeepsInstructionsStableAndDirectsViaTheTurn() async throws {
+        let instructionsAndStdin = { (choice: ToolChoice) async throws -> (String, String) in
+            let captured = Captured<AgentCLIRun>()
+            let c = self.client(.claudeCode, workDir: try self.makeWorkDir()) { run in
+                captured.value = run
+                return AgentCLIOutput(stdout: self.claudeEnvelope(#"{"tool":"speak","arguments":{"lines":["t"]}}"#),
+                                      stderr: "", exitCode: 0)
+            }
+            _ = try await c.respond(messages: [.system("coach prompt"), .user("help")],
+                                    tools: coachTools, toolChoice: choice)
+            let run = try #require(captured.value)
+            let sysIdx = try #require(run.arguments.firstIndex(of: "--system-prompt"))
+            return (run.arguments[sysIdx + 1], try #require(run.stdin))
+        }
+        let (requiredInstructions, requiredStdin) = try await instructionsAndStdin(.required)
+        let (forcedInstructions, forcedStdin) = try await instructionsAndStdin(.force(speakTool.name))
+        #expect(forcedInstructions == requiredInstructions)
+        #expect(forcedStdin.contains("You MUST call the `speak` tool this turn."))
+        #expect(!requiredStdin.contains("You MUST call the `speak` tool"))
+    }
+
     @Test func forcedSpeakRejectsAnotherToolAndSpeaksTheProse() async throws {
         // The Responses API enforces a forced tool server-side; the CLI protocol is prompt text,
         // so a stay_silent reply to the hint hotkey must not eat the hint.

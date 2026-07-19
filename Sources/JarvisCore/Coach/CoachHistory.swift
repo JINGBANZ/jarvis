@@ -14,7 +14,17 @@ public final class CoachHistory: @unchecked Sendable {
     private let lock = NSLock()
     private var messages: [ChatMessage] = []
 
-    static let imageStub = "[an earlier screenshot was here — no longer available; call capture_screen for a fresh look]"
+    // Deliberately not an instruction: a session-audit showed the earlier "call capture_screen for
+    // a fresh look" phrasing, repeated once per stubbed screenshot in user-role history, biased the
+    // model toward capturing on every quiet turn (stay_silent was never chosen).
+    static let imageStub = "[an earlier screenshot was here — no longer available]"
+
+    /// The opening line of every OCR block the driver commits (see `CoachDriver.recognizedTextBlock`,
+    /// which builds on this constant so the two can't drift). Matched at commit time: a new capture's
+    /// OCR supersedes every earlier one, which then collapses to `ocrStub`.
+    static let ocrHeader = "Text recognized on the captured window (on-device OCR — may contain "
+        + "errors; the screenshot image is ground truth):"
+    static let ocrStub = "[an earlier screen's OCR text was here — superseded by a newer capture]"
 
     public init() {}
 
@@ -30,7 +40,15 @@ public final class CoachHistory: @unchecked Sendable {
     /// - **Screenshots** are replaced with a text stub (observation masking). The capture's OCR text
     ///   — what the model actually reads — rides in the tool-result message and stays verbatim; the
     ///   pixels are ~1–2k tokens re-billed on every later request, and the model can always capture
-    ///   a fresh look.
+    ///   a fresh look. When the turn carries a NEW OCR block, every earlier OCR dump — committed
+    ///   history and any older capture within the same turn — collapses to a one-line stub:
+    ///   near-identical screens re-billed forever, and a session-audit caught the model
+    ///   "correcting" code the user had already fixed by reading a stale dump. Unlike the two
+    ///   tail-local rewrites above, this one re-diverges the prompt-cache prefix at the oldest
+    ///   collapsed block. That is deliberate: a bounded one-request re-read per capture (and free
+    ///   on the CLI providers, which serialize history into a single block no prefix cache can hit
+    ///   anyway) buys back ~1k stale tokens per dump on every later request plus the stale-context
+    ///   failure mode above.
     /// - **Raw passthrough items** (a response's verbatim `output` array, replayed whole within the
     ///   turn's tool loop) are CONVERTED, not kept: the `function_call` items survive as one
     ///   synthetic id-less call message — so the committed `function_call_output` never orphans —
@@ -43,10 +61,24 @@ public final class CoachHistory: @unchecked Sendable {
     public func commit(_ turn: [ChatMessage]) {
         guard !turn.isEmpty else { return }
         lock.lock(); defer { lock.unlock() }
+        var turn = turn
+        if let newest = turn.lastIndex(where: { $0.text?.contains(Self.ocrHeader) == true }) {
+            messages = messages.map(Self.collapsingSupersededOCR)
+            // One tool loop may capture more than once — only the turn's newest OCR stays verbatim.
+            for i in turn.indices where i < newest { turn[i] = Self.collapsingSupersededOCR(turn[i]) }
+        }
         messages.append(contentsOf: turn.compactMap { m in
             if let raw = m.rawItemsJSON { return Self.convertRawItems(raw) }
             return m.imageBase64JPEG != nil ? .user(Self.imageStub) : m
         })
+    }
+
+    /// Rewrite one committed message so its OCR block (if any) becomes `ocrStub`. Text before the
+    /// block — e.g. a tool result's "screenshot captured" line — survives.
+    private static func collapsingSupersededOCR(_ m: ChatMessage) -> ChatMessage {
+        guard let text = m.text, let header = text.range(of: ocrHeader) else { return m }
+        return ChatMessage(role: m.role, text: String(text[..<header.lowerBound]) + ocrStub,
+                           toolCallId: m.toolCallId)
     }
 
     /// The commit-time conversion of a verbatim passthrough message: keep its `function_call` items

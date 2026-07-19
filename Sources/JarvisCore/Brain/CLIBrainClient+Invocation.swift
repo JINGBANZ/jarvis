@@ -58,7 +58,8 @@ extension CLIBrainClient {
                         "--tools", ""]
             if !model.isEmpty { args += ["--model", model] }
             let message = try Self.claudeStreamMessage(segments: rendered.segments,
-                                                       hasTools: !tools.isEmpty)
+                                                       hasTools: !tools.isEmpty,
+                                                       forcedTool: Self.forcedToolDirective(toolChoice))
             auditRequest["input"] = message.auditInput
             return PreparedInvocation(
                 run: AgentCLIRun(executable: executable, arguments: args, stdin: message.stdin,
@@ -109,7 +110,10 @@ extension CLIBrainClient {
             var document = Self.codexDirectResponseInstruction + "\n\n"
             if !instructions.isEmpty { document += instructions + "\n\n" }
             document += "## Conversation\n\n" + blocks.joined(separator: "\n\n")
-            if !tools.isEmpty { document += "\n\nAnswer now, following the tool protocol." }
+            if !tools.isEmpty {
+                document += "\n\nAnswer now, following the tool protocol."
+                if let forced = Self.forcedToolDirective(toolChoice) { document += " \(forced)" }
+            }
             auditRequest["input"] = auditInput
             return PreparedInvocation(
                 run: AgentCLIRun(executable: executable, arguments: args, stdin: document,
@@ -150,7 +154,7 @@ extension CLIBrainClient {
     /// file + Read tool would cost a second model round trip (and an on-disk copy). Also returns the
     /// audit copy of the content — same blocks with every image reduced to a stub — so the traffic
     /// log never receives the base64 bytes in any form.
-    static func claudeStreamMessage(segments: [Segment], hasTools: Bool)
+    static func claudeStreamMessage(segments: [Segment], hasTools: Bool, forcedTool: String? = nil)
         throws -> (stdin: String, auditInput: [[String: Any]]) {
         var content: [[String: Any]] = []
         var auditInput: [[String: Any]] = []
@@ -176,7 +180,11 @@ extension CLIBrainClient {
                 auditInput.append(["type": "image", "image": imageStub(base64)])
             }
         }
-        if hasTools { textRun.append("Answer now, following the tool protocol.") }
+        if hasTools {
+            var trailer = "Answer now, following the tool protocol."
+            if let forcedTool { trailer += " \(forcedTool)" }
+            textRun.append(trailer)
+        }
         flushText()
         let message: [String: Any] = ["type": "user",
                                       "message": ["role": "user", "content": content]]

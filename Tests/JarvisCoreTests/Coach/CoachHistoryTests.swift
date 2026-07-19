@@ -20,6 +20,49 @@ import Testing
         #expect(!snap.contains { $0.imageBase64JPEG != nil })
         #expect(snap.filter { ($0.text ?? "").contains("no longer available") }.count == 2)   // the stubs
         #expect(snap.compactMap(\.text).first == "a")   // non-image messages untouched
+        // The stub is a neutral marker, not an instruction — "call capture_screen" phrasing in
+        // user-role history drove capture-on-every-quiet-turn in a live session audit.
+        #expect(!snap.contains { ($0.text ?? "").contains("capture_screen") })
+    }
+
+    /// A new capture's OCR supersedes every earlier dump: older blocks collapse to a one-line stub
+    /// (stale screen text misleads and re-bills), while text before the block and the newest OCR
+    /// stay verbatim.
+    @Test func newCaptureCollapsesSupersededOCR() {
+        let ocr = { (body: String) in "\(CoachHistory.ocrHeader)\n\(body)" }
+        let h = CoachHistory()
+        h.commit([.user("turn 1"),
+                  .init(role: .tool, text: "screenshot captured\n\n\(ocr("if (min < sum)"))", toolCallId: "c1")])
+        h.commit([.user("turn 2")])                                  // no capture: nothing collapses
+        #expect(h.snapshot().contains { ($0.text ?? "").contains("if (min < sum)") })
+
+        h.commit([.user(ocr("if (sum < min)"))])                     // hint-path OCR rides as a user message
+        var texts = h.snapshot().compactMap(\.text)
+        #expect(texts.contains("screenshot captured\n\n\(CoachHistory.ocrStub)"))  // prefix survives
+        #expect(!texts.joined().contains("if (min < sum)"))          // stale body gone
+        #expect(texts.contains { $0.contains("if (sum < min)") })    // newest OCR verbatim
+
+        h.commit([.init(role: .tool, text: "screenshot captured\n\n\(ocr("rewritten"))", toolCallId: "c2")])
+        texts = h.snapshot().compactMap(\.text)
+        #expect(texts.contains(CoachHistory.ocrStub))                // the user-shaped OCR collapsed whole
+        #expect(!texts.joined().contains("if (sum < min)"))
+        #expect(texts.contains { $0.contains("rewritten") })
+        #expect(h.snapshot().contains { $0.toolCallId == "c1" })     // tool-result pairing intact
+    }
+
+    /// A single tool loop may capture more than once; only the turn's own newest OCR survives
+    /// verbatim — the earlier same-turn capture is as stale as any committed one.
+    @Test func multiCaptureTurnKeepsOnlyItsNewestOCR() {
+        let ocr = { (body: String) in "\(CoachHistory.ocrHeader)\n\(body)" }
+        let h = CoachHistory()
+        h.commit([.user("turn"),
+                  .init(role: .tool, text: "screenshot captured\n\n\(ocr("first look"))", toolCallId: "c1"),
+                  .init(role: .tool, text: "screenshot captured\n\n\(ocr("second look"))", toolCallId: "c2")])
+        let texts = h.snapshot().compactMap(\.text)
+        #expect(!texts.joined().contains("first look"))
+        #expect(texts.contains("screenshot captured\n\n\(CoachHistory.ocrStub)"))
+        #expect(texts.contains { $0.contains("second look") })
+        #expect(h.snapshot().contains { $0.toolCallId == "c1" })     // pairing intact, text collapsed
     }
 
     /// Raw passthrough items live only inside their turn's tool loop — commit converts them: the

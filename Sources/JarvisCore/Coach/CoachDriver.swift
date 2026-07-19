@@ -356,13 +356,10 @@ public final class CoachDriver: @unchecked Sendable {
     }
 
     /// Framed so the model treats OCR as a reading aid, not gospel — recognition mangles the odd
-    /// identifier, and the screenshot stays the ground truth to verify against.
+    /// identifier, and the screenshot stays the ground truth to verify against. Opens with
+    /// `CoachHistory.ocrHeader` so commit-time collapse of superseded OCR can't drift out of sync.
     private static func recognizedTextBlock(_ text: String) -> String {
-        """
-        Text recognized on the captured window (on-device OCR — may contain errors; \
-        the screenshot image is ground truth):
-        \(text)
-        """
+        "\(CoachHistory.ocrHeader)\n\(text)"
     }
 
     // MARK: - History compaction
