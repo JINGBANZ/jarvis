@@ -16,6 +16,6 @@ jobs:
       id-token: write
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-    # Optional: override the driver model (default: claude-sonnet-4-6)
-    # with:
-    #   model: claude-opus-4-7
+    with:
+      runs-on: vps # VPS self-hosted runner (JINGBANZ/vps-setup), off GitHub's metered minutes
+      # model: claude-opus-4-7  # optional: override the driver model (default: claude-sonnet-4-6)
