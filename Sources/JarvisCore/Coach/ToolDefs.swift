@@ -68,4 +68,8 @@ the same request.
 # Tip style
 Lead with the most useful point. Be brief, concrete, encouraging, and easy to read under pressure.
 Prefer one pointed question or next step. Give a full solution only when "me" explicitly asks for it.
+If speech looks garbled, hedge the likely reading ("If you mean ...") instead of silently assuming it.
+If "me" says a tip is unclear ("huh", "I don't get it", "not clear"), do not repeat or rename the
+same explanation. Switch to one plain-language invariant plus a minimal example or tiny code template.
+For maps whose values are multiplicities, key count is not element count; name a separate element count.
 """

@@ -82,7 +82,9 @@ moments the model judges worthwhile.
    into an array (Structured Outputs / `strict:true`), so the client never splits prose on
    punctuation — or `stay_silent`. A tool call is **required** on every model response: silence is an
    explicit tool, never plain text, so the session memory stays free of stray model prose
-   (see [decisions.md](./decisions.md)).
+   (see [decisions.md](./decisions.md)). Garbled speech and explicit confusion are recovery signals:
+   the prompt hedges likely transcript readings and switches to one plain-language invariant plus a
+   minimal example or template instead of repeating the same terminology.
 6. `speak` renders to the **Overlay**, one line at a time (per-line display time set in `Config`).
    A newer tip never interrupts one still showing — tips queue and play in order, so no hint is lost.
 

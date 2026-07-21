@@ -68,6 +68,33 @@ import Testing
         #expect(!coachSystemPrompt.contains("never the whole answer"))
     }
 
+    /// In a live TreeMap coaching session, "Huh?", "I don't get it", and "not very clear" drew
+    /// repeated terminology instead of a different teaching approach. Explicit confusion now
+    /// requires a concrete recovery mode rather than another rephrase.
+    @Test func coachPromptChangesApproachAfterExplicitConfusion() {
+        #expect(coachSystemPrompt.contains("\"huh\""))
+        #expect(coachSystemPrompt.contains("\"I don't get it\""))
+        #expect(coachSystemPrompt.contains("do not repeat or rename"))
+        #expect(coachSystemPrompt.contains("one plain-language invariant"))
+        #expect(coachSystemPrompt.contains("minimal example or tiny code template"))
+    }
+
+    /// The same session's ASR rendered "first" as "furs". A likely reading is useful, but it must
+    /// be labelled as an interpretation instead of being answered as certain transcript text.
+    @Test func coachPromptHedgesGarbledSpeech() {
+        #expect(coachSystemPrompt.contains("If speech looks garbled"))
+        #expect(coachSystemPrompt.contains("\"If you mean ...\""))
+        #expect(coachSystemPrompt.contains("silently assuming it"))
+    }
+
+    /// A counted TreeMap's `size()` is its distinct-key count, not its multiplicity. The session's
+    /// "small.size > k-1" tip was therefore unsafe for duplicates without a separate element count.
+    @Test func coachPromptDistinguishesKeyCountFromElementCount() {
+        #expect(coachSystemPrompt.contains("values are multiplicities"))
+        #expect(coachSystemPrompt.contains("key count is not element count"))
+        #expect(coachSystemPrompt.contains("separate element count"))
+    }
+
     /// Silence is a TOOL now: the prompt must direct the model to stay_silent (never free text),
     /// or a required tool_choice would leave it no sanctioned way to stay quiet.
     @Test func coachPromptDirectsSilenceToTheStaySilentTool() {
