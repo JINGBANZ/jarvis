@@ -45,6 +45,15 @@ import Testing
         }
     }
 
+    /// A terse interviewer rejection changes the requirements immediately. It must not wait for the
+    /// next long utterance, while the same one-word response from the user remains a back-channel.
+    @Test func interviewerRejectionIsImmediateSubstance() {
+        for text in ["No.", "nope"] {
+            #expect(TurnSubstance.isSubstantive(.init(speaker: .them, text: text, at: 1)))
+            #expect(!TurnSubstance.isSubstantive(.init(speaker: .me, text: text, at: 1)))
+        }
+    }
+
     /// Fail open: anything not provably filler reaches the brain — real sentences, and even unknown
     /// words that merely LOOK like filler ("melon" is not on any list).
     @Test func realSpeechFailsOpenToTheBrain() {

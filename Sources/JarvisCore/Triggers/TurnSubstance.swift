@@ -12,7 +12,12 @@ import Foundation
 /// short-fragment fallback. Everything else FAILS OPEN to the brain — the model stays the judge of
 /// meaning; this is punctuation-level hygiene, not a wake-word gate.
 public enum TurnSubstance {
-    /// Human-readable back-channel forms, kept in natural spelling. Each is run through `normalize`
+    /// A bare rejection from the interviewer is not a back-channel: it corrects the user's current
+    /// understanding and needs an immediate coaching turn. The same words from the user remain
+    /// filler ("no, no" while thinking aloud), so this override must see the speaker label.
+    private static let interviewerCorrections: Set<String> = ["no", "nope"]
+
+    /// Human-readable back-channel forms, kept in natural spelling. Each is run through `normalized`
     /// when the set is built, so entries stay readable while being guaranteed to match normalized
     /// input — an entry with a doubled letter ("cool", "i see") can't silently die to the collapse
     /// step. To add a language, add its dozen closed-class forms in plain spelling.
@@ -24,20 +29,7 @@ public enum TurnSubstance {
         // Chinese
         "嗯", "恩", "啊", "哦", "噢", "呃", "好", "好的", "好吧", "好了",
         "对", "对的", "是", "是的", "明白", "可以", "行", "了解",
-    ].map(normalize))
-
-    /// Keep only letters/digits (CJK ideographs are letters), dropping punctuation, whitespace, and
-    /// symbols; then collapse consecutive repeats so elongations fold onto their base form
-    /// ("Hmmmm." → "hm", "嗯嗯" → "嗯"). Applied to both incoming lines and the `fillers` set so the
-    /// two are compared in the same shape.
-    private static func normalize(_ text: String) -> String {
-        var collapsed = ""
-        for scalar in text.lowercased().unicodeScalars where CharacterSet.alphanumerics.contains(scalar) {
-            let ch = Character(scalar)
-            if collapsed.last != ch { collapsed.append(ch) }
-        }
-        return collapsed
-    }
+    ].map(normalized))
 
     /// True when the line should reach the brain. Order matters: overrides first (a question or an
     /// address is always substance, whoever said it), then normalize, then the closed-class list and
@@ -47,11 +39,33 @@ public enum TurnSubstance {
         if lower.contains("jarvis") { return true }
         if lower.contains("?") || lower.contains("？") { return true }
 
-        let collapsed = normalize(line)
+        let collapsed = normalized(lower)
 
         if collapsed.isEmpty { return false }              // pure punctuation / noise
         if fillers.contains(collapsed) { return false }    // closed-class back-channel
         if collapsed.count <= 2 { return false }           // short fragment in ANY language
         return true
+    }
+
+    /// Speaker-aware entry point used by the coach's delta gate. Most filler behavior stays neutral,
+    /// but a terse interviewer rejection is a correction, not conversational noise.
+    public static func isSubstantive(_ line: TranscriptLine) -> Bool {
+        if line.speaker == .them, interviewerCorrections.contains(normalized(line.text.lowercased())) {
+            return true
+        }
+        return isSubstantive(line.text)
+    }
+
+    /// Keep only letters/digits (CJK ideographs are letters), dropping punctuation, whitespace, and
+    /// symbols; then collapse consecutive repeats so elongations fold onto their base form
+    /// ("Hmmmm." → "hm", "嗯嗯" → "嗯"). Applied to both incoming lines and the `fillers` set so the
+    /// two are compared in the same shape.
+    private static func normalized(_ lower: String) -> String {
+        var collapsed = ""
+        for scalar in lower.unicodeScalars where CharacterSet.alphanumerics.contains(scalar) {
+            let ch = Character(scalar)
+            if collapsed.last != ch { collapsed.append(ch) }
+        }
+        return collapsed
     }
 }
