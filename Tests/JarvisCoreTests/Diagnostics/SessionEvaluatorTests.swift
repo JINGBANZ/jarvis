@@ -112,6 +112,37 @@ private final class CannedBrain: BrainClient, @unchecked Sendable {
         #expect(out.contains("assistant → function_call capture_screen({})"))
     }
 
+    /// The transcript now leads with the deterministic metrics table, before the first call block,
+    /// so the auditor reads computed numbers before any usage blob.
+    @Test func transcriptLeadsWithDeterministicMetrics() throws {
+        let call = try line(request: ["model": "gpt-5.5", "input": [userItem("hi")]],
+                            response: ["status": "completed", "output": [],
+                                       "usage": ["input_tokens": 100,
+                                                 "input_tokens_details": ["cached_tokens": 40],
+                                                 "output_tokens": 12]])
+        let out = SessionEvaluator.renderTranscript(jsonl: call)
+        #expect(out.hasPrefix("=== deterministic metrics"))
+        #expect(out.contains("| call | tag | model |"))
+        let metrics = try #require(out.range(of: "deterministic metrics"))
+        let firstCall = try #require(out.range(of: "=== call #1"))
+        #expect(metrics.lowerBound < firstCall.lowerBound)
+    }
+
+    /// The audit prompt teaches each provider record, preserves unavailable metrics, points at the
+    /// computed values, and requires a self-verification pass.
+    @Test func evalInstructionsTeachEnvelopesMetricsAndSelfCheck() {
+        let p = SessionEvaluator.evalInstructions
+        #expect(p.contains("deterministic metrics"))
+        #expect(p.contains("input_tokens_details.cached_tokens"))
+        #expect(p.contains("cache_write_tokens"))
+        #expect(p.contains("total_cost_usd"))
+        #expect(p.contains("modelUsage"))
+        #expect(p.contains("Codex CLI"))
+        #expect(p.contains("unavailable, not zero"))
+        #expect(p.contains("known (N unavailable)"))
+        #expect(p.contains("re-check every number"))
+    }
+
     @Test func evaluateSendsTranscriptAndPersistsOwnerOnlyReport() async throws {
         let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         let traffic = BrainTrafficLog(); traffic.enable(directory: dir)
@@ -122,7 +153,9 @@ private final class CannedBrain: BrainClient, @unchecked Sendable {
         let brain = CannedBrain(text: "## Context engineering\nall good")
         let report = try await SessionEvaluator(brain: brain).evaluate(sessionDir: dir)
 
-        #expect(report == "## Context engineering\nall good")
+        // The model's text is preserved verbatim, preceded by the provenance stamp.
+        #expect(report.hasSuffix("## Context engineering\nall good"))
+        #expect(report.contains(SessionEvaluator.provenanceStamp))
         #expect(brain.received.first?.role == .system)
         #expect(brain.received.last?.text?.contains("=== call #1 · coach") == true)
         let url = dir.appendingPathComponent(SessionEvaluator.reportFilename)
