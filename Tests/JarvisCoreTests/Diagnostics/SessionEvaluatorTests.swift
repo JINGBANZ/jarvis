@@ -128,14 +128,18 @@ private final class CannedBrain: BrainClient, @unchecked Sendable {
         #expect(metrics.lowerBound < firstCall.lowerBound)
     }
 
-    /// The audit prompt must teach both provider envelopes (so the auditor reads the right usage
-    /// fields), point at the computed metrics, and require a self-verification pass.
+    /// The audit prompt teaches each provider record, preserves unavailable metrics, points at the
+    /// computed values, and requires a self-verification pass.
     @Test func evalInstructionsTeachEnvelopesMetricsAndSelfCheck() {
         let p = SessionEvaluator.evalInstructions
         #expect(p.contains("deterministic metrics"))
         #expect(p.contains("input_tokens_details.cached_tokens"))
+        #expect(p.contains("cache_write_tokens"))
         #expect(p.contains("total_cost_usd"))
         #expect(p.contains("modelUsage"))
+        #expect(p.contains("Codex CLI"))
+        #expect(p.contains("unavailable, not zero"))
+        #expect(p.contains("known (N unavailable)"))
         #expect(p.contains("re-check every number"))
     }
 

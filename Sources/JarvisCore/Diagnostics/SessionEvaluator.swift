@@ -253,17 +253,21 @@ public struct SessionEvaluator: Sendable {
     into a summary by a separate "summarizer" client.
 
     The user message opens with a "=== deterministic metrics ===" table computed from the raw traffic \
-    (per-call and session-total input / cache-read / cache-write / output tokens and cost, plus a \
-    per-model breakdown). TRUST those numbers and interpret them; NEVER recompute a total by eye — \
-    quote the table. It follows with the session's complete wire-level LLM traffic, one block per API \
+    (per-call and aggregate input / cache-read / cache-write / output tokens and cost, plus a \
+    per-model breakdown). Trust its known numbers and availability labels: `—` means unavailable, not \
+    zero, and a `known (N unavailable)` value is partial, not a session total. Quote only what the \
+    table supports; NEVER recompute a total by eye. It follows with the session's complete wire-level \
+    LLM traffic, one block per API \
     call, in order. To keep it compact: content byte-identical to the previous call with the same tag \
     is elided and explicitly marked "(unchanged)" — those markers are where the prompt cache SHOULD \
     be hitting; base64 screenshots are redacted to a stub.
 
-    Two provider envelopes appear, sometimes in one session — read the right fields for each:
+    Provider records can appear together — read the right fields for each:
       - OpenAI Responses: `response.usage` with `input_tokens`, `input_tokens_details.cached_tokens` \
-    (the automatic prefix-cache hit; hit rate = cached_tokens / input_tokens), `output_tokens`; a \
-    truncated run shows `status:"incomplete"`. There is no per-call dollar cost.
+    (the automatic prefix-cache hit; hit rate = cached_tokens / input_tokens), optional \
+    `cache_write_tokens`, and `output_tokens`; a truncated run shows `status:"incomplete"`. There is \
+    no per-call dollar cost. OpenAI `input_tokens` includes cached input, so mixed-provider token \
+    totals are kept separate.
       - Local CLI (`claude -p`): `response.cli` with `total_cost_usd`, a call-level `usage` carrying \
     Anthropic's `cache_creation_input_tokens` / `cache_read_input_tokens` split, and a `modelUsage` \
     map with per-model usage + cost (including the CLI's internal sidecar models, e.g. a haiku pass). \
@@ -271,6 +275,8 @@ public struct SessionEvaluator: Sendable {
     sends the whole conversation as one giant block, so it can only ever cache-hit the reused \
     `--system-prompt` — a small, flat cache-read across turns is that serialization, NOT the harness \
     rewriting history. Do not attribute it to cache-busting without checking which envelope this is.
+      - Codex CLI: the recorded response currently has the reply and exit status but no token, cache, \
+    or cost usage. Those cells must stay unavailable; never interpret them as zero.
 
     Before finalizing, re-check every number you wrote against the metrics table and correct or delete \
     any that disagree. This transcript ELIDES byte-identical repeats, so it cannot support cardinal \

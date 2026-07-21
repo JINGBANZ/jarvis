@@ -65,8 +65,10 @@ public enum AgenticEvaluation {
         with these inputs in that directory:
           - `\(transcriptFilename)` — the session's wire-level LLM traffic. It OPENS with a \
         "=== deterministic metrics ===" table computed from the raw traffic (per-call and \
-        session-total input / cache-read / cache-write / output tokens and cost, plus a per-model \
-        breakdown). TRUST those numbers and quote them; never recompute a total by eye. The rest is \
+        aggregate input / cache-read / cache-write / output tokens and cost, plus a per-model \
+        breakdown). Trust its known numbers and availability labels: `—` means unavailable, not zero, \
+        and a `known (N unavailable)` value is partial, not a session total. Quote only what the table \
+        supports; never recompute a total by eye. The rest is \
         one block per API call, in order — your PRIMARY narrative input. To keep it compact, content \
         byte-identical to the previous same-tag call is elided and marked "(unchanged)" — those \
         markers are exactly where the prompt cache SHOULD be hitting.
@@ -74,10 +76,12 @@ public enum AgenticEvaluation {
         byte-identical repeats, ANY cardinal count (stub occurrences, OCR dumps, marker repetitions) \
         MUST be counted here, not from the elided transcript.
 
-        Two provider envelopes appear, sometimes in one session — read the right fields for each:
+        Provider records can appear together — read the right fields for each:
           - OpenAI Responses: `response.usage` with `input_tokens`, \
-        `input_tokens_details.cached_tokens` (automatic prefix-cache hit), `output_tokens`; a \
-        truncated run shows `status:"incomplete"`. No per-call dollar cost.
+        `input_tokens_details.cached_tokens` (automatic prefix-cache hit), optional \
+        `cache_write_tokens`, and `output_tokens`; a truncated run shows `status:"incomplete"`. No \
+        per-call dollar cost. OpenAI `input_tokens` includes cached input, so mixed-provider token \
+        totals are kept separate.
           - Local CLI (`claude -p`): `response.cli` with `total_cost_usd`, a call-level `usage` \
         carrying Anthropic's `cache_creation_input_tokens` / `cache_read_input_tokens` split, and a \
         `modelUsage` map (per-model usage + cost, including internal sidecar models like a haiku \
@@ -85,6 +89,8 @@ public enum AgenticEvaluation {
         whole conversation as one block, so it can only cache-hit the reused `--system-prompt` — a \
         small, flat cross-turn cache-read is that serialization (verify against \
         `Sources/JarvisCore/Brain/CLIBrainClient+Invocation.swift`), NOT history rewriting.
+          - Codex CLI: the recorded response currently has the reply and exit status but no token, \
+        cache, or cost usage. Those cells must stay unavailable; never interpret them as zero.
           - `shot-N.jpg` — the screenshots the model actually saw (base64 was redacted from the traffic).
           - a prior `\(reportFilename)`, if this session was audited before.
 

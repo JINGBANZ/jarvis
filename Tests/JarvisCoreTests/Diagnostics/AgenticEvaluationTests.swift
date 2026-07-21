@@ -34,15 +34,18 @@ import Foundation
         #expect(prompt.contains(AgenticEvaluation.reportFilename))
     }
 
-    /// The prompt teaches both provider envelopes and both cache models, points at the deterministic
-    /// metrics, requires cardinal counts from the un-elided record, and asks for a self-check — the
-    /// four failure modes the 2026-07-19 audit exhibited.
+    /// The prompt teaches each provider record and cache model, preserves unavailable metrics,
+    /// requires cardinal counts from the un-elided record, and asks for a self-check.
     @Test func promptTeachesEnvelopesCacheModelsCountingAndSelfCheck() {
         let prompt = AgenticEvaluation.prompt(sessionDirPath: "/tmp/session")
         #expect(prompt.contains("deterministic metrics"))
         #expect(prompt.contains("input_tokens_details.cached_tokens"))
+        #expect(prompt.contains("cache_write_tokens"))
         #expect(prompt.contains("total_cost_usd"))
         #expect(prompt.contains("modelUsage"))
+        #expect(prompt.contains("Codex CLI"))
+        #expect(prompt.contains("unavailable, not zero"))
+        #expect(prompt.contains("known (N unavailable)"))
         #expect(prompt.contains("BLOCK-level"))
         #expect(prompt.contains("--system-prompt"))
         // Cardinal counts must come from the un-elided jsonl, not the elided transcript.
