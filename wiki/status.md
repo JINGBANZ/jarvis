@@ -67,11 +67,11 @@ thin OS shell, verified by the smoke run.
 - `Sources/JarvisApp/Viewer/ActivityViewer.swift` — the in-app `WKWebView` activity viewer, with an exact selectable/copyable session ID and the one-click **Evaluate** session audit.
 - `Sources/EvalPrep/main.swift` — the Foundation-only CLI half of the agentic session audit; `scripts/eval-session.sh` drives it through an agentic CLI (`claude -p` / `codex exec`) over the repo + session dir (see the 2026-07-17 [decision](./decisions.md)).
 - `Sources/CJarvisAEC/lib/libjarvis-aec.a` — the prebuilt, zero-dylib WebRTC AEC3 C edge (the `CJarvisAEC` target; rebuilt by `scripts/build-aec.sh`).
-- `.github/workflows/release.yml` + `scripts/package-app.sh` — automated releases: release-please Release PR → Developer ID-signed, notarized, stapled `Jarvis-<version>.zip` attached to a GitHub Release ([build-and-run.md → Distribution](./build-and-run.md#distribution--signed-notarized-releases-from-ci)).
+- `.github/workflows/release.yml` + `scripts/package-app.sh` — releases: release-please opens a Release PR and, on merge, tags + drafts a GitHub Release; the maintainer then runs `package-app.sh` on their Mac to attach the Developer ID-signed, notarized, stapled `Jarvis-<version>.zip` and publish ([build-and-run.md → Distribution](./build-and-run.md#distribution--signed-notarized-releases)).
 
 ## Not yet built
 
-- **First notarized release** — the release workflow needs its five repo secrets (Developer ID `.p12` + App Store Connect API key; names in `.github/workflows/release.yml`) set before the first Release PR is merged; the first run is the pipeline's live test.
+- **First notarized release** — the v0.1.1 draft Release + tag exist; publishing it is a local step: on the Mac, `./scripts/package-app.sh` then `gh release upload v0.1.1 …` + `gh release edit v0.1.1 --draft=false --latest`. The Developer ID signing + notarization path is untested end-to-end (the earlier CI attempt was blocked by the private-repo macOS billing limit before it ran).
 - **Universal binary** — `Sources/CJarvisAEC/lib/libjarvis-aec.a` is arm64-only; `lipo` in an x86_64 slice if Intel is ever needed.
 - **Neural double-talk canceller** (DTLN / Muesli-style on the same aligned streams) — the escalation if AEC3 over-attenuates the user under loud far audio in practice.
 - **Minimum macOS version confirmed** — currently targeting macOS 14+; confirm against the APIs actually used (ScreenCaptureKit needs 13+).
