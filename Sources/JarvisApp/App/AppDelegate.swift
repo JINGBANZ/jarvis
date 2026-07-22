@@ -298,35 +298,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Route turns through TurnTaskBox so Stop can cancel an in-flight one. Concurrent triggers are
         // coalesced inside CoachDriver (the running turn batches them in), so we don't cancel here.
         let turns = TurnTaskBox()
-        // Mic socket gave up (bad key / quota / network): coaching can't continue. Record only fixed
-        // human-facing copy, then stop through the ghost-safe runtime reporter.
-        let onSessionTranscriptionFailure: @Sendable (TranscriptionFailureReason) -> Void = {
-            [weak self] reason in
-            Task { @MainActor in self?.reportTranscriptionFailure(reason) }
-        }
-        // "Them" socket gave up: degrade gracefully — stop the system-audio transcriber, keep the mic
-        // running. The shared aggregate capture keeps feeding the mic side; its now-nil "them"
-        // transcriber simply drops the tap audio. Still report it (a non-blocking .degraded notice) so
-        // it flows through the one funnel; the menu stays 🟢.
-        let onThemTerminalFailure: @Sendable (TranscriptionFailureReason) -> Void = {
-            [weak self, errorReporter] reason in
-            if reason != .connectionLost {
-                onSessionTranscriptionFailure(reason)
-                return
-            }
-            Task { @MainActor in
-                guard let self else { return }
-                self.themTranscriber?.stop()
-                self.themTranscriber = nil
-                // The transcriber's asynchronous `.stopped` callback is identity-guarded and will
-                // be ignored after nil-ing it, so commit the degraded state explicitly here.
-                self.systemConnectionState = .failed
-                self.refreshConnectionUI()
-            }
-            ActivityLog.shared.record(.systemAudioStopped)
-            errorReporter.report(.systemAudioStopped, context: .runtime)
-        }
-
         // "Me" side: the mic. Drives turn-end and the backing-off silence check ("are you stuck?").
         let transcriber = RealtimeTranscriber(apiKey: key, model: config.transcriptionModel,
                                               speaker: .me, transcript: transcript, clock: clock,
@@ -345,7 +316,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                               })
         transcriber.onTurnEnd = { turns.run { await driver.handleTrigger(.turnEnd) } }
         transcriber.onSilence = { secs in turns.run { await driver.handleTrigger(.silence(secondsQuiet: secs)) } }
-        transcriber.onTerminalFailure = onSessionTranscriptionFailure
 
         // "Them" side: system audio (remote participants). Drives turn-end so Jarvis can react when the
         // other side finishes (e.g. asks you something), but NOT the silence check — the "are you
@@ -365,7 +335,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                                       networkDiagnostics.currentSummary
                                                   })
         themTranscriber.onTurnEnd = { turns.run { await driver.handleTrigger(.turnEnd) } }
-        themTranscriber.onTerminalFailure = onThemTerminalFailure
+        // Bind terminal callbacks to the transcriber that emitted them. A callback already queued
+        // across Stop → Start must not report against or tear down the replacement session.
+        transcriber.onTerminalFailure = { [weak self, weak transcriber] reason in
+            guard let transcriber else { return }
+            Task { @MainActor [weak self] in
+                guard let self, self.transcriber === transcriber else { return }
+                self.reportTranscriptionFailure(reason)
+            }
+        }
+        themTranscriber.onTerminalFailure = { [weak self, weak themTranscriber] reason in
+            guard let themTranscriber else { return }
+            Task { @MainActor [weak self] in
+                guard let self, self.themTranscriber === themTranscriber else { return }
+                if reason != .connectionLost {
+                    self.reportTranscriptionFailure(reason)
+                    return
+                }
+                // A system-audio connection loss degrades gracefully: stop that transcriber while
+                // microphone coaching continues. The shared capture simply drops tap audio.
+                themTranscriber.stop()
+                self.themTranscriber = nil
+                // The transcriber's asynchronous `.stopped` callback is identity-guarded and will
+                // be ignored after nil-ing it, so commit the degraded state explicitly here.
+                self.systemConnectionState = .failed
+                self.refreshConnectionUI()
+                ActivityLog.shared.record(.systemAudioStopped)
+                self.errorReporter.report(.systemAudioStopped, context: .runtime)
+            }
+        }
 
         // One-clock capture + echo cancellation: a single aggregate device (mic + system tap) feeds
         // the cleaned mic to the "me" socket and the sample-preserving system timeline to the "them"
