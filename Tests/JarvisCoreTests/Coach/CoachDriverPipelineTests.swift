@@ -43,6 +43,10 @@ final class FakeScreen: ScreenCapturing, @unchecked Sendable {
     }
 }
 
+final class UnavailableScreen: ScreenCapturing, @unchecked Sendable {
+    func capture() -> ScreenSnapshot? { nil }
+}
+
 /// A screen whose `capture()` parks until released, so a test can cancel the turn *while the
 /// (detached, un-cancellable) screenshot is in flight* — the exact window the cancellation guard
 /// closes. `entered` signals capture has begun; `release` lets it return.
@@ -313,6 +317,55 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(second.contains { ($0.text ?? "").contains("thinking about the columns") })  // memory kept
         #expect(!second.contains { $0.role == .assistant && $0.toolCalls != nil })           // no call replayed
         #expect(!second.contains { $0.role == .tool })                                       // no dangling result
+    }
+
+    /// `stay_silent` is a real brain action. It stays out of model memory, but it belongs in the
+    /// human-facing Activity record so a healthy no-op cannot look like a stalled brain.
+    @Test func staySilentActionLandsInActivityLog() async throws {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("jarvis-silent-action-\(ProcessInfo.processInfo.globallyUniqueString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { ActivityLog.shared.disable(); try? FileManager.default.removeItem(at: dir) }
+        ActivityLog.shared.enable(directory: dir)
+
+        let brain = ScriptedBrain(script: [
+            .init(toolCalls: [.staySilent(callId: "quiet")],
+                  rawToolCalls: [RawToolCall(id: "quiet", name: "stay_silent", argumentsJSON: "{}")])
+        ])
+        let (driver, transcript) = makeDriver(brain: brain, clock: ManualClock(now: 0))
+        transcript.append(.init(speaker: .me, text: "thinking about the columns", at: 0))
+
+        #expect(await driver.handleTrigger(.turnEnd) == .silentByModel)
+
+        let snapshot = ActivityLog.shared.attach { _ in }
+        #expect(snapshot.rows.count == 1)
+        #expect(snapshot.rows[0].contains("stayed silent"))
+    }
+
+    /// A failed `capture_screen` still records the action before the model makes its terminal choice.
+    @Test func failedScreenActionAndStaySilentBothLandInActivityLog() async throws {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("jarvis-failed-screen-action-\(ProcessInfo.processInfo.globallyUniqueString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { ActivityLog.shared.disable(); try? FileManager.default.removeItem(at: dir) }
+        ActivityLog.shared.enable(directory: dir)
+
+        let brain = ScriptedBrain(script: [
+            .init(toolCalls: [.captureScreen(callId: "capture")],
+                  rawToolCalls: [RawToolCall(id: "capture", name: "capture_screen", argumentsJSON: "{}")]),
+            .init(toolCalls: [.staySilent(callId: "quiet")],
+                  rawToolCalls: [RawToolCall(id: "quiet", name: "stay_silent", argumentsJSON: "{}")]),
+        ])
+        let (driver, transcript) = makeDriver(brain: brain, screen: UnavailableScreen(),
+                                              clock: ManualClock(now: 0))
+        transcript.append(.init(speaker: .me, text: "look at this", at: 0))
+
+        #expect(await driver.handleTrigger(.turnEnd) == .silentByModel)
+
+        let snapshot = ActivityLog.shared.attach { _ in }
+        #expect(snapshot.rows.count == 2)
+        #expect(snapshot.rows[0].contains("couldn't view your screen"))
+        #expect(snapshot.rows[1].contains("stayed silent"))
     }
 
     /// A silence check the model shrugs at (stay_silent, nothing new said) leaves NO trace in the

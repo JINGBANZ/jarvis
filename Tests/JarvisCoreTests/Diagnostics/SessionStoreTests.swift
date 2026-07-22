@@ -63,15 +63,17 @@ import Foundation
             "{\"t\":\"10:00:01\",\"m\":\"evil\",\"s\":\"../escape.jpg\"}",
             "{\"t\":\"10:00:02\",\"m\":\"🗣 heard (me): text only\"}",
             "{\"t\":\"10:00:03\",\"m\":\"💭 thinking…\"}",
+            "{\"t\":\"10:00:04\",\"m\":\"🤫 stayed silent — nothing useful to add\"}",
         ], shot: ("shot-1.jpg", Data([0xFF, 0xD8, 0xFF, 0xD9])))
         let store = SessionStore(base: base, current: nil)
         let session = try #require(store.listSessions().first)
         let rows = store.entries(for: session)
-        #expect(rows.count == 2)                     // malformed + diagnostic rows skipped
+        #expect(rows.count == 3)                     // malformed + diagnostic rows skipped
         #expect(rows[0].0.message == "👁 looking at your screen")
         #expect(rows[0].1 != nil)                    // valid shot bytes loaded
         #expect(rows[1].0.message == "🗣 heard (me): text only")
         #expect(rows[1].1 == nil)                    // text-only coaching line
+        #expect(rows[2].0.message.contains("stayed silent"))
     }
 
     @Test func entriesDropImageWhenShotFileMissing() throws {

@@ -8,6 +8,7 @@ import Foundation
         #expect(ActivityLog.cssClass(for: "👁 looking at your screen") == "see")
         #expect(ActivityLog.cssClass(for: "🗣 heard: \"hello\"") == "hear")
         #expect(ActivityLog.cssClass(for: "🤫 quiet for 8s") == "hear")
+        #expect(ActivityLog.cssClass(for: "🤫 stayed silent — nothing useful to add") == "think")
         #expect(ActivityLog.cssClass(for: "💭 thinking…") == "think")
         #expect(ActivityLog.cssClass(for: "… nothing useful to add, staying silent") == "think")
         #expect(ActivityLog.cssClass(for: "⏹ coaching stopped — Claude Code couldn't respond") == "think")
@@ -102,6 +103,26 @@ import Foundation
         #expect(jsonl.contains(#"heard (them): \"How would you optimize it?\""#))
         #expect(!jsonl.contains("item"))
         #expect(!jsonl.contains("recovered"))
+    }
+
+    @Test func everyBrainActionHasAHumanFacingEvent() throws {
+        let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
+        let log = ActivityLog(); log.enable(directory: dir)
+        log.record(.screenViewFailed)
+        log.record(.stayedSilent)
+        let snapshot = log.attach { _ in }
+
+        #expect(snapshot.rows.count == 2)
+        #expect(snapshot.rows[0].contains("couldn't view your screen"))
+        #expect(snapshot.rows[1].contains("stayed silent"))
+        #expect(ActivityLog.isHumanFacing(
+            message: "👁 couldn't view your screen",
+            imageFile: nil
+        ))
+        #expect(ActivityLog.isHumanFacing(
+            message: "🤫 stayed silent — nothing useful to add",
+            imageFile: nil
+        ))
     }
 
     @Test func coachingStoppedPersistsOnlyADiscreetHumanFacingNotice() throws {

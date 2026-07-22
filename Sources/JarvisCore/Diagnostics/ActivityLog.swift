@@ -1,10 +1,10 @@
 import Foundation
 
 /// The model behind the human-facing activity viewer. It records the coaching exchange — heard
-/// speech, manual hint requests, screens Jarvis viewed, and tips Jarvis gave — plus a fixed,
-/// non-sensitive notice when coaching must stop without interrupting the user. It pushes those
-/// entries into an in-app `WKWebView` window (see `ActivityViewer` in JarvisApp) and persists them so
-/// past sessions can be browsed later. Detailed diagnostics belong exclusively in `JarvisLog`.
+/// speech, manual hint requests, every brain action (screen view, tip, or deliberate silence), and
+/// fixed non-sensitive notices when coaching stops or degrades. It pushes those entries into an
+/// in-app `WKWebView` window (see `ActivityViewer` in JarvisApp) and persists them so past sessions
+/// can be browsed later. Detailed diagnostics belong exclusively in `JarvisLog`.
 ///
 /// This type is UI-free (Foundation only): it generates the page HTML and the per-row JS as plain
 /// strings; the WebView lives in JarvisApp. See wiki/build-and-run.md.
@@ -21,8 +21,12 @@ public final class ActivityLog: @unchecked Sendable {
         case manualHint(prompt: String)
         /// Jarvis captured and viewed the screen while preparing a coaching response.
         case screenViewed(imageBase64JPEG: String)
+        /// The brain chose to view the screen, but capture failed. Raw failure detail stays in debug.
+        case screenViewFailed
         /// Jarvis displayed these coaching lines to the user.
         case tip(lines: [String])
+        /// The brain explicitly chose `stay_silent` for this turn.
+        case stayedSilent
         /// Coaching ended because the selected brain could not respond. Carries only the provider,
         /// never the raw error, so the notice cannot expose provider diagnostics during screen
         /// sharing.
@@ -127,8 +131,14 @@ public final class ActivityLog: @unchecked Sendable {
         case .screenViewed(let imageBase64JPEG):
             message = "👁 looking at your screen"
             imageBase64 = imageBase64JPEG
+        case .screenViewFailed:
+            message = "👁 couldn't view your screen"
+            imageBase64 = nil
         case .tip(let lines):
             message = "💬 \(lines.joined(separator: " "))"
+            imageBase64 = nil
+        case .stayedSilent:
+            message = "🤫 stayed silent — nothing useful to add"
             imageBase64 = nil
         case .coachingStopped(let provider):
             message = "⏹ coaching stopped — \(provider.displayName) couldn't respond; check Settings → Brain"
@@ -234,8 +244,8 @@ public final class ActivityLog: @unchecked Sendable {
         let m = message.trimmingCharacters(in: .whitespaces)
         if m.hasPrefix("💬") { return "say" }
         if m.hasPrefix("👁") { return "see" }
-        if m.hasPrefix("🗣") || m.hasPrefix("🤫") { return "hear" }
-        if m.hasPrefix("💭") || m.hasPrefix("…") { return "think" }
+        if m.hasPrefix("🗣") || m.hasPrefix("🤫 quiet") { return "hear" }
+        if m.hasPrefix("🤫 stayed silent") || m.hasPrefix("💭") || m.hasPrefix("…") { return "think" }
         if m.hasPrefix("⏹ coaching stopped") { return "think" }
         if m.hasPrefix("⚠️") { return "think" }
         let low = m.lowercased()
@@ -249,7 +259,8 @@ public final class ActivityLog: @unchecked Sendable {
         if imageFile != nil { return true }
         let m = message.trimmingCharacters(in: .whitespaces)
         return m.hasPrefix("🗣 heard") || m.hasPrefix("⌨️ hint shortcut")
-            || m.hasPrefix("👁 looking at your screen") || m.hasPrefix("💬")
+            || m.hasPrefix("👁 looking at your screen") || m.hasPrefix("👁 couldn't view your screen")
+            || m.hasPrefix("💬") || m.hasPrefix("🤫 stayed silent")
             || m.hasPrefix("⏹ coaching stopped")
             || m.hasPrefix("⚠️ system audio stopped")
             || m.hasPrefix("⚠️ settings change wasn't applied")

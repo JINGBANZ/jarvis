@@ -83,7 +83,9 @@ moments the model judges worthwhile.
    punctuation — or `stay_silent`. A tool call is **required** on every model response: silence is an
    explicit tool, never plain text, so the session memory stays free of stray model prose
    (see [decisions.md](./decisions.md)).
-6. `speak` renders to the **Overlay**, one line at a time (per-line display time set in `Config`).
+6. `ActivityLog` records every brain action: successful or failed `capture_screen`, `speak`, and
+   `stay_silent`. The deliberate-silence entry is human-facing but stays out of model memory.
+7. `speak` renders to the **Overlay**, one line at a time (per-line display time set in `Config`).
    A newer tip never interrupts one still showing — tips queue and play in order, so no hint is lost.
 
 **Why the overlay never interrupts and never drops (and why direct-reply latency is a non-issue).**
@@ -167,8 +169,9 @@ Every user-facing failure flows through one `ErrorReporter`: severity on a Found
 failure site decides presentation. Startup failures caused by an explicit Start may alert; every
 runtime context suppresses alerts unconditionally, including after teardown, so a queued main-actor
 report cannot reveal Jarvis during screen sharing. Terminal brain, microphone-transcription, and
-audio-capture failures stop silently; the system-audio failure degrades to microphone-only. Each
-records fixed non-sensitive Activity copy while dynamic reasons remain only in `JarvisLog`.
+audio-capture failures stop without presenting UI; the system-audio failure degrades to
+microphone-only. Every failure that stops or degrades coaching records fixed non-sensitive Activity
+copy while dynamic reasons remain only in `JarvisLog`.
 
 Ghost mode applies from a live pipeline through terminal teardown: no autonomous activation, alert,
 window, browser, notification, attention request, or sound is allowed outside the nonactivating,
@@ -345,9 +348,10 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
   counters, sequence/sample metadata, timestamps, socket generations, server audio-clock values, and
   a local activity bit in the owner-only session log — never PCM or recovered words. The only screen-/audio-derived data
   written to **local** disk is the owner-only, bounded per-session **activity log** (spoken tips,
-  transcribed lines, the screenshots the model saw); raw mic audio and the live transcript are never
-  archived. Requests are sent `store:true`, so what the model saw does remain inspectable (and
-  retained) server-side at OpenAI for debugging (see [sandbox.md](./sandbox.md)).
+  deliberate-silence outcomes, fixed failed-action and stop/degrade notices, transcribed lines, and
+  the screenshots the model saw); raw mic audio and the live transcript are never archived. Requests
+  are sent `store:true`, so what the model saw does remain inspectable (and retained) server-side at
+  OpenAI for debugging (see [sandbox.md](./sandbox.md)).
 - **Behavioral restraint (model-governed):** there is **no cooldown or rate cap** in code. Every
   substantive utterance — from either speaker; only back-channel filler is skipped as pure cost —
   reaches the brain, and the brain decides whether it has anything worth
