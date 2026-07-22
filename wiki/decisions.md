@@ -533,18 +533,8 @@
 
 ### 2026-07-22 — Brain settings hot-switch between coaching turns
 
-- **Chose:** Apply provider, model, and reasoning-effort changes to a running `CoachDriver` without
-  restarting the coaching pipeline. The driver atomically replaces the coach client, summarizer, and
-  provider-specific failure policy, then snapshots that configuration once per turn: an in-flight
-  tool loop finishes on its original provider and the next turn uses the replacement. Transcript,
-  sent position, client-managed history, overlays, audio capture/transcription, session directory,
-  and traffic recorder remain one continuous session. Cutover is transactional: the previous active
-  provider remains available until the replacement completes one non-truncated terminal turn. If the
-  replacement fails, discard its provider-specific tool-loop state, restore the prior provider, and
-  retry that same turn from the original provider-neutral messages; record only the failed/restored
-  providers in Activity while raw error detail stays in `jarvis-debug.log`. A superseded in-flight
-  provider failure cannot stop the replacement; a missing or signed-out newly selected CLI fails
-  preflight and leaves the current brain running.
+- **Chose:** Apply provider, model, and reasoning-effort changes between coaching turns without
+  stopping the session, using a snapshotted, transactional brain configuration in `CoachDriver`.
 - **Why:** A live interview is exactly when changing provider or model is useful. The old Settings
   behavior persisted the click but silently kept the start-time client for the entire run, while the
   obvious reuse of the existing restart path would discard the transcript and coaching history.
