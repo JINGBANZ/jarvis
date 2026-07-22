@@ -138,7 +138,7 @@ behavior, it's `JarvisOverlay`. If no subsystem fits and it's a generic helper, 
 - **Expectations:** add/extend tests for behavior changes. Don't add production seams or hooks just to
   enable a test — make the test adapt instead.
 - `JarvisApp` is intentionally **not** unit-tested — its behavior needs live TCC permissions, a mic,
-  and screen capture. Verify it with the [live smoke checklist](./README.md#live-smoke-checklist).
+  and screen capture. Verify it with the [live smoke checklist](./wiki/build-and-run.md#live-smoke-checklist).
 - **Before claiming anything works, run `./scripts/run-tests.sh` and read the output.** Evidence, not
   assertion.
 
