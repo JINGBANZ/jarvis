@@ -140,7 +140,8 @@ running `CoachDriver` atomically replaces its coach, summarizer, and provider-fa
 brain value changes. An in-flight turn keeps one snapshotted provider through its whole tool loop;
 the replacement starts on the **next coaching turn** while the transcript, client-managed history,
 audio pipeline, and session logs continue unchanged. The previous active provider remains available
-until the replacement completes one whole turn. If the replacement fails, the driver
+until the replacement completes one non-truncated terminal turn; an incomplete response does not
+commit the cutover. If the replacement fails, the driver
 discards its provider-specific tool-loop state, restores the prior provider, and retries that same
 turn from its provider-neutral starting messages; Activity names the failed and restored providers
 without including the raw error. Several Settings edits before a turn still fall back to the original

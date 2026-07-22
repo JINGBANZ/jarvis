@@ -512,6 +512,40 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(nextBrain.calls.count == 1)
     }
 
+    /// A manual hint starts before its detached screenshot finishes. Settings changes during that
+    /// capture belong to the next turn; the captured hint must finish on its original provider.
+    @Test func brainUpdateDuringManualHintCaptureAppliesToNextTurn() async {
+        let clock = ManualClock(now: 0)
+        let screen = GatedScreen()
+        let oldBrain = ScriptedBrain(script: [
+            .init(toolCalls: [.speak(callId: "old", lines: ["old provider hint"])],
+                  rawToolCalls: [RawToolCall(id: "old", name: "speak",
+                                             argumentsJSON: #"{"lines":["old provider hint"]}"#)]),
+        ])
+        let nextBrain = ScriptedBrain(script: [
+            .init(toolCalls: [.speak(callId: "new", lines: ["new provider turn"])],
+                  rawToolCalls: [RawToolCall(id: "new", name: "speak",
+                                             argumentsJSON: #"{"lines":["new provider turn"]}"#)]),
+        ])
+        let (driver, transcript) = makeDriver(
+            brain: oldBrain, screen: screen, clock: clock)
+        transcript.append(.init(speaker: .me, text: "help with what is on screen", at: 0))
+        async let hintTurn = driver.handleTrigger(.manualHint)
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            DispatchQueue.global().async { screen.entered.wait(); cont.resume() }
+        }
+
+        driver.updateBrain(nextBrain)
+        screen.release.signal()
+        #expect(await hintTurn == .spoke)
+        #expect(oldBrain.calls.count == 1)
+        #expect(nextBrain.calls.isEmpty)
+
+        transcript.append(.init(speaker: .me, text: "continue with the new provider", at: 1))
+        #expect(await driver.handleTrigger(.turnEnd) == .spoke)
+        #expect(nextBrain.calls.count == 1)
+    }
+
     /// The old brain remains a transaction fallback until the replacement proves it can finish a
     /// turn. A first-request failure retries the same transcript delta immediately on the old brain.
     @Test func failedReplacementRetriesSameTurnOnPreviousBrain() async {
@@ -602,6 +636,41 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(previousBrain.calls.isEmpty)
         #expect(fallbackRecorder.events.isEmpty)
         #expect(failureRecorder.messages.count == 1)
+    }
+
+    /// A truncated response is not a successful cutover. If the replacement fails on a later turn,
+    /// the previous provider must still be available to retry that turn and keep coaching alive.
+    @Test func truncatedReplacementRetainsFallbackUntilTerminalTurn() async {
+        let clock = ManualClock(now: 0)
+        let previousBrain = ScriptedBrain(script: [
+            .init(toolCalls: [.speak(callId: "old", lines: ["fallback after truncation"])],
+                  rawToolCalls: [RawToolCall(id: "old", name: "speak",
+                                             argumentsJSON: #"{"lines":["fallback after truncation"]}"#)]),
+        ])
+        let replacementBrain = ScriptedThrowBrain(script: [
+            .init(toolCalls: [], rawToolCalls: [], incompleteReason: "max_output_tokens"),
+            nil,
+        ])
+        let fallbackRecorder = BrainFallbackRecorder()
+        let (driver, transcript) = makeDriver(
+            brain: previousBrain, brainProvider: .openAI, clock: clock)
+        driver.updateBrain(
+            replacementBrain, provider: .claudeCode,
+            onBrainFallback: { fallbackRecorder.record(failed: $0, restored: $1) })
+
+        transcript.append(.init(speaker: .me, text: "first replacement turn", at: 0))
+        #expect(await driver.handleTrigger(.turnEnd) == .truncated)
+        transcript.append(.init(speaker: .me, text: "retry this later turn safely", at: 1))
+        #expect(await driver.handleTrigger(.turnEnd) == .spoke)
+
+        #expect(replacementBrain.calls.count == 2)
+        #expect(previousBrain.calls.count == 1)
+        #expect(previousBrain.calls[0].contains {
+            ($0.text ?? "").contains("retry this later turn safely")
+        })
+        #expect(fallbackRecorder.events == [
+            .init(failed: .claudeCode, restored: .openAI),
+        ])
     }
 
     /// The delta is sent once: a line already carried by an earlier turn appears in the next request

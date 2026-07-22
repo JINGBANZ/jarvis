@@ -32,8 +32,8 @@ public final class CoachDriver: @unchecked Sendable {
 
     private let stateLock = NSLock()
     /// The coach, its cheaper compaction model, and its provider-specific failure policies move
-    /// together. A turn snapshots this once before its first model call, so a Settings change cannot
-    /// split one capture/tool loop across providers; the replacement starts on the next turn.
+    /// together. A turn snapshots this before any awaited work, so a Settings change cannot split
+    /// its manual capture or model tool loop across providers; the replacement starts next turn.
     private struct BrainConfiguration {
         let revision: UInt
         let brain: BrainClient
@@ -44,7 +44,7 @@ public final class CoachDriver: @unchecked Sendable {
     }
     private var brainConfiguration: BrainConfiguration
     /// The previous active configuration. A replacement keeps it until the replacement itself
-    /// completes one turn, making a Settings change a transactional cutover.
+    /// completes one non-truncated terminal turn, making a Settings change a transactional cutover.
     private var fallbackBrainConfiguration: BrainConfiguration?
     private var isHandling = false
     /// Number of transcript lines already sent to the brain. Each turn sends `lines[sentCount...]`
@@ -88,7 +88,8 @@ public final class CoachDriver: @unchecked Sendable {
     /// Replace only the model layer of a running coach. The transcript, sent position, history,
     /// trigger queue, overlays, and audio pipeline stay intact. If a turn is already in flight it
     /// finishes with its snapshotted configuration; the replacement owns the next turn. The last
-    /// working configuration remains a fallback until the replacement completes one whole turn.
+    /// working configuration remains a fallback until the replacement completes one non-truncated
+    /// terminal turn.
     public func updateBrain(
         _ brain: BrainClient,
         provider: BrainProvider? = nil,
@@ -259,6 +260,11 @@ public final class CoachDriver: @unchecked Sendable {
                         ctx.promptLine].compactMap { $0 }.joined(separator: "\n\n")
         var turnMessages: [ChatMessage] = [.user(userText)]
 
+        // Keep one provider/model for the whole turn, including the manual-hint capture below. This
+        // snapshot must precede that await: a Settings update while capture is in flight belongs to
+        // the next turn, not the already-started hint.
+        var brains = currentBrainConfiguration()
+
         // Manual hint (hotkey): the user explicitly asked for help, so capture the screen HERE and
         // inject it into THIS first request — no waiting for the model to call capture_screen.
         // Forcing `speak` (below) then guarantees a visible hint in a single round trip. Same
@@ -288,12 +294,11 @@ public final class CoachDriver: @unchecked Sendable {
 
         jlog("💭 thinking…")
 
-        // Keep one provider/model for the whole tool loop. Settings updates atomically replace the
-        // shared configuration, but this turn continues on its snapshot and the next turn sees it.
-        // If an unconfirmed replacement fails, discard its provider-specific tool state and restart
-        // this same turn from the original provider-neutral messages on the last working brain.
+        // Settings updates atomically replace the shared configuration, but this turn continues on
+        // its snapshot and the next turn sees it. If an unconfirmed replacement fails, discard its
+        // provider-specific tool state and restart this same turn from the original provider-neutral
+        // messages on the last working brain.
         let initialTurnMessages = turnMessages
-        var brains = currentBrainConfiguration()
         var committed = false
         var iterations = 0
         while iterations < maxToolIterations {
@@ -344,7 +349,8 @@ public final class CoachDriver: @unchecked Sendable {
                 commitIfWorthKeeping(turnMessages, deltaText: delta.text)
                 if let reasonText = response.incompleteReason {
                     jlog("⚠️ response truncated (\(reasonText)) — not deliberate silence")
-                    confirmBrainConfiguration(brains.revision)
+                    // An incomplete response does not prove the replacement can finish a turn. Keep
+                    // the previous provider available for a later request failure.
                     return .truncated
                 }
                 jlog("… nothing useful to add, staying silent")

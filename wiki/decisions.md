@@ -539,7 +539,7 @@
   tool loop finishes on its original provider and the next turn uses the replacement. Transcript,
   sent position, client-managed history, overlays, audio capture/transcription, session directory,
   and traffic recorder remain one continuous session. Cutover is transactional: the previous active
-  provider remains available until the replacement completes one whole turn. If the
+  provider remains available until the replacement completes one non-truncated terminal turn. If the
   replacement fails, discard its provider-specific tool-loop state, restore the prior provider, and
   retry that same turn from the original provider-neutral messages; record only the failed/restored
   providers in Activity while raw error detail stays in `jarvis-debug.log`. A superseded in-flight
