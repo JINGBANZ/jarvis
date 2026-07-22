@@ -29,6 +29,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var micConnectionState: RealtimeConnectionState = .stopped
     private var systemConnectionState: RealtimeConnectionState = .stopped
     private var reportedCoachingReady = false
+    private var reportedTranscriptionFailure = false
     /// One-clock capture: a single private aggregate device (built-in mic + system-output tap on one
     /// drift-compensated clock) feeds both transcription sockets, running AEC3 inside its IOProc so the
     /// other side's speaker bleed is cancelled from the mic. Replaces the separate AVAudioEngine mic +
@@ -222,6 +223,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             brainCLI = cli
         }
         stop() // tear down any existing pipeline so we start cleanly
+        reportedTranscriptionFailure = false
         // A fresh transcript for the fresh pipeline (even on an in-place restart, which rebuilds the
         // driver and transcribers too). Reusing the old one would re-send a dead run's lines as "new
         // since last turn" — their [mm:ss] stamps minted against the previous transcriber's clock —
@@ -298,15 +300,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let turns = TurnTaskBox()
         // Mic socket gave up (bad key / quota / network): coaching can't continue. Record only fixed
         // human-facing copy, then stop through the ghost-safe runtime reporter.
-        let onMicTerminalFailure: @Sendable () -> Void = { [errorReporter] in
-            ActivityLog.shared.record(.transcriptionStopped)
-            errorReporter.report(.transcriptionStopped, context: .runtime)
+        let onSessionTranscriptionFailure: @Sendable (TranscriptionFailureReason) -> Void = {
+            [weak self] reason in
+            Task { @MainActor in self?.reportTranscriptionFailure(reason) }
         }
         // "Them" socket gave up: degrade gracefully — stop the system-audio transcriber, keep the mic
         // running. The shared aggregate capture keeps feeding the mic side; its now-nil "them"
         // transcriber simply drops the tap audio. Still report it (a non-blocking .degraded notice) so
         // it flows through the one funnel; the menu stays 🟢.
-        let onThemTerminalFailure: @Sendable () -> Void = { [weak self, errorReporter] in
+        let onThemTerminalFailure: @Sendable (TranscriptionFailureReason) -> Void = {
+            [weak self, errorReporter] reason in
+            if reason != .connectionLost {
+                onSessionTranscriptionFailure(reason)
+                return
+            }
             Task { @MainActor in
                 guard let self else { return }
                 self.themTranscriber?.stop()
@@ -338,7 +345,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                               })
         transcriber.onTurnEnd = { turns.run { await driver.handleTrigger(.turnEnd) } }
         transcriber.onSilence = { secs in turns.run { await driver.handleTrigger(.silence(secondsQuiet: secs)) } }
-        transcriber.onTerminalFailure = onMicTerminalFailure
+        transcriber.onTerminalFailure = onSessionTranscriptionFailure
 
         // "Them" side: system audio (remote participants). Drives turn-end so Jarvis can react when the
         // other side finishes (e.g. asks you something), but NOT the silence check — the "are you
@@ -463,6 +470,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         activityViewer?.coachingStateDidChange()
+    }
+
+    /// Deduplicate the two sockets sharing one OpenAI key: either can discover a permanent account or
+    /// configuration failure first, but Activity should show one reason and teardown should run once.
+    private func reportTranscriptionFailure(_ reason: TranscriptionFailureReason) {
+        guard !reportedTranscriptionFailure, transcriber != nil || themTranscriber != nil else { return }
+        reportedTranscriptionFailure = true
+        ActivityLog.shared.record(.transcriptionStopped(reason: reason))
+        errorReporter.report(.transcriptionStopped(reason: reason), context: .runtime)
     }
 
     /// The mic socket is the truth for whether Jarvis is listening. System audio may reconnect or

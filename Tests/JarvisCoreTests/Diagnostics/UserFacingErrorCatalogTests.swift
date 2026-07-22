@@ -26,9 +26,13 @@ import Testing
     }
 
     @Test func transcriptionStoppedIsTerminal() {
-        #expect(UserFacingError.transcriptionStopped.severity == .terminal)
-        #expect(UserFacingError.transcriptionStopped.severity.stopsSession)
-        #expect(!UserFacingError.transcriptionStopped.severity.showsAlert)
+        for reason in TranscriptionFailureReason.allCases {
+            let error = UserFacingError.transcriptionStopped(reason: reason)
+            #expect(error.severity == .terminal)
+            #expect(error.severity.stopsSession)
+            #expect(!error.severity.showsAlert)
+            #expect(error.message.contains(reason.activityDescription))
+        }
     }
 
     @Test func systemAudioStoppedStaysQuiet() {
