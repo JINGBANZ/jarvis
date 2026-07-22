@@ -8,6 +8,7 @@ import Foundation
         #expect(ActivityLog.cssClass(for: "👁 looking at your screen") == "see")
         #expect(ActivityLog.cssClass(for: "🗣 heard: \"hello\"") == "hear")
         #expect(ActivityLog.cssClass(for: "🤫 quiet for 8s") == "hear")
+        #expect(ActivityLog.cssClass(for: "⌨️ hint shortcut — Trigger: the user pressed the hint shortcut.") == "hear")
         #expect(ActivityLog.cssClass(for: "💭 thinking…") == "think")
         #expect(ActivityLog.cssClass(for: "… nothing useful to add, staying silent") == "think")
         #expect(ActivityLog.cssClass(for: "⏹ coaching stopped — Claude Code couldn't respond") == "think")

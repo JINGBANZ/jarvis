@@ -234,7 +234,7 @@ public final class ActivityLog: @unchecked Sendable {
         let m = message.trimmingCharacters(in: .whitespaces)
         if m.hasPrefix("💬") { return "say" }
         if m.hasPrefix("👁") { return "see" }
-        if m.hasPrefix("🗣") || m.hasPrefix("🤫") { return "hear" }
+        if m.hasPrefix("🗣") || m.hasPrefix("🤫") || m.hasPrefix("⌨️") { return "hear" }
         if m.hasPrefix("💭") || m.hasPrefix("…") { return "think" }
         if m.hasPrefix("⏹ coaching stopped") { return "think" }
         if m.hasPrefix("⚠️") { return "think" }
