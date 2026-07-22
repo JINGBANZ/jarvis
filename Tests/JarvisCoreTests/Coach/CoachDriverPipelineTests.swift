@@ -75,7 +75,8 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 // Serializing the suite keeps their enable()/disable() calls from racing each other — they are the
 // only code that enables the shared log, so no other suite can collide.
 @Suite(.serialized) struct CoachDriverPipelineTests {
-    private func makeDriver(brain: BrainClient, summarizer: BrainClient? = nil,
+    private func makeDriver(brain: BrainClient, brainProvider: BrainProvider? = nil,
+                            summarizer: BrainClient? = nil,
                             screen: ScreenCapturing = FakeScreen(),
                             overlay: OverlayRendering = FakeOverlay(),
                             clock: Clock, config: Config = .default,
@@ -84,7 +85,8 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let transcript = RollingTranscript()
         let driver = CoachDriver(
             config: config, transcript: transcript,
-            brain: brain, summarizer: summarizer, screen: screen, overlay: overlay, clock: clock,
+            brain: brain, brainProvider: brainProvider, summarizer: summarizer,
+            screen: screen, overlay: overlay, clock: clock,
             onBrainFailure: onBrainFailure
         )
         return (driver, transcript)
@@ -445,6 +447,163 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(second.contains { $0.role == .tool && $0.toolCallId == "spk1" })
     }
 
+    /// Changing provider/model is a model-layer swap, not a new coaching session: the replacement
+    /// receives the existing client-managed history plus only the transcript delta it has not seen.
+    @Test func brainUpdateAppliesToNextTurnWithoutLosingHistory() async {
+        let clock = ManualClock(now: 0)
+        let firstBrain = ScriptedBrain(script: [
+            .init(toolCalls: [.speak(callId: "old", lines: ["first tip"])],
+                  rawToolCalls: [RawToolCall(id: "old", name: "speak",
+                                             argumentsJSON: #"{"lines":["first tip"]}"#)]),
+        ])
+        let nextBrain = ScriptedBrain(script: [
+            .init(toolCalls: [.speak(callId: "new", lines: ["second tip"])],
+                  rawToolCalls: [RawToolCall(id: "new", name: "speak",
+                                             argumentsJSON: #"{"lines":["second tip"]}"#)]),
+        ])
+        let (driver, transcript) = makeDriver(brain: firstBrain, clock: clock)
+        transcript.append(.init(speaker: .me, text: "the original problem", at: 0))
+        #expect(await driver.handleTrigger(.turnEnd) == .spoke)
+
+        driver.updateBrain(nextBrain)
+        transcript.append(.init(speaker: .me, text: "my next idea", at: 1))
+        #expect(await driver.handleTrigger(.turnEnd) == .spoke)
+
+        #expect(firstBrain.calls.count == 1)
+        #expect(nextBrain.calls.count == 1)
+        let replacementContext = nextBrain.calls[0]
+        #expect(replacementContext.contains { ($0.text ?? "").contains("the original problem") })
+        #expect(replacementContext.contains { ($0.text ?? "").contains("my next idea") })
+        #expect(replacementContext.contains { $0.role == .assistant && $0.toolCalls?.first?.id == "old" })
+        #expect(replacementContext.contains { $0.role == .tool && $0.toolCallId == "old" })
+    }
+
+    /// One capture/tool loop is one provider transaction. A switch during its first request waits
+    /// for the next turn instead of sending the captured result to a different provider/model.
+    @Test func brainUpdateDoesNotSplitAnInFlightToolLoop() async {
+        let clock = ManualClock(now: 0)
+        let gate = AsyncGate()
+        let oldBrain = GatedBrain(gate: gate, script: [
+            .init(toolCalls: [.captureScreen(callId: "capture")],
+                  rawToolCalls: [RawToolCall(id: "capture", name: "capture_screen",
+                                             argumentsJSON: "{}")]),
+            .init(toolCalls: [.speak(callId: "old", lines: ["old provider finished"])],
+                  rawToolCalls: [RawToolCall(id: "old", name: "speak",
+                                             argumentsJSON: #"{"lines":["old provider finished"]}"#)]),
+        ])
+        let nextBrain = ScriptedBrain(script: [
+            .init(toolCalls: [.speak(callId: "new", lines: ["new provider turn"])],
+                  rawToolCalls: [RawToolCall(id: "new", name: "speak",
+                                             argumentsJSON: #"{"lines":["new provider turn"]}"#)]),
+        ])
+        let (driver, transcript) = makeDriver(brain: oldBrain, clock: clock)
+        transcript.append(.init(speaker: .me, text: "inspect this code", at: 0))
+        async let oldTurn = driver.handleTrigger(.turnEnd)
+        await gate.waitUntilEntered()
+
+        driver.updateBrain(nextBrain)
+        await gate.release()
+        #expect(await oldTurn == .spoke)
+        #expect(oldBrain.callCount == 2)
+        #expect(nextBrain.calls.isEmpty)
+
+        transcript.append(.init(speaker: .me, text: "now continue", at: 1))
+        #expect(await driver.handleTrigger(.turnEnd) == .spoke)
+        #expect(nextBrain.calls.count == 1)
+    }
+
+    /// The old brain remains a transaction fallback until the replacement proves it can finish a
+    /// turn. A first-request failure retries the same transcript delta immediately on the old brain.
+    @Test func failedReplacementRetriesSameTurnOnPreviousBrain() async {
+        let clock = ManualClock(now: 0)
+        let previousBrain = ScriptedBrain(script: [
+            .init(toolCalls: [.speak(callId: "old", lines: ["fallback tip"])],
+                  rawToolCalls: [RawToolCall(id: "old", name: "speak",
+                                             argumentsJSON: #"{"lines":["fallback tip"]}"#)]),
+        ])
+        let replacementBrain = ScriptedThrowBrain(script: [nil])
+        let fallbackRecorder = BrainFallbackRecorder()
+        let (driver, transcript) = makeDriver(
+            brain: previousBrain, brainProvider: .openAI, clock: clock)
+        driver.updateBrain(
+            replacementBrain, provider: .claudeCode,
+            onBrainFallback: { fallbackRecorder.record(failed: $0, restored: $1) })
+        transcript.append(.init(speaker: .me, text: "keep this conversation going", at: 0))
+
+        #expect(await driver.handleTrigger(.turnEnd) == .spoke)
+        #expect(replacementBrain.calls.count == 1)
+        #expect(previousBrain.calls.count == 1)
+        #expect(previousBrain.calls[0].contains {
+            ($0.text ?? "").contains("keep this conversation going")
+        })
+        #expect(fallbackRecorder.events == [
+            .init(failed: .claudeCode, restored: .openAI),
+        ])
+    }
+
+    /// If the replacement fails after asking for a screenshot, rollback restarts from the original
+    /// provider-neutral turn. Provider-specific calls/results from the failed tool loop never cross
+    /// into the fallback provider.
+    @Test func failedReplacementToolLoopRestartsCleanlyOnPreviousBrain() async {
+        let clock = ManualClock(now: 0)
+        let previousBrain = ScriptedBrain(script: [
+            .init(toolCalls: [.speak(callId: "old", lines: ["clean fallback"])],
+                  rawToolCalls: [RawToolCall(id: "old", name: "speak",
+                                             argumentsJSON: #"{"lines":["clean fallback"]}"#)]),
+        ])
+        let replacementBrain = ScriptedThrowBrain(script: [
+            .init(toolCalls: [.captureScreen(callId: "new-capture")],
+                  rawToolCalls: [RawToolCall(id: "new-capture", name: "capture_screen",
+                                             argumentsJSON: "{}")]),
+            nil,
+        ])
+        let (driver, transcript) = makeDriver(
+            brain: previousBrain, brainProvider: .openAI, clock: clock)
+        driver.updateBrain(replacementBrain, provider: .codexCLI)
+        transcript.append(.init(speaker: .me, text: "review the visible code", at: 0))
+
+        #expect(await driver.handleTrigger(.turnEnd) == .spoke)
+        #expect(replacementBrain.calls.count == 2)
+        #expect(previousBrain.calls.count == 1)
+        let fallbackRequest = previousBrain.calls[0]
+        #expect(fallbackRequest.contains { ($0.text ?? "").contains("review the visible code") })
+        #expect(!fallbackRequest.contains { $0.role == .tool })
+        #expect(!fallbackRequest.contains { $0.role == .assistant && $0.toolCalls != nil })
+        #expect(!fallbackRequest.contains { $0.rawItemsJSON != nil })
+    }
+
+    /// Once a replacement completes a turn it is the established provider. Later failures follow its
+    /// normal policy instead of unexpectedly rolling back to a stale provider.
+    @Test func successfulReplacementClearsItsFallback() async {
+        let clock = ManualClock(now: 0)
+        let previousBrain = ScriptedBrain(script: [
+            .init(toolCalls: [.speak(callId: "old", lines: ["should not run"])])
+        ])
+        let replacementBrain = ScriptedThrowBrain(script: [
+            .init(toolCalls: [.speak(callId: "new", lines: ["replacement works"])],
+                  rawToolCalls: [RawToolCall(id: "new", name: "speak",
+                                             argumentsJSON: #"{"lines":["replacement works"]}"#)]),
+            nil,
+        ])
+        let failureRecorder = BrainFailureRecorder()
+        let fallbackRecorder = BrainFallbackRecorder()
+        let (driver, transcript) = makeDriver(
+            brain: previousBrain, brainProvider: .openAI, clock: clock)
+        driver.updateBrain(
+            replacementBrain, provider: .claudeCode,
+            onBrainFailure: { failureRecorder.record($0) },
+            onBrainFallback: { fallbackRecorder.record(failed: $0, restored: $1) })
+
+        transcript.append(.init(speaker: .me, text: "first replacement turn", at: 0))
+        #expect(await driver.handleTrigger(.turnEnd) == .spoke)
+        transcript.append(.init(speaker: .me, text: "later provider failure", at: 1))
+        #expect(await driver.handleTrigger(.turnEnd) == .brainError)
+
+        #expect(previousBrain.calls.isEmpty)
+        #expect(fallbackRecorder.events.isEmpty)
+        #expect(failureRecorder.messages.count == 1)
+    }
+
     /// The delta is sent once: a line already carried by an earlier turn appears in the next request
     /// only via history (exactly once), never re-sent as new speech.
     @Test func indexDeltaSendsEachLineExactlyOnce() async {
@@ -680,6 +839,36 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(recorder.messages == ["gated brain failed"])
     }
 
+    /// A Settings switch can race an already-running request. Its superseded provider may still
+    /// unwind with an error, but that stale failure must neither stop nor poison the replacement.
+    @Test func supersededInFlightFailureDoesNotStopReplacementBrain() async {
+        let clock = ManualClock(now: 0)
+        let gate = AsyncGate()
+        let oldBrain = GatedThrowingBrain(gate: gate)
+        let nextBrain = ScriptedBrain(script: [
+            .init(toolCalls: [.speak(callId: "new", lines: ["recovered"])],
+                  rawToolCalls: [RawToolCall(id: "new", name: "speak",
+                                             argumentsJSON: #"{"lines":["recovered"]}"#)]),
+        ])
+        let recorder = BrainFailureRecorder()
+        let (driver, transcript) = makeDriver(
+            brain: oldBrain, clock: clock,
+            onBrainFailure: { recorder.record($0) }
+        )
+        transcript.append(.init(speaker: .me, text: "first question", at: 0))
+        async let oldTurn = driver.handleTrigger(.turnEnd)
+        await gate.waitUntilEntered()
+
+        driver.updateBrain(nextBrain)
+        await gate.release()
+        #expect(await oldTurn == .brainError)
+        #expect(recorder.messages.isEmpty)
+
+        transcript.append(.init(speaker: .me, text: "second question", at: 1))
+        #expect(await driver.handleTrigger(.turnEnd) == .spoke)
+        #expect(nextBrain.calls.count == 1)
+    }
+
     /// Audio-driven turns REQUIRE a tool call (never free text): the model picks which tool from the
     /// prompt — reply, look at the screen, or stay_silent — but must answer with one of them.
     @Test func everyAudioTurnRequiresAToolCall() async {
@@ -726,20 +915,41 @@ final class BrainFailureRecorder: @unchecked Sendable {
     func record(_ message: String) { lock.lock(); recorded.append(message); lock.unlock() }
 }
 
+/// Lock-guarded record of provider identities reported by a transactional fallback.
+final class BrainFallbackRecorder: @unchecked Sendable {
+    struct Event: Equatable {
+        let failed: BrainProvider?
+        let restored: BrainProvider?
+    }
+
+    private let lock = NSLock()
+    private var recorded: [Event] = []
+    var events: [Event] { lock.lock(); defer { lock.unlock() }; return recorded }
+    func record(failed: BrainProvider?, restored: BrainProvider?) {
+        lock.lock(); recorded.append(.init(failed: failed, restored: restored)); lock.unlock()
+    }
+}
+
 /// A brain that parks inside `respond` until released, so a second concurrent trigger can be
 /// observed hitting the single-in-flight guard.
 final class GatedBrain: BrainClient, @unchecked Sendable {
     private let gate: AsyncGate
-    private let response: BrainResponse
+    private let script: [BrainResponse]
     private let lock = NSLock()
     private var _callCount = 0
     var callCount: Int { lock.lock(); defer { lock.unlock() }; return _callCount }
-    private func record() { lock.lock(); _callCount += 1; lock.unlock() }
-    init(gate: AsyncGate, response: BrainResponse) { self.gate = gate; self.response = response }
+    private func record() -> Int {
+        lock.lock(); defer { lock.unlock() }
+        let index = _callCount
+        _callCount += 1
+        return index
+    }
+    init(gate: AsyncGate, response: BrainResponse) { self.gate = gate; self.script = [response] }
+    init(gate: AsyncGate, script: [BrainResponse]) { self.gate = gate; self.script = script }
     func respond(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice) async throws -> BrainResponse {
-        record()
+        let index = record()
         await gate.enter()
-        return response
+        return script[min(index, script.count - 1)]
     }
 }
 

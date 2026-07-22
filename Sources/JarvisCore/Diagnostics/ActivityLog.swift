@@ -2,9 +2,10 @@ import Foundation
 
 /// The model behind the human-facing activity viewer. It records the coaching exchange — heard
 /// speech, manual hint requests, screens Jarvis viewed, and tips Jarvis gave — plus a fixed,
-/// non-sensitive notice when coaching must stop without interrupting the user. It pushes those
-/// entries into an in-app `WKWebView` window (see `ActivityViewer` in JarvisApp) and persists them so
-/// past sessions can be browsed later. Detailed diagnostics belong exclusively in `JarvisLog`.
+/// non-sensitive notice when coaching falls back, degrades, or must stop without interrupting the
+/// user. It pushes those entries into an in-app `WKWebView` window (see `ActivityViewer` in
+/// JarvisApp) and persists them so past sessions can be browsed later. Detailed diagnostics belong
+/// exclusively in `JarvisLog`.
 ///
 /// This type is UI-free (Foundation only): it generates the page HTML and the per-row JS as plain
 /// strings; the WebView lives in JarvisApp. See wiki/build-and-run.md.
@@ -37,6 +38,9 @@ public final class ActivityLog: @unchecked Sendable {
         case systemAudioStopped
         /// An explicit Settings reapply failed its preflight while the existing session continued.
         case settingsChangeNotApplied
+        /// A live brain replacement failed its first turn, so Jarvis restored the previous active
+        /// provider. Carries provider identities only; raw failure detail stays in jlog.
+        case brainFallback(failed: BrainProvider, restored: BrainProvider)
     }
 
     /// One recorded line. `imageFile` is the relative `shot-N.jpg` name on disk (the bytes the DOM
@@ -144,6 +148,13 @@ public final class ActivityLog: @unchecked Sendable {
             imageBase64 = nil
         case .settingsChangeNotApplied:
             message = "⚠️ settings change wasn't applied — current coaching session continues; check Settings → Brain"
+            imageBase64 = nil
+        case .brainFallback(let failed, let restored):
+            if failed == restored {
+                message = "⚠️ brain change failed — retrying this turn with the previous \(restored.displayName) setup"
+            } else {
+                message = "⚠️ brain switch failed — \(failed.displayName) couldn't respond; retrying this turn with \(restored.displayName)"
+            }
             imageBase64 = nil
         }
         queue.async { [self] in
@@ -253,6 +264,8 @@ public final class ActivityLog: @unchecked Sendable {
             || m.hasPrefix("⏹ coaching stopped")
             || m.hasPrefix("⚠️ system audio stopped")
             || m.hasPrefix("⚠️ settings change wasn't applied")
+            || m.hasPrefix("⚠️ brain switch failed")
+            || m.hasPrefix("⚠️ brain change failed")
     }
 
     /// The empty page shell: dark theme, a header with a live count, the row container, the lightbox

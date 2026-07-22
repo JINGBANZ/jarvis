@@ -37,6 +37,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// In-flight coaching turns, so Stop can cancel one mid-brain-call (otherwise it could speak
     /// after the user pressed Stop).
     private var turns: TurnTaskBox?
+    /// The running session's event loop. Stored so Brain Settings can replace only its model clients
+    /// without restarting transcription or discarding the session's transcript/history.
+    private var coachDriver: CoachDriver?
     /// The global hint hotkey. Lives for the whole app run; its callback beeps when no session runs.
     private var hotkeys: HotkeyController?
     /// Fires an on-demand hint for the running session. Non-nil only while running — set in `start()`,
@@ -127,6 +130,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // running, reflecting the real outcome back into the menu state.
         let sections: [SettingsSection] = [
             BrainSection(preferences: brainPreferences, detector: AgentCLIDetector(),
+                         onPreferencesChanged: { [weak self] cli in
+                self?.applyBrainPreferencesToRunningSession(detectedCLI: cli)
+            },
                          keyStore: secretFile, onKeySaved: { [weak self] _ in
                 guard let self, self.transcriber != nil else { return }
                 // Re-saving a key while running only re-applies it to the pipeline — it is NOT a new
@@ -168,6 +174,121 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// The three pieces that must change together when the selected brain changes. The failure
+    /// callback belongs to the provider too: CLI failures are terminal, while an OpenAI request
+    /// failure remains retryable on a later coaching turn.
+    private struct BrainRuntime {
+        let coach: BrainClient
+        let summarizer: BrainClient
+        let onFailure: (@Sendable (String) -> Void)?
+    }
+
+    /// Check the selected local provider before disturbing a live session. OpenAI needs no provider
+    /// preflight; a missing/signed-out CLI leaves the current brain intact and reports fixed Activity
+    /// copy while raw detection detail stays in the debug log.
+    private func preflightBrainProvider(_ provider: BrainProvider,
+                                        detectedCLI: DetectedAgentCLI?,
+                                        context: UserFacingError.PresentationContext,
+                                        recordSettingsFailure: Bool)
+        -> (isReady: Bool, cli: DetectedAgentCLI?) {
+        guard provider.usesLocalCLI else { return (true, nil) }
+        let action = recordSettingsFailure ? "apply brain settings" : "start"
+        guard let cli = detectedCLI else {
+            jlog("Jarvis: can't \(action) — \(provider.displayName) CLI not found.")
+            if recordSettingsFailure { ActivityLog.shared.record(.settingsChangeNotApplied) }
+            errorReporter.report(.brainCLIMissing(provider: provider.displayName), context: context)
+            return (false, nil)
+        }
+        switch cli.authenticationStatus {
+        case .signedIn:
+            break
+        case .signedOut:
+            jlog("Jarvis: can't \(action) — \(provider.displayName) isn't signed in.")
+            if recordSettingsFailure { ActivityLog.shared.record(.settingsChangeNotApplied) }
+            errorReporter.report(.brainCLINotSignedIn(provider: provider.displayName), context: context)
+            return (false, nil)
+        case .unknown:
+            errorReporter.report(.brainCLISignInUnconfirmed(provider: provider.displayName),
+                                 context: context)
+        }
+        return (true, cli)
+    }
+
+    /// Construct the coach + compaction clients for one preferences snapshot. Both keep writing to
+    /// the current session's traffic recorder, so a hot switch remains one auditable conversation.
+    private func makeBrainRuntime(apiKey key: String, provider: BrainProvider,
+                                  cli: DetectedAgentCLI?) -> BrainRuntime {
+        let coachBase: BrainClient
+        let summarizer: BrainClient
+        if let cli {
+            let sessionDir = currentSessionDir ?? logDirectory()
+            coachBase = CLIBrainClient(provider: provider, executable: cli.executableURL,
+                                       model: brainPreferences.model(for: provider).id,
+                                       reasoningEffort: brainPreferences.effort.rawValue,
+                                       workDirectory: sessionDir,
+                                       codexSupportedFeatures: cli.supportedFeatures,
+                                       traffic: sessionTraffic, trafficTag: "coach")
+            summarizer = CLIBrainClient(provider: provider, executable: cli.executableURL,
+                                        model: BrainModelCatalog.summarizerModelID(for: provider),
+                                        reasoningEffort: ReasoningEffort.low.rawValue,
+                                        workDirectory: sessionDir,
+                                        codexSupportedFeatures: cli.supportedFeatures,
+                                        traffic: sessionTraffic, trafficTag: "summarizer")
+        } else {
+            coachBase = OpenAIBrainClient(apiKey: key, model: brainPreferences.model.id,
+                                          reasoningEffort: brainPreferences.effort.rawValue,
+                                          maxOutputTokens: brainPreferences.effort.maxOutputTokens,
+                                          traffic: sessionTraffic, trafficTag: "coach")
+            summarizer = OpenAIBrainClient(
+                apiKey: key, model: BrainModelCatalog.summarizerModelID(for: .openAI),
+                reasoningEffort: ReasoningEffort.low.rawValue, maxOutputTokens: 2_048,
+                traffic: sessionTraffic, trafficTag: "summarizer")
+        }
+
+        let onFailure: (@Sendable (String) -> Void)?
+        if provider.usesLocalCLI {
+            let signInCommand = provider == .claudeCode ? "claude auth login" : "codex login"
+            onFailure = { [errorReporter] reason in
+                ActivityLog.shared.record(.coachingStopped(provider: provider))
+                errorReporter.report(.brainCLIStopped(provider: provider.displayName,
+                                                       signInCommand: signInCommand,
+                                                       reason: reason),
+                                     context: .runtime)
+            }
+        } else {
+            onFailure = nil
+        }
+        return BrainRuntime(coach: RetryingBrainClient(base: coachBase),
+                            summarizer: summarizer, onFailure: onFailure)
+    }
+
+    /// Apply provider/model/effort changes without touching capture, transcription, history, or the
+    /// session directory. An in-flight turn finishes on its old snapshot; the next turn uses this.
+    private func applyBrainPreferencesToRunningSession(detectedCLI: DetectedAgentCLI?) {
+        guard let coachDriver, transcriber != nil else { return }
+        guard let key = secrets.apiKey(), !key.isEmpty else {
+            jlog("Jarvis: can't apply brain settings — no API key.")
+            ActivityLog.shared.record(.settingsChangeNotApplied)
+            errorReporter.report(.noAPIKey, context: .runtime)
+            return
+        }
+        let provider = brainPreferences.provider
+        let preflight = preflightBrainProvider(provider, detectedCLI: detectedCLI, context: .runtime,
+                                               recordSettingsFailure: true)
+        guard preflight.isReady else { return }
+        let runtime = makeBrainRuntime(apiKey: key, provider: provider, cli: preflight.cli)
+        coachDriver.updateBrain(
+            runtime.coach, provider: provider, summarizer: runtime.summarizer,
+            onBrainFailure: runtime.onFailure,
+            onBrainFallback: { failed, restored in
+                guard let failed, let restored else { return }
+                ActivityLog.shared.record(.brainFallback(failed: failed, restored: restored))
+            })
+        let model = brainPreferences.model(for: provider)
+        jlog("Jarvis: brain settings will apply on the next turn — \(provider.displayName), "
+             + "\(model.displayName), \(brainPreferences.effort.displayName) effort.")
+    }
+
     /// Build the brain + driver and start the transcription pipeline. Returns `false` (and stays
     /// stopped) if no API key is available yet (transcription always needs it), or if the selected
     /// brain provider's CLI is missing.
@@ -190,37 +311,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             errorReporter.report(.noAPIKey, context: reportContext)
             return false
         }
-        // A CLI brain provider's binary must exist before anything is torn down — a failed Start
-        // must leave the app exactly as it was.
         let brainProvider = brainPreferences.provider
-        var brainCLI: DetectedAgentCLI?
-        if brainProvider.usesLocalCLI {
-            guard let cli = AgentCLIDetector().detect(brainProvider) else {
-                jlog("Jarvis: can't start — \(brainProvider.displayName) CLI not found.")
-                if wasRunning {
-                    ActivityLog.shared.record(.settingsChangeNotApplied)
-                }
-                errorReporter.report(.brainCLIMissing(provider: brainProvider.displayName),
-                                     context: reportContext)
-                return false
-            }
-            switch cli.authenticationStatus {
-            case .signedIn:
-                break
-            case .signedOut:
-                jlog("Jarvis: can't start — \(brainProvider.displayName) isn't signed in.")
-                if wasRunning {
-                    ActivityLog.shared.record(.settingsChangeNotApplied)
-                }
-                errorReporter.report(.brainCLINotSignedIn(provider: brainProvider.displayName),
-                                     context: reportContext)
-                return false
-            case .unknown:
-                errorReporter.report(.brainCLISignInUnconfirmed(provider: brainProvider.displayName),
-                                     context: reportContext)
-            }
-            brainCLI = cli
-        }
+        // A CLI brain provider's binary/auth must pass before anything is torn down — a failed Start
+        // or in-place key reapply leaves the existing pipeline exactly as it was.
+        let detectedCLI = brainProvider.usesLocalCLI
+            ? AgentCLIDetector().detect(brainProvider)
+            : nil
+        let preflight = preflightBrainProvider(brainProvider, detectedCLI: detectedCLI,
+                                               context: reportContext,
+                                               recordSettingsFailure: wasRunning)
+        guard preflight.isReady else { return false }
         stop() // tear down any existing pipeline so we start cleanly
         // A fresh transcript for the fresh pipeline (even on an in-place restart, which rebuilds the
         // driver and transcribers too). Reusing the old one would re-send a dead run's lines as "new
@@ -237,60 +337,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // recording sits INSIDE the retry wrapper, so each retry attempt is its own audit-visible entry.
         // History-compaction summaries don't need the coaching model — each provider's cheap tier
         // (see `BrainModelCatalog.summarizerModelID`) writes a 250-word briefing a few times an hour.
-        let coachBase: BrainClient
-        let summarizer: BrainClient
-        if let cli = brainCLI {
-            // Brain on the local CLI: turns are billed to the user's Claude/ChatGPT subscription.
-            // Screenshots for the CLI are materialized inside the session dir (owner-only posture).
-            let sessionDir = currentSessionDir ?? logDirectory()
-            coachBase = CLIBrainClient(provider: brainProvider, executable: cli.executableURL,
-                                       model: brainPreferences.model(for: brainProvider).id,
-                                       reasoningEffort: brainPreferences.effort.rawValue,
-                                       workDirectory: sessionDir,
-                                       codexSupportedFeatures: cli.supportedFeatures,
-                                       traffic: sessionTraffic, trafficTag: "coach")
-            summarizer = CLIBrainClient(provider: brainProvider, executable: cli.executableURL,
-                                        model: BrainModelCatalog.summarizerModelID(for: brainProvider),
-                                        reasoningEffort: ReasoningEffort.low.rawValue,
-                                        workDirectory: sessionDir,
-                                        codexSupportedFeatures: cli.supportedFeatures,
-                                        traffic: sessionTraffic, trafficTag: "summarizer")
-        } else {
-            coachBase = OpenAIBrainClient(apiKey: key, model: brainPreferences.model.id,
-                                          reasoningEffort: brainPreferences.effort.rawValue,
-                                          maxOutputTokens: brainPreferences.effort.maxOutputTokens,
-                                          traffic: sessionTraffic, trafficTag: "coach")
-            summarizer = OpenAIBrainClient(apiKey: key, model: BrainModelCatalog.summarizerModelID(for: .openAI),
-                                           reasoningEffort: ReasoningEffort.low.rawValue,
-                                           maxOutputTokens: 2_048,
-                                           traffic: sessionTraffic, trafficTag: "summarizer")
-        }
-        let brain = RetryingBrainClient(base: coachBase)
-        // A token can expire after the bounded Start preflight, and other runtime failures remain
-        // possible. If the actual CLI request fails, surface the reason and stop the green-but-
-        // unusable session instead of silently ignoring every later utterance.
-        let onBrainFailure: (@Sendable (String) -> Void)?
-        if brainProvider.usesLocalCLI {
-            let signInCommand = brainProvider == .claudeCode ? "claude auth login" : "codex login"
-            onBrainFailure = { [errorReporter] reason in
-                // Preserve ghost mode: the fixed Activity notice is enough for the human-facing
-                // record; the provider's detailed failure stays in jarvis-debug.log below.
-                ActivityLog.shared.record(.coachingStopped(provider: brainProvider))
-                errorReporter.report(.brainCLIStopped(provider: brainProvider.displayName,
-                                                       signInCommand: signInCommand,
-                                                       reason: reason),
-                                     context: .runtime)
-            }
-        } else {
-            onBrainFailure = nil
-        }
+        let brainRuntime = makeBrainRuntime(apiKey: key, provider: brainProvider,
+                                            cli: preflight.cli)
         // Fan each spoken tip out to both the Overlay Caption and the persistent Overlay Box.
         let overlaySink = BroadcastOverlay([overlayCaption, overlayBox])
         let driver = CoachDriver(config: config, transcript: transcript,
-                                 brain: brain, summarizer: summarizer,
+                                 brain: brainRuntime.coach, brainProvider: brainProvider,
+                                 summarizer: brainRuntime.summarizer,
                                  screen: WindowScopedScreenCapture(preferences: screenPreferences),
                                  overlay: overlaySink, clock: clock,
-                                 onBrainFailure: onBrainFailure)
+                                 onBrainFailure: brainRuntime.onFailure)
 
         // CoachDriver is @unchecked Sendable; capture it (not @MainActor self) in the callbacks.
         // Route turns through TurnTaskBox so Stop can cancel an in-flight one. Concurrent triggers are
@@ -389,6 +445,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.themTranscriber = themTranscriber
         self.aggregateCapture = capture
         self.turns = turns
+        self.coachDriver = driver
         micConnectionState = .connecting
         systemConnectionState = .connecting
         reportedCoachingReady = false
@@ -437,6 +494,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let wasRunning = transcriber != nil || themTranscriber != nil
         requestManualHint = nil              // hotkey beeps again once there's no live session
         let cancelled = turns?.cancelAll() ?? []; turns = nil   // cancel any in-flight coaching turn
+        coachDriver = nil
         // Mark both delivery endpoints stopped before draining the IOProc. Aggregate capture hands
         // chunks off asynchronously, so callbacks already queued during teardown must see the
         // transcribers' stopped guards and become no-ops.

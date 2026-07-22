@@ -49,7 +49,7 @@ so an unwrapped fixed-frame view would ride the bottom edge in a taller window).
 
 | Section class | Tab title | Always present | Description |
 |---|---|---|---|
-| `BrainSection` | "Brain" | yes | Everything that decides who answers a coaching turn, in one tab: the provider radios (OpenAI API / Claude Code / Codex CLI — see [Brain](#brain)), a per-provider model dropdown, the reasoning-effort dropdown (one global setting, mapped onto each provider's scale), and the OpenAI API-key controls (`APIKeyControls`: an `NSSecureTextField` that saves to an owner-only file and restarts the pipeline if already running). Takes effect on the next Start. |
+| `BrainSection` | "Brain" | yes | Everything that decides who answers a coaching turn, in one tab: the provider radios (OpenAI API / Claude Code / Codex CLI — see [Brain](#brain)), a per-provider model dropdown, the reasoning-effort dropdown (one global setting, mapped onto each provider's scale), and the OpenAI API-key controls (`APIKeyControls`: an `NSSecureTextField` that saves to an owner-only file and restarts the pipeline if already running). Brain choices take effect on the next coaching turn while running, or the next Start while stopped. |
 | `OverlaySection` | "Overlay" | yes | Two groups, one per overlay surface — **Overlay Caption** (the transient on-screen tip) and **Overlay Box** (the persistent response history). Each has a header with an On/Off toggle (an `NSSwitch` + "On"/"Off" label) and a one-line description. When a surface is **on** it also shows its Text Size + Opacity sliders (with live readouts) and a live sample, **only while the Overlay tab is selected** (`didBecomeActive`/`didResignActive`); when **off**, its sliders and sample are hidden and the layout collapses. Persists via `OverlayAppearance`. |
 | `DisplaySection` | "Screen" | yes | One dropdown — the capture scope: **Active window** (default) or one **Entire display** entry per connected display; persists via `ScreenCapturePreferences`. Applies to the next screenshot. |
 | `ActivitySection` | "Activity" | yes | Embeds the `ActivityViewer` content view (`makeContentView()` / `teardown()`); `fillsTab == true` so the log stretches with the window. Its header shows the selected session's exact directory ID in a selectable field with **Copy ID**, and carries **Evaluate** — one click sends the selected session's recorded LLM wire traffic (`brain-traffic.jsonl`) to the brain model at high effort for a context-engineering audit (`SessionEvaluator`), saved as `eval-report.md` in the session dir and opened in the browser as a rendered `eval-report.html` page (`EvalReportPage`) whose **Copy as Markdown** button hands the raw report to an agent chat; once a session has a saved report the button flips to **Open report**. Only *finished* conversations qualify: the button is disabled while the selected session is the live, still-running one (a mid-session audit would judge half a story) and re-enables once Stop has drained any in-flight turn — the cancelled request's final traffic line must land before the audit reads the file. |
@@ -114,9 +114,10 @@ known install dirs, while Claude sign-in uses its non-billing `auth status --jso
 short timeout because account metadata can outlive an expired OAuth session. Codex keeps using its
 auth-file marker. The radios show **signed in**, **signed out**, or **sign-in unknown**; a confirmed
 logout refuses Start, while an unavailable probe warns but does not falsely claim logout. An actual
-CLI request can still fail after preflight; Jarvis then stops the unusable coaching session without
-activating the app, adds a discreet provider-only notice to Activity, and keeps the detailed error
-and sign-in command in `jarvis-debug.log`.
+CLI request can still fail after preflight. A provider that was selected at Start or has already
+completed a turn then stops the unusable coaching session without activating the app; a newly
+switched provider uses the transactional fallback described below. Both paths keep detailed error
+and sign-in information in `jarvis-debug.log` and put only fixed provider-level copy in Activity.
 
 **Model + effort.** A **Model** dropdown drawn from `BrainModelCatalog` per provider (OpenAI ids for
 the API; CLI aliases like `sonnet` for the CLIs, plus a "CLI default" entry meaning "no model flag" —
@@ -134,9 +135,20 @@ the key.
 
 Reads are validated: a persisted model id no longer in that provider's catalog (or an unrecognized
 provider/effort) falls back to the default rather than reaching the API. The transcription model is
-deliberately **not** here — it's a separate field and code path (`Config.transcriptionModel`). The
-values are read in `AppDelegate.start()` when the brain client is built, so a change takes effect on
-the **next Start**, not mid-session — hence the caption on the tab.
+deliberately **not** here — it's a separate field and code path (`Config.transcriptionModel`). A
+running `CoachDriver` atomically replaces its coach, summarizer, and provider-failure policy when a
+brain value changes. An in-flight turn keeps one snapshotted provider through its whole tool loop;
+the replacement starts on the **next coaching turn** while the transcript, client-managed history,
+audio pipeline, and session logs continue unchanged. The previous active provider remains available
+until the replacement completes one whole turn. If the replacement fails, the driver
+discards its provider-specific tool-loop state, restores the prior provider, and retries that same
+turn from its provider-neutral starting messages; Activity names the failed and restored providers
+without including the raw error. Several Settings edits before a turn still fall back to the original
+active provider, not an untried intermediate selection. A local-CLI choice is preflighted first; if
+its binary is missing or it is signed out, the existing brain keeps running and Activity records the
+fixed settings-not-applied notice. Runtime fallback changes the live brain only; the attempted choice
+remains persisted so the user can retry it or select something else deliberately. While stopped,
+persisted changes apply on the **next Start**.
 
 All four selections persist via `BrainPreferences` —
 `Sources/JarvisCore/Config/BrainPreferences.swift` is the single source for the UserDefaults keys,

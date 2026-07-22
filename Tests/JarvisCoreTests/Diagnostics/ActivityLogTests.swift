@@ -121,6 +121,25 @@ import Foundation
         ))
     }
 
+    @Test func brainFallbackNamesProvidersWithoutDiagnosticDetail() throws {
+        let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
+        let log = ActivityLog(); log.enable(directory: dir)
+        log.record(.brainFallback(failed: .claudeCode, restored: .openAI))
+        let snapshot = log.attach { _ in }
+
+        let row = try #require(snapshot.rows.first)
+        #expect(row.contains("brain switch failed"))
+        #expect(row.contains("Claude Code"))
+        #expect(row.contains("OpenAI API"))
+        #expect(row.contains("retrying this turn"))
+        #expect(!row.contains("OAuth"))
+        #expect(!row.contains("token"))
+        #expect(ActivityLog.isHumanFacing(
+            message: "⚠️ brain switch failed — Claude Code couldn't respond; retrying this turn with OpenAI API",
+            imageFile: nil
+        ))
+    }
+
     @Test func runtimeFailureNoticesStayFixedAndDiagnosticFree() throws {
         let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         let log = ActivityLog(); log.enable(directory: dir)

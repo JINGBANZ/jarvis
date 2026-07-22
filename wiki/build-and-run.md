@@ -85,7 +85,10 @@ then just run the script) for packaging without CI. Distributed builds run on Ap
 
 Settings → **Activity** opens an **in-app `WKWebView`** into which `ActivityLog` pushes the typed,
 human-facing coaching exchange: finalized interviewer/user speech, manual hint requests, screens
-Jarvis viewed, and tips Jarvis displayed. Screen-view events carry their thumbnails as in-memory
+Jarvis viewed, and tips Jarvis displayed. Fixed runtime notices also record a settings preflight that
+was not applied, a failed live brain switch falling back to the previous provider, or a subsystem
+stopping/degrading; provider names are allowed, while raw errors, authentication details, retries,
+and timing remain in `jarvis-debug.log`. Screen-view events carry their thumbnails as in-memory
 `data:` URIs. Chosen over a local HTTP server + SSE: for an app that already holds the entries in
 memory, pushing into an embedded WebView is less code, has zero network surface, and is the most
 testable (the production runtime *is* the test runtime). It also sidesteps the `file://` `fetch()`
