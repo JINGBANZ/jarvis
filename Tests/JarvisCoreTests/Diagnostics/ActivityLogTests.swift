@@ -10,6 +10,7 @@ import Foundation
         #expect(ActivityLog.cssClass(for: "🤫 quiet for 8s") == "hear")
         #expect(ActivityLog.cssClass(for: "💭 thinking…") == "think")
         #expect(ActivityLog.cssClass(for: "… nothing useful to add, staying silent") == "think")
+        #expect(ActivityLog.cssClass(for: "⏹ coaching stopped — Claude Code couldn't respond") == "think")
         #expect(ActivityLog.cssClass(for: "Jarvis realtime error event: oops") == "err")
         #expect(ActivityLog.cssClass(for: "Jarvis: coaching started.") == "")
         // A spoken tip can legitimately contain "failed"; it must stay a 💬 say line.
@@ -44,8 +45,8 @@ import Foundation
         #expect(snap.rows.isEmpty)                       // empty session
         #expect(snap.total == 0)
         let pixel = Data([0xFF, 0xD8, 0xFF, 0xD9]).base64EncodedString()
-        log.record("👁 looking", imageBase64: pixel)
-        log.record("💬 tip")
+        log.record(.screenViewed(imageBase64JPEG: pixel))
+        log.record(.tip(lines: ["tip"]))
         _ = log.attach { _ in }                          // sync barrier: drains the serial queue
 
         let jsonl = try String(contentsOf: dir.appendingPathComponent("jarvis-activity.jsonl"), encoding: .utf8)
@@ -63,8 +64,8 @@ import Foundation
         let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         let log = ActivityLog(); log.enable(directory: dir)
         let pixel = Data([0xFF, 0xD8, 0xFF, 0xD9]).base64EncodedString()
-        log.record("👁 looking", imageBase64: pixel)
-        log.record("💬 tip")
+        log.record(.screenViewed(imageBase64JPEG: pixel))
+        log.record(.tip(lines: ["tip"]))
         let snap = log.attach { _ in }                   // late attach: snapshot must contain prior rows
         #expect(snap.rows.count == 2)
         #expect(snap.shown == 2)
@@ -85,10 +86,68 @@ import Foundation
 
     @Test func recordIsNoOpWhenDisabled() {
         let log = ActivityLog()                          // never enabled
-        log.record("💬 should not crash or write anything")
+        log.record(.tip(lines: ["should not crash or write anything"]))
         let snap = log.attach { _ in }
         #expect(snap.total == 0)
         #expect(snap.rows.isEmpty)
+    }
+
+    @Test func eventFormattingKeepsDiagnosticDetailsOut() throws {
+        let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
+        let log = ActivityLog(); log.enable(directory: dir)
+        log.record(.heard(speaker: .them, text: "How would you optimize it?"))
+        _ = log.attach { _ in }
+
+        let jsonl = try String(contentsOf: dir.appendingPathComponent("jarvis-activity.jsonl"), encoding: .utf8)
+        #expect(jsonl.contains(#"heard (them): \"How would you optimize it?\""#))
+        #expect(!jsonl.contains("item"))
+        #expect(!jsonl.contains("recovered"))
+    }
+
+    @Test func coachingStoppedPersistsOnlyADiscreetHumanFacingNotice() throws {
+        let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
+        let log = ActivityLog(); log.enable(directory: dir)
+        log.record(.coachingStopped(provider: .claudeCode))
+        let snapshot = log.attach { _ in }
+
+        let row = try #require(snapshot.rows.first)
+        #expect(row.contains("coaching stopped"))
+        #expect(row.contains("Claude Code"))
+        #expect(row.contains("Settings"))
+        #expect(!row.contains("OAuth"))
+        #expect(ActivityLog.isHumanFacing(
+            message: "⏹ coaching stopped — Claude Code couldn't respond; check Settings → Brain",
+            imageFile: nil
+        ))
+    }
+
+    @Test func runtimeFailureNoticesStayFixedAndDiagnosticFree() throws {
+        let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
+        let log = ActivityLog(); log.enable(directory: dir)
+        log.record(.transcriptionStopped)
+        log.record(.audioCaptureStopped)
+        log.record(.systemAudioStopped)
+        log.record(.settingsChangeNotApplied)
+        let snapshot = log.attach { _ in }
+
+        #expect(snapshot.rows.count == 4)
+        #expect(snapshot.rows[0].contains("transcription connection was lost"))
+        #expect(snapshot.rows[1].contains("audio capture became unavailable"))
+        #expect(snapshot.rows[2].contains("microphone coaching continues"))
+        #expect(snapshot.rows[3].contains("current coaching session continues"))
+        for row in snapshot.rows {
+            #expect(!row.contains("OAuth"))
+            #expect(!row.contains("AirPods"))
+            #expect(!row.contains("quota"))
+        }
+        #expect(ActivityLog.isHumanFacing(
+            message: "⚠️ system audio stopped — microphone coaching continues; check jarvis-debug.log",
+            imageFile: nil
+        ))
+        #expect(ActivityLog.isHumanFacing(
+            message: "⚠️ settings change wasn't applied — current coaching session continues; check Settings → Brain",
+            imageFile: nil
+        ))
     }
 
     /// Shared temp-dir helper (also used by SessionStoreTests). Owner-only dir, like the real app.

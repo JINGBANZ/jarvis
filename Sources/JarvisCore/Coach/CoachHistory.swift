@@ -2,8 +2,8 @@ import Foundation
 
 /// The session's conversation memory, CLIENT-managed: `CoachDriver` commits each finished turn here
 /// and rebuilds every request as `[system] + snapshot() + <this turn>`. Owning the memory (instead of
-/// a server-side conversation object) is what lets the harness keep it small: old screenshots are
-/// stubbed, `stay_silent` turns leave no trace, and once the estimate passes the compaction threshold
+/// a server-side conversation object) is what lets the harness keep it small: screenshots are stubbed
+/// at commit, `stay_silent` turns leave no trace, and once the estimate passes the compaction threshold
 /// the oldest span is replaced with a short summary (see `CoachDriver.compactIfNeeded`).
 ///
 /// Growth is strictly append-only between compactions — the message prefix stays byte-identical
@@ -14,11 +14,17 @@ public final class CoachHistory: @unchecked Sendable {
     private let lock = NSLock()
     private var messages: [ChatMessage] = []
 
-    /// How many screenshots stay in history as pixels; older ones become one-line text stubs
-    /// (observation masking). A screenshot is ~1–2k tokens re-billed on every later request, and a
-    /// stale one rarely helps — the model can always capture a fresh look.
-    private let maxImagesRetained = 1
-    static let imageStub = "[an earlier screenshot was here — no longer available; call capture_screen for a fresh look]"
+    // Deliberately not an instruction: a session-audit showed the earlier "call capture_screen for
+    // a fresh look" phrasing, repeated once per stubbed screenshot in user-role history, biased the
+    // model toward capturing on every quiet turn (stay_silent was never chosen).
+    static let imageStub = "[an earlier screenshot was here — no longer available]"
+
+    /// The opening line of every OCR block the driver commits (see `CoachDriver.recognizedTextBlock`,
+    /// which builds on this constant so the two can't drift). Matched at commit time: a new capture's
+    /// OCR supersedes every earlier one, which then collapses to `ocrStub`.
+    static let ocrHeader = "Text recognized on the captured window (on-device OCR — may contain "
+        + "errors; the screenshot image is ground truth):"
+    static let ocrStub = "[an earlier screen's OCR text was here — superseded by a newer capture]"
 
     public init() {}
 
@@ -29,20 +35,69 @@ public final class CoachHistory: @unchecked Sendable {
     }
 
     /// Commit a finished turn's messages (the user delta, and any capture/speak calls with their
-    /// results). Callers must NOT pass `stay_silent` traces — silence needs no memory. Any screenshot
-    /// beyond the newest `maxImagesRetained` is replaced with a text stub.
+    /// results). Callers must NOT pass `stay_silent` traces — silence needs no memory. Two kinds of
+    /// message are rewritten at commit:
+    /// - **Screenshots** are replaced with a text stub (observation masking). The capture's OCR text
+    ///   — what the model actually reads — rides in the tool-result message and stays verbatim; the
+    ///   pixels are ~1–2k tokens re-billed on every later request, and the model can always capture
+    ///   a fresh look. When the turn carries a NEW OCR block, every earlier OCR dump — committed
+    ///   history and any older capture within the same turn — collapses to a one-line stub:
+    ///   near-identical screens re-billed forever, and a session-audit caught the model
+    ///   "correcting" code the user had already fixed by reading a stale dump. Unlike the two
+    ///   tail-local rewrites above, this one re-diverges the prompt-cache prefix at the oldest
+    ///   collapsed block. That is deliberate: a bounded one-request re-read per capture (and free
+    ///   on the CLI providers, which serialize history into a single block no prefix cache can hit
+    ///   anyway) buys back ~1k stale tokens per dump on every later request plus the stale-context
+    ///   failure mode above.
+    /// - **Raw passthrough items** (a response's verbatim `output` array, replayed whole within the
+    ///   turn's tool loop) are CONVERTED, not kept: the `function_call` items survive as one
+    ///   synthetic id-less call message — so the committed `function_call_output` never orphans —
+    ///   and `reasoning` (and any other) items are dropped. OpenAI only needs reasoning WITHIN the
+    ///   turn's tool loop; across turns a new user message follows and stale reasoning is ignored,
+    ///   retaining it would re-bill every later request, and a brain-model switch invalidates
+    ///   reasoning items outright. The id-less call + output pair is the long-proven history shape.
+    /// Both rewrites cost one prompt-cache divergence at the tail of the just-finished turn — far
+    /// cheaper than re-billing the content on every request for the rest of the session.
     public func commit(_ turn: [ChatMessage]) {
         guard !turn.isEmpty else { return }
         lock.lock(); defer { lock.unlock() }
-        messages.append(contentsOf: turn)
-        let imageIndices = messages.indices.filter { messages[$0].imageBase64JPEG != nil }
-        for index in imageIndices.dropLast(maxImagesRetained) {
-            messages[index] = .user(Self.imageStub)
+        var turn = turn
+        if let newest = turn.lastIndex(where: { $0.text?.contains(Self.ocrHeader) == true }) {
+            messages = messages.map(Self.collapsingSupersededOCR)
+            // One tool loop may capture more than once — only the turn's newest OCR stays verbatim.
+            for i in turn.indices where i < newest { turn[i] = Self.collapsingSupersededOCR(turn[i]) }
         }
+        messages.append(contentsOf: turn.compactMap { m in
+            if let raw = m.rawItemsJSON { return Self.convertRawItems(raw) }
+            return m.imageBase64JPEG != nil ? .user(Self.imageStub) : m
+        })
     }
 
-    /// Rough size of the memory in tokens (chars/4 for text, a flat estimate per screenshot) — used
-    /// only to decide WHEN to compact, so precision doesn't matter.
+    /// Rewrite one committed message so its OCR block (if any) becomes `ocrStub`. Text before the
+    /// block — e.g. a tool result's "screenshot captured" line — survives.
+    private static func collapsingSupersededOCR(_ m: ChatMessage) -> ChatMessage {
+        guard let text = m.text, let header = text.range(of: ocrHeader) else { return m }
+        return ChatMessage(role: m.role, text: String(text[..<header.lowerBound]) + ocrStub,
+                           toolCallId: m.toolCallId)
+    }
+
+    /// The commit-time conversion of a verbatim passthrough message: keep its `function_call` items
+    /// as one synthetic id-less `assistantToolCalls` message, drop everything else. Nil when the
+    /// items carried no function call — nothing a later turn can use.
+    private static func convertRawItems(_ itemsJSON: [String]) -> ChatMessage? {
+        let calls = itemsJSON.compactMap { itemJSON -> RawToolCall? in
+            guard let item = (try? JSONSerialization.jsonObject(with: Data(itemJSON.utf8))) as? [String: Any],
+                  item["type"] as? String == "function_call",
+                  let callId = item["call_id"] as? String,
+                  let name = item["name"] as? String else { return nil }
+            return RawToolCall(id: callId, name: name,
+                               argumentsJSON: item["arguments"] as? String ?? "{}")
+        }
+        return calls.isEmpty ? nil : .assistantToolCalls(calls)
+    }
+
+    /// Rough size of the memory in tokens (chars/4) — used only to decide WHEN to compact, so
+    /// precision doesn't matter. No image term: screenshots are stubbed to text at commit.
     public var estimatedTokens: Int {
         lock.lock(); defer { lock.unlock() }
         return Self.estimate(messages)
@@ -51,7 +106,6 @@ public final class CoachHistory: @unchecked Sendable {
     private static func estimate(_ messages: [ChatMessage]) -> Int {
         messages.reduce(0) { total, m in
             var t = total + ((m.text?.count ?? 0) / 4)
-            if m.imageBase64JPEG != nil { t += 1_500 }
             if let calls = m.toolCalls { t += calls.reduce(0) { $0 + ($1.argumentsJSON.count / 4) + 8 } }
             return t
         }

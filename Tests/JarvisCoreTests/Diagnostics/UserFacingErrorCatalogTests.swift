@@ -17,8 +17,18 @@ import Testing
         #expect(e.message.contains("no input device"))
     }
 
-    @Test func transcriptionStoppedIsFatal() {
-        #expect(UserFacingError.transcriptionStopped.severity == .fatal)
+    @Test func runtimeCaptureFailureStopsQuietlyAndCarriesReason() {
+        let e = UserFacingError.captureStopped(reason: "route disappeared")
+        #expect(e.severity == .terminal)
+        #expect(e.severity.stopsSession)
+        #expect(!e.severity.showsAlert)
+        #expect(e.message.contains("route disappeared"))
+    }
+
+    @Test func transcriptionStoppedIsTerminal() {
+        #expect(UserFacingError.transcriptionStopped.severity == .terminal)
+        #expect(UserFacingError.transcriptionStopped.severity.stopsSession)
+        #expect(!UserFacingError.transcriptionStopped.severity.showsAlert)
     }
 
     @Test func systemAudioStoppedStaysQuiet() {
@@ -26,5 +36,45 @@ import Testing
         #expect(UserFacingError.systemAudioStopped.severity == .degraded)
         #expect(!UserFacingError.systemAudioStopped.severity.showsAlert)
         #expect(!UserFacingError.systemAudioStopped.severity.stopsSession)
+    }
+
+    @Test func brainCLIMissingAlertsWithoutStoppingAndNamesTheProvider() {
+        // A preflight refusal: the Start never opened anything, and an in-place restart that trips
+        // it has a LIVE session that must survive — alert, never stop.
+        let e = UserFacingError.brainCLIMissing(provider: "Claude Code")
+        #expect(e.severity == .warning)
+        #expect(e.severity.showsAlert)
+        #expect(!e.severity.stopsSession)
+        #expect(e.title.contains("Claude Code"))
+    }
+
+    @Test func brainCLINotSignedInAlertsWithoutStopping() {
+        // An authoritative signed-out marker (Codex) refuses the Start — same preflight semantics.
+        let e = UserFacingError.brainCLINotSignedIn(provider: "Codex CLI")
+        #expect(e.severity == .warning)
+        #expect(e.severity.showsAlert)
+        #expect(!e.severity.stopsSession)
+    }
+
+    @Test func brainCLISignInUnconfirmedStaysQuiet() {
+        // A failed/timed-out probe is unknown rather than proof of logout, so warn without blocking.
+        let e = UserFacingError.brainCLISignInUnconfirmed(provider: "Claude Code")
+        #expect(e.severity == .degraded)
+        #expect(!e.severity.showsAlert)
+        #expect(!e.severity.stopsSession)
+    }
+
+    @Test func brainCLIRuntimeFailureStopsQuietlyAndKeepsDiagnosticRecoveryDetail() {
+        let e = UserFacingError.brainCLIStopped(
+            provider: "Claude Code",
+            signInCommand: "claude auth login",
+            reason: "OAuth session expired"
+        )
+        #expect(e.severity == .terminal)
+        #expect(!e.severity.showsAlert)
+        #expect(e.severity.stopsSession)
+        #expect(e.title.contains("Claude Code"))
+        #expect(e.message.contains("OAuth session expired"))
+        #expect(e.message.contains("claude auth login"))
     }
 }

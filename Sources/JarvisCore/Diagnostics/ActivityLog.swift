@@ -1,14 +1,43 @@
 import Foundation
 
-/// The model behind the activity viewer. Mirrors `jlog` lines into an in-app `WKWebView` window
-/// (see `ActivityViewer` in JarvisApp) by **pushing** each line to a registered observer, and
-/// persists the session to disk so past sessions can be browsed later. Until `enable(directory:)`
-/// is called (on each Start), `record(_:)` is a no-op and nothing is written.
+/// The model behind the human-facing activity viewer. It records the coaching exchange — heard
+/// speech, manual hint requests, screens Jarvis viewed, and tips Jarvis gave — plus a fixed,
+/// non-sensitive notice when coaching must stop without interrupting the user. It pushes those
+/// entries into an in-app `WKWebView` window (see `ActivityViewer` in JarvisApp) and persists them so
+/// past sessions can be browsed later. Detailed diagnostics belong exclusively in `JarvisLog`.
 ///
 /// This type is UI-free (Foundation only): it generates the page HTML and the per-row JS as plain
 /// strings; the WebView lives in JarvisApp. See wiki/build-and-run.md.
 public final class ActivityLog: @unchecked Sendable {
     public static let shared = ActivityLog()
+
+    /// A human-visible event in the coaching exchange. Keeping this closed set typed prevents
+    /// transport, retry, error details, and other diagnostic strings from leaking into the activity
+    /// viewer through a generic logging call.
+    public enum Event: Sendable {
+        /// A finalized utterance from the user (`me`) or interviewer (`them`).
+        case heard(speaker: Speaker, text: String)
+        /// The user explicitly requested help through the manual-hint shortcut.
+        case manualHint(prompt: String)
+        /// Jarvis captured and viewed the screen while preparing a coaching response.
+        case screenViewed(imageBase64JPEG: String)
+        /// Jarvis displayed these coaching lines to the user.
+        case tip(lines: [String])
+        /// Coaching ended because the selected brain could not respond. Carries only the provider,
+        /// never the raw error, so the notice cannot expose provider diagnostics during screen
+        /// sharing.
+        case coachingStopped(provider: BrainProvider)
+        /// Coaching ended because the microphone transcription connection was lost. No transport
+        /// detail is carried; the fixed copy points to diagnostics.
+        case transcriptionStopped
+        /// Coaching ended because the running audio capture became unavailable. No device or route
+        /// detail is carried; the fixed copy points to diagnostics.
+        case audioCaptureStopped
+        /// The secondary system-audio transcription stopped while microphone coaching continued.
+        case systemAudioStopped
+        /// An explicit Settings reapply failed its preflight while the existing session continued.
+        case settingsChangeNotApplied
+    }
 
     /// One recorded line. `imageFile` is the relative `shot-N.jpg` name on disk (the bytes the DOM
     /// renders are passed separately as base64), or nil for a plain text line.
@@ -63,7 +92,7 @@ public final class ActivityLog: @unchecked Sendable {
 
     /// Turn on the viewer for a session. `directory` is this session's dir; an empty
     /// `jarvis-activity.jsonl` is created at 0600 immediately so the session is discoverable by
-    /// `SessionStore.listSessions()` even before its first `record()`.
+    /// `SessionStore.listSessions()` even before its first event.
     public func enable(directory: URL) {
         queue.sync {
             dir = directory
@@ -79,12 +108,44 @@ public final class ActivityLog: @unchecked Sendable {
         queue.sync { dir = nil; entries.removeAll(); totalCount = 0; shotSeq = 0; onAppend = nil }
     }
 
-    /// Append a line: persist it, then push it to the observer. No-op when disabled.
+    /// Append one human-facing coaching event: persist it, then push it to the observer. No-op when
+    /// disabled. Call `jlog` instead for diagnostics.
     ///
-    /// When `imageBase64` is a base64 JPEG (a screenshot the model just looked at), the `.jpg` is
-    /// written **first** (owner-only) and then the `.jsonl` line referencing it — so a persisted
-    /// reference always points at a file that exists.
-    public func record(_ message: String, imageBase64: String? = nil, at date: Date = Date()) {
+    /// When a screen-view event carries a base64 JPEG, the `.jpg` is written **first** (owner-only)
+    /// and then the `.jsonl` line referencing it — so a persisted reference always points at a file
+    /// that exists.
+    public func record(_ event: Event, at date: Date = Date()) {
+        let message: String
+        let imageBase64: String?
+        switch event {
+        case .heard(let speaker, let text):
+            message = "🗣 heard (\(speaker.rawValue)): \"\(text)\""
+            imageBase64 = nil
+        case .manualHint(let prompt):
+            message = "⌨️ hint shortcut — \(prompt)"
+            imageBase64 = nil
+        case .screenViewed(let imageBase64JPEG):
+            message = "👁 looking at your screen"
+            imageBase64 = imageBase64JPEG
+        case .tip(let lines):
+            message = "💬 \(lines.joined(separator: " "))"
+            imageBase64 = nil
+        case .coachingStopped(let provider):
+            message = "⏹ coaching stopped — \(provider.displayName) couldn't respond; check Settings → Brain"
+            imageBase64 = nil
+        case .transcriptionStopped:
+            message = "⏹ coaching stopped — transcription connection was lost; check jarvis-debug.log"
+            imageBase64 = nil
+        case .audioCaptureStopped:
+            message = "⏹ coaching stopped — audio capture became unavailable; check jarvis-debug.log"
+            imageBase64 = nil
+        case .systemAudioStopped:
+            message = "⚠️ system audio stopped — microphone coaching continues; check jarvis-debug.log"
+            imageBase64 = nil
+        case .settingsChangeNotApplied:
+            message = "⚠️ settings change wasn't applied — current coaching session continues; check Settings → Brain"
+            imageBase64 = nil
+        }
         queue.async { [self] in
             guard let dir else { return }
             let shotName = imageBase64.flatMap { saveShot($0, in: dir) }
@@ -175,9 +236,23 @@ public final class ActivityLog: @unchecked Sendable {
         if m.hasPrefix("👁") { return "see" }
         if m.hasPrefix("🗣") || m.hasPrefix("🤫") { return "hear" }
         if m.hasPrefix("💭") || m.hasPrefix("…") { return "think" }
+        if m.hasPrefix("⏹ coaching stopped") { return "think" }
+        if m.hasPrefix("⚠️") { return "think" }
         let low = m.lowercased()
         if low.contains("error") || low.contains("failed") || low.contains("denied") { return "err" }
         return ""
+    }
+
+    /// Whether a persisted row belongs in the human-facing viewer. New rows are guaranteed by the
+    /// typed `Event` API; this also hides diagnostic rows from sessions written by older builds.
+    static func isHumanFacing(message: String, imageFile: String?) -> Bool {
+        if imageFile != nil { return true }
+        let m = message.trimmingCharacters(in: .whitespaces)
+        return m.hasPrefix("🗣 heard") || m.hasPrefix("⌨️ hint shortcut")
+            || m.hasPrefix("👁 looking at your screen") || m.hasPrefix("💬")
+            || m.hasPrefix("⏹ coaching stopped")
+            || m.hasPrefix("⚠️ system audio stopped")
+            || m.hasPrefix("⚠️ settings change wasn't applied")
     }
 
     /// The empty page shell: dark theme, a header with a live count, the row container, the lightbox

@@ -32,4 +32,29 @@ import Testing
         b.reset()
         #expect(b.next() == 30)
     }
+
+    /// The idle cutoff gates the PROBE (the brain request), not the schedule: `shouldProbe` is
+    /// evaluated against the quiet stretch at fire time, so a check that crosses the cutoff
+    /// mid-wait stays quiet instead of billing one last request past the deadline.
+    @Test func shouldProbeStopsAtTheIdleCutoff() {
+        let b = SilenceBackoff(base: 30, maxInterval: 240, idleCutoff: 1800)
+        #expect(b.shouldProbe(quietSoFar: 0))
+        #expect(b.shouldProbe(quietSoFar: 1799))    // just under the cutoff: still probing
+        #expect(!b.shouldProbe(quietSoFar: 1800))   // at the cutoff: suppressed
+        #expect(!b.shouldProbe(quietSoFar: 9999))
+    }
+
+    /// The cutoff gates on the CURRENT quiet stretch: once speech (either side) restarts it,
+    /// probing resumes — a shorter `quietSoFar` probes again without any state to clear.
+    @Test func probingResumesOnceQuietStretchRestarts() {
+        let b = SilenceBackoff(base: 30, maxInterval: 240, idleCutoff: 1800)
+        #expect(!b.shouldProbe(quietSoFar: 2000))   // gone idle
+        #expect(b.shouldProbe(quietSoFar: 10))      // speech restarted the stretch: probing again
+    }
+
+    /// Without an explicit cutoff, probing never stops (the default keeps old behavior).
+    @Test func defaultHasNoIdleCutoff() {
+        let b = SilenceBackoff(base: 30, maxInterval: 240)
+        #expect(b.shouldProbe(quietSoFar: 1e9))
+    }
 }

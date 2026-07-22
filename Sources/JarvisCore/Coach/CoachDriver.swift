@@ -28,8 +28,10 @@ public final class CoachDriver: @unchecked Sendable {
     private let screen: ScreenCapturing
     private let overlay: OverlayRendering
     private let clock: Clock
+    /// The app edge uses this to surface a provider failure and end a session that can no longer
+    /// coach. Nil keeps Core-only callers/tests free of UI policy.
+    private let onBrainFailure: (@Sendable (String) -> Void)?
     private let sessionStart: TimeInterval
-    private let onSpoke: (@Sendable () -> Void)?
     private let history = CoachHistory()
 
     /// Safety backstop against a pathological model that loops on capture_screen forever.
@@ -44,11 +46,15 @@ public final class CoachDriver: @unchecked Sendable {
     /// nothing is dropped and turns don't pile up. The first such trigger is kept and the batched
     /// speech rides along via the sent-index, so a later trigger needn't displace it.
     private var pendingTrigger: TriggerReason?
+    /// Latched only when the app supplied `onBrainFailure`, which means this provider failure is
+    /// terminal for the session. It prevents pending or newly arriving triggers from issuing another
+    /// request while the app's main-actor stop is still being scheduled.
+    private var terminalBrainFailure = false
 
     public init(config: Config, transcript: RollingTranscript,
                 brain: BrainClient, summarizer: BrainClient? = nil,
                 screen: ScreenCapturing, overlay: OverlayRendering, clock: Clock,
-                onSpoke: (@Sendable () -> Void)? = nil) {
+                onBrainFailure: (@Sendable (String) -> Void)? = nil) {
         self.config = config
         self.transcript = transcript
         self.brain = brain
@@ -56,8 +62,8 @@ public final class CoachDriver: @unchecked Sendable {
         self.screen = screen
         self.overlay = overlay
         self.clock = clock
+        self.onBrainFailure = onBrainFailure
         self.sessionStart = clock.now()
-        self.onSpoke = onSpoke
     }
 
     // Synchronous lock accessors — NSLock can't be held across an `await`, so all critical sections
@@ -72,16 +78,31 @@ public final class CoachDriver: @unchecked Sendable {
 
     /// Atomically claim the single in-flight slot, OR (if busy) record the trigger as pending. One
     /// critical section so a trigger can never slip between "am I busy?" and "set pending" and be lost.
-    /// Returns true if this call now owns the turn loop. The first pending trigger is kept; the
-    /// coalesced speech rides along regardless, so a later trigger needn't displace it.
-    private func claimOrPend(_ reason: TriggerReason) -> Bool {
+    /// Returns whether this call owns the loop, was queued behind it, or arrived after a terminal
+    /// provider failure. The first pending trigger is kept; the coalesced speech rides along
+    /// regardless, so a later trigger needn't displace it.
+    private enum TriggerClaim {
+        case claimed
+        case pending
+        case terminalFailure
+    }
+
+    private func claimOrPend(_ reason: TriggerReason) -> TriggerClaim {
         stateLock.lock(); defer { stateLock.unlock() }
+        if terminalBrainFailure { return .terminalFailure }
         if isHandling {
             if pendingTrigger == nil { pendingTrigger = reason }
-            return false
+            return .pending
         }
         isHandling = true
-        return true
+        return .claimed
+    }
+
+    private func latchTerminalBrainFailure() {
+        stateLock.lock()
+        terminalBrainFailure = true
+        pendingTrigger = nil
+        stateLock.unlock()
     }
 
     /// Atomically take the next pending trigger (keeping the slot) OR release the slot. One critical
@@ -98,9 +119,15 @@ public final class CoachDriver: @unchecked Sendable {
         // Single-in-flight, but we COALESCE rather than drop: a trigger arriving while a turn runs is
         // recorded as pending and picked up by the running turn when it finishes — so nothing is lost
         // and turns can't pile up. The batched speech rides along automatically via the sent-index.
-        guard claimOrPend(reason) else {
+        switch claimOrPend(reason) {
+        case .claimed:
+            break
+        case .pending:
             jlog("… busy; batching this \(reason) into the running turn")
             return .busy
+        case .terminalFailure:
+            jlog("… terminal brain failure already ended this coaching session")
+            return .brainError
         }
         var current = reason
         var outcome: TurnOutcome = .silentByModel
@@ -126,7 +153,10 @@ public final class CoachDriver: @unchecked Sendable {
         // A hotkey trigger leaves no "🗣 heard:" line (the user pressed a key, didn't speak), so record
         // it — with the synthetic request we pre-fill as the user's message — so the activity viewer
         // shows what the shortcut sent to the brain.
-        if reason == .manualHint { jlog("⌨️ hint shortcut — \(ctx.promptLine)") }
+        if reason == .manualHint, let line = ctx.promptLine {
+            jlog("⌨️ hint shortcut — \(line)")
+            ActivityLog.shared.record(.manualHint(prompt: line))
+        }
 
         // The delta: only the lines the brain hasn't seen yet (the rest live in `history`).
         let delta = transcript.renderFrom(index: currentSentCount())
@@ -136,9 +166,9 @@ public final class CoachDriver: @unchecked Sendable {
         // would re-bill the whole working set just to decide "stay silent". The unsent lines ride
         // along on the next substantive turn (sentCount only advances on a send); silence and
         // manual-hint triggers always go through. Logged so gate misfires are auditable.
-        if reason == .turnEnd && !delta.lines.contains(where: { TurnSubstance.isSubstantive($0.text) }) {
+        if reason == .turnEnd && !delta.lines.contains(where: TurnSubstance.isSubstantive) {
             // Log WHAT was skipped (not just that a skip happened) so a gate misfire — a real remark
-            // wrongly classified as filler — is visible in the activity viewer, not silent.
+            // wrongly classified as filler — is visible in the debug log, not silent.
             let preview = delta.lines.isEmpty
                 ? "nothing new"
                 : String(delta.lines.map(\.text).joined(separator: " · ").prefix(80))
@@ -150,11 +180,11 @@ public final class CoachDriver: @unchecked Sendable {
         // snapshotted once, so the prefix is stable across the turn's tool-loop iterations (and
         // across turns, history being append-only — that's what keeps the prompt cache hitting).
         let historyBase: [ChatMessage] = [.system(coachSystemPrompt)] + history.snapshot()
-        // Lead with the trigger line; prepend new speech only when there is any (a manual hint often
-        // has none, and an empty "New since last turn" block just buries the real signal).
-        let userText = delta.text.isEmpty
-            ? ctx.promptLine
-            : "New since last turn:\n\(delta.text)\n\n\(ctx.promptLine)"
+        // New speech (when there is any) followed by the trigger note (when there is one — a
+        // turn-end has none, the stamped delta already carries that signal). Never both empty:
+        // an empty turn-end delta is gated above, and silence/manual-hint always have a note.
+        let userText = [delta.text.isEmpty ? nil : "New since last turn:\n\(delta.text)",
+                        ctx.promptLine].compactMap { $0 }.joined(separator: "\n\n")
         var turnMessages: [ChatMessage] = [.user(userText)]
 
         // Manual hint (hotkey): the user explicitly asked for help, so capture the screen HERE and
@@ -163,10 +193,20 @@ public final class CoachDriver: @unchecked Sendable {
         // off-pool capture + post-capture cancellation guard as the capture_screen tool branch.
         if reason == .manualHint {
             let screen = self.screen
-            let img = await Task.detached(priority: .userInitiated, operation: { screen.capture() }).value
+            let shot = await Task.detached(priority: .userInitiated, operation: { screen.capture() }).value
             if Task.isCancelled { jlog("… turn cancelled (stopped) after capture"); return .cancelled }
-            if let img { jlog("👁 looking at your screen", image: img); turnMessages.append(.userImage(img)) }
-            else { jlog("👁 screenshot failed") }   // still force a hint from transcript/history
+            if let shot {
+                jlog("👁 looking at your screen")
+                ActivityLog.shared.record(.screenViewed(imageBase64JPEG: shot.imageBase64))
+                turnMessages.append(.userImage(shot.imageBase64))
+                // OCR sidecar: the same window as exact text, so the model reads code instead of
+                // deciphering pixels. Rides as its own user message — there's no tool result to
+                // carry it on this pre-injected path.
+                if let text = shot.recognizedText {
+                    jlog("🔤 read \(text.count(where: { $0 == "\n" }) + 1) lines of on-screen text")
+                    turnMessages.append(.user(Self.recognizedTextBlock(text)))
+                }
+            } else { jlog("👁 screenshot failed") }   // still force a hint from transcript/history
         }
 
         // Force `speak` ONLY for an explicit manual hint; audio-driven turns use `.required` — SOME
@@ -187,11 +227,14 @@ public final class CoachDriver: @unchecked Sendable {
             } catch {
                 // A cancellation (barge-in / Stop) is expected — report it quietly, not as a failure.
                 if Task.isCancelled { jlog("… turn cancelled (interrupted)"); return .cancelled }
-                jlog("Jarvis coach: brain request failed on \(reason): \(error.localizedDescription)")
+                let detail = error.localizedDescription
+                jlog("Jarvis coach: brain request failed on \(reason): \(detail)")
+                if onBrainFailure != nil { latchTerminalBrainFailure() }
+                onBrainFailure?(detail)
                 // Speech already marked sent (a later-iteration failure) must not vanish from memory —
                 // commit what this turn accumulated. A first-request failure commits nothing; the
                 // un-advanced sentCount re-sends the delta next turn instead.
-                if committed { history.commit(turnMessages) }
+                if committed { commitIfWorthKeeping(turnMessages, deltaText: delta.text) }
                 return .brainError
             }
             // The input provably reached the server — NOW mark the delta as sent.
@@ -199,7 +242,7 @@ public final class CoachDriver: @unchecked Sendable {
 
             if Task.isCancelled {
                 jlog("… turn cancelled (stopped) mid-think")
-                history.commit(turnMessages)   // the delta was sent; keep memory consistent with it
+                commitIfWorthKeeping(turnMessages, deltaText: delta.text)   // the delta was sent; keep memory consistent with it
                 return .cancelled
             }
 
@@ -207,7 +250,7 @@ public final class CoachDriver: @unchecked Sendable {
             // model ignoring `tool_choice: required`. Treat the latter as silence — rendering nothing
             // is the safe interpretation. Either way the sent delta must land in memory.
             guard let call = response.toolCalls.first else {
-                history.commit(turnMessages)
+                commitIfWorthKeeping(turnMessages, deltaText: delta.text)
                 if let reasonText = response.incompleteReason {
                     jlog("⚠️ response truncated (\(reasonText)) — not deliberate silence")
                     return .truncated
@@ -222,7 +265,7 @@ public final class CoachDriver: @unchecked Sendable {
                 // ScreenCaptureCLI shells out to `screencapture` and blocks for 100s of ms; run it
                 // off the cooperative pool so it doesn't stall a pool thread while holding the slot.
                 let screen = self.screen
-                let img = await Task.detached(priority: .userInitiated, operation: { screen.capture() }).value
+                let shot = await Task.detached(priority: .userInitiated, operation: { screen.capture() }).value
                 // Stop may have fired during the (un-cancellable, detached) capture. Bail before
                 // emitting: otherwise this screenshot — and the reasoning that follows — would be
                 // logged into whatever session is now current (a Start rotates the log mid-turn).
@@ -231,15 +274,34 @@ public final class CoachDriver: @unchecked Sendable {
                     history.commit(turnMessages)
                     return .cancelled
                 }
-                if let img { jlog("👁 looking at your screen", image: img) }   // thumbnail in the activity viewer
-                else { jlog("👁 screenshot failed") }
+                if let shot {
+                    jlog("👁 looking at your screen")
+                    ActivityLog.shared.record(.screenViewed(imageBase64JPEG: shot.imageBase64))
+                    if let text = shot.recognizedText {
+                        jlog("🔤 read \(text.count(where: { $0 == "\n" }) + 1) lines of on-screen text")
+                    }
+                } else { jlog("👁 screenshot failed") }
                 // Thread the call + its result into this turn's messages; the next iteration's
-                // request carries them (and they land in history at commit, where old screenshots
-                // are stubbed down to the newest one).
-                turnMessages.append(.assistantToolCalls(response.rawToolCalls))
-                if let img {
-                    turnMessages.append(.init(role: .tool, text: "screenshot captured", toolCallId: callId))
-                    turnMessages.append(.userImage(img))
+                // request carries them (and they land in history at commit, where the screenshot
+                // becomes a text stub — only the OCR text outlives the turn). The OCR sidecar
+                // travels in the tool-result text, right next to the image. The model's output goes
+                // back WHOLE and verbatim — reasoning then function_call, item ids intact, the
+                // canonical `input.push(...response.output)` loop: pairing a raw reasoning item with
+                // a rebuilt, id-less call trips the provider's reasoning/function-call linkage
+                // validation, and dropping the reasoning makes the model re-reason from scratch.
+                // (`CoachHistory.commit` converts this back to the proven id-less call and drops the
+                // reasoning — later turns don't need it.)
+                if !response.outputItemsJSON.isEmpty {
+                    turnMessages.append(.rawItems(response.outputItemsJSON))
+                } else {
+                    // No raw bytes to replay (a scripted test brain, or a response whose raw output
+                    // failed to re-serialize): fall back to the synthetic id-less call so the tool
+                    // result below never orphans.
+                    turnMessages.append(.assistantToolCalls(response.rawToolCalls))
+                }
+                if let shot {
+                    turnMessages.append(.init(role: .tool, text: Self.captureResultText(shot), toolCallId: callId))
+                    turnMessages.append(.userImage(shot.imageBase64))
                 } else {
                     turnMessages.append(.init(role: .tool, text: "screenshot failed", toolCallId: callId))
                 }
@@ -247,13 +309,13 @@ public final class CoachDriver: @unchecked Sendable {
 
             case .speak(let callId, let lines):
                 // Last gate before side effects: a turn cancelled by Stop (or a Stop→Start that
-                // rotated the session) must not render a stale tip, bump the counter, or log into
-                // the new session. This is the "speak after Stop" guard the TurnTaskBox relies on.
+                // rotated the session) must not render a stale tip or log into the new session.
+                // This is the "speak after Stop" guard the TurnTaskBox relies on.
                 if Task.isCancelled { jlog("… turn cancelled (stopped) before speaking"); return .cancelled }
                 jlog("💬 \(lines.joined(separator: " "))")
+                ActivityLog.shared.record(.tip(lines: lines))
                 let perLine = lines.map { OverlayTiming.displaySeconds(for: $0, config: config) }
                 overlay.render(lines, perLineSeconds: perLine)
-                onSpoke?()
                 // Close the call locally — we own the history, so no follow-up round trip is needed.
                 turnMessages.append(.assistantToolCalls(response.rawToolCalls))
                 turnMessages.append(.init(role: .tool, text: "shown to the user", toolCallId: callId))
@@ -265,7 +327,7 @@ public final class CoachDriver: @unchecked Sendable {
                 // The model's explicit stay-quiet decision. Deliberately NOT recorded: the call and
                 // its non-answer would only bloat every later request — silence needs no memory.
                 jlog("… nothing useful to add, staying silent")
-                history.commit(turnMessages)
+                commitIfWorthKeeping(turnMessages, deltaText: delta.text)
                 await compactIfNeeded()
                 return .silentByModel
             }
@@ -274,6 +336,30 @@ public final class CoachDriver: @unchecked Sendable {
         history.commit(turnMessages)   // captures + speech stay in memory even on the backstop path
         await compactIfNeeded()
         return .exhausted
+    }
+
+    /// Commit a finished turn to session memory ONLY when it left something a later turn can use —
+    /// new transcript lines, or tool activity (a capture the model may refer back to). A turn that
+    /// was just a trigger note the model shrugged at (a silence check → stay_silent) is dropped
+    /// whole: committing it would pile up answerless user messages in memory, re-billed on every
+    /// later request and confusing to read back.
+    private func commitIfWorthKeeping(_ turn: [ChatMessage], deltaText: String) {
+        guard !deltaText.isEmpty || turn.count > 1 else { return }
+        history.commit(turn)
+    }
+
+    /// The capture_screen tool-result text: the OCR sidecar rides here when present, so exact text
+    /// and the image arrive as one result the model reasons over together.
+    private static func captureResultText(_ shot: ScreenSnapshot) -> String {
+        guard let text = shot.recognizedText else { return "screenshot captured" }
+        return "screenshot captured\n\n\(recognizedTextBlock(text))"
+    }
+
+    /// Framed so the model treats OCR as a reading aid, not gospel — recognition mangles the odd
+    /// identifier, and the screenshot stays the ground truth to verify against. Opens with
+    /// `CoachHistory.ocrHeader` so commit-time collapse of superseded OCR can't drift out of sync.
+    private static func recognizedTextBlock(_ text: String) -> String {
+        "\(CoachHistory.ocrHeader)\n\(text)"
     }
 
     // MARK: - History compaction

@@ -9,6 +9,10 @@ public struct Config: Sendable {
     /// Upper bound on the silence-check interval as it backs off, so a long silence still gets an
     /// occasional gentle check rather than going dark forever.
     public var silenceMaxIntervalSeconds: TimeInterval
+    /// Stop the silence checks entirely once the user has been continuously quiet this long — they
+    /// have stepped away, and every probe into the empty room still bills a full-history brain
+    /// request (often plus a screenshot). Speech re-arms the checks from the base interval.
+    public var silenceIdleCutoffSeconds: TimeInterval
     /// When the client-managed session memory (`CoachHistory`) grows past this many estimated tokens,
     /// the driver condenses its oldest span into a short summary (see `CoachDriver.compactIfNeeded`).
     /// Sized to industry practice for conversational loads (~5–20k): big enough that compaction is
@@ -47,10 +51,18 @@ public struct Config: Sendable {
     /// new session on reconnect so a mid-sentence drop isn't lost. Capped so a long outage can't grow
     /// memory without bound (the oldest audio is evicted past the cap).
     public var maxBufferedAudioSeconds: TimeInterval
+    /// Maximum time for a new Realtime socket to receive the server's session-ready event. Audio is
+    /// buffered during this window; a silent handshake/configuration hang is then reconnected.
+    public var realtimeReadyTimeoutSeconds: TimeInterval
+    /// Interval between WebSocket ping/pong health probes while a transcription session is ready.
+    public var realtimePingIntervalSeconds: TimeInterval
+    /// Maximum time to receive a pong before declaring the apparently-open socket unhealthy.
+    public var realtimePongTimeoutSeconds: TimeInterval
 
     public init(
         silenceTimeoutSeconds: TimeInterval = 120,
         silenceMaxIntervalSeconds: TimeInterval = 960,
+        silenceIdleCutoffSeconds: TimeInterval = 1_800,
         historyCompactionTokenThreshold: Int = 10_000,
         overlayNoticeBufferSeconds: TimeInterval = 2.0,
         overlaySecondsPerWord: TimeInterval = 0.35,
@@ -59,10 +71,14 @@ public struct Config: Sendable {
         vadSilenceDurationMs: Int = 1000,
         audioNoiseReduction: NoiseReductionMode = .auto,
         turnDebounceSeconds: TimeInterval = 0.4,
-        maxBufferedAudioSeconds: TimeInterval = 60
+        maxBufferedAudioSeconds: TimeInterval = 60,
+        realtimeReadyTimeoutSeconds: TimeInterval = 10,
+        realtimePingIntervalSeconds: TimeInterval = 20,
+        realtimePongTimeoutSeconds: TimeInterval = 10
     ) {
         self.silenceTimeoutSeconds = silenceTimeoutSeconds
         self.silenceMaxIntervalSeconds = silenceMaxIntervalSeconds
+        self.silenceIdleCutoffSeconds = silenceIdleCutoffSeconds
         self.historyCompactionTokenThreshold = historyCompactionTokenThreshold
         self.overlayNoticeBufferSeconds = overlayNoticeBufferSeconds
         self.overlaySecondsPerWord = overlaySecondsPerWord
@@ -72,6 +88,9 @@ public struct Config: Sendable {
         self.audioNoiseReduction = audioNoiseReduction
         self.turnDebounceSeconds = turnDebounceSeconds
         self.maxBufferedAudioSeconds = maxBufferedAudioSeconds
+        self.realtimeReadyTimeoutSeconds = realtimeReadyTimeoutSeconds
+        self.realtimePingIntervalSeconds = realtimePingIntervalSeconds
+        self.realtimePongTimeoutSeconds = realtimePongTimeoutSeconds
     }
 
     // Overlay appearance: defaults + allowed ranges. The persisted values live in UserDefaults via

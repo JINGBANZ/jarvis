@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Hardened runtime (required for notarization) denies microphone capture outright unless this
+       entitlement is present — it gates the capability; the user-facing TCC prompt still applies.
+       Screen capture and outbound networking need no entitlement outside the App Sandbox. -->
+  <key>com.apple.security.device.audio-input</key><true/>
+</dict>
+</plist>

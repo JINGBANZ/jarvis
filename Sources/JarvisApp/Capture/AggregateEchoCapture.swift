@@ -20,10 +20,20 @@ import JarvisCore
 /// `@unchecked Sendable`: audio state is touched only by the single IOProc thread; lifecycle
 /// (build/teardown/rebuild/stop) is serialized by `lock`. The IOProc never takes `lock`, and teardown
 /// calls `AudioDeviceStop` (which drains in-flight callbacks) before destroying anything. Client
-/// callbacks (`onUnavailable`) are invoked OUTSIDE the lock.
+/// audio delivery is moved onto one serial queue so encoding/network work cannot stall Core Audio;
+/// `onUnavailable` is invoked outside the lock.
 final class AggregateEchoCapture: @unchecked Sendable {
-    private let onMicClean: @Sendable (Data) -> Void
-    private let onSystem: @Sendable (Data) -> Void
+    private struct SequencedAudioChunk: Sendable {
+        let data: Data
+        let sequence: UInt64
+        let sampleCount: Int
+        let capturedAt: TimeInterval
+    }
+
+    private let onMicCaptured: @Sendable (UInt64, Int, TimeInterval) -> Void
+    private let onSystemCaptured: @Sendable (UInt64, Int, TimeInterval) -> Void
+    private let onMicClean: @Sendable (Data, UInt64, TimeInterval) -> Void
+    private let onSystem: @Sendable (Data, UInt64, TimeInterval) -> Void
     /// Fired if the device can't be built/started mid-session (route-change rebuild) — the caller
     /// decides how to surface it. Carries a human-readable reason.
     var onUnavailable: (@Sendable (String) -> Void)?
@@ -46,11 +56,23 @@ final class AggregateEchoCapture: @unchecked Sendable {
 
     private let lock = NSLock()
     private let routeQueue = DispatchQueue(label: "jarvis.aec.routes")
+    /// Both speaker streams share one queue to preserve the IOProc's callback order (cleaned mic,
+    /// then untouched system tap) without doing Realtime encoding/sends on the audio thread.
+    private let deliveryQueue = DispatchQueue(label: "jarvis.aec.delivery", qos: .userInitiated)
     private var routeListener: AudioObjectPropertyListenerBlock?
     private var pendingRebuild: DispatchWorkItem?
     private var stopped = false
+    /// Assigned on the single IOProc thread and preserved across route rebuilds. A gap at any later
+    /// boundary is therefore diagnosable without retaining the audio itself.
+    private var micSequence: UInt64 = 0
+    private var systemSequence: UInt64 = 0
 
-    init(onMicClean: @escaping @Sendable (Data) -> Void, onSystem: @escaping @Sendable (Data) -> Void) {
+    init(onMicCaptured: @escaping @Sendable (UInt64, Int, TimeInterval) -> Void,
+         onSystemCaptured: @escaping @Sendable (UInt64, Int, TimeInterval) -> Void,
+         onMicClean: @escaping @Sendable (Data, UInt64, TimeInterval) -> Void,
+         onSystem: @escaping @Sendable (Data, UInt64, TimeInterval) -> Void) {
+        self.onMicCaptured = onMicCaptured
+        self.onSystemCaptured = onSystemCaptured
         self.onMicClean = onMicClean
         self.onSystem = onSystem
     }
@@ -230,20 +252,53 @@ final class AggregateEchoCapture: @unchecked Sendable {
         // 48 kHz and the up-resamplers are nil).
         if let micUp { mic = micUp.convert(mic) }
         if let sysUp { tap = sysUp.convert(tap) }
+        // Keep two purpose-specific copies. Transcription preserves every real tap sample and pads a
+        // short/empty callback to the mic duration so the server audio clock and trailing-silence VAD
+        // keep advancing. AEC needs an exact mic-length reference and may therefore also truncate.
+        let systemTap = tap
         // Keep far and near in lockstep AT THE AEC RATE: AEC3's reference and capture must advance by the
         // SAME sample count each callback, or the two framers drift apart for the rest of the session. The
         // tap can legitimately be short/empty (silence), and the two converters can emit a sample or two
         // apart — so pad/truncate the tap to the mic's count after resampling.
-        if tap.count != mic.count {
-            if tap.count < mic.count { tap.append(contentsOf: repeatElement(0, count: mic.count - tap.count)) }
-            else { tap.removeLast(tap.count - mic.count) }
-        }
+        let aecTap = EchoReferenceAlignment.aligned(systemTap, toFrameCount: mic.count)
+        let systemTimeline = SystemAudioTimeline.preservingSamples(
+            systemTap, minimumFrameCount: mic.count)
 
-        aec.processReverse(tap)            // far-end reference FIRST
+        aec.processReverse(aecTap)         // far-end reference FIRST
         let clean = aec.process(mic)       // near-end, echo removed
 
-        if !clean.isEmpty { onMicClean(Self.data(micDown.convert(clean))) }
-        if !tap.isEmpty { onSystem(Self.data(sysDown.convert(tap))) }
+        let micData = clean.isEmpty ? nil : Self.data(micDown.convert(clean))
+        let systemData = systemTimeline.isEmpty ? nil : Self.data(sysDown.convert(systemTimeline))
+        guard micData != nil || systemData != nil else { return }
+        let capturedAt = Date().timeIntervalSince1970
+        let micChunk: SequencedAudioChunk? = micData.map { data in
+            micSequence &+= 1
+            return SequencedAudioChunk(
+                data: data, sequence: micSequence,
+                sampleCount: data.count / MemoryLayout<Int16>.size,
+                capturedAt: capturedAt)
+        }
+        let systemChunk: SequencedAudioChunk? = systemData.map { data in
+            systemSequence &+= 1
+            return SequencedAudioChunk(
+                data: data, sequence: systemSequence,
+                sampleCount: data.count / MemoryLayout<Int16>.size,
+                capturedAt: capturedAt)
+        }
+        let onMicCaptured = self.onMicCaptured
+        let onSystemCaptured = self.onSystemCaptured
+        let onMicClean = self.onMicClean
+        let onSystem = self.onSystem
+        deliveryQueue.async {
+            if let micChunk {
+                onMicCaptured(micChunk.sequence, micChunk.sampleCount, micChunk.capturedAt)
+                onMicClean(micChunk.data, micChunk.sequence, micChunk.capturedAt)
+            }
+            if let systemChunk {
+                onSystemCaptured(systemChunk.sequence, systemChunk.sampleCount, systemChunk.capturedAt)
+                onSystem(systemChunk.data, systemChunk.sequence, systemChunk.capturedAt)
+            }
+        }
     }
 
     // MARK: - Core Audio / format helpers

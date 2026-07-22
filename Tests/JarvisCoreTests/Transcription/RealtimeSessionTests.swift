@@ -148,6 +148,13 @@ import Testing
         #expect(ev["audio"] as? String == "AAAA")
     }
 
+    @Test func configuredSessionEventRequiresUpdateAcknowledgement() {
+        #expect(RealtimeSession.isConfiguredSessionEventType("session.updated"))
+        #expect(RealtimeSession.isConfiguredSessionEventType("transcription_session.updated"))
+        #expect(!RealtimeSession.isConfiguredSessionEventType("session.created"))
+        #expect(!RealtimeSession.isConfiguredSessionEventType("transcription_session.created"))
+    }
+
     /// The real `session_expired` wire event (the same JSON the socket delivers at the ~60-min cap) is
     /// recognized as an expected rotation, so the transcriber logs it calmly instead of as a fault.
     @Test func isSessionExpiredMatchesTheServerExpiryEvent() throws {

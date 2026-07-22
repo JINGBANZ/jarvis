@@ -71,6 +71,7 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_PATH" "$APP/Contents/MacOS/$BIN_NAME"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
+cp Resources/Jarvis.icns "$APP/Contents/Resources/Jarvis.icns"
 
 echo "▶ signing with '$IDENTITY'"
 codesign --force --deep --sign "$IDENTITY" "$APP"

@@ -6,6 +6,7 @@ import Testing
         let c = Config.default
         #expect(c.silenceTimeoutSeconds == 120)
         #expect(c.silenceMaxIntervalSeconds == 960)
+        #expect(c.silenceIdleCutoffSeconds == 1_800)
         #expect(c.historyCompactionTokenThreshold == 10_000)
         #expect(c.overlayNoticeBufferSeconds == 2.0)
         #expect(c.overlaySecondsPerWord == 0.35)
@@ -14,6 +15,9 @@ import Testing
         #expect(c.vadSilenceDurationMs == 1000)
         #expect(c.turnDebounceSeconds == 0.4)
         #expect(c.maxBufferedAudioSeconds == 60)
+        #expect(c.realtimeReadyTimeoutSeconds == 10)
+        #expect(c.realtimePingIntervalSeconds == 20)
+        #expect(c.realtimePongTimeoutSeconds == 10)
     }
 
     @Test func overlayAppearanceConstants() {
@@ -48,6 +52,13 @@ import Testing
         #expect(c.overlaySecondsPerWord > 0)
         #expect(c.overlayMaxDisplaySeconds > c.overlayNoticeBufferSeconds)
         #expect(Config.overlayLineGapSeconds >= 0)
+    }
+
+    @Test func realtimeHealthConstantsAreCoherent() {
+        let c = Config.default
+        #expect(c.realtimeReadyTimeoutSeconds > 0)
+        #expect(c.realtimePingIntervalSeconds > 0)
+        #expect(c.realtimePongTimeoutSeconds > 0)
     }
 
     @Test func envSecretStoreReadsKey() {

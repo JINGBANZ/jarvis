@@ -26,7 +26,7 @@ protocol SettingsSection: AnyObject {
     func didBecomeActive()            // default: no-op — this tab became visible
     func didResignActive()            // default: no-op — another tab chosen, or window closing
     func windowWillClose()            // default: no-op
-    var prefersResizableWindow: Bool { get }   // default: false
+    var fillsTab: Bool { get }        // default: false — fixed-form panels pin to the top
 }
 ```
 
@@ -36,25 +36,25 @@ change it pairs `didResignActive()` on the outgoing section with `didBecomeActiv
 one (and resigns the active section on window close). This lets a panel run side effects **only while
 its tab is visible** rather than for the whole time the window is open.
 
-### Per-tab window sizing
+### Window sizing
 
-The simple panels are fixed-size (560×460); a section can opt into a larger, user-resizable window
-by returning `prefersResizableWindow == true`. When such a tab becomes active, `SettingsWindow`
-inserts `.resizable` into the style mask and grows the window to 820×600 (min 520×380); leaving the
-tab restores the fixed compact size. Only `ActivitySection` opts in — the log benefits from room and
-resizing; the API-key and overlay panels stay compact.
+One user-resizable window size for every tab — 820×600 by default, minimum 560×460 (which keeps the
+fixed-form panels fully visible). Switching tabs never resizes the window; whatever size the user
+set stays. A section whose content should stretch with the window returns `fillsTab == true` (only
+`ActivitySection` — the embedded log viewer); the fixed-form panels keep their designed frame,
+wrapped so they pin to the top of the tab and center horizontally (AppKit's y-origin is the bottom,
+so an unwrapped fixed-frame view would ride the bottom edge in a taller window).
 
 ### Sections
 
 | Section class | Tab title | Always present | Description |
 |---|---|---|---|
-| `APIKeySection` | "API Key" | yes | `NSSecureTextField` to paste the OpenAI key; saves to an owner-only file on "Save", restarts the pipeline if already running. |
+| `BrainSection` | "Brain" | yes | Everything that decides who answers a coaching turn, in one tab: the provider radios (OpenAI API / Claude Code / Codex CLI — see [Brain](#brain)), a per-provider model dropdown, the reasoning-effort dropdown (one global setting, mapped onto each provider's scale), and the OpenAI API-key controls (`APIKeyControls`: an `NSSecureTextField` that saves to an owner-only file and restarts the pipeline if already running). Takes effect on the next Start. |
 | `OverlaySection` | "Overlay" | yes | Two groups, one per overlay surface — **Overlay Caption** (the transient on-screen tip) and **Overlay Box** (the persistent response history). Each has a header with an On/Off toggle (an `NSSwitch` + "On"/"Off" label) and a one-line description. When a surface is **on** it also shows its Text Size + Opacity sliders (with live readouts) and a live sample, **only while the Overlay tab is selected** (`didBecomeActive`/`didResignActive`); when **off**, its sliders and sample are hidden and the layout collapses. Persists via `OverlayAppearance`. |
-| `DisplaySection` | "Screen" | yes | One dropdown listing the connected displays — which one `capture_screen` screenshots; persists via `ScreenCapturePreferences`. Applies to the next screenshot. |
-| `BrainModelSection` | "Brain" | yes | Two dropdowns — the brain (LLM) model and the reasoning effort applied to it; persists via `BrainPreferences`. Takes effect on the next Start. |
-| `ActivitySection` | "Activity" | yes | Embeds the `ActivityViewer` content view (`makeContentView()` / `teardown()`); `prefersResizableWindow == true` so the log gets a larger, resizable window. |
+| `DisplaySection` | "Screen" | yes | One dropdown — the capture scope: **Active window** (default) or one **Entire display** entry per connected display; persists via `ScreenCapturePreferences`. Applies to the next screenshot. |
+| `ActivitySection` | "Activity" | yes | Embeds the `ActivityViewer` content view (`makeContentView()` / `teardown()`); `fillsTab == true` so the log stretches with the window. Its header shows the selected session's exact directory ID in a selectable field with **Copy ID**, and carries **Evaluate** — one click sends the selected session's recorded LLM wire traffic (`brain-traffic.jsonl`) to the brain model at high effort for a context-engineering audit (`SessionEvaluator`), saved as `eval-report.md` in the session dir and opened in the browser as a rendered `eval-report.html` page (`EvalReportPage`) whose **Copy as Markdown** button hands the raw report to an agent chat; once a session has a saved report the button flips to **Open report**. Only *finished* conversations qualify: the button is disabled while the selected session is the live, still-running one (a mid-session audit would judge half a story) and re-enables once Stop has drained any in-flight turn — the cancelled request's final traffic line must land before the audit reads the file. |
 
-`AppDelegate` builds the section list at launch and passes it to `SettingsWindow`. All five sections
+`AppDelegate` builds the section list at launch and passes it to `SettingsWindow`. All four sections
 are always present.
 
 ## Activation-Policy Switch
@@ -100,50 +100,85 @@ tracks intent separately from `panel.isVisible` so the setting can't desync). Th
 (`setFontSize`/`setBackgroundOpacity`/`setOpacity`) only change appearance and don't touch
 `sharingType`. See [overlay-invisibility.md](./overlay-invisibility.md).
 
-## Brain Model
+## Brain
 
-The brain (LLM) model and its reasoning effort are user-selectable, persisted through
-`BrainPreferences` (UserDefaults). Two independent dropdowns: a **Model** picker drawn from
-`BrainModelCatalog` — the curated, code-owned list of OpenAI brain models (the single source of truth,
-bumped by a one-line edit when OpenAI ships a new one) — and a **Reasoning Effort** picker over the
-fixed `ReasoningEffort` levels (None / Low / Medium / High, default Low). The effort is stored
-independently of the model, so it's set once and carries across model changes.
+The Brain tab owns the whole "who answers a coaching turn" decision, persisted through
+`BrainPreferences` (UserDefaults).
 
-Reads are validated: a persisted model id no longer in the catalog (or an unrecognized effort) falls
-back to the default rather than reaching the API. The transcription model is deliberately **not**
-here — it's a separate field and code path (`Config.transcriptionModel`). Both values are read in
-`AppDelegate.start()` when the brain client is built, so a change takes effect on the **next Start**,
-not mid-session — hence the caption on the tab.
+**Provider.** Three radios (`BrainProvider`): the **OpenAI API** (metered by the key), or a locally
+installed **Claude Code** / **Codex CLI** — in which case coaching turns are spawned as CLI
+subprocesses and billed to the user's existing Claude / ChatGPT *subscription* instead of the key
+(`CLIBrainClient`; see [architecture.md](./architecture.md#local-cli-brain-providers)). Installed
+CLIs are auto-detected by `AgentCLIDetector`: binary discovery is a pure file probe over $PATH + the
+known install dirs, while Claude sign-in uses its non-billing `auth status --json` command under a
+short timeout because account metadata can outlive an expired OAuth session. Codex keeps using its
+auth-file marker. The radios show **signed in**, **signed out**, or **sign-in unknown**; a confirmed
+logout refuses Start, while an unavailable probe warns but does not falsely claim logout. An actual
+CLI request can still fail after preflight; Jarvis then stops the unusable coaching session without
+activating the app, adds a discreet provider-only notice to Activity, and keeps the detailed error
+and sign-in command in `jarvis-debug.log`.
 
-| Setting | Default | Source of truth | UserDefaults key |
-|---|---|---|---|
-| Brain model | `gpt-5.5` | `BrainModelCatalog` | `brain.model` |
-| Reasoning effort | `low` | `ReasoningEffort` | `brain.reasoningEffort` |
+**Model + effort.** A **Model** dropdown drawn from `BrainModelCatalog` per provider (OpenAI ids for
+the API; CLI aliases like `sonnet` for the CLIs, plus a "CLI default" entry meaning "no model flag" —
+for Codex that is its built-in default, since harness runs ignore the user's codex config). Each
+provider remembers its own model. The **Reasoning
+Effort** picker (`ReasoningEffort`: None / Low / Medium / High, default Low) is stored once and
+applies uniformly to whichever provider is active — `CLIBrainClient` maps it onto each CLI's own
+scale (Claude Code `--effort`, floor `low`; Codex `model_reasoning_effort`, passed through
+unchanged), so model + effort behave the same way across all three providers.
 
-## Capture Display
+**API key.** The OpenAI key controls (`APIKeyControls`) live at the bottom of the same tab because
+the key is part of the same decision — and it stays **required regardless of provider**: realtime
+voice transcription always runs on the OpenAI Realtime API. A CLI provider moves only the brain off
+the key.
 
-Which display `capture_screen` screenshots is user-selectable, persisted through
-`ScreenCapturePreferences` (UserDefaults) as the **1-based index `screencapture -D` uses** (1 = the
-main display, the one with the menu bar). The dropdown enumerates `NSScreen.screens` — main display
-first, matching `screencapture`'s numbering — and refreshes when displays are plugged or unplugged
-while the tab is visible.
+Reads are validated: a persisted model id no longer in that provider's catalog (or an unrecognized
+provider/effort) falls back to the default rather than reaching the API. The transcription model is
+deliberately **not** here — it's a separate field and code path (`Config.transcriptionModel`). The
+values are read in `AppDelegate.start()` when the brain client is built, so a change takes effect on
+the **next Start**, not mid-session — hence the caption on the tab.
 
-Unlike the brain settings, the selection is read **at capture time** (`ScreenCaptureCLI`), so a
-change applies to the very next screenshot with no restart. Reads are validated twice: a stored
-value < 1 clamps to the main display, and if the selected display no longer exists (the monitor was
-unplugged since it was chosen) `screencapture -D` fails and `ScreenCaptureCLI` falls back to a plain
-main-display capture rather than dropping the screenshot.
+All four selections persist via `BrainPreferences` —
+`Sources/JarvisCore/Config/BrainPreferences.swift` is the single source for the UserDefaults keys,
+defaults, and validation (the catalogs themselves live in
+`Sources/JarvisCore/Brain/BrainModelCatalog.swift`).
 
-A user-initiated **Start with more than one display connected also prompts** for the screen to watch
-(`DisplayPicker`: an alert with the same dropdown, pre-selected to the persisted choice; Cancel
-aborts the Start untouched) — so a laptop-vs-monitor session never silently coaches from the wrong
-screen. One display → no prompt; an in-place restart (e.g. re-saving the API key while running)
-never prompts. The prompt writes through the same `ScreenCapturePreferences`, so it and the
-Settings tab are one setting.
+## Capture Scope
+
+What `capture_screen` shoots — one dropdown covering both the scope and, for entire-display
+capture, the display: **Active window (recommended)** plus one **Entire display** entry per
+connected display. Active-window mode reads the window server's single front-to-back z-order at capture time
+(`WindowScopedScreenCapture` in `JarvisApp/Capture`, with the pick itself pure logic in Core's
+`FrontWindowSelector`) and shoots the window the user last clicked or typed into — whichever
+display it lives on — via `screencapture -l`, which reads the window's own backing image (clean
+even when partially covered; `-o` omits the shadow). Jarvis's own windows, non-app layers (dock,
+panels), and tiny layer-0 helper windows are skipped.
+
+The window shot also gets an **on-device OCR sidecar**: `ScreenTextRecognizer` (Apple Vision,
+`.accurate`, language correction off so code identifiers survive) recognizes the text and Core's
+`RecognizedTextLayout` rebuilds reading order; `CoachDriver` sends it in the `capture_screen`
+tool-result text beside the image, flagged as fallible, so the model reads exact code instead of
+deciphering pixels. Nothing eligible on screen → fall back to a full shot of the **main display**;
+fallback and entire-display captures skip OCR deliberately (a whole display's text would feed the
+surrounding clutter back to the model as tokens).
+
+The **Entire display** entries are named and numbered the way `screencapture -D` counts displays
+(1 = the main display, the one with the menu bar; the dropdown enumerates `NSScreen.screens`, main
+first, matching that order) and refresh when displays are plugged or unplugged while the tab is
+visible. The chosen display persists as the 1-based `-D` index alongside the scope.
+
+Both values are read **at capture time** (`WindowScopedScreenCapture` / `ScreenCaptureCLI`), so a
+change applies to the very next screenshot with no restart. Reads are validated: an unrecognized
+stored scope falls back to the default, a stored index < 1 clamps to the main display, and if the
+chosen display no longer exists (the monitor was unplugged since it was chosen) `screencapture -D`
+fails and `ScreenCaptureCLI` reshoots the main display rather than dropping the screenshot.
+Fallbacks from active-window scope always capture the main display — a display index left over
+from an old entire-display selection never steers them.
 
 | Setting | Default | UserDefaults key |
 |---|---|---|
-| Capture display | `1` (main display) | `screen.captureDisplayIndex` |
+| Capture scope | `activeWindow` | `screen.captureScope` |
+| Entire-display display | `1` (main display) | `screen.captureDisplayIndex` |
 
 ## Key Files
 
@@ -151,17 +186,18 @@ Settings tab are one setting.
 |---|---|
 | `Sources/JarvisApp/Settings/SettingsSection.swift` | Protocol definition |
 | `Sources/JarvisApp/Settings/SettingsWindow.swift` | Host window + tab view |
-| `Sources/JarvisApp/Settings/APIKeySection.swift` | API-key tab |
+| `Sources/JarvisApp/Settings/BrainSection.swift` | Brain tab: provider + model + effort + key |
+| `Sources/JarvisApp/Settings/APIKeyControls.swift` | The API-key rows embedded in the Brain tab |
 | `Sources/JarvisApp/Settings/OverlaySection.swift` | Overlay-appearance tab |
-| `Sources/JarvisApp/Settings/DisplaySection.swift` | Capture-display tab |
-| `Sources/JarvisApp/Settings/DisplayPicker.swift` | Start-time display prompt (>1 display) |
-| `Sources/JarvisApp/Settings/NSScreen+DisplayTitles.swift` | Shared display naming for the tab + prompt |
-| `Sources/JarvisApp/Settings/BrainModelSection.swift` | Brain model + reasoning-effort tab |
+| `Sources/JarvisApp/Settings/DisplaySection.swift` | Capture-scope tab (scope + display in one dropdown) |
+| `Sources/JarvisApp/Settings/NSScreen+DisplayTitles.swift` | Display naming for the dropdown's entire-display entries |
 | `Sources/JarvisApp/Settings/ActivitySection.swift` | Activity tab |
-| `Sources/JarvisCore/Coach/BrainModelCatalog.swift` | Curated model list (`BrainModel`) |
-| `Sources/JarvisCore/Coach/ReasoningEffort.swift` | The four effort levels |
+| `Sources/JarvisCore/Brain/BrainProvider.swift` | The three providers |
+| `Sources/JarvisCore/Brain/AgentCLIDetector.swift` | CLI binary discovery + bounded authentication-status detection |
+| `Sources/JarvisCore/Brain/BrainModelCatalog.swift` | Curated per-provider model lists (`BrainModel`) |
+| `Sources/JarvisCore/Brain/ReasoningEffort.swift` | The four effort levels |
 | `Sources/JarvisCore/Config/BrainPreferences.swift` | UserDefaults persistence + validation |
-| `Sources/JarvisCore/Config/ScreenCapturePreferences.swift` | Capture-display persistence + clamping |
+| `Sources/JarvisCore/Config/ScreenCapturePreferences.swift` | Capture scope + display persistence + clamping |
 | `Sources/JarvisCore/Screen/ScreenCapture.swift` | `ScreenCaptureCLI` — reads the selection at capture time, falls back to the main display |
 | `Sources/JarvisCore/Config/Config.swift` | `overlayCaption*`/`overlayBox*` size + opacity ranges, enabled + appearance defaults |
 | `Sources/JarvisCore/Overlay/OverlayAppearance.swift` | UserDefaults persistence; `OverlayCaptionApplying` + `OverlayBoxApplying` protocols |

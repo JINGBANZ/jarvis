@@ -33,6 +33,7 @@
 - **Chose:** A single coaching mode, no tiers.
 - **Why:** Scope discipline for the MVP.
 - **Detail:** [architecture.md §6](./architecture.md#6-non-goals-v1).
+- **Superseded by:** 2026-07-18 — Technical-interview context is broad and screen-dependent.
 
 ### 2026-06-13 — Model-triggered `capture_screen`
 
@@ -232,6 +233,7 @@
 - **Why:** A tight timeout abandoned a still-generating turn while the server kept the conversation's single-writer lock, so every following turn hit `conversation_locked` and the coach went silent for minutes. Turns are single-flighted, so waiting for a slow turn lets it finish and release the lock naturally; and because the driver re-sends the still-unsent transcript next turn, a retry would only resend a *staler* body while hammering a held lock.
 - **Rejected:** (a) In-request retry with backoff — near-useless for `conversation_locked` (a >ceiling generation outlasts it) and it resends stale content; the only thing given up is `Retry-After` backoff on transient 429/5xx, negligible for a single-user app. (b) Cancel-and-send-the-latest via background mode + `POST /responses/{id}/cancel` — the only way to *abandon* a stale turn and jump to freshest context, but a much larger build; deferred.
 - **Revisit if:** the app grows beyond single-user (429 backpressure starts to matter), or the ceiling-length wait on a genuinely slow turn proves too laggy live (then reach for background-mode cancel).
+- **Superseded by:** 2026-07-15 — Explicit Realtime health and one transient brain retry. The generous ceiling and next-trigger fallback remain; the one-attempt rule does not.
 - **Detail:** [architecture.md → Resilience](./architecture.md#resilience).
 
 ### 2026-07-06 — Silence is a tool call; audio turns require one
@@ -246,7 +248,8 @@
 - **Chose:** Settings → Screen stores the chosen display as the 1-based index `screencapture -D` uses (`ScreenCapturePreferences`, default 1 = main). `ScreenCaptureCLI` reads it at capture time (change applies to the next screenshot, no restart) and falls back to a plain main-display capture when `-D` fails (monitor unplugged since selection). A user-initiated Start with >1 display also prompts for the screen (`DisplayPicker`, pre-selected to the persisted choice; Cancel aborts the Start) so a session never silently coaches from the wrong screen.
 - **Why:** The plain `screencapture` invocation only ever shot the main display, so with a laptop + external monitor the coach never saw the monitor. The index is the CLI's own addressing scheme — no ID translation layer — and for the common two-display case it's stable; the capture-time fallback makes a stale index harmless.
 - **Rejected:** (a) Persisting a `CGDirectDisplayID` or display name — more code for stability the fallback already provides, and `screencapture` can't be addressed by ID anyway. (b) Auto-following the frontmost window / mouse across displays — implicit behavior the user can't override; an explicit picker was the ask. (c) Capturing all displays per trigger — doubles image tokens per brain call for a screen usually irrelevant.
-- **Detail:** [settings-window.md → Capture Display](./settings-window.md#capture-display).
+- **Detail:** [settings-window.md → Capture Scope](./settings-window.md#capture-scope).
+- **Superseded by:** the 2026-07-16 entry — the standalone picker and the start-time prompt are folded into the capture-scope dropdown; the `-D` index persistence and stale-index fallback stand.
 
 ### 2026-07-07 — Filler-only turn-ends skip the brain (substance gate, speaker-neutral)
 
@@ -257,7 +260,272 @@
 
 ### 2026-07-07 — Session memory moved client-side, with compaction
 
-- **Chose:** Replace the per-session server-side conversation with client-managed memory (`CoachHistory`): every request is `[system] + memory + new delta`, memory grows append-only (stable prefix → prompt-cache hits), `stay_silent` turns leave no trace, only the newest screenshot stays as pixels (older → one-line stubs), and past `Config.historyCompactionTokenThreshold` the oldest span is condensed into a ≤250-word briefing by `gpt-5.4-mini`. Requests stay `store:true` purely so they remain inspectable in the OpenAI dashboard for debugging. Supersedes the conversation half of the 2026-07-03 entry (its generous-timeout / one-attempt / recover-next-trigger halves stand).
+- **Chose:** Replace the per-session server-side conversation with client-managed memory (`CoachHistory`): every request is `[system] + memory + new delta`, memory grows append-only (stable prefix → prompt-cache hits), `stay_silent` turns leave no trace, only the newest screenshot stays as pixels (older → one-line stubs), and past `Config.historyCompactionTokenThreshold` the oldest span is condensed into a ≤250-word briefing by `gpt-5.4-mini`. Requests stay `store:true` purely so they remain inspectable in the OpenAI dashboard for debugging. Supersedes the conversation half of the 2026-07-03 entry (its generous-timeout and recover-next-trigger halves stand; its one-attempt half was later superseded on 2026-07-15).
 - **Why:** A server conversation can only grow: every screenshot and every stored reply was re-billed as input on all ~350 turns of an hour session (~$12.60 of the observed $13). Owning the memory bounds the per-request working set (~5–6k tokens, mostly cached), keeps the problem statement in context forever via the summary, and removes a failure class outright (`conversation_locked`, dangling tool-call closes). The industry patterns adopted (compaction, observation masking, cache-ordered prefixes) and the cost model live in PR #46's design notes.
 - **Rejected:** (a) Keeping conversations and rotating them with a summary seed — same summarization work, but retains the unbounded-growth window and the lock failure mode. (b) `store:false` for privacy — deferred by choice; debuggability wins while the harness is being tuned, and it's now a one-line flip.
 - **Detail:** `Sources/JarvisCore/Coach/CoachHistory.swift`, `CoachDriver.compactIfNeeded`, [sandbox.md](./sandbox.md) for the retention posture.
+- **Superseded (in part) by:** the 2026-07-16 entry — screenshots now never outlive their turn as pixels; the rest of this entry stands.
+
+### 2026-07-07 — `capture_screen` is window-scoped with an on-device OCR sidecar
+
+- **Chose:** The default capture scope shoots the **frontmost app window** via `screencapture -l` — the window server keeps one z-order across all displays, so the pick (Core's `FrontWindowSelector`; own windows, non-app layers, and tiny helper windows skipped) is the window the user last clicked or typed into, on whichever monitor. The shot gets an **on-device OCR sidecar** (Apple Vision `.accurate`, language correction off; reading order via Core's `RecognizedTextLayout`) sent in the tool-result text beside the image. An explicit **Capture Scope** setting (Settings → Screen) reverts to entire-display; the display picker keeps governing entire-display mode and every fallback (no eligible window / window capture failed), which skip OCR so a whole display's clutter is never fed back as text.
+- **Why:** The full-display shot billed every Retina pixel of dock/widgets/second-browser on each screen turn, and published distractor studies show irrelevant frame content measurably degrades reasoning-model accuracy; exact text beats pixels for reading code. Together these let **low** reasoning effort find bugs that previously needed **high** (the PoC to confirm). Vision runs on-device, so the no-new-egress posture holds. This *complements* the 2026-07-06 display decision: that rejected implicit display-*following* in favor of an explicit picker; this changes capture *scope*, stays an explicit overridable setting, and leaves the picker its fallback job.
+- **Rejected:** (a) Downscaling / `detail` tuning — GPT-5.5 ingests full resolution (verified against the vision docs in the PR #30 investigation), so shrink the *area*, not the fidelity. (b) Accessibility-tree text extraction — Chrome exposes web content only under assistive-tech flags and Monaco virtualizes to visible lines; OCR gets the same generically with none of the per-app fragility. (c) OCR *instead of* the image — diagrams and layout need vision, and OCR mangles the odd identifier; the image stays ground truth. (d) Column-aware OCR ordering — deferred until the PoC shows two-column interleave actually hurts.
+- **Detail:** [settings-window.md → Capture Scope](./settings-window.md#capture-scope).
+- **Superseded by:** the 2026-07-16 entry — active-window fallbacks now always shoot the main display; the display choice only governs entire-display scope.
+
+### 2026-07-15 — Explicit Realtime health and one transient brain retry
+
+- **Chose:** Treat Realtime connectivity as an explicit state machine. A transcription socket becomes ready only after the server acknowledges `session.update`; a startup deadline plus active ping/pong probes detect silent and idle failures; every failure source enters one generation-guarded reconnect path; and the menu shows starting/reconnecting/degraded states instead of claiming the pipeline is listening. Wrap each self-contained primary brain request in exactly one retry for transient network and retryable server failures, then preserve the existing next-trigger recovery.
+- **Why:** Live sessions showed both startup and mid-session WebSockets being reset or losing the network, while the old app accepted the initial handshake as readiness and learned about an idle dead socket only when speech produced network I/O. A separate preflight connection would test a socket that the app immediately discards, so it cannot establish that the two real transcription sockets are healthy. Client-managed brain memory also removed the server-conversation lock that made an in-request retry unsafe: tool effects occur only after the response reaches the driver, so replaying the same request once cannot duplicate a screenshot or tip.
+- **Rejected:** (a) A disposable startup connectivity test — it races the real sockets and can pass while they fail. (b) Passive WebSocket keepalive — it leaves half-open sockets invisible until the user speaks. (c) Retrying authentication, malformed requests, or rate limits — these need correction or backoff, not an immediate duplicate. (d) Unlimited brain retries — excessive latency and duplicate load during an outage.
+- **Detail:** [architecture.md → Resilience](./architecture.md#resilience).
+
+### 2026-07-15 — Brain traffic is recorded per session; one-click LLM audit
+
+- **Chose:** Every brain round trip (coach + summarizer, tagged apart) is recorded **wire-level** — the exact request body sent and response body received, plus status/latency, with base64 screenshots redacted to stubs (the pixels are already the session's `shot-N.jpg` files) — as owner-only `brain-traffic.jsonl` in the session dir (`BrainTrafficLog` — a **per-session instance** bound to its session's directory at Start, so a request still unwinding across a Stop → Start records into the session that made it, never the new one). The Activity tab's **Evaluate** button feeds a delta-aware rendering of that traffic — instructions/tools/input prefixes that are byte-identical to the previous same-tag call are elided and *marked* elided — to the selected brain model at high reasoning effort with an audit prompt focused on context engineering, then saves and shows the markdown report (`SessionEvaluator` → `eval-report.md`).
+- **Why:** Tuning the harness previously meant pulling request logs from the OpenAI dashboard by hand and pasting them into a chat for diagnosis. The wire body is the ground truth a context-engineering audit needs (instructions, message order, tool schemas, `usage.cached_tokens` per call); recording it locally and auditing it in one click closes that loop. The elision markers double as signal: they show the auditor exactly where the prompt cache should be hitting, and keep the audit prompt itself from re-billing every repeated prefix.
+- **Rejected:** (a) Staying on the dashboard as the source — manual, and it dies the day `store:true` is flipped off (see the 2026-07-07 memory entry's privacy item). (b) Recording at the `ChatMessage` level — provider-agnostic but a paraphrase: it can't show cache-busting prefix changes or tool-schema bloat, which are the audit's main quarry. (c) Recording the evaluator's own traffic — it would pollute the very session it audits (its client keeps `traffic: nil`).
+- **Detail:** `Sources/JarvisCore/Diagnostics/BrainTrafficLog.swift`, `Sources/JarvisCore/Diagnostics/SessionEvaluator.swift`; the button lives in `ActivityViewer` ([settings-window.md → Sections](./settings-window.md#sections)); retention posture in [sandbox.md](./sandbox.md).
+
+### 2026-07-16 — Display choice folded into the capture-scope dropdown; no start-time prompt
+
+- **Chose:** Settings → Screen is one dropdown: **Active window (recommended)** plus one **Entire display** entry per connected display (the row number is the persisted `screencapture -D` index). The standalone Capture Display picker and the start-time `DisplayPicker` prompt are gone, and fallbacks from active-window scope always shoot the **main display** — `ScreenCaptureCLI` applies `-D` only in entire-display scope.
+- **Why:** With active-window as the default — and the window pick spanning all displays — the display only matters when the user explicitly chooses entire-display capture, so a standalone always-visible picker (and a prompt on every multi-display Start) configured something that usually had no effect. Folding the display into the scope choice makes every dropdown entry consequential, and a stale index silently steering active-window fallbacks to a long-ago-chosen monitor was a surprise, not a feature.
+- **Rejected:** (a) Removing the display choice outright — entire-display scope still needs it. (b) Keeping the Start prompt for entire-display scope only — the scope entry now names its display explicitly; re-confirming an explicit setting on every Start is ceremony.
+- **Supersedes:** the picker/prompt parts of the two entries marked above (2026-07-06 capture display, 2026-07-07 window-scoped capture).
+- **Detail:** [settings-window.md → Capture Scope](./settings-window.md#capture-scope).
+
+### 2026-07-16 — Screenshots never outlive their turn as pixels
+
+- **Chose:** `CoachHistory.commit` stubs **every** screenshot to its one-line text marker as the turn commits — no image survives into later requests (previously the newest one rode along until displaced by the next capture). The model sees the pixels for the full tool loop of the turn that captured them; after that, the capture's OCR sidecar (riding in the tool-result text) is what persists, and a fresh look is one `capture_screen` call away. Two smaller fixes from the same audit landed alongside: the brain client logs per-call `input`/`cached_tokens` so the prompt-cache hit rate is visible live, and the `speak` tool description says "call stay_silent" instead of "do not call any tool" (matching `tool_choice: "required"`).
+- **Why:** The first one-click session audit (2026-07-15 entry) showed the retained screenshot as the dominant per-request cost: prompts jumped from ~1.2k to ~4.9k tokens after a single capture and stayed there for every later call — billed in full whenever the prompt cache missed (3 of 4 follow-up calls in the audited session had 0 cached tokens). A stale screenshot buys little after its turn: the OCR text is what the model actually reads back, and the screen has usually changed.
+- **Rejected:** (a) Keeping the newest image (status quo) — ~1.5–3.7k tokens on every subsequent request of the session for a shot that's stale the moment the turn ends. (b) Dropping the OCR text too — it's the exact code text later turns reason over, and it's cheap next to pixels. (c) The audit's suggestion to shrink `max_output_tokens` to ~64–128 — the cap is a combined reasoning+output budget (`ReasoningEffort.maxOutputTokens`); a tight cap recreates the `status:"incomplete"` truncation failure, and actual cost tracks usage, not the ceiling.
+- **Detail:** `Sources/JarvisCore/Coach/CoachHistory.swift` (commit-time stubbing), `OpenAIBrainClient.swift` (cache-hit log line), `ToolDefs.swift`.
+
+### 2026-07-16 — Reasoning items ride the tool loop
+
+- **Chose:** Replay the brain's **entire `output` array verbatim** (reasoning and `function_call` items whole — ids and any payload untouched, in order, the canonical `input.push(...response.output)` loop) on the tool loop's follow-up request. At commit, `CoachHistory` converts the passthrough: the `function_call` survives as the proven id-less synthetic call (so the committed `function_call_output` never orphans) and the reasoning is dropped — it lives only inside the turn that produced it, like screenshots.
+- **Why:** OpenAI's function-calling and reasoning guides require reasoning items to accompany a client-fulfilled tool call's output; dropping them (our old behavior, and a known ecosystem anti-pattern — the Agents SDK, Vercel AI SDK, and LangChain all round-trip them) discards the chain of thought mid-turn, so the model re-reasons over the screenshot from scratch: worse answers, more reasoning tokens, and OpenAI's own cookbook measured a 40%→80% cache-utilization gain from replaying them.
+- **Rejected:** (a) `previous_response_id` server threading — reintroduces the server-side conversation the 2026-07-07 decision removed. (b) `store:false` + `include: reasoning.encrypted_content` — the fully stateless variant; deferred with the existing `store:true` debuggability choice, and it's the same replay path when flipped. (c) Keeping reasoning items across turns — OpenAI ignores stale ones, they'd bloat every later request, and a mid-session brain-model switch invalidates them. (d) A generic SDK/agent-framework dependency to manage the loop — none exists for Swift, and owning the message list is where the harness's cost machinery lives.
+- **Detail:** `Sources/JarvisCore/Brain/OpenAIBrainClient.swift` (verbatim extract/re-emit), `CoachDriver.swift` (whole-output threading), `CoachHistory.swift` (commit-time conversion), `Brain.swift` (`ChatMessage.rawItems`).
+
+### 2026-07-16 — Local Claude Code / Codex CLIs as alternative brain providers
+
+- **Chose:** A `BrainProvider` selection (Settings → Brain): the OpenAI Responses API (default), or a locally installed **Claude Code** / **Codex** CLI spawned per turn (`CLIBrainClient` behind the same `BrainClient` protocol), so the brain — coach, summarizer, evaluator — bills to the user's existing Claude / ChatGPT **subscription** instead of the metered key. CLIs are auto-detected by pure file probes (`AgentCLIDetector`: $PATH + known install dirs + on-disk auth markers; no subprocess, no Keychain prompt) so selection is one radio click. Tool use rides a prompt-embedded JSON protocol generated from the same `ToolDef`s; every turn is a single model call — screenshots reach Claude inline as base64 image blocks (stream-json input, all built-in tools disabled) and Codex as 0600 session-dir files via `-i` (`--sandbox read-only`); both CLIs run with session persistence off so no transcript copy lands in their own stores. The API-key section merged into the Brain tab — the key stays required for Realtime transcription regardless of provider.
+- **Why:** For a subscription holder, per-turn API billing is the product's dominant marginal cost; the CLIs expose the same frontier models under flat-rate plans the user already pays for. The `BrainClient` seam meant the driver, client-managed memory, retry, and traffic audit all carry over unchanged; detection-by-file-probe keeps the Settings tab instant and side-effect-free.
+- **Rejected:** (a) Wiring the CLIs' MCP interfaces for native tool calling — a protocol server + handshake per turn for three tools; the JSON-line protocol does the same job with a parser that tolerates prose/fences and degrades a forced `speak` to speaking the raw reply. (b) Auth verification by running the CLI at detection time — slow, may bill a request, and a Keychain prompt from `security` would be worse; the marker heuristic is a UI hint, with failures surfacing loudly at Start. (c) Replacing transcription too — the CLIs have no realtime audio surface; the OpenAI key remains the ears.
+- **Superseded in part by:** 2026-07-18 — Claude sign-in uses Claude's bounded auth-status command. Binary discovery and Codex's auth marker stand.
+- **Superseded in part by:** 2026-07-18 — Codex coaching invocations are isolated and bounded.
+- **Detail:** [architecture.md → Local CLI brain providers](./architecture.md#local-cli-brain-providers), [settings-window.md → Brain](./settings-window.md#brain); egress note in [sandbox.md](./sandbox.md#data-egress).
+
+### 2026-07-16 — Realtime transcript integrity is tracked per audio item
+
+- **Chose:** Reconcile Realtime transcription by `item_id` instead of treating only
+  `…transcription.completed` as meaningful. `RealtimeTranscriptionLedger` records VAD start time and
+  streamed deltas, accepts out-of-order completion/failure, salvages delta text on failure or a
+  missing-terminal deadline, and emits an explicit context-gap line when failed, timed-out, or
+  long VAD-confirmed speech cannot be recovered from an empty completion. Transcript timestamps use
+  `audio_start_ms`, so inference completion order cannot reorder speakers. Bare `speech_stopped` no
+  longer resets the silence clock. Every real system-output sample is preserved for transcription;
+  a short/empty callback is padded only with its missing silence so the Realtime audio clock and
+  trailing-silence VAD keep advancing, while a separate exact-length padded/truncated copy feeds AEC.
+  Noise-reduction policy stays at its configured setting for both streams; source-specific tuning
+  requires representative live evaluation rather than assuming digital loopback is noise-free.
+  VAD-only starts/stops cannot restart the silence interval: a due check waits locally for the pending
+  item, while socket failure or a long active-item deadline resolves it so stale speech state cannot
+  suppress coaching forever.
+- **Why:** In the 2026-07-16 interview session, the user's long answer about an AI project reached the
+  mic transcript but the interviewer's question never appeared in either the activity log or the
+  exact brain traffic. The gap was upstream of `CoachDriver`; the old client ignored documented delta
+  and failed events, silently discarded unusable completion text, and mutated the system tap to the
+  mic buffer length before sending it. A sentence must either arrive or leave a visible integrity
+  failure — never disappear invisibly.
+- **Rejected:** (a) Logging only the failure event — observable but still deprives the coach of
+  streamed text. (b) Treating every VAD stop as a turn — it supplies no language context and, in the
+  old timer path, allowed noise/typing to postpone a silence check indefinitely. (c) Switching
+  transcription models as a first response — it changes the commit/VAD contract without fixing the
+  client's dropped event paths.
+- **Detail:** `Sources/JarvisCore/Transcription/RealtimeTranscriptionLedger.swift`,
+  `Sources/JarvisApp/Capture/RealtimeTranscriber.swift`, `AggregateEchoCapture.swift`.
+- **Superseded in part by:** 2026-07-17 — Diagnostics never enter the brain transcript. Delta
+  salvage and per-item reconciliation stand; explicit context-gap lines do not.
+
+### 2026-07-16 — Short interviewer rejection is substantive
+
+- **Chose:** Keep the closed-class filler gate, but classify exact interviewer-side “No”/“Nope” as
+  substantive. The same user-side fragments remain filler unless other substance rules apply.
+- **Why:** The interview log showed an interviewer “No.” correction skipped as filler and delivered
+  only with a later turn. Speaker identity changes the meaning here: an interviewer rejection is
+  actionable feedback, not a back-channel.
+- **Rejected:** Removing the filler gate — would restore the large steady-state cost from acknowledgments.
+- **Detail:** `Sources/JarvisCore/Triggers/TurnSubstance.swift`.
+
+### 2026-07-17 — Audio continuity evidence is content-free, not a recording
+
+- **Chose:** Add a per-side continuity witness across capture, delivery, WebSocket
+  attempt/completion, and Realtime server-speech boundaries. It retains sequence/sample counters,
+  timestamps, socket generations, server audio-clock values, and a locally derived activity bit;
+  periodic summaries and typed anomalies go only to the owner-only session log. Realtime item deltas
+  remain the only recoverable words. Sustained local activity without a server speech event adds an
+  explicit warning to the rolling transcript for the next real coach turn, without inventing text or
+  creating its own coach request. Capture timestamps are assigned in the IOProc, while witness locking
+  and PCM activity inspection run on the existing delivery queue so AEC timing is not disturbed.
+  Every delivered PCM chunk enters one byte-capped transactional FIFO plus an in-memory recovery
+  tail. One typed claim is sent at a time. URLSession completion moves it to that tail but cannot
+  retire it: the Realtime contract explicitly provides no confirmation event for
+  `input_audio_buffer.append`. Server VAD/transcription audio-clock progress advances only the prefix
+  behind the earliest unresolved item, including out-of-order completions. Socket failure requeues
+  the remaining tail before never-sent audio, then the replacement session transcribes interrupted
+  items from PCM instead of duplicating a partial old-session finalization. Thus the ready transition,
+  an asynchronous send error, and a half-open socket cannot silently strand a chunk. An overflow of
+  the deliberate cap is itself a typed anomaly and an explicit context warning.
+- **Why:** The prior session cannot retrospectively reveal whether the missing question disappeared
+  before capture, between capture and delivery, at the socket, or inside transcription. Boundary
+  evidence makes the next failure locatable while preserving the rule that raw audio is never
+  archived. Live reconnect validation then exposed the remaining boundary: macOS accepted offline
+  append messages locally for twelve seconds before ping detected the dead socket, so the old FIFO
+  deleted the exact missing phrases and replayed only later silence. The witness isolated that stage;
+  the bounded recovery tail now retains and retranscribes those words after reconnect.
+- **Rejected:** (a) Persist raw PCM — it would reveal the words but reverses the project's privacy
+  posture. (b) Send every stream to a second transcription provider — doubles audio egress and cost.
+  (c) Hash audio chunks as proof — a content hash does not reveal what was said or which downstream
+  stage failed, while increasing fingerprinting risk.
+- **Detail:** `Sources/JarvisCore/Diagnostics/AudioContinuityWitness.swift`,
+  `Sources/JarvisCore/Audio/AdaptiveAudioActivityDetector.swift`,
+  `Sources/JarvisApp/Capture/RealtimeTranscriber.swift`.
+- **Superseded in part by:** 2026-07-17 — Diagnostics never enter the brain transcript. The witness,
+  recovery tail, and anomaly logs stand; transcript warning insertion does not.
+
+### 2026-07-17 — Diagnostics never enter the brain transcript
+
+- **Chose:** Keep the rolling transcript semantic: only usable final or salvaged transcription text
+  can enter it or trigger a coach turn. Failed, timed-out, overflowed, or locally unmatched audio
+  remains diagnostic-only. The continuity witness correlates bounded local activity intervals with
+  overlapping server VAD intervals on the session audio clock, retaining warned metadata long enough
+  for reconnect replay to resolve it; a new socket generation never unmatches prior evidence.
+- **Why:** Live validation produced explicit missing-speech warnings immediately after five correctly
+  transcribed utterances. A quiet dip split one locally detected phrase into multiple episodes while
+  Realtime correctly reported one longer server interval; matching only the server start mislabeled
+  the later episodes. Those heuristic warnings then rode into later brain requests as if they were
+  speech, adding cost and misleading context without recovering a single word. Diagnostics can prove
+  where continuity stopped, but they are not language and do not belong in semantic context.
+- **Rejected:** (a) Increasing the grace timeout — delays real diagnostics without fixing interval
+  mismatch. (b) Treating completion/failure events as blanket matches — a late event from an older
+  item could hide a newer loss. (c) Sending hedged warning prose to the brain — it is still synthetic
+  context and can distort coaching.
+- **Detail:** [architecture.md → Resilience](./architecture.md#resilience),
+  `Sources/JarvisCore/Diagnostics/AudioContinuityWitness.swift`,
+  `Sources/JarvisCore/Transcription/RealtimeTranscriptionLedger.swift`,
+  `Sources/JarvisApp/Capture/RealtimeTranscriber.swift`.
+
+### 2026-07-17 — Distribution via release-please + notarized zip on GitHub Releases
+
+- **Chose:** Releases are fully automated in `.github/workflows/release.yml`: release-please (`simple` release type) maintains a Release PR from the conventional-commit history and keeps both `Resources/Info.plist` version keys in sync via `x-release-please-version` line annotations; merging it creates a **draft** GitHub Release, and a `macos-15` job runs the test gate, then `scripts/package-app.sh` — one Developer ID signing pass with hardened runtime, timestamp, and the `audio-input` entitlement (hardened runtime otherwise denies the mic), notarization via an App Store Connect API key, staple, **re-zip after stapling** — and publishes the Release only after `Jarvis-<version>.zip` is attached. `package-app.sh` is self-contained rather than layered on `build-app.sh`, whose self-signed-identity creation can prompt for keychain access and hang a headless runner.
+- **Why:** Friends install from the repo's Releases page with zero Gatekeeper friction, and version/CHANGELOG/tag/asset can't drift because no step is manual. Draft-until-attached means a failed sign/notarize run never leaves a public Release without its app.
+- **Rejected:** (a) Sharing the `Jarvis Dev`-signed zip — untrusted on every other Mac; macOS 15 removed the right-click-Open bypass, leaving the buried "Open Anyway" flow. (b) A separate tag-triggered build workflow — tags created with `GITHUB_TOKEN` never trigger other workflows, so it would silently never run; the build job is gated on `release_created` in the same workflow instead. (c) Apple ID + app-specific password for notarization — the API key is the recommended CI method (no 2FA/session coupling, revocable). (d) A DMG — a zip is standard for a small menu-bar app and `notarytool` takes it directly.
+- **Detail:** [build-and-run.md → Distribution](./build-and-run.md#distribution--signed-notarized-releases-from-ci); `scripts/package-app.sh`, `release-please-config.json`.
+
+### 2026-07-17 — Agentic session audit as a dev-side workflow; single-call path kept as fallback
+
+- **Chose:** A second, *agentic* evaluator that runs the audit through an agentic CLI (Claude Code `claude -p` / Codex `codex exec`) whose workspace is the repo checkout **plus** the session directory, so it verifies each finding against the harness's own code instead of guessing from traffic. It ships as a **dev-side script** (`scripts/eval-session.sh`) driving a thin Foundation-only executable (`EvalPrep`) that reuses Core's delta-aware transcript rendering (`SessionEvaluator.renderTranscript`) to write an owner-only `eval-transcript.txt` beside the traffic and emit the task prompt (`AgenticEvaluation`). The prompt keeps the report skeleton and call-#N citations, points the auditor at the load-bearing files (`CoachHistory.swift`, `CoachDriver.swift`, `ToolDefs.swift`, `ReasoningEffort.swift`), and requires each recommendation to be labelled `[confirmed]` (checked against the code) or `[hypothesis]`. The report is written back as `eval-report.md` — the same filename the in-app path uses. The single-call `SessionEvaluator` (the in-app **Evaluate** button) is unchanged and stays as the cheap fallback.
+- **Why:** Grading the first real single-call report (2026-07-15 session) showed it was half wrong in three ways, all rooted in the auditor seeing only wire traffic, not the code: it recommended shrinking `max_output_tokens` (which is a combined reasoning+output budget), blamed 0-cached-token calls on a client bug the elision markers disproved, and proposed mechanisms (`CoachHistory` screenshot stubbing, bulky-result compaction) that already exist. An auditor that can read `CoachHistory.swift`/`CoachDriver.swift`/`ToolDefs.swift` turns those guesses into checkable claims. Keeping it dev-side sidesteps the sandbox/key-handling questions of launching a headless agent from the signed app: `.jarvis/` session dirs are already owner-only and workspace-local, and the CLI authenticates with the developer's own `claude`/`codex` login — Jarvis's owner-only key file is never touched. `EvalPrep` is a separate executable (not a `JarvisApp` subcommand) purely so the render logic is reusable from a script on any machine, keeping the "logic in Core, testable anywhere" boundary.
+- **Rejected:** (a) An in-app shell-out from the Evaluate button — raises the sandbox + key-handoff questions with no payoff for a personal dev-time tool. (b) Baking the ground truth into the single-call prompt as static prose (the parked `b32c5be` revision) — the harness description drifts, and a stale sentence makes the auditor confidently wrong, the exact failure it was meant to fix; letting the agent read the live code removes the drift surface entirely. (c) Dropping the single-call path — it's one cheap round trip and the fallback when no agentic CLI is installed. (d) Feeding the agent raw `brain-traffic.jsonl` instead of the rendered transcript — the delta-aware render is the right compact input regardless of consumer, so it's reused, not reimplemented in bash.
+- **Detail:** `Sources/JarvisCore/Diagnostics/AgenticEvaluation.swift`, `Sources/EvalPrep/main.swift`, `scripts/eval-session.sh`; the `[confirmed]`/`[hypothesis]` idea comes from the parked revision noted in issue #71.
+
+### 2026-07-17 — Reports are read in the browser; markdown stays the source of truth
+
+- **Chose:** "Open report" renders the saved `eval-report.md` to a self-contained `eval-report.html` beside it (`EvalReportPage`, a deliberate-subset markdown renderer in Core) and hands the page to the default browser; the page's **Copy as Markdown** button carries the raw report so it can be pasted into an agent chat to work on the findings. The markdown remains the only thing evaluators produce; the HTML is a derived view regenerated on every open (so an agentic re-audit that rewrites the `.md` can never leave a stale page). All report content is HTML-escaped — the report is LLM output and must not be able to inject script into a local page.
+- **Rejected:** (a) The prior in-app `NSTextView` window — raw markdown as monospace text; readable but unrendered, and copy meant select-all. (b) Having evaluators emit HTML directly — agents consume markdown, and two authored formats drift. (c) A real markdown dependency (swift-markdown/cmark) — a dependency for a report page whose imperfect corners are always recoverable from the embedded raw markdown fails the no-new-dependencies bar.
+- **Detail:** `Sources/JarvisCore/Diagnostics/EvalReportPage.swift`; opened by `ActivityViewer.openReport` and `scripts/eval-session.sh` (via `EvalPrep --html`).
+
+### 2026-07-18 — Technical-interview context is broad and screen-dependent
+
+- **Chose:** One technical-interview coach covers behavioral, system-design, and coding questions.
+  When a specific answer depends on visible context missing from the conversation — including an
+  unresolved reference such as “this” — the prompt uses a screen gate: `capture_screen` before
+  `speak`, with one fresh screenshot/OCR satisfying that request. Each model response chooses one
+  action, allowing the intended capture-then-answer tool loop without repeated captures.
+- **Why:** In a live session, “How can I solve this in one pass?” triggered a generic coding answer
+  because the prompt required capture only for explicit look-at-screen requests. The visible problem
+  was the missing referent, and a coding-platform-specific persona also understated the intended
+  interview scope.
+- **Rejected:** (a) Capturing before every direct answer — fully stated behavioral, system-design,
+  and coding questions do not need vision. (b) Recapturing after a fresh result. (c) A longer prompt
+  that repeats tool protocol already expressed by the tool definitions. (d) A coding-platform-
+  specific coaching identity.
+- **Supersedes:** 2026-06-13 — One mode for v1: LeetCode Coach.
+- **Detail:** [architecture.md §2](./architecture.md#2-core-loop),
+  `Sources/JarvisCore/Coach/ToolDefs.swift`.
+
+### 2026-07-18 — Claude sign-in uses Claude's bounded auth-status command
+
+- **Chose:** Keep CLI binary discovery as file probes, but determine Claude Code authentication by
+  running its non-billing `claude auth status --json` command under a short timeout. Model the result
+  as signed in, signed out, or unknown; Settings shows all three, Start refuses only a confirmed
+  logout, and an actual coaching failure stops the unusable session without activating the app. A
+  fixed provider-only Activity notice explains that coaching stopped; the detailed error remains in
+  `jarvis-debug.log`. Codex continues to use its auth-file marker.
+- **Why:** Session `2026-07-18_15-25-46_366D` had an expired OAuth session, but the persistent
+  `oauthAccount` metadata made Settings claim Claude was signed in. Claude's own status command reads
+  its real credential store without making a model request and correctly distinguishes that stale
+  marker from a working login.
+- **Rejected:** (a) Trusting the account marker as signed in — it caused the false status. (b) Treating
+  every failed probe as signed out — a slow or broken executable is unknown, not proof of logout.
+  (c) Making a model request as preflight — it bills usage and duplicates the first real turn. (d)
+  Showing a modal alert for a mid-session failure — activating Jarvis can expose it during screen
+  sharing and breaks the app's ghost behavior.
+- **Supersedes in part:** 2026-07-16 — Local Claude Code / Codex CLIs as alternative brain providers.
+- **Detail:** [settings-window.md → Brain](./settings-window.md#brain),
+  `Sources/JarvisCore/Brain/AgentCLIDetector.swift`.
+
+### 2026-07-18 — Runtime failures preserve ghost mode
+
+- **Chose:** Treat startup and runtime failure presentation as separate policy. An explicit Start may
+  show a failure alert before a session exists; once a pipeline is live, every error path remains
+  non-presenting through terminal teardown. Terminal brain, microphone-transcription, and capture
+  failures stop silently; the system-audio path degrades silently. Fixed, non-sensitive notices go
+  to Activity and dynamic details go only to `jarvis-debug.log`. Activity evaluation/report opening
+  and history confirmation are disabled and race-guarded while coaching runs. A static gate requires
+  an inline reviewed exception on every API capable of presenting, activating, opening a URL,
+  requesting attention, notifying, or sounding.
+- **Why:** A modal or browser appearing during screen sharing exposes the assistant precisely when a
+  runtime failure makes it most likely. Severity alone also races: teardown can finish before a
+  queued main-actor alert executes. Capturing startup/runtime context at the failure site makes the
+  invariant independent of later session state, and the source guard prevents direct AppKit bypasses.
+- **Rejected:** (a) Alerting on terminal failures — operationally clear but violates ghost mode. (b)
+  Reading only current session state when the UI task executes — teardown turns a runtime failure
+  into a false startup state. (c) Hiding the persistent menu-bar item or blocking user-opened
+  Settings/Activity — those are named product surfaces and explicit user actions, not autonomous
+  disclosure. macOS privacy indicators remain unavoidable.
+- **Supersedes in part:** 2026-06-23 — Capture adapts to any input rate; startup fails loud. Startup
+  still fails loud; mid-session failures do not.
+- **Detail:** [architecture.md → Failure surfacing](./architecture.md#failure-surfacing--startup-loud-runtime-ghost),
+  `Sources/JarvisCore/Diagnostics/UserFacingError.swift`, `scripts/check-ghost-mode.sh`.
+
+### 2026-07-18 — Codex coaching invocations are isolated and bounded
+
+- **Chose:** Keep `codex exec` as the subscription-backed transport, but make a coaching turn a
+  direct-response decision rather than a coding-agent run: suppress project-root/document and rules
+  discovery, probe the installed CLI's advertised feature names and disable its supported
+  shell/code-mode/delegation/browser/app/plugin surfaces, explicitly forbid remaining built-in tools
+  in the prompt, and retain read-only sandboxing as the enforcement backstop. A missing capability
+  probe falls back to no guessed feature flags, so older or renamed CLIs are not rejected before the
+  direct-response safeguards run. Codex gets a shorter default stall timeout than Claude, and a
+  timed-out process includes its bounded stderr tail in the session diagnostic.
+- **Why:** Session `2026-07-18_20-50-10_4AC2` reached the first Codex request, then produced no reply
+  for 62.968 seconds; Stop was the only reason it ended, so the traffic record contained only a
+  generic cancellation. The installed 0.144.5 CLI still enabled its coding-agent feature surface,
+  while Jarvis incorrectly treated `--sandbox read-only` and `--ignore-user-config` as if they
+  disabled tools and instruction discovery. That let a three-way coach decision enter Codex's much
+  heavier agent runtime, where current GPT-5.6 Sol/macOS releases also have a reported code-mode-host
+  stall/failure path.
+- **Rejected:** (a) Silently falling back to the metered API or another CLI — changes the user's
+  selected provider and billing path. (b) Keeping the two-minute generic timeout — later speech only
+  batches behind the stuck turn. (c) Treating read-only as no-tools — it limits filesystem mutation
+  but does not remove shell, delegation, browser, or other tool definitions. (d) Replacing the
+  coaching transport with Codex app-server/SDK — substantially more lifecycle and protocol surface
+  when this call needs one final text object.
+- **Supersedes in part:** 2026-07-16 — Local Claude Code / Codex CLIs as alternative brain providers.
+- **Detail:** [architecture.md → Local CLI brain providers](./architecture.md#local-cli-brain-providers),
+  `Sources/JarvisCore/Brain/CLIBrainClient+Invocation.swift`, `AgentCLIProcessRunner.swift`.

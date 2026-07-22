@@ -1,17 +1,30 @@
 import AppKit
 
-/// Menu-bar status item: start/stop, a "Settings…" item, and a session interjection counter.
-/// Two states, shown as the robot emoji icon: desaturated (black-and-white) when stopped, full
-/// colour when running. All settings (API key, overlay appearance, the activity log) live in
-/// the unified Settings window, opened via `onOpenSettings`.
+/// Menu-bar status item: Start/Stop, Settings, Quit — every item in the standard icon+title format
+/// (see `NSMenuItem+Standard.swift`). The icon is full-colour only while mic transcription is
+/// actually ready; starting and reconnecting stay visibly distinct from a healthy listening session.
 @MainActor
 final class MenuBarController: NSObject {
+    enum State: Equatable {
+        case stopped
+        case starting
+        case listening
+        case reconnecting(attempt: Int)
+        case systemAudioConnecting
+        case microphoneOnly
+
+        var isActive: Bool { self != .stopped }
+
+        var isMicReady: Bool {
+            self == .listening || self == .systemAudioConnecting || self == .microphoneOnly
+        }
+    }
+
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-    private let counterItem = NSMenuItem(title: "Interjections: 0", action: nil, keyEquivalent: "")
-    private let startStopItem = NSMenuItem(title: "Start Jarvis", action: nil, keyEquivalent: "s")
-    private var interjections = 0
-    /// Whether the listen/coach pipeline is currently running.
-    private(set) var isRunning = false
+    private let startStopItem = NSMenuItem.standard("Start Jarvis", symbol: "play.fill", keyEquivalent: "s")
+    private(set) var state: State = .stopped
+    /// Whether a pipeline exists, including its startup/reconnect windows.
+    var isRunning: Bool { state.isActive }
 
     /// Fired when the user asks to start the pipeline. Returns `true` if it actually started.
     var onStart: (() -> Bool)?
@@ -22,55 +35,43 @@ final class MenuBarController: NSObject {
 
     override init() {
         super.init()
-        let menu = NSMenu()
         startStopItem.target = self
         startStopItem.action = #selector(toggleStartStop)
-        menu.addItem(startStopItem)
-        let settings = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
-        settings.target = self
-        menu.addItem(settings)
-        menu.addItem(.separator())
-        menu.addItem(counterItem)
-        menu.addItem(.separator())
-        let quit = NSMenuItem(title: "Quit Jarvis", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-        menu.addItem(quit)
+        let menu = NSMenu()
+        menu.items = [
+            startStopItem,
+            .standard("Settings…", symbol: "gearshape",
+                      action: #selector(openSettings), target: self, keyEquivalent: ","),
+            .standard("Quit Jarvis", symbol: "power",
+                      action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"),
+        ]
         statusItem.menu = menu
         refreshUI()
     }
 
-    func noteSpoke() {
-        interjections += 1
-        counterItem.title = "Interjections: \(interjections)"
-    }
-
-    /// Reset the per-session interjection count (called on each Start).
-    func resetCounter() {
-        interjections = 0
-        counterItem.title = "Interjections: 0"
-    }
-
-    /// The single source of truth for running state.
-    func setRunning(_ running: Bool) {
-        isRunning = running
+    /// The single source of truth for pipeline and mic-connection health.
+    func setState(_ state: State) {
+        self.state = state
         refreshUI()
     }
 
     @objc private func openSettings() { onOpenSettings?() }
 
     @objc private func toggleStartStop() {
-        if isRunning {
+        if state.isActive {
             onStop?()
-            setRunning(false)
+            setState(.stopped)
         } else {
-            setRunning(onStart?() ?? false)
+            _ = onStart?()
         }
     }
 
-    /// Single source of truth for the status icon and the start/stop label.
+    /// Single source of truth for the status icon and the start/stop item.
     private func refreshUI() {
-        startStopItem.title = isRunning ? "Stop Jarvis" : "Start Jarvis"
+        startStopItem.applyStandard(title: state.isActive ? "Stop Jarvis" : "Start Jarvis",
+                                    symbol: state.isActive ? "stop.fill" : "play.fill")
         guard let button = statusItem.button else { return }
-        button.image = isRunning ? MenuBarIcon.running : MenuBarIcon.stopped
+        button.image = state.isMicReady ? MenuBarIcon.running : MenuBarIcon.stopped
         button.title = ""
     }
 }

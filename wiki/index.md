@@ -17,7 +17,7 @@
 - **[overlay-timing.md](./overlay-timing.md)** — how long each coaching line stays on screen: a hybrid of the captioning reading-speed standard and our glance-not-watch situation (length-proportional time + a fixed notice buffer + an inter-line blank gap).
 - **[landscape-survey.md](./landscape-survey.md)** — every tool and product we tried or evaluated, and how each measured up. ("What I tried.")
 - **[fork-evaluation.md](./fork-evaluation.md)** — code-level evaluation of open-source apps as a fork base for the PoC, and why they're all Electron/Tauri rather than native Swift.
-- **[settings-window.md](./settings-window.md)** — the unified Settings window: one menu item → `SettingsWindow` hosting `APIKeySection`, `OverlaySection`, `DisplaySection`, `BrainModelSection`, and `ActivitySection`; the Overlay Caption and Overlay Box each have an on/off toggle + size/opacity, persisted via `OverlayAppearance`; the Screen tab picks which display `capture_screen` screenshots.
+- **[settings-window.md](./settings-window.md)** — the unified Settings window: one menu item → `SettingsWindow` hosting `BrainSection`, `OverlaySection`, `DisplaySection`, and `ActivitySection`; the Brain tab picks the provider (OpenAI API, or an auto-detected local Claude Code / Codex CLI running on the user's subscription), its model + reasoning effort, and holds the OpenAI API key (always required — transcription runs on it); the Overlay Caption and Overlay Box each have an on/off toggle + size/opacity, persisted via `OverlayAppearance`; the Screen tab picks what `capture_screen` shoots in one dropdown — the active window by default (with an on-device OCR sidecar) or an entire display.
 
 ## Decisions
 
@@ -30,6 +30,7 @@
 
 ## What Jarvis Is, In One Sentence
 
-A personal, always-on macOS assistant that watches and listens while you solve a LeetCode
-problem and proactively coaches you with short tips in an on-screen overlay — built as a thin
-harness over Apple's capture frameworks and the OpenAI APIs, reinventing nothing.
+A personal, always-on macOS assistant that watches and listens during technical interviews and
+proactively coaches behavioral, system-design, and coding questions with short tips in an on-screen
+overlay — built as a thin harness over Apple's capture frameworks and the OpenAI APIs, reinventing
+nothing.

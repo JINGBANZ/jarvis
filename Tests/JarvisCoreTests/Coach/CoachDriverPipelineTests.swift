@@ -33,8 +33,14 @@ final class ScriptedThrowBrain: BrainClient, @unchecked Sendable {
 final class FakeScreen: ScreenCapturing, @unchecked Sendable {
     var captureCount = 0
     let payload: String
-    init(payload: String = "ZmFrZS1qcGVn") { self.payload = payload } // "fake-jpeg"
-    func capture() -> String? { captureCount += 1; return payload }
+    let recognizedText: String?
+    init(payload: String = "ZmFrZS1qcGVn", recognizedText: String? = nil) { // "fake-jpeg"
+        self.payload = payload; self.recognizedText = recognizedText
+    }
+    func capture() -> ScreenSnapshot? {
+        captureCount += 1
+        return ScreenSnapshot(imageBase64: payload, recognizedText: recognizedText)
+    }
 }
 
 /// A screen whose `capture()` parks until released, so a test can cancel the turn *while the
@@ -46,11 +52,11 @@ final class GatedScreen: ScreenCapturing, @unchecked Sendable {
     private(set) var captureCount = 0
     let payload: String
     init(payload: String = "ZmFrZS1qcGVn") { self.payload = payload }
-    func capture() -> String? {
+    func capture() -> ScreenSnapshot? {
         captureCount += 1
         entered.signal()
         release.wait()
-        return payload
+        return ScreenSnapshot(imageBase64: payload)
     }
 }
 
@@ -65,18 +71,21 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     }
 }
 
-// `.serialized`: two tests here drive the shared `ActivityLog` singleton (the screenshot e2e and the
-// manual-hint trigger-log e2e). Serializing the suite keeps their enable()/disable() from racing each
-// other — they are the only code that enables the shared log, so no other suite can collide.
+// `.serialized`: the activity-log end-to-end tests drive the shared `ActivityLog` singleton.
+// Serializing the suite keeps their enable()/disable() calls from racing each other — they are the
+// only code that enables the shared log, so no other suite can collide.
 @Suite(.serialized) struct CoachDriverPipelineTests {
     private func makeDriver(brain: BrainClient, summarizer: BrainClient? = nil,
                             screen: ScreenCapturing = FakeScreen(),
                             overlay: OverlayRendering = FakeOverlay(),
-                            clock: Clock, config: Config = .default) -> (CoachDriver, RollingTranscript) {
+                            clock: Clock, config: Config = .default,
+                            onBrainFailure: (@Sendable (String) -> Void)? = nil)
+        -> (CoachDriver, RollingTranscript) {
         let transcript = RollingTranscript()
         let driver = CoachDriver(
             config: config, transcript: transcript,
-            brain: brain, summarizer: summarizer, screen: screen, overlay: overlay, clock: clock
+            brain: brain, summarizer: summarizer, screen: screen, overlay: overlay, clock: clock,
+            onBrainFailure: onBrainFailure
         )
         return (driver, transcript)
     }
@@ -110,19 +119,41 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(brain.calls[1].contains { $0.role == .assistant && $0.toolCalls?.first?.name == "capture_screen" })
         #expect(brain.calls[1].contains { $0.role == .tool && $0.toolCallId == "c1" })
         #expect(brain.calls[1].contains { $0.imageBase64JPEG != nil })
+        // No OCR text on this snapshot → the tool result stays the plain marker.
+        #expect(brain.calls[1].first { $0.role == .tool }?.text == "screenshot captured")
+    }
+
+    /// D2 (OCR sidecar): when the capture carries recognized text, it rides in the capture_screen
+    /// tool-result text — flagged as fallible OCR — right next to the image, so the model reads
+    /// the exact code instead of deciphering pixels.
+    @Test func recognizedTextRidesInTheCaptureToolResult() async {
+        let brain = ScriptedBrain(script: [
+            .init(toolCalls: [.captureScreen(callId: "c1")],
+                  rawToolCalls: [RawToolCall(id: "c1", name: "capture_screen", argumentsJSON: "{}")]),
+            .init(toolCalls: [.speak(callId: "s1", lines: ["Check groupEnd for null before .next"])],
+                  rawToolCalls: [RawToolCall(id: "s1", name: "speak",
+                                             argumentsJSON: #"{"lines":["Check groupEnd for null before .next"]}"#)]),
+        ])
+        let screen = FakeScreen(recognizedText: "class Solution {\n    while(true){ cnt--; }")
+        let (driver, transcript) = makeDriver(brain: brain, screen: screen,
+                                              overlay: FakeOverlay(), clock: ManualClock(now: 100))
+        transcript.append(.init(speaker: .me, text: "why is this throwing NPE", at: 100))
+
+        await driver.handleTrigger(.turnEnd)
+
+        let toolResult = brain.calls[1].first { $0.role == .tool && $0.toolCallId == "c1" }?.text ?? ""
+        #expect(toolResult.contains("screenshot captured"))
+        #expect(toolResult.contains("while(true){ cnt--; }"))     // the OCR text, verbatim
+        #expect(toolResult.contains("may contain errors"))        // …flagged as fallible
+        #expect(brain.calls[1].contains { $0.imageBase64JPEG != nil })   // image still ground truth
     }
 
     /// End-to-end: a real capture→speak turn through the production `CoachDriver` with the activity
-    /// log enabled (as dev mode does). Proves the screenshot the model looked at lands in the
-    /// activity log as a genuine, owner-only JPEG rendered as a clickable thumbnail linked to the
-    /// full image — the behaviour verified by hand, now automated against regressions.
+    /// log enabled (as it is for every session). Proves the screenshot the model looked at lands in
+    /// the activity log as a genuine, owner-only JPEG rendered as a clickable thumbnail linked to
+    /// the full image — the behaviour verified by hand, now automated against regressions.
     ///
-    /// This drives the shared `ActivityLog` singleton (the real production path: CoachDriver → jlog →
-    /// ActivityLog.shared). Peer tests in this suite also call jlog() and can write into this dir
-    /// while it's the active sink — `.serialized` does NOT prevent that (swift-testing's serialization
-    /// doesn't isolate a test from its peers). Robustness instead comes from: (1) selecting the shot
-    /// by exact byte-match to our fixture, so another test's screenshot can't be mistaken for ours,
-    /// and (2) the append-only `jarvis-activity.jsonl`, so our line survives interleaved writes.
+    /// This drives the shared `ActivityLog` singleton through the real typed activity-event path.
     /// `disable()` in defer resets the singleton afterwards.
     @Test func screenshotLandsInActivityLogAsValidJpeg() async throws {
         let dir = URL(fileURLWithPath: NSTemporaryDirectory())
@@ -168,10 +199,9 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
     /// A hotkey trigger leaves no "🗣 heard:" transcript line (the user pressed a key, didn't speak),
     /// so the manual hint must record its OWN activity line — including the synthetic message we
-    /// pre-fill as the user's request — so the dev viewer shows what the shortcut sent to the brain.
-    /// Drives the shared `ActivityLog` like the screenshot e2e above; the suite is `.serialized` so the
-    /// two shared-log tests don't race. (Other suites' `jlog` calls may also land in this dir while it's
-    /// enabled; that only adds lines, so the `contains` check stays robust.)
+    /// pre-fill as the user's request — so the viewer shows what the shortcut sent to the brain.
+    /// Drives the shared `ActivityLog` like the screenshot e2e above; the suite is `.serialized` so
+    /// the shared-log tests don't race.
     @Test func manualHintTriggerAndPrefilledMessageLandInActivityLog() async throws {
         let dir = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("jarvis-hintlog-\(ProcessInfo.processInfo.globallyUniqueString)")
@@ -190,6 +220,35 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let jsonl = try String(contentsOf: dir.appendingPathComponent("jarvis-activity.jsonl"), encoding: .utf8)
         // The trigger marker carries the pre-filled synthetic request ("…pressed the hint shortcut…").
         #expect(jsonl.contains("hint shortcut"))
+    }
+
+    /// The activity viewer is the human coaching record, not a second debug console. Internal turn
+    /// state still belongs in `jarvis-debug.log`, while the tip produced by that turn remains visible.
+    @Test func activityLogExcludesCoachingDiagnostics() async throws {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("jarvis-activity-boundary-\(ProcessInfo.processInfo.globallyUniqueString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { ActivityLog.shared.disable(); try? FileManager.default.removeItem(at: dir) }
+        JarvisLog.enableFileLogging(directory: dir)
+        ActivityLog.shared.enable(directory: dir)
+
+        let brain = ScriptedBrain(script: [
+            .init(toolCalls: [.speak(callId: "s", lines: ["activity-boundary-tip-417"])])
+        ])
+        let (driver, _) = makeDriver(brain: brain, clock: ManualClock(now: 417))
+
+        #expect(await driver.handleTrigger(.silence(secondsQuiet: 417)) == .spoke)
+
+        _ = ActivityLog.shared.attach { _ in }   // sync barrier: all async records have landed
+        let jsonl = try String(contentsOf: dir.appendingPathComponent("jarvis-activity.jsonl"), encoding: .utf8)
+        #expect(jsonl.contains("activity-boundary-tip-417"))
+        #expect(!jsonl.contains("quiet for 417s"))
+        #expect(!jsonl.contains("thinking"))
+
+        let debug = try String(contentsOf: dir.appendingPathComponent("jarvis-debug.log"), encoding: .utf8)
+        #expect(debug.contains("quiet for 417s"))
+        #expect(debug.contains("thinking"))
+        #expect(debug.contains("activity-boundary-tip-417"))
     }
 
     /// Stop cancelling a turn *while the screenshot is being captured* must abort before emitting:
@@ -254,6 +313,43 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(second.contains { ($0.text ?? "").contains("thinking about the columns") })  // memory kept
         #expect(!second.contains { $0.role == .assistant && $0.toolCalls != nil })           // no call replayed
         #expect(!second.contains { $0.role == .tool })                                       // no dangling result
+    }
+
+    /// A silence check the model shrugs at (stay_silent, nothing new said) leaves NO trace in the
+    /// session memory: committing its bare trigger note would pile up answerless user messages,
+    /// re-billed on every later request and confusing to read back in the request log.
+    @Test func silentSilenceCheckLeavesNoTriggerNoteInHistory() async {
+        let clock = ManualClock(now: 0)
+        let brain = ScriptedBrain(script: [.init(toolCalls: [.staySilent(callId: "q1")],
+                                                 rawToolCalls: [RawToolCall(id: "q1", name: "stay_silent", argumentsJSON: "{}")])])
+        let (driver, transcript) = makeDriver(brain: brain, clock: clock)
+        #expect(await driver.handleTrigger(.silence(secondsQuiet: 120)) == .silentByModel)
+
+        transcript.append(.init(speaker: .me, text: "ok here is an idea", at: 5))
+        await driver.handleTrigger(.turnEnd)
+        // Scoped to user messages: the system prompt legitimately shows a "(no speech for …)" example.
+        #expect(!brain.calls[1].contains { $0.role == .user && ($0.text ?? "").contains("no speech for") })
+    }
+
+    /// But a silence check where the model DID look at the screen keeps the whole turn in memory —
+    /// the capture (and the note that prompted it) is context a later turn can build on.
+    @Test func silenceCheckWithCaptureIsKeptInHistory() async {
+        let clock = ManualClock(now: 0)
+        let brain = ScriptedThrowBrain(script: [
+            .init(toolCalls: [.captureScreen(callId: "c1")],
+                  rawToolCalls: [RawToolCall(id: "c1", name: "capture_screen", argumentsJSON: "{}")]),
+            .init(toolCalls: [.staySilent(callId: "q1")],
+                  rawToolCalls: [RawToolCall(id: "q1", name: "stay_silent", argumentsJSON: "{}")]),
+            .init(toolCalls: []),
+        ])
+        let (driver, transcript) = makeDriver(brain: brain, clock: clock)
+        #expect(await driver.handleTrigger(.silence(secondsQuiet: 120)) == .silentByModel)
+
+        transcript.append(.init(speaker: .me, text: "ok here is an idea", at: 5))
+        await driver.handleTrigger(.turnEnd)
+        let last = brain.calls.last!
+        #expect(last.contains { $0.role == .user && ($0.text ?? "").contains("no speech for") })   // the note survives
+        #expect(last.contains { $0.role == .tool && $0.toolCallId == "c1" })                        // with its capture
     }
 
     /// Defensive: a model that answers with NO tool call despite `required` still reads as deliberate
@@ -376,9 +472,47 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(brain.calls.last!.contains { ($0.text ?? "").contains("important words") })   // re-sent
     }
 
-    /// Observation masking: once a NEWER screenshot exists, older ones in memory become text stubs —
-    /// the next request carries exactly one image plus the stub.
-    @Test func olderScreenshotStubbedAfterNewerCapture() async {
+    /// Reasoning passthrough: a capture_screen response's WHOLE output (reasoning + the function_call
+    /// with its item id) rides verbatim into the tool loop's next request, ahead of the tool result —
+    /// the canonical `input.push(...response.output)` loop. Commit converts it: the next turn's
+    /// request carries the id-less synthetic call instead, and no reasoning.
+    @Test func reasoningItemsRideTheToolLoopButNotMemory() async {
+        let outputItems = [
+            #"{"type":"reasoning","id":"rs_1"}"#,
+            #"{"type":"function_call","id":"fc_1","call_id":"c1","name":"capture_screen","arguments":"{}"}"#,
+        ]
+        let brain = ScriptedBrain(script: [
+            .init(toolCalls: [.captureScreen(callId: "c1")],
+                  rawToolCalls: [RawToolCall(id: "c1", name: "capture_screen", argumentsJSON: "{}")],
+                  outputItemsJSON: outputItems),
+            .init(toolCalls: [.speak(callId: "s1", lines: ["tip"])],
+                  rawToolCalls: [RawToolCall(id: "s1", name: "speak", argumentsJSON: "{}")]),
+            .init(toolCalls: []),
+        ])
+        let (driver, transcript) = makeDriver(brain: brain, clock: ManualClock(now: 0))
+        transcript.append(.init(speaker: .me, text: "look at this", at: 0))
+        await driver.handleTrigger(.turnEnd)
+        transcript.append(.init(speaker: .me, text: "another thought", at: 5))
+        await driver.handleTrigger(.turnEnd)
+
+        // Within the turn: one verbatim passthrough message, whole and in order, before the result.
+        let second = brain.calls[1]
+        let rawIndex = second.firstIndex { $0.rawItemsJSON != nil }
+        let resultIndex = second.firstIndex { $0.role == .tool && $0.toolCallId == "c1" }
+        #expect(rawIndex != nil && resultIndex != nil)
+        if let r = rawIndex, let t = resultIndex { #expect(r < t) }
+        #expect(second.first { $0.rawItemsJSON != nil }?.rawItemsJSON == outputItems)
+        #expect(!second.contains { $0.toolCalls?.contains { $0.name == "capture_screen" } ?? false })   // no duplicate synthetic call
+
+        // After commit: reasoning gone, the call converted to the id-less synthetic history shape.
+        let third = brain.calls[2]
+        #expect(!third.contains { $0.rawItemsJSON != nil })
+        #expect(third.contains { $0.toolCalls == [RawToolCall(id: "c1", name: "capture_screen", argumentsJSON: "{}")] })
+    }
+
+    /// Observation masking: a screenshot only lives within the turn that took it — once the turn
+    /// commits, later requests carry a text stub instead of pixels.
+    @Test func screenshotsStubbedAfterTheirTurnCommits() async {
         let clock = ManualClock(now: 0)
         // Every turn: capture then speak. ScriptedBrain repeats the last entry, so we script one
         // capture+speak pair and run it twice, then inspect the request of a third turn.
@@ -402,8 +536,8 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         await driver.handleTrigger(.turnEnd)
 
         let last = brain.calls.last!
-        #expect(last.filter { $0.imageBase64JPEG != nil }.count == 1)                    // newest only
-        #expect(last.contains { ($0.text ?? "").contains("no longer available") })       // stub for the old one
+        #expect(!last.contains { $0.imageBase64JPEG != nil })                            // no pixels survive
+        #expect(last.filter { ($0.text ?? "").contains("no longer available") }.count == 2)   // a stub each
     }
 
     // MARK: - Compaction
@@ -512,6 +646,40 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(await driver.handleTrigger(.turnEnd) == .brainError)
     }
 
+    @Test func brainErrorReportsTheFailureReason() async {
+        let recorder = BrainFailureRecorder()
+        let (driver, transcript) = makeDriver(
+            brain: ThrowingBrain(), clock: ManualClock(now: 0),
+            onBrainFailure: { recorder.record($0) }
+        )
+        transcript.append(.init(speaker: .me, text: "please help with this problem", at: 0))
+
+        #expect(await driver.handleTrigger(.turnEnd) == .brainError)
+        #expect(recorder.messages == ["test brain failed"])
+    }
+
+    @Test func terminalBrainErrorDropsCoalescedAndLaterTriggers() async {
+        let clock = ManualClock(now: 0)
+        let gate = AsyncGate()
+        let brain = GatedThrowingBrain(gate: gate)
+        let recorder = BrainFailureRecorder()
+        let (driver, transcript) = makeDriver(
+            brain: brain, clock: clock,
+            onBrainFailure: { recorder.record($0) }
+        )
+        transcript.append(.init(speaker: .me, text: "first substantial question", at: 0))
+        async let first = driver.handleTrigger(.turnEnd)
+        await gate.waitUntilEntered()
+        transcript.append(.init(speaker: .me, text: "second substantial question", at: 1))
+
+        #expect(await driver.handleTrigger(.turnEnd) == .busy)
+        await gate.release()
+        #expect(await first == .brainError)
+        #expect(await driver.handleTrigger(.turnEnd) == .brainError)
+        #expect(brain.callCount == 1)
+        #expect(recorder.messages == ["gated brain failed"])
+    }
+
     /// Audio-driven turns REQUIRE a tool call (never free text): the model picks which tool from the
     /// prompt — reply, look at the screen, or stay_silent — but must answer with one of them.
     @Test func everyAudioTurnRequiresAToolCall() async {
@@ -545,8 +713,17 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 /// A brain that always throws, to exercise the `.brainError` outcome.
 final class ThrowingBrain: BrainClient, @unchecked Sendable {
     func respond(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice) async throws -> BrainResponse {
-        throw NSError(domain: "test", code: 401)
+        throw NSError(domain: "test", code: 401,
+                      userInfo: [NSLocalizedDescriptionKey: "test brain failed"])
     }
+}
+
+/// Lock-guarded because `CoachDriver`'s failure callback is `@Sendable`.
+final class BrainFailureRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var recorded: [String] = []
+    var messages: [String] { lock.lock(); defer { lock.unlock() }; return recorded }
+    func record(_ message: String) { lock.lock(); recorded.append(message); lock.unlock() }
 }
 
 /// A brain that parks inside `respond` until released, so a second concurrent trigger can be
@@ -563,6 +740,24 @@ final class GatedBrain: BrainClient, @unchecked Sendable {
         record()
         await gate.enter()
         return response
+    }
+}
+
+/// A throwing brain with the same one-shot gate, so a second trigger can pend before the terminal
+/// failure is released.
+final class GatedThrowingBrain: BrainClient, @unchecked Sendable {
+    private let gate: AsyncGate
+    private let lock = NSLock()
+    private var _callCount = 0
+    var callCount: Int { lock.lock(); defer { lock.unlock() }; return _callCount }
+    init(gate: AsyncGate) { self.gate = gate }
+    private func recordCall() { lock.lock(); _callCount += 1; lock.unlock() }
+    func respond(messages: [ChatMessage], tools: [ToolDef],
+                 toolChoice: ToolChoice) async throws -> BrainResponse {
+        recordCall()
+        await gate.enter()
+        throw NSError(domain: "test", code: 401,
+                      userInfo: [NSLocalizedDescriptionKey: "gated brain failed"])
     }
 }
 

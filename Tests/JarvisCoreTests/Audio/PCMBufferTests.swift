@@ -36,4 +36,192 @@ import Testing
         #expect(b.bufferedBytes == 0)
         #expect(b.drain().isEmpty)
     }
+
+    @Test func sequencedChunksSurviveReconnectBuffering() {
+        let b = PCMBuffer(maxBytes: 100)
+        b.append(Data([1, 2]), sequenceNumber: 41)
+        b.append(Data([3, 4]), sequenceNumber: 42)
+
+        #expect(b.drainChunks() == [
+            .init(data: Data([1, 2]), sequenceNumber: 41),
+            .init(data: Data([3, 4]), sequenceNumber: 42),
+        ])
+    }
+
+    @Test func claimedChunkRemainsFirstUntilLocalSendCompletes() throws {
+        let b = PCMBuffer(maxBytes: 100)
+        b.append(Data([1]), sequenceNumber: 1)
+        b.append(Data([2]), sequenceNumber: 2)
+
+        let first = try #require(b.claimNext())
+        #expect(first.chunk.sequenceNumber == 1)
+        #expect(b.claimNext() == nil)
+        #expect(b.completeSend(first) != nil)
+
+        let second = try #require(b.claimNext())
+        #expect(second.chunk.sequenceNumber == 2)
+    }
+
+    @Test func failedSendRetriesExactChunkBeforeLaterAudio() throws {
+        let b = PCMBuffer(maxBytes: 100)
+        b.append(Data([1]), sequenceNumber: 41)
+        let failed = try #require(b.claimNext())
+        b.append(Data([2]), sequenceNumber: 42)
+
+        #expect(b.retry(failed))
+        let retry = try #require(b.claimNext())
+        #expect(retry.chunk.sequenceNumber == 41)
+        #expect(retry != failed) // a stale callback cannot complete the replacement claim
+        #expect(b.completeSend(failed) == nil)
+        #expect(b.completeSend(retry) != nil)
+        #expect(b.claimNext()?.chunk.sequenceNumber == 42)
+    }
+
+    @Test func appendAfterEmptyReadyBoundaryCannotBeStranded() throws {
+        let b = PCMBuffer(maxBytes: 100)
+
+        #expect(b.claimNext() == nil) // readiness found the queue empty
+        b.append(Data([9]), sequenceNumber: 9) // producer races immediately after that check
+
+        let claim = try #require(b.claimNext())
+        #expect(claim.chunk.sequenceNumber == 9)
+    }
+
+    @Test func capNeverEvictsInFlightChunk() throws {
+        let b = PCMBuffer(maxBytes: 3)
+        b.append(Data([1, 1, 1]), sequenceNumber: 1)
+        let inFlight = try #require(b.claimNext())
+        let evicted = b.append(Data([2, 2, 2, 2]), sequenceNumber: 2)
+
+        #expect(evicted.map(\.sequenceNumber) == [2])
+        #expect(b.retry(inFlight))
+        #expect(b.claimNext()?.chunk.sequenceNumber == 1)
+    }
+
+    /// URLSession can report a successful local send while a half-open socket has delivered no
+    /// bytes to the server. The chunk therefore remains available to the replacement connection.
+    @Test func localSendCompletionDoesNotRemoveChunkFromReconnectReplay() throws {
+        let b = PCMBuffer(maxBytes: 100)
+        b.append(Data([1, 2]), sequenceNumber: 41, capturedAt: 10, duration: 0.01)
+        let locallySent = try #require(b.claimNext())
+        #expect(b.completeSend(locallySent) != nil)
+        #expect(b.claimNext() == nil)
+
+        let recovery = b.prepareForReconnect()
+        #expect(recovery.replayedChunks == 1)
+        #expect(recovery.oldestCapturedAt == 10)
+        #expect(try #require(b.claimNext()).chunk.sequenceNumber == 41)
+    }
+
+    @Test func reconnectReplaysLocalTailBeforeNeverSentAudio() throws {
+        let b = PCMBuffer(maxBytes: 100)
+        b.append(Data([1]), sequenceNumber: 1, capturedAt: 1, duration: 0.01)
+        let sent = try #require(b.claimNext())
+        #expect(b.completeSend(sent) != nil)
+        b.append(Data([2]), sequenceNumber: 2, capturedAt: 2, duration: 0.01)
+
+        b.prepareForReconnect()
+        #expect(b.drainChunks().map(\.sequenceNumber) == [1, 2])
+    }
+
+    @Test func serverProgressDiscardsOnlyCoveredLocalSendPrefix() throws {
+        let b = PCMBuffer(maxBytes: 100)
+        for sequence in 1...3 {
+            b.append(Data([UInt8(sequence)]), sequenceNumber: UInt64(sequence),
+                     capturedAt: TimeInterval(sequence), duration: 0.5)
+            let claim = try #require(b.claimNext())
+            #expect(b.completeSend(claim) != nil)
+        }
+
+        #expect(b.discardSent(through: 2.5).map(\.sequenceNumber) == [1, 2])
+        b.prepareForReconnect()
+        #expect(b.drainChunks().map(\.sequenceNumber) == [3])
+    }
+
+    @Test func serverProgressBeforeLocalCompletionPreventsLaterReplay() throws {
+        let b = PCMBuffer(maxBytes: 100)
+        b.append(Data([1]), sequenceNumber: 1, capturedAt: 1, duration: 0.5)
+        let inFlight = try #require(b.claimNext())
+
+        #expect(b.discardSent(through: 1.5).isEmpty)
+        #expect(b.completeSend(inFlight) != nil)
+
+        #expect(b.prepareForReconnect().replayedChunks == 0)
+        #expect(b.drainChunks().isEmpty)
+    }
+
+    @Test func reconnectDropsServerConfirmedClaimBeforeItsCallbackArrives() throws {
+        let b = PCMBuffer(maxBytes: 100)
+        b.append(Data([1]), sequenceNumber: 1, capturedAt: 1, duration: 0.5)
+        let staleClaim = try #require(b.claimNext())
+
+        #expect(b.discardSent(through: 1.5).isEmpty)
+        #expect(b.prepareForReconnect().replayedChunks == 0)
+        #expect(b.completeSend(staleClaim) == nil)
+        #expect(b.drainChunks().isEmpty)
+    }
+
+    @Test func serverBoundaryAfterReconnectPreparationDropsConfirmedReplayPrefix() throws {
+        let b = PCMBuffer(maxBytes: 100)
+        b.append(Data([1]), sequenceNumber: 1, capturedAt: 1, duration: 0.5)
+        let sent = try #require(b.claimNext())
+        #expect(b.completeSend(sent) != nil)
+        b.prepareForReconnect()
+
+        #expect(b.discardSent(through: 1.5).isEmpty)
+        #expect(b.drainChunks().isEmpty)
+    }
+
+    @Test func staleLocalCompletionCannotRemoveRequeuedChunk() throws {
+        let b = PCMBuffer(maxBytes: 100)
+        b.append(Data([1]), sequenceNumber: 1, capturedAt: 1, duration: 0.01)
+        let oldClaim = try #require(b.claimNext())
+
+        b.prepareForReconnect()
+        let replacementClaim = try #require(b.claimNext())
+        #expect(b.completeSend(oldClaim) == nil)
+        #expect(b.completeSend(replacementClaim) != nil)
+
+        b.prepareForReconnect()
+        #expect(b.claimNext()?.chunk.sequenceNumber == 1)
+    }
+
+    @Test func localRecoveryTailAndPendingAudioShareTheMemoryCap() throws {
+        let b = PCMBuffer(maxBytes: 3)
+        b.append(Data([1, 1]), sequenceNumber: 1, capturedAt: 1, duration: 0.01)
+        let sent = try #require(b.claimNext())
+        #expect(b.completeSend(sent) != nil)
+
+        let evicted = b.append(Data([2, 2]), sequenceNumber: 2, capturedAt: 2, duration: 0.01)
+        #expect(evicted.map(\.sequenceNumber) == [1])
+        #expect(b.bufferedBytes <= 3)
+        b.prepareForReconnect()
+        #expect(b.drainChunks().map(\.sequenceNumber) == [2])
+    }
+
+    @Test func reportsOverflowWhenUnconfirmedLocallySentAudioAgesOut() throws {
+        let b = PCMBuffer(maxBytes: 2)
+        for sequence in 1...2 {
+            b.append(Data([UInt8(sequence)]), sequenceNumber: UInt64(sequence))
+            let claim = try #require(b.claimNext())
+            #expect(b.completeSend(claim) != nil)
+        }
+        b.prepareForReconnect()
+
+        #expect(b.append(Data([3]), sequenceNumber: 3).map(\.sequenceNumber) == [1])
+        #expect(b.append(Data([4]), sequenceNumber: 4).map(\.sequenceNumber) == [2])
+        #expect(b.append(Data([5]), sequenceNumber: 5).map(\.sequenceNumber) == [3])
+        #expect(b.drainChunks().map(\.sequenceNumber) == [4, 5])
+    }
+
+    @Test func completionReportsRecoveryTailEvictedAroundAnInFlightClaim() throws {
+        let b = PCMBuffer(maxBytes: 3)
+        b.append(Data([1, 1, 1]), sequenceNumber: 1)
+        let inFlight = try #require(b.claimNext())
+        #expect(b.append(Data([2, 2, 2]), sequenceNumber: 2).isEmpty)
+
+        let completion = try #require(b.completeSend(inFlight))
+        #expect(completion.evicted.map(\.sequenceNumber) == [1])
+        #expect(b.drainChunks().map(\.sequenceNumber) == [2])
+    }
 }

@@ -11,8 +11,22 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
     private let log: ActivityLog
     private var store: SessionStore   // rebuilt when a new session opens (see `sessionDidChange`)
 
+    /// Builds the evaluation pipeline for the "Evaluate" button, read at click time so it always
+    /// uses the current API key + model selection. Nil result ⇒ no key yet. Wired by AppDelegate;
+    /// explicitly `@MainActor` because it reads AppDelegate's main-actor state (secrets, preferences).
+    var makeEvaluator: (@MainActor () -> SessionEvaluator?)?
+
+    /// Whether a coaching session is currently running (wired by AppDelegate). Read at click time —
+    /// evaluation is for *finished* conversations, so the live session is off-limits until Stop:
+    /// its traffic file is still being appended to, and a mid-session audit would judge half a story.
+    var isCoachingRunning: (@MainActor () -> Bool)?
+
     private var webView: WKWebView?
     private var picker: NSPopUpButton?
+    private var copySessionIDButton: NSButton?
+    private var evaluateButton: NSButton?
+    private var clearHistoryButton: NSButton?
+    private var isEvaluating = false      // an audit is in flight; keep the button disabled meanwhile
     private var sessions: [SessionStore.Session] = []
 
     private var loaded = false             // page navigation finished?
@@ -42,33 +56,75 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         let content = NSView(frame: NSRect(x: 0, y: 0, width: 560, height: 420))
         content.autoresizingMask = [.width, .height]
 
-        let header = NSVisualEffectView(frame: NSRect(x: 0, y: content.bounds.height - 44, width: content.bounds.width, height: 44))
+        let headerHeight: CGFloat = 44
+        let header = NSVisualEffectView(frame: NSRect(x: 0,
+                                                      y: content.bounds.height - headerHeight,
+                                                      width: content.bounds.width,
+                                                      height: headerHeight))
         header.autoresizingMask = [.width, .minYMargin]
         header.material = .headerView
         header.blendingMode = .withinWindow
         header.state = .active
 
         let sessionLabel = NSTextField(labelWithString: "Session")
-        sessionLabel.frame = NSRect(x: 14, y: 13, width: 60, height: 18)
+        sessionLabel.translatesAutoresizingMaskIntoConstraints = false
         sessionLabel.textColor = .secondaryLabelColor
         header.addSubview(sessionLabel)
 
-        let pop = NSPopUpButton(frame: NSRect(x: 76, y: 8, width: 280, height: 26))
+        let pop = NSPopUpButton(frame: .zero)
+        pop.translatesAutoresizingMaskIntoConstraints = false
         pop.target = self
         pop.action = #selector(sessionChanged)
         pop.toolTip = "Switch between this and previous sessions"
-        pop.autoresizingMask = [.maxXMargin]
+        pop.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         header.addSubview(pop)
         self.picker = pop
 
+        let copyID = NSButton(title: "Copy ID", target: self, action: #selector(copySessionIDTapped))
+        copyID.translatesAutoresizingMaskIntoConstraints = false
+        copyID.bezelStyle = .rounded
+        copyID.toolTip = "Copy the exact session ID"
+        header.addSubview(copyID)
+        self.copySessionIDButton = copyID
+
+        let evaluate = NSButton(title: "Evaluate", target: self, action: #selector(evaluateTapped))
+        evaluate.translatesAutoresizingMaskIntoConstraints = false
+        evaluate.bezelStyle = .rounded
+        header.addSubview(evaluate)
+        self.evaluateButton = evaluate
+
         let clear = NSButton(title: "Clear history", target: self, action: #selector(clearHistoryTapped))
+        clear.translatesAutoresizingMaskIntoConstraints = false
         clear.bezelStyle = .rounded
         clear.toolTip = "Delete all previous sessions (keeps the current one)"
-        clear.frame = NSRect(x: content.bounds.width - 134, y: 8, width: 120, height: 28)
-        clear.autoresizingMask = [.minXMargin]
         header.addSubview(clear)
+        self.clearHistoryButton = clear
 
-        let wv = WKWebView(frame: NSRect(x: 0, y: 0, width: content.bounds.width, height: content.bounds.height - 44))
+        let preferredPickerWidth = pop.widthAnchor.constraint(equalToConstant: 230)
+        // Prefer the full picker width, but let window resizing compress it.
+        preferredPickerWidth.priority = .init(rawValue: 490)
+        NSLayoutConstraint.activate([
+            sessionLabel.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 14),
+            sessionLabel.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            pop.leadingAnchor.constraint(equalTo: sessionLabel.trailingAnchor, constant: 2),
+            pop.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            pop.widthAnchor.constraint(greaterThanOrEqualToConstant: 120),
+            preferredPickerWidth,
+            copyID.leadingAnchor.constraint(equalTo: pop.trailingAnchor, constant: 8),
+            copyID.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            copyID.widthAnchor.constraint(equalToConstant: 78),
+            copyID.trailingAnchor.constraint(lessThanOrEqualTo: evaluate.leadingAnchor, constant: -8),
+            evaluate.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            evaluate.widthAnchor.constraint(equalToConstant: 104),
+            evaluate.trailingAnchor.constraint(equalTo: clear.leadingAnchor, constant: -8),
+            clear.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            clear.widthAnchor.constraint(equalToConstant: 120),
+            clear.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -14),
+        ])
+
+        let wv = WKWebView(frame: NSRect(x: 0, y: 0,
+                                        width: content.bounds.width,
+                                        height: content.bounds.height - headerHeight))
         wv.autoresizingMask = [.width, .height]
         wv.navigationDelegate = self
 
@@ -86,6 +142,9 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         log.detach()
         webView = nil
         picker = nil
+        copySessionIDButton = nil
+        evaluateButton = nil
+        clearHistoryButton = nil
         loaded = false
         pending = []
         snapshotRows = []
@@ -114,12 +173,73 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         if let idx = sessions.firstIndex(where: { $0.isCurrent }) {
             picker?.selectItem(at: idx)
         }
+        refreshCopySessionIDButtonState()
+        refreshEvaluateButtonState()
     }
 
     @objc private func sessionChanged() {
         guard let idx = picker?.indexOfSelectedItem, sessions.indices.contains(idx) else { return }
         let s = sessions[idx]
         if s.isCurrent { loadCurrent() } else { loadPast(s) }
+        refreshCopySessionIDButtonState()
+        refreshEvaluateButtonState()
+    }
+
+    private func refreshCopySessionIDButtonState() {
+        guard let idx = picker?.indexOfSelectedItem, sessions.indices.contains(idx) else {
+            copySessionIDButton?.isEnabled = false
+            return
+        }
+        copySessionIDButton?.isEnabled = true
+    }
+
+    @objc private func copySessionIDTapped() {
+        guard let idx = picker?.indexOfSelectedItem, sessions.indices.contains(idx) else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(sessions[idx].id, forType: .string)
+    }
+
+    /// Coaching started or stopped (AppDelegate calls this from Start/Stop): the live session just
+    /// became off-limits for evaluation, or the now-stopped one became evaluable.
+    func coachingStateDidChange() {
+        refreshEvaluateButtonState()
+    }
+
+    /// Evaluate and Clear stay disabled for the entire coaching lifecycle. Past-session evaluation
+    /// is data-safe while another session runs, but its asynchronous completion can otherwise open
+    /// a browser or alert mid-session. Owns the title too: `isEvaluating` survives a Settings
+    /// close/reopen (the viewer outlives its content view), so a rebuilt button mid-audit correctly
+    /// shows "Evaluating…" disabled instead of inviting a duplicate audit.
+    private func refreshEvaluateButtonState() {
+        let coachingRunning = isCoachingRunning?() == true
+        clearHistoryButton?.isEnabled = !coachingRunning
+        guard let button = evaluateButton else { return }
+        if isEvaluating {
+            button.title = "Evaluating…"
+            button.isEnabled = false
+            return
+        }
+        guard let idx = picker?.indexOfSelectedItem, sessions.indices.contains(idx) else {
+            button.title = "Evaluate"
+            button.isEnabled = false
+            return
+        }
+        let session = sessions[idx]
+        if coachingRunning {
+            button.title = SessionEvaluator.savedReport(in: session.url) == nil ? "Evaluate" : "Open report"
+            button.toolTip = "Stop Jarvis before evaluating or opening a report"
+            button.isEnabled = false
+            return
+        }
+        if SessionEvaluator.savedReport(in: session.url) != nil {
+            button.title = "Open report"
+            button.toolTip = "Open this session's evaluation report in your browser"
+            button.isEnabled = true
+        } else {
+            button.title = "Evaluate"
+            button.toolTip = "Send this session's recorded LLM traffic to the brain model for a context-engineering audit (stopped sessions only)"
+            button.isEnabled = true
+        }
     }
 
     // MARK: - Loading
@@ -182,16 +302,93 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         webView.evaluateJavaScript("setMeta(\(jsString(pendingMeta)));", completionHandler: nil)
     }
 
+    // MARK: - Session evaluation
+
+    /// One click: send the selected session's recorded brain traffic to the evaluation model and
+    /// show (and persist) the resulting audit report. A session that was already evaluated just
+    /// reopens its saved report — no re-billing. Only *stopped* conversations qualify for a fresh
+    /// audit: any past session, or the current one once coaching is stopped. The button is already
+    /// disabled while any session runs (`refreshEvaluateButtonState`); the guard here is the
+    /// race-proof backstop for a click that lands exactly as a Start flips the state.
+    @objc private func evaluateTapped() {
+        guard isCoachingRunning?() != true else {
+            jlog("Jarvis: suppressed Activity evaluation presentation while coaching is running.")
+            return
+        }
+        guard let idx = picker?.indexOfSelectedItem, sessions.indices.contains(idx) else { return }
+        let session = sessions[idx]
+        if let report = SessionEvaluator.savedReport(in: session.url) {
+            openReport(report, for: session)
+            return
+        }
+        guard SessionEvaluator.hasTraffic(in: session.url) else {
+            info("Nothing to evaluate",
+                 "This session has no recorded LLM traffic. Traffic is captured from the first coaching turn onward.")
+            return
+        }
+        guard let evaluator = makeEvaluator?() else {
+            info("No API key", "Paste your API key in Settings first — the evaluation runs on the same key.")
+            return
+        }
+        isEvaluating = true
+        refreshEvaluateButtonState()
+        Task { [weak self] in
+            defer {
+                self?.isEvaluating = false
+                self?.refreshEvaluateButtonState()
+            }
+            do {
+                let report = try await evaluator.evaluate(sessionDir: session.url)
+                self?.openReport(report, for: session)
+            } catch {
+                self?.info("Evaluation failed", error.localizedDescription)
+            }
+        }
+    }
+
+    /// Open the report in the user's browser: render the markdown to `eval-report.html` beside it
+    /// (regenerated every open, so it never goes stale after a dev-side agentic re-audit rewrites
+    /// the `.md`) and hand the page to the default browser. The page carries a "Copy as Markdown"
+    /// button so the raw report can be pasted into an agent chat to work on the findings.
+    private func openReport(_ report: String, for session: SessionStore.Session) {
+        guard isCoachingRunning?() != true else {
+            jlog("Jarvis: evaluation completed while coaching is running; report saved without opening a browser.")
+            return
+        }
+        do {
+            let url = try EvalReportPage.write(markdown: report, in: session.url,
+                                               title: "Session evaluation — \(session.label)")
+            NSWorkspace.shared.open(url) // ghost-mode-allowed: guarded explicit Activity action
+        } catch {
+            info("Couldn't write the report page", error.localizedDescription)
+        }
+    }
+
+    private func info(_ title: String, _ message: String) {
+        guard isCoachingRunning?() != true else {
+            jlog("Jarvis: suppressed Activity alert while coaching is running — \(title): \(message)")
+            return
+        }
+        let alert = NSAlert() // ghost-mode-allowed: guarded explicit Activity action
+        alert.messageText = title
+        alert.informativeText = message
+        alert.runModal() // ghost-mode-allowed: guarded explicit Activity action
+    }
+
     // MARK: - Clear history
 
     @objc private func clearHistoryTapped() {
-        let alert = NSAlert()
+        guard isCoachingRunning?() != true else {
+            jlog("Jarvis: suppressed Clear history confirmation while coaching is running.")
+            return
+        }
+        let alert = NSAlert() // ghost-mode-allowed: guarded explicit Activity action
         alert.messageText = "Clear session history?"
         alert.informativeText = "This permanently deletes all previous sessions (logs and screenshots). The current session is kept."
         alert.alertStyle = .warning
         alert.addButton(withTitle: "Clear")
         alert.addButton(withTitle: "Cancel")
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        guard alert.runModal() == .alertFirstButtonReturn else { return } // ghost-mode-allowed: guarded explicit Activity action
         store.clearHistory()
         populatePicker()
         loadCurrent()   // the viewed session may be gone; fall back to the live one

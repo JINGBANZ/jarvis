@@ -35,4 +35,44 @@ import Foundation
         p.displayIndex = 0
         #expect(p.displayIndex == 1)
     }
+
+    @Test func scopeDefaultsToActiveWindowWhenUnset() {
+        #expect(ScreenCapturePreferences(defaults: freshDefaults()).scope == .activeWindow)
+    }
+
+    @Test func scopeRoundTripsThroughDefaults() {
+        let d = freshDefaults()
+        ScreenCapturePreferences(defaults: d).scope = .entireDisplay
+        #expect(ScreenCapturePreferences(defaults: d).scope == .entireDisplay)
+    }
+
+    @Test func unrecognizedStoredScopeFallsBackToActiveWindow() {
+        // A hand-edited or stale value must never crash or silently mean "entire display".
+        let d = freshDefaults()
+        d.set("holographic", forKey: "screen.captureScope")
+        #expect(ScreenCapturePreferences(defaults: d).scope == .activeWindow)
+    }
+
+    @Test func entireDisplayScopeTargetsTheChosenDisplay() {
+        let p = ScreenCapturePreferences(defaults: freshDefaults())
+        p.scope = .entireDisplay
+        p.displayIndex = 2
+        #expect(p.explicitDisplay == 2)
+    }
+
+    @Test func mainDisplayNeedsNoExplicitTargeting() {
+        // A plain capture IS the main display, so index 1 never produces a -D.
+        let p = ScreenCapturePreferences(defaults: freshDefaults())
+        p.scope = .entireDisplay
+        p.displayIndex = 1
+        #expect(p.explicitDisplay == nil)
+    }
+
+    @Test func activeWindowFallbacksIgnoreAStaleDisplayIndex() {
+        // An index left over from an old entire-display selection must not steer fallbacks.
+        let p = ScreenCapturePreferences(defaults: freshDefaults())
+        p.scope = .activeWindow
+        p.displayIndex = 3
+        #expect(p.explicitDisplay == nil)
+    }
 }

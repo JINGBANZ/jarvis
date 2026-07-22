@@ -13,10 +13,11 @@
 
 ## 1. Vision
 
-Jarvis is a personal, always-on macOS assistant that **coaches you through a LeetCode problem**.
-It listens to you think aloud, and — when it decides it needs to — looks at your screen to see
-the problem statement and your code. When it has something genuinely useful to add, it speaks up
-**unprompted** with a short tip rendered in an on-screen overlay.
+Jarvis is a personal, always-on macOS assistant that **coaches you through technical interviews**:
+behavioral, system-design, and coding questions. It listens to you think aloud, and — when it needs
+visible context — looks at your screen to see the current question, code, diagram, or notes. When it
+has something genuinely useful to add, it speaks up **unprompted** with a short tip rendered in an
+on-screen overlay.
 
 The guiding belief: **build the harness, not the intelligence.** The intelligence already exists
 (`gpt-5.5`, the `gpt-4o-transcribe` model on the OpenAI Realtime API). The macOS capabilities already exist (ScreenCaptureKit,
@@ -54,24 +55,32 @@ moments the model judges worthwhile.
 1. The Transcriber emits a **turn-end** event (`gpt-4o-transcribe` server VAD ends the turn after a
    tuned silence window) or a **silence check** fires (you've gone quiet, maybe stuck). The silence
    check carries *how long* you've been quiet and backs off across a long silence (the interval
-   doubles each step up to a cap — see `Config`), resetting on speech.
+   doubles each step up to a cap — see `Config`), resetting on speech; past an idle cutoff it stops
+   probing entirely (you've stepped away — a nudge into an empty room still bills a request) until
+   speech re-arms it.
 2. The CoachDriver calls the brain on every trigger that carries **substance** — there is no
    cooldown, rate cap, or wake-word gate. Whether to speak (and whether the user just addressed
    Jarvis) is the model's call, governed by the system prompt; the only hard gates are the user's
    Start/Stop and the **substance gate** (`TurnSubstance`): a turn-end whose delta is pure
-   back-channel filler ("Hmm", "嗯" — from *either* speaker) or empty is skipped without a
-   request. The gate is speaker-neutral by design: an interviewer question is substance and may
-   draw a proactive tip for the user. Skipped lines ride along on the next substantive turn;
-   silence checks and the hint hotkey always go through.
+   back-channel filler ("Hmm", "嗯") or empty is skipped without a request. Classification is
+   speaker-aware only where conversational meaning demands it: a short interviewer rejection such
+   as "No" is substantive, even though the same user-side fragment is normally filler. Interviewer
+   questions remain first-class and may draw a proactive tip. Skipped lines ride along on the next
+   substantive turn; silence checks and the hint hotkey always go through.
 3. It calls **`gpt-5.5`** with the coach system prompt, the session memory (`CoachHistory`), the
    new transcript delta, the timing context (seconds silent, session elapsed), and the tool set
    `[capture_screen, speak, stay_silent]`. The timing is what lets the model tell "thinking" from
    "stuck."
-4. The model may call `capture_screen`. The harness fulfills it (a silent screenshot) and
-   returns the image into the request. The model may now reason over what's on screen.
+4. Before speaking, the model calls `capture_screen` when a specific, correct reply depends on
+   visible context missing from the conversation — including unresolved references such as “this”
+   or “here” — and no fresh capture is already available for that request. It may also capture when
+   a silence trigger leaves progress unclear. The harness returns a silent screenshot plus OCR; that
+   fresh result satisfies the screen gate, so the next model response must speak or stay silent
+   rather than capture the same request again. Fully stated questions do not require a reflexive
+   capture.
 5. The model calls `speak(lines)` — a tip of up to ~3 short lines, returned **already split**
    into an array (Structured Outputs / `strict:true`), so the client never splits prose on
-   punctuation — or `stay_silent`. A tool call is **required** on every turn: silence is an
+   punctuation — or `stay_silent`. A tool call is **required** on every model response: silence is an
    explicit tool, never plain text, so the session memory stays free of stray model prose
    (see [decisions.md](./decisions.md)).
 6. `speak` renders to the **Overlay**, one line at a time (per-line display time set in `Config`).
@@ -115,15 +124,15 @@ plugins ship only with full Xcode, and Jarvis builds **CLT-only** (see
 
 | Component | Responsibility | Built on (borrowed) |
 |---|---|---|
-| **AggregateEchoCapture** | The whole capture path: one **private Core Audio aggregate device** = the built-in mic (`me`, clock master) + a system-output **process tap** (`them`, drift-compensated onto the mic's clock). A single IOProc delivers both sample-synced at the device's **native rate** — the one-clock case AEC3 needs; the capture **reads that rate and resamples mic+tap up to 48 kHz** for AEC3 (a no-op when the device is already 48 kHz). So **any input device works** — built-in, USB, 44.1 kHz gear, or AirPods (Bluetooth HFP at 16/24 kHz) — instead of the old hard 48 kHz pin that silently failed to start on Bluetooth mics. Inside the callback it runs AEC3 (tap = far reference, mic = near), removing the other side's speaker bleed from the mic *before* transcription — no headphones, and double-talk works (measured 30–50 dB cancellation). Then downsamples to 24 kHz: cleaned mic → `me` socket, raw tap → `them` socket. Replaces the old separate `AVAudioEngine` mic + `SCStream`. | Core Audio (`AudioHardwareCreateProcessTap`, private aggregate device, drift compensation) + `AVAudioConverter` resampling + WebRTC **AEC3**. |
+| **AggregateEchoCapture** | The whole capture path: one **private Core Audio aggregate device** = the built-in mic (`me`, clock master) + a system-output **process tap** (`them`, drift-compensated onto the mic's clock). A single IOProc delivers both sample-synced at the device's **native rate** — the one-clock case AEC3 needs; the capture **reads that rate and resamples mic+tap up to 48 kHz** for AEC3 (a no-op when the device is already 48 kHz). So **any input device works** — built-in, USB, 44.1 kHz gear, or AirPods (Bluetooth HFP at 16/24 kHz) — instead of the old hard 48 kHz pin that silently failed to start on Bluetooth mics. Inside the callback it runs AEC3 (tap = far reference, mic = near), removing the other side's speaker bleed from the mic *before* transcription — no headphones, and double-talk works (measured 30–50 dB cancellation). The untouched resampled tap remains the `them` source while a separate padded/truncated copy aligns AEC; wire delivery is serialized off the realtime IOProc. Then both sides downsample to 24 kHz. Replaces the old separate `AVAudioEngine` mic + `SCStream`. | Core Audio (`AudioHardwareCreateProcessTap`, private aggregate device, drift compensation) + `AVAudioConverter` resampling + WebRTC **AEC3**. |
 | **WebRTCEchoCanceller** | AEC3 echo canceller driven at 48 kHz on 10 ms frames inside the capture IOProc; far reference first, then the mic cleaned in place. | WebRTC **AEC3** (`webrtc-audio-processing`), vendored static + zero-dylib via `scripts/build-aec.sh`. |
-| **ErrorReporter** | The single funnel for user-facing failures. Severity on a Foundation-only `UserFacingError` (in Core) decides the response — `fatal` pops an `NSAlert` and tears the session down, `degraded` is logged only — so no startup failure is ever silent. The only place an *error* `NSAlert` is raised (confirmation prompts aside); diagnostics stay in `JarvisLog`. | AppKit (`NSAlert`). |
-| **Transcriber** | Maintain a rolling, speaker-labeled, **timestamped** transcript; emit turn-end events and backing-off silence checks (with quiet duration). Two instances run in parallel — one per side — tagging lines `me`/`them` into one shared transcript. | `gpt-4o-transcribe` (Realtime API; tuned `server_vad`). |
-| **CoachDriver** | The event loop. On every substantive trigger (plus every silence check and hint keypress), call the brain with the session memory + transcript delta + timing context and tools, route tool calls, and compact the memory when it grows long. No cooldown/rate cap — restraint is the model's; the only client-side skip is the filler-only turn-end gate (`TurnSubstance`). | `gpt-5.5` (vision + tool-use); `gpt-5.4-mini` for memory summaries. |
-| **ScreenTool** | Fulfill `capture_screen`: take a silent screenshot of the display selected in Settings → Screen (default: the main display; falls back to it if the selected one is unplugged), excluding the overlay window. See [settings-window.md](./settings-window.md#capture-display). | macOS `screencapture` CLI. |
+| **ErrorReporter** | The single funnel for user-facing failures. Severity on a Foundation-only `UserFacingError` decides the lifecycle consequence; an explicit startup/runtime context decides presentation. Startup failures may alert, but runtime failures never activate Jarvis or present UI even when they stop the session. Fixed redacted notices go to Activity and raw detail stays in `JarvisLog`. | AppKit (`NSAlert`) for startup only. |
+| **Transcriber** | Maintain a rolling, speaker-labeled, **spoken-time timestamped** transcript; emit turn-end events and backing-off silence checks (with quiet duration). Two instances run in parallel — one per side — tagging lines `me`/`them` into one shared transcript. A per-`item_id` ledger reconciles out-of-order delta/completed/failed/VAD events and salvages streamed text; an item with no usable words is logged as diagnostic metadata and cannot enter the transcript or trigger the brain. A privacy-preserving continuity witness records content-free capture/delivery/socket/server checkpoints and locally derived activity intervals, so the session log can locate a future gap without retaining PCM or adding pseudo-speech to model context. A socket is ready only after the server acknowledges its configuration; active ping/pong probes, send/receive errors, and startup timeouts all drive the same reconnect path. | `gpt-4o-transcribe` (Realtime API; tuned `server_vad`). |
+| **CoachDriver** | The event loop. On every substantive trigger (plus every silence check and hint keypress), call the brain with the session memory + transcript delta + timing context and tools, route tool calls, and compact the memory when it grows long. No cooldown/rate cap — restraint is the model's; the only client-side skip is the filler-only turn-end gate (`TurnSubstance`). | `gpt-5.5` (vision + tool-use) with `gpt-5.4-mini` for memory summaries — or a local Claude Code / Codex CLI on the user's subscription (see [§4 Local CLI brain providers](#local-cli-brain-providers)). |
+| **ScreenTool** | Fulfill `capture_screen`: silently shoot the **active window** (default scope) — the window-server frontmost, on whichever display, clean even when partially covered — and attach an **on-device OCR** of the shot to the tool result so the model reads exact text instead of pixels. Falls back to a full-display capture (no OCR) — the Settings-chosen display in Entire-display scope, the main display when no window is eligible; the overlay window is excluded either way. See [settings-window.md](./settings-window.md#capture-scope). | macOS `screencapture` CLI + Apple Vision (`VNRecognizeTextRequest`). |
 | **Overlay Caption** | Render `speak` output: up to ~3 short lines (model-split), shown one at a time and queued so a newer tip never cuts off the current one; non-activating, always-on-top, excluded from capture. Switchable from Settings — **off by default**; when off, tips are suppressed. | AppKit NSPanel; `OverlayCaptionPanel`. |
 | **Overlay Box** | A persistent window logging every `speak` tip in full, timestamped — the scrollable history of what the caption flashed one line at a time. Movable, resizable, opaque, also excluded from capture; switched on/off from Settings (**on by default**), cleared on each Start. Fed by the same `speak` call as the caption via **`BroadcastOverlay`**, which fans one `OverlayRendering.render` out to both sinks (so `CoachDriver` is unchanged). | AppKit NSPanel; `OverlayBoxPanel`. |
-| **MenuBar** | Manual **Start/Stop** of the pipeline (two states: ⚪️ stopped / 🟢 running — no auto-start), status indicator, one-time API-key entry. The two overlay surfaces are switched from Settings, not the menu. | AppKit menu-bar item; owner-only file for the key. |
+| **MenuBar** | Manual **Start/Stop** of the pipeline (no auto-start), an explicit connection state (starting, listening, reconnecting, system-audio connecting, microphone-only, or stopped), and one-time API-key entry. It turns green only when the microphone transcription socket is configured and ready. The two overlay surfaces are switched from Settings, not the menu. | AppKit menu-bar item; owner-only file for the key. |
 | **HotkeyController** | Register the global **⌥⌘J** hint hotkey and route a press to a one-trip `manualHint` turn while a session runs (beep otherwise). See [§2 On-demand hint](#on-demand-hint-j). | Carbon HIToolbox (`RegisterEventHotKey`, no TCC). |
 
 Each component has one job and a narrow interface. The CoachDriver is the only place the
@@ -151,15 +160,23 @@ all routes — it's a near-passthrough on earbuds (no acoustic echo to cancel). 
 mic* are HFP narrowband and low-fidelity regardless of resampling; for input quality, use the
 built-in mic.
 
-### Failure surfacing — fail loud
+### Failure surfacing — startup loud, runtime ghost
 
 Every user-facing failure flows through one `ErrorReporter`: severity on a Foundation-only
-`UserFacingError` decides the response (`fatal` → `NSAlert` + session teardown; `degraded` →
-log only), so a startup failure can never again flip the menu green and silently revert. Per-failure
-copy and severity live in a Core **catalog** (`UserFacingError+Catalog`), the single source of truth
-for *which* failures are loud — unit-tested in Core (e.g. the system-audio degrade must stay quiet),
-since `JarvisApp` itself can't be headlessly tested and the `NSAlert` display stays a manual smoke
-check. Diagnostics remain `JarvisLog`'s job; `ErrorReporter` owns surfacing + lifecycle consequence.
+`UserFacingError` decides the lifecycle consequence while an explicit context captured at the
+failure site decides presentation. Startup failures caused by an explicit Start may alert; every
+runtime context suppresses alerts unconditionally, including after teardown, so a queued main-actor
+report cannot reveal Jarvis during screen sharing. Terminal brain, microphone-transcription, and
+audio-capture failures stop silently; the system-audio failure degrades to microphone-only. Each
+records fixed non-sensitive Activity copy while dynamic reasons remain only in `JarvisLog`.
+
+Ghost mode applies from a live pipeline through terminal teardown: no autonomous activation, alert,
+window, browser, notification, attention request, or sound is allowed outside the nonactivating,
+capture-excluded caption and box overlays. The persistent menu-bar item and user-invoked
+Settings/Activity surfaces are explicit exceptions, as is unavoidable macOS privacy UI. The Core
+presentation matrix is unit-tested, and `scripts/check-ghost-mode.sh` rejects unreviewed presentation
+API calls from the normal test gate. Realtime health remains visible only through the existing
+menu-bar status; `ErrorReporter` owns failure lifecycle and permitted startup surfacing.
 
 ## 4. Data Flow & Cost Model
 
@@ -178,13 +195,17 @@ rather than a per-turn screenshot.
 
 - **Brain — `gpt-5.5` via the OpenAI Responses API** (`POST /v1/responses`), not Chat Completions:
   for the gpt-5 family, function/tool calling is the recommended (and least restricted) path on
-  Responses. The tool loop is threaded with `function_call` / `function_call_output` items.
+  Responses. The tool loop is threaded with `function_call` / `function_call_output` items, with the
+  model's `reasoning` items replayed verbatim ahead of the call — OpenAI's requirement for the model
+  to continue its chain of thought over a tool result instead of re-reasoning from scratch.
 - **Per-session memory — client-managed (`CoachHistory`).** The coach needs to remember its *own*
   prior replies (the transcript only holds user speech), so `CoachDriver` keeps the session memory
   itself and rebuilds every request as `[system] + memory + new delta`. Owning the memory is what
   keeps it small and cheap: it grows **append-only** (a byte-identical prefix, so OpenAI's prompt
-  cache keeps hitting at ~90% discount); `stay_silent` turns leave no trace; only the newest
-  screenshot stays as pixels (older ones become one-line stubs); and past a token threshold (see
+  cache keeps hitting at ~90% discount); `stay_silent` turns leave no trace; screenshots and reasoning
+  items live only inside the turn that produced them — at commit, the pixels become a one-line stub
+  and the capture's OCR text (in the tool result) is what persists, and reasoning items are dropped;
+  and past a token threshold (see
   `Config.historyCompactionTokenThreshold`) the oldest span is **compacted** into a short structured
   summary written by a cheaper model (`gpt-5.4-mini`), so the problem statement never falls out of
   context. Requests are sent `store:true` so they stay inspectable in the OpenAI dashboard for
@@ -193,6 +214,60 @@ rather than a per-turn screenshot.
   `semantic_vad`, which is reported flaky in transcription-only mode — it can stop emitting
   `…transcription.completed` entirely). Turn-end fires on `…transcription.completed`, plus a
   client-side debounce so a brief mid-thought pause doesn't fragment one sentence into several turns.
+
+### Local CLI brain providers
+
+The brain can alternatively run through a locally installed **Claude Code** or **Codex** CLI
+(`BrainProvider`, selected in [Settings → Brain](./settings-window.md#brain)), so coaching turns are
+billed to the user's existing Claude / ChatGPT **subscription** instead of the metered API key.
+`CLIBrainClient` implements the same `BrainClient` protocol, so `CoachDriver`, the client-managed
+memory, retries, and traffic recording are all unchanged — only the transport differs:
+
+- **One stateless subprocess per turn** (`claude -p` / `codex exec`, spawned by
+  `AgentCLIProcessRunner`) — no CLI session is created, resumed, or left behind: every call is
+  self-contained (client-managed memory, same as the API path), the CLIs run with session
+  persistence off (`--no-session-persistence` / `--ephemeral`, so no transcript copy lands in
+  `~/.claude` / `~/.codex`), and the process dies with the turn — at reply, at the SIGTERM→SIGKILL
+  timeout watchdog, or **immediately when Stop cancels the turn** (task cancellation kills the pid,
+  so a cancelled turn never keeps burning quota). Since the CLI has no native function calling, the
+  `ToolDef`s are rendered as a **JSON tool protocol** — the model ends its reply with
+  `{"tool":…,"arguments":{…}}`, parsed back into the same `ToolInvocation`s (with prose/code-fence
+  tolerance, and a forced `speak` degrading to speaking the raw reply so a hotkey press never
+  silently vanishes).
+- **Every turn is one model call.** Claude takes its input as a stream-json message, so screenshots
+  ride **inline as base64 image blocks** — same call, no disk copy, no Read-tool round trip — and
+  with `--tools ""` (every built-in disabled) a turn can't go agentic at all. Codex has no inline
+  image input, so for it screenshots become 0600 files in the per-session log directory (which
+  already persists every screenshot the model sees — same data posture), attached via `-i` and
+  deleted when the run finishes. A bounded local capability probe reads the installed Codex CLI's
+  advertised feature names; its supported shell, code-mode, delegation, browser/app, plugin, and
+  other agentic surfaces are disabled without guessing flags that an older or renamed CLI rejects.
+  Project-root/document discovery is suppressed, and the leading instruction explicitly treats the
+  three Jarvis tool names as an output protocol, not Codex tools. `--sandbox read-only` remains the
+  enforcement backstop for built-ins Codex does not expose a disable switch for. Claude runs with
+  its persona replaced (`--system-prompt`) and no settings sources, and the one reasoning-effort
+  setting maps onto each CLI's own scale.
+- **Installed CLIs are auto-detected.** `AgentCLIDetector` discovers binaries through file probes
+  over $PATH + known install dirs. Claude's actual sign-in state comes from its non-billing
+  `auth status --json` command under a short timeout, because stale account metadata can survive an
+  expired OAuth session; Codex uses its auth-file marker and a bounded, non-model `features list`
+  capability probe. Settings distinguishes signed in, signed out, and an unavailable auth probe,
+  and Start refuses a confirmed logout.
+- **The OpenAI key stays required**: transcription always runs on the Realtime API. A CLI provider
+  moves the brain/summarizer/evaluator off the key, not the ears. **Latency is the tradeoff**,
+  though a modest one now that every turn is one model call: measured coach turns run ~2.6s (text)
+  / ~3.3s (with screenshot) on claude sonnet at low effort, ~5–8s on codex — versus the direct
+  API's sub-2s target. The invocation is kept deliberately slim (persona replaced, no settings
+  sources or personal codex config — `--ignore-user-config` — **zero MCP servers** via
+  `--strict-mcp-config` / `-c mcp_servers={}`, and no feature-gated Codex agent tools),
+  so what remains is irreducible from outside: claude's floor is ~0.7s of process overhead + model
+  time; codex's is ~4.7s even for a trivial prompt because its fixed coding-agent scaffold (a
+  built-in multi-thousand-token system prompt that `exec` offers no flag to replace) rides every
+  call. The pipeline absorbs it (single-in-flight turns coalesce; the overlay paces display). If
+  more is ever needed, the escalation is a long-lived interactive CLI process (stream-json in/out
+  with `/clear` between turns — verified to work) — worth its lifecycle complexity only for
+  claude's last ~0.7s, so it's deliberately not built; per-turn session *resume* is pointless (it
+  still pays startup per call).
 
 ### Latency
 
@@ -204,23 +279,53 @@ streamed (one buffered request; the overlay just paces the display).
 
 ### Resilience
 
+The capture edge keeps two system-audio representations for different contracts: transcription
+preserves every real tap sample and pads only a short/empty callback's missing silence so Realtime
+VAD keeps advancing; AEC receives a separate exact mic-length padded/truncated reference. Neither
+path disables AEC or changes the configured Realtime noise-reduction profile.
+
 The always-on legs are built to survive transient failure rather than die on it:
 
 - **The realtime transcription socket *will* drop** (network blips, server resets, the ~60-min
   session cap) and a Realtime session **cannot be resumed** — a dropped connection means a new
-  session. So instead of discarding mic audio during the reconnect gap, the transcriber **buffers it**
-  (`PCMBuffer`, capped at `maxBufferedAudioSeconds`, oldest evicted) and **flushes it into the new
-  session on reconnect** — a mid-sentence drop no longer loses the user's words. Reconnect uses
-  capped exponential backoff with a ping keepalive.
-- **The brain call** is single-flighted (a turn can't double-speak) and runs under a generous request
-  timeout — a hang backstop set well above the reasoning-turn tail, so a slow turn is waited out, not
-  abandoned. It makes **one attempt** per turn: a failed request (a stuck/timed-out call, a dropped
-  connection, an HTTP error) fails the turn rather than retrying in place. Recovery is on the **next
-  trigger** — sent-state advances only on a successful send, so the next turn re-sends the still-unsent
-  transcript (the failed lines plus anything newer, fresher than a resend). Because session memory is
-  client-owned, every request is self-contained: there is no server-side conversation object to lock
-  or dangle. Memory **compaction** fails soft the same way — a failed summary just means the full
-  history rides along until the next attempt.
+  session. A socket is not declared ready at the WebSocket handshake: the transcriber waits for the
+  server's session-configuration acknowledgement under a startup deadline. Once ready, ping/pong
+  probes expose an idle half-open connection before the user's next utterance; send, receive, close,
+  startup-timeout, and liveness failures all enter one idempotent reconnect path. Each replacement
+  socket has a generation so stale callbacks cannot damage the new one, and diagnostics label the
+  `me`/`them` side, socket generation, server session, and current macOS network-path summary. While
+  reconnecting, audio remains in one **transactional FIFO plus recovery tail** (`PCMBuffer`, capped at
+  `maxBufferedAudioSeconds`). Exactly one oldest chunk is claimed at a time. A successful URLSession
+  callback moves it into the in-memory tail rather than deleting it, because Realtime intentionally
+  sends no confirmation for `input_audio_buffer.append`; only server VAD/transcription audio-clock
+  progress retires a safe prefix. On failure, the unconfirmed tail is requeued ahead of audio captured
+  during reconnect backoff. This closes the ready-transition, asynchronous-send, and idle half-open
+  loss edges; deliberate cap eviction is logged as diagnostic metadata. Within a healthy socket,
+  streamed transcript deltas survive a failed or missing terminal event; an unrecoverable detected
+  utterance remains visible in diagnostics but cannot become pseudo-speech or trigger the brain.
+  Sequence, sample, timestamp, and socket-generation checkpoints cover the capture, delivery,
+  WebSocket attempt/completion, and server-event boundaries. Periodic content-free summaries and
+  typed anomalies show which boundary stopped advancing. Bounded local activity intervals match
+  overlapping server VAD intervals on the session audio clock, including delayed reconnect replay,
+  so a quiet dip inside one server utterance is not reported as a gap. This evidence stays in the
+  owner-only session log: it diagnoses loss but cannot reconstruct words that never reached
+  transcription, and none of it enters model context. VAD-only start/stop events do not
+  restart silence checks without contributing context. Pending items are finalized by bounded
+  stopped/active deadlines. On a recoverable socket failure, their old server IDs are cleared and
+  their retained PCM is transcribed by the replacement session instead of first emitting a partial
+  or gap that the replay would duplicate. Stale speech state therefore cannot suppress silence
+  coaching after reconnect. Reconnect uses capped exponential backoff.
+- **The brain call** is single-flighted (a turn can't double-speak) and runs under a provider-aware
+  request timeout. The API and Claude ceilings stay well above the reasoning-turn tail; Codex has a
+  shorter bound because a healthy decision turn takes seconds and a silent agent-runtime stall would
+  otherwise batch every later transcript turn behind it. Because client-owned memory makes every
+  request self-contained and tool effects happen
+  only after a response reaches the driver, a transient transport failure or retryable server error
+  gets **one immediate automatic retry** without duplicating a screenshot or spoken tip. Cancellation,
+  authentication, malformed requests, rate limits, and other permanent failures do not retry. If both
+  attempts fail, recovery remains on the **next trigger** — sent-state advances only on a successful
+  send, so that turn includes the failed transcript plus anything newer. Memory **compaction** fails
+  soft without this wrapper: a failed summary simply leaves the full history for the next attempt.
 
 ## 5. Safety Model
 
@@ -236,7 +341,9 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
 - **Built and run in the main `forrest` account inside a git worktree** (recoverability). The
   separate-restricted-account requirement is waived for the personal build; see [sandbox.md](./sandbox.md).
 - **Egress is narrow and explicit:** audio to `gpt-4o-transcribe`; a screenshot + transcript window
-  to `gpt-5.5` *only when the model triggers a capture/response*. The only screen-/audio-derived data
+  to `gpt-5.5` *only when the model triggers a capture/response*. The audio witness persists only
+  counters, sequence/sample metadata, timestamps, socket generations, server audio-clock values, and
+  a local activity bit in the owner-only session log — never PCM or recovered words. The only screen-/audio-derived data
   written to **local** disk is the owner-only, bounded per-session **activity log** (spoken tips,
   transcribed lines, the screenshots the model saw); raw mic audio and the live transcript are never
   archived. Requests are sent `store:true`, so what the model saw does remain inspectable (and
@@ -248,12 +355,13 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
   This keeps
   conversation natural: a follow-up question is never stranded behind a timer. The hard control is
   the menu-bar **Start/Stop** — coaching never runs until explicitly started, and stopping tears the
-  pipeline down entirely. A session interjection counter in the menu bar makes over-talking visible;
-  cost is accepted as tracking usage for now (a future improvement, not a v1 guardrail).
+  pipeline down entirely. Cost is accepted as tracking usage for now (a future improvement, not a
+  v1 guardrail).
 
 ## 6. Non-Goals (v1)
 
-- Multiple modes / a tiered sensitivity dial. (One mode: LeetCode Coach.)
+- Multiple coaching modes / a tiered sensitivity dial. (One technical-interview mode spans
+  behavioral, system-design, and coding questions.)
 - Continuous OCR or recording the screen/audio to disk ("recall").
 - A dedicated wake-word engine. Direct address is just the word "Jarvis" (or a question) appearing
   in the transcript, which the brain reads and answers — there is no wake-word detector. (A global
@@ -270,7 +378,7 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
 4. **Proactive, but disciplined.** Speaking up unprompted is the whole point; the model's own restraint (a tuned system prompt) keeps it from being annoying.
 5. **Sees the screen, not the disk.** Security is enforced by the sandbox, not by good intentions.
 6. **Self-verifying.** Every build ships with tests and a smoke checklist the agent can run to prove it works.
-7. **One mode, done well.** Ship the coach; expand later.
+7. **One domain, done well.** Ship the technical-interview coach; expand later.
 
 How Jarvis is built, signed, tested, and run — and the activity viewer — is its own
 operational page: [build-and-run.md](./build-and-run.md).

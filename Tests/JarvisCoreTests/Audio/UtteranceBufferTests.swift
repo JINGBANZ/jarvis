@@ -33,4 +33,51 @@ import Testing
         b.append("can you help")
         #expect(b.flush().text == "hey can you help")
     }
+
+    @Test func pendingTranscriptionDefersDrainWithoutDiscardingFragments() {
+        let b = UtteranceBuffer()
+        b.append("Violet Lantern begins.")
+
+        #expect(b.drainIfSettled(hasPendingTranscriptions: true)
+                == .waitingForPendingTranscriptions)
+
+        b.append("Describe your agentic project.")
+        #expect(b.drainIfSettled(hasPendingTranscriptions: true)
+                == .waitingForPendingTranscriptions)
+
+        b.append("Violet Lantern ends.")
+        #expect(b.drainIfSettled(hasPendingTranscriptions: false)
+                == .ready(
+                    text: "Violet Lantern begins. Describe your agentic project. "
+                        + "Violet Lantern ends.",
+                    fragments: 3))
+        #expect(b.drainIfSettled(hasPendingTranscriptions: false) == .empty)
+    }
+
+    @Test func terminalItemWithoutTextRearmsDeferredTurnExactlyOnce() {
+        let b = UtteranceBuffer()
+        b.append("Preserve this completed fragment.")
+        #expect(b.drainIfSettled(hasPendingTranscriptions: true)
+                == .waitingForPendingTranscriptions)
+
+        #expect(!b.shouldResumeAfterPendingTranscriptionsSettle(
+            hasPendingTranscriptions: true))
+        #expect(b.shouldResumeAfterPendingTranscriptionsSettle(
+            hasPendingTranscriptions: false))
+        #expect(!b.shouldResumeAfterPendingTranscriptionsSettle(
+            hasPendingTranscriptions: false))
+        #expect(b.drainIfSettled(hasPendingTranscriptions: false)
+                == .ready(text: "Preserve this completed fragment.", fragments: 1))
+    }
+
+    @Test func genuinelySeparateTurnsDrainIndependently() {
+        let b = UtteranceBuffer()
+        b.append("Separate question one.")
+        #expect(b.drainIfSettled(hasPendingTranscriptions: false)
+                == .ready(text: "Separate question one.", fragments: 1))
+
+        b.append("Separate question two.")
+        #expect(b.drainIfSettled(hasPendingTranscriptions: false)
+                == .ready(text: "Separate question two.", fragments: 1))
+    }
 }

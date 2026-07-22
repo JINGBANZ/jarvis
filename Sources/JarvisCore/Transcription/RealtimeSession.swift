@@ -51,6 +51,13 @@ public enum RealtimeSession {
         ["type": "input_audio_buffer.append", "audio": base64PCM]
     }
 
+    /// A socket is usable only after the server acknowledges `session.update`. The earlier created
+    /// event proves the handshake opened, but not that the requested transcription model/format/VAD
+    /// configuration was accepted.
+    public static func isConfiguredSessionEventType(_ type: String) -> Bool {
+        type == "session.updated" || type == "transcription_session.updated"
+    }
+
     /// True if a parsed wire event is the server's `session_expired` error — emitted when a transcription
     /// session hits its maximum lifetime (~60 min) and the socket rotates. An EXPECTED rotation, not a
     /// fault (callers log it calmly and quiet the reconnect noise; see `RealtimeTranscriber`).
@@ -60,8 +67,13 @@ public enum RealtimeSession {
         return error["code"] as? String == "session_expired"
     }
 
+    public static let speechStartedType = "input_audio_buffer.speech_started"
+    public static let speechStoppedType = "input_audio_buffer.speech_stopped"
+    public static let deltaTranscriptionType = "conversation.item.input_audio_transcription.delta"
+
     /// The event type the server emits when an utterance's transcription is final.
     public static let completedTranscriptionType = "conversation.item.input_audio_transcription.completed"
+    public static let failedTranscriptionType = "conversation.item.input_audio_transcription.failed"
 
     /// The transcript text from a parsed realtime event, if it is a **completed** input-audio
     /// transcription carrying real speech — otherwise nil. Pure and unit-testable; the live socket

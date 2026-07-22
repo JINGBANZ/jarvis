@@ -49,6 +49,52 @@ private func speakResponseBody(arguments: String) -> Data {
         #expect(resp.rawToolCalls == [RawToolCall(id: "call_9", name: "capture_screen", argumentsJSON: "{}")])
     }
 
+    /// The decoder surfaces the response's ENTIRE `output` array verbatim, so the tool loop can
+    /// replay it whole with the tool result (`input.push(...response.output)`) — reasoning id,
+    /// encrypted payload, and the function_call's own item id must all survive untouched.
+    @Test func decodeSurfacesWholeOutputVerbatim() async throws {
+        let json = """
+        {"output":[
+          {"type":"reasoning","id":"rs_1","summary":[],"encrypted_content":"opaque-blob"},
+          {"type":"function_call","id":"fc_9","call_id":"call_9","name":"capture_screen","arguments":"{}"}
+        ]}
+        """
+        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+                                       send: { _ in (Data(json.utf8), http(200)) })
+        let resp = try await client.respond(messages: [.user("hi")], tools: coachTools)
+        #expect(resp.toolCalls == [.captureScreen(callId: "call_9")])
+        #expect(resp.outputItemsJSON.count == 2)
+        let reasoning = resp.outputItemsJSON.first ?? ""
+        #expect(reasoning.contains(#""id":"rs_1""#))
+        #expect(reasoning.contains(#""encrypted_content":"opaque-blob""#))
+        let call = resp.outputItemsJSON.last ?? ""
+        #expect(call.contains(#""id":"fc_9""#))       // the item id rides along, unlike a rebuilt call
+        #expect(call.contains(#""call_id":"call_9""#))
+    }
+
+    /// `.rawItems` passthrough is re-emitted into `input` exactly as recorded — reasoning before the
+    /// function_call it belongs to, the call keeping its item id — the shape the API requires.
+    @Test func encodesRawItemsVerbatimBeforeFunctionCallOutput() async throws {
+        let box = CapturedBody()
+        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+                                       send: { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
+        let convo: [ChatMessage] = [
+            .user("transcript"),
+            .rawItems([
+                #"{"type":"reasoning","id":"rs_1","summary":[]}"#,
+                #"{"type":"function_call","id":"fc_1","call_id":"call_1","name":"capture_screen","arguments":"{}"}"#,
+            ]),
+            .init(role: .tool, text: "screenshot captured", toolCallId: "call_1"),
+        ]
+        _ = try await client.respond(messages: convo, tools: coachTools)
+        let body = try JSONSerialization.jsonObject(with: box.get() ?? Data()) as? [String: Any]
+        let input = body?["input"] as? [[String: Any]] ?? []
+        let kinds = input.map { ($0["type"] as? String) ?? ($0["role"] as? String) ?? "?" }
+        #expect(kinds == ["user", "reasoning", "function_call", "function_call_output"])
+        #expect(input.count == 4 && input[1]["id"] as? String == "rs_1")
+        #expect(input.count == 4 && input[2]["id"] as? String == "fc_1")   // verbatim, id preserved
+    }
+
     @Test func decodesStaySilentToolCall() async throws {
         let json = """
         {"output":[
@@ -70,16 +116,17 @@ private func speakResponseBody(arguments: String) -> Data {
     }
 
     /// `strict:true` makes malformed `speak` arguments unlikely, but the decode must still degrade
-    /// gracefully to an EMPTY `lines` array (never nil/throw/dropped call) for every off-contract
-    /// shape: a missing key, a non-array value, an explicitly empty array, or broken JSON. Pin that
-    /// fallback so a future refactor can't silently change it.
-    @Test func speakDecodeFallsBackToEmptyLinesOnOffContractArguments() async throws {
-        for args in [#"{}"#, #"{"lines":"hi"}"#, #"{"lines":[]}"#, "not json"] {
+    /// gracefully — and an off-contract shape (missing key, non-array value, empty array, broken
+    /// JSON) is DROPPED, never accepted as a speak with empty lines: an empty overlay would still
+    /// count as a spoken turn (history, counter). The driver treats the empty tool-call list as
+    /// silence. Pin that fallback so a future refactor can't silently change it.
+    @Test func speakDecodeDropsOffContractArgumentsAsSilence() async throws {
+        for args in [#"{}"#, #"{"lines":"hi"}"#, #"{"lines":[]}"#, #"{"lines":["  "]}"#, "not json"] {
             let body = speakResponseBody(arguments: args)
             let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
                                            send: { _ in (body, http(200)) })
             let resp = try await client.respond(messages: [.user("hi")], tools: coachTools)
-            #expect(resp.toolCalls == [.speak(callId: "c", lines: [])], "args=\(args)")
+            #expect(resp.toolCalls.isEmpty, "args=\(args)")
         }
     }
 
@@ -219,6 +266,45 @@ private func speakResponseBody(arguments: String) -> Data {
         #expect(body.contains("\"tool_choice\""))
         #expect(body.contains("\"type\":\"function\""))
         #expect(body.contains("\"name\":\"speak\""))
+    }
+
+    /// With a traffic log wired, a successful round trip lands in `brain-traffic.jsonl` — the raw
+    /// eval pipeline input — tagged, with the request body and response body both present.
+    @Test func successfulRoundTripIsRecordedToTrafficLog() async throws {
+        let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
+        let traffic = BrainTrafficLog(); traffic.enable(directory: dir)
+        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+                                       traffic: traffic, trafficTag: "coach",
+                                       send: { _ in (Data(#"{"output":[]}"#.utf8), http(200)) })
+        _ = try await client.respond(messages: [.user("hi")], tools: coachTools)
+
+        let text = try String(contentsOf: dir.appendingPathComponent(BrainTrafficLog.filename),
+                              encoding: .utf8)
+        let entry = try #require(try JSONSerialization.jsonObject(
+            with: Data(text.split(separator: "\n")[0].utf8)) as? [String: Any])
+        #expect(entry["tag"] as? String == "coach")
+        #expect(entry["status"] as? Int == 200)
+        #expect((entry["request"] as? [String: Any])?["model"] as? String == "gpt-5.5")
+        #expect(entry["response"] != nil)
+    }
+
+    /// A transport failure still records the attempt (request + error, no response) and rethrows.
+    @Test func transportErrorIsRecordedToTrafficLogAndRethrown() async throws {
+        let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
+        let traffic = BrainTrafficLog(); traffic.enable(directory: dir)
+        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+                                       traffic: traffic, trafficTag: "coach",
+                                       send: { _ in throw URLError(.timedOut) })
+        await #expect(throws: (any Error).self) {
+            try await client.respond(messages: [.user("hi")], tools: coachTools)
+        }
+        let text = try String(contentsOf: dir.appendingPathComponent(BrainTrafficLog.filename),
+                              encoding: .utf8)
+        let entry = try #require(try JSONSerialization.jsonObject(
+            with: Data(text.split(separator: "\n")[0].utf8)) as? [String: Any])
+        #expect(entry["error"] != nil)
+        #expect(entry["response"] == nil)
+        #expect((entry["request"] as? [String: Any])?["model"] as? String == "gpt-5.5")
     }
 }
 

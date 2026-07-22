@@ -89,12 +89,23 @@ Narrow and explicit. Data leaves the machine only via:
 - **Audio → `gpt-4o-transcribe`** on the OpenAI Realtime API (continuous, for transcription).
 - **Screenshot + transcript window → `gpt-5.5`** — and *only* when the model triggers a
   `capture_screen` and/or a coaching turn. No screen content leaves the machine on idle turns.
+- **With a local CLI brain provider selected** ([architecture.md §4](./architecture.md#local-cli-brain-providers)),
+  the same brain payload instead goes to the `claude` / `codex` subprocess, which sends it to
+  Anthropic / OpenAI under the *user's own signed-in account* and that vendor's consumer retention
+  terms. The subprocess runs with the CLI's own privileges (Codex is invoked `--sandbox read-only`;
+  Claude with every built-in tool disabled, cwd pinned to the session dir), and **no user-configured
+  MCP server is loaded** in a Jarvis turn (`--strict-mcp-config` / `-c mcp_servers={}`) — the coach
+  must never see or trigger that tool surface. This trusts a CLI the user already runs on this
+  machine, not widening what Jarvis itself may touch. The CLIs run with
+  **session persistence off** (`--no-session-persistence` / `--ephemeral`), so they keep no local
+  transcript of the coaching conversation in `~/.claude` / `~/.codex` — the owner-only session dir
+  stays the only on-disk copy. Transcription audio still goes to the OpenAI Realtime API regardless.
 
 There is **no rolling screen/audio archive and no "recall" database** — Jarvis keeps no continuous
 recording of what it sees or hears. The **raw captured streams stay transient**: mic audio streams to
 the API and is dropped, the live transcript lives in memory, and the temp screenshot files used to
 hand a frame to `screencapture` are deleted immediately after use. The one thing persisted *on this
-machine* is the **activity log** — owner-only and bounded; see below.
+machine* is the **per-session log directory** — owner-only and bounded; see below.
 
 > **Server-side retention for debuggability (current behavior).** Session memory is client-managed
 > (`CoachHistory` — nothing at OpenAI is needed for continuity), but requests are still sent
@@ -105,10 +116,15 @@ machine* is the **activity log** — owner-only and bounded; see below.
 > choice; flipping to `store:false` — now a one-line change with no quality cost — is tracked as a
 > future privacy item.
 
-**The activity log is the one bounded form of disk persistence, hardened to stay owner-only.** The
-log (the in-app `WKWebView` viewer's `jarvis-activity.jsonl` + the screenshots the model looked at,
-alongside `jarvis-debug.log`) records the model's spoken tips and the transcribed "heard:" lines so a
-session can be reviewed afterward. It is written on **every** launch — it was previously gated to a
+**The per-session log directory is the one bounded form of disk persistence, hardened to stay
+owner-only.** It holds the **activity log** (the in-app `WKWebView` viewer's `jarvis-activity.jsonl` +
+the screenshots the model looked at, alongside `jarvis-debug.log`) — the model's spoken tips and the
+transcribed "heard:" lines so a session can be reviewed afterward — plus the **brain traffic record**
+(`brain-traffic.jsonl`: the exact request/response bodies exchanged with the LLM provider, with
+base64 screenshots redacted to stubs since the pixels are already the shot files) and, once the user
+runs the one-click session evaluation, its `eval-report.md` and the browsable `eval-report.html`
+rendered from it. All of it is written on **every**
+launch — the activity log was previously gated to a
 `--dev` flag (now removed), an explicit decision to make session review a default affordance. The
 hardening that made the old dev affordance safe still applies in full: the files go to a per-session
 directory in the **gitignored, workspace-local `.jarvis/`** (passed to the `open`-launched app via
@@ -129,8 +145,7 @@ readable by this user account and by nothing else. See [build-and-run.md](./buil
 - **Manual Start/Stop** in the menu bar — the only hard gate. Coaching never runs until started, and
   Stop tears the pipeline down entirely.
 - **Visible "listening" indicator** — the user always knows when Jarvis is active (also a consent cue).
-- **Session interjection counter** in the menu bar (reset on each Start), so over-talking is visible
-  immediately. Cost is accepted as tracking usage for now (a future improvement, not a v1 guardrail).
+  Cost is accepted as tracking usage for now (a future improvement, not a v1 guardrail).
 
 ## Consent Note
 

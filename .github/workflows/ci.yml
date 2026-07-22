@@ -5,9 +5,11 @@ name: CI
 # Recording) or exercise the live capture pipeline, so a bundled artifact would carry no extra
 # signal. Bundling/signing stays a local step (scripts/build-app.sh).
 
+# PR-only on purpose: every change lands through a PR (already tested here), and a release merge
+# is re-tested by release.yml's publish gate — a push-to-main trigger would run the same suite a
+# second time on the same commit, at the 10x macOS minute multiplier. The cost of this choice:
+# a direct push to main isn't tested until the next PR or release touches it.
 on:
-  push:
-    branches: [main]
   pull_request:
 
 # Cancel superseded runs on the same ref so a quick succession of pushes doesn't pile up.
@@ -18,6 +20,10 @@ concurrency:
 jobs:
   test:
     runs-on: macos-15
+    # Backstop, not a tuning knob: the default job timeout is 6 hours, and one hung run at the
+    # 10x macOS multiplier would burn 3600 multiplied minutes — nearly double the monthly free
+    # tier. Normal runs finish in ~1 minute.
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
