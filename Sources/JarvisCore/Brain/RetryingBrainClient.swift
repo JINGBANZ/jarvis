@@ -39,6 +39,11 @@ public struct RetryingBrainClient: BrainClient, Sendable {
         if ns.domain == "OpenAIBrainClient" {
             return [408, 409, 500, 502, 503, 504].contains(ns.code)
         }
+        // The CLI runner labels its watchdog timeout with `NSURLErrorTimedOut` to signal the same
+        // transient intent as an OpenAI URLSession timeout, but keeps its own domain for diagnostics.
+        if ns.domain == "AgentCLIProcessRunner" {
+            return ns.code == NSURLErrorTimedOut
+        }
         return false
     }
 }
