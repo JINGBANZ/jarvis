@@ -171,14 +171,16 @@ The squash-merge subject carries the PR number (`type: summary (#N)`).
   exceptions. Every presentation API call needs an inline `ghost-mode-allowed` reason so
   `scripts/check-ghost-mode.sh` can enforce the boundary in the normal test gate.
 - **Keep human activity separate from agent diagnostics.** `ActivityLog` is the human-facing coaching
-  record: only finalized interviewer/user speech, manual hint requests, screens Jarvis actually viewed,
-  tips Jarvis displayed, fixed typed brain-change notices, and fixed typed runtime-failure notices
-  belong there. Lifecycle, transport, retry, raw error, timing, and diagnosis details go through
-  `jlog` to `jarvis-debug.log`. Never mirror `jlog` into `ActivityLog`; record the corresponding typed
-  activity event explicitly.
+  record: finalized interviewer/user speech, manual hint requests, every brain action (`capture_screen`
+  success or failure, `speak`, and `stay_silent`), fixed typed brain-change notices, and fixed typed
+  notices for every runtime failure that stops or degrades coaching belong there. Lifecycle,
+  transport, retry, raw error, timing, and diagnosis details go through `jlog` to
+  `jarvis-debug.log`. Never mirror `jlog` into `ActivityLog`; record the corresponding typed activity
+  event explicitly.
 - **The only screen-/audio-derived data persisted to disk is the per-session log directory** (the
-  activity log — spoken tips, transcribed "heard:" lines, the screenshots the model looked at — plus
-  the wire-level brain traffic record and its on-demand evaluation report). It is written every run to an
+  activity log — spoken tips, deliberate-silence and fixed failure notices, transcribed "heard:"
+  lines, and the screenshots the model looked at — plus the wire-level brain traffic record and its
+  on-demand evaluation report). It is written every run to an
   **owner-only** (`0600` files in a `0700` dir) per-session directory in the gitignored, workspace-local
   `.jarvis/`, pruned to the most recent few sessions, never `/tmp`. The raw mic audio and the live
   transcript are **never** archived. Keep the owner-only, no-`/tmp`, workspace-local posture.

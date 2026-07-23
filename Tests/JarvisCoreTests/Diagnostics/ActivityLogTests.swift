@@ -8,6 +8,7 @@ import Foundation
         #expect(ActivityLog.cssClass(for: "👁 looking at your screen") == "see")
         #expect(ActivityLog.cssClass(for: "🗣 heard: \"hello\"") == "hear")
         #expect(ActivityLog.cssClass(for: "🤫 quiet for 8s") == "hear")
+        #expect(ActivityLog.cssClass(for: "🤫 stayed silent — nothing useful to add") == "think")
         #expect(ActivityLog.cssClass(for: "💭 thinking…") == "think")
         #expect(ActivityLog.cssClass(for: "… nothing useful to add, staying silent") == "think")
         #expect(ActivityLog.cssClass(for: "🧠 brain switch applied — OpenAI API → Claude Code") == "think")
@@ -105,6 +106,28 @@ import Foundation
         #expect(!jsonl.contains("recovered"))
     }
 
+    @Test func everyBrainActionHasAHumanFacingEvent() throws {
+        let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
+        let log = ActivityLog(); log.enable(directory: dir)
+        log.record(.screenViewFailed)
+        log.record(.stayedSilent)
+        let snapshot = log.attach { _ in }
+
+        #expect(snapshot.rows.count == 2)
+        #expect(snapshot.rows[0].contains("couldn't view your screen"))
+        #expect(snapshot.rows[0].contains("screen capture failed"))
+        #expect(snapshot.rows[0].contains("Screen Recording permission"))
+        #expect(snapshot.rows[1].contains("stayed silent"))
+        #expect(ActivityLog.isHumanFacing(
+            message: "👁 couldn't view your screen — screen capture failed; check Screen Recording permission",
+            imageFile: nil
+        ))
+        #expect(ActivityLog.isHumanFacing(
+            message: "🤫 stayed silent — nothing useful to add",
+            imageFile: nil
+        ))
+    }
+
     @Test func coachingStoppedPersistsOnlyADiscreetHumanFacingNotice() throws {
         let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         let log = ActivityLog(); log.enable(directory: dir)
@@ -164,24 +187,38 @@ import Foundation
     @Test func runtimeFailureNoticesStayFixedAndDiagnosticFree() throws {
         let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         let log = ActivityLog(); log.enable(directory: dir)
-        log.record(.transcriptionStopped)
+        log.record(.transcriptionStopped(reason: .connectionLost))
+        log.record(.transcriptionStopped(reason: .quotaExceeded))
+        log.record(.transcriptionStopped(reason: .authenticationFailed))
+        log.record(.transcriptionStopped(reason: .accessDenied))
+        log.record(.transcriptionStopped(reason: .configurationRejected))
         log.record(.audioCaptureStopped)
         log.record(.systemAudioStopped)
         log.record(.settingsChangeNotApplied)
         let snapshot = log.attach { _ in }
 
-        #expect(snapshot.rows.count == 4)
+        #expect(snapshot.rows.count == 8)
+        #expect(snapshot.rows[0].contains("session failed"))
         #expect(snapshot.rows[0].contains("transcription connection was lost"))
-        #expect(snapshot.rows[1].contains("audio capture became unavailable"))
-        #expect(snapshot.rows[2].contains("microphone coaching continues"))
-        #expect(snapshot.rows[3].contains("current coaching session continues"))
+        #expect(snapshot.rows[1].contains("API quota is exhausted"))
+        #expect(snapshot.rows[1].contains("billing"))
+        #expect(snapshot.rows[2].contains("rejected the API key"))
+        #expect(snapshot.rows[3].contains("denied transcription access"))
+        #expect(snapshot.rows[4].contains("rejected the transcription configuration"))
+        #expect(snapshot.rows[5].contains("audio capture became unavailable"))
+        #expect(snapshot.rows[6].contains("microphone coaching continues"))
+        #expect(snapshot.rows[7].contains("current coaching session continues"))
         for row in snapshot.rows {
             #expect(!row.contains("OAuth"))
             #expect(!row.contains("AirPods"))
-            #expect(!row.contains("quota"))
+            #expect(!row.contains("item_"))
         }
         #expect(ActivityLog.isHumanFacing(
             message: "⚠️ system audio stopped — microphone coaching continues; check jarvis-debug.log",
+            imageFile: nil
+        ))
+        #expect(ActivityLog.isHumanFacing(
+            message: "⏹ session failed — the OpenAI API quota is exhausted; check billing",
             imageFile: nil
         ))
         #expect(ActivityLog.isHumanFacing(
