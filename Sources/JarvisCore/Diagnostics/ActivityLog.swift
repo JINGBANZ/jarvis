@@ -21,7 +21,8 @@ public final class ActivityLog: @unchecked Sendable {
         case manualHint(prompt: String)
         /// Jarvis captured and viewed the screen while preparing a coaching response.
         case screenViewed(imageBase64JPEG: String)
-        /// The brain chose to view the screen, but capture failed. Raw failure detail stays in debug.
+        /// The brain chose to view the screen, but capture failed. Activity gets fixed recovery
+        /// guidance while raw failure detail stays in debug.
         case screenViewFailed
         /// Jarvis displayed these coaching lines to the user.
         case tip(lines: [String])
@@ -132,7 +133,7 @@ public final class ActivityLog: @unchecked Sendable {
             message = "👁 looking at your screen"
             imageBase64 = imageBase64JPEG
         case .screenViewFailed:
-            message = "👁 couldn't view your screen"
+            message = "👁 couldn't view your screen — screen capture failed; check Screen Recording permission"
             imageBase64 = nil
         case .tip(let lines):
             message = "💬 \(lines.joined(separator: " "))"

@@ -114,9 +114,11 @@ import Foundation
 
         #expect(snapshot.rows.count == 2)
         #expect(snapshot.rows[0].contains("couldn't view your screen"))
+        #expect(snapshot.rows[0].contains("screen capture failed"))
+        #expect(snapshot.rows[0].contains("Screen Recording permission"))
         #expect(snapshot.rows[1].contains("stayed silent"))
         #expect(ActivityLog.isHumanFacing(
-            message: "👁 couldn't view your screen",
+            message: "👁 couldn't view your screen — screen capture failed; check Screen Recording permission",
             imageFile: nil
         ))
         #expect(ActivityLog.isHumanFacing(

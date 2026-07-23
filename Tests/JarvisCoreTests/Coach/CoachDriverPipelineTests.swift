@@ -342,7 +342,8 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(snapshot.rows[0].contains("stayed silent"))
     }
 
-    /// A failed `capture_screen` still records the action before the model makes its terminal choice.
+    /// A failed `capture_screen` records the action and fixed recovery guidance before the model
+    /// makes its terminal choice.
     @Test func failedScreenActionAndStaySilentBothLandInActivityLog() async throws {
         let dir = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("jarvis-failed-screen-action-\(ProcessInfo.processInfo.globallyUniqueString)")
@@ -365,6 +366,8 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let snapshot = ActivityLog.shared.attach { _ in }
         #expect(snapshot.rows.count == 2)
         #expect(snapshot.rows[0].contains("couldn't view your screen"))
+        #expect(snapshot.rows[0].contains("screen capture failed"))
+        #expect(snapshot.rows[0].contains("Screen Recording permission"))
         #expect(snapshot.rows[1].contains("stayed silent"))
     }
 
