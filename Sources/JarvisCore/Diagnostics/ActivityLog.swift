@@ -27,9 +27,9 @@ public final class ActivityLog: @unchecked Sendable {
         /// never the raw error, so the notice cannot expose provider diagnostics during screen
         /// sharing.
         case coachingStopped(provider: BrainProvider)
-        /// Coaching ended because the microphone transcription connection was lost. No transport
-        /// detail is carried; the fixed copy points to diagnostics.
-        case transcriptionStopped
+        /// The session ended because transcription became unusable. Carries a fixed, typed reason;
+        /// raw provider and transport details remain exclusively in diagnostics.
+        case transcriptionStopped(reason: TranscriptionFailureReason)
         /// Coaching ended because the running audio capture became unavailable. No device or route
         /// detail is carried; the fixed copy points to diagnostics.
         case audioCaptureStopped
@@ -133,8 +133,8 @@ public final class ActivityLog: @unchecked Sendable {
         case .coachingStopped(let provider):
             message = "⏹ coaching stopped — \(provider.displayName) couldn't respond; check Settings → Brain"
             imageBase64 = nil
-        case .transcriptionStopped:
-            message = "⏹ coaching stopped — transcription connection was lost; check jarvis-debug.log"
+        case .transcriptionStopped(let reason):
+            message = "⏹ session failed — \(reason.activityDescription)"
             imageBase64 = nil
         case .audioCaptureStopped:
             message = "⏹ coaching stopped — audio capture became unavailable; check jarvis-debug.log"
@@ -251,6 +251,7 @@ public final class ActivityLog: @unchecked Sendable {
         return m.hasPrefix("🗣 heard") || m.hasPrefix("⌨️ hint shortcut")
             || m.hasPrefix("👁 looking at your screen") || m.hasPrefix("💬")
             || m.hasPrefix("⏹ coaching stopped")
+            || m.hasPrefix("⏹ session failed")
             || m.hasPrefix("⚠️ system audio stopped")
             || m.hasPrefix("⚠️ settings change wasn't applied")
     }

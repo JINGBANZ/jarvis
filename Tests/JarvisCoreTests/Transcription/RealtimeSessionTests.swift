@@ -173,4 +173,48 @@ import Testing
         #expect(!RealtimeSession.isSessionExpired(["type": "transcription_session.created"]))
         #expect(!RealtimeSession.isSessionExpired([:]))
     }
+
+    @Test func terminalTranscriptionFailureClassifiesBreakingAccountErrors() {
+        func event(code: String? = nil, type: String? = nil) -> [String: Any] {
+            var error: [String: Any] = [:]
+            if let code { error["code"] = code }
+            if let type { error["type"] = type }
+            return ["type": RealtimeSession.failedTranscriptionType, "error": error]
+        }
+
+        #expect(RealtimeSession.terminalTranscriptionFailure(from: event(code: "insufficient_quota"))
+                == .quotaExceeded)
+        #expect(RealtimeSession.terminalTranscriptionFailure(from: event(code: "invalid_api_key"))
+                == .authenticationFailed)
+        #expect(RealtimeSession.terminalTranscriptionFailure(from: event(type: "authentication_error"))
+                == .authenticationFailed)
+        #expect(RealtimeSession.terminalTranscriptionFailure(from: event(type: "permission_error"))
+                == .accessDenied)
+        #expect(RealtimeSession.terminalTranscriptionFailure(from: event(code: "model_not_found"))
+                == .configurationRejected)
+        #expect(RealtimeSession.terminalTranscriptionFailure(from: [
+            "type": "error",
+            "error": ["code": "insufficient_quota"],
+        ]) == .quotaExceeded)
+    }
+
+    @Test func terminalTranscriptionFailureLeavesUtteranceAndTransientErrorsRecoverable() {
+        func event(code: String, type: String = "transcription_error") -> [String: Any] {
+            [
+                "type": RealtimeSession.failedTranscriptionType,
+                "error": ["code": code, "type": type],
+            ]
+        }
+
+        #expect(RealtimeSession.terminalTranscriptionFailure(from: event(code: "audio_unintelligible")) == nil)
+        #expect(RealtimeSession.terminalTranscriptionFailure(from: event(code: "rate_limit_exceeded")) == nil)
+        #expect(RealtimeSession.terminalTranscriptionFailure(from: event(code: "server_error")) == nil)
+        #expect(RealtimeSession.terminalTranscriptionFailure(from: [
+            "type": RealtimeSession.completedTranscriptionType,
+            "error": ["code": "insufficient_quota"],
+        ]) == nil)
+        #expect(RealtimeSession.terminalTranscriptionFailure(from: [
+            "type": RealtimeSession.failedTranscriptionType,
+        ]) == nil)
+    }
 }

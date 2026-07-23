@@ -64,9 +64,9 @@ public extension UserFacingError {
 
     /// The mic ("me") transcription socket gave up (bad key / quota / network) — NOT a mic-hardware
     /// failure (that's `captureStopped`). Coaching can't continue, so stop without revealing UI.
-    static var transcriptionStopped: UserFacingError {
+    static func transcriptionStopped(reason: TranscriptionFailureReason) -> UserFacingError {
         .init(title: "Transcription stopped",
-              message: "Jarvis lost its connection to the transcription service (often a bad API key, quota, or network issue). Coaching has stopped.",
+              message: "Jarvis could not continue because \(reason.activityDescription).",
               severity: .terminal)
     }
 

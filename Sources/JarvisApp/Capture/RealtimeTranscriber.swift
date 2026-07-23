@@ -18,9 +18,9 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
     var onTurnEnd: (@Sendable () -> Void)?
     var onSilence: (@Sendable (TimeInterval) -> Void)?
     var onConnectionStateChange: (@Sendable (RealtimeConnectionState) -> Void)?
-    /// Fired when reconnection is abandoned after `maxReconnects` consecutive failures (e.g. a bad
-    /// key / quota), so the app can flip the menu back to ⚪️ stopped instead of lying green.
-    var onTerminalFailure: (@Sendable () -> Void)?
+    /// Fired when transcription becomes unusable, either from an unrecoverable provider rejection or
+    /// after reconnection is abandoned, so the app can stop instead of lying green.
+    var onTerminalFailure: (@Sendable (TranscriptionFailureReason) -> Void)?
 
     private let maxReconnects = 6
     private let apiKey: String
@@ -60,6 +60,7 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
     private var connected = false        // true only between "session ready" and the next drop/close
     private var everConnected = false    // distinguishes the first connect from a reconnect
     private var rotating = false         // an EXPECTED server rotation is mid-flight; quiet the noise it makes
+    private var terminalFailureReported = false
     private var generation = 0           // rejects late callbacks from a replaced socket
     private var pendingPingGeneration: Int?
     /// Realtime's `audio_start_ms` is relative to audio written on one socket. These origins map it
@@ -117,6 +118,7 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         // Start clean: clear the stopped flag AND any stale backoff state from a prior session.
         lock.lock()
         stopped = false; reconnectAttempt = 0; isReconnecting = false; rotating = false
+        terminalFailureReported = false
         pendingAudioTimelineOrigin = 0; activeAudioTimelineOrigin = 0
         lock.unlock()
         transcriptionLifecycle.start()
@@ -376,12 +378,14 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
                 break
             }
             let error = Self.transcriptionErrorDescription(from: obj)
+            let terminalFailure = RealtimeSession.terminalTranscriptionFailure(from: obj)
             continuityReporter.recordServerSpeech(.transcriptionFailed,
                                    audioTimeMilliseconds: nil,
                                    itemID: itemID,
                                    socketGeneration: socketGeneration)
             transcriptionLifecycle.recordFailed(
                 itemID: itemID, error: error, socketGeneration: socketGeneration)
+            if let terminalFailure { reportTerminalFailure(terminalFailure) }
         case RealtimeSession.speechStoppedType:
             guard let itemID = obj["item_id"] as? String else {
                 jlog("Jarvis realtime [\(speaker.rawValue)]: speech_stopped missing item_id")
@@ -423,6 +427,9 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
                 failConnection(task: task, generation: socketGeneration, diagnostic: nil)
             } else {
                 jlog("Jarvis realtime [\(speaker.rawValue)] error event: \(text)")
+                if let terminalFailure = RealtimeSession.terminalTranscriptionFailure(from: obj) {
+                    reportTerminalFailure(terminalFailure)
+                }
             }
         default:
             break
@@ -490,6 +497,21 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         return description.isEmpty ? "unknown error" : description
     }
 
+    /// End a green-but-unusable transcription session immediately for permanent provider failures.
+    /// The Activity layer receives only the typed reason; the raw provider detail was logged by the
+    /// item lifecycle immediately before this call.
+    private func reportTerminalFailure(_ reason: TranscriptionFailureReason) {
+        lock.lock()
+        guard !stopped, !terminalFailureReported else { lock.unlock(); return }
+        terminalFailureReported = true
+        connected = false
+        lock.unlock()
+        invalidateConnectionTimers()
+        emitState(.failed)
+        jlog("Jarvis realtime [\(speaker.rawValue)]: unrecoverable transcription failure — stopping")
+        onTerminalFailure?(reason)
+    }
+
     // MARK: - Reconnect / keepalive
 
     func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask,
@@ -526,7 +548,8 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         let failureAt = clock.now() - sessionStart
         lock.lock()
         guard let currentTask = task else { lock.unlock(); return }
-        if stopped || isReconnecting || generation != failedGeneration || currentTask !== failedTask {
+        if stopped || terminalFailureReported || isReconnecting
+            || generation != failedGeneration || currentTask !== failedTask {
             lock.unlock(); return
         }
         connected = false
@@ -540,6 +563,7 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         session = nil
         if reconnectAttempt >= maxReconnects {
             isReconnecting = true
+            terminalFailureReported = true
             lock.unlock()
             audioBuffer.retryInFlight()
             transcriptionLifecycle.finalizeInterrupted(reason: "socket failure")
@@ -549,7 +573,7 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
             failedSession?.invalidateAndCancel()
             emitState(.failed)
             jlog("Jarvis realtime [\(speaker.rawValue)]: giving up after \(maxReconnects) reconnect attempts — stopping")
-            onTerminalFailure?()
+            onTerminalFailure?(.connectionLost)
             return
         }
         isReconnecting = true

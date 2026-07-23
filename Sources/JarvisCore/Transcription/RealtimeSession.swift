@@ -75,6 +75,39 @@ public enum RealtimeSession {
     public static let completedTranscriptionType = "conversation.item.input_audio_transcription.completed"
     public static let failedTranscriptionType = "conversation.item.input_audio_transcription.failed"
 
+    /// Classify only failures that cannot recover on the next utterance. Realtime also uses the
+    /// failed-transcription event for item-local failures such as `audio_unintelligible`, so an
+    /// unrecognized code must remain diagnostic rather than tearing down an otherwise usable session.
+    public static func terminalTranscriptionFailure(
+        from event: [String: Any]
+    ) -> TranscriptionFailureReason? {
+        guard let eventType = event["type"] as? String,
+              eventType == failedTranscriptionType || eventType == "error",
+              let error = event["error"] as? [String: Any] else { return nil }
+        let code = (error["code"] as? String)?.lowercased()
+        let type = (error["type"] as? String)?.lowercased()
+
+        switch code {
+        case "insufficient_quota", "billing_hard_limit_reached", "billing_not_active":
+            return .quotaExceeded
+        case "invalid_api_key":
+            return .authenticationFailed
+        case "permission_denied", "organization_deactivated", "account_deactivated",
+             "unsupported_country_region_territory":
+            return .accessDenied
+        case "model_not_found":
+            return .configurationRejected
+        default:
+            break
+        }
+
+        switch type {
+        case "authentication_error": return .authenticationFailed
+        case "permission_error": return .accessDenied
+        default: return nil
+        }
+    }
+
     /// The transcript text from a parsed realtime event, if it is a **completed** input-audio
     /// transcription carrying real speech — otherwise nil. Pure and unit-testable; the live socket
     /// is not, so this is where the wire→text parsing (and hallucination filtering) is verified.
