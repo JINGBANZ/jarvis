@@ -17,17 +17,19 @@ public enum TurnSubstance {
     /// filler ("no, no" while thinking aloud), so this override must see the speaker label.
     private static let interviewerCorrections: Set<String> = ["no", "nope"]
 
-    /// Normalized (lowercased, punctuation-stripped, repeats-collapsed) back-channel forms.
-    /// To add a language, add its dozen closed-class forms in normalized shape.
-    private static let fillers: Set<String> = [
+    /// Human-readable back-channel forms, kept in natural spelling. Each is run through `normalized`
+    /// when the set is built, so entries stay readable while being guaranteed to match normalized
+    /// input — an entry with a doubled letter ("cool", "i see") can't silently die to the collapse
+    /// step. To add a language, add its dozen closed-class forms in plain spelling.
+    private static let fillers: Set<String> = Set([
         // English
         "hm", "m", "mhm", "uh", "um", "uhuh", "uhum", "ok", "okay",
         "yes", "yeah", "yep", "no", "nope", "right", "sure", "wow", "oh", "ah", "so",
-        "cool", "gotit", "isee", "alright",
+        "cool", "got it", "i see", "alright",
         // Chinese
         "嗯", "恩", "啊", "哦", "噢", "呃", "好", "好的", "好吧", "好了",
         "对", "对的", "是", "是的", "明白", "可以", "行", "了解",
-    ]
+    ].map(normalized))
 
     /// True when the line should reach the brain. Order matters: overrides first (a question or an
     /// address is always substance, whoever said it), then normalize, then the closed-class list and
@@ -37,8 +39,6 @@ public enum TurnSubstance {
         if lower.contains("jarvis") { return true }
         if lower.contains("?") || lower.contains("？") { return true }
 
-        // Keep only letters/digits (CJK ideographs are letters), dropping punctuation, whitespace,
-        // and symbols; then collapse consecutive repeats so elongations match their base form.
         let collapsed = normalized(lower)
 
         if collapsed.isEmpty { return false }              // pure punctuation / noise
@@ -56,6 +56,10 @@ public enum TurnSubstance {
         return isSubstantive(line.text)
     }
 
+    /// Keep only letters/digits (CJK ideographs are letters), dropping punctuation, whitespace, and
+    /// symbols; then collapse consecutive repeats so elongations fold onto their base form
+    /// ("Hmmmm." → "hm", "嗯嗯" → "嗯"). Applied to both incoming lines and the `fillers` set so the
+    /// two are compared in the same shape.
     private static func normalized(_ lower: String) -> String {
         var collapsed = ""
         for scalar in lower.unicodeScalars where CharacterSet.alphanumerics.contains(scalar) {
