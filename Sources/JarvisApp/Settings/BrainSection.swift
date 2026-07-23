@@ -223,7 +223,13 @@ final class BrainSection: NSObject, SettingsSection {
             onPreferencesChanged(nil)
             return
         }
-        if detectionTask == nil, let detectedCLIs {
+        // Never apply a cached preflight while a fresher probe is running. The completion collapses
+        // any edits made during that probe into one application of the latest persisted preferences.
+        if detectionTask != nil {
+            applyPreferencesAfterDetection = true
+            return
+        }
+        if let detectedCLIs {
             onPreferencesChanged(detectedCLIs[provider])
         } else {
             applyPreferencesAfterDetection = true
