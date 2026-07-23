@@ -6,9 +6,9 @@
 
 ## Entry Point
 
-One menu item — **"Settings…"** — calls `SettingsWindow.show()`. The window is rebuilt on each
-open so every section starts fresh; re-opening while already visible brings it to the front without
-rebuilding.
+One menu item — **"Settings…"** — calls `SettingsWindow.show()`. The lightweight window and tab shell
+are retained between opens. Section views are built only when selected and released on close, so
+controls still start fresh without constructing hidden tabs before the window can appear.
 
 ## Architecture
 
@@ -54,8 +54,8 @@ so an unwrapped fixed-frame view would ride the bottom edge in a taller window).
 | `DisplaySection` | "Screen" | yes | One dropdown — the capture scope: **Active window** (default) or one **Entire display** entry per connected display; persists via `ScreenCapturePreferences`. Applies to the next screenshot. |
 | `ActivitySection` | "Activity" | yes | Embeds the `ActivityViewer` content view (`makeContentView()` / `teardown()`); `fillsTab == true` so the log stretches with the window. Its header shows the selected session's exact directory ID in a selectable field with **Copy ID**, and carries **Evaluate** — one click sends the selected session's recorded LLM wire traffic (`brain-traffic.jsonl`) to the brain model at high effort for a context-engineering audit (`SessionEvaluator`), saved as `eval-report.md` in the session dir and opened in the browser as a rendered `eval-report.html` page (`EvalReportPage`) whose **Copy as Markdown** button hands the raw report to an agent chat; once a session has a saved report the button flips to **Open report**. Only *finished* conversations qualify: the button is disabled while the selected session is the live, still-running one (a mid-session audit would judge half a story) and re-enables once Stop has drained any in-flight turn — the cancelled request's final traffic line must land before the audit reads the file. |
 
-`AppDelegate` builds the section list at launch and passes it to `SettingsWindow`. All four sections
-are always present.
+`AppDelegate` builds the section list at launch and passes it to `SettingsWindow`. All four tabs are
+always present, but each tab's content is created lazily on first selection during that open.
 
 ## Activation-Policy Switch
 
@@ -63,7 +63,9 @@ are always present.
 `show()` promotes the activation policy to `.regular` so the window can become key and accept
 paste/keyboard input. `windowWillClose(_:)` drops it back to `.accessory`. This is the same pattern
 the old API-key dialog and activity viewer each learned independently — now consolidated in one
-place.
+place. Initial Brain controls render from preferences and the latest cached CLI status immediately;
+CLI status and capability subprocesses run away from the main actor and update those controls when
+they finish, so their bounded timeouts cannot delay presentation.
 
 ## Overlay Appearance
 
@@ -112,10 +114,12 @@ subprocesses and billed to the user's existing Claude / ChatGPT *subscription* i
 CLIs are auto-detected by `AgentCLIDetector`: binary discovery is a pure file probe over $PATH + the
 known install dirs, while Claude sign-in uses its non-billing `auth status --json` command under a
 short timeout because account metadata can outlive an expired OAuth session. Codex keeps using its
-auth-file marker. The radios show **signed in**, **signed out**, or **sign-in unknown**; a confirmed
-logout refuses Start, while an unavailable probe warns but does not falsely claim logout. An actual
-CLI request can still fail after preflight. A provider that was selected at Start or has already
-completed a turn then stops the unusable coaching session without activating the app; a newly
+auth-file marker. Settings runs these probes asynchronously and keeps local-provider controls
+selectable while the first result is pending. The radios then show **signed in**, **signed out**, or
+**sign-in unknown**; a confirmed logout refuses Start, while an unavailable probe warns but does not
+falsely claim logout. An actual CLI request can still fail after preflight. A provider that was
+selected at Start or has already completed a turn then stops the unusable coaching session without
+activating the app; a newly
 switched provider uses the transactional fallback described below. Both paths keep detailed error
 and sign-in information in `jarvis-debug.log` and put only fixed provider-level copy in Activity.
 

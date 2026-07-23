@@ -203,4 +203,17 @@ import Glibc
         #expect(d.detect(.openAI) == nil)
         #expect(d.detectAll().map(\.provider) == [.claudeCode, .codexCLI])
     }
+
+    @Test func asyncDetectionReturnsProbeResults() async throws {
+        let home = try makeHome()
+        let bin = home.appendingPathComponent("fakebin")
+        try installBinary("claude", in: bin, script: """
+            #!/bin/sh
+            printf '%s\\n' '{"loggedIn":true,"authMethod":"claude.ai"}'
+            """)
+        try installBinary("codex", in: bin)
+        let d = AgentCLIDetector(home: home, pathVariable: bin.path, authStatusTimeout: 10)
+        let result = await d.detectAllAsync()
+        #expect(result.first(where: { $0.provider == .claudeCode })?.authenticationStatus == .signedIn)
+    }
 }

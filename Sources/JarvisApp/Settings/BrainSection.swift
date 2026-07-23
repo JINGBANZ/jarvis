@@ -25,6 +25,13 @@ final class BrainSection: NSObject, SettingsSection {
     private var modelPopup: NSPopUpButton?
     /// The models backing the current popup rows, so selection maps back without re-deriving.
     private var listedModels: [BrainModel] = []
+    /// The latest completed probe remains usable while the next refresh runs in the background.
+    private var detectedCLIs: [BrainProvider: DetectedAgentCLI]?
+    /// Deliberately survives a Settings close so a local-provider edit made during the probe still
+    /// reaches the running coaching session when detection finishes.
+    private var detectionTask: Task<Void, Never>?
+    /// Several edits during one probe collapse into one application of the latest persisted values.
+    private var applyPreferencesAfterDetection = false
 
     init(preferences: BrainPreferences, detector: AgentCLIDetector,
          onPreferencesChanged: @escaping (DetectedAgentCLI?) -> Void,
@@ -102,27 +109,43 @@ final class BrainSection: NSObject, SettingsSection {
 
         apiKey.addControls(to: view, top: 112)
 
+        renderDetection()
         return view
     }
 
-    /// Populate on initial activation and re-probe on every later show so an install or sign-in
-    /// completed while the app was open appears. `makeView()` deliberately does not probe: the
-    /// Settings host activates the initial tab immediately after building all section views.
+    /// Re-probe whenever the tab becomes visible so an install or sign-in completed while the app
+    /// was open appears. The subprocesses stay off the main actor; cached or base labels render
+    /// immediately and the status suffixes update when detection finishes.
     func didBecomeActive() {
         refreshDetection()
     }
 
-    /// Update radio titles/enablement from detection and re-aim the model/effort controls at the
-    /// selected provider.
-    @discardableResult
-    private func refreshDetection() -> [BrainProvider: DetectedAgentCLI] {
+    private func refreshDetection() {
+        guard detectionTask == nil else { return }
+        let detector = detector
+        detectionTask = Task { [weak self] in
+            let values = await detector.detectAllAsync()
+            guard !Task.isCancelled, let self else { return }
+            detectionTask = nil
+            detectedCLIs = Dictionary(uniqueKeysWithValues: values.map { ($0.provider, $0) })
+            renderDetection()
+            if applyPreferencesAfterDetection {
+                applyPreferencesAfterDetection = false
+                onPreferencesChanged(detectedCLIs?[preferences.provider])
+            }
+        }
+    }
+
+    /// Update radio titles/enablement from the most recent detection and re-aim the model controls at
+    /// the selected provider. Before the first probe completes, local providers stay selectable and
+    /// use their base labels rather than being misreported as missing.
+    private func renderDetection() {
         let selected = preferences.provider
-        let detected = Dictionary(uniqueKeysWithValues: detector.detectAll().map { ($0.provider, $0) })
         for (provider, radio) in radios {
             var title = provider.displayName
             var enabled = true
-            if provider.usesLocalCLI {
-                if let cli = detected[provider] {
+            if provider.usesLocalCLI, let detectedCLIs {
+                if let cli = detectedCLIs[provider] {
                     switch cli.authenticationStatus {
                     case .signedIn: title += " — detected, signed in"
                     case .signedOut: title += " — detected, signed out"
@@ -140,7 +163,7 @@ final class BrainSection: NSObject, SettingsSection {
             radio.state = provider == selected ? .on : .off
         }
         var note = Self.note(for: selected)
-        if selected.usesLocalCLI, let cli = detected[selected] {
+        if selected.usesLocalCLI, let cli = detectedCLIs?[selected] {
             switch cli.authenticationStatus {
             case .signedIn:
                 break
@@ -152,7 +175,6 @@ final class BrainSection: NSObject, SettingsSection {
         }
         providerNote?.stringValue = note
         reloadModels(for: selected)
-        return detected
     }
 
     private static func note(for provider: BrainProvider) -> String {
@@ -176,26 +198,36 @@ final class BrainSection: NSObject, SettingsSection {
     @objc private func providerChanged(_ sender: NSButton) {
         guard let provider = radios.first(where: { $0.value === sender })?.key else { return }
         preferences.provider = provider
-        let detected = refreshDetection()
-        onPreferencesChanged(detected[provider])
+        renderDetection()
+        preferencesDidChange()
     }
 
     @objc private func modelChanged(_ sender: NSPopUpButton) {
         let row = sender.indexOfSelectedItem
         guard listedModels.indices.contains(row) else { return }
         preferences.setModel(listedModels[row], for: preferences.provider)
-        onPreferencesChanged(detectSelectedCLI())
+        preferencesDidChange()
     }
 
     @objc private func effortChanged(_ sender: NSPopUpButton) {
         let row = sender.indexOfSelectedItem
         guard ReasoningEffort.allCases.indices.contains(row) else { return }
         preferences.effort = ReasoningEffort.allCases[row]
-        onPreferencesChanged(detectSelectedCLI())
+        preferencesDidChange()
     }
 
-    private func detectSelectedCLI() -> DetectedAgentCLI? {
+    private func preferencesDidChange() {
         let provider = preferences.provider
-        return provider.usesLocalCLI ? detector.detect(provider) : nil
+        guard provider.usesLocalCLI else {
+            applyPreferencesAfterDetection = false
+            onPreferencesChanged(nil)
+            return
+        }
+        if detectionTask == nil, let detectedCLIs {
+            onPreferencesChanged(detectedCLIs[provider])
+        } else {
+            applyPreferencesAfterDetection = true
+            refreshDetection()
+        }
     }
 }
