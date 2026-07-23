@@ -11,6 +11,7 @@ import Foundation
         #expect(ActivityLog.cssClass(for: "🤫 stayed silent — nothing useful to add") == "think")
         #expect(ActivityLog.cssClass(for: "💭 thinking…") == "think")
         #expect(ActivityLog.cssClass(for: "… nothing useful to add, staying silent") == "think")
+        #expect(ActivityLog.cssClass(for: "🧠 brain switch applied — OpenAI API → Claude Code") == "think")
         #expect(ActivityLog.cssClass(for: "⏹ coaching stopped — Claude Code couldn't respond") == "think")
         #expect(ActivityLog.cssClass(for: "Jarvis realtime error event: oops") == "err")
         #expect(ActivityLog.cssClass(for: "Jarvis: coaching started.") == "")
@@ -140,6 +141,45 @@ import Foundation
         #expect(!row.contains("OAuth"))
         #expect(ActivityLog.isHumanFacing(
             message: "⏹ coaching stopped — Claude Code couldn't respond; check Settings → Brain",
+            imageFile: nil
+        ))
+    }
+
+    @Test func brainChangeAppliedNamesProvidersWithoutDiagnosticDetail() throws {
+        let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
+        let log = ActivityLog(); log.enable(directory: dir)
+        log.record(.brainChangeApplied(previous: .openAI, current: .claudeCode))
+        let snapshot = log.attach { _ in }
+
+        let row = try #require(snapshot.rows.first)
+        #expect(row.contains("brain switch applied"))
+        #expect(row.contains("OpenAI API"))
+        #expect(row.contains("Claude Code"))
+        #expect(!row.contains("OAuth"))
+        #expect(!row.contains("token"))
+        #expect(ActivityLog.isHumanFacing(
+            message: "🧠 brain switch applied — OpenAI API → Claude Code",
+            imageFile: nil
+        ))
+    }
+
+    @Test func brainFallbackNamesProvidersWithoutDiagnosticDetail() throws {
+        let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
+        let log = ActivityLog(); log.enable(directory: dir)
+        log.record(.brainFallback(failed: .claudeCode, restored: .openAI))
+        let snapshot = log.attach { _ in }
+
+        let row = try #require(snapshot.rows.first)
+        #expect(row.contains("brain switch failed"))
+        #expect(row.contains("Claude Code"))
+        #expect(row.contains("OpenAI API"))
+        #expect(row.contains("OpenAI API restored"))
+        #expect(!row.contains("retry"))
+        #expect(!row.contains("turn"))
+        #expect(!row.contains("OAuth"))
+        #expect(!row.contains("token"))
+        #expect(ActivityLog.isHumanFacing(
+            message: "⚠️ brain switch failed — Claude Code couldn't respond; OpenAI API restored",
             imageFile: nil
         ))
     }

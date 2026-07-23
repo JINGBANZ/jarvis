@@ -191,6 +191,7 @@
 
 - **Chose:** A Brain settings tab picks the model from a code-owned `BrainModelCatalog` (default `gpt-5.5`) and one global reasoning effort (default `low`), persisted via `BrainPreferences` and applied on next Start; moved out of `Config`.
 - **Why:** The catalog/enum becomes the single source of truth, and the user can trade quality versus cost/latency.
+- **Superseded by:** 2026-07-22 — Brain settings hot-switch between coaching turns. Persistence and catalog ownership stand; next-Start-only application does not.
 - **Detail:** [settings-window.md](./settings-window.md).
 
 ### 2026-06-20 — Persistent response box beside the overlay
@@ -529,3 +530,24 @@
 - **Supersedes in part:** 2026-07-16 — Local Claude Code / Codex CLIs as alternative brain providers.
 - **Detail:** [architecture.md → Local CLI brain providers](./architecture.md#local-cli-brain-providers),
   `Sources/JarvisCore/Brain/CLIBrainClient+Invocation.swift`, `AgentCLIProcessRunner.swift`.
+
+### 2026-07-22 — Brain settings hot-switch between coaching turns
+
+- **Chose:** Apply provider, model, and reasoning-effort changes between coaching turns without
+  stopping the session, using a snapshotted, transactional brain configuration in `CoachDriver`.
+- **Why:** A live interview is exactly when changing provider or model is useful. The old Settings
+  behavior persisted the click but silently kept the start-time client for the entire run, while the
+  obvious reuse of the existing restart path would discard the transcript and coaching history.
+  Client-managed, provider-neutral committed history makes a between-turn switch safe; provider raw
+  reasoning items exist only inside a turn's tool loop, which is why the snapshot boundary matters.
+- **Rejected:** (a) Stop and Start automatically — rotates or resets live context and interrupts
+  transcription. (b) Looking up preferences on every `BrainClient.respond` call — can split one
+  capture/tool loop across providers and invalidate provider-specific reasoning/call linkage. (c)
+  Cancelling the in-flight turn on every Settings click — drops a valid response and can churn CLI
+  subprocesses while the user adjusts model and effort controls. (d) Stopping after an unconfirmed
+  replacement fails — sacrifices a known-working provider and interrupts the live conversation. (e)
+  Feeding the failed replacement's partial tool loop into the fallback — provider-specific reasoning
+  and call identifiers cannot safely cross transports, so the clean turn input is replayed instead.
+- **Supersedes in part:** 2026-06-20 — Brain model + reasoning effort are user-selectable.
+- **Detail:** [settings-window.md → Brain](./settings-window.md#brain),
+  `Sources/JarvisCore/Coach/CoachDriver.swift`, `Sources/JarvisApp/App/AppDelegate.swift`.

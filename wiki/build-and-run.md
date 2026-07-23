@@ -87,11 +87,13 @@ Settings → **Activity** opens an **in-app `WKWebView`** into which `ActivityLo
 human-facing coaching exchange: finalized interviewer/user speech, manual hint requests, and every
 brain action — a successful or failed `capture_screen`, a displayed `speak` tip, or a deliberate
 `stay_silent`. It also shows fixed, non-sensitive notices for every runtime failure that stops or
-degrades coaching; raw error detail remains in `jarvis-debug.log`. Successful screen-view events
-carry their thumbnails as in-memory `data:` URIs. Chosen over a local HTTP server + SSE: for an app
-that already holds the entries in memory, pushing into an embedded WebView is less code, has zero
-network surface, and is the most testable (the production runtime *is* the test runtime). It also
-sidesteps the `file://` `fetch()` restriction that forced the original viewer's `<meta refresh>`
+degrades coaching, as well as a settings preflight that was not applied and a failed live brain
+switch falling back to the previous provider. Provider names are allowed, while raw errors,
+authentication details, retries, and timing remain in `jarvis-debug.log`. Successful screen-view
+events carry their thumbnails as in-memory `data:` URIs. Chosen over a local HTTP server + SSE: for
+an app that already holds the entries in memory, pushing into an embedded WebView is less code, has
+zero network surface, and is the most testable (the production runtime *is* the test runtime). It
+also sidesteps the `file://` `fetch()` restriction that forced the original viewer's `<meta refresh>`
 reload.
 
 - New events stream in live (no reload, no flicker); thumbnails open in an in-page lightbox.

@@ -2,9 +2,10 @@ import Foundation
 
 /// The model behind the human-facing activity viewer. It records the coaching exchange — heard
 /// speech, manual hint requests, every brain action (screen view, tip, or deliberate silence), and
-/// fixed non-sensitive notices when coaching stops or degrades. It pushes those entries into an
-/// in-app `WKWebView` window (see `ActivityViewer` in JarvisApp) and persists them so past sessions
-/// can be browsed later. Detailed diagnostics belong exclusively in `JarvisLog`.
+/// fixed non-sensitive notices when a brain change succeeds, falls back, degrades, or must stop. It
+/// pushes those entries into an in-app `WKWebView` window (see `ActivityViewer` in JarvisApp) and
+/// persists them so past sessions can be browsed later. Detailed diagnostics belong exclusively in
+/// `JarvisLog`.
 ///
 /// This type is UI-free (Foundation only): it generates the page HTML and the per-row JS as plain
 /// strings; the WebView lives in JarvisApp. See wiki/build-and-run.md.
@@ -42,6 +43,13 @@ public final class ActivityLog: @unchecked Sendable {
         case systemAudioStopped
         /// An explicit Settings reapply failed its preflight while the existing session continued.
         case settingsChangeNotApplied
+        /// A live brain replacement completed its first non-truncated terminal turn. Provider
+        /// identities are enough for a fixed human-facing success notice; model transport details
+        /// remain in jlog.
+        case brainChangeApplied(previous: BrainProvider, current: BrainProvider)
+        /// A live brain replacement failed its first turn, so Jarvis restored the previous active
+        /// provider. Carries provider identities only; raw failure detail stays in jlog.
+        case brainFallback(failed: BrainProvider, restored: BrainProvider)
     }
 
     /// One recorded line. `imageFile` is the relative `shot-N.jpg` name on disk (the bytes the DOM
@@ -156,6 +164,20 @@ public final class ActivityLog: @unchecked Sendable {
         case .settingsChangeNotApplied:
             message = "⚠️ settings change wasn't applied — current coaching session continues; check Settings → Brain"
             imageBase64 = nil
+        case .brainChangeApplied(let previous, let current):
+            if previous == current {
+                message = "🧠 brain change applied — \(current.displayName) setup is active"
+            } else {
+                message = "🧠 brain switch applied — \(previous.displayName) → \(current.displayName)"
+            }
+            imageBase64 = nil
+        case .brainFallback(let failed, let restored):
+            if failed == restored {
+                message = "⚠️ brain change failed — previous \(restored.displayName) setup restored"
+            } else {
+                message = "⚠️ brain switch failed — \(failed.displayName) couldn't respond; \(restored.displayName) restored"
+            }
+            imageBase64 = nil
         }
         queue.async { [self] in
             guard let dir else { return }
@@ -247,6 +269,7 @@ public final class ActivityLog: @unchecked Sendable {
         if m.hasPrefix("👁") { return "see" }
         if m.hasPrefix("🗣") || m.hasPrefix("🤫 quiet") { return "hear" }
         if m.hasPrefix("🤫 stayed silent") || m.hasPrefix("💭") || m.hasPrefix("…") { return "think" }
+        if m.hasPrefix("🧠") { return "think" }
         if m.hasPrefix("⏹ coaching stopped") { return "think" }
         if m.hasPrefix("⚠️") { return "think" }
         let low = m.lowercased()
@@ -266,6 +289,10 @@ public final class ActivityLog: @unchecked Sendable {
             || m.hasPrefix("⏹ session failed")
             || m.hasPrefix("⚠️ system audio stopped")
             || m.hasPrefix("⚠️ settings change wasn't applied")
+            || m.hasPrefix("🧠 brain switch applied")
+            || m.hasPrefix("🧠 brain change applied")
+            || m.hasPrefix("⚠️ brain switch failed")
+            || m.hasPrefix("⚠️ brain change failed")
     }
 
     /// The empty page shell: dark theme, a header with a live count, the row container, the lightbox

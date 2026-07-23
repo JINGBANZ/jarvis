@@ -21,16 +21,9 @@ import Foundation
 public final class CoachDriver: @unchecked Sendable {
     private let config: Config
     private let transcript: RollingTranscript
-    private let brain: BrainClient
-    /// Writes the compaction summaries — typically a cheaper model than the coach (see AppDelegate).
-    /// Nil falls back to `brain`, so tests and minimal callers need not wire one.
-    private let summarizer: BrainClient?
     private let screen: ScreenCapturing
     private let overlay: OverlayRendering
     private let clock: Clock
-    /// The app edge uses this to surface a provider failure and end a session that can no longer
-    /// coach. Nil keeps Core-only callers/tests free of UI policy.
-    private let onBrainFailure: (@Sendable (String) -> Void)?
     private let sessionStart: TimeInterval
     private let history = CoachHistory()
 
@@ -38,6 +31,22 @@ public final class CoachDriver: @unchecked Sendable {
     private let maxToolIterations = 4
 
     private let stateLock = NSLock()
+    /// The coach, its cheaper compaction model, and its provider-specific failure policies move
+    /// together. A turn snapshots this before any awaited work, so a Settings change cannot split
+    /// its manual capture or model tool loop across providers; the replacement starts next turn.
+    private struct BrainConfiguration {
+        let revision: UInt
+        let brain: BrainClient
+        let provider: BrainProvider?
+        let summarizer: BrainClient?
+        let onFailure: (@MainActor @Sendable (String) -> Void)?
+        let onChangeApplied: (@Sendable (BrainProvider?, BrainProvider?) -> Void)?
+        let onFallback: (@Sendable (BrainProvider?, BrainProvider?) -> Void)?
+    }
+    private var brainConfiguration: BrainConfiguration
+    /// The previous active configuration. A replacement keeps it until the replacement itself
+    /// completes one non-truncated terminal turn, making a Settings change a transactional cutover.
+    private var fallbackBrainConfiguration: BrainConfiguration?
     private var isHandling = false
     /// Number of transcript lines already sent to the brain. Each turn sends `lines[sentCount...]`
     /// and advances this ONLY after the input reached the server, so a failed turn re-sends its speech.
@@ -52,17 +61,18 @@ public final class CoachDriver: @unchecked Sendable {
     private var terminalBrainFailure = false
 
     public init(config: Config, transcript: RollingTranscript,
-                brain: BrainClient, summarizer: BrainClient? = nil,
+                brain: BrainClient, brainProvider: BrainProvider? = nil,
+                summarizer: BrainClient? = nil,
                 screen: ScreenCapturing, overlay: OverlayRendering, clock: Clock,
-                onBrainFailure: (@Sendable (String) -> Void)? = nil) {
+                onBrainFailure: (@MainActor @Sendable (String) -> Void)? = nil) {
         self.config = config
         self.transcript = transcript
-        self.brain = brain
-        self.summarizer = summarizer
         self.screen = screen
         self.overlay = overlay
         self.clock = clock
-        self.onBrainFailure = onBrainFailure
+        self.brainConfiguration = BrainConfiguration(
+            revision: 0, brain: brain, provider: brainProvider, summarizer: summarizer,
+            onFailure: onBrainFailure, onChangeApplied: nil, onFallback: nil)
         self.sessionStart = clock.now()
     }
 
@@ -74,6 +84,78 @@ public final class CoachDriver: @unchecked Sendable {
     /// Advance the read position (forward only) once the input has reached the brain.
     private func advanceSentCount(to upTo: Int) {
         stateLock.lock(); if upTo > sentCount { sentCount = upTo }; stateLock.unlock()
+    }
+
+    /// Replace only the model layer of a running coach. The transcript, sent position, history,
+    /// trigger queue, overlays, and audio pipeline stay intact. If a turn is already in flight it
+    /// finishes with its snapshotted configuration; the replacement owns the next turn. The last
+    /// working configuration remains a fallback until the replacement completes one non-truncated
+    /// terminal turn.
+    public func updateBrain(
+        _ brain: BrainClient,
+        provider: BrainProvider? = nil,
+        summarizer: BrainClient? = nil,
+        onBrainFailure: (@MainActor @Sendable (String) -> Void)? = nil,
+        onBrainChangeApplied: (@Sendable (BrainProvider?, BrainProvider?) -> Void)? = nil,
+        onBrainFallback: (@Sendable (BrainProvider?, BrainProvider?) -> Void)? = nil
+    ) {
+        stateLock.lock()
+        // Several Settings edits can land before another coaching turn. Keep the original active
+        // configuration as the fallback rather than replacing it with an untried intermediate one.
+        if fallbackBrainConfiguration == nil {
+            fallbackBrainConfiguration = brainConfiguration
+        }
+        brainConfiguration = BrainConfiguration(
+            revision: brainConfiguration.revision &+ 1,
+            brain: brain, provider: provider, summarizer: summarizer,
+            onFailure: onBrainFailure, onChangeApplied: onBrainChangeApplied,
+            onFallback: onBrainFallback)
+        // A provider change is a recovery path if the former provider failed just as Settings was
+        // changed. Any failure from the superseded revision is ignored below instead of re-latching.
+        terminalBrainFailure = false
+        stateLock.unlock()
+    }
+
+    private func currentBrainConfiguration() -> BrainConfiguration {
+        stateLock.lock(); defer { stateLock.unlock() }; return brainConfiguration
+    }
+
+    /// Commit a successful cutover only if this is still the active revision. A turn on a provider
+    /// superseded while it was in flight must not discard the newer replacement's fallback.
+    private func confirmBrainConfiguration(_ revision: UInt) {
+        var callback: (@Sendable (BrainProvider?, BrainProvider?) -> Void)?
+        var previousProvider: BrainProvider?
+        var activeProvider: BrainProvider?
+        stateLock.lock()
+        if brainConfiguration.revision == revision,
+           let fallback = fallbackBrainConfiguration {
+            callback = brainConfiguration.onChangeApplied
+            previousProvider = fallback.provider
+            activeProvider = brainConfiguration.provider
+            fallbackBrainConfiguration = nil
+        }
+        stateLock.unlock()
+        callback?(previousProvider, activeProvider)
+    }
+
+    /// Restore the previous active configuration when an unconfirmed replacement fails. The restored
+    /// clients get a fresh revision so stale failures cannot match them through an ABA-style race.
+    private func restoreFallback(
+        for failing: BrainConfiguration
+    ) -> (configuration: BrainConfiguration,
+          callback: (@Sendable (BrainProvider?, BrainProvider?) -> Void)?)? {
+        stateLock.lock(); defer { stateLock.unlock() }
+        guard brainConfiguration.revision == failing.revision,
+              let fallback = fallbackBrainConfiguration else { return nil }
+        let restored = BrainConfiguration(
+            revision: brainConfiguration.revision &+ 1,
+            brain: fallback.brain, provider: fallback.provider, summarizer: fallback.summarizer,
+            onFailure: fallback.onFailure, onChangeApplied: fallback.onChangeApplied,
+            onFallback: fallback.onFallback)
+        brainConfiguration = restored
+        fallbackBrainConfiguration = nil
+        terminalBrainFailure = false
+        return (restored, failing.onFallback)
     }
 
     /// Atomically claim the single in-flight slot, OR (if busy) record the trigger as pending. One
@@ -98,11 +180,22 @@ public final class CoachDriver: @unchecked Sendable {
         return .claimed
     }
 
-    private func latchTerminalBrainFailure() {
-        stateLock.lock()
+    /// Latch/report only if the failing turn still belongs to the active provider. A user can switch
+    /// providers while an old request is in flight; that stale failure must not stop the replacement.
+    private func latchTerminalBrainFailure(for revision: UInt) -> Bool {
+        stateLock.lock(); defer { stateLock.unlock() }
+        guard brainConfiguration.revision == revision else { return false }
         terminalBrainFailure = true
         pendingTrigger = nil
-        stateLock.unlock()
+        return true
+    }
+
+    /// Recheck at main-actor delivery, not only when the request unwinds. A Settings update can run
+    /// after a terminal failure is latched but before its callback reaches the app; that stale
+    /// callback must not stop the replacement provider.
+    private func isCurrentBrainConfiguration(_ revision: UInt) -> Bool {
+        stateLock.lock(); defer { stateLock.unlock() }
+        return brainConfiguration.revision == revision
     }
 
     /// Atomically take the next pending trigger (keeping the slot) OR release the slot. One critical
@@ -187,6 +280,11 @@ public final class CoachDriver: @unchecked Sendable {
                         ctx.promptLine].compactMap { $0 }.joined(separator: "\n\n")
         var turnMessages: [ChatMessage] = [.user(userText)]
 
+        // Keep one provider/model for the whole turn, including the manual-hint capture below. This
+        // snapshot must precede that await: a Settings update while capture is in flight belongs to
+        // the next turn, not the already-started hint.
+        var brains = currentBrainConfiguration()
+
         // Manual hint (hotkey): the user explicitly asked for help, so capture the screen HERE and
         // inject it into THIS first request — no waiting for the model to call capture_screen.
         // Forcing `speak` (below) then guarantees a visible hint in a single round trip. Same
@@ -219,27 +317,54 @@ public final class CoachDriver: @unchecked Sendable {
 
         jlog("💭 thinking…")
 
+        // Settings updates atomically replace the shared configuration, but this turn continues on
+        // its snapshot and the next turn sees it. If an unconfirmed replacement fails, discard its
+        // provider-specific tool state and restart this same turn from the original provider-neutral
+        // messages on the last working brain.
+        let initialTurnMessages = turnMessages
         var committed = false
         var iterations = 0
+        var lastResponseCompleted = false
         while iterations < maxToolIterations {
             iterations += 1
             let response: BrainResponse
             do {
-                response = try await brain.respond(messages: historyBase + turnMessages,
-                                                   tools: coachTools, toolChoice: turnToolChoice)
+                response = try await brains.brain.respond(messages: historyBase + turnMessages,
+                                                          tools: coachTools, toolChoice: turnToolChoice)
             } catch {
                 // A cancellation (barge-in / Stop) is expected — report it quietly, not as a failure.
                 if Task.isCancelled { jlog("… turn cancelled (interrupted)"); return .cancelled }
                 let detail = error.localizedDescription
                 jlog("Jarvis coach: brain request failed on \(reason): \(detail)")
-                if onBrainFailure != nil { latchTerminalBrainFailure() }
-                onBrainFailure?(detail)
+                if let fallback = restoreFallback(for: brains) {
+                    jlog("Jarvis coach: replacement brain failed — retrying this turn on the previous configuration")
+                    fallback.callback?(brains.provider, fallback.configuration.provider)
+                    brains = fallback.configuration
+                    turnMessages = initialTurnMessages
+                    iterations = 0
+                    lastResponseCompleted = false
+                    continue
+                }
+                if let onFailure = brains.onFailure {
+                    if latchTerminalBrainFailure(for: brains.revision) {
+                        await MainActor.run {
+                            guard isCurrentBrainConfiguration(brains.revision) else {
+                                jlog("… ignoring queued failure from superseded brain configuration")
+                                return
+                            }
+                            onFailure(detail)
+                        }
+                    } else {
+                        jlog("… ignoring failure from superseded brain configuration")
+                    }
+                }
                 // Speech already marked sent (a later-iteration failure) must not vanish from memory —
                 // commit what this turn accumulated. A first-request failure commits nothing; the
                 // un-advanced sentCount re-sends the delta next turn instead.
                 if committed { commitIfWorthKeeping(turnMessages, deltaText: delta.text) }
                 return .brainError
             }
+            lastResponseCompleted = response.incompleteReason == nil
             // The input provably reached the server — NOW mark the delta as sent.
             if !committed { advanceSentCount(to: delta.upTo); committed = true }
 
@@ -256,11 +381,18 @@ public final class CoachDriver: @unchecked Sendable {
                 commitIfWorthKeeping(turnMessages, deltaText: delta.text)
                 if let reasonText = response.incompleteReason {
                     jlog("⚠️ response truncated (\(reasonText)) — not deliberate silence")
+                    // An incomplete response does not prove the replacement can finish a turn. Keep
+                    // the previous provider available for a later request failure.
                     return .truncated
                 }
                 jlog("… nothing useful to add, staying silent")
-                await compactIfNeeded()
+                confirmBrainConfiguration(brains.revision)
+                await compactIfNeeded(using: brains)
                 return .silentByModel
+            }
+
+            if let reasonText = response.incompleteReason {
+                jlog("⚠️ response incomplete (\(reasonText)) — not confirming a brain change")
             }
 
             switch call {
@@ -326,7 +458,10 @@ public final class CoachDriver: @unchecked Sendable {
                 turnMessages.append(.assistantToolCalls(response.rawToolCalls))
                 turnMessages.append(.init(role: .tool, text: "shown to the user", toolCallId: callId))
                 history.commit(turnMessages)
-                await compactIfNeeded()
+                if lastResponseCompleted {
+                    confirmBrainConfiguration(brains.revision)
+                }
+                await compactIfNeeded(using: brains)
                 return .spoke
 
             case .staySilent:
@@ -336,13 +471,19 @@ public final class CoachDriver: @unchecked Sendable {
                 jlog("… nothing useful to add, staying silent")
                 ActivityLog.shared.record(.stayedSilent)
                 commitIfWorthKeeping(turnMessages, deltaText: delta.text)
-                await compactIfNeeded()
+                if lastResponseCompleted {
+                    confirmBrainConfiguration(brains.revision)
+                }
+                await compactIfNeeded(using: brains)
                 return .silentByModel
             }
         }
         jlog("… tool loop exhausted without speaking")
         history.commit(turnMessages)   // captures + speech stay in memory even on the backstop path
-        await compactIfNeeded()
+        if lastResponseCompleted {
+            confirmBrainConfiguration(brains.revision)
+        }
+        await compactIfNeeded(using: brains)
         return .exhausted
     }
 
@@ -376,11 +517,11 @@ public final class CoachDriver: @unchecked Sendable {
     /// (via `summarizer`, falling back to the coach brain). Runs while still holding the turn slot —
     /// a concurrent trigger just coalesces, so there's no compaction/turn race — and fails soft: on
     /// any error the full history simply rides along until the next attempt.
-    private func compactIfNeeded() async {
+    private func compactIfNeeded(using brains: BrainConfiguration) async {
         guard history.estimatedTokens > config.historyCompactionTokenThreshold else { return }
         guard let (oldest, count) = history.compactionPrefix() else { return }
         do {
-            let response = try await (summarizer ?? brain).respond(
+            let response = try await (brains.summarizer ?? brains.brain).respond(
                 messages: [.system(Self.summaryInstructions), .user(Self.renderForSummary(oldest))],
                 tools: [], toolChoice: .auto)
             guard let summary = response.outputText, !summary.isEmpty else {

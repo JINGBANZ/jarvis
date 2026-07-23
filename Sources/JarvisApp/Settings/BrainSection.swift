@@ -7,16 +7,17 @@ import JarvisCore
 /// list is per provider (each remembers its own); the effort is one global setting applied to all
 /// three, mapped onto each CLI's scale by `CLIBrainClient`. Installed CLIs are auto-detected
 /// whenever the tab is shown; Claude's bounded status command distinguishes signed in, signed out,
-/// and an unavailable probe. Selections persist immediately through `BrainPreferences`; changes
-/// take effect on the next Start, since the brain client is built once per coaching run. The
-/// transcription model is deliberately NOT here; it's a separate concern — which is also why the
-/// key stays required: transcription always runs on it.
+/// and an unavailable probe. Selections persist immediately through `BrainPreferences`; while
+/// coaching, the driver swaps its model clients for the next turn without resetting transcript or
+/// history. The transcription model is deliberately NOT here; it's a separate concern — which is
+/// also why the key stays required: transcription always runs on it.
 @MainActor
 final class BrainSection: NSObject, SettingsSection {
     let title = "Brain"
 
     private let preferences: BrainPreferences
     private let detector: AgentCLIDetector
+    private let onPreferencesChanged: (DetectedAgentCLI?) -> Void
     private let apiKey: APIKeyControls
 
     private var radios: [BrainProvider: NSButton] = [:]
@@ -26,9 +27,11 @@ final class BrainSection: NSObject, SettingsSection {
     private var listedModels: [BrainModel] = []
 
     init(preferences: BrainPreferences, detector: AgentCLIDetector,
+         onPreferencesChanged: @escaping (DetectedAgentCLI?) -> Void,
          keyStore: FileSecretStore, onKeySaved: @escaping (String) -> Void) {
         self.preferences = preferences
         self.detector = detector
+        self.onPreferencesChanged = onPreferencesChanged
         self.apiKey = APIKeyControls(store: keyStore, onKeySaved: onKeySaved)
     }
 
@@ -81,7 +84,8 @@ final class BrainSection: NSObject, SettingsSection {
         }
         view.addSubview(effortPopup)
 
-        let applyNote = NSTextField(labelWithString: "Changes apply on the next Start (Stop and Start to apply now).")
+        let applyNote = NSTextField(
+            labelWithString: "Changes apply on the next coaching turn (or the next Start while stopped).")
         applyNote.frame = NSRect(x: 24, y: 192, width: 512, height: 20)
         applyNote.textColor = .secondaryLabelColor
         view.addSubview(applyNote)
@@ -110,7 +114,8 @@ final class BrainSection: NSObject, SettingsSection {
 
     /// Update radio titles/enablement from detection and re-aim the model/effort controls at the
     /// selected provider.
-    private func refreshDetection() {
+    @discardableResult
+    private func refreshDetection() -> [BrainProvider: DetectedAgentCLI] {
         let selected = preferences.provider
         let detected = Dictionary(uniqueKeysWithValues: detector.detectAll().map { ($0.provider, $0) })
         for (provider, radio) in radios {
@@ -147,6 +152,7 @@ final class BrainSection: NSObject, SettingsSection {
         }
         providerNote?.stringValue = note
         reloadModels(for: selected)
+        return detected
     }
 
     private static func note(for provider: BrainProvider) -> String {
@@ -170,18 +176,26 @@ final class BrainSection: NSObject, SettingsSection {
     @objc private func providerChanged(_ sender: NSButton) {
         guard let provider = radios.first(where: { $0.value === sender })?.key else { return }
         preferences.provider = provider
-        refreshDetection()
+        let detected = refreshDetection()
+        onPreferencesChanged(detected[provider])
     }
 
     @objc private func modelChanged(_ sender: NSPopUpButton) {
         let row = sender.indexOfSelectedItem
         guard listedModels.indices.contains(row) else { return }
         preferences.setModel(listedModels[row], for: preferences.provider)
+        onPreferencesChanged(detectSelectedCLI())
     }
 
     @objc private func effortChanged(_ sender: NSPopUpButton) {
         let row = sender.indexOfSelectedItem
         guard ReasoningEffort.allCases.indices.contains(row) else { return }
         preferences.effort = ReasoningEffort.allCases[row]
+        onPreferencesChanged(detectSelectedCLI())
+    }
+
+    private func detectSelectedCLI() -> DetectedAgentCLI? {
+        let provider = preferences.provider
+        return provider.usesLocalCLI ? detector.detect(provider) : nil
     }
 }

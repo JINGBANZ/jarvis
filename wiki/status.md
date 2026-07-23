@@ -25,12 +25,15 @@ replacement socket replays the rest after a half-open failure. A live Wi-Fi reco
 that speech captured during the outage returns after recovery. The brain can also run through a
 locally installed Claude Code or Codex CLI on the user's subscription; Settings → Brain auto-detects
 those providers, reports Claude's current sign-in state from its bounded status command, and keeps
-the OpenAI API-key path available. Codex coaching calls suppress project instructions and its
-feature-gated agent tools, run as direct-response decisions, and stop under a provider-specific
-stall bound instead of leaving later speech batched indefinitely. A failed CLI coaching request
-stops the unusable session without activating the app, leaves a discreet provider-only Activity
-notice, and keeps the detailed reason in `jarvis-debug.log` instead of leaving the listening state
-green. The same runtime ghost-mode rule
+the OpenAI API-key path available. Provider, model, and effort changes apply transactionally between
+turns without restarting the session: the previous brain remains available until the replacement
+finishes a non-truncated terminal turn, and Activity records a fixed provider-only success or
+fallback notice. Codex coaching calls suppress project instructions and its feature-gated agent
+tools, run as direct-response decisions, and stop under a provider-specific stall bound instead of
+leaving later speech batched indefinitely. A failed established CLI coaching request stops the
+unusable session without activating the app, leaves a discreet provider-only Activity notice, and
+keeps the detailed reason in `jarvis-debug.log` instead of leaving the listening state green. The
+same runtime ghost-mode rule
 now covers microphone transcription, audio-route loss, in-place CLI preflight, and Activity-audit
 completion: no runtime error autonomously activates Jarvis, opens a browser, or presents a modal;
 fixed notices remain available in Activity. The gate statically rejects unreviewed presentation APIs.
@@ -42,8 +45,11 @@ details, ask “Jarvis, how can I solve this in one pass?”, and confirm the fi
 exactly one `capture_screen` followed by a screen-specific reply. Then ask a fully stated behavioral
 question and confirm it can answer without an unnecessary capture. Finish the in-app Claude Code
 provider smoke: confirm Settings shows it signed in, then confirm a coaching turn and screen request.
-Finish the in-app Codex smoke through audio and the overlay, then confirm a missing or signed-out CLI
-fails loudly. The standard release checklist remains in [build-and-run.md](./build-and-run.md).
+While that session runs, switch providers and confirm the next completed turn preserves context and
+adds the provider-only success notice to Activity; then exercise a failed replacement and confirm
+the previous provider continues the conversation with a provider-only fallback notice. Finish the
+in-app Codex smoke through audio and the overlay, then confirm a missing or signed-out CLI fails
+loudly. The standard release checklist remains in [build-and-run.md](./build-and-run.md).
 
 ## Built
 
@@ -53,12 +59,12 @@ thin OS shell, verified by the smoke run.
 - `Sources/JarvisCore/Audio/` — transactional PCM + utterance buffering, adaptive content-free activity detection, non-destructive AEC reference alignment, and system-audio timeline preservation (`PCMBuffer`, `UtteranceBuffer`, `PCM16Framer`, `AudioDownmix`, `AdaptiveAudioActivityDetector`, `EchoReferenceAlignment`, `SystemAudioTimeline`).
 - `Sources/JarvisCore/Transcription/` — realtime session wire contract, per-item event ledger, and rolling transcript (`RealtimeSession`, `RealtimeTranscriptionLedger`, `Transcript`, `NoiseReduction`).
 - `Sources/JarvisCore/Brain/` — the LLM integration: the `BrainClient` contract (`Brain`), `OpenAIBrainClient`, `CLIBrainClient` + `AgentCLIProcessRunner` + `AgentCLIDetector`/`AgentCLIAuthenticationStatus` (the local Claude Code / Codex brain providers and sign-in state), `RetryingBrainClient`, `BrainProvider`, `BrainModelCatalog` (default `gpt-5.5`), `ReasoningEffort`.
-- `Sources/JarvisCore/Coach/` — the event loop: `CoachDriver`, `CoachHistory` (client-managed session memory), `ToolDefs` (coach tools + system prompt).
+- `Sources/JarvisCore/Coach/` — the event loop: `CoachDriver` (including transactional between-turn brain replacement), `CoachHistory` (client-managed session memory), `ToolDefs` (coach tools + system prompt).
 - `Sources/JarvisCore/Triggers/` — turn/silence trigger detection, substance classification, and silence backoff (`Trigger`, `TurnSubstance`, `SilenceBackoff`).
 - `Sources/JarvisCore/Screen/` — the model-triggered screen-capture tool contract + window-scoped capture logic (`ScreenCapture`, `ScreenSnapshot`, `FrontWindowSelector`, `RecognizedTextLayout`).
 - `Sources/JarvisCore/Overlay/` — overlay text model + length-proportional timing + fan-out (`OverlayRendering`, `OverlayTiming`, `OverlayAppearance`, `BroadcastOverlay`).
 - `Sources/JarvisCore/Config/` — config + owner-only secrets + brain/screen preferences (`Config`, `Secrets`, `BrainPreferences`, `ScreenCapturePreferences`, `ScreenCaptureScope`).
-- `Sources/JarvisCore/Diagnostics/` — logging, always-on activity log, privacy-preserving audio continuity evidence, session-history store, wire-level brain traffic capture + one-click session evaluation (single-call in-app **and** the agentic dev-side audit's prompt/transcript prep), user-facing errors (`ActivityLog`, `AudioContinuityWitness`, `SessionStore`, `BrainTrafficLog`, `SessionEvaluator`, `AgenticEvaluation`, `UserFacingError`).
+- `Sources/JarvisCore/Diagnostics/` — logging, always-on activity log with fixed typed brain-change success/fallback notices, privacy-preserving audio continuity evidence, session-history store, wire-level brain traffic capture + one-click session evaluation (single-call in-app **and** the agentic dev-side audit's prompt/transcript prep), user-facing errors (`ActivityLog`, `AudioContinuityWitness`, `SessionStore`, `BrainTrafficLog`, `SessionEvaluator`, `AgenticEvaluation`, `UserFacingError`).
 - `Sources/JarvisOverlay/` — the capture-invisible `NSPanel` surfaces: `OverlayCaptionPanel` (transient), `OverlayBoxPanel` (persistent), `NSPanel+CaptureExclusion`.
 - `Sources/JarvisApp/App/` + `MenuBar/` — entry point, connection-aware menu status, Start/Stop, `ErrorReporter` (startup alerts plus an unconditional no-presentation runtime policy).
 - `Sources/JarvisApp/Capture/` — one-clock aggregate mic + sample-preserving system-audio capture with AEC3 echo cancellation + resampling (`AggregateEchoCapture`, `WebRTCEchoCanceller`, `Resampler`), Realtime item/readiness/liveness/transactional-reconnect/witness handling (`RealtimeTranscriber`, `NetworkPathDiagnostics`), permissions, plus the window-scoped screenshot + OCR edge (`WindowScopedScreenCapture`, `ScreenTextRecognizer`).
