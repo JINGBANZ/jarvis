@@ -84,7 +84,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
                             screen: ScreenCapturing = FakeScreen(),
                             overlay: OverlayRendering = FakeOverlay(),
                             clock: Clock, config: Config = .default,
-                            onBrainFailure: (@Sendable (String) -> Void)? = nil)
+                            onBrainFailure: (@MainActor @Sendable (String) -> Void)? = nil)
         -> (CoachDriver, RollingTranscript) {
         let transcript = RollingTranscript()
         let driver = CoachDriver(
@@ -743,6 +743,48 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(changeRecorder.events.isEmpty)
     }
 
+    /// A response can carry a valid tool call even when the provider marks the run incomplete. The
+    /// tip is still useful, but it does not prove the replacement can finish reliably, so a later
+    /// failure must still restore the previous provider.
+    @Test func incompleteSpeakRetainsFallbackUntilTerminalTurn() async {
+        let clock = ManualClock(now: 0)
+        let previousBrain = ScriptedBrain(script: [
+            .init(toolCalls: [.speak(callId: "old", lines: ["fallback after incomplete tip"])],
+                  rawToolCalls: [RawToolCall(id: "old", name: "speak",
+                                             argumentsJSON: #"{"lines":["fallback after incomplete tip"]}"#)]),
+        ])
+        let replacementBrain = ScriptedThrowBrain(script: [
+            .init(toolCalls: [.speak(callId: "new", lines: ["partial but useful"])],
+                  rawToolCalls: [RawToolCall(id: "new", name: "speak",
+                                             argumentsJSON: #"{"lines":["partial but useful"]}"#)],
+                  incompleteReason: "max_output_tokens"),
+            nil,
+        ])
+        let fallbackRecorder = BrainFallbackRecorder()
+        let changeRecorder = BrainChangeRecorder()
+        let (driver, transcript) = makeDriver(
+            brain: previousBrain, brainProvider: .openAI, clock: clock)
+        driver.updateBrain(
+            replacementBrain, provider: .claudeCode,
+            onBrainChangeApplied: {
+                changeRecorder.record(previous: $0, current: $1)
+            },
+            onBrainFallback: { fallbackRecorder.record(failed: $0, restored: $1) })
+
+        transcript.append(.init(speaker: .me, text: "first replacement turn", at: 0))
+        #expect(await driver.handleTrigger(.turnEnd) == .spoke)
+        #expect(changeRecorder.events.isEmpty)
+        transcript.append(.init(speaker: .me, text: "retry after incomplete response", at: 1))
+        #expect(await driver.handleTrigger(.turnEnd) == .spoke)
+
+        #expect(replacementBrain.calls.count == 2)
+        #expect(previousBrain.calls.count == 1)
+        #expect(fallbackRecorder.events == [
+            .init(failed: .claudeCode, restored: .openAI),
+        ])
+        #expect(changeRecorder.events.isEmpty)
+    }
+
     /// The delta is sent once: a line already carried by an earlier turn appears in the next request
     /// only via history (exactly once), never re-sent as new speech.
     @Test func indexDeltaSendsEachLineExactlyOnce() async {
@@ -1008,6 +1050,58 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(nextBrain.calls.count == 1)
     }
 
+    /// The old request can latch its terminal failure before the main actor delivers the callback.
+    /// A provider switch in that queueing window invalidates the callback so it cannot stop the new
+    /// configuration.
+    @Test func queuedTerminalFailureDoesNotStopReplacementBrain() async {
+        let mainEntered = DispatchSemaphore(value: 0)
+        let mainRelease = DispatchSemaphore(value: 0)
+        let mainBlocker = Task { @MainActor in
+            blockMainActor(entered: mainEntered, release: mainRelease)
+        }
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            DispatchQueue.global().async {
+                mainEntered.wait()
+                continuation.resume()
+            }
+        }
+        defer { mainRelease.signal() }
+
+        let gate = AsyncGate()
+        let oldBrain = GatedThrowingBrain(gate: gate)
+        let nextBrain = ScriptedBrain(script: [
+            .init(toolCalls: [.speak(callId: "new", lines: ["still running"])],
+                  rawToolCalls: [RawToolCall(id: "new", name: "speak",
+                                             argumentsJSON: #"{"lines":["still running"]}"#)]),
+        ])
+        let recorder = BrainFailureRecorder()
+        let (driver, transcript) = makeDriver(
+            brain: oldBrain, clock: ManualClock(now: 0),
+            onBrainFailure: { recorder.record($0) }
+        )
+        transcript.append(.init(speaker: .me, text: "first question", at: 0))
+        async let oldTurn = driver.handleTrigger(.turnEnd)
+        await gate.waitUntilEntered()
+        await gate.release()
+
+        var probe = await driver.handleTrigger(.turnEnd)
+        while probe == .busy {
+            await Task.yield()
+            probe = await driver.handleTrigger(.turnEnd)
+        }
+        #expect(probe == .brainError)
+
+        driver.updateBrain(nextBrain)
+        mainRelease.signal()
+        _ = await mainBlocker.value
+        #expect(await oldTurn == .brainError)
+        #expect(recorder.messages.isEmpty)
+
+        transcript.append(.init(speaker: .me, text: "second question", at: 1))
+        #expect(await driver.handleTrigger(.turnEnd) == .spoke)
+        #expect(nextBrain.calls.count == 1)
+    }
+
     /// Audio-driven turns REQUIRE a tool call (never free text): the model picks which tool from the
     /// prompt — reply, look at the screen, or stay_silent — but must answer with one of them.
     @Test func everyAudioTurnRequiresAToolCall() async {
@@ -1036,6 +1130,14 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         _ = await first
         #expect(brain.callCount >= 2)                      // the original AND the coalesced turn ran
     }
+}
+
+/// Synchronous on purpose: it holds main-actor delivery at a deterministic point while the test
+/// advances the provider revision from another executor.
+@MainActor
+private func blockMainActor(entered: DispatchSemaphore, release: DispatchSemaphore) {
+    entered.signal()
+    release.wait()
 }
 
 /// A brain that always throws, to exercise the `.brainError` outcome.

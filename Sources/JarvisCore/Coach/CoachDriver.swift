@@ -39,7 +39,7 @@ public final class CoachDriver: @unchecked Sendable {
         let brain: BrainClient
         let provider: BrainProvider?
         let summarizer: BrainClient?
-        let onFailure: (@Sendable (String) -> Void)?
+        let onFailure: (@MainActor @Sendable (String) -> Void)?
         let onChangeApplied: (@Sendable (BrainProvider?, BrainProvider?) -> Void)?
         let onFallback: (@Sendable (BrainProvider?, BrainProvider?) -> Void)?
     }
@@ -64,7 +64,7 @@ public final class CoachDriver: @unchecked Sendable {
                 brain: BrainClient, brainProvider: BrainProvider? = nil,
                 summarizer: BrainClient? = nil,
                 screen: ScreenCapturing, overlay: OverlayRendering, clock: Clock,
-                onBrainFailure: (@Sendable (String) -> Void)? = nil) {
+                onBrainFailure: (@MainActor @Sendable (String) -> Void)? = nil) {
         self.config = config
         self.transcript = transcript
         self.screen = screen
@@ -95,7 +95,7 @@ public final class CoachDriver: @unchecked Sendable {
         _ brain: BrainClient,
         provider: BrainProvider? = nil,
         summarizer: BrainClient? = nil,
-        onBrainFailure: (@Sendable (String) -> Void)? = nil,
+        onBrainFailure: (@MainActor @Sendable (String) -> Void)? = nil,
         onBrainChangeApplied: (@Sendable (BrainProvider?, BrainProvider?) -> Void)? = nil,
         onBrainFallback: (@Sendable (BrainProvider?, BrainProvider?) -> Void)? = nil
     ) {
@@ -188,6 +188,14 @@ public final class CoachDriver: @unchecked Sendable {
         terminalBrainFailure = true
         pendingTrigger = nil
         return true
+    }
+
+    /// Recheck at main-actor delivery, not only when the request unwinds. A Settings update can run
+    /// after a terminal failure is latched but before its callback reaches the app; that stale
+    /// callback must not stop the replacement provider.
+    private func isCurrentBrainConfiguration(_ revision: UInt) -> Bool {
+        stateLock.lock(); defer { stateLock.unlock() }
+        return brainConfiguration.revision == revision
     }
 
     /// Atomically take the next pending trigger (keeping the slot) OR release the slot. One critical
@@ -316,6 +324,7 @@ public final class CoachDriver: @unchecked Sendable {
         let initialTurnMessages = turnMessages
         var committed = false
         var iterations = 0
+        var lastResponseCompleted = false
         while iterations < maxToolIterations {
             iterations += 1
             let response: BrainResponse
@@ -333,11 +342,18 @@ public final class CoachDriver: @unchecked Sendable {
                     brains = fallback.configuration
                     turnMessages = initialTurnMessages
                     iterations = 0
+                    lastResponseCompleted = false
                     continue
                 }
                 if let onFailure = brains.onFailure {
                     if latchTerminalBrainFailure(for: brains.revision) {
-                        onFailure(detail)
+                        await MainActor.run {
+                            guard isCurrentBrainConfiguration(brains.revision) else {
+                                jlog("… ignoring queued failure from superseded brain configuration")
+                                return
+                            }
+                            onFailure(detail)
+                        }
                     } else {
                         jlog("… ignoring failure from superseded brain configuration")
                     }
@@ -348,6 +364,7 @@ public final class CoachDriver: @unchecked Sendable {
                 if committed { commitIfWorthKeeping(turnMessages, deltaText: delta.text) }
                 return .brainError
             }
+            lastResponseCompleted = response.incompleteReason == nil
             // The input provably reached the server — NOW mark the delta as sent.
             if !committed { advanceSentCount(to: delta.upTo); committed = true }
 
@@ -372,6 +389,10 @@ public final class CoachDriver: @unchecked Sendable {
                 confirmBrainConfiguration(brains.revision)
                 await compactIfNeeded(using: brains)
                 return .silentByModel
+            }
+
+            if let reasonText = response.incompleteReason {
+                jlog("⚠️ response incomplete (\(reasonText)) — not confirming a brain change")
             }
 
             switch call {
@@ -437,7 +458,9 @@ public final class CoachDriver: @unchecked Sendable {
                 turnMessages.append(.assistantToolCalls(response.rawToolCalls))
                 turnMessages.append(.init(role: .tool, text: "shown to the user", toolCallId: callId))
                 history.commit(turnMessages)
-                confirmBrainConfiguration(brains.revision)
+                if lastResponseCompleted {
+                    confirmBrainConfiguration(brains.revision)
+                }
                 await compactIfNeeded(using: brains)
                 return .spoke
 
@@ -448,14 +471,18 @@ public final class CoachDriver: @unchecked Sendable {
                 jlog("… nothing useful to add, staying silent")
                 ActivityLog.shared.record(.stayedSilent)
                 commitIfWorthKeeping(turnMessages, deltaText: delta.text)
-                confirmBrainConfiguration(brains.revision)
+                if lastResponseCompleted {
+                    confirmBrainConfiguration(brains.revision)
+                }
                 await compactIfNeeded(using: brains)
                 return .silentByModel
             }
         }
         jlog("… tool loop exhausted without speaking")
         history.commit(turnMessages)   // captures + speech stay in memory even on the backstop path
-        confirmBrainConfiguration(brains.revision)
+        if lastResponseCompleted {
+            confirmBrainConfiguration(brains.revision)
+        }
         await compactIfNeeded(using: brains)
         return .exhausted
     }

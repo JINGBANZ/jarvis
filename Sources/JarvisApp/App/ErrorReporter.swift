@@ -18,7 +18,15 @@ final class ErrorReporter {
 
     nonisolated func report(_ error: UserFacingError,
                             context: UserFacingError.PresentationContext) {
-        Task { @MainActor in self.present(error, context: context) }
+        Task { @MainActor in self.reportImmediately(error, context: context) }
+    }
+
+    /// Deliver synchronously when the caller is already on the main actor. This keeps a guarded
+    /// runtime failure atomic with its lifecycle consequence instead of introducing another queued
+    /// task in which a newer provider configuration could be stopped.
+    func reportImmediately(_ error: UserFacingError,
+                           context: UserFacingError.PresentationContext) {
+        present(error, context: context)
     }
 
     private func present(_ error: UserFacingError,

@@ -181,7 +181,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private struct BrainRuntime {
         let coach: BrainClient
         let summarizer: BrainClient
-        let onFailure: (@Sendable (String) -> Void)?
+        let onFailure: (@MainActor @Sendable (String) -> Void)?
     }
 
     /// Check the selected local provider before disturbing a live session. OpenAI needs no provider
@@ -246,15 +246,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 traffic: sessionTraffic, trafficTag: "summarizer")
         }
 
-        let onFailure: (@Sendable (String) -> Void)?
+        let onFailure: (@MainActor @Sendable (String) -> Void)?
         if provider.usesLocalCLI {
             let signInCommand = provider == .claudeCode ? "claude auth login" : "codex login"
             onFailure = { [errorReporter] reason in
                 ActivityLog.shared.record(.coachingStopped(provider: provider))
-                errorReporter.report(.brainCLIStopped(provider: provider.displayName,
-                                                       signInCommand: signInCommand,
-                                                       reason: reason),
-                                     context: .runtime)
+                errorReporter.reportImmediately(
+                    .brainCLIStopped(provider: provider.displayName,
+                                     signInCommand: signInCommand,
+                                     reason: reason),
+                    context: .runtime)
             }
         } else {
             onFailure = nil

@@ -90,8 +90,9 @@ public struct BrainResponse: Sendable {
     /// session memory.
     public let outputItemsJSON: [String]
     /// Non-nil when the model run did NOT finish cleanly (Responses `status:"incomplete"`), carrying
-    /// the reason (e.g. `"max_output_tokens"`). An empty `toolCalls` with a non-nil reason is
-    /// *truncation*, not a deliberate decision to stay silent — the coach loop distinguishes them.
+    /// the reason (e.g. `"max_output_tokens"`). Such a response cannot confirm a provider cutover,
+    /// even if it includes a usable tool call. With no tool call it is *truncation*, not a deliberate
+    /// decision to stay silent — the coach loop distinguishes them.
     public let incompleteReason: String?
     /// The response's plain text output, if any. Coaching turns never use it (tool_choice is
     /// required there); it exists for tool-less calls like the history summarizer.
