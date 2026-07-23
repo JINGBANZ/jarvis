@@ -15,7 +15,7 @@ on:
 jobs:
   claude:
     if: |
-      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude') && github.event.comment.body != '@claude /resolve-conflicts') ||
       (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
       (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
       (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
@@ -30,3 +30,19 @@ jobs:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
     with:
       runs-on: vps # VPS self-hosted runner (JINGBANZ/vps-setup), off GitHub's metered minutes
+
+  resolve-conflicts:
+    if: |
+      github.event_name == 'issue_comment' &&
+      github.event.issue.pull_request &&
+      github.event.comment.body == '@claude /resolve-conflicts'
+    uses: JINGBANZ/workflows/.github/workflows/claude-resolve-conflicts.yml@main
+    permissions:
+      contents: write
+      pull-requests: read
+      issues: write
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+    with:
+      runs-on: vps # VPS self-hosted runner (JINGBANZ/vps-setup), off GitHub's metered minutes
+      validation-command: "swift build && ./scripts/run-tests.sh"
