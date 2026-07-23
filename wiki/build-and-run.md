@@ -84,12 +84,15 @@ then just run the script) for packaging without CI. Distributed builds run on Ap
 ## The live activity viewer
 
 Settings → **Activity** opens an **in-app `WKWebView`** into which `ActivityLog` pushes the typed,
-human-facing coaching exchange: finalized interviewer/user speech, manual hint requests, screens
-Jarvis viewed, and tips Jarvis displayed. Screen-view events carry their thumbnails as in-memory
-`data:` URIs. Chosen over a local HTTP server + SSE: for an app that already holds the entries in
-memory, pushing into an embedded WebView is less code, has zero network surface, and is the most
-testable (the production runtime *is* the test runtime). It also sidesteps the `file://` `fetch()`
-restriction that forced the original viewer's `<meta refresh>` reload.
+human-facing coaching exchange: finalized interviewer/user speech, manual hint requests, and every
+brain action — a successful or failed `capture_screen`, a displayed `speak` tip, or a deliberate
+`stay_silent`. It also shows fixed, non-sensitive notices for every runtime failure that stops or
+degrades coaching; raw error detail remains in `jarvis-debug.log`. Successful screen-view events
+carry their thumbnails as in-memory `data:` URIs. Chosen over a local HTTP server + SSE: for an app
+that already holds the entries in memory, pushing into an embedded WebView is less code, has zero
+network surface, and is the most testable (the production runtime *is* the test runtime). It also
+sidesteps the `file://` `fetch()` restriction that forced the original viewer's `<meta refresh>`
+reload.
 
 - New events stream in live (no reload, no flicker); thumbnails open in an in-page lightbox.
 - Each Start opens a fresh session (a Stop→Start gets a new log, never resuming the previous run),
@@ -119,6 +122,8 @@ the human-facing coaching record. The current validation priority lives in
 - Show an interview question without speaking its details, then ask, “Jarvis, how can I solve this in
   one pass?” Confirm Activity shows exactly one screen view followed by a screen-specific tip. A fully
   stated behavioral question should not cause an unnecessary capture.
+- On a turn where the brain has nothing useful to add, confirm Activity shows a `stayed silent`
+  entry, so a deliberate no-op cannot look like a stalled brain.
 - Press **⌥⌘J** with a question visible; confirm a shortcut entry, one screen view, and a tip appear in
   Activity.
 - Confirm saved screenshots exclude both overlay surfaces. Toggle each overlay in Settings, verify its

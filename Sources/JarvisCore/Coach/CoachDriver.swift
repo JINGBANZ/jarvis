@@ -206,7 +206,10 @@ public final class CoachDriver: @unchecked Sendable {
                     jlog("🔤 read \(text.count(where: { $0 == "\n" }) + 1) lines of on-screen text")
                     turnMessages.append(.user(Self.recognizedTextBlock(text)))
                 }
-            } else { jlog("👁 screenshot failed") }   // still force a hint from transcript/history
+            } else {
+                jlog("👁 screenshot failed")
+                ActivityLog.shared.record(.screenViewFailed)
+            }   // still force a hint from transcript/history
         }
 
         // Force `speak` ONLY for an explicit manual hint; audio-driven turns use `.required` — SOME
@@ -280,7 +283,10 @@ public final class CoachDriver: @unchecked Sendable {
                     if let text = shot.recognizedText {
                         jlog("🔤 read \(text.count(where: { $0 == "\n" }) + 1) lines of on-screen text")
                     }
-                } else { jlog("👁 screenshot failed") }
+                } else {
+                    jlog("👁 screenshot failed")
+                    ActivityLog.shared.record(.screenViewFailed)
+                }
                 // Thread the call + its result into this turn's messages; the next iteration's
                 // request carries them (and they land in history at commit, where the screenshot
                 // becomes a text stub — only the OCR text outlives the turn). The OCR sidecar
@@ -324,9 +330,11 @@ public final class CoachDriver: @unchecked Sendable {
                 return .spoke
 
             case .staySilent:
-                // The model's explicit stay-quiet decision. Deliberately NOT recorded: the call and
-                // its non-answer would only bloat every later request — silence needs no memory.
+                // The model's explicit stay-quiet decision belongs in the human-facing Activity
+                // record like every other brain action. It still stays out of model memory: replaying
+                // the call and its non-answer would only bloat every later request.
                 jlog("… nothing useful to add, staying silent")
+                ActivityLog.shared.record(.stayedSilent)
                 commitIfWorthKeeping(turnMessages, deltaText: delta.text)
                 await compactIfNeeded()
                 return .silentByModel
