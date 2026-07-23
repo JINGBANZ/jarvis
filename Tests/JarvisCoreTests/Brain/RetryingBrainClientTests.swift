@@ -41,6 +41,30 @@ import Testing
         #expect(base.callCount == 2)
     }
 
+    @Test func retriesCLISubprocessTimeout() async throws {
+        let base = RetryScriptBrain(script: [
+            .failure(NSError(domain: "AgentCLIProcessRunner", code: NSURLErrorTimedOut)),
+            .success(.init(toolCalls: [.staySilent(callId: "ok")])),
+        ])
+        let client = RetryingBrainClient(base: base)
+
+        _ = try await client.respond(messages: [.user("hi")], tools: coachTools)
+
+        #expect(base.callCount == 2)
+    }
+
+    @Test func doesNotRetryNonTimeoutCLIError() async {
+        let base = RetryScriptBrain(script: [
+            .failure(NSError(domain: "AgentCLIProcessRunner", code: 1)),
+        ])
+        let client = RetryingBrainClient(base: base)
+
+        await #expect(throws: (any Error).self) {
+            _ = try await client.respond(messages: [.user("hi")], tools: coachTools)
+        }
+        #expect(base.callCount == 1)
+    }
+
     @Test func doesNotRetryPermanentFailure() async {
         let error = NSError(domain: "OpenAIBrainClient", code: 401)
         let base = RetryScriptBrain(script: [.failure(error)])
