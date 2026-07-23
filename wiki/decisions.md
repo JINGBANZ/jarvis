@@ -551,3 +551,19 @@
 - **Supersedes in part:** 2026-06-20 — Brain model + reasoning effort are user-selectable.
 - **Detail:** [settings-window.md → Brain](./settings-window.md#brain),
   `Sources/JarvisCore/Coach/CoachDriver.swift`, `Sources/JarvisApp/App/AppDelegate.swift`.
+
+### 2026-07-23 — Settings retains its shell and lazily builds sections
+
+- **Chose:** Retain the lightweight `NSWindow`/`NSTabView` shell between opens, build a section view
+  only when its tab is selected, and release all section views when the window closes.
+- **Why:** The pre-presentation path rebuilt every section, including Activity's `WKWebView`, then
+  ran bounded CLI subprocess probes on the main actor, making a warm open take about 0.95 seconds.
+  Moving probes off the main actor and deferring hidden sections reduced warm opens to about
+  0.12–0.13 seconds.
+  Releasing section views preserves Activity's established fresh-WebView lifecycle while retaining
+  only the cheap window shell.
+- **Rejected:** Rebuilding the whole window on every open — it repeats unrelated hidden-tab work on
+  the latency-sensitive presentation path.
+- **Detail:** [settings-window.md](./settings-window.md),
+  `Sources/JarvisApp/Settings/SettingsWindow.swift`,
+  `Sources/JarvisCore/Brain/AgentCLIDetector.swift`.

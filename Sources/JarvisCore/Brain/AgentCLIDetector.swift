@@ -27,6 +27,16 @@ public struct AgentCLIDetector: Sendable {
         BrainProvider.allCases.compactMap(detect)
     }
 
+    /// Run the blocking subprocess probes away from the caller's executor. Settings uses this path
+    /// so a slow CLI cannot hold the main actor and delay or freeze its window.
+    public func detectAllAsync() async -> [DetectedAgentCLI] {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                continuation.resume(returning: detectAll())
+            }
+        }
+    }
+
     /// The given provider's CLI, or nil when its binary isn't installed (or the provider is the
     /// direct API, which has nothing to detect).
     public func detect(_ provider: BrainProvider) -> DetectedAgentCLI? {

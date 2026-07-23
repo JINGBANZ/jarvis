@@ -10,13 +10,14 @@ private final class EscapableWindow: NSWindow {
 /// One window hosting all settings sections as tabs. Non-modal: it promotes the accessory app to
 /// `.regular` while open (so secure/text fields can become first responder and accept paste) and
 /// drops back to `.accessory` on close — the lesson the old API-key dialog and activity viewer
-/// both learned. The window is rebuilt on each open so sections start fresh (mirrors the viewer's
-/// rebuild-on-show pattern).
+/// both learned. The lightweight window/tab shell is retained between opens, while section views are
+/// rebuilt lazily so controls start fresh without constructing hidden tabs before presentation.
 @MainActor
 final class SettingsWindow: NSObject, NSWindowDelegate, NSTabViewDelegate {
     private let sections: [SettingsSection]
     private var window: NSWindow?
     private var tabView: NSTabView?
+    private var loadedSectionIndexes: Set<Int> = []
     /// The section whose tab is currently selected, so we can pair `didBecomeActive`/`didResignActive`.
     private var activeSection: SettingsSection?
 
@@ -31,13 +32,9 @@ final class SettingsWindow: NSObject, NSWindowDelegate, NSTabViewDelegate {
     }
 
     func show() {
-        if let window {
-            NSApp.activate(ignoringOtherApps: true) // ghost-mode-allowed: explicit Settings action
-            window.makeKeyAndOrderFront(nil) // ghost-mode-allowed: explicit Settings action
-            return
-        }
-        build()
         NSApp.setActivationPolicy(.regular) // ghost-mode-allowed: explicit Settings action
+        if window == nil { build() }
+        activate(tabView?.selectedTabViewItem)
         NSApp.activate(ignoringOtherApps: true) // ghost-mode-allowed: explicit Settings action
         window?.makeKeyAndOrderFront(nil) // ghost-mode-allowed: explicit Settings action
     }
@@ -57,15 +54,12 @@ final class SettingsWindow: NSObject, NSWindowDelegate, NSTabViewDelegate {
         for section in sections {
             let item = NSTabViewItem(identifier: section.title)
             item.label = section.title
-            item.view = section.fillsTab ? section.makeView() : Self.topPinned(section.makeView())
+            item.view = NSView()
             tabView.addTabViewItem(item)
         }
         win.contentView!.addSubview(tabView)
         self.window = win
         self.tabView = tabView
-        // Activate the initially-selected tab (delegate callbacks during addTabViewItem above are
-        // no-ops because window/tabView weren't wired yet).
-        activate(tabView.selectedTabViewItem)
     }
 
     /// Wrap a fixed-layout section view so it hugs the top of the tab (and centers horizontally)
@@ -91,6 +85,10 @@ final class SettingsWindow: NSObject, NSWindowDelegate, NSTabViewDelegate {
         let newly = sections[idx]
         guard newly !== activeSection else { return }
         activeSection?.didResignActive()
+        if loadedSectionIndexes.insert(idx).inserted {
+            let view = newly.makeView()
+            item.view = newly.fillsTab ? view : Self.topPinned(view)
+        }
         activeSection = newly
         newly.didBecomeActive()
     }
@@ -99,8 +97,13 @@ final class SettingsWindow: NSObject, NSWindowDelegate, NSTabViewDelegate {
         activeSection?.didResignActive()        // e.g. turn the overlay preview off if Overlay was open
         activeSection = nil
         for section in sections { section.windowWillClose() }
+        // Preserve the cheap NSWindow/NSTabView shell, but release every section view so controls and
+        // Activity's WebView still get their established fresh-on-open lifecycle.
+        tabView?.delegate = nil
+        for item in tabView?.tabViewItems ?? [] { item.view = NSView() }
+        loadedSectionIndexes.removeAll()
+        tabView?.selectTabViewItem(at: 0)
+        tabView?.delegate = self
         NSApp.setActivationPolicy(.accessory) // ghost-mode-allowed: close explicit Settings action
-        window = nil
-        tabView = nil
     }
 }
