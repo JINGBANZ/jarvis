@@ -55,6 +55,35 @@ import Testing
         #expect(!coachSystemPrompt.contains("one tool call each turn"))
     }
 
+    /// Short fragments and transcription noise should not create unsolicited overlay chatter, while
+    /// terse corrections and requirements still carry enough interview signal to coach.
+    @Test func coachPromptDefaultsFragmentsAndASRGarbleToSilence() {
+        #expect(coachSystemPrompt.contains(
+            "short, question-free fragment or likely ASR garble"
+        ))
+        #expect(coachSystemPrompt.contains(
+            "stay_silent unless it clearly conveys a correction, requirement, or new technical fact"
+        ))
+        #expect(coachSystemPrompt.contains(
+            "A likely transcription mistake is not itself a coaching opportunity"
+        ))
+        #expect(coachSystemPrompt.contains("do not correct its wording"))
+        #expect(coachSystemPrompt.contains("Wait for more speech"))
+    }
+
+    @Test func coachPromptKeepsDirectRepliesAheadOfTheFragmentGate() {
+        let directReply = coachSystemPrompt.range(of: "2. Direct address from \"me\"")
+        let fragmentGate = coachSystemPrompt.range(of: "3. Fragment gate")
+        #expect(directReply != nil)
+        #expect(fragmentGate != nil)
+        if let directReply, let fragmentGate {
+            #expect(directReply.lowerBound < fragmentGate.lowerBound)
+        }
+        #expect(coachSystemPrompt.contains(
+            "If a direct reply is required, hedge your interpretation instead"
+        ))
+    }
+
     @Test func coachContextCoversTechnicalInterviewFormatsWithoutBrandNarrowing() {
         let modelContext = captureScreenTool.description + coachSystemPrompt
         #expect(modelContext.contains("behavioral"))
