@@ -191,7 +191,7 @@
 
 - **Chose:** A Brain settings tab picks the model from a code-owned `BrainModelCatalog` (default `gpt-5.5`) and one global reasoning effort (default `low`), persisted via `BrainPreferences` and applied on next Start; moved out of `Config`.
 - **Why:** The catalog/enum becomes the single source of truth, and the user can trade quality versus cost/latency.
-- **Superseded in part by:** 2026-07-22 — Brain settings hot-switch between coaching turns. Persistence and catalog ownership stand; next-Start-only application does not.
+- **Superseded by:** 2026-07-22 — Brain settings hot-switch between coaching turns. Persistence and catalog ownership stand; next-Start-only application does not.
 - **Detail:** [settings-window.md](./settings-window.md).
 
 ### 2026-06-20 — Persistent response box beside the overlay

@@ -280,6 +280,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         coachDriver.updateBrain(
             runtime.coach, provider: provider, summarizer: runtime.summarizer,
             onBrainFailure: runtime.onFailure,
+            onBrainChangeApplied: { previous, current in
+                guard let previous, let current else { return }
+                ActivityLog.shared.record(.brainChangeApplied(previous: previous, current: current))
+            },
             onBrainFallback: { failed, restored in
                 guard let failed, let restored else { return }
                 ActivityLog.shared.record(.brainFallback(failed: failed, restored: restored))

@@ -2,8 +2,8 @@ import Foundation
 
 /// The model behind the human-facing activity viewer. It records the coaching exchange — heard
 /// speech, manual hint requests, screens Jarvis viewed, and tips Jarvis gave — plus a fixed,
-/// non-sensitive notice when coaching falls back, degrades, or must stop without interrupting the
-/// user. It pushes those entries into an in-app `WKWebView` window (see `ActivityViewer` in
+/// non-sensitive notice when a brain change succeeds, falls back, degrades, or must stop without
+/// interrupting the user. It pushes those entries into an in-app `WKWebView` window (see `ActivityViewer` in
 /// JarvisApp) and persists them so past sessions can be browsed later. Detailed diagnostics belong
 /// exclusively in `JarvisLog`.
 ///
@@ -38,6 +38,10 @@ public final class ActivityLog: @unchecked Sendable {
         case systemAudioStopped
         /// An explicit Settings reapply failed its preflight while the existing session continued.
         case settingsChangeNotApplied
+        /// A live brain replacement completed its first non-truncated terminal turn. Provider
+        /// identities are enough for a fixed human-facing success notice; model transport details
+        /// remain in jlog.
+        case brainChangeApplied(previous: BrainProvider, current: BrainProvider)
         /// A live brain replacement failed its first turn, so Jarvis restored the previous active
         /// provider. Carries provider identities only; raw failure detail stays in jlog.
         case brainFallback(failed: BrainProvider, restored: BrainProvider)
@@ -149,11 +153,18 @@ public final class ActivityLog: @unchecked Sendable {
         case .settingsChangeNotApplied:
             message = "⚠️ settings change wasn't applied — current coaching session continues; check Settings → Brain"
             imageBase64 = nil
+        case .brainChangeApplied(let previous, let current):
+            if previous == current {
+                message = "🧠 brain change applied — \(current.displayName) setup is active"
+            } else {
+                message = "🧠 brain switch applied — \(previous.displayName) → \(current.displayName)"
+            }
+            imageBase64 = nil
         case .brainFallback(let failed, let restored):
             if failed == restored {
-                message = "⚠️ brain change failed — retrying this turn with the previous \(restored.displayName) setup"
+                message = "⚠️ brain change failed — previous \(restored.displayName) setup restored"
             } else {
-                message = "⚠️ brain switch failed — \(failed.displayName) couldn't respond; retrying this turn with \(restored.displayName)"
+                message = "⚠️ brain switch failed — \(failed.displayName) couldn't respond; \(restored.displayName) restored"
             }
             imageBase64 = nil
         }
@@ -247,6 +258,7 @@ public final class ActivityLog: @unchecked Sendable {
         if m.hasPrefix("👁") { return "see" }
         if m.hasPrefix("🗣") || m.hasPrefix("🤫") { return "hear" }
         if m.hasPrefix("💭") || m.hasPrefix("…") { return "think" }
+        if m.hasPrefix("🧠") { return "think" }
         if m.hasPrefix("⏹ coaching stopped") { return "think" }
         if m.hasPrefix("⚠️") { return "think" }
         let low = m.lowercased()
@@ -264,6 +276,8 @@ public final class ActivityLog: @unchecked Sendable {
             || m.hasPrefix("⏹ coaching stopped")
             || m.hasPrefix("⚠️ system audio stopped")
             || m.hasPrefix("⚠️ settings change wasn't applied")
+            || m.hasPrefix("🧠 brain switch applied")
+            || m.hasPrefix("🧠 brain change applied")
             || m.hasPrefix("⚠️ brain switch failed")
             || m.hasPrefix("⚠️ brain change failed")
     }

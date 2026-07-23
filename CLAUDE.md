@@ -172,9 +172,10 @@ The squash-merge subject carries the PR number (`type: summary (#N)`).
   `scripts/check-ghost-mode.sh` can enforce the boundary in the normal test gate.
 - **Keep human activity separate from agent diagnostics.** `ActivityLog` is the human-facing coaching
   record: only finalized interviewer/user speech, manual hint requests, screens Jarvis actually viewed,
-  tips Jarvis displayed, and fixed typed runtime-failure notices belong there. Lifecycle, transport,
-  retry, raw error, timing, and diagnosis details go through `jlog` to `jarvis-debug.log`. Never
-  mirror `jlog` into `ActivityLog`; record the corresponding typed activity event explicitly.
+  tips Jarvis displayed, fixed typed brain-change notices, and fixed typed runtime-failure notices
+  belong there. Lifecycle, transport, retry, raw error, timing, and diagnosis details go through
+  `jlog` to `jarvis-debug.log`. Never mirror `jlog` into `ActivityLog`; record the corresponding typed
+  activity event explicitly.
 - **The only screen-/audio-derived data persisted to disk is the per-session log directory** (the
   activity log — spoken tips, transcribed "heard:" lines, the screenshots the model looked at — plus
   the wire-level brain traffic record and its on-demand evaluation report). It is written every run to an

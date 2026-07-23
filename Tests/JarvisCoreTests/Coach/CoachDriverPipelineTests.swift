@@ -620,20 +620,28 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             nil,
         ])
         let failureRecorder = BrainFailureRecorder()
+        let changeRecorder = BrainChangeRecorder()
         let fallbackRecorder = BrainFallbackRecorder()
         let (driver, transcript) = makeDriver(
             brain: previousBrain, brainProvider: .openAI, clock: clock)
         driver.updateBrain(
             replacementBrain, provider: .claudeCode,
             onBrainFailure: { failureRecorder.record($0) },
+            onBrainChangeApplied: {
+                changeRecorder.record(previous: $0, current: $1)
+            },
             onBrainFallback: { fallbackRecorder.record(failed: $0, restored: $1) })
 
         transcript.append(.init(speaker: .me, text: "first replacement turn", at: 0))
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
+        #expect(changeRecorder.events == [
+            .init(previous: .openAI, current: .claudeCode),
+        ])
         transcript.append(.init(speaker: .me, text: "later provider failure", at: 1))
         #expect(await driver.handleTrigger(.turnEnd) == .brainError)
 
         #expect(previousBrain.calls.isEmpty)
+        #expect(changeRecorder.events.count == 1)
         #expect(fallbackRecorder.events.isEmpty)
         #expect(failureRecorder.messages.count == 1)
     }
@@ -652,14 +660,19 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             nil,
         ])
         let fallbackRecorder = BrainFallbackRecorder()
+        let changeRecorder = BrainChangeRecorder()
         let (driver, transcript) = makeDriver(
             brain: previousBrain, brainProvider: .openAI, clock: clock)
         driver.updateBrain(
             replacementBrain, provider: .claudeCode,
+            onBrainChangeApplied: {
+                changeRecorder.record(previous: $0, current: $1)
+            },
             onBrainFallback: { fallbackRecorder.record(failed: $0, restored: $1) })
 
         transcript.append(.init(speaker: .me, text: "first replacement turn", at: 0))
         #expect(await driver.handleTrigger(.turnEnd) == .truncated)
+        #expect(changeRecorder.events.isEmpty)
         transcript.append(.init(speaker: .me, text: "retry this later turn safely", at: 1))
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
 
@@ -671,6 +684,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(fallbackRecorder.events == [
             .init(failed: .claudeCode, restored: .openAI),
         ])
+        #expect(changeRecorder.events.isEmpty)
     }
 
     /// The delta is sent once: a line already carried by an earlier turn appears in the next request
@@ -982,6 +996,21 @@ final class BrainFailureRecorder: @unchecked Sendable {
     private var recorded: [String] = []
     var messages: [String] { lock.lock(); defer { lock.unlock() }; return recorded }
     func record(_ message: String) { lock.lock(); recorded.append(message); lock.unlock() }
+}
+
+/// Lock-guarded record of provider identities reported when a transactional cutover commits.
+final class BrainChangeRecorder: @unchecked Sendable {
+    struct Event: Equatable {
+        let previous: BrainProvider?
+        let current: BrainProvider?
+    }
+
+    private let lock = NSLock()
+    private var recorded: [Event] = []
+    var events: [Event] { lock.lock(); defer { lock.unlock() }; return recorded }
+    func record(previous: BrainProvider?, current: BrainProvider?) {
+        lock.lock(); recorded.append(.init(previous: previous, current: current)); lock.unlock()
+    }
 }
 
 /// Lock-guarded record of provider identities reported by a transactional fallback.

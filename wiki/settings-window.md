@@ -143,13 +143,15 @@ audio pipeline, and session logs continue unchanged. The previous active provide
 until the replacement completes one non-truncated terminal turn; an incomplete response does not
 commit the cutover. If the replacement fails, the driver
 discards its provider-specific tool-loop state, restores the prior provider, and retries that same
-turn from its provider-neutral starting messages; Activity names the failed and restored providers
-without including the raw error. Several Settings edits before a turn still fall back to the original
-active provider, not an untried intermediate selection. A local-CLI choice is preflighted first; if
-its binary is missing or it is signed out, the existing brain keeps running and Activity records the
-fixed settings-not-applied notice. Runtime fallback changes the live brain only; the attempted choice
-remains persisted so the user can retry it or select something else deliberately. While stopped,
-persisted changes apply on the **next Start**.
+turn from its provider-neutral starting messages. Once the replacement completes its first
+non-truncated terminal turn, Activity records fixed provider-only switch-applied copy; a fallback
+instead records the failed and restored providers without retry lifecycle or raw error detail.
+Several Settings edits before a turn still fall back to the original active provider, not an untried
+intermediate selection. A local-CLI choice is preflighted first; if its binary is missing or it is
+signed out, the existing brain keeps running and Activity records the fixed settings-not-applied
+notice. Runtime fallback changes the live brain only; the attempted choice remains persisted so the
+user can retry it or select something else deliberately. While stopped, persisted changes apply on
+the **next Start**.
 
 All four selections persist via `BrainPreferences` —
 `Sources/JarvisCore/Config/BrainPreferences.swift` is the single source for the UserDefaults keys,

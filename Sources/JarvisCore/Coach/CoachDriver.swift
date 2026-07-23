@@ -40,6 +40,7 @@ public final class CoachDriver: @unchecked Sendable {
         let provider: BrainProvider?
         let summarizer: BrainClient?
         let onFailure: (@Sendable (String) -> Void)?
+        let onChangeApplied: (@Sendable (BrainProvider?, BrainProvider?) -> Void)?
         let onFallback: (@Sendable (BrainProvider?, BrainProvider?) -> Void)?
     }
     private var brainConfiguration: BrainConfiguration
@@ -71,7 +72,7 @@ public final class CoachDriver: @unchecked Sendable {
         self.clock = clock
         self.brainConfiguration = BrainConfiguration(
             revision: 0, brain: brain, provider: brainProvider, summarizer: summarizer,
-            onFailure: onBrainFailure, onFallback: nil)
+            onFailure: onBrainFailure, onChangeApplied: nil, onFallback: nil)
         self.sessionStart = clock.now()
     }
 
@@ -95,6 +96,7 @@ public final class CoachDriver: @unchecked Sendable {
         provider: BrainProvider? = nil,
         summarizer: BrainClient? = nil,
         onBrainFailure: (@Sendable (String) -> Void)? = nil,
+        onBrainChangeApplied: (@Sendable (BrainProvider?, BrainProvider?) -> Void)? = nil,
         onBrainFallback: (@Sendable (BrainProvider?, BrainProvider?) -> Void)? = nil
     ) {
         stateLock.lock()
@@ -106,7 +108,8 @@ public final class CoachDriver: @unchecked Sendable {
         brainConfiguration = BrainConfiguration(
             revision: brainConfiguration.revision &+ 1,
             brain: brain, provider: provider, summarizer: summarizer,
-            onFailure: onBrainFailure, onFallback: onBrainFallback)
+            onFailure: onBrainFailure, onChangeApplied: onBrainChangeApplied,
+            onFallback: onBrainFallback)
         // A provider change is a recovery path if the former provider failed just as Settings was
         // changed. Any failure from the superseded revision is ignored below instead of re-latching.
         terminalBrainFailure = false
@@ -120,11 +123,19 @@ public final class CoachDriver: @unchecked Sendable {
     /// Commit a successful cutover only if this is still the active revision. A turn on a provider
     /// superseded while it was in flight must not discard the newer replacement's fallback.
     private func confirmBrainConfiguration(_ revision: UInt) {
+        var callback: (@Sendable (BrainProvider?, BrainProvider?) -> Void)?
+        var previousProvider: BrainProvider?
+        var activeProvider: BrainProvider?
         stateLock.lock()
-        if brainConfiguration.revision == revision {
+        if brainConfiguration.revision == revision,
+           let fallback = fallbackBrainConfiguration {
+            callback = brainConfiguration.onChangeApplied
+            previousProvider = fallback.provider
+            activeProvider = brainConfiguration.provider
             fallbackBrainConfiguration = nil
         }
         stateLock.unlock()
+        callback?(previousProvider, activeProvider)
     }
 
     /// Restore the previous active configuration when an unconfirmed replacement fails. The restored
@@ -139,7 +150,8 @@ public final class CoachDriver: @unchecked Sendable {
         let restored = BrainConfiguration(
             revision: brainConfiguration.revision &+ 1,
             brain: fallback.brain, provider: fallback.provider, summarizer: fallback.summarizer,
-            onFailure: fallback.onFailure, onFallback: fallback.onFallback)
+            onFailure: fallback.onFailure, onChangeApplied: fallback.onChangeApplied,
+            onFallback: fallback.onFallback)
         brainConfiguration = restored
         fallbackBrainConfiguration = nil
         terminalBrainFailure = false
