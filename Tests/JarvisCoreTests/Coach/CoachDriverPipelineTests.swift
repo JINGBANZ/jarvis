@@ -1240,6 +1240,8 @@ final class BrainFailureRecorder: @unchecked Sendable {
 }
 
 /// The CLI watchdog misses the first turn, then the same conversation succeeds on the next trigger.
+/// `@unchecked Sendable` is safe because `CoachDriver` awaits one `respond` call at a time, so this
+/// test double's `calls` array is never accessed concurrently.
 final class TimeoutThenSpeakingBrain: BrainClient, @unchecked Sendable {
     private(set) var calls: [[ChatMessage]] = []
 
