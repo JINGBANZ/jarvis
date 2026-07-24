@@ -50,6 +50,31 @@ import Foundation
         #expect(prompt.contains("deliberately NOT filtered, summarized"))
     }
 
+    @Test func prepareReplacesTranscriptSoAFailedEvaluatorCanBeRetried() throws {
+        let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
+        let traffic = BrainTrafficLog(); traffic.enable(directory: dir)
+        traffic.record(tag: "coach",
+                       request: Data(#"{"model":"gpt-5.5","input":[]}"#.utf8),
+                       response: Data(#"{"status":"completed","output":[]}"#.utf8),
+                       status: 200, latencyMs: 300)
+        try Data().write(to: dir.appendingPathComponent(ActivityLog.filename))
+
+        _ = try AgenticEvaluation.prepare(sessionDir: dir)
+        let transcriptURL = dir.appendingPathComponent(AgenticEvaluation.transcriptFilename)
+        try Data("stale partial transcript".utf8).write(to: transcriptURL)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o644], ofItemAtPath: transcriptURL.path)
+
+        _ = try AgenticEvaluation.prepare(sessionDir: dir)
+
+        let transcript = try String(contentsOf: transcriptURL, encoding: .utf8)
+        #expect(transcript.contains("=== call #1 · coach"))
+        #expect(!transcript.contains("stale partial transcript"))
+        let permissions = try FileManager.default.attributesOfItem(
+            atPath: transcriptURL.path)[.posixPermissions] as? NSNumber
+        #expect(permissions?.int16Value == 0o600)
+    }
+
     /// The prompt teaches each provider record and cache model, preserves unavailable metrics,
     /// requires cardinal counts from the un-elided record, and asks for a self-check.
     @Test func promptTeachesEnvelopesCacheModelsCountingAndSelfCheck() {
@@ -155,5 +180,11 @@ import Foundation
         #expect(throws: (any Error).self) {
             try AgenticEvaluation.prepare(sessionDir: dir)
         }
+        let leftovers = try FileManager.default.contentsOfDirectory(atPath: dir.path)
+            .filter {
+                $0.hasPrefix(".\(AgenticEvaluation.transcriptFilename).")
+                    && $0.hasSuffix(".tmp")
+            }
+        #expect(leftovers.isEmpty)
     }
 }

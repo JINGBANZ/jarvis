@@ -73,13 +73,10 @@ public enum AgenticEvaluation {
             throw EvaluationError.missingActivityLog
         }
 
-        let transcriptURL = sessionDir.appendingPathComponent(transcriptFilename)
         // A failed write must abort: the prompt tells the agent the transcript is its primary
         // input, so silently proceeding would spend a whole agentic run on a missing/stale file.
-        guard FileManager.default.createFile(
-            atPath: transcriptURL.path,
-            contents: Data(transcript.utf8), attributes: [.posixPermissions: 0o600])
-        else { throw CocoaError(.fileWriteUnknown) }
+        try replaceOwnerOnlyFile(
+            Data(transcript.utf8), filename: transcriptFilename, in: sessionDir)
 
         return prompt(sessionDirPath: sessionDir.path)
     }
@@ -94,24 +91,37 @@ public enum AgenticEvaluation {
             was instructed to check recommendations labelled [confirmed] against the code._
             """
         let report = "\(stamp)\n\n\(body)\n"
-        let destination = sessionDir.appendingPathComponent(reportFilename)
+        try replaceOwnerOnlyFile(
+            Data(report.utf8), filename: reportFilename, in: sessionDir)
+        return report
+    }
+
+    /// Atomically install a derived evaluator artifact with owner-only permissions. Replacing on
+    /// every attempt makes Evaluate retryable after a CLI/auth/network failure left the transcript
+    /// behind, and using a fresh inode avoids inheriting a legacy destination's looser mode.
+    private static func replaceOwnerOnlyFile(
+        _ data: Data, filename: String, in sessionDir: URL
+    ) throws {
+        let destination = sessionDir.appendingPathComponent(filename)
         let temporary = sessionDir.appendingPathComponent(
-            ".\(reportFilename).\(UUID().uuidString).tmp")
+            ".\(filename).\(UUID().uuidString).tmp")
+        // `createFile` reports failure with a Bool and may have created a partial file before doing
+        // so (for example, when the volume fills). Always clean the unique temporary path; after a
+        // successful rename it no longer exists, so this is harmless on the success path.
+        defer { try? FileManager.default.removeItem(at: temporary) }
         guard FileManager.default.createFile(
             atPath: temporary.path,
-            contents: Data(report.utf8),
+            contents: data,
             attributes: [.posixPermissions: 0o600]
         ) else { throw CocoaError(.fileWriteUnknown) }
 
         // Both paths are in the session directory, so POSIX rename atomically replaces any older
-        // report with the already-0600 inode. Foundation's replaceItemAt may retain the destination's
-        // looser mode, defeating the owner-only guarantee on a legacy report.
+        // artifact with the already-0600 inode. Foundation's replaceItemAt may retain the
+        // destination's looser mode, defeating the owner-only guarantee on a legacy file.
         guard rename(temporary.path, destination.path) == 0 else {
             let error = NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
-            try? FileManager.default.removeItem(at: temporary)
             throw error
         }
-        return report
     }
 
     /// The task prompt handed to the agentic CLI. It points at the complete session directory and
