@@ -21,7 +21,7 @@ do {
         print(try AgenticEvaluation.prepare(sessionDir: sessionDir))
     case (3, "--html"):
         let sessionDir = URL(fileURLWithPath: args[2], isDirectory: true)
-        guard let markdown = SessionEvaluator.savedReport(in: sessionDir) else {
+        guard let markdown = AgenticEvaluation.savedReport(in: sessionDir) else {
             FileHandle.standardError.write(Data("eval-prep: no eval-report.md in \(args[2])\n".utf8))
             exit(1)
         }

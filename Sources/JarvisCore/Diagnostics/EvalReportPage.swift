@@ -2,16 +2,14 @@ import Foundation
 
 /// Renders a saved evaluation report (`eval-report.md`) as a self-contained HTML page so "Open
 /// report" can hand it to the user's browser. The markdown stays the on-disk source of truth — it's
-/// what both evaluators produce and what an agent consumes when the user pastes the report into a
-/// fix-it chat — so the page embeds the raw markdown verbatim behind a **Copy as Markdown** button,
-/// and the HTML is a derived view regenerated from the markdown on every open (never stale after an
-/// agentic re-audit rewrites the `.md`).
+/// what the agentic evaluator produces and what an agent consumes when the user pastes the report
+/// into a fix-it chat — so the page embeds the raw markdown verbatim behind a **Copy as Markdown**
+/// button, and the HTML is a derived view regenerated from the markdown on every open.
 ///
 /// The renderer is a deliberate subset of markdown — headings, lists, tables, fenced code,
-/// blockquotes, bold / inline code / links — which covers the report skeleton `SessionEvaluator` and
-/// `AgenticEvaluation` prescribe. Anything it renders imperfectly is still recoverable via the
-/// embedded raw markdown. All report content is HTML-escaped: the report is LLM output and must not
-/// be able to inject script into a local page.
+/// blockquotes, bold / inline code / links — which covers the report skeleton `AgenticEvaluation`
+/// prescribes. Anything it renders imperfectly is still recoverable via the embedded raw markdown.
+/// All report content is HTML-escaped: the report is LLM output and must not inject script.
 public enum EvalReportPage {
     /// Written beside `eval-report.md` in the session directory, owner-only like everything there.
     public static let filename = "eval-report.html"

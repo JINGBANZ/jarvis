@@ -12,10 +12,13 @@ import Foundation
                        request: Data(#"{"model":"gpt-5.5","input":[]}"#.utf8),
                        response: Data(#"{"status":"completed","output":[]}"#.utf8),
                        status: 200, latencyMs: 300)
-        let activityLine =
-            #"{"t":"10:00:30","m":"plain permanent failure","k":"coachingStopped"}"#
-        try Data((activityLine + "\n").utf8)
-            .write(to: dir.appendingPathComponent(ActivityLog.filename))
+        let activityJSONL = [
+            #"{"t":"10:00:00","m":"heard question","k":"heard"}"#,
+            #"{"t":"10:00:20","m":"coaching tip","k":"tip"}"#,
+            #"{"t":"10:00:30","m":"plain permanent failure","k":"coachingStopped"}"#,
+        ].joined(separator: "\n") + "\n"
+        let activityURL = dir.appendingPathComponent(ActivityLog.filename)
+        try Data(activityJSONL.utf8).write(to: activityURL)
 
         let prompt = try AgenticEvaluation.prepare(sessionDir: dir)
 
@@ -23,10 +26,13 @@ import Foundation
         let transcriptURL = dir.appendingPathComponent(AgenticEvaluation.transcriptFilename)
         let transcript = try String(contentsOf: transcriptURL, encoding: .utf8)
         #expect(transcript.contains("=== call #1 · coach"))
-        #expect(transcript.contains("=== human-facing runtime outcome ==="))
-        #expect(transcript.contains("plain permanent failure"))
+        #expect(!transcript.contains("heard question"))
+        #expect(!transcript.contains("coaching tip"))
+        #expect(!transcript.contains("plain permanent failure"))
         let perms = try FileManager.default.attributesOfItem(atPath: transcriptURL.path)[.posixPermissions] as? NSNumber
         #expect(perms?.int16Value == 0o600)
+        // Preparation never rewrites or filters Activity; the agent receives the complete source file.
+        #expect(try String(contentsOf: activityURL, encoding: .utf8) == activityJSONL)
 
         // The prompt names the session dir, the report skeleton, the confirmed/hypothesis discipline,
         // and the code the auditor is told to verify against.
@@ -39,6 +45,9 @@ import Foundation
         #expect(prompt.contains("CoachHistory.swift"))
         #expect(prompt.contains(AgenticEvaluation.reportFilename))
         #expect(prompt.contains(ActivityLog.filename))
+        #expect(prompt.contains("COMPLETE sanitized human-facing coaching record"))
+        #expect(prompt.contains("Read the file itself in full"))
+        #expect(prompt.contains("deliberately NOT filtered, summarized"))
     }
 
     /// The prompt teaches each provider record and cache model, preserves unavailable metrics,
@@ -60,20 +69,41 @@ import Foundation
         #expect(prompt.contains("MUST be counted here"))
         #expect(prompt.contains("re-check every number"))
         #expect(prompt.contains("session-level UX failure"))
+        #expect(prompt.contains("stable event kinds in `k`"))
     }
 
-    /// Shares the report filename with the single-call path, so "Show report" and the viewer find a
-    /// report whichever evaluator produced it.
-    @Test func reportFilenameMatchesSingleCallPath() {
-        #expect(AgenticEvaluation.reportFilename == SessionEvaluator.reportFilename)
+    /// `savedReport` is the Activity viewer's discovery gate: an empty or absent file is not a report.
+    @Test func savedReportReturnsOnlyPersistedAgenticReport() throws {
+        let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
+        #expect(AgenticEvaluation.savedReport(in: dir) == nil)
+        let url = dir.appendingPathComponent(AgenticEvaluation.reportFilename)
+        try Data("## Audit\nfine".utf8).write(to: url)
+        #expect(AgenticEvaluation.savedReport(in: dir) == "## Audit\nfine")
+        try Data().write(to: url)
+        #expect(AgenticEvaluation.savedReport(in: dir) == nil)
     }
 
     @Test func prepareThrowsWhenSessionHasNoTraffic() throws {
         let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
-        #expect(throws: SessionEvaluator.EvaluationError.noTraffic) {
+        #expect(throws: AgenticEvaluation.EvaluationError.noTraffic) {
             try AgenticEvaluation.prepare(sessionDir: dir)
         }
         // No transcript file is left behind on the empty-traffic path.
+        #expect(!FileManager.default.fileExists(
+            atPath: dir.appendingPathComponent(AgenticEvaluation.transcriptFilename).path))
+    }
+
+    @Test func prepareRequiresTheCompleteActivityFile() throws {
+        let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
+        let traffic = BrainTrafficLog(); traffic.enable(directory: dir)
+        traffic.record(tag: "coach",
+                       request: Data(#"{"model":"gpt-5.5","input":[]}"#.utf8),
+                       response: Data(#"{"status":"completed","output":[]}"#.utf8),
+                       status: 200, latencyMs: 300)
+
+        #expect(throws: AgenticEvaluation.EvaluationError.missingActivityLog) {
+            try AgenticEvaluation.prepare(sessionDir: dir)
+        }
         #expect(!FileManager.default.fileExists(
             atPath: dir.appendingPathComponent(AgenticEvaluation.transcriptFilename).path))
     }
@@ -87,6 +117,7 @@ import Foundation
                        request: Data(#"{"model":"gpt-5.5","input":[]}"#.utf8),
                        response: Data(#"{"status":"completed","output":[]}"#.utf8),
                        status: 200, latencyMs: 300)
+        try Data().write(to: dir.appendingPathComponent(ActivityLog.filename))
         // A directory squatting on the transcript path makes createFile fail.
         try FileManager.default.createDirectory(
             at: dir.appendingPathComponent(AgenticEvaluation.transcriptFilename),

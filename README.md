@@ -78,7 +78,7 @@ When launched with `./scripts/build-app.sh --run`, each Start creates an owner-o
 - `jarvis-activity.jsonl` and any screenshots Jarvis actually viewed, shown in **Settings → Activity**;
 - `jarvis-debug.log` for lifecycle, transport, retry, and diagnostic detail;
 - `brain-traffic.jsonl` for the requests and responses exchanged with the selected brain provider;
-- `eval-report.md` and `eval-report.html` only after a session evaluation is requested.
+- `eval-report.md` and `eval-report.html` only after `scripts/eval-session.sh` runs the agentic audit.
 
 The history is pruned to the ten most recent sessions. Raw audio and the rolling in-memory transcript
 are not archived, although finalized `heard:` lines are part of the activity record. Audio is sent to

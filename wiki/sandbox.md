@@ -122,8 +122,10 @@ the screenshots the model looked at, alongside `jarvis-debug.log`) — the model
 transcribed "heard:" lines so a session can be reviewed afterward — plus the **brain traffic record**
 (`brain-traffic.jsonl`: the exact request/response bodies exchanged with the LLM provider, with
 base64 screenshots redacted to stubs since the pixels are already the shot files) and, once the user
-runs the one-click session evaluation, its `eval-report.md` and the browsable `eval-report.html`
-rendered from it. All of it is written on **every**
+runs the dev-side agentic session evaluator, its `eval-report.md` and the browsable
+`eval-report.html` rendered from it. The evaluator receives this complete owner-only session
+directory; `jarvis-activity.jsonl` is not copied or prefiltered into another prompt artifact. All of
+it is written on **every**
 launch — the activity log was previously gated to a
 `--dev` flag (now removed), an explicit decision to make session review a default affordance. The
 hardening that made the old dev affordance safe still applies in full: the files go to a per-session

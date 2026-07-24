@@ -1,45 +1,58 @@
 import Foundation
 
-/// The *agentic* session audit: instead of one Responses API call over the wire transcript
-/// (`SessionEvaluator`), this hands the audit to an agentic CLI (Claude Code / Codex) whose workspace
-/// is the repo checkout **plus** the session directory. The auditor then reads the harness's own code
-/// — `CoachHistory.swift`, `CoachDriver.swift`, `ToolDefs.swift`, `ReasoningEffort.swift` — and
-/// verifies each finding against the actual implementation instead of guessing from traffic alone.
+/// The session audit hands a complete session to an agentic CLI (Claude Code / Codex) whose workspace
+/// is the repo checkout **plus** the session directory. The auditor can read the harness's code, the
+/// compact wire transcript, the complete raw traffic, the complete Activity log, and screenshots,
+/// then verifies each finding against the actual implementation instead of guessing from one input.
 ///
-/// This type is the pure, testable half: it renders the session's traffic to the same compact,
-/// delta-aware transcript `SessionEvaluator` produces (kept deliberately — it's the right input
-/// format regardless of who consumes it), writes it beside the traffic as an owner-only file, and
-/// assembles the task prompt that points the CLI at the workspace. The OS-bound half — actually
-/// spawning `claude -p` / `codex exec` — lives in `scripts/eval-session.sh` (a dev-side workflow, so
-/// the sandboxed app never has to launch a headless agent or hand it a key).
-///
-/// The single-call `SessionEvaluator` stays as the in-app "Evaluate" button: cheap, one round trip,
-/// and the fallback when no agentic CLI is installed.
+/// This type is the pure, testable half: it renders the traffic to a compact, delta-aware transcript,
+/// writes that derived view beside the untouched source logs as an owner-only file, and assembles the
+/// task prompt that points the CLI at every input. The OS-bound half — actually spawning
+/// `claude -p` / `codex exec` — lives in `scripts/eval-session.sh`.
 public enum AgenticEvaluation {
     /// The rendered transcript is written here (owner-only) so the agent reads a file, not a giant
     /// argv. Sits beside `brain-traffic.jsonl` and `eval-report.md` in the session dir.
     public static let transcriptFilename = "eval-transcript.txt"
 
-    /// The audit report the agent writes back — same name as the single-call path so the in-app
-    /// "Show report" reuse and the viewer both find it regardless of which evaluator produced it.
-    public static let reportFilename = SessionEvaluator.reportFilename
+    /// The audit report the agent writes back. Activity can open it after the dev-side agentic run.
+    public static let reportFilename = "eval-report.md"
+
+    public enum EvaluationError: LocalizedError, Equatable {
+        case noTraffic
+        case missingActivityLog
+
+        public var errorDescription: String? {
+            switch self {
+            case .noTraffic:
+                "No brain traffic was recorded for this session — nothing to evaluate."
+            case .missingActivityLog:
+                "The session's complete Activity log is missing or unreadable."
+            }
+        }
+    }
+
+    /// The report persisted by an earlier agentic audit, if any.
+    public static func savedReport(in sessionDir: URL) -> String? {
+        let url = sessionDir.appendingPathComponent(reportFilename)
+        guard let report = try? String(contentsOf: url, encoding: .utf8), !report.isEmpty
+        else { return nil }
+        return report
+    }
 
     /// Prepare the agent's workspace for one session and return the task prompt to feed the CLI.
     ///
     /// Renders the session's recorded traffic to the compact transcript, writes it owner-only into the
     /// session directory, and returns the prompt (which embeds the directory's absolute path so the
-    /// agent knows where its inputs live). Throws `EvaluationError.noTraffic` when there is nothing to
-    /// audit, matching `SessionEvaluator`.
+    /// agent knows where its inputs live). Throws `EvaluationError.noTraffic` when there is nothing
+    /// to audit.
     public static func prepare(sessionDir: URL) throws -> String {
         let trafficURL = sessionDir.appendingPathComponent(BrainTrafficLog.filename)
         let jsonl = (try? String(contentsOf: trafficURL, encoding: .utf8)) ?? ""
-        var transcript = SessionEvaluator.renderTranscript(jsonl: jsonl)
-        guard !transcript.isEmpty else { throw SessionEvaluator.EvaluationError.noTraffic }
+        let transcript = EvaluationTranscript.render(jsonl: jsonl)
+        guard !transcript.isEmpty else { throw EvaluationError.noTraffic }
         let activityURL = sessionDir.appendingPathComponent(ActivityLog.filename)
-        let activityJSONL = (try? String(contentsOf: activityURL, encoding: .utf8)) ?? ""
-        let activityOutcome = SessionEvaluator.renderActivityOutcome(jsonl: activityJSONL)
-        if !activityOutcome.isEmpty {
-            transcript += "\n\n" + activityOutcome
+        guard FileManager.default.isReadableFile(atPath: activityURL.path) else {
+            throw EvaluationError.missingActivityLog
         }
 
         let transcriptURL = sessionDir.appendingPathComponent(transcriptFilename)
@@ -53,10 +66,9 @@ public enum AgenticEvaluation {
         return prompt(sessionDirPath: sessionDir.path)
     }
 
-    /// The task prompt handed to the agentic CLI. Reuses `SessionEvaluator`'s report skeleton and its
-    /// call-#N citation discipline, but adds the two things the wire-only auditor could never do:
-    /// point at the session directory + repo as a workspace, and require every recommendation to be
-    /// labelled `[confirmed]` (checked against the code in this checkout) or `[hypothesis]`.
+    /// The task prompt handed to the agentic CLI. It points at the complete session directory and
+    /// repo, preserves call-#N citation discipline, and requires every recommendation to be labelled
+    /// `[confirmed]` (checked against the code in this checkout) or `[hypothesis]`.
     static func prompt(sessionDirPath: String) -> String {
         """
         You are auditing one session of Jarvis, a proactive macOS coaching assistant: it transcribes \
@@ -81,11 +93,14 @@ public enum AgenticEvaluation {
           - `\(BrainTrafficLog.filename)` — the same traffic un-elided. Because the transcript elides \
         byte-identical repeats, ANY cardinal count (stub occurrences, OCR dumps, marker repetitions) \
         MUST be counted here, not from the elided transcript.
-          - `\(ActivityLog.filename)` — the sanitized human-facing coaching record. Fixed stop/degrade \
-        notices are also copied into the transcript's "=== human-facing runtime outcome ===" block. \
-        Treat `coaching stopped` / `session failed` as a session-level UX failure and distinguish it \
-        from a recoverable `listening continues` notice. A single call timeout that stopped the whole \
-        session is catastrophic even if the wire-level failure itself looks ordinary.
+          - `\(ActivityLog.filename)` — the COMPLETE sanitized human-facing coaching record: heard \
+        speech, manual hints, every brain action, and every fixed stop/degrade notice, with stable \
+        event kinds in `k`. Read the file itself in full; it is deliberately NOT filtered, summarized, \
+        or copied into `\(transcriptFilename)`. Use it whenever you need the user-visible sequence or \
+        lifecycle consequence. Treat `coaching stopped` / `session failed` as a session-level UX \
+        failure and distinguish it from a recoverable `listening continues` notice. A single call \
+        timeout that stopped the whole session is catastrophic even if the wire-level failure itself \
+        looks ordinary.
 
         Provider records can appear together — read the right fields for each:
           - OpenAI Responses: `response.usage` with `input_tokens`, \

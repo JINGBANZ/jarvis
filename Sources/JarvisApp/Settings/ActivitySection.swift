@@ -15,6 +15,7 @@ final class ActivitySection: NSObject, SettingsSection {
     }
 
     func makeView() -> NSView { viewer.makeContentView() }
+    func didBecomeActive() { viewer.didBecomeActive() }
     func windowWillClose() { viewer.teardown() }
 
     /// The embedded viewer stretches with the window, unlike the fixed-form panels.

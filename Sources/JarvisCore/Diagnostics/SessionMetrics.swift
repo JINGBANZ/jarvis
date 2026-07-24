@@ -2,7 +2,7 @@ import Foundation
 
 /// Deterministic, pure-Swift accounting of a session's brain traffic: per-call and aggregate token /
 /// cache / cost numbers computed straight from `brain-traffic.jsonl` and rendered as a table that
-/// leads the evaluation transcript (see `SessionEvaluator.renderTranscript`). Missing telemetry stays
+/// leads the evaluation transcript (see `EvaluationTranscript.render`). Missing telemetry stays
 /// unavailable — it is never silently converted to a factual zero or omitted from a partial total.
 ///
 /// Why this exists: the auditor is an LLM, and the 2026-07-19 session audit's factual slips (total
@@ -64,7 +64,7 @@ enum SessionMetrics {
     // MARK: - Rendering
 
     /// The metrics block that leads the transcript, or "" when there is no traffic (so callers'
-    /// empty-transcript guards still fire). Call numbering matches `SessionEvaluator.renderTranscript`
+    /// empty-transcript guards still fire). Call numbering matches `EvaluationTranscript.render`
     /// exactly — both count one call per JSON-parseable line, in file order.
     static func render(jsonl: String) -> String {
         let calls = parse(jsonl: jsonl)

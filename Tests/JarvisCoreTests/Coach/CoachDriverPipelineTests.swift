@@ -1340,6 +1340,7 @@ final class GatedThrowingBrain: BrainClient, @unchecked Sendable {
 
 /// A temporary first failure with a parked request, followed by success. This proves the driver's
 /// coalesced trigger—not only a later external trigger—keeps the conversation alive.
+/// `@unchecked Sendable` is safe because `recordedCalls` is always accessed through `NSLock`.
 final class GatedFailureThenSpeakingBrain: BrainClient, @unchecked Sendable {
     private let gate: AsyncGate
     private let lock = NSLock()

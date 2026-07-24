@@ -175,9 +175,10 @@ retry and `CoachDriver` lifecycle handling: temporary and unrecognized live-turn
 fixed missed-turn notice and leave capture, transcription, pending triggers, and unsent transcript
 intact; only an explicitly proven permanent failure may latch and stop. Audio-route rebuilds also
 retry under a bounded schedule before capture is declared unavailable, and stale callbacks are
-identity-guarded across Stop → Start. Each Activity row persists a stable event kind, so evaluators
-select lifecycle outcomes structurally rather than parsing human copy; dynamic provider and transport
-detail remains only in `JarvisLog`.
+identity-guarded across Stop → Start. Each Activity row persists a stable event kind. The agentic
+session evaluator reads the complete Activity file, using those kinds and the full user-visible
+sequence rather than a preselected excerpt; dynamic provider and transport detail remains only in
+`JarvisLog`.
 
 Ghost mode applies from a live pipeline through terminal teardown: no autonomous activation, alert,
 window, browser, notification, attention request, or sound is allowed outside the nonactivating,
@@ -266,7 +267,8 @@ memory, retries, and traffic recording are all unchanged — only the transport 
   distinguishes signed in, signed out, and an unavailable auth probe, and Start refuses a confirmed
   logout.
 - **The OpenAI key stays required**: transcription always runs on the Realtime API. A CLI provider
-  moves the brain/summarizer/evaluator off the key, not the ears. **Latency is the tradeoff**,
+  moves the brain/summarizer off the key, not the ears; the session evaluator independently runs
+  through a local agentic CLI over the completed session directory. **Latency is the tradeoff**,
   though a modest one now that every turn is one model call: measured coach turns run ~2.6s (text)
   / ~3.3s (with screenshot) on claude sonnet at low effort, ~5–8s on codex — versus the direct
   API's sub-2s target. The invocation is kept deliberately slim (persona replaced, no settings
@@ -348,9 +350,9 @@ The always-on legs are built to survive transient failure rather than die on it:
   turn includes the failed transcript plus anything newer, including a trigger coalesced while the
   failure was in flight. Cancellation remains quiet. Memory **compaction** fails soft without this
   wrapper: a failed summary simply leaves the full history for the next attempt.
-- **The audit edge** drains Activity's asynchronous writer before a stopped session becomes
-  evaluable, and the in-app evaluator repeats that barrier immediately before reading. Stable event
-  kinds therefore solve both selection drift and the record-then-Evaluate race.
+- **The audit edge** drains Activity's asynchronous writer as Stop completes. The dev-side agentic
+  evaluator then receives the completed session directory and reads `jarvis-activity.jsonl` itself
+  in full; no application-owned filter decides which Activity events are relevant before the audit.
 
 ## 5. Safety Model
 

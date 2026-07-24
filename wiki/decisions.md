@@ -287,7 +287,11 @@
 - **Chose:** Every brain round trip (coach + summarizer, tagged apart) is recorded **wire-level** — the exact request body sent and response body received, plus status/latency, with base64 screenshots redacted to stubs (the pixels are already the session's `shot-N.jpg` files) — as owner-only `brain-traffic.jsonl` in the session dir (`BrainTrafficLog` — a **per-session instance** bound to its session's directory at Start, so a request still unwinding across a Stop → Start records into the session that made it, never the new one). The Activity tab's **Evaluate** button feeds a delta-aware rendering of that traffic — instructions/tools/input prefixes that are byte-identical to the previous same-tag call are elided and *marked* elided — to the selected brain model at high reasoning effort with an audit prompt focused on context engineering, then saves and shows the markdown report (`SessionEvaluator` → `eval-report.md`).
 - **Why:** Tuning the harness previously meant pulling request logs from the OpenAI dashboard by hand and pasting them into a chat for diagnosis. The wire body is the ground truth a context-engineering audit needs (instructions, message order, tool schemas, `usage.cached_tokens` per call); recording it locally and auditing it in one click closes that loop. The elision markers double as signal: they show the auditor exactly where the prompt cache should be hitting, and keep the audit prompt itself from re-billing every repeated prefix.
 - **Rejected:** (a) Staying on the dashboard as the source — manual, and it dies the day `store:true` is flipped off (see the 2026-07-07 memory entry's privacy item). (b) Recording at the `ChatMessage` level — provider-agnostic but a paraphrase: it can't show cache-busting prefix changes or tool-schema bloat, which are the audit's main quarry. (c) Recording the evaluator's own traffic — it would pollute the very session it audits (its client keeps `traffic: nil`).
-- **Detail:** `Sources/JarvisCore/Diagnostics/BrainTrafficLog.swift`, `Sources/JarvisCore/Diagnostics/SessionEvaluator.swift`; the button lives in `ActivityViewer` ([settings-window.md → Sections](./settings-window.md#sections)); retention posture in [sandbox.md](./sandbox.md).
+- **Superseded in part by:** 2026-07-24 — Session evaluation is agentic-only and reads complete source logs. Wire recording and delta-aware rendering stand; the in-app one-click model call does not.
+- **Detail:** `Sources/JarvisCore/Diagnostics/BrainTrafficLog.swift`,
+  `Sources/JarvisCore/Diagnostics/EvaluationTranscript.swift`; current report discovery lives in
+  `ActivityViewer` ([settings-window.md → Sections](./settings-window.md#sections)); retention
+  posture in [sandbox.md](./sandbox.md).
 
 ### 2026-07-16 — Display choice folded into the capture-scope dropdown; no start-time prompt
 
@@ -432,6 +436,7 @@
 - **Chose:** A second, *agentic* evaluator that runs the audit through an agentic CLI (Claude Code `claude -p` / Codex `codex exec`) whose workspace is the repo checkout **plus** the session directory, so it verifies each finding against the harness's own code instead of guessing from traffic. It ships as a **dev-side script** (`scripts/eval-session.sh`) driving a thin Foundation-only executable (`EvalPrep`) that reuses Core's delta-aware transcript rendering (`SessionEvaluator.renderTranscript`) to write an owner-only `eval-transcript.txt` beside the traffic and emit the task prompt (`AgenticEvaluation`). The prompt keeps the report skeleton and call-#N citations, points the auditor at the load-bearing files (`CoachHistory.swift`, `CoachDriver.swift`, `ToolDefs.swift`, `ReasoningEffort.swift`), and requires each recommendation to be labelled `[confirmed]` (checked against the code) or `[hypothesis]`. The report is written back as `eval-report.md` — the same filename the in-app path uses. The single-call `SessionEvaluator` (the in-app **Evaluate** button) is unchanged and stays as the cheap fallback.
 - **Why:** Grading the first real single-call report (2026-07-15 session) showed it was half wrong in three ways, all rooted in the auditor seeing only wire traffic, not the code: it recommended shrinking `max_output_tokens` (which is a combined reasoning+output budget), blamed 0-cached-token calls on a client bug the elision markers disproved, and proposed mechanisms (`CoachHistory` screenshot stubbing, bulky-result compaction) that already exist. An auditor that can read `CoachHistory.swift`/`CoachDriver.swift`/`ToolDefs.swift` turns those guesses into checkable claims. Keeping it dev-side sidesteps the sandbox/key-handling questions of launching a headless agent from the signed app: `.jarvis/` session dirs are already owner-only and workspace-local, and the CLI authenticates with the developer's own `claude`/`codex` login — Jarvis's owner-only key file is never touched. `EvalPrep` is a separate executable (not a `JarvisApp` subcommand) purely so the render logic is reusable from a script on any machine, keeping the "logic in Core, testable anywhere" boundary.
 - **Rejected:** (a) An in-app shell-out from the Evaluate button — raises the sandbox + key-handoff questions with no payoff for a personal dev-time tool. (b) Baking the ground truth into the single-call prompt as static prose (the parked `b32c5be` revision) — the harness description drifts, and a stale sentence makes the auditor confidently wrong, the exact failure it was meant to fix; letting the agent read the live code removes the drift surface entirely. (c) Dropping the single-call path — it's one cheap round trip and the fallback when no agentic CLI is installed. (d) Feeding the agent raw `brain-traffic.jsonl` instead of the rendered transcript — the delta-aware render is the right compact input regardless of consumer, so it's reused, not reimplemented in bash.
+- **Superseded by:** 2026-07-24 — Session evaluation is agentic-only and reads complete source logs.
 - **Detail:** `Sources/JarvisCore/Diagnostics/AgenticEvaluation.swift`, `Sources/EvalPrep/main.swift`, `scripts/eval-session.sh`; the `[confirmed]`/`[hypothesis]` idea comes from the parked revision noted in issue #71.
 
 ### 2026-07-17 — Reports are read in the browser; markdown stays the source of truth
@@ -597,9 +602,37 @@
   unusable for later turns.
 - **Supersedes in part:** 2026-07-18 — Claude sign-in uses Claude's bounded auth-status command. A
   proven preflight logout still blocks Start; an unclassified runtime CLI failure no longer stops.
+- **Superseded in part by:** 2026-07-24 — Session evaluation is agentic-only and reads complete
+  source logs. Stable Activity kinds and Stop-time flushing stand; preselecting evaluator outcomes
+  and maintaining two evaluator paths do not.
 - **Detail:** [architecture.md → Failure surfacing](./architecture.md#failure-surfacing--startup-loud-runtime-ghost),
   [architecture.md → Resilience](./architecture.md#resilience),
   `Sources/JarvisCore/Brain/BrainFailure.swift`,
   `Sources/JarvisCore/Support/RetryIncident.swift`,
   `Sources/JarvisCore/Support/RetrySchedule.swift`,
   `Sources/JarvisCore/Diagnostics/ActivityLog.swift`.
+
+### 2026-07-24 — Session evaluation is agentic-only and reads complete source logs
+
+- **Chose:** Keep one evaluator: the dev-side `scripts/eval-session.sh` workflow backed by
+  `AgenticEvaluation`. Its read-only Claude Code / Codex agent receives the repo plus the complete
+  session directory. `eval-transcript.txt` remains a compact delta-aware view of wire traffic, while
+  the untouched `brain-traffic.jsonl`, complete `jarvis-activity.jsonl`, screenshots, and source
+  checkout remain first-class inputs the agent reads whenever needed. The app only discovers and
+  opens the resulting report; it never makes a separate evaluation-model call.
+- **Why:** A single model call cannot inspect the live implementation and was already producing
+  confident but incorrect recommendations. Preselecting only Activity stop/degrade events also
+  imposes application-owned relevance judgment before the auditor sees the session, hiding speech,
+  hints, actions, and ordering that may explain coaching quality or lifecycle impact. An agent with
+  direct file access can inspect the complete source of truth without duplicating it into its prompt.
+- **Rejected:** (a) Keeping the in-app evaluator as a cheap fallback — two evaluators produce
+  different evidence and confidence levels under one report surface. (b) Copying selected Activity
+  outcomes into the wire transcript — redundant and lossy when the agent already has the complete
+  file. (c) Concatenating the entire Activity file into `eval-transcript.txt` — duplicates persisted
+  session data and prevents the agent from choosing when it needs that evidence.
+- **Supersedes:** 2026-07-17 — Agentic session audit as a dev-side workflow; single-call path kept as
+  fallback. It also supersedes the in-app evaluation half of the 2026-07-15 wire-audit decision and
+  the dual-evaluator/Activity-selection half of the earlier 2026-07-24 resilience decision.
+- **Detail:** `Sources/JarvisCore/Diagnostics/AgenticEvaluation.swift`,
+  `Sources/JarvisCore/Diagnostics/EvaluationTranscript.swift`, `Sources/EvalPrep/main.swift`,
+  `scripts/eval-session.sh`, [settings-window.md](./settings-window.md#sections).

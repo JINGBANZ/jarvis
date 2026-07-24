@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 # Agentic session audit — the exploring auditor that reads the code, not just the wire.
 #
-# Where the in-app "Evaluate" button sends one Responses API call over the session's wire transcript
-# (SessionEvaluator), this runs the audit through an agentic CLI (Claude Code / Codex) whose workspace
-# is this repo checkout PLUS the session directory. The auditor then verifies each finding against the
-# harness's own code (CoachHistory.swift, CoachDriver.swift, ToolDefs.swift, …) instead of guessing
-# from traffic alone — the whole point of issue #71.
+# The sole evaluator runs through an agentic CLI (Claude Code / Codex) whose workspace is this repo
+# checkout PLUS the complete session directory. The auditor reads the full Activity log and raw
+# traffic whenever useful, then verifies each finding against the harness's own code
+# (CoachHistory.swift, CoachDriver.swift, ToolDefs.swift, …) instead of guessing from a reduced prompt.
 #
 # It stays a DEV-SIDE workflow on purpose: the sandboxed app never launches a headless agent or hands
 # it a key, and the agent authenticates with the developer's own `claude`/`codex` login — Jarvis's
@@ -79,9 +78,8 @@ case "$AGENT" in
 esac
 mv "$REPORT_TMP" "$REPORT"
 
-# Stamp provenance so a reader knows this is the code-reading agentic audit (not the in-app
-# wire-only SessionEvaluator, which stamps its own). Prepend as one line, keeping the report
-# owner-only from birth; the HTML render below picks it up because it reads this .md back.
+# Stamp provenance as one line, keeping the report owner-only from birth; the HTML render below picks
+# it up because it reads this .md back.
 STAMP="> _Produced by the agentic evaluator (\`$AGENT\` over the repo + session); the auditor was instructed to check recommendations labelled [confirmed] against the code._"
 STAMPED_TMP="$REPORT.stamped"
 trap 'rm -f "$REPORT_TMP" "$STAMPED_TMP"' EXIT

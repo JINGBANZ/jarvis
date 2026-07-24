@@ -110,6 +110,11 @@ reload.
   [sandbox.md](./sandbox.md).
 - The viewer's rendering logic (`htmlShell`/`rowScript`) and history reader (`SessionStore`) live in
   `JarvisCore` so they're unit/WebKit-tested; `ActivityViewer` in `JarvisApp` is the thin window.
+- Session evaluation is agentic only: run `./scripts/eval-session.sh [session-dir]`. The read-only
+  Claude Code / Codex agent receives the repo plus the complete session directory and reads the full
+  `jarvis-activity.jsonl` itself alongside raw brain traffic and screenshots. The Activity header's
+  **Open report** button discovers and opens the resulting `eval-report.md`; the app does not make a
+  separate evaluation-model call.
 
 ## Live smoke checklist
 

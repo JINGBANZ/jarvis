@@ -13,8 +13,8 @@ public final class ActivityLog: @unchecked Sendable {
     public static let shared = ActivityLog()
     public static let filename = "jarvis-activity.jsonl"
 
-    /// Stable on-disk identity for each typed Activity event. Human copy and emoji may evolve; audit
-    /// and lifecycle tooling must select events by this value instead of reverse-parsing prose.
+    /// Stable on-disk identity for each typed Activity event. Human copy and emoji may evolve; tools
+    /// reading the complete log can use this value instead of reverse-parsing prose.
     public enum EventKind: String, Codable, CaseIterable, Sendable {
         case heard
         case manualHint
@@ -30,20 +30,6 @@ public final class ActivityLog: @unchecked Sendable {
         case settingsChangeNotApplied
         case brainChangeApplied
         case brainFallback
-
-        /// Outcomes an evaluator must inspect in addition to the brain's wire traffic. These are
-        /// failures or degraded/recovered paths, not healthy speech, tips, or deliberate silence.
-        var isEvaluationOutcome: Bool {
-            switch self {
-            case .screenViewFailed, .coachingStopped, .coachingTurnFailed,
-                 .transcriptionStopped, .audioCaptureStopped, .systemAudioStopped,
-                 .settingsChangeNotApplied, .brainFallback:
-                true
-            case .heard, .manualHint, .screenViewed, .tip, .stayedSilent,
-                 .brainChangeApplied:
-                false
-            }
-        }
     }
 
     /// A human-visible event in the coaching exchange. Keeping this closed set typed prevents

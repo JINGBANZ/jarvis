@@ -78,34 +78,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // first Start, so the viewer starts with no current session to browse.
         activityViewer = ActivityViewer(log: .shared,
                                         store: SessionStore(base: logDirectory(), current: nil))
-        // The one-click session evaluation: audit the recorded brain traffic with the selected brain
-        // model at high effort (an audit is a depth task, not a latency one). Built at click time so
-        // it always uses the current key/model; its own traffic is NOT recorded (`traffic` stays nil)
-        // — the audit must not pollute the session it audits.
-        activityViewer.makeEvaluator = { [weak self] in
-            guard let self else { return nil }
-            let provider = self.brainPreferences.provider
-            if provider.usesLocalCLI {
-                guard let cli = AgentCLIDetector().detect(provider) else { return nil }
-                let brain = CLIBrainClient(provider: provider, executable: cli.executableURL,
-                                           model: self.brainPreferences.model(for: provider).id,
-                                           reasoningEffort: ReasoningEffort.high.rawValue,
-                                           workDirectory: self.currentSessionDir ?? self.logDirectory(),
-                                           codexSupportedFeatures: cli.supportedFeatures,
-                                           timeout: 600)   // a big session transcript takes minutes, not seconds
-                return SessionEvaluator(brain: brain, activityLog: .shared)
-            }
-            guard let key = self.secrets.apiKey(), !key.isEmpty else { return nil }
-            let brain = OpenAIBrainClient(apiKey: key, model: self.brainPreferences.model.id,
-                                          reasoningEffort: ReasoningEffort.high.rawValue,
-                                          timeout: 300,   // a big session transcript takes minutes, not seconds
-                                          maxOutputTokens: ReasoningEffort.high.maxOutputTokens,
-                                          promptCacheKey: "jarvis-eval-v1")
-            return SessionEvaluator(brain: brain, activityLog: .shared)
-        }
-        // Evaluation is for finished conversations only: the viewer disables its Evaluate button for
-        // the live session while coaching runs — or while a cancelled turn is still draining its
-        // final traffic line (start()/stop() ping it via coachingStateDidChange).
+        // Report opening is explicit Activity UI and remains unavailable while coaching runs—or while
+        // a cancelled turn is still draining—so it cannot reveal Jarvis during the ghost lifecycle.
+        // The sole evaluator is the dev-side agentic workflow in scripts/eval-session.sh.
         activityViewer.isCoachingRunning = { [weak self] in
             guard let self else { return false }
             return self.transcriber != nil || self.drainingStops > 0

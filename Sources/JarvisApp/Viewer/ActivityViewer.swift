@@ -11,22 +11,15 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
     private let log: ActivityLog
     private var store: SessionStore   // rebuilt when a new session opens (see `sessionDidChange`)
 
-    /// Builds the evaluation pipeline for the "Evaluate" button, read at click time so it always
-    /// uses the current API key + model selection. Nil result ⇒ no key yet. Wired by AppDelegate;
-    /// explicitly `@MainActor` because it reads AppDelegate's main-actor state (secrets, preferences).
-    var makeEvaluator: (@MainActor () -> SessionEvaluator?)?
-
-    /// Whether a coaching session is currently running (wired by AppDelegate). Read at click time —
-    /// evaluation is for *finished* conversations, so the live session is off-limits until Stop:
-    /// its traffic file is still being appended to, and a mid-session audit would judge half a story.
+    /// Whether a coaching session is currently running (wired by AppDelegate). Report opening is an
+    /// explicit browser presentation, so it remains disabled for the full coaching lifecycle.
     var isCoachingRunning: (@MainActor () -> Bool)?
 
     private var webView: WKWebView?
     private var picker: NSPopUpButton?
     private var copySessionIDButton: NSButton?
-    private var evaluateButton: NSButton?
+    private var reportButton: NSButton?
     private var clearHistoryButton: NSButton?
-    private var isEvaluating = false      // an audit is in flight; keep the button disabled meanwhile
     private var sessions: [SessionStore.Session] = []
 
     private var loaded = false             // page navigation finished?
@@ -87,11 +80,11 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         header.addSubview(copyID)
         self.copySessionIDButton = copyID
 
-        let evaluate = NSButton(title: "Evaluate", target: self, action: #selector(evaluateTapped))
-        evaluate.translatesAutoresizingMaskIntoConstraints = false
-        evaluate.bezelStyle = .rounded
-        header.addSubview(evaluate)
-        self.evaluateButton = evaluate
+        let report = NSButton(title: "Open report", target: self, action: #selector(openReportTapped))
+        report.translatesAutoresizingMaskIntoConstraints = false
+        report.bezelStyle = .rounded
+        header.addSubview(report)
+        self.reportButton = report
 
         let clear = NSButton(title: "Clear history", target: self, action: #selector(clearHistoryTapped))
         clear.translatesAutoresizingMaskIntoConstraints = false
@@ -113,10 +106,10 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
             copyID.leadingAnchor.constraint(equalTo: pop.trailingAnchor, constant: 8),
             copyID.centerYAnchor.constraint(equalTo: header.centerYAnchor),
             copyID.widthAnchor.constraint(equalToConstant: 78),
-            copyID.trailingAnchor.constraint(lessThanOrEqualTo: evaluate.leadingAnchor, constant: -8),
-            evaluate.centerYAnchor.constraint(equalTo: header.centerYAnchor),
-            evaluate.widthAnchor.constraint(equalToConstant: 104),
-            evaluate.trailingAnchor.constraint(equalTo: clear.leadingAnchor, constant: -8),
+            copyID.trailingAnchor.constraint(lessThanOrEqualTo: report.leadingAnchor, constant: -8),
+            report.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            report.widthAnchor.constraint(equalToConstant: 104),
+            report.trailingAnchor.constraint(equalTo: clear.leadingAnchor, constant: -8),
             clear.centerYAnchor.constraint(equalTo: header.centerYAnchor),
             clear.widthAnchor.constraint(equalToConstant: 120),
             clear.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -14),
@@ -143,7 +136,7 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         webView = nil
         picker = nil
         copySessionIDButton = nil
-        evaluateButton = nil
+        reportButton = nil
         clearHistoryButton = nil
         loaded = false
         pending = []
@@ -174,7 +167,7 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
             picker?.selectItem(at: idx)
         }
         refreshCopySessionIDButtonState()
-        refreshEvaluateButtonState()
+        refreshReportButtonState()
     }
 
     @objc private func sessionChanged() {
@@ -182,7 +175,7 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         let s = sessions[idx]
         if s.isCurrent { loadCurrent() } else { loadPast(s) }
         refreshCopySessionIDButtonState()
-        refreshEvaluateButtonState()
+        refreshReportButtonState()
     }
 
     private func refreshCopySessionIDButtonState() {
@@ -199,46 +192,43 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         NSPasteboard.general.setString(sessions[idx].id, forType: .string)
     }
 
-    /// Coaching started or stopped (AppDelegate calls this from Start/Stop): the live session just
-    /// became off-limits for evaluation, or the now-stopped one became evaluable.
+    /// Coaching started or stopped (AppDelegate calls this from Start/Stop): explicit browser
+    /// presentation is suppressed until the full coaching lifecycle has ended.
     func coachingStateDidChange() {
-        refreshEvaluateButtonState()
+        refreshReportButtonState()
     }
 
-    /// Evaluate and Clear stay disabled for the entire coaching lifecycle. Past-session evaluation
-    /// is data-safe while another session runs, but its asynchronous completion can otherwise open
-    /// a browser or alert mid-session. Owns the title too: `isEvaluating` survives a Settings
-    /// close/reopen (the viewer outlives its content view), so a rebuilt button mid-audit correctly
-    /// shows "Evaluating…" disabled instead of inviting a duplicate audit.
-    private func refreshEvaluateButtonState() {
+    /// A dev-side evaluator may have written a report while Settings remained open on another tab.
+    /// Recheck the selected session when Activity becomes visible again.
+    func didBecomeActive() {
+        refreshReportButtonState()
+    }
+
+    /// Open report and Clear stay disabled for the entire coaching lifecycle. The report button is
+    /// discover-only: the sole evaluator is the dev-side agentic workflow, and Activity opens its
+    /// saved result without launching an evaluator from the app.
+    private func refreshReportButtonState() {
         let coachingRunning = isCoachingRunning?() == true
         clearHistoryButton?.isEnabled = !coachingRunning
-        guard let button = evaluateButton else { return }
-        if isEvaluating {
-            button.title = "Evaluating…"
-            button.isEnabled = false
-            return
-        }
+        guard let button = reportButton else { return }
+        button.title = "Open report"
         guard let idx = picker?.indexOfSelectedItem, sessions.indices.contains(idx) else {
-            button.title = "Evaluate"
+            button.toolTip = "No session selected"
             button.isEnabled = false
             return
         }
         let session = sessions[idx]
         if coachingRunning {
-            button.title = SessionEvaluator.savedReport(in: session.url) == nil ? "Evaluate" : "Open report"
-            button.toolTip = "Stop Jarvis before evaluating or opening a report"
+            button.toolTip = "Stop Jarvis before opening a report"
             button.isEnabled = false
             return
         }
-        if SessionEvaluator.savedReport(in: session.url) != nil {
-            button.title = "Open report"
+        if AgenticEvaluation.savedReport(in: session.url) != nil {
             button.toolTip = "Open this session's evaluation report in your browser"
             button.isEnabled = true
         } else {
-            button.title = "Evaluate"
-            button.toolTip = "Send this session's recorded LLM traffic to the brain model for a context-engineering audit (stopped sessions only)"
-            button.isEnabled = true
+            button.toolTip = "No agentic evaluation report exists for this session"
+            button.isEnabled = false
         }
     }
 
@@ -302,48 +292,20 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         webView.evaluateJavaScript("setMeta(\(jsString(pendingMeta)));", completionHandler: nil)
     }
 
-    // MARK: - Session evaluation
+    // MARK: - Session report
 
-    /// One click: send the selected session's recorded brain traffic to the evaluation model and
-    /// show (and persist) the resulting audit report. A session that was already evaluated just
-    /// reopens its saved report — no re-billing. Only *stopped* conversations qualify for a fresh
-    /// audit: any past session, or the current one once coaching is stopped. The button is already
-    /// disabled while any session runs (`refreshEvaluateButtonState`); the guard here is the
-    /// race-proof backstop for a click that lands exactly as a Start flips the state.
-    @objc private func evaluateTapped() {
+    /// Open the selected session's saved agentic report. Evaluation itself is intentionally
+    /// dev-side (`scripts/eval-session.sh`), where an agent can inspect the repo and complete session
+    /// directory instead of receiving a reduced prompt from the app.
+    @objc private func openReportTapped() {
         guard isCoachingRunning?() != true else {
-            jlog("Jarvis: suppressed Activity evaluation presentation while coaching is running.")
+            jlog("Jarvis: suppressed Activity report presentation while coaching is running.")
             return
         }
         guard let idx = picker?.indexOfSelectedItem, sessions.indices.contains(idx) else { return }
         let session = sessions[idx]
-        if let report = SessionEvaluator.savedReport(in: session.url) {
-            openReport(report, for: session)
-            return
-        }
-        guard SessionEvaluator.hasTraffic(in: session.url) else {
-            info("Nothing to evaluate",
-                 "This session has no recorded LLM traffic. Traffic is captured from the first coaching turn onward.")
-            return
-        }
-        guard let evaluator = makeEvaluator?() else {
-            info("No API key", "Paste your API key in Settings first — the evaluation runs on the same key.")
-            return
-        }
-        isEvaluating = true
-        refreshEvaluateButtonState()
-        Task { [weak self] in
-            defer {
-                self?.isEvaluating = false
-                self?.refreshEvaluateButtonState()
-            }
-            do {
-                let report = try await evaluator.evaluate(sessionDir: session.url)
-                self?.openReport(report, for: session)
-            } catch {
-                self?.info("Evaluation failed", error.localizedDescription)
-            }
-        }
+        guard let report = AgenticEvaluation.savedReport(in: session.url) else { return }
+        openReport(report, for: session)
     }
 
     /// Open the report in the user's browser: render the markdown to `eval-report.html` beside it
@@ -352,7 +314,7 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
     /// button so the raw report can be pasted into an agent chat to work on the findings.
     private func openReport(_ report: String, for session: SessionStore.Session) {
         guard isCoachingRunning?() != true else {
-            jlog("Jarvis: evaluation completed while coaching is running; report saved without opening a browser.")
+            jlog("Jarvis: suppressed Activity report presentation while coaching is running.")
             return
         }
         do {
