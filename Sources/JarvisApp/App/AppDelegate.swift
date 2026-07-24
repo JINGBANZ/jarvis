@@ -176,12 +176,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// The three pieces that must change together when the selected brain changes. The failure
-    /// callback belongs to the provider too: CLI failures are terminal, while an OpenAI request
-    /// failure remains retryable on a later coaching turn.
+    /// callback belongs to the provider too: a temporary CLI watchdog miss keeps the live pipeline,
+    /// while a permanent CLI failure stops it.
     private struct BrainRuntime {
         let coach: BrainClient
         let summarizer: BrainClient
-        let onFailure: (@MainActor @Sendable (String) -> Void)?
+        let onFailure: (@MainActor @Sendable (BrainFailure) -> Void)?
     }
 
     /// Check the selected local provider before disturbing a live session. OpenAI needs no provider
@@ -246,16 +246,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 traffic: sessionTraffic, trafficTag: "summarizer")
         }
 
-        let onFailure: (@MainActor @Sendable (String) -> Void)?
+        let onFailure: (@MainActor @Sendable (BrainFailure) -> Void)?
         if provider.usesLocalCLI {
-            let signInCommand = provider == .claudeCode ? "claude auth login" : "codex login"
-            onFailure = { [errorReporter] reason in
-                ActivityLog.shared.record(.coachingStopped(provider: provider))
-                errorReporter.reportImmediately(
-                    .brainCLIStopped(provider: provider.displayName,
-                                     signInCommand: signInCommand,
-                                     reason: reason),
-                    context: .runtime)
+            onFailure = { [errorReporter] failure in
+                switch failure.disposition {
+                case .temporary:
+                    ActivityLog.shared.record(.coachingTurnFailed(provider: provider))
+                case .terminal:
+                    let signInCommand = provider == .claudeCode
+                        ? "claude auth login"
+                        : "codex login"
+                    ActivityLog.shared.record(.coachingStopped(provider: provider))
+                    errorReporter.reportImmediately(
+                        .brainCLIStopped(provider: provider.displayName,
+                                         signInCommand: signInCommand,
+                                         reason: failure.detail),
+                        context: .runtime)
+                }
             }
         } else {
             onFailure = nil

@@ -141,6 +141,25 @@ private final class CannedBrain: BrainClient, @unchecked Sendable {
         #expect(p.contains("unavailable, not zero"))
         #expect(p.contains("known (N unavailable)"))
         #expect(p.contains("re-check every number"))
+        #expect(p.contains("human-facing runtime outcome"))
+        #expect(p.contains("session-level UX failure"))
+    }
+
+    @Test func activityOutcomeRendersOnlyFixedStopAndDegradeNotices() {
+        let jsonl = [
+            #"{"t":"10:00:00","m":"🗣 heard (me): \"hello\""}"#,
+            #"{"t":"10:00:30","m":"⚠️ Codex CLI couldn't respond this turn — listening continues"}"#,
+            #"{"t":"10:00:40","m":"💬 try a hash map"}"#,
+            #"{"t":"10:01:00","m":"⏹ coaching stopped — Codex CLI couldn't respond; check Settings → Brain"}"#,
+        ].joined(separator: "\n")
+
+        let outcome = SessionEvaluator.renderActivityOutcome(jsonl: jsonl)
+
+        #expect(outcome.hasPrefix("=== human-facing runtime outcome ==="))
+        #expect(outcome.contains("[10:00:30] ⚠️ Codex CLI couldn't respond this turn"))
+        #expect(outcome.contains("[10:01:00] ⏹ coaching stopped"))
+        #expect(!outcome.contains("heard"))
+        #expect(!outcome.contains("hash map"))
     }
 
     @Test func evaluateSendsTranscriptAndPersistsOwnerOnlyReport() async throws {
@@ -150,6 +169,10 @@ private final class CannedBrain: BrainClient, @unchecked Sendable {
                        request: Data(#"{"model":"gpt-5.5","input":[]}"#.utf8),
                        response: Data(#"{"status":"completed","output":[]}"#.utf8),
                        status: 200, latencyMs: 300)
+        let activityLine =
+            #"{"t":"10:00:30","m":"⏹ coaching stopped — Codex CLI couldn't respond; check Settings → Brain"}"#
+        try Data((activityLine + "\n").utf8)
+            .write(to: dir.appendingPathComponent(ActivityLog.filename))
         let brain = CannedBrain(text: "## Context engineering\nall good")
         let report = try await SessionEvaluator(brain: brain).evaluate(sessionDir: dir)
 
@@ -158,6 +181,8 @@ private final class CannedBrain: BrainClient, @unchecked Sendable {
         #expect(report.contains(SessionEvaluator.provenanceStamp))
         #expect(brain.received.first?.role == .system)
         #expect(brain.received.last?.text?.contains("=== call #1 · coach") == true)
+        #expect(brain.received.last?.text?.contains("=== human-facing runtime outcome ===") == true)
+        #expect(brain.received.last?.text?.contains("⏹ coaching stopped") == true)
         let url = dir.appendingPathComponent(SessionEvaluator.reportFilename)
         #expect(try String(contentsOf: url, encoding: .utf8) == report)
         let perms = try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? NSNumber

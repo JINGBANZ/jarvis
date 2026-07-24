@@ -12,6 +12,10 @@ import Foundation
                        request: Data(#"{"model":"gpt-5.5","input":[]}"#.utf8),
                        response: Data(#"{"status":"completed","output":[]}"#.utf8),
                        status: 200, latencyMs: 300)
+        let activityLine =
+            #"{"t":"10:00:30","m":"⏹ coaching stopped — Codex CLI couldn't respond; check Settings → Brain"}"#
+        try Data((activityLine + "\n").utf8)
+            .write(to: dir.appendingPathComponent(ActivityLog.filename))
 
         let prompt = try AgenticEvaluation.prepare(sessionDir: dir)
 
@@ -19,6 +23,8 @@ import Foundation
         let transcriptURL = dir.appendingPathComponent(AgenticEvaluation.transcriptFilename)
         let transcript = try String(contentsOf: transcriptURL, encoding: .utf8)
         #expect(transcript.contains("=== call #1 · coach"))
+        #expect(transcript.contains("=== human-facing runtime outcome ==="))
+        #expect(transcript.contains("⏹ coaching stopped"))
         let perms = try FileManager.default.attributesOfItem(atPath: transcriptURL.path)[.posixPermissions] as? NSNumber
         #expect(perms?.int16Value == 0o600)
 
@@ -32,6 +38,7 @@ import Foundation
         #expect(prompt.contains("[hypothesis]"))
         #expect(prompt.contains("CoachHistory.swift"))
         #expect(prompt.contains(AgenticEvaluation.reportFilename))
+        #expect(prompt.contains(ActivityLog.filename))
     }
 
     /// The prompt teaches each provider record and cache model, preserves unavailable metrics,
@@ -52,6 +59,7 @@ import Foundation
         #expect(prompt.contains(BrainTrafficLog.filename))
         #expect(prompt.contains("MUST be counted here"))
         #expect(prompt.contains("re-check every number"))
+        #expect(prompt.contains("session-level UX failure"))
     }
 
     /// Shares the report filename with the single-call path, so "Show report" and the viewer find a

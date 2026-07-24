@@ -11,6 +11,7 @@ import Foundation
 /// strings; the WebView lives in JarvisApp. See wiki/build-and-run.md.
 public final class ActivityLog: @unchecked Sendable {
     public static let shared = ActivityLog()
+    public static let filename = "jarvis-activity.jsonl"
 
     /// A human-visible event in the coaching exchange. Keeping this closed set typed prevents
     /// transport, retry, error details, and other diagnostic strings from leaking into the activity
@@ -33,6 +34,9 @@ public final class ActivityLog: @unchecked Sendable {
         /// never the raw error, so the notice cannot expose provider diagnostics during screen
         /// sharing.
         case coachingStopped(provider: BrainProvider)
+        /// One coaching turn failed temporarily while capture and transcription remain live. The
+        /// provider identity is enough for fixed recovery copy; raw error detail stays in debug.
+        case coachingTurnFailed(provider: BrainProvider)
         /// The session ended because transcription became unusable. Carries a fixed, typed reason;
         /// raw provider and transport details remain exclusively in diagnostics.
         case transcriptionStopped(reason: TranscriptionFailureReason)
@@ -110,7 +114,7 @@ public final class ActivityLog: @unchecked Sendable {
         queue.sync {
             dir = directory
             entries.removeAll(); totalCount = 0; shotSeq = 0; onAppend = nil
-            let url = directory.appendingPathComponent("jarvis-activity.jsonl")
+            let url = directory.appendingPathComponent(Self.filename)
             FileManager.default.createFile(atPath: url.path, contents: Data(),
                                            attributes: [.posixPermissions: 0o600])
         }
@@ -151,6 +155,9 @@ public final class ActivityLog: @unchecked Sendable {
             imageBase64 = nil
         case .coachingStopped(let provider):
             message = "⏹ coaching stopped — \(provider.displayName) couldn't respond; check Settings → Brain"
+            imageBase64 = nil
+        case .coachingTurnFailed(let provider):
+            message = "⚠️ \(provider.displayName) couldn't respond this turn — listening continues"
             imageBase64 = nil
         case .transcriptionStopped(let reason):
             message = "⏹ session failed — \(reason.activityDescription)"
@@ -229,7 +236,7 @@ public final class ActivityLog: @unchecked Sendable {
     private func appendJSONL(_ entry: Entry, in dir: URL) {
         let pe = PersistedEntry(t: entry.time, m: entry.message, s: entry.imageFile)
         guard let data = try? JSONEncoder().encode(pe) else { return }
-        let url = dir.appendingPathComponent("jarvis-activity.jsonl")
+        let url = dir.appendingPathComponent(Self.filename)
         guard let fh = try? FileHandle(forWritingTo: url) else { return }
         defer { try? fh.close() }
         _ = try? fh.seekToEnd()
@@ -287,6 +294,8 @@ public final class ActivityLog: @unchecked Sendable {
             || m.hasPrefix("💬") || m.hasPrefix("🤫 stayed silent")
             || m.hasPrefix("⏹ coaching stopped")
             || m.hasPrefix("⏹ session failed")
+            || (m.hasPrefix("⚠️") && m.contains("couldn't respond this turn")
+                && m.hasSuffix("listening continues"))
             || m.hasPrefix("⚠️ system audio stopped")
             || m.hasPrefix("⚠️ settings change wasn't applied")
             || m.hasPrefix("🧠 brain switch applied")

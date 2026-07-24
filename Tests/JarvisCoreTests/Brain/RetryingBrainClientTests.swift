@@ -51,6 +51,21 @@ import Testing
         }
         #expect(base.callCount == 1)
     }
+
+    @Test func doesNotImmediatelyRetryCLIWatchdogTimeout() async {
+        let error = NSError(
+            domain: AgentCLIProcessRunner.errorDomain,
+            code: NSURLErrorTimedOut,
+            userInfo: [NSLocalizedDescriptionKey: "codex timed out"]
+        )
+        let base = RetryScriptBrain(script: [.failure(error)])
+        let client = RetryingBrainClient(base: base)
+
+        await #expect(throws: (any Error).self) {
+            _ = try await client.respond(messages: [.user("hi")], tools: coachTools)
+        }
+        #expect(base.callCount == 1)
+    }
 }
 
 // SAFETY: `script` and `calls` are the only mutable state and every access is guarded by `lock`.

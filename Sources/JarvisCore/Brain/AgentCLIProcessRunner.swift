@@ -11,6 +11,13 @@ import Glibc
 /// and cancelling the calling task (Stop pressed mid-turn) kills the subprocess immediately — a
 /// cancelled turn's reply can never be used, so the CLI must not keep burning the user's quota.
 public enum AgentCLIProcessRunner {
+    static let errorDomain = "AgentCLIProcessRunner"
+
+    static func isTimeout(_ error: Error) -> Bool {
+        let ns = error as NSError
+        return ns.domain == errorDomain && ns.code == NSURLErrorTimedOut
+    }
+
     public static func run(_ invocation: AgentCLIRun) async throws -> AgentCLIOutput {
         try Task.checkCancellation()   // don't even spawn for an already-cancelled turn
         let pidBox = Box<Int32?>(nil)
@@ -58,14 +65,17 @@ public enum AgentCLIProcessRunner {
         process.executableURL = run.executable
         process.arguments = run.arguments
         process.currentDirectoryURL = run.workingDirectory
-        // The app is launched via `open` and inherits launchd's minimal PATH; append the CLI's own
-        // directory plus the detector's fallback dirs, so a CLI shim found in one of them can also
-        // resolve its interpreter/helpers from another (an npm-shim `claude` needing Homebrew's
-        // `node`) — otherwise Settings says "detected" while every spawned turn fails.
+        // Use the same stable PATH policy as detection, then append the selected CLI's directory so
+        // an npm-installed executable can find its interpreter/helpers. Inherited launch wrappers
+        // under the system temporary directory must not leak into the long-running app's subprocess.
         var environment = ProcessInfo.processInfo.environment
-        let extraDirs = [run.executable.deletingLastPathComponent().path]
-            + AgentCLIDetector.fallbackDirectories(home: URL(fileURLWithPath: NSHomeDirectory()))
-        environment["PATH"] = ([environment["PATH"]].compactMap { $0 } + extraDirs)
+        let home = URL(fileURLWithPath: NSHomeDirectory())
+        let searchDirectories = AgentCLIDetector.stableSearchDirectories(
+            pathVariable: environment["PATH"],
+            home: home,
+            temporaryDirectory: FileManager.default.temporaryDirectory
+        )
+        environment["PATH"] = ([run.executable.deletingLastPathComponent().path] + searchDirectories)
             .joined(separator: ":")
         // Jarvis's own secret must not widen its exposure: when the documented OPENAI_API_KEY
         // fallback is in use, the transcription key would otherwise be inherited by the brain CLI
@@ -140,7 +150,7 @@ public enum AgentCLIProcessRunner {
             let stderr = String(decoding: stderrBox.get(), as: UTF8.self)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             let detail = stderr.isEmpty ? "" : "; stderr: \(String(stderr.suffix(2_000)))"
-            throw NSError(domain: "AgentCLIProcessRunner", code: NSURLErrorTimedOut, userInfo: [
+            throw NSError(domain: errorDomain, code: NSURLErrorTimedOut, userInfo: [
                 NSLocalizedDescriptionKey:
                     "\(run.executable.lastPathComponent) timed out after \(Int(run.timeout))s\(detail)",
             ])

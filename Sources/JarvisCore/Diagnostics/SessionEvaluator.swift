@@ -1,8 +1,9 @@
 import Foundation
 
 /// One-click session evaluation: turns a session's recorded brain traffic (`brain-traffic.jsonl`,
-/// see `BrainTrafficLog`) into a readable wire transcript, sends it to an LLM with an audit prompt
-/// focused on context engineering, and saves the returned report as `eval-report.md` in the session
+/// see `BrainTrafficLog`) into a readable wire transcript, appends fixed stop/degrade outcomes from
+/// the human-facing Activity log, sends both to an LLM with an audit prompt focused on context
+/// engineering and user impact, and saves the returned report as `eval-report.md` in the session
 /// directory. This automates the old manual loop of pulling request logs from the OpenAI dashboard
 /// and pasting them into a chat for diagnosis.
 ///
@@ -55,8 +56,14 @@ public struct SessionEvaluator: Sendable {
     public func evaluate(sessionDir: URL) async throws -> String {
         let url = sessionDir.appendingPathComponent(BrainTrafficLog.filename)
         let jsonl = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
-        let transcript = Self.renderTranscript(jsonl: jsonl)
+        var transcript = Self.renderTranscript(jsonl: jsonl)
         guard !transcript.isEmpty else { throw EvaluationError.noTraffic }
+        let activityURL = sessionDir.appendingPathComponent(ActivityLog.filename)
+        let activityJSONL = (try? String(contentsOf: activityURL, encoding: .utf8)) ?? ""
+        let activityOutcome = Self.renderActivityOutcome(jsonl: activityJSONL)
+        if !activityOutcome.isEmpty {
+            transcript += "\n\n" + activityOutcome
+        }
 
         let response = try await brain.respond(
             messages: [.system(Self.evalInstructions), .user(transcript)],
@@ -64,7 +71,8 @@ public struct SessionEvaluator: Sendable {
         guard let text = response.outputText, !text.isEmpty else {
             throw EvaluationError.emptyReport
         }
-        // Stamp provenance so a reader knows this is the wire-only audit, not the code-reading one.
+        // Stamp provenance so a reader knows this is the wire + Activity-outcome audit, not the
+        // code-reading one.
         let report = Self.provenanceStamp + "\n\n" + text
         // A failed write is tolerable: the report is still shown; only "Open report" reuse is lost.
         _ = FileManager.default.createFile(
@@ -73,11 +81,11 @@ public struct SessionEvaluator: Sendable {
         return report
     }
 
-    /// Prepended to every single-call report. This path audits the wire transcript only; the
-    /// code-reading agentic audit (`AgenticEvaluation` via `scripts/eval-session.sh`) is preferred
-    /// for a real audit — see the note it stamps.
+    /// Prepended to every single-call report. This path audits the wire transcript plus sanitized
+    /// Activity outcomes; the code-reading agentic audit (`AgenticEvaluation` via
+    /// `scripts/eval-session.sh`) is preferred for a real audit — see the note it stamps.
     static let provenanceStamp =
-        "> _Produced by the single-call `SessionEvaluator` (in-app wire-only audit). For a "
+        "> _Produced by the single-call `SessionEvaluator` (in-app wire + Activity-outcome audit). For a "
         + "code-verified audit with `[confirmed]`/`[hypothesis]` labels, run `scripts/eval-session.sh`._"
 
     // MARK: - Transcript rendering (pure, testable)
@@ -123,6 +131,24 @@ public struct SessionEvaluator: Sendable {
         // audit's cost/cache arithmetic errors. Empty traffic still renders "" (callers guard on it).
         let body = blocks.joined(separator: "\n\n")
         return SessionMetrics.render(jsonl: jsonl) + "\n\n" + body
+    }
+
+    /// Render only Activity's fixed runtime stop/degrade notices. Heard speech, tips, screenshots,
+    /// and raw diagnostics are deliberately excluded: the wire transcript already carries the model
+    /// context, while this compact block answers the missing UX question—did one failed call degrade
+    /// or terminate the user's whole session?
+    static func renderActivityOutcome(jsonl: String) -> String {
+        var lines: [String] = []
+        for raw in jsonl.split(separator: "\n", omittingEmptySubsequences: true) {
+            guard let entry = (try? JSONSerialization.jsonObject(with: Data(raw.utf8)))
+                    as? [String: Any],
+                  let message = entry["m"] as? String,
+                  message.hasPrefix("⚠️") || message.hasPrefix("⏹")
+            else { continue }
+            lines.append("[\(entry["t"] as? String ?? "?")] \(message)")
+        }
+        guard !lines.isEmpty else { return "" }
+        return (["=== human-facing runtime outcome ==="] + lines).joined(separator: "\n")
     }
 
     private static func renderRequest(_ request: [String: Any], tag: String,
@@ -260,7 +286,12 @@ public struct SessionEvaluator: Sendable {
     LLM traffic, one block per API \
     call, in order. To keep it compact: content byte-identical to the previous call with the same tag \
     is elided and explicitly marked "(unchanged)" — those markers are where the prompt cache SHOULD \
-    be hitting; base64 screenshots are redacted to a stub.
+    be hitting; base64 screenshots are redacted to a stub. When the session recorded a fixed Activity \
+    stop or degrade notice, the user message ends with a "=== human-facing runtime outcome ===" \
+    block. Treat that block as authoritative for user impact: `coaching stopped` / `session failed` \
+    is a session-level UX failure, while `listening continues` is a recoverable missed turn. In \
+    particular, flag a single transport timeout that stopped the whole session as catastrophic and \
+    correlate it with the nearest call error.
 
     Provider records can appear together — read the right fields for each:
       - OpenAI Responses: `response.usage` with `input_tokens`, `input_tokens_details.cached_tokens` \
@@ -294,8 +325,8 @@ public struct SessionEvaluator: Sendable {
 
     ## Issues and errors
     Transport errors, non-2xx responses, truncated runs (status=incomplete), tool-loop anomalies \
-    (repeated capture_screen, exhausted loops), and any contradiction between the instructions and \
-    the model's behavior.
+    (repeated capture_screen, exhausted loops), any contradiction between the instructions and the \
+    model's behavior, and the user-visible lifecycle consequence from the runtime-outcome block.
 
     ## Coaching quality
     Given the transcript deltas the model saw: tips that were wrong, late, redundant, or noisy; \

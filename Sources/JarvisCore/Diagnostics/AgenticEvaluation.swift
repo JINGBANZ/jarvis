@@ -33,8 +33,14 @@ public enum AgenticEvaluation {
     public static func prepare(sessionDir: URL) throws -> String {
         let trafficURL = sessionDir.appendingPathComponent(BrainTrafficLog.filename)
         let jsonl = (try? String(contentsOf: trafficURL, encoding: .utf8)) ?? ""
-        let transcript = SessionEvaluator.renderTranscript(jsonl: jsonl)
+        var transcript = SessionEvaluator.renderTranscript(jsonl: jsonl)
         guard !transcript.isEmpty else { throw SessionEvaluator.EvaluationError.noTraffic }
+        let activityURL = sessionDir.appendingPathComponent(ActivityLog.filename)
+        let activityJSONL = (try? String(contentsOf: activityURL, encoding: .utf8)) ?? ""
+        let activityOutcome = SessionEvaluator.renderActivityOutcome(jsonl: activityJSONL)
+        if !activityOutcome.isEmpty {
+            transcript += "\n\n" + activityOutcome
+        }
 
         let transcriptURL = sessionDir.appendingPathComponent(transcriptFilename)
         // A failed write must abort: the prompt tells the agent the transcript is its primary
@@ -75,6 +81,11 @@ public enum AgenticEvaluation {
           - `\(BrainTrafficLog.filename)` — the same traffic un-elided. Because the transcript elides \
         byte-identical repeats, ANY cardinal count (stub occurrences, OCR dumps, marker repetitions) \
         MUST be counted here, not from the elided transcript.
+          - `\(ActivityLog.filename)` — the sanitized human-facing coaching record. Fixed stop/degrade \
+        notices are also copied into the transcript's "=== human-facing runtime outcome ===" block. \
+        Treat `coaching stopped` / `session failed` as a session-level UX failure and distinguish it \
+        from a recoverable `listening continues` notice. A single call timeout that stopped the whole \
+        session is catastrophic even if the wire-level failure itself looks ordinary.
 
         Provider records can appear together — read the right fields for each:
           - OpenAI Responses: `response.usage` with `input_tokens`, \
