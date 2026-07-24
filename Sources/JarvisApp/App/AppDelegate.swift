@@ -78,12 +78,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // first Start, so the viewer starts with no current session to browse.
         activityViewer = ActivityViewer(log: .shared,
                                         store: SessionStore(base: logDirectory(), current: nil))
-        // Report opening is explicit Activity UI and remains unavailable while coaching runs—or while
-        // a cancelled turn is still draining—so it cannot reveal Jarvis during the ghost lifecycle.
-        // The sole evaluator is the dev-side agentic workflow in scripts/eval-session.sh.
+        // Evaluation/report opening is explicit Activity UI and remains unavailable while coaching
+        // runs—or while a cancelled turn is still draining—so it cannot reveal Jarvis during the
+        // ghost lifecycle.
         activityViewer.isCoachingRunning = { [weak self] in
             guard let self else { return false }
             return self.transcriber != nil || self.drainingStops > 0
+        }
+        // The button launches the same sole agentic evaluator as scripts/eval-session.sh. Resolve the
+        // checkout at click time and read the current provider preference then, so Settings changes
+        // and a moved local app bundle are both reflected without rebuilding Activity.
+        activityViewer.makeEvaluator = { [weak self] in
+            guard let self, let repository = self.evaluationRepositoryDirectory() else { return nil }
+            return AgenticEvaluator(repositoryDirectory: repository,
+                                    preferredProvider: self.brainPreferences.provider)
         }
 
         // Ask for Microphone + Screen Recording up front, not lazily mid-session.
@@ -147,6 +155,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    func applicationWillTerminate(_ notification: Notification) {
+        activityViewer?.cancelEvaluation()
+    }
+
     /// The three pieces that must change together when the selected brain changes. Every provider
     /// uses the same typed failure policy: temporary/unknown misses keep the live pipeline, while
     /// only an explicitly permanent failure stops it.
@@ -169,7 +181,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let cli = detectedCLI else {
             jlog("Jarvis: can't \(action) — \(provider.displayName) CLI not found.")
             if recordSettingsFailure { ActivityLog.shared.record(.settingsChangeNotApplied) }
-            errorReporter.report(.brainCLIMissing(provider: provider.displayName), context: context)
+            errorReporter.reportImmediately(
+                .brainCLIMissing(provider: provider.displayName), context: context)
             return (false, nil)
         }
         switch cli.authenticationStatus {
@@ -178,11 +191,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .signedOut:
             jlog("Jarvis: can't \(action) — \(provider.displayName) isn't signed in.")
             if recordSettingsFailure { ActivityLog.shared.record(.settingsChangeNotApplied) }
-            errorReporter.report(.brainCLINotSignedIn(provider: provider.displayName), context: context)
+            errorReporter.reportImmediately(
+                .brainCLINotSignedIn(provider: provider.displayName), context: context)
             return (false, nil)
         case .unknown:
-            errorReporter.report(.brainCLISignInUnconfirmed(provider: provider.displayName),
-                                 context: context)
+            errorReporter.reportImmediately(
+                .brainCLISignInUnconfirmed(provider: provider.displayName), context: context)
         }
         return (true, cli)
     }
@@ -218,8 +232,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 traffic: sessionTraffic, trafficTag: "summarizer")
         }
 
+        // Bind App-facing failure delivery to the session that owns these clients. CoachDriver
+        // revision-gates provider switches within one session; this second identity gate covers
+        // Stop → Start, where an old driver can finish unwinding after a replacement driver exists.
+        let sessionDirectory = currentSessionDir
         let onFailure: @MainActor @Sendable (BrainFailure) -> Void = {
-            [errorReporter] failure in
+            [weak self, errorReporter] failure in
+            guard let self, self.coachDriver != nil,
+                  self.currentSessionDir == sessionDirectory else {
+                jlog("Jarvis: ignoring brain failure from a stopped or superseded session.")
+                return
+            }
             switch failure.disposition {
             case .temporary:
                 ActivityLog.shared.record(.coachingTurnFailed(provider: provider))
@@ -251,7 +274,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         detectedCLI: DetectedAgentCLI?,
         apiKeyOverride: String? = nil
     ) {
-        guard let coachDriver, transcriber != nil else { return }
+        guard let coachDriver, transcriber != nil, let sessionDirectory = currentSessionDir else {
+            return
+        }
         guard let key = apiKeyOverride ?? secrets.apiKey(), !key.isEmpty else {
             jlog("Jarvis: can't apply brain settings — no API key.")
             ActivityLog.shared.record(.settingsChangeNotApplied)
@@ -265,13 +290,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         coachDriver.updateBrain(
             runtime.coach, provider: provider, summarizer: runtime.summarizer,
             onBrainFailure: runtime.onFailure,
-            onBrainChangeApplied: { previous, current in
+            onBrainChangeApplied: { [weak self] previous, current in
                 guard let previous, let current else { return }
-                ActivityLog.shared.record(.brainChangeApplied(previous: previous, current: current))
+                Task { @MainActor [weak self] in
+                    guard let self, self.coachDriver != nil,
+                          self.currentSessionDir == sessionDirectory else {
+                        jlog("Jarvis: ignoring brain-change notice from a stopped or superseded session.")
+                        return
+                    }
+                    ActivityLog.shared.record(
+                        .brainChangeApplied(previous: previous, current: current))
+                }
             },
-            onBrainFallback: { failed, restored in
+            onBrainFallback: { [weak self] failed, restored in
                 guard let failed, let restored else { return }
-                ActivityLog.shared.record(.brainFallback(failed: failed, restored: restored))
+                Task { @MainActor [weak self] in
+                    guard let self, self.coachDriver != nil,
+                          self.currentSessionDir == sessionDirectory else {
+                        jlog("Jarvis: ignoring brain-fallback notice from a stopped or superseded session.")
+                        return
+                    }
+                    ActivityLog.shared.record(
+                        .brainFallback(failed: failed, restored: restored))
+                }
             })
         let model = brainPreferences.model(for: provider)
         jlog("Jarvis: brain settings will apply on the next turn — \(provider.displayName), "
@@ -307,7 +348,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if wasRunning {
                 ActivityLog.shared.record(.settingsChangeNotApplied)
             }
-            errorReporter.report(.noAPIKey, context: reportContext)
+            errorReporter.reportImmediately(.noAPIKey, context: reportContext)
             return false
         }
         let brainProvider = brainPreferences.provider
@@ -411,7 +452,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.systemConnectionState = .failed
                 self.refreshConnectionUI()
                 ActivityLog.shared.record(.systemAudioStopped)
-                self.errorReporter.report(.systemAudioStopped, context: .runtime)
+                self.errorReporter.reportImmediately(.systemAudioStopped, context: .runtime)
             }
         }
 
@@ -483,7 +524,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if reportContext == .runtime {
                 ActivityLog.shared.record(.audioCaptureStopped)
             }
-            errorReporter.report(.captureFailed(reason: reason), context: reportContext)
+            errorReporter.reportImmediately(
+                .captureFailed(reason: reason), context: reportContext)
             return false
         }
         jlog("Jarvis: coaching starting — verifying realtime transcription connections.")
@@ -540,7 +582,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard !reportedTranscriptionFailure, transcriber != nil || themTranscriber != nil else { return }
         reportedTranscriptionFailure = true
         ActivityLog.shared.record(.transcriptionStopped(reason: reason))
-        errorReporter.report(.transcriptionStopped(reason: reason), context: .runtime)
+        // This method already runs on the main actor after checking the emitting transcriber's
+        // identity. Deliver synchronously so Stop → Start cannot slip between that check and the
+        // terminal lifecycle consequence and let a stale failure stop the replacement session.
+        errorReporter.reportImmediately(
+            .transcriptionStopped(reason: reason), context: .runtime)
     }
 
     /// The mic socket is the truth for whether Jarvis is listening. System audio may reconnect or
@@ -631,5 +677,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return URL(fileURLWithPath: args[i + 1])
         }
         return secretFile.fileURL.deletingLastPathComponent().appendingPathComponent("sessions")
+    }
+
+    /// The agentic evaluator must inspect the live source checkout, not a baked description. Prefer
+    /// an explicit launch argument, then the workspace-local `.jarvis/` parent used by build-app.sh,
+    /// then the directory containing a locally built Jarvis.app. A redistributed bundle without a
+    /// checkout simply reports evaluation unavailable instead of running a weaker evaluator.
+    private func evaluationRepositoryDirectory() -> URL? {
+        let args = CommandLine.arguments
+        var candidates: [URL] = []
+        if let i = args.firstIndex(of: "--repo-dir"), i + 1 < args.count {
+            candidates.append(URL(fileURLWithPath: args[i + 1]))
+        }
+        let logs = logDirectory().standardizedFileURL
+        if logs.lastPathComponent == ".jarvis" {
+            candidates.append(logs.deletingLastPathComponent())
+        }
+        candidates.append(Bundle.main.bundleURL.deletingLastPathComponent())
+
+        return candidates.first { candidate in
+            let root = candidate.standardizedFileURL
+            return FileManager.default.fileExists(
+                atPath: root.appendingPathComponent("Package.swift").path)
+                && FileManager.default.fileExists(
+                    atPath: root.appendingPathComponent("Sources/JarvisCore").path)
+        }?.standardizedFileURL
     }
 }

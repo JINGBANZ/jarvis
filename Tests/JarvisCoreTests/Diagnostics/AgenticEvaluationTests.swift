@@ -83,6 +83,36 @@ import Foundation
         #expect(AgenticEvaluation.savedReport(in: dir) == nil)
     }
 
+    @Test func hasTrafficRequiresANonemptyTrafficFile() throws {
+        let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
+        #expect(!AgenticEvaluation.hasTraffic(in: dir))
+        let url = dir.appendingPathComponent(BrainTrafficLog.filename)
+        try Data().write(to: url)
+        #expect(!AgenticEvaluation.hasTraffic(in: dir))
+        try Data("{}\n".utf8).write(to: url)
+        #expect(AgenticEvaluation.hasTraffic(in: dir))
+    }
+
+    @Test func saveReportAtomicallyReplacesAnOlderOwnerOnlyReport() throws {
+        let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent(AgenticEvaluation.reportFilename)
+        try Data("old report".utf8).write(to: url)
+
+        let saved = try AgenticEvaluation.saveReport(
+            "## New audit\nall good", agentName: "codex", in: dir)
+
+        #expect(try String(contentsOf: url, encoding: .utf8) == saved)
+        #expect(saved.contains("Produced by the agentic evaluator (`codex`"))
+        #expect(saved.contains("## New audit"))
+        let permissions = try FileManager.default.attributesOfItem(
+            atPath: url.path)[.posixPermissions] as? NSNumber
+        #expect(permissions?.int16Value == 0o600)
+        #expect(throws: AgenticEvaluation.EvaluationError.emptyReport) {
+            _ = try AgenticEvaluation.saveReport("  ", agentName: "codex", in: dir)
+        }
+        #expect(try String(contentsOf: url, encoding: .utf8) == saved)
+    }
+
     @Test func prepareThrowsWhenSessionHasNoTraffic() throws {
         let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         #expect(throws: AgenticEvaluation.EvaluationError.noTraffic) {

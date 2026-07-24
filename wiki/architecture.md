@@ -350,9 +350,11 @@ The always-on legs are built to survive transient failure rather than die on it:
   turn includes the failed transcript plus anything newer, including a trigger coalesced while the
   failure was in flight. Cancellation remains quiet. Memory **compaction** fails soft without this
   wrapper: a failed summary simply leaves the full history for the next attempt.
-- **The audit edge** drains Activity's asynchronous writer as Stop completes. The dev-side agentic
-  evaluator then receives the completed session directory and reads `jarvis-activity.jsonl` itself
-  in full; no application-owned filter decides which Activity events are relevant before the audit.
+- **The audit edge** drains Activity's asynchronous writer as Stop completes. An explicit
+  Activity → **Evaluate** click then runs the read-only agentic evaluator over the source checkout
+  plus the completed session directory; it reads `jarvis-activity.jsonl` itself in full, so no
+  application-owned filter decides which Activity events are relevant before the audit. The
+  standalone script invokes this same Core evaluator.
 
 ## 5. Safety Model
 

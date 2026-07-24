@@ -6,15 +6,16 @@
 # traffic whenever useful, then verifies each finding against the harness's own code
 # (CoachHistory.swift, CoachDriver.swift, ToolDefs.swift, …) instead of guessing from a reduced prompt.
 #
-# It stays a DEV-SIDE workflow on purpose: the sandboxed app never launches a headless agent or hands
-# it a key, and the agent authenticates with the developer's own `claude`/`codex` login — Jarvis's
-# owner-only API-key file is never touched. Session dirs under .jarvis/ are already owner-only and
-# workspace-local, so the agent (running as their owner) has exactly the access it needs.
+# The script and Activity's Evaluate button both call the same Foundation-only evaluator. The agent
+# authenticates with the user's existing `claude`/`codex` login — Jarvis's owner-only API-key file is
+# never touched. Session dirs under .jarvis/ are already owner-only and workspace-local, so the agent
+# (running as their owner) has exactly the access it needs.
 #
 # Usage:
 #   ./scripts/eval-session.sh [session-dir]     # defaults to the most recent session under .jarvis/
 #
-# Requires one of `claude` (Claude Code) or `codex` (Codex CLI) on PATH; override with EVAL_AGENT.
+# Requires one of `claude` (Claude Code) or `codex` (Codex CLI) on a stable PATH entry or in a
+# standard user/system install directory; override the provider choice with EVAL_AGENT.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -37,56 +38,14 @@ fi
 [[ -d "$SESSION_DIR" ]] || { echo "not a directory: $SESSION_DIR" >&2; exit 1; }
 SESSION_DIR="$(cd "$SESSION_DIR" && pwd)"   # absolute, so the prompt points the agent unambiguously
 
-# Render the compact transcript into the session dir and get the task prompt (reuses Core's rendering
-# via the EvalPrep executable — no bash reimplementation of the delta-aware format).
-PROMPT="$(swift run EvalPrep "$SESSION_DIR")"
-
-REPORT="$SESSION_DIR/eval-report.md"
-
-# Pick the agentic CLI. Both print their final answer to stdout in headless mode, which is the report.
+# EvalPrep calls the same Foundation-only AgenticEvaluator as Activity's Evaluate button, keeping
+# CLI discovery, read-only/stateless arguments, report stamping, and failure behavior in one place.
 AGENT="${EVAL_AGENT:-}"
-if [[ -z "$AGENT" ]]; then
-  if command -v claude >/dev/null 2>&1;   then AGENT="claude"
-  elif command -v codex >/dev/null 2>&1;  then AGENT="codex"
-  else
-    echo "no agentic CLI found — install Claude Code (\`claude\`) or Codex (\`codex\`), or set EVAL_AGENT" >&2
-    exit 1
-  fi
-fi
-
-echo "▶ running $AGENT over the repo + session (this explores the code; give it a minute)…"
-# Write to an owner-only temp file and mv into place only on success, so a failed run (auth,
-# network, interrupt) never truncates a previous report and the report bytes are 0600 from
-# birth. `--ephemeral` keeps Codex from persisting a rollout copy of the session transcript
-# outside the owner-only .jarvis/ dir.
-REPORT_TMP="$REPORT.tmp"
-trap 'rm -f "$REPORT_TMP"' EXIT
-rm -f "$REPORT_TMP"
-(umask 077; : > "$REPORT_TMP")
-# Both CLIs run read-only and stateless, mirroring the CLIBrainClient posture: the audit only
-# reads and prints, so a prompt-injected transcript/report must not be able to edit the checkout
-# (`--permission-mode plan` / `--sandbox read-only`), and no copy of the audit context may land
-# in the CLIs' own session stores (`--no-session-persistence` / `--ephemeral`). `--add-dir`
-# grants claude the session dir, which can live outside the repo (explicit path, app-default
-# Application Support location); codex's read-only sandbox already permits reads there.
 case "$AGENT" in
-  # NB: the prompt must directly follow -p — --add-dir is variadic and would swallow it.
-  claude) claude -p "$PROMPT" --no-session-persistence --permission-mode plan \
-                 --add-dir "$SESSION_DIR" > "$REPORT_TMP" ;;
-  codex)  codex exec --ephemeral --sandbox read-only "$PROMPT" > "$REPORT_TMP" ;;
-  *)      echo "unknown EVAL_AGENT: $AGENT (expected 'claude' or 'codex')" >&2; exit 2 ;;
+  "")       HTML="$(swift run EvalPrep --evaluate "$PWD" "$SESSION_DIR")" ;;
+  claude|codex)
+            HTML="$(swift run EvalPrep --evaluate "$PWD" "$SESSION_DIR" "$AGENT")" ;;
+  *)        echo "unknown EVAL_AGENT: $AGENT (expected 'claude' or 'codex')" >&2; exit 2 ;;
 esac
-mv "$REPORT_TMP" "$REPORT"
-
-# Stamp provenance as one line, keeping the report owner-only from birth; the HTML render below picks
-# it up because it reads this .md back.
-STAMP="> _Produced by the agentic evaluator (\`$AGENT\` over the repo + session); the auditor was instructed to check recommendations labelled [confirmed] against the code._"
-STAMPED_TMP="$REPORT.stamped"
-trap 'rm -f "$REPORT_TMP" "$STAMPED_TMP"' EXIT
-(umask 077; { printf '%s\n\n' "$STAMP"; cat "$REPORT"; } > "$STAMPED_TMP")
-mv "$STAMPED_TMP" "$REPORT"
-
-# Render the browsable page (with its Copy-as-Markdown button) from what the agent wrote.
-HTML="$(swift run EvalPrep --html "$SESSION_DIR")"
-echo "✓ report written to $REPORT"
+echo "✓ report written to $SESSION_DIR/eval-report.md"
 echo "✓ open in a browser: $HTML"

@@ -206,6 +206,28 @@ private func speakResponseBody(arguments: String) -> Data {
         }
     }
 
+    @Test func generic404PreservesSessionButModelNotFoundStopsAtProviderBoundary() async {
+        let cases: [(Data, BrainFailure.Disposition)] = [
+            (Data(#"{"error":{"message":"route unavailable"}}"#.utf8), .temporary),
+            (Data(#"{"error":{"code":"model_not_found","type":"invalid_request_error"}}"#.utf8),
+             .terminal),
+        ]
+        for (body, expected) in cases {
+            let client = OpenAIBrainClient(
+                apiKey: "sk-x", model: "gpt-5.5",
+                send: { _ in (body, http(404)) })
+            do {
+                _ = try await client.respond(messages: [.user("hi")], tools: coachTools)
+                Issue.record("expected a classified HTTP failure")
+            } catch let failure as BrainFailure {
+                #expect(failure.disposition == expected)
+                #expect(!failure.retriesImmediately)
+            } catch {
+                Issue.record("expected BrainFailure, got \(error)")
+            }
+        }
+    }
+
     @Test func parsedPermanentProviderCodeStopsEvenOnRateLimitStatus() async {
         let body = Data(#"{"error":{"code":"insufficient_quota","type":"billing_error"}}"#.utf8)
         let client = OpenAIBrainClient(

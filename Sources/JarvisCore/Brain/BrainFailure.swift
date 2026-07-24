@@ -81,7 +81,7 @@ public struct BrainFailure: Error, LocalizedError, Sendable, Equatable {
             "authentication_error",
             "permission_error",
         ]
-        let terminal = [401, 402, 403, 404].contains(status)
+        let terminal = [401, 402, 403].contains(status)
             || code.map(permanentCodes.contains) == true
             || type.map(permanentTypes.contains) == true
         let retriesImmediately = status == 408 || status == 409 || (500..<600).contains(status)

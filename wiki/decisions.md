@@ -633,6 +633,37 @@
 - **Supersedes:** 2026-07-17 — Agentic session audit as a dev-side workflow; single-call path kept as
   fallback. It also supersedes the in-app evaluation half of the 2026-07-15 wire-audit decision and
   the dual-evaluator/Activity-selection half of the earlier 2026-07-24 resilience decision.
+- **Superseded in part by:** 2026-07-24 — Evaluate launches the sole agentic evaluator. The evidence
+  model and removal of the single-call fallback stand; making users launch it outside the app does not.
 - **Detail:** `Sources/JarvisCore/Diagnostics/AgenticEvaluation.swift`,
   `Sources/JarvisCore/Diagnostics/EvaluationTranscript.swift`, `Sources/EvalPrep/main.swift`,
   `scripts/eval-session.sh`, [settings-window.md](./settings-window.md#sections).
+
+### 2026-07-24 — Evaluate launches the sole agentic evaluator
+
+- **Chose:** Keep the established Activity state machine: a stopped session without a report shows
+  **Evaluate**, one click runs the sole agentic Claude Code / Codex auditor over the source checkout
+  plus the complete session, saves owner-only `eval-report.md`, and opens it; a saved session shows
+  **Open report** and reopens without another run. `AgenticEvaluator` owns CLI discovery, the
+  read-only/non-persisted invocation, report stamping, and failure behavior in Core.
+  `scripts/eval-session.sh` reaches that same implementation through `EvalPrep`, so the UI and
+  terminal are two launch surfaces for one evaluator. A selected local Brain provider is used
+  directly and never silently replaced; with the OpenAI API selected, the first installed agent CLI
+  in Claude-then-Codex order runs the audit.
+- **Why:** Removing the inaccurate single-call evaluator was correct, but conflating “one evaluator”
+  with “no in-app launcher” regressed the user experience: a fresh session exposed a disabled
+  **Open report** button and required an undocumented terminal step before the app became useful.
+  Evaluation quality is defined by the agent's evidence and permissions, not by whether a button or
+  shell script starts it.
+- **Rejected:** (a) Restoring the old single-call evaluator — it still cannot inspect source and
+  recreates two reports with different evidence. (b) Keeping Activity discover-only — makes report
+  creation an external manual prerequisite. (c) Having the app launch the shell script — cancellation
+  and timeout would target the wrapper rather than reliably terminating the model subprocess.
+  (d) Running without a source checkout — that recreates the unverified recommendations the agentic
+  path exists to prevent.
+- **Supersedes in part:** 2026-07-24 — Session evaluation is agentic-only and reads complete source
+  logs. The evaluator stays agentic-only and continues to read the complete files; Activity now
+  launches it instead of only discovering its output.
+- **Detail:** `Sources/JarvisCore/Diagnostics/AgenticEvaluator.swift`,
+  `Sources/JarvisCore/Diagnostics/AgenticEvaluation.swift`,
+  `Sources/JarvisApp/Viewer/ActivityViewer.swift`, [settings-window.md](./settings-window.md#sections).

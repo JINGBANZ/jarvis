@@ -100,6 +100,11 @@ Narrow and explicit. Data leaves the machine only via:
   **session persistence off** (`--no-session-persistence` / `--ephemeral`), so they keep no local
   transcript of the coaching conversation in `~/.claude` / `~/.codex` — the owner-only session dir
   stays the only on-disk copy. Transcription audio still goes to the OpenAI Realtime API regardless.
+- **An explicit Activity → Evaluate click** sends the selected completed session to a read-only,
+  non-persisted Claude Code / Codex agent under that CLI account. Unlike a coaching turn, this agent
+  may inspect the complete `jarvis-activity.jsonl`, brain traffic, saved screenshots, and source
+  checkout because correlation across those inputs is the audit's purpose. Evaluation is unavailable
+  without a live checkout; the app never substitutes a weaker API-only audit.
 
 There is **no rolling screen/audio archive and no "recall" database** — Jarvis keeps no continuous
 recording of what it sees or hears. The **raw captured streams stay transient**: mic audio streams to
@@ -122,7 +127,7 @@ the screenshots the model looked at, alongside `jarvis-debug.log`) — the model
 transcribed "heard:" lines so a session can be reviewed afterward — plus the **brain traffic record**
 (`brain-traffic.jsonl`: the exact request/response bodies exchanged with the LLM provider, with
 base64 screenshots redacted to stubs since the pixels are already the shot files) and, once the user
-runs the dev-side agentic session evaluator, its `eval-report.md` and the browsable
+runs the agentic session evaluator from Activity or `scripts/eval-session.sh`, its `eval-report.md` and the browsable
 `eval-report.html` rendered from it. The evaluator receives this complete owner-only session
 directory; `jarvis-activity.jsonl` is not copied or prefiltered into another prompt artifact. All of
 it is written on **every**

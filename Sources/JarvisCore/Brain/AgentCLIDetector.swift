@@ -40,6 +40,16 @@ public struct AgentCLIDetector: Sendable {
         }
     }
 
+    /// Find only the first usable provider in the supplied order, off the caller's executor. Agentic
+    /// evaluation uses this instead of probing a second CLI that it will not invoke.
+    public func detectFirstAsync(_ providers: [BrainProvider]) async -> DetectedAgentCLI? {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                continuation.resume(returning: providers.lazy.compactMap(detect).first)
+            }
+        }
+    }
+
     /// The given provider's CLI, or nil when its binary isn't installed (or the provider is the
     /// direct API, which has nothing to detect).
     public func detect(_ provider: BrainProvider) -> DetectedAgentCLI? {

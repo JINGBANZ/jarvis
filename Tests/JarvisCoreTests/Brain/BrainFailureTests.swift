@@ -45,7 +45,7 @@ import Testing
     }
 
     @Test func unknownAndRequestLocalHTTPFailuresRemainTemporary() {
-        for status in [400, 418, 422, 423, 424, 425, 429] {
+        for status in [400, 404, 418, 422, 423, 424, 425, 429] {
             let failure = BrainFailure.openAIHTTP(
                 status: status, errorCode: "future_code", errorType: "future_type", detail: "failed")
             #expect(failure.disposition == .temporary)
@@ -54,7 +54,7 @@ import Testing
     }
 
     @Test func onlyProvenOrExplicitPermanentFailuresAreTerminal() {
-        for status in [401, 402, 403, 404] {
+        for status in [401, 402, 403] {
             #expect(BrainFailure.openAIHTTP(
                 status: status, errorCode: nil, errorType: nil, detail: "failed"
             ).disposition == .terminal)
