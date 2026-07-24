@@ -48,7 +48,7 @@ import Foundation
         } catch {
             #expect(error.localizedDescription.contains("timed out"))
             #expect(error.localizedDescription.contains("startup-stalled"))
-            #expect(AgentCLIProcessRunner.isTimeout(error))
+            #expect(BrainFailure(error).disposition == .temporary)
         }
     }
 }

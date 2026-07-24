@@ -162,6 +162,26 @@ private final class CannedBrain: BrainClient, @unchecked Sendable {
         #expect(!outcome.contains("hash map"))
     }
 
+    @Test func activityOutcomeUsesStableKindsInsteadOfHumanCopy() throws {
+        let lines = ActivityLog.EventKind.allCases.map { kind in
+            let record: [String: Any] = [
+                "t": "10:00:00",
+                "m": "plain copy for \(kind.rawValue)",
+                "k": kind.rawValue,
+            ]
+            return String(data: try! JSONSerialization.data(withJSONObject: record),
+                          encoding: .utf8)!
+        }
+
+        let outcome = SessionEvaluator.renderActivityOutcome(
+            jsonl: lines.joined(separator: "\n"))
+
+        for kind in ActivityLog.EventKind.allCases {
+            #expect(outcome.contains("plain copy for \(kind.rawValue)")
+                == kind.isEvaluationOutcome)
+        }
+    }
+
     @Test func evaluateSendsTranscriptAndPersistsOwnerOnlyReport() async throws {
         let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         let traffic = BrainTrafficLog(); traffic.enable(directory: dir)
@@ -187,6 +207,24 @@ private final class CannedBrain: BrainClient, @unchecked Sendable {
         #expect(try String(contentsOf: url, encoding: .utf8) == report)
         let perms = try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? NSNumber
         #expect(perms?.int16Value == 0o600)
+    }
+
+    @Test func evaluateFlushesPendingActivityBeforeReadingOutcomes() async throws {
+        let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
+        let traffic = BrainTrafficLog(); traffic.enable(directory: dir)
+        traffic.record(tag: "coach",
+                       request: Data(#"{"model":"gpt-5.5","input":[]}"#.utf8),
+                       response: Data(#"{"status":"completed","output":[]}"#.utf8),
+                       status: 200, latencyMs: 300)
+        let activity = ActivityLog()
+        activity.enable(directory: dir)
+        activity.record(.coachingStopped(provider: .codexCLI))
+        let brain = CannedBrain(text: "## Audit\ncaught it")
+
+        _ = try await SessionEvaluator(brain: brain, activityLog: activity)
+            .evaluate(sessionDir: dir)
+
+        #expect(brain.received.last?.text?.contains("coaching stopped") == true)
     }
 
     /// `savedReport` is the "Show report" gate: nil until an evaluation persisted a report, then the

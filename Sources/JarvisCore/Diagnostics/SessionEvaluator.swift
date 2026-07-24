@@ -16,9 +16,11 @@ public struct SessionEvaluator: Sendable {
     public static let reportFilename = "eval-report.md"
 
     private let brain: BrainClient
+    private let activityLog: ActivityLog?
 
-    public init(brain: BrainClient) {
+    public init(brain: BrainClient, activityLog: ActivityLog? = nil) {
         self.brain = brain
+        self.activityLog = activityLog
     }
 
     public enum EvaluationError: LocalizedError, Equatable {
@@ -54,6 +56,9 @@ public struct SessionEvaluator: Sendable {
     /// markdown report. The report is written owner-only next to the traffic it audits, so it survives
     /// for later browsing and re-reading without re-billing an evaluation.
     public func evaluate(sessionDir: URL) async throws -> String {
+        // `record` is intentionally asynchronous. Drain it before reading so an Evaluate click
+        // immediately after teardown cannot omit the failure that caused teardown.
+        activityLog?.flush()
         let url = sessionDir.appendingPathComponent(BrainTrafficLog.filename)
         let jsonl = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
         var transcript = Self.renderTranscript(jsonl: jsonl)
@@ -133,18 +138,24 @@ public struct SessionEvaluator: Sendable {
         return SessionMetrics.render(jsonl: jsonl) + "\n\n" + body
     }
 
-    /// Render only Activity's fixed runtime stop/degrade notices. Heard speech, tips, screenshots,
-    /// and raw diagnostics are deliberately excluded: the wire transcript already carries the model
-    /// context, while this compact block answers the missing UX question—did one failed call degrade
-    /// or terminate the user's whole session?
+    /// Render only Activity's typed runtime failure/degrade outcomes. Heard speech, tips,
+    /// screenshots, and raw diagnostics are deliberately excluded: the wire transcript already
+    /// carries the model context, while this compact block answers the missing UX question—did one
+    /// failed call degrade or terminate the user's whole session? Old sessions without `k` retain a
+    /// marker fallback; new sessions never depend on mutable human copy for lifecycle semantics.
     static func renderActivityOutcome(jsonl: String) -> String {
         var lines: [String] = []
         for raw in jsonl.split(separator: "\n", omittingEmptySubsequences: true) {
             guard let entry = (try? JSONSerialization.jsonObject(with: Data(raw.utf8)))
                     as? [String: Any],
-                  let message = entry["m"] as? String,
-                  message.hasPrefix("⚠️") || message.hasPrefix("⏹")
-            else { continue }
+                  let message = entry["m"] as? String else { continue }
+            if let rawKind = entry["k"] as? String,
+               let kind = ActivityLog.EventKind(rawValue: rawKind) {
+                guard kind.isEvaluationOutcome else { continue }
+            } else {
+                // Backward compatibility for sessions written before stable event kinds.
+                guard message.hasPrefix("⚠️") || message.hasPrefix("⏹") else { continue }
+            }
             lines.append("[\(entry["t"] as? String ?? "?")] \(message)")
         }
         guard !lines.isEmpty else { return "" }

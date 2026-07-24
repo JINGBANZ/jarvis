@@ -128,7 +128,7 @@ plugins ship only with full Xcode, and Jarvis builds **CLT-only** (see
 |---|---|---|
 | **AggregateEchoCapture** | The whole capture path: one **private Core Audio aggregate device** = the built-in mic (`me`, clock master) + a system-output **process tap** (`them`, drift-compensated onto the mic's clock). A single IOProc delivers both sample-synced at the device's **native rate** — the one-clock case AEC3 needs; the capture **reads that rate and resamples mic+tap up to 48 kHz** for AEC3 (a no-op when the device is already 48 kHz). So **any input device works** — built-in, USB, 44.1 kHz gear, or AirPods (Bluetooth HFP at 16/24 kHz) — instead of the old hard 48 kHz pin that silently failed to start on Bluetooth mics. Inside the callback it runs AEC3 (tap = far reference, mic = near), removing the other side's speaker bleed from the mic *before* transcription — no headphones, and double-talk works (measured 30–50 dB cancellation). The untouched resampled tap remains the `them` source while a separate padded/truncated copy aligns AEC; wire delivery is serialized off the realtime IOProc. Then both sides downsample to 24 kHz. Replaces the old separate `AVAudioEngine` mic + `SCStream`. | Core Audio (`AudioHardwareCreateProcessTap`, private aggregate device, drift compensation) + `AVAudioConverter` resampling + WebRTC **AEC3**. |
 | **WebRTCEchoCanceller** | AEC3 echo canceller driven at 48 kHz on 10 ms frames inside the capture IOProc; far reference first, then the mic cleaned in place. | WebRTC **AEC3** (`webrtc-audio-processing`), vendored static + zero-dylib via `scripts/build-aec.sh`. |
-| **ErrorReporter** | The single funnel for user-facing failures. Severity on a Foundation-only `UserFacingError` decides the lifecycle consequence; an explicit startup/runtime context decides presentation. Startup failures may alert, but runtime failures never activate Jarvis or present UI even when they stop the session. Fixed, categorized failure reasons go to Activity and raw detail stays in `JarvisLog`; a temporary missed brain turn bypasses this fatal funnel and keeps listening. | AppKit (`NSAlert`) for startup only. |
+| **ErrorReporter** | The single funnel for user-facing failures. Severity on a Foundation-only `UserFacingError` decides the lifecycle consequence; an explicit startup/runtime context decides presentation. Startup failures may alert, but runtime failures never activate Jarvis or present UI even when they stop the session. `BrainFailure` separately guarantees that temporary or unknown missed turns never enter this terminal funnel. Fixed, typed Activity outcomes carry stable on-disk identities while raw detail stays in `JarvisLog`. | AppKit (`NSAlert`) for startup only. |
 | **Transcriber** | Maintain a rolling, speaker-labeled, **spoken-time timestamped** transcript; emit turn-end events and backing-off silence checks (with quiet duration). Two instances run in parallel — one per side — tagging lines `me`/`them` into one shared transcript. A per-`item_id` ledger reconciles out-of-order delta/completed/failed/VAD events and salvages streamed text. An utterance-local failure with no usable words stays diagnostic and cannot trigger the brain; a permanent account or configuration rejection stops the unusable session with a fixed Activity reason. A privacy-preserving continuity witness records content-free capture/delivery/socket/server checkpoints and locally derived activity intervals, so the session log can locate a future gap without retaining PCM or adding pseudo-speech to model context. A socket is ready only after the server acknowledges its configuration; active ping/pong probes, send/receive errors, and startup timeouts all drive the same reconnect path. | `gpt-4o-transcribe` (Realtime API; tuned `server_vad`). |
 | **CoachDriver** | The event loop. On every substantive trigger (plus every silence check and hint keypress), call the brain with the session memory + transcript delta + timing context and tools, route tool calls, and compact the memory when it grows long. No cooldown/rate cap — restraint is the model's; the only client-side skip is the filler-only turn-end gate (`TurnSubstance`). | `gpt-5.5` (vision + tool-use) with `gpt-5.4-mini` for memory summaries — or a local Claude Code / Codex CLI on the user's subscription (see [§4 Local CLI brain providers](#local-cli-brain-providers)). |
 | **ScreenTool** | Fulfill `capture_screen`: silently shoot the **active window** (default scope) — the window-server frontmost, on whichever display, clean even when partially covered — and attach an **on-device OCR** of the shot to the tool result so the model reads exact text instead of pixels. Falls back to a full-display capture (no OCR) — the Settings-chosen display in Entire-display scope, the main display when no window is eligible; the overlay window is excluded either way. See [settings-window.md](./settings-window.md#capture-scope). | macOS `screencapture` CLI + Apple Vision (`VNRecognizeTextRequest`). |
@@ -170,10 +170,14 @@ failure site decides presentation. Startup failures caused by an explicit Start 
 runtime context suppresses alerts unconditionally, including after teardown, so a queued main-actor
 report cannot reveal Jarvis during screen sharing. Permanent brain, microphone-transcription, and
 audio-capture failures stop without presenting UI; the system-audio failure degrades to
-microphone-only. A local-CLI watchdog timeout is a recoverable missed turn instead: it records fixed
-Activity copy and leaves capture and transcription running for the next trigger. Each path records a
-fixed, categorized Activity reason while dynamic provider and transport detail remains only in
-`JarvisLog`.
+microphone-only. Every brain provider crosses one typed `BrainFailure` boundary shared by immediate
+retry and `CoachDriver` lifecycle handling: temporary and unrecognized live-turn errors record a
+fixed missed-turn notice and leave capture, transcription, pending triggers, and unsent transcript
+intact; only an explicitly proven permanent failure may latch and stop. Audio-route rebuilds also
+retry under a bounded schedule before capture is declared unavailable, and stale callbacks are
+identity-guarded across Stop → Start. Each Activity row persists a stable event kind, so evaluators
+select lifecycle outcomes structurally rather than parsing human copy; dynamic provider and transport
+detail remains only in `JarvisLog`.
 
 Ghost mode applies from a live pipeline through terminal teardown: no autonomous activation, alert,
 window, browser, notification, attention request, or sound is allowed outside the nonactivating,
@@ -290,7 +294,11 @@ streamed (one buffered request; the overlay just paces the display).
 The capture edge keeps two system-audio representations for different contracts: transcription
 preserves every real tap sample and pads only a short/empty callback's missing silence so Realtime
 VAD keeps advancing; AEC receives a separate exact mic-length padded/truncated reference. Neither
-path disables AEC or changes the configured Realtime noise-reduction profile.
+path disables AEC or changes the configured Realtime noise-reduction profile. A route switch may
+briefly expose no usable input/output device, so a failed aggregate rebuild follows a bounded
+exponential retry schedule before reporting terminal capture loss. Repeated notifications from the
+same device transition may supersede the pending work, but share one `RetryIncident` budget; only a
+successful rebuild resets it for a later incident.
 
 The always-on legs are built to survive transient failure rather than die on it:
 
@@ -331,13 +339,18 @@ The always-on legs are built to survive transient failure rather than die on it:
   otherwise batch every later transcript turn behind it. Because client-owned memory makes every
   request self-contained and tool effects happen only after a response reaches the driver, a
   transient API transport failure or retryable server error gets **one immediate automatic retry**
-  without duplicating a screenshot or spoken tip. A local-CLI watchdog expiration does not
-  immediately spend another full timeout; it becomes a fixed Activity warning for one missed turn
-  while the session keeps listening. Recovery remains on the **next trigger** — sent-state advances
-  only on a successful send, so that turn includes the failed transcript plus anything newer.
-  Cancellation, authentication, malformed requests, rate limits, and other permanent failures do
-  not retry. Memory **compaction** fails soft without this wrapper: a failed summary simply leaves
-  the full history for the next attempt.
+  without duplicating a screenshot or spoken tip. Retry and lifecycle consume the same typed
+  classification: an unknown/new provider error—including an unrecognized or request-local HTTP
+  4xx—defaults to a recoverable missed turn. Only an explicit allowlist proving unusable
+  authentication, billing, access, or configuration may stop the session. A CLI watchdog expiration
+  and ordinary rate limiting preserve the conversation but do not immediately repeat the request;
+  recovery waits for the **next trigger**. Sent-state advances only on a successful send, so that
+  turn includes the failed transcript plus anything newer, including a trigger coalesced while the
+  failure was in flight. Cancellation remains quiet. Memory **compaction** fails soft without this
+  wrapper: a failed summary simply leaves the full history for the next attempt.
+- **The audit edge** drains Activity's asynchronous writer before a stopped session becomes
+  evaluable, and the in-app evaluator repeats that barrier immediately before reading. Stable event
+  kinds therefore solve both selection drift and the record-then-Evaluate race.
 
 ## 5. Safety Model
 

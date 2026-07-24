@@ -40,13 +40,14 @@ public extension UserFacingError {
               severity: .degraded)
     }
 
-    /// The selected CLI passed preflight but an actual coaching request failed. The session cannot
-    /// coach, so stop without activating the app; the Activity log gets a discreet fixed notice and
-    /// the detailed reason stays in diagnostics.
-    static func brainCLIStopped(provider: String, signInCommand: String,
-                                reason: String) -> UserFacingError {
+    /// A provider proved that an actual coaching request cannot recover. Temporary and unknown
+    /// failures never use this path; they preserve the session for a later trigger. The Activity log
+    /// gets a discreet fixed notice while the detailed reason and provider-specific recovery stay in
+    /// diagnostics.
+    static func brainStopped(provider: String, recovery: String,
+                             reason: String) -> UserFacingError {
         .init(title: "\(provider) couldn't respond",
-              message: "\(reason)\n\nCoaching has stopped. Run \u{201C}\(signInCommand)\u{201D} in Terminal, or choose another brain provider in Settings \u{2192} Brain, then Start again.",
+              message: "\(reason)\n\nCoaching has stopped. \(recovery)",
               severity: .terminal)
     }
 

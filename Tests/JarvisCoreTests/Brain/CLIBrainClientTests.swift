@@ -380,7 +380,7 @@ import Foundation
             AgentCLIOutput(stdout: self.claudeEnvelope("credit balance too low", isError: true),
                            stderr: "", exitCode: 1)
         }
-        await #expect(throws: (any Error).self) {
+        await #expect(throws: BrainFailure.self) {
             _ = try await c.respond(messages: [.user("x")], tools: coachTools, toolChoice: .required)
         }
     }
@@ -393,8 +393,11 @@ import Foundation
         do {
             _ = try await c.respond(messages: [.user("x")], tools: coachTools, toolChoice: .required)
             Issue.record("expected a throw")
+        } catch let failure as BrainFailure {
+            #expect(failure.disposition == .temporary)
+            #expect(failure.detail.contains("not logged in"))
         } catch {
-            #expect(error.localizedDescription.contains("not logged in"))
+            Issue.record("expected BrainFailure, got \(error)")
         }
     }
 }

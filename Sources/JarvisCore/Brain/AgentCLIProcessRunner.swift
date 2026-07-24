@@ -13,11 +13,6 @@ import Glibc
 public enum AgentCLIProcessRunner {
     static let errorDomain = "AgentCLIProcessRunner"
 
-    static func isTimeout(_ error: Error) -> Bool {
-        let ns = error as NSError
-        return ns.domain == errorDomain && ns.code == NSURLErrorTimedOut
-    }
-
     public static func run(_ invocation: AgentCLIRun) async throws -> AgentCLIOutput {
         try Task.checkCancellation()   // don't even spawn for an already-cancelled turn
         let pidBox = Box<Int32?>(nil)

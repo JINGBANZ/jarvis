@@ -13,7 +13,7 @@ import Foundation
                        response: Data(#"{"status":"completed","output":[]}"#.utf8),
                        status: 200, latencyMs: 300)
         let activityLine =
-            #"{"t":"10:00:30","m":"⏹ coaching stopped — Codex CLI couldn't respond; check Settings → Brain"}"#
+            #"{"t":"10:00:30","m":"plain permanent failure","k":"coachingStopped"}"#
         try Data((activityLine + "\n").utf8)
             .write(to: dir.appendingPathComponent(ActivityLog.filename))
 
@@ -24,7 +24,7 @@ import Foundation
         let transcript = try String(contentsOf: transcriptURL, encoding: .utf8)
         #expect(transcript.contains("=== call #1 · coach"))
         #expect(transcript.contains("=== human-facing runtime outcome ==="))
-        #expect(transcript.contains("⏹ coaching stopped"))
+        #expect(transcript.contains("plain permanent failure"))
         let perms = try FileManager.default.attributesOfItem(atPath: transcriptURL.path)[.posixPermissions] as? NSNumber
         #expect(perms?.int16Value == 0o600)
 

@@ -2,7 +2,7 @@ import AppKit
 import JarvisCore
 
 /// The OpenAI API-key controls embedded in the Brain settings tab. Saves to an owner-only file and
-/// reports back via `onKeySaved` (the app restarts the pipeline only if it was already running).
+/// reports back via `onKeySaved` (the app applies it without restarting a live conversation).
 ///
 /// Two states: when no key is stored yet it shows the entry field + Save; when one already exists it
 /// shows a "key is saved" summary + an Edit button (we never display the stored key — it's write-only,

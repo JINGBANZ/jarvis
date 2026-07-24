@@ -62,6 +62,19 @@ import Foundation
         #expect(pushed[1].contains("appendRow("))
     }
 
+    @Test func flushPersistsEveryPreviouslyRecordedEvent() throws {
+        let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
+        let log = ActivityLog(); log.enable(directory: dir)
+
+        log.record(.coachingStopped(provider: .codexCLI))
+        log.flush()
+
+        let jsonl = try String(
+            contentsOf: dir.appendingPathComponent(ActivityLog.filename), encoding: .utf8)
+        #expect(jsonl.contains(#""k":"coachingStopped""#)
+            || jsonl.contains(#""k": "coachingStopped""#))
+    }
+
     @Test func attachSnapshotReplaysExistingEntriesWithImageBytes() throws {
         let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         let log = ActivityLog(); log.enable(directory: dir)
@@ -159,6 +172,12 @@ import Foundation
             message: "⚠️ Codex CLI couldn't respond this turn — listening continues",
             imageFile: nil
         ))
+        let jsonl = try String(
+            contentsOf: dir.appendingPathComponent(ActivityLog.filename), encoding: .utf8)
+        let persisted = try #require(try JSONSerialization.jsonObject(
+            with: Data(jsonl.split(separator: "\n")[0].utf8)) as? [String: Any])
+        #expect(persisted["k"] as? String
+            == ActivityLog.EventKind.coachingTurnFailed.rawValue)
     }
 
     @Test func brainChangeAppliedNamesProvidersWithoutDiagnosticDetail() throws {

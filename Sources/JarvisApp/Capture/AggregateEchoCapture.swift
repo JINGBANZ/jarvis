@@ -56,6 +56,10 @@ final class AggregateEchoCapture: @unchecked Sendable {
 
     private let lock = NSLock()
     private let routeQueue = DispatchQueue(label: "jarvis.aec.routes")
+    /// Device routes often disappear briefly while macOS switches hardware. Preserve the live
+    /// conversation through that interval; only a full bounded retry budget proves capture unusable.
+    private var rebuildIncident = RetryIncident(schedule: RetrySchedule(
+        maximumRetries: 6, initialDelay: 0.5, maximumDelay: 5))
     /// Both speaker streams share one queue to preserve the IOProc's callback order (cleaned mic,
     /// then untouched system tap) without doing Realtime encoding/sends on the audio thread.
     private let deliveryQueue = DispatchQueue(label: "jarvis.aec.delivery", qos: .userInitiated)
@@ -81,7 +85,13 @@ final class AggregateEchoCapture: @unchecked Sendable {
     /// caller surfaces it via `ErrorReporter`). Mid-session rebuild failures go through `onUnavailable`.
     func start() -> String? {
         var reason: String?
+        routeQueue.sync {
+            pendingRebuild?.cancel()
+            pendingRebuild = nil
+            rebuildIncident.reset()
+        }
         lock.lock()
+        stopped = false
         if #available(macOS 14.2, *), aec != nil, micDown != nil, sysDown != nil {
             reason = buildAudioLocked()
             if reason == nil { registerRouteListenersLocked() }
@@ -94,6 +104,11 @@ final class AggregateEchoCapture: @unchecked Sendable {
     }
 
     func stop() {
+        routeQueue.sync {
+            pendingRebuild?.cancel()
+            pendingRebuild = nil
+            rebuildIncident.stop()
+        }
         lock.lock()
         stopped = true
         removeRouteListenersLocked()
@@ -198,6 +213,7 @@ final class AggregateEchoCapture: @unchecked Sendable {
         // bookkeeping needs no extra locking.
         let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
             guard let self else { return }
+            guard self.rebuildIncident.beginOrContinue() else { return }
             self.pendingRebuild?.cancel()
             let work = DispatchWorkItem { [weak self] in self?.rebuild() }
             self.pendingRebuild = work
@@ -227,16 +243,37 @@ final class AggregateEchoCapture: @unchecked Sendable {
     /// on `routeQueue` (serial, debounced); the `stopped` guard makes a late change a no-op.
     private func rebuild() {
         var reason: String?
+        var failureAction = RetryIncident.FailureAction.ignore
         lock.lock()
         if !stopped {
             teardownAudioLocked()
             reason = buildAudioLocked()
-            if reason == nil { jlog("Jarvis: rebuilt capture after audio route change") }
+            if reason == nil {
+                jlog("Jarvis: rebuilt capture after audio route change")
+            }
         }
         lock.unlock()
-        if let reason {
-            jlog("Jarvis: capture rebuild failed after route change")
+        if reason == nil {
+            rebuildIncident.succeeded()
+            pendingRebuild = nil
+        } else {
+            failureAction = rebuildIncident.failed()
+        }
+        guard let reason else { return }
+        switch failureAction {
+        case .retry(let attempt, let maximum, let delay):
+            jlog("Jarvis: capture rebuild failed after route change — retrying "
+                 + "\(attempt)/\(maximum)")
+            let work = DispatchWorkItem { [weak self] in
+                self?.rebuild()
+            }
+            pendingRebuild = work
+            routeQueue.asyncAfter(deadline: .now() + delay, execute: work)
+        case .exhausted:
+            jlog("Jarvis: capture rebuild unavailable after bounded retries")
             onUnavailable?(reason)        // notify outside the lock
+        case .ignore:
+            break
         }
     }
 

@@ -65,6 +65,19 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
 
     public func respond(messages: [ChatMessage], tools: [ToolDef],
                         toolChoice: ToolChoice) async throws -> BrainResponse {
+        do {
+            return try await performRequest(
+                messages: messages, tools: tools, toolChoice: toolChoice)
+        } catch {
+            if Task.isCancelled || error is CancellationError { throw error }
+            throw BrainFailure(error)
+        }
+    }
+
+    /// Keep classification at the provider boundary: callers—including the retry wrapper and
+    /// `CoachDriver`—receive the same typed recoverability decision.
+    private func performRequest(messages: [ChatMessage], tools: [ToolDef],
+                                toolChoice: ToolChoice) async throws -> BrainResponse {
         var request = URLRequest(url: endpoint, timeoutInterval: timeout)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -95,10 +108,22 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
         traffic?.record(tag: trafficTag, request: body, response: data, status: status,
                         latencyMs: Self.elapsedMs(since: started))
         guard (200..<300).contains(status) else {
-            throw NSError(domain: "OpenAIBrainClient", code: status,
-                          userInfo: [NSLocalizedDescriptionKey: String(data: data, encoding: .utf8) ?? "http \(status)"])
+            let identity = Self.errorIdentity(from: data)
+            throw BrainFailure.openAIHTTP(
+                status: status,
+                errorCode: identity.code,
+                errorType: identity.type,
+                detail: String(data: data, encoding: .utf8) ?? "http \(status)")
         }
         return try decode(data)
+    }
+
+    private static func errorIdentity(from data: Data) -> (code: String?, type: String?) {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let error = root["error"] as? [String: Any] else {
+            return (nil, nil)
+        }
+        return (error["code"] as? String, error["type"] as? String)
     }
 
     private static func elapsedMs(since started: Date) -> Int {

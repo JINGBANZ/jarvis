@@ -174,6 +174,54 @@ private func speakResponseBody(arguments: String) -> Data {
         #expect(attempts.value == 1) // single attempt, no retry
     }
 
+    @Test func httpErrorIsClassifiedAtProviderBoundary() async {
+        let client = OpenAIBrainClient(
+            apiKey: "sk-x", model: "gpt-5.5",
+            send: { _ in (Data("unauthorized".utf8), http(401)) })
+        do {
+            _ = try await client.respond(messages: [.user("hi")], tools: coachTools)
+            Issue.record("expected a classified HTTP failure")
+        } catch let failure as BrainFailure {
+            #expect(failure.disposition == .terminal)
+            #expect(!failure.retriesImmediately)
+            #expect(failure.detail.contains("unauthorized"))
+        } catch {
+            Issue.record("expected BrainFailure, got \(error)")
+        }
+    }
+
+    @Test func unknownRequestLocalHTTPErrorPreservesTheSession() async {
+        let body = Data(#"{"error":{"code":"future_request_error","type":"future_type"}}"#.utf8)
+        let client = OpenAIBrainClient(
+            apiKey: "sk-x", model: "gpt-5.5",
+            send: { _ in (body, http(422)) })
+        do {
+            _ = try await client.respond(messages: [.user("hi")], tools: coachTools)
+            Issue.record("expected a classified HTTP failure")
+        } catch let failure as BrainFailure {
+            #expect(failure.disposition == .temporary)
+            #expect(!failure.retriesImmediately)
+        } catch {
+            Issue.record("expected BrainFailure, got \(error)")
+        }
+    }
+
+    @Test func parsedPermanentProviderCodeStopsEvenOnRateLimitStatus() async {
+        let body = Data(#"{"error":{"code":"insufficient_quota","type":"billing_error"}}"#.utf8)
+        let client = OpenAIBrainClient(
+            apiKey: "sk-x", model: "gpt-5.5",
+            send: { _ in (body, http(429)) })
+        do {
+            _ = try await client.respond(messages: [.user("hi")], tools: coachTools)
+            Issue.record("expected a classified HTTP failure")
+        } catch let failure as BrainFailure {
+            #expect(failure.disposition == .terminal)
+            #expect(!failure.retriesImmediately)
+        } catch {
+            Issue.record("expected BrainFailure, got \(error)")
+        }
+    }
+
     /// Request body uses the Responses shape + hardening flags.
     @Test func encodesResponsesRequestShape() async throws {
         let box = CapturedBody()

@@ -345,9 +345,10 @@ public final class CoachDriver: @unchecked Sendable {
                     lastResponseCompleted = false
                     continue
                 }
-                if let onFailure = brains.onFailure {
-                    let failure = BrainFailure(error)
-                    if failure.disposition == .temporary {
+                let failure = BrainFailure(error)
+                switch failure.disposition {
+                case .temporary:
+                    if let onFailure = brains.onFailure {
                         await MainActor.run {
                             guard isCurrentBrainConfiguration(brains.revision) else {
                                 jlog("… ignoring queued failure from superseded brain configuration")
@@ -355,7 +356,12 @@ public final class CoachDriver: @unchecked Sendable {
                             }
                             onFailure(failure)
                         }
-                    } else if latchTerminalBrainFailure(for: brains.revision) {
+                    }
+                case .terminal:
+                    // Lifecycle policy is independent of observation: even a headless/test caller
+                    // with no callback must not issue more requests after a proven permanent failure.
+                    if latchTerminalBrainFailure(for: brains.revision),
+                       let onFailure = brains.onFailure {
                         await MainActor.run {
                             guard isCurrentBrainConfiguration(brains.revision) else {
                                 jlog("… ignoring queued failure from superseded brain configuration")
@@ -363,7 +369,7 @@ public final class CoachDriver: @unchecked Sendable {
                             }
                             onFailure(failure)
                         }
-                    } else {
+                    } else if !isCurrentBrainConfiguration(brains.revision) {
                         jlog("… ignoring failure from superseded brain configuration")
                     }
                 }

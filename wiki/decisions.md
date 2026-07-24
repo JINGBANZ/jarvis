@@ -567,3 +567,39 @@
 - **Detail:** [settings-window.md](./settings-window.md),
   `Sources/JarvisApp/Settings/SettingsWindow.swift`,
   `Sources/JarvisCore/Brain/AgentCLIDetector.swift`.
+
+### 2026-07-24 — Temporary runtime failures preserve the live conversation
+
+- **Chose:** Make provider recoverability one typed `BrainFailure` decision shared by provider
+  adapters, immediate retry, and `CoachDriver` lifecycle handling. Unknown live-turn errors fail
+  safe as temporary missed turns—including unknown/request-local HTTP 4xx responses; only a small
+  explicit allowlist proving unusable authentication, billing, access, or configuration may latch
+  and stop. Temporary failures preserve pending triggers, unsent transcript, capture/transcription,
+  and history. Audio-route rebuilds use one incident-scoped bounded retry budget that repeated route
+  notifications cannot reset, and capture callbacks are identity-guarded across Stop → Start.
+  Saving an API key updates future Realtime reconnects and transactionally replaces an OpenAI brain
+  without restarting capture, transcription, transcript, or history; a settings preflight failure
+  likewise cannot stop the clients already running.
+  Activity persists a stable event kind and is flushed before evaluation, so both session evaluators
+  find failure/degrade outcomes without reverse-parsing mutable emoji/prose or racing its writer.
+- **Why:** A Codex watchdog timeout was treated as a terminal CLI failure, producing “coaching
+  stopped” and destroying the live UX after one stalled turn. Special-casing that exact timeout
+  still left retry and lifecycle with incompatible classifiers, let any new CLI error default
+  terminal, and let a momentary audio-device gap—or a late callback from an old capture—stop the
+  conversation. Liveness must be the default; teardown requires positive evidence that recovery
+  cannot work.
+- **Rejected:** (a) Enumerating every temporary CLI stderr string or process exit code — neither is a
+  stable recoverability contract. (b) Defaulting unknown errors terminal — recreates the regression
+  whenever a provider adds a failure shape. (c) Retrying every temporary failure immediately — a
+  watchdog miss or rate limit should wait for fresher context/backoff. (d) Filtering Activity
+  outcomes only by leading marker — human copy is not a durable schema. (e) Treating every HTTP 4xx
+  as permanent — request-local and future status meanings are not proof that the provider is
+  unusable for later turns.
+- **Supersedes in part:** 2026-07-18 — Claude sign-in uses Claude's bounded auth-status command. A
+  proven preflight logout still blocks Start; an unclassified runtime CLI failure no longer stops.
+- **Detail:** [architecture.md → Failure surfacing](./architecture.md#failure-surfacing--startup-loud-runtime-ghost),
+  [architecture.md → Resilience](./architecture.md#resilience),
+  `Sources/JarvisCore/Brain/BrainFailure.swift`,
+  `Sources/JarvisCore/Support/RetryIncident.swift`,
+  `Sources/JarvisCore/Support/RetrySchedule.swift`,
+  `Sources/JarvisCore/Diagnostics/ActivityLog.swift`.
