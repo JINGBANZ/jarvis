@@ -110,6 +110,14 @@ reload.
   [sandbox.md](./sandbox.md).
 - The viewer's rendering logic (`htmlShell`/`rowScript`) and history reader (`SessionStore`) live in
   `JarvisCore` so they're unit/WebKit-tested; `ActivityViewer` in `JarvisApp` is the thin window.
+- Session evaluation is agentic only. After Stop, select a session and click **Evaluate**: the
+  read-only Claude Code / Codex agent receives the source checkout plus the complete session
+  directory, reads the full `jarvis-activity.jsonl` itself alongside raw brain traffic and
+  screenshots, writes owner-only `eval-report.md`, and opens the rendered page. A saved session shows
+  **Open report** instead, avoiding another agent run. The local app locates its checkout from the
+  workspace `.jarvis/`, a `--repo-dir` launch argument, or the directory containing a locally built
+  `Jarvis.app`; without live source it refuses to run a weaker audit. `./scripts/eval-session.sh
+  [session-dir]` is the terminal launcher for the same Core evaluator.
 
 ## Live smoke checklist
 
@@ -133,3 +141,5 @@ the human-facing coaching record. The current validation priority lives in
 - If validating realtime recovery, disconnect the network, say a unique phrase, reconnect, and confirm
   the debug log reports buffered replay and the phrase appears exactly once after recovery.
 - Choose **Stop Jarvis** and confirm no later transcription or coaching events are produced.
+- In Activity, choose the stopped session and click **Evaluate**. Confirm the button shows
+  **Evaluating…**, the report opens when the agent finishes, and the button then shows **Open report**.

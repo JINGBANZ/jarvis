@@ -13,13 +13,16 @@ public struct AgentCLIDetector: Sendable {
     private let home: URL
     private let pathVariable: String?
     private let authStatusTimeout: TimeInterval
+    private let temporaryDirectory: URL
 
     public init(home: URL = URL(fileURLWithPath: NSHomeDirectory()),
                 pathVariable: String? = ProcessInfo.processInfo.environment["PATH"],
-                authStatusTimeout: TimeInterval = 2) {
+                authStatusTimeout: TimeInterval = 2,
+                temporaryDirectory: URL = FileManager.default.temporaryDirectory) {
         self.home = home
         self.pathVariable = pathVariable
         self.authStatusTimeout = authStatusTimeout
+        self.temporaryDirectory = temporaryDirectory
     }
 
     /// All CLI providers found on this machine, in `BrainProvider` declaration order.
@@ -33,6 +36,16 @@ public struct AgentCLIDetector: Sendable {
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 continuation.resume(returning: detectAll())
+            }
+        }
+    }
+
+    /// Find only the first usable provider in the supplied order, off the caller's executor. Agentic
+    /// evaluation uses this instead of probing a second CLI that it will not invoke.
+    public func detectFirstAsync(_ providers: [BrainProvider]) async -> DetectedAgentCLI? {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                continuation.resume(returning: providers.lazy.compactMap(detect).first)
             }
         }
     }
@@ -67,17 +80,39 @@ public struct AgentCLIDetector: Sendable {
         ]
     }
 
-    /// $PATH first, then the common install locations. The fallbacks matter because the app is
-    /// launched via `open` and inherits launchd's minimal PATH (`/usr/bin:/bin:…`), which contains
-    /// none of the places these CLIs actually install to.
+    /// Stable $PATH entries first, then common install locations. Apps opened from a terminal inherit
+    /// that terminal's PATH, which can contain short-lived launcher wrappers under the system temp
+    /// directory. A long-running app must not retain one of those paths after its owner exits.
     private func firstExecutable(named name: String) -> URL? {
-        let dirs = (pathVariable ?? "").split(separator: ":").map(String.init)
-            + Self.fallbackDirectories(home: home)
+        let dirs = Self.stableSearchDirectories(
+            pathVariable: pathVariable,
+            home: home,
+            temporaryDirectory: temporaryDirectory
+        )
         for dir in dirs where !dir.isEmpty {
             let candidate = URL(fileURLWithPath: dir).appendingPathComponent(name)
             if FileManager.default.isExecutableFile(atPath: candidate.path) { return candidate }
         }
         return nil
+    }
+
+    /// Search/environment PATH shared by detection and execution. Only inherited entries under the
+    /// system temporary directory are discarded; explicit user and system install locations retain
+    /// their normal precedence and are appended as fallbacks.
+    static func stableSearchDirectories(pathVariable: String?, home: URL,
+                                        temporaryDirectory: URL) -> [String] {
+        let inherited = (pathVariable ?? "").split(separator: ":").map(String.init)
+            .filter { !isInside(URL(fileURLWithPath: $0), root: temporaryDirectory) }
+        var seen = Set<String>()
+        return (inherited + fallbackDirectories(home: home)).filter {
+            !$0.isEmpty && seen.insert($0).inserted
+        }
+    }
+
+    private static func isInside(_ candidate: URL, root: URL) -> Bool {
+        let candidatePath = candidate.standardizedFileURL.resolvingSymlinksInPath().path
+        let rootPath = root.standardizedFileURL.resolvingSymlinksInPath().path
+        return candidatePath == rootPath || candidatePath.hasPrefix(rootPath + "/")
     }
 
     private func authenticationStatus(_ provider: BrainProvider, executable: URL)
@@ -144,9 +179,12 @@ public struct AgentCLIDetector: Sendable {
 
         var environment = ProcessInfo.processInfo.environment
         environment["HOME"] = home.path
-        let extraDirectories = [executable.deletingLastPathComponent().path]
-            + Self.fallbackDirectories(home: home)
-        environment["PATH"] = ([pathVariable].compactMap { $0 } + extraDirectories)
+        let searchDirectories = Self.stableSearchDirectories(
+            pathVariable: pathVariable,
+            home: home,
+            temporaryDirectory: temporaryDirectory
+        )
+        environment["PATH"] = ([executable.deletingLastPathComponent().path] + searchDirectories)
             .joined(separator: ":")
         environment.removeValue(forKey: "OPENAI_API_KEY")
         process.environment = environment

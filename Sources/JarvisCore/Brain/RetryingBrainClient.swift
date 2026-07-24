@@ -1,9 +1,10 @@
 import Foundation
 
-/// Adds one automatic retry for transient transport/server failures around a self-contained brain
-/// request. Tool calls have no client-side effect until a response reaches `CoachDriver`, so retrying
-/// a request whose response was lost cannot duplicate a screenshot or spoken tip. Permanent HTTP
-/// failures and cancellation still fail immediately.
+/// Adds one automatic retry when the shared `BrainFailure` policy says the exact self-contained
+/// request is safe to repeat. Tool calls have no client-side effect until a response reaches
+/// `CoachDriver`, so retrying a request whose response was lost cannot duplicate a screenshot or
+/// spoken tip. The same typed failure then reaches the driver, preventing retry and session
+/// lifecycle from independently—and inconsistently—reclassifying it.
 public struct RetryingBrainClient: BrainClient, Sendable {
     private let base: BrainClient
 
@@ -16,29 +17,17 @@ public struct RetryingBrainClient: BrainClient, Sendable {
         do {
             return try await base.respond(messages: messages, tools: tools, toolChoice: toolChoice)
         } catch {
-            guard !Task.isCancelled, Self.isTransient(error) else { throw error }
-            jlog("Jarvis coach: transient brain request failure — retrying once: \(error.localizedDescription)")
-            return try await base.respond(messages: messages, tools: tools, toolChoice: toolChoice)
+            if Task.isCancelled || error is CancellationError { throw error }
+            let failure = BrainFailure(error)
+            guard failure.retriesImmediately else { throw failure }
+            jlog("Jarvis coach: transient brain request failure — retrying once: \(failure.detail)")
+            do {
+                return try await base.respond(
+                    messages: messages, tools: tools, toolChoice: toolChoice)
+            } catch {
+                if Task.isCancelled || error is CancellationError { throw error }
+                throw BrainFailure(error)
+            }
         }
-    }
-
-    private static func isTransient(_ error: Error) -> Bool {
-        if error is CancellationError { return false }
-        let ns = error as NSError
-        if ns.domain == NSURLErrorDomain {
-            return [
-                NSURLErrorTimedOut,
-                NSURLErrorNetworkConnectionLost,
-                NSURLErrorNotConnectedToInternet,
-                NSURLErrorCannotFindHost,
-                NSURLErrorCannotConnectToHost,
-                NSURLErrorDNSLookupFailed,
-                NSURLErrorSecureConnectionFailed,
-            ].contains(ns.code)
-        }
-        if ns.domain == "OpenAIBrainClient" {
-            return [408, 409, 500, 502, 503, 504].contains(ns.code)
-        }
-        return false
     }
 }

@@ -69,9 +69,9 @@ import Testing
     }
 
     @Test func brainCLIRuntimeFailureStopsQuietlyAndKeepsDiagnosticRecoveryDetail() {
-        let e = UserFacingError.brainCLIStopped(
+        let e = UserFacingError.brainStopped(
             provider: "Claude Code",
-            signInCommand: "claude auth login",
+            recovery: "Run “claude auth login” in Terminal.",
             reason: "OAuth session expired"
         )
         #expect(e.severity == .terminal)

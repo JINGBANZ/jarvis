@@ -35,6 +35,21 @@ import Glibc
         try Data(text.utf8).write(to: url)
     }
 
+    /// Detector fixtures themselves live under the real system temporary directory. Give each test
+    /// a separate synthetic system-temp root so ordinary fake installs remain eligible while tests
+    /// can explicitly place a transient wrapper under the rejected root.
+    private func detector(home: URL, pathVariable: String?,
+                          authStatusTimeout: TimeInterval = 2,
+                          temporaryDirectory: URL? = nil) -> AgentCLIDetector {
+        AgentCLIDetector(
+            home: home,
+            pathVariable: pathVariable,
+            authStatusTimeout: authStatusTimeout,
+            temporaryDirectory: temporaryDirectory
+                ?? home.appendingPathComponent("synthetic-system-temporary-directory")
+        )
+    }
+
     /// True when a machine-wide claude/codex lives in the absolute fallback dirs the detector
     /// consults regardless of the fixture home. The negative-detection tests adapt by returning
     /// early — on such a machine, detecting that install is correct behavior, not a failure.
@@ -48,7 +63,7 @@ import Glibc
         let home = try makeHome()
         let bin = home.appendingPathComponent("fakebin")
         try installBinary("claude", in: bin)
-        let d = AgentCLIDetector(home: home, pathVariable: "/nonexistent:\(bin.path)")
+        let d = detector(home: home, pathVariable: "/nonexistent:\(bin.path)")
         let cli = d.detect(.claudeCode)
         #expect(cli?.executableURL.path == bin.appendingPathComponent("claude").path)
         #expect(cli?.authenticationStatus == .unknown)
@@ -59,7 +74,7 @@ import Glibc
         // its self-managed install location under the home directory.
         let home = try makeHome()
         try installBinary("claude", in: home.appendingPathComponent(".claude/local"))
-        let d = AgentCLIDetector(home: home, pathVariable: "/nonexistent")
+        let d = detector(home: home, pathVariable: "/nonexistent")
         #expect(d.detect(.claudeCode)?.executableURL.path
                 == home.appendingPathComponent(".claude/local/claude").path)
     }
@@ -69,8 +84,26 @@ import Glibc
         let bin = home.appendingPathComponent("fakebin")
         try installBinary("codex", in: bin)
         try installBinary("codex", in: home.appendingPathComponent(".cargo/bin"))
-        let d = AgentCLIDetector(home: home, pathVariable: bin.path)
+        let d = detector(home: home, pathVariable: bin.path)
         #expect(d.detect(.codexCLI)?.executableURL.path == bin.appendingPathComponent("codex").path)
+    }
+
+    @Test func skipsExecutableFromSystemTemporaryPATHAndUsesStableInstall() throws {
+        let home = try makeHome()
+        let temporaryDirectory = home.appendingPathComponent("system-temporary-directory")
+        let transientBin = temporaryDirectory.appendingPathComponent("launcher-wrappers")
+        let stableBin = home.appendingPathComponent("stable-bin")
+        try installBinary("codex", in: transientBin)
+        try installBinary("codex", in: stableBin)
+
+        let d = detector(
+            home: home,
+            pathVariable: "\(transientBin.path):\(stableBin.path)",
+            temporaryDirectory: temporaryDirectory
+        )
+
+        #expect(d.detect(.codexCLI)?.executableURL.path
+                == stableBin.appendingPathComponent("codex").path)
     }
 
     @Test func nonExecutableFileIsNotDetected() throws {
@@ -79,7 +112,7 @@ import Glibc
         let bin = home.appendingPathComponent("fakebin")
         try fm.createDirectory(at: bin, withIntermediateDirectories: true)
         try write("not a binary", to: bin.appendingPathComponent("claude"))   // 0644, no exec bit
-        let d = AgentCLIDetector(home: home, pathVariable: bin.path)
+        let d = detector(home: home, pathVariable: bin.path)
         #expect(d.detect(.claudeCode) == nil)
     }
 
@@ -90,7 +123,7 @@ import Glibc
             printf '%s\\n' '{"loggedIn":true,"authMethod":"claude.ai"}'
             exit 0
             """)
-        let d = AgentCLIDetector(home: home, pathVariable: nil, authStatusTimeout: 10)
+        let d = detector(home: home, pathVariable: nil, authStatusTimeout: 10)
         #expect(d.detect(.claudeCode)?.authenticationStatus == .signedIn)
     }
 
@@ -103,14 +136,14 @@ import Glibc
             """)
         try write(#"{"oauthAccount":{"emailAddress":"x@y.z"}}"#,
                   to: home.appendingPathComponent(".claude.json"))
-        let d = AgentCLIDetector(home: home, pathVariable: nil, authStatusTimeout: 10)
+        let d = detector(home: home, pathVariable: nil, authStatusTimeout: 10)
         #expect(d.detect(.claudeCode)?.authenticationStatus == .signedOut)
     }
 
     @Test func claudeAuthStatusFailureIsUnknown() throws {
         let home = try makeHome()
         try installBinary("claude", in: home.appendingPathComponent(".claude/local"))
-        let d = AgentCLIDetector(home: home, pathVariable: nil)
+        let d = detector(home: home, pathVariable: nil)
         #expect(d.detect(.claudeCode)?.authenticationStatus == .unknown)
     }
 
@@ -120,7 +153,7 @@ import Glibc
             #!/bin/sh
             sleep 1
             """)
-        let d = AgentCLIDetector(home: home, pathVariable: nil, authStatusTimeout: 0.01)
+        let d = detector(home: home, pathVariable: nil, authStatusTimeout: 0.01)
         #expect(d.detect(.claudeCode)?.authenticationStatus == .unknown)
     }
 
@@ -134,7 +167,7 @@ import Glibc
             printf '%s\\n' "$!" > "$HOME/child.pid"
             exit 2
             """)
-        let d = AgentCLIDetector(home: home, pathVariable: nil, authStatusTimeout: 0.01)
+        let d = detector(home: home, pathVariable: nil, authStatusTimeout: 0.01)
 
         let status = d.detect(.claudeCode)?.authenticationStatus
         defer {
@@ -161,7 +194,7 @@ import Glibc
             exit 2
             """)
         try write("{}", to: home.appendingPathComponent(".codex/auth.json"))
-        let d = AgentCLIDetector(home: home, pathVariable: bin.path, authStatusTimeout: 10)
+        let d = detector(home: home, pathVariable: bin.path, authStatusTimeout: 10)
         let cli = d.detect(.codexCLI)
         #expect(cli?.authenticationStatus == .signedIn)
         #expect(cli?.supportedFeatures == ["shell_tool", "code_mode_host"])
@@ -171,7 +204,7 @@ import Glibc
         let home = try makeHome()
         let bin = home.appendingPathComponent("fakebin")
         try installBinary("codex", in: bin)
-        let d = AgentCLIDetector(home: home, pathVariable: bin.path)
+        let d = detector(home: home, pathVariable: bin.path)
         #expect(d.detect(.codexCLI)?.supportedFeatures == [])
     }
 
@@ -182,14 +215,14 @@ import Glibc
             #!/bin/sh
             exec sleep 1
             """)
-        let d = AgentCLIDetector(home: home, pathVariable: bin.path, authStatusTimeout: 0.01)
+        let d = detector(home: home, pathVariable: bin.path, authStatusTimeout: 0.01)
         #expect(d.detect(.codexCLI)?.supportedFeatures == [])
     }
 
     @Test func missingBinaryDetectsNothing() throws {
         guard !systemWideCLIInstalled else { return }
         let home = try makeHome()
-        let d = AgentCLIDetector(home: home, pathVariable: "/nonexistent")
+        let d = detector(home: home, pathVariable: "/nonexistent")
         #expect(d.detect(.claudeCode) == nil)
         #expect(d.detect(.codexCLI) == nil)
     }
@@ -199,7 +232,7 @@ import Glibc
         let bin = home.appendingPathComponent("fakebin")
         try installBinary("claude", in: bin)
         try installBinary("codex", in: bin)
-        let d = AgentCLIDetector(home: home, pathVariable: bin.path)
+        let d = detector(home: home, pathVariable: bin.path)
         #expect(d.detect(.openAI) == nil)
         #expect(d.detectAll().map(\.provider) == [.claudeCode, .codexCLI])
     }
@@ -212,7 +245,7 @@ import Glibc
             printf '%s\\n' '{"loggedIn":true,"authMethod":"claude.ai"}'
             """)
         try installBinary("codex", in: bin)
-        let d = AgentCLIDetector(home: home, pathVariable: bin.path, authStatusTimeout: 10)
+        let d = detector(home: home, pathVariable: bin.path, authStatusTimeout: 10)
         let result = await d.detectAllAsync()
         #expect(result.first(where: { $0.provider == .claudeCode })?.authenticationStatus == .signedIn)
     }

@@ -15,7 +15,7 @@ extension CLIBrainClient {
     /// The audit record is built alongside the invocation with screenshots already redacted (never
     /// the raw stdin — an inline base64 image inside a JSON string would slip past
     /// `BrainTrafficLog.redactingImages`, which only recognizes parsed `data:` URIs). It reuses the
-    /// evaluator's schema keys (model / instructions / input), so `SessionEvaluator` renders and
+    /// evaluator's schema keys (model / instructions / input), so `EvaluationTranscript` renders and
     /// prefix-elides CLI traffic exactly like API traffic.
     func prepareInvocation(messages: [ChatMessage], tools: [ToolDef],
                            toolChoice: ToolChoice) throws -> PreparedInvocation {

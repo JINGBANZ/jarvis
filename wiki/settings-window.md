@@ -49,10 +49,10 @@ so an unwrapped fixed-frame view would ride the bottom edge in a taller window).
 
 | Section class | Tab title | Always present | Description |
 |---|---|---|---|
-| `BrainSection` | "Brain" | yes | Everything that decides who answers a coaching turn, in one tab: the provider radios (OpenAI API / Claude Code / Codex CLI — see [Brain](#brain)), a per-provider model dropdown, the reasoning-effort dropdown (one global setting, mapped onto each provider's scale), and the OpenAI API-key controls (`APIKeyControls`: an `NSSecureTextField` that saves to an owner-only file and restarts the pipeline if already running). Brain choices take effect on the next coaching turn while running, or the next Start while stopped. |
+| `BrainSection` | "Brain" | yes | Everything that decides who answers a coaching turn, in one tab: the provider radios (OpenAI API / Claude Code / Codex CLI — see [Brain](#brain)), a per-provider model dropdown, the reasoning-effort dropdown (one global setting, mapped onto each provider's scale), and the OpenAI API-key controls (`APIKeyControls`: an `NSSecureTextField` that saves to an owner-only file). Saving a key never restarts a live conversation: established Realtime sockets stay connected and use it on a later reconnect, while an OpenAI brain update uses the same transactional between-turn fallback as other Brain changes. Brain choices take effect on the next coaching turn while running, or the next Start while stopped. |
 | `OverlaySection` | "Overlay" | yes | Two groups, one per overlay surface — **Overlay Caption** (the transient on-screen tip) and **Overlay Box** (the persistent response history). Each has a header with an On/Off toggle (an `NSSwitch` + "On"/"Off" label) and a one-line description. When a surface is **on** it also shows its Text Size + Opacity sliders (with live readouts) and a live sample, **only while the Overlay tab is selected** (`didBecomeActive`/`didResignActive`); when **off**, its sliders and sample are hidden and the layout collapses. Persists via `OverlayAppearance`. |
 | `DisplaySection` | "Screen" | yes | One dropdown — the capture scope: **Active window** (default) or one **Entire display** entry per connected display; persists via `ScreenCapturePreferences`. Applies to the next screenshot. |
-| `ActivitySection` | "Activity" | yes | Embeds the `ActivityViewer` content view (`makeContentView()` / `teardown()`); `fillsTab == true` so the log stretches with the window. Its header shows the selected session's exact directory ID in a selectable field with **Copy ID**, and carries **Evaluate** — one click sends the selected session's recorded LLM wire traffic (`brain-traffic.jsonl`) to the brain model at high effort for a context-engineering audit (`SessionEvaluator`), saved as `eval-report.md` in the session dir and opened in the browser as a rendered `eval-report.html` page (`EvalReportPage`) whose **Copy as Markdown** button hands the raw report to an agent chat; once a session has a saved report the button flips to **Open report**. Only *finished* conversations qualify: the button is disabled while the selected session is the live, still-running one (a mid-session audit would judge half a story) and re-enables once Stop has drained any in-flight turn — the cancelled request's final traffic line must land before the audit reads the file. |
+| `ActivitySection` | "Activity" | yes | Embeds the `ActivityViewer` content view (`makeContentView()` / `teardown()`); `fillsTab == true` so the log stretches with the window. Its header shows the selected session's exact directory ID with **Copy ID**. A session without a report shows **Evaluate**: one click runs the sole `AgenticEvaluator` through a locally installed Claude Code / Codex CLI over the source checkout plus the complete session directory, writes owner-only `eval-report.md`, and opens it. While it runs the button shows **Evaluating…**; afterward it becomes **Open report**, which reopens the saved result without another model run. The agent reads the full unfiltered `jarvis-activity.jsonl` whenever it needs the user-visible sequence and correlates it with `brain-traffic.jsonl`, screenshots, and live source. `scripts/eval-session.sh` is a second launcher for this same Core evaluator, not another evaluation path. `EvalReportPage` renders the markdown as `eval-report.html`; **Copy as Markdown** hands the raw report to an agent chat. Evaluation, report opening, and history clearing stay disabled through the live coaching/teardown lifecycle. |
 
 `AppDelegate` builds the section list at launch and passes it to `SettingsWindow`. All four tabs are
 always present, but each tab's content is created lazily on first selection during that open.
@@ -118,10 +118,13 @@ auth-file marker. Settings runs these probes asynchronously and keeps local-prov
 selectable while the first result is pending. The radios then show **signed in**, **signed out**, or
 **sign-in unknown**; a confirmed logout refuses Start, while an unavailable probe warns but does not
 falsely claim logout. An actual CLI request can still fail after preflight. A provider that was
-selected at Start or has already completed a turn then stops the unusable coaching session without
-activating the app; a newly
-switched provider uses the transactional fallback described below. Both paths keep detailed error
-and sign-in information in `jarvis-debug.log` and put only fixed provider-level copy in Activity.
+selected at Start or has already completed a turn uses the shared `BrainFailure` policy: temporary
+or unknown errors miss one turn while the same conversation keeps listening, and only an explicitly
+permanent failure stops without activating the app; a newly switched provider uses the transactional
+fallback described below. Both paths keep detailed error and sign-in information in
+`jarvis-debug.log` and put only fixed provider-level copy in Activity. Unknown and request-local
+HTTP failures remain temporary unless an explicit authentication, billing, access, or configuration
+signal proves the provider unusable.
 
 **Model + effort.** A **Model** dropdown drawn from `BrainModelCatalog` per provider (OpenAI ids for
 the API; CLI aliases like `sonnet` for the CLIs, plus a "CLI default" entry meaning "no model flag" —
@@ -215,6 +218,7 @@ from an old entire-display selection never steers them.
 | `Sources/JarvisCore/Brain/AgentCLIDetector.swift` | CLI binary discovery + bounded authentication-status detection |
 | `Sources/JarvisCore/Brain/BrainModelCatalog.swift` | Curated per-provider model lists (`BrainModel`) |
 | `Sources/JarvisCore/Brain/ReasoningEffort.swift` | The four effort levels |
+| `Sources/JarvisCore/Diagnostics/AgenticEvaluator.swift` | Read-only Claude Code / Codex session audit invoked by Activity and `EvalPrep` |
 | `Sources/JarvisCore/Config/BrainPreferences.swift` | UserDefaults persistence + validation |
 | `Sources/JarvisCore/Config/ScreenCapturePreferences.swift` | Capture scope + display persistence + clamping |
 | `Sources/JarvisCore/Screen/ScreenCapture.swift` | `ScreenCaptureCLI` — reads the selection at capture time, falls back to the main display |

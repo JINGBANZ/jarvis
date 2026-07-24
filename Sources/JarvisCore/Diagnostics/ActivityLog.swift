@@ -11,6 +11,26 @@ import Foundation
 /// strings; the WebView lives in JarvisApp. See wiki/build-and-run.md.
 public final class ActivityLog: @unchecked Sendable {
     public static let shared = ActivityLog()
+    public static let filename = "jarvis-activity.jsonl"
+
+    /// Stable on-disk identity for each typed Activity event. Human copy and emoji may evolve; tools
+    /// reading the complete log can use this value instead of reverse-parsing prose.
+    public enum EventKind: String, Codable, CaseIterable, Sendable {
+        case heard
+        case manualHint
+        case screenViewed
+        case screenViewFailed
+        case tip
+        case stayedSilent
+        case coachingStopped
+        case coachingTurnFailed
+        case transcriptionStopped
+        case audioCaptureStopped
+        case systemAudioStopped
+        case settingsChangeNotApplied
+        case brainChangeApplied
+        case brainFallback
+    }
 
     /// A human-visible event in the coaching exchange. Keeping this closed set typed prevents
     /// transport, retry, error details, and other diagnostic strings from leaking into the activity
@@ -33,6 +53,9 @@ public final class ActivityLog: @unchecked Sendable {
         /// never the raw error, so the notice cannot expose provider diagnostics during screen
         /// sharing.
         case coachingStopped(provider: BrainProvider)
+        /// One coaching turn failed temporarily while capture and transcription remain live. The
+        /// provider identity is enough for fixed recovery copy; raw error detail stays in debug.
+        case coachingTurnFailed(provider: BrainProvider)
         /// The session ended because transcription became unusable. Carries a fixed, typed reason;
         /// raw provider and transport details remain exclusively in diagnostics.
         case transcriptionStopped(reason: TranscriptionFailureReason)
@@ -50,6 +73,25 @@ public final class ActivityLog: @unchecked Sendable {
         /// A live brain replacement failed its first turn, so Jarvis restored the previous active
         /// provider. Carries provider identities only; raw failure detail stays in jlog.
         case brainFallback(failed: BrainProvider, restored: BrainProvider)
+
+        var kind: EventKind {
+            switch self {
+            case .heard: .heard
+            case .manualHint: .manualHint
+            case .screenViewed: .screenViewed
+            case .screenViewFailed: .screenViewFailed
+            case .tip: .tip
+            case .stayedSilent: .stayedSilent
+            case .coachingStopped: .coachingStopped
+            case .coachingTurnFailed: .coachingTurnFailed
+            case .transcriptionStopped: .transcriptionStopped
+            case .audioCaptureStopped: .audioCaptureStopped
+            case .systemAudioStopped: .systemAudioStopped
+            case .settingsChangeNotApplied: .settingsChangeNotApplied
+            case .brainChangeApplied: .brainChangeApplied
+            case .brainFallback: .brainFallback
+            }
+        }
     }
 
     /// One recorded line. `imageFile` is the relative `shot-N.jpg` name on disk (the bytes the DOM
@@ -78,6 +120,7 @@ public final class ActivityLog: @unchecked Sendable {
         let t: String       // time, HH:mm:ss
         let m: String       // message
         let s: String?      // shot filename, if any
+        let k: EventKind?   // stable event identity; nil only for backward-compatible old rows
     }
 
     /// In-memory replay cap for a late-attaching viewer. Sized for hours of coaching (an hour-long
@@ -110,7 +153,7 @@ public final class ActivityLog: @unchecked Sendable {
         queue.sync {
             dir = directory
             entries.removeAll(); totalCount = 0; shotSeq = 0; onAppend = nil
-            let url = directory.appendingPathComponent("jarvis-activity.jsonl")
+            let url = directory.appendingPathComponent(Self.filename)
             FileManager.default.createFile(atPath: url.path, contents: Data(),
                                            attributes: [.posixPermissions: 0o600])
         }
@@ -128,6 +171,7 @@ public final class ActivityLog: @unchecked Sendable {
     /// and then the `.jsonl` line referencing it — so a persisted reference always points at a file
     /// that exists.
     public func record(_ event: Event, at date: Date = Date()) {
+        let kind = event.kind
         let message: String
         let imageBase64: String?
         switch event {
@@ -151,6 +195,9 @@ public final class ActivityLog: @unchecked Sendable {
             imageBase64 = nil
         case .coachingStopped(let provider):
             message = "⏹ coaching stopped — \(provider.displayName) couldn't respond; check Settings → Brain"
+            imageBase64 = nil
+        case .coachingTurnFailed(let provider):
+            message = "⚠️ \(provider.displayName) couldn't respond this turn — listening continues"
             imageBase64 = nil
         case .transcriptionStopped(let reason):
             message = "⏹ session failed — \(reason.activityDescription)"
@@ -183,7 +230,7 @@ public final class ActivityLog: @unchecked Sendable {
             guard let dir else { return }
             let shotName = imageBase64.flatMap { saveShot($0, in: dir) }
             let entry = Entry(time: df.string(from: date), message: message, imageFile: shotName)
-            appendJSONL(entry, in: dir)
+            appendJSONL(entry, kind: kind, in: dir)
             entries.append(entry)
             totalCount += 1
             if entries.count > maxLines { entries.removeFirst(entries.count - maxLines) }
@@ -212,6 +259,12 @@ public final class ActivityLog: @unchecked Sendable {
     /// Stop pushing to the observer (e.g. while the viewer shows a *past* session).
     public func detach() { queue.sync { onAppend = nil } }
 
+    /// Wait until every event recorded before this call is persisted. Session teardown and
+    /// evaluation use this barrier so a just-recorded catastrophic outcome cannot race the evaluator.
+    public func flush() {
+        queue.sync {}
+    }
+
     /// Decode a base64 JPEG and write it as the next owner-only `shot-N.jpg` in `dir`. Returns the
     /// relative filename, or nil if the payload was invalid / the write failed. Must run on `queue`.
     private func saveShot(_ base64: String, in dir: URL) -> String? {
@@ -226,10 +279,10 @@ public final class ActivityLog: @unchecked Sendable {
 
     /// Append one JSON line to `jarvis-activity.jsonl`. Best-effort; a failed write just means that
     /// line won't survive into history (the live push already happened). Must run on `queue`.
-    private func appendJSONL(_ entry: Entry, in dir: URL) {
-        let pe = PersistedEntry(t: entry.time, m: entry.message, s: entry.imageFile)
+    private func appendJSONL(_ entry: Entry, kind: EventKind, in dir: URL) {
+        let pe = PersistedEntry(t: entry.time, m: entry.message, s: entry.imageFile, k: kind)
         guard let data = try? JSONEncoder().encode(pe) else { return }
-        let url = dir.appendingPathComponent("jarvis-activity.jsonl")
+        let url = dir.appendingPathComponent(Self.filename)
         guard let fh = try? FileHandle(forWritingTo: url) else { return }
         defer { try? fh.close() }
         _ = try? fh.seekToEnd()
@@ -287,6 +340,8 @@ public final class ActivityLog: @unchecked Sendable {
             || m.hasPrefix("💬") || m.hasPrefix("🤫 stayed silent")
             || m.hasPrefix("⏹ coaching stopped")
             || m.hasPrefix("⏹ session failed")
+            || (m.hasPrefix("⚠️") && m.contains("couldn't respond this turn")
+                && m.hasSuffix("listening continues"))
             || m.hasPrefix("⚠️ system audio stopped")
             || m.hasPrefix("⚠️ settings change wasn't applied")
             || m.hasPrefix("🧠 brain switch applied")

@@ -2,10 +2,10 @@ import Foundation
 
 /// Per-session wire-level record of every brain (LLM provider) round trip — the exact request body
 /// the harness sent and the exact response body it got back, as `brain-traffic.jsonl` in the session
-/// directory. This is the raw material for the one-click session evaluation (`SessionEvaluator`):
-/// judging our context engineering needs the *actual* bytes on the wire (instructions, message order,
-/// tool schemas, usage/cached-token counts), not a paraphrase — and having it locally replaces
-/// pulling the same data by hand from the OpenAI dashboard logs.
+/// directory. This is raw material for `AgenticEvaluation`: judging context engineering needs the
+/// *actual* bytes on the wire (instructions, message order, tool schemas, usage/cached-token counts),
+/// not a paraphrase — and having it locally replaces pulling the same data by hand from the OpenAI
+/// dashboard logs.
 ///
 /// One instance **per session**, bound to that session's directory via `enable(directory:)` and a
 /// no-op until then. Deliberately NOT a shared singleton: the brain clients hold their own session's

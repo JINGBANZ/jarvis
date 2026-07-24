@@ -84,7 +84,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
                             screen: ScreenCapturing = FakeScreen(),
                             overlay: OverlayRendering = FakeOverlay(),
                             clock: Clock, config: Config = .default,
-                            onBrainFailure: (@MainActor @Sendable (String) -> Void)? = nil)
+                            onBrainFailure: (@MainActor @Sendable (BrainFailure) -> Void)? = nil)
         -> (CoachDriver, RollingTranscript) {
         let transcript = RollingTranscript()
         let driver = CoachDriver(
@@ -986,16 +986,74 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(await driver.handleTrigger(.turnEnd) == .brainError)
     }
 
-    @Test func brainErrorReportsTheFailureReason() async {
+    @Test func unknownBrainErrorReportsTemporaryFailureWithoutEndingSession() async {
         let recorder = BrainFailureRecorder()
+        let brain = ThrowingBrain()
         let (driver, transcript) = makeDriver(
-            brain: ThrowingBrain(), clock: ManualClock(now: 0),
+            brain: brain, clock: ManualClock(now: 0),
             onBrainFailure: { recorder.record($0) }
         )
         transcript.append(.init(speaker: .me, text: "please help with this problem", at: 0))
 
         #expect(await driver.handleTrigger(.turnEnd) == .brainError)
         #expect(recorder.messages == ["test brain failed"])
+        #expect(recorder.failures.map(\.disposition) == [.temporary])
+
+        transcript.append(.init(speaker: .me, text: "please try again", at: 1))
+        #expect(await driver.handleTrigger(.turnEnd) == .brainError)
+        #expect(brain.callCount == 2)
+    }
+
+    @Test func cliWatchdogTimeoutMissesOneTurnButNextTurnContinues() async {
+        let recorder = BrainFailureRecorder()
+        let brain = TimeoutThenSpeakingBrain()
+        let overlay = FakeOverlay()
+        let (driver, transcript) = makeDriver(
+            brain: brain, brainProvider: .codexCLI, overlay: overlay,
+            clock: ManualClock(now: 0),
+            onBrainFailure: { recorder.record($0) }
+        )
+        transcript.append(.init(speaker: .me, text: "first question", at: 0))
+
+        #expect(await driver.handleTrigger(.turnEnd) == .brainError)
+        #expect(recorder.failures.map(\.disposition) == [.temporary])
+
+        transcript.append(.init(speaker: .me, text: "follow-up after timeout", at: 1))
+        #expect(await driver.handleTrigger(.turnEnd) == .spoke)
+        #expect(brain.calls.count == 2)
+        #expect(brain.calls[1].contains {
+            ($0.text ?? "").contains("first question")
+                && ($0.text ?? "").contains("follow-up after timeout")
+        })
+        #expect(overlay.rendered == [["recovered on the next turn"]])
+    }
+
+    @Test func pendingTriggerSurvivesTemporaryFailureAndRetriesUnsentSpeech() async {
+        let gate = AsyncGate()
+        let brain = GatedFailureThenSpeakingBrain(gate: gate)
+        let overlay = FakeOverlay()
+        let recorder = BrainFailureRecorder()
+        let (driver, transcript) = makeDriver(
+            brain: brain, brainProvider: .openAI, overlay: overlay,
+            clock: ManualClock(now: 0),
+            onBrainFailure: { recorder.record($0) }
+        )
+        transcript.append(.init(speaker: .me, text: "first question", at: 0))
+        async let first = driver.handleTrigger(.turnEnd)
+        await gate.waitUntilEntered()
+
+        transcript.append(.init(speaker: .me, text: "follow-up while unavailable", at: 1))
+        #expect(await driver.handleTrigger(.turnEnd) == .busy)
+        await gate.release()
+
+        #expect(await first == .spoke)
+        #expect(recorder.failures.map(\.disposition) == [.temporary])
+        #expect(brain.calls.count == 2)
+        #expect(brain.calls[1].contains {
+            ($0.text ?? "").contains("first question")
+                && ($0.text ?? "").contains("follow-up while unavailable")
+        })
+        #expect(overlay.rendered == [["recovered pending turn"]])
     }
 
     @Test func terminalBrainErrorDropsCoalescedAndLaterTriggers() async {
@@ -1018,6 +1076,19 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(await driver.handleTrigger(.turnEnd) == .brainError)
         #expect(brain.callCount == 1)
         #expect(recorder.messages == ["gated brain failed"])
+    }
+
+    @Test func terminalFailureLatchesWithoutAnObserver() async {
+        let brain = ThrowingBrain(error: BrainFailure(
+            disposition: .terminal, detail: "permanent test failure"))
+        let (driver, transcript) = makeDriver(
+            brain: brain, clock: ManualClock(now: 0), onBrainFailure: nil)
+        transcript.append(.init(speaker: .me, text: "first question", at: 0))
+
+        #expect(await driver.handleTrigger(.turnEnd) == .brainError)
+        transcript.append(.init(speaker: .me, text: "second question", at: 1))
+        #expect(await driver.handleTrigger(.turnEnd) == .brainError)
+        #expect(brain.callCount == 1)
     }
 
     /// A Settings switch can race an already-running request. Its superseded provider may still
@@ -1142,18 +1213,59 @@ private func blockMainActor(entered: DispatchSemaphore, release: DispatchSemapho
 
 /// A brain that always throws, to exercise the `.brainError` outcome.
 final class ThrowingBrain: BrainClient, @unchecked Sendable {
+    private let lock = NSLock()
+    private let error: Error
+    private var calls = 0
+    var callCount: Int { lock.withLock { calls } }
+
+    init(error: Error = NSError(
+        domain: "test", code: 401,
+        userInfo: [NSLocalizedDescriptionKey: "test brain failed"])) {
+        self.error = error
+    }
+
     func respond(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice) async throws -> BrainResponse {
-        throw NSError(domain: "test", code: 401,
-                      userInfo: [NSLocalizedDescriptionKey: "test brain failed"])
+        lock.withLock { calls += 1 }
+        throw error
     }
 }
 
 /// Lock-guarded because `CoachDriver`'s failure callback is `@Sendable`.
 final class BrainFailureRecorder: @unchecked Sendable {
     private let lock = NSLock()
-    private var recorded: [String] = []
-    var messages: [String] { lock.lock(); defer { lock.unlock() }; return recorded }
-    func record(_ message: String) { lock.lock(); recorded.append(message); lock.unlock() }
+    private var recorded: [BrainFailure] = []
+    var failures: [BrainFailure] { lock.lock(); defer { lock.unlock() }; return recorded }
+    var messages: [String] { failures.map(\.detail) }
+    func record(_ failure: BrainFailure) { lock.lock(); recorded.append(failure); lock.unlock() }
+}
+
+/// The CLI watchdog misses the first turn, then the same conversation succeeds on the next trigger.
+/// `@unchecked Sendable` is safe because `CoachDriver` awaits one `respond` call at a time, so this
+/// test double's `calls` array is never accessed concurrently.
+final class TimeoutThenSpeakingBrain: BrainClient, @unchecked Sendable {
+    private(set) var calls: [[ChatMessage]] = []
+
+    func respond(messages: [ChatMessage], tools: [ToolDef],
+                 toolChoice: ToolChoice) async throws -> BrainResponse {
+        calls.append(messages)
+        if calls.count == 1 {
+            throw NSError(
+                domain: AgentCLIProcessRunner.errorDomain,
+                code: NSURLErrorTimedOut,
+                userInfo: [NSLocalizedDescriptionKey: "codex timed out after 30s"]
+            )
+        }
+        return BrainResponse(
+            toolCalls: [.speak(callId: "recovered", lines: ["recovered on the next turn"])],
+            rawToolCalls: [
+                RawToolCall(
+                    id: "recovered",
+                    name: "speak",
+                    argumentsJSON: #"{"lines":["recovered on the next turn"]}"#
+                ),
+            ]
+        )
+    }
 }
 
 /// Lock-guarded record of provider identities reported when a transactional cutover commits.
@@ -1222,8 +1334,40 @@ final class GatedThrowingBrain: BrainClient, @unchecked Sendable {
                  toolChoice: ToolChoice) async throws -> BrainResponse {
         recordCall()
         await gate.enter()
-        throw NSError(domain: "test", code: 401,
-                      userInfo: [NSLocalizedDescriptionKey: "gated brain failed"])
+        throw BrainFailure(disposition: .terminal, detail: "gated brain failed")
+    }
+}
+
+/// A temporary first failure with a parked request, followed by success. This proves the driver's
+/// coalesced trigger—not only a later external trigger—keeps the conversation alive.
+/// `@unchecked Sendable` is safe because `recordedCalls` is always accessed through `NSLock`.
+final class GatedFailureThenSpeakingBrain: BrainClient, @unchecked Sendable {
+    private let gate: AsyncGate
+    private let lock = NSLock()
+    private var recordedCalls: [[ChatMessage]] = []
+    var calls: [[ChatMessage]] { lock.withLock { recordedCalls } }
+
+    init(gate: AsyncGate) { self.gate = gate }
+
+    func respond(messages: [ChatMessage], tools: [ToolDef],
+                 toolChoice: ToolChoice) async throws -> BrainResponse {
+        let index = lock.withLock {
+            recordedCalls.append(messages)
+            return recordedCalls.count - 1
+        }
+        if index == 0 {
+            await gate.enter()
+            throw NSError(
+                domain: "FutureProvider", code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "temporary provider interruption"])
+        }
+        return BrainResponse(
+            toolCalls: [.speak(callId: "recovered", lines: ["recovered pending turn"])],
+            rawToolCalls: [
+                RawToolCall(
+                    id: "recovered", name: "speak",
+                    argumentsJSON: #"{"lines":["recovered pending turn"]}"#),
+            ])
     }
 }
 

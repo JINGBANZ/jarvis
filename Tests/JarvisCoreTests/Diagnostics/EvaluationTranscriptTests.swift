@@ -2,21 +2,7 @@ import Testing
 import Foundation
 @testable import JarvisCore
 
-/// A brain that returns a canned report and remembers what it was asked.
-/// `@unchecked Sendable`: `received` is written by `respond` and only read by the test after the
-/// `await` returns — the sequential test flow means no concurrent access can occur.
-private final class CannedBrain: BrainClient, @unchecked Sendable {
-    let text: String?
-    var received: [ChatMessage] = []
-    init(text: String?) { self.text = text }
-    func respond(messages: [ChatMessage], tools: [ToolDef],
-                 toolChoice: ToolChoice) async throws -> BrainResponse {
-        received = messages
-        return BrainResponse(toolCalls: [], outputText: text)
-    }
-}
-
-@Suite struct SessionEvaluatorTests {
+@Suite struct EvaluationTranscriptTests {
     /// One traffic line in the on-disk shape `BrainTrafficLog` writes.
     private func line(tag: String = "coach", request: [String: Any],
                       response: [String: Any]? = nil, error: String? = nil) throws -> String {
@@ -42,7 +28,7 @@ private final class CannedBrain: BrainClient, @unchecked Sendable {
                                         "input": [userItem("turn one"), userItem("turn two")]],
                               response: ["status": "completed", "output": [],
                                          "usage": ["input_tokens": 120]])
-        let out = SessionEvaluator.renderTranscript(jsonl: "\(first)\n\(second)")
+        let out = EvaluationTranscript.render(jsonl: "\(first)\n\(second)")
 
         #expect(out.contains("=== call #1 · coach · 10:00:00 · HTTP 200 · 500 ms"))
         #expect(out.contains("instructions (3 chars):\nSYS"))
@@ -64,7 +50,7 @@ private final class CannedBrain: BrainClient, @unchecked Sendable {
                            request: ["model": "gpt-5.4-mini", "input": [userItem("condense this")]])
         let coach2 = try line(request: ["model": "gpt-5.5",
                                         "input": [userItem("coach turn"), userItem("more")]])
-        let out = SessionEvaluator.renderTranscript(jsonl: [coach1, sum, coach2].joined(separator: "\n"))
+        let out = EvaluationTranscript.render(jsonl: [coach1, sum, coach2].joined(separator: "\n"))
         #expect(out.contains("[items 1–1 unchanged from the previous coach call"))
         #expect(out.contains("user: condense this"))
     }
@@ -83,7 +69,7 @@ private final class CannedBrain: BrainClient, @unchecked Sendable {
                                      "usage": ["output_tokens": 42]])
         let failed = try line(request: ["model": "gpt-5.5", "input": [userItem("hello")]],
                               error: "timed out")
-        let out = SessionEvaluator.renderTranscript(jsonl: "\(ok)\n\(failed)")
+        let out = EvaluationTranscript.render(jsonl: "\(ok)\n\(failed)")
 
         #expect(out.contains("assistant → function_call capture_screen({})"))
         #expect(out.contains("tool result: screenshot captured"))
@@ -104,8 +90,8 @@ private final class CannedBrain: BrainClient, @unchecked Sendable {
             ["type": "function_call", "call_id": "c1", "name": "capture_screen", "arguments": "{}"],
             ["type": "function_call_output", "call_id": "c1", "output": "screenshot captured"],
         ]
-        let out = SessionEvaluator.renderTranscript(jsonl: try line(request: ["model": "gpt-5.5",
-                                                                              "input": items]))
+        let out = EvaluationTranscript.render(jsonl: try line(request: ["model": "gpt-5.5",
+                                                                        "input": items]))
         #expect(out.contains("assistant reasoning (replayed verbatim — "))
         #expect(out.contains("chars)"))
         #expect(!out.contains(blob))                              // the opaque payload never renders
@@ -120,7 +106,7 @@ private final class CannedBrain: BrainClient, @unchecked Sendable {
                                        "usage": ["input_tokens": 100,
                                                  "input_tokens_details": ["cached_tokens": 40],
                                                  "output_tokens": 12]])
-        let out = SessionEvaluator.renderTranscript(jsonl: call)
+        let out = EvaluationTranscript.render(jsonl: call)
         #expect(out.hasPrefix("=== deterministic metrics"))
         #expect(out.contains("| call | tag | model |"))
         let metrics = try #require(out.range(of: "deterministic metrics"))
@@ -128,76 +114,4 @@ private final class CannedBrain: BrainClient, @unchecked Sendable {
         #expect(metrics.lowerBound < firstCall.lowerBound)
     }
 
-    /// The audit prompt teaches each provider record, preserves unavailable metrics, points at the
-    /// computed values, and requires a self-verification pass.
-    @Test func evalInstructionsTeachEnvelopesMetricsAndSelfCheck() {
-        let p = SessionEvaluator.evalInstructions
-        #expect(p.contains("deterministic metrics"))
-        #expect(p.contains("input_tokens_details.cached_tokens"))
-        #expect(p.contains("cache_write_tokens"))
-        #expect(p.contains("total_cost_usd"))
-        #expect(p.contains("modelUsage"))
-        #expect(p.contains("Codex CLI"))
-        #expect(p.contains("unavailable, not zero"))
-        #expect(p.contains("known (N unavailable)"))
-        #expect(p.contains("re-check every number"))
-    }
-
-    @Test func evaluateSendsTranscriptAndPersistsOwnerOnlyReport() async throws {
-        let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
-        let traffic = BrainTrafficLog(); traffic.enable(directory: dir)
-        traffic.record(tag: "coach",
-                       request: Data(#"{"model":"gpt-5.5","input":[]}"#.utf8),
-                       response: Data(#"{"status":"completed","output":[]}"#.utf8),
-                       status: 200, latencyMs: 300)
-        let brain = CannedBrain(text: "## Context engineering\nall good")
-        let report = try await SessionEvaluator(brain: brain).evaluate(sessionDir: dir)
-
-        // The model's text is preserved verbatim, preceded by the provenance stamp.
-        #expect(report.hasSuffix("## Context engineering\nall good"))
-        #expect(report.contains(SessionEvaluator.provenanceStamp))
-        #expect(brain.received.first?.role == .system)
-        #expect(brain.received.last?.text?.contains("=== call #1 · coach") == true)
-        let url = dir.appendingPathComponent(SessionEvaluator.reportFilename)
-        #expect(try String(contentsOf: url, encoding: .utf8) == report)
-        let perms = try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? NSNumber
-        #expect(perms?.int16Value == 0o600)
-    }
-
-    /// `savedReport` is the "Show report" gate: nil until an evaluation persisted a report, then the
-    /// exact saved text — and an empty file (a failed/interrupted write) must not count as a report.
-    @Test func savedReportReturnsPersistedReportOnly() async throws {
-        let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
-        #expect(SessionEvaluator.savedReport(in: dir) == nil)
-
-        let traffic = BrainTrafficLog(); traffic.enable(directory: dir)
-        traffic.record(tag: "coach",
-                       request: Data(#"{"model":"gpt-5.5","input":[]}"#.utf8),
-                       response: Data(#"{"status":"completed","output":[]}"#.utf8),
-                       status: 200, latencyMs: 300)
-        let report = try await SessionEvaluator(brain: CannedBrain(text: "## Audit\nfine")).evaluate(sessionDir: dir)
-        #expect(SessionEvaluator.savedReport(in: dir) == report)
-
-        try Data().write(to: dir.appendingPathComponent(SessionEvaluator.reportFilename))
-        #expect(SessionEvaluator.savedReport(in: dir) == nil)
-    }
-
-    @Test func evaluateThrowsWhenSessionHasNoTraffic() async throws {
-        let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
-        #expect(!SessionEvaluator.hasTraffic(in: dir))
-        await #expect(throws: SessionEvaluator.EvaluationError.noTraffic) {
-            try await SessionEvaluator(brain: CannedBrain(text: "unused")).evaluate(sessionDir: dir)
-        }
-    }
-
-    @Test func evaluateThrowsWhenModelReturnsNoText() async throws {
-        let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
-        let traffic = BrainTrafficLog(); traffic.enable(directory: dir)
-        traffic.record(tag: "coach", request: Data(#"{"model":"gpt-5.5"}"#.utf8),
-                       response: Data("{}".utf8), status: 200, latencyMs: 1)
-        #expect(SessionEvaluator.hasTraffic(in: dir))
-        await #expect(throws: SessionEvaluator.EvaluationError.emptyReport) {
-            try await SessionEvaluator(brain: CannedBrain(text: nil)).evaluate(sessionDir: dir)
-        }
-    }
 }

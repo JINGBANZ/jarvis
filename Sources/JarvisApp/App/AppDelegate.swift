@@ -78,37 +78,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // first Start, so the viewer starts with no current session to browse.
         activityViewer = ActivityViewer(log: .shared,
                                         store: SessionStore(base: logDirectory(), current: nil))
-        // The one-click session evaluation: audit the recorded brain traffic with the selected brain
-        // model at high effort (an audit is a depth task, not a latency one). Built at click time so
-        // it always uses the current key/model; its own traffic is NOT recorded (`traffic` stays nil)
-        // — the audit must not pollute the session it audits.
-        activityViewer.makeEvaluator = { [weak self] in
-            guard let self else { return nil }
-            let provider = self.brainPreferences.provider
-            if provider.usesLocalCLI {
-                guard let cli = AgentCLIDetector().detect(provider) else { return nil }
-                let brain = CLIBrainClient(provider: provider, executable: cli.executableURL,
-                                           model: self.brainPreferences.model(for: provider).id,
-                                           reasoningEffort: ReasoningEffort.high.rawValue,
-                                           workDirectory: self.currentSessionDir ?? self.logDirectory(),
-                                           codexSupportedFeatures: cli.supportedFeatures,
-                                           timeout: 600)   // a big session transcript takes minutes, not seconds
-                return SessionEvaluator(brain: brain)
-            }
-            guard let key = self.secrets.apiKey(), !key.isEmpty else { return nil }
-            let brain = OpenAIBrainClient(apiKey: key, model: self.brainPreferences.model.id,
-                                          reasoningEffort: ReasoningEffort.high.rawValue,
-                                          timeout: 300,   // a big session transcript takes minutes, not seconds
-                                          maxOutputTokens: ReasoningEffort.high.maxOutputTokens,
-                                          promptCacheKey: "jarvis-eval-v1")
-            return SessionEvaluator(brain: brain)
-        }
-        // Evaluation is for finished conversations only: the viewer disables its Evaluate button for
-        // the live session while coaching runs — or while a cancelled turn is still draining its
-        // final traffic line (start()/stop() ping it via coachingStateDidChange).
+        // Evaluation/report opening is explicit Activity UI and remains unavailable while coaching
+        // runs—or while a cancelled turn is still draining—so it cannot reveal Jarvis during the
+        // ghost lifecycle.
         activityViewer.isCoachingRunning = { [weak self] in
             guard let self else { return false }
             return self.transcriber != nil || self.drainingStops > 0
+        }
+        // The button launches the same sole agentic evaluator as scripts/eval-session.sh. Resolve the
+        // checkout at click time and read the current provider preference then, so Settings changes
+        // and a moved local app bundle are both reflected without rebuilding Activity.
+        activityViewer.makeEvaluator = { [weak self] in
+            guard let self, let repository = self.evaluationRepositoryDirectory() else { return nil }
+            return AgenticEvaluator(repositoryDirectory: repository,
+                                    preferredProvider: self.brainPreferences.provider)
         }
 
         // Ask for Microphone + Screen Recording up front, not lazily mid-session.
@@ -127,19 +110,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menuBar = MenuBarController()
 
         // Unified Settings window: brain (provider + model + API key) + overlay appearance + the
-        // activity log. A pasted key is stored but does not auto-start; restart only if already
-        // running, reflecting the real outcome back into the menu state.
+        // activity log. A pasted key is stored but does not auto-start. While running, it updates
+        // future Realtime connections and transactionally replaces only an OpenAI brain—never the
+        // capture/transcript pipeline.
         let sections: [SettingsSection] = [
             BrainSection(preferences: brainPreferences, detector: AgentCLIDetector(),
                          onPreferencesChanged: { [weak self] cli in
                 self?.applyBrainPreferencesToRunningSession(detectedCLI: cli)
             },
-                         keyStore: secretFile, onKeySaved: { [weak self] _ in
-                guard let self, self.transcriber != nil else { return }
-                // Re-saving a key while running only re-applies it to the pipeline — it is NOT a new
-                // coaching run, so keep the current session (don't rotate logs). Session rotation is
-                // reserved for an explicit user Start.
-                self.start(freshSession: false)
+                         keyStore: secretFile, onKeySaved: { [weak self] key in
+                self?.applySavedAPIKeyToRunningSession(key)
             }),
             OverlaySection(appearance: appearance, caption: overlayCaption, box: overlayBox),
             DisplaySection(preferences: screenPreferences),
@@ -175,13 +155,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// The three pieces that must change together when the selected brain changes. The failure
-    /// callback belongs to the provider too: CLI failures are terminal, while an OpenAI request
-    /// failure remains retryable on a later coaching turn.
+    func applicationWillTerminate(_ notification: Notification) {
+        activityViewer?.cancelEvaluation()
+    }
+
+    /// The three pieces that must change together when the selected brain changes. Every provider
+    /// uses the same typed failure policy: temporary/unknown misses keep the live pipeline, while
+    /// only an explicitly permanent failure stops it.
     private struct BrainRuntime {
         let coach: BrainClient
         let summarizer: BrainClient
-        let onFailure: (@MainActor @Sendable (String) -> Void)?
+        let onFailure: (@MainActor @Sendable (BrainFailure) -> Void)?
     }
 
     /// Check the selected local provider before disturbing a live session. OpenAI needs no provider
@@ -197,7 +181,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let cli = detectedCLI else {
             jlog("Jarvis: can't \(action) — \(provider.displayName) CLI not found.")
             if recordSettingsFailure { ActivityLog.shared.record(.settingsChangeNotApplied) }
-            errorReporter.report(.brainCLIMissing(provider: provider.displayName), context: context)
+            errorReporter.reportImmediately(
+                .brainCLIMissing(provider: provider.displayName), context: context)
             return (false, nil)
         }
         switch cli.authenticationStatus {
@@ -206,11 +191,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .signedOut:
             jlog("Jarvis: can't \(action) — \(provider.displayName) isn't signed in.")
             if recordSettingsFailure { ActivityLog.shared.record(.settingsChangeNotApplied) }
-            errorReporter.report(.brainCLINotSignedIn(provider: provider.displayName), context: context)
+            errorReporter.reportImmediately(
+                .brainCLINotSignedIn(provider: provider.displayName), context: context)
             return (false, nil)
         case .unknown:
-            errorReporter.report(.brainCLISignInUnconfirmed(provider: provider.displayName),
-                                 context: context)
+            errorReporter.reportImmediately(
+                .brainCLISignInUnconfirmed(provider: provider.displayName), context: context)
         }
         return (true, cli)
     }
@@ -246,19 +232,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 traffic: sessionTraffic, trafficTag: "summarizer")
         }
 
-        let onFailure: (@MainActor @Sendable (String) -> Void)?
-        if provider.usesLocalCLI {
-            let signInCommand = provider == .claudeCode ? "claude auth login" : "codex login"
-            onFailure = { [errorReporter] reason in
+        // Bind App-facing failure delivery to the session that owns these clients. CoachDriver
+        // revision-gates provider switches within one session; this second identity gate covers
+        // Stop → Start, where an old driver can finish unwinding after a replacement driver exists.
+        let sessionDirectory = currentSessionDir
+        let onFailure: @MainActor @Sendable (BrainFailure) -> Void = {
+            [weak self, errorReporter] failure in
+            guard let self, self.coachDriver != nil,
+                  self.currentSessionDir == sessionDirectory else {
+                jlog("Jarvis: ignoring brain failure from a stopped or superseded session.")
+                return
+            }
+            switch failure.disposition {
+            case .temporary:
+                ActivityLog.shared.record(.coachingTurnFailed(provider: provider))
+            case .terminal:
+                let recovery: String
+                switch provider {
+                case .claudeCode:
+                    recovery = "Run \u{201C}claude auth login\u{201D} in Terminal, or choose another brain provider in Settings \u{2192} Brain, then Start again."
+                case .codexCLI:
+                    recovery = "Run \u{201C}codex login\u{201D} in Terminal, or choose another brain provider in Settings \u{2192} Brain, then Start again."
+                case .openAI:
+                    recovery = "Check the OpenAI API key in Settings \u{2192} Brain, then Start again."
+                }
                 ActivityLog.shared.record(.coachingStopped(provider: provider))
                 errorReporter.reportImmediately(
-                    .brainCLIStopped(provider: provider.displayName,
-                                     signInCommand: signInCommand,
-                                     reason: reason),
+                    .brainStopped(provider: provider.displayName,
+                                  recovery: recovery,
+                                  reason: failure.detail),
                     context: .runtime)
             }
-        } else {
-            onFailure = nil
         }
         return BrainRuntime(coach: RetryingBrainClient(base: coachBase),
                             summarizer: summarizer, onFailure: onFailure)
@@ -266,12 +270,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Apply provider/model/effort changes without touching capture, transcription, history, or the
     /// session directory. An in-flight turn finishes on its old snapshot; the next turn uses this.
-    private func applyBrainPreferencesToRunningSession(detectedCLI: DetectedAgentCLI?) {
-        guard let coachDriver, transcriber != nil else { return }
-        guard let key = secrets.apiKey(), !key.isEmpty else {
+    private func applyBrainPreferencesToRunningSession(
+        detectedCLI: DetectedAgentCLI?,
+        apiKeyOverride: String? = nil
+    ) {
+        guard let coachDriver, transcriber != nil, let sessionDirectory = currentSessionDir else {
+            return
+        }
+        guard let key = apiKeyOverride ?? secrets.apiKey(), !key.isEmpty else {
             jlog("Jarvis: can't apply brain settings — no API key.")
             ActivityLog.shared.record(.settingsChangeNotApplied)
-            errorReporter.report(.noAPIKey, context: .runtime)
             return
         }
         let provider = brainPreferences.provider
@@ -282,30 +290,56 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         coachDriver.updateBrain(
             runtime.coach, provider: provider, summarizer: runtime.summarizer,
             onBrainFailure: runtime.onFailure,
-            onBrainChangeApplied: { previous, current in
+            onBrainChangeApplied: { [weak self] previous, current in
                 guard let previous, let current else { return }
-                ActivityLog.shared.record(.brainChangeApplied(previous: previous, current: current))
+                Task { @MainActor [weak self] in
+                    guard let self, self.coachDriver != nil,
+                          self.currentSessionDir == sessionDirectory else {
+                        jlog("Jarvis: ignoring brain-change notice from a stopped or superseded session.")
+                        return
+                    }
+                    ActivityLog.shared.record(
+                        .brainChangeApplied(previous: previous, current: current))
+                }
             },
-            onBrainFallback: { failed, restored in
+            onBrainFallback: { [weak self] failed, restored in
                 guard let failed, let restored else { return }
-                ActivityLog.shared.record(.brainFallback(failed: failed, restored: restored))
+                Task { @MainActor [weak self] in
+                    guard let self, self.coachDriver != nil,
+                          self.currentSessionDir == sessionDirectory else {
+                        jlog("Jarvis: ignoring brain-fallback notice from a stopped or superseded session.")
+                        return
+                    }
+                    ActivityLog.shared.record(
+                        .brainFallback(failed: failed, restored: restored))
+                }
             })
         let model = brainPreferences.model(for: provider)
         jlog("Jarvis: brain settings will apply on the next turn — \(provider.displayName), "
              + "\(model.displayName), \(brainPreferences.effort.displayName) effort.")
     }
 
+    /// Keep a healthy live conversation intact when the credential file changes. Existing Realtime
+    /// sockets are already authenticated; retain them and use the new key only if either socket later
+    /// reconnects. If OpenAI is the selected brain, `CoachDriver`'s established transactional update
+    /// keeps the old client as fallback until the replacement completes a real turn.
+    private func applySavedAPIKeyToRunningSession(_ key: String) {
+        guard let transcriber else { return }
+        transcriber.updateAPIKey(key)
+        themTranscriber?.updateAPIKey(key)
+        guard brainPreferences.provider == .openAI else {
+            jlog("Jarvis: saved API key will apply to future Realtime connections.")
+            return
+        }
+        applyBrainPreferencesToRunningSession(detectedCLI: nil, apiKeyOverride: key)
+    }
+
     /// Build the brain + driver and start the transcription pipeline. Returns `false` (and stays
     /// stopped) if no API key is available yet (transcription always needs it), or if the selected
     /// brain provider's CLI is missing.
-    ///
-    /// `freshSession` is true for a user-initiated Start (rotate to a fresh session + logs) and
-    /// false for an in-place restart that only re-applies a setting — e.g. saving a new API key while
-    /// running — which must NOT be misattributed as a new coaching run.
     @discardableResult
-    private func start(freshSession: Bool = true) -> Bool {
-        // Capture whether this Start is replacing a live pipeline before any guard or teardown. An
-        // in-place reapply must remain ghost-safe even if the queued report executes after stop().
+    private func start() -> Bool {
+        // Capture whether this Start is replacing a live pipeline before any guard or teardown.
         let wasRunning = transcriber != nil || themTranscriber != nil
         let reportContext: UserFacingError.PresentationContext =
             wasRunning ? .runtime : .startup
@@ -314,12 +348,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if wasRunning {
                 ActivityLog.shared.record(.settingsChangeNotApplied)
             }
-            errorReporter.report(.noAPIKey, context: reportContext)
+            errorReporter.reportImmediately(.noAPIKey, context: reportContext)
             return false
         }
         let brainProvider = brainPreferences.provider
-        // A CLI brain provider's binary/auth must pass before anything is torn down — a failed Start
-        // or in-place key reapply leaves the existing pipeline exactly as it was.
+        // A CLI brain provider's binary/auth must pass before anything is torn down.
         let detectedCLI = brainProvider.usesLocalCLI
             ? AgentCLIDetector().detect(brainProvider)
             : nil
@@ -329,15 +362,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard preflight.isReady else { return false }
         stop() // tear down any existing pipeline so we start cleanly
         reportedTranscriptionFailure = false
-        // A fresh transcript for the fresh pipeline (even on an in-place restart, which rebuilds the
-        // driver and transcribers too). Reusing the old one would re-send a dead run's lines as "new
-        // since last turn" — their [mm:ss] stamps minted against the previous transcriber's clock —
-        // and anchor the silence math to that run's last utterance instead of real quiet time.
+        // A fresh transcript for the fresh pipeline. Reusing the old one would re-send a dead run's
+        // lines as "new since last turn" — their [mm:ss] stamps minted against the previous
+        // transcriber's clock — and anchor silence math to old speech.
         transcript = RollingTranscript()
-        if freshSession {
-            beginNewSession()  // rotate to a fresh session dir + activity/debug log
-            overlayBox.clear() // …and a fresh response history for the new conversation
-        }
+        beginNewSession()  // rotate to a fresh session dir + activity/debug log
+        overlayBox.clear() // …and a fresh response history for the new conversation
 
         // Both clients record their wire traffic into the session's `brain-traffic.jsonl` (enabled in
         // `beginNewSession`), tagged so the evaluation can tell the coach and summarizer apart. The
@@ -422,7 +452,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.systemConnectionState = .failed
                 self.refreshConnectionUI()
                 ActivityLog.shared.record(.systemAudioStopped)
-                self.errorReporter.report(.systemAudioStopped, context: .runtime)
+                self.errorReporter.reportImmediately(.systemAudioStopped, context: .runtime)
             }
         }
 
@@ -447,9 +477,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 themTranscriber?.sendAudio(
                     data, sequenceNumber: sequence, capturedAt: capturedAt)
             })
-        capture.onUnavailable = { [errorReporter] reason in
-            ActivityLog.shared.record(.audioCaptureStopped)
-            errorReporter.report(.captureStopped(reason: reason), context: .runtime)
+        // Like the transcriber callbacks above, bind the failure to the capture that emitted it. A
+        // final retry from an old capture may arrive after Stop → Start; it must not tear down the
+        // replacement session through ErrorReporter's global `onFatal`.
+        capture.onUnavailable = { [weak self, weak capture] reason in
+            guard let capture else { return }
+            Task { @MainActor [weak self] in
+                guard let self, self.aggregateCapture === capture else { return }
+                ActivityLog.shared.record(.audioCaptureStopped)
+                self.errorReporter.reportImmediately(
+                    .captureStopped(reason: reason), context: .runtime)
+            }
         }
         self.transcriber = transcriber
         self.themTranscriber = themTranscriber
@@ -486,7 +524,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if reportContext == .runtime {
                 ActivityLog.shared.record(.audioCaptureStopped)
             }
-            errorReporter.report(.captureFailed(reason: reason), context: reportContext)
+            errorReporter.reportImmediately(
+                .captureFailed(reason: reason), context: reportContext)
             return false
         }
         jlog("Jarvis: coaching starting — verifying realtime transcription connections.")
@@ -518,6 +557,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         reportedCoachingReady = false
         menuBar?.setState(.stopped)
         if wasRunning { jlog("Jarvis: stopped.") }
+        // Activity writes are asynchronous during live capture. Persist every fixed failure outcome
+        // before this session can become evaluable, or an immediate Evaluate could miss why it ended.
+        ActivityLog.shared.flush()
         // The just-stopped session becomes evaluable only once any cancelled turn has actually
         // finished unwinding — its brain request records a final traffic line on the way out, and an
         // Evaluate click before that line lands would audit an incomplete brain-traffic.jsonl.
@@ -526,6 +568,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { @MainActor [weak self] in
                 for task in cancelled { await task.value }
                 guard let self else { return }
+                ActivityLog.shared.flush()
                 self.drainingStops -= 1
                 self.activityViewer?.coachingStateDidChange()
             }
@@ -539,7 +582,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard !reportedTranscriptionFailure, transcriber != nil || themTranscriber != nil else { return }
         reportedTranscriptionFailure = true
         ActivityLog.shared.record(.transcriptionStopped(reason: reason))
-        errorReporter.report(.transcriptionStopped(reason: reason), context: .runtime)
+        // This method already runs on the main actor after checking the emitting transcriber's
+        // identity. Deliver synchronously so Stop → Start cannot slip between that check and the
+        // terminal lifecycle consequence and let a stale failure stop the replacement session.
+        errorReporter.reportImmediately(
+            .transcriptionStopped(reason: reason), context: .runtime)
     }
 
     /// The mic socket is the truth for whether Jarvis is listening. System audio may reconnect or
@@ -630,5 +677,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return URL(fileURLWithPath: args[i + 1])
         }
         return secretFile.fileURL.deletingLastPathComponent().appendingPathComponent("sessions")
+    }
+
+    /// The agentic evaluator must inspect the live source checkout, not a baked description. Prefer
+    /// an explicit launch argument, then the workspace-local `.jarvis/` parent used by build-app.sh,
+    /// then the directory containing a locally built Jarvis.app. A redistributed bundle without a
+    /// checkout simply reports evaluation unavailable instead of running a weaker evaluator.
+    private func evaluationRepositoryDirectory() -> URL? {
+        let args = CommandLine.arguments
+        var candidates: [URL] = []
+        if let i = args.firstIndex(of: "--repo-dir"), i + 1 < args.count {
+            candidates.append(URL(fileURLWithPath: args[i + 1]))
+        }
+        let logs = logDirectory().standardizedFileURL
+        if logs.lastPathComponent == ".jarvis" {
+            candidates.append(logs.deletingLastPathComponent())
+        }
+        candidates.append(Bundle.main.bundleURL.deletingLastPathComponent())
+
+        return candidates.first { candidate in
+            let root = candidate.standardizedFileURL
+            return FileManager.default.fileExists(
+                atPath: root.appendingPathComponent("Package.swift").path)
+                && FileManager.default.fileExists(
+                    atPath: root.appendingPathComponent("Sources/JarvisCore").path)
+        }?.standardizedFileURL
     }
 }

@@ -64,6 +64,19 @@ public struct CLIBrainClient: BrainClient, @unchecked Sendable {
 
     public func respond(messages: [ChatMessage], tools: [ToolDef],
                         toolChoice: ToolChoice) async throws -> BrainResponse {
+        do {
+            return try await performRequest(
+                messages: messages, tools: tools, toolChoice: toolChoice)
+        } catch {
+            if Task.isCancelled || error is CancellationError { throw error }
+            throw BrainFailure(error)
+        }
+    }
+
+    /// Keep classification at the provider boundary. CLI exit codes and stderr are diagnostics,
+    /// not a recoverability taxonomy, so unclassified failures remain temporary by default.
+    private func performRequest(messages: [ChatMessage], tools: [ToolDef],
+                                toolChoice: ToolChoice) async throws -> BrainResponse {
         let prepared = try prepareInvocation(messages: messages, tools: tools, toolChoice: toolChoice)
         defer { for url in prepared.transientFiles { try? FileManager.default.removeItem(at: url) } }
 

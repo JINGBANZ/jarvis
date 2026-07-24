@@ -29,11 +29,20 @@ the OpenAI API-key path available. Provider, model, and effort changes apply tra
 turns without restarting the session: the previous brain remains available until the replacement
 finishes a non-truncated terminal turn, and Activity records a fixed provider-only success or
 fallback notice. Codex coaching calls suppress project instructions and its feature-gated agent
-tools, run as direct-response decisions, and stop under a provider-specific stall bound instead of
-leaving later speech batched indefinitely. A failed established CLI coaching request stops the
-unusable session without activating the app, leaves a discreet provider-only Activity notice, and
-keeps the detailed reason in `jarvis-debug.log` instead of leaving the listening state green. The
-same runtime ghost-mode rule
+tools, run as direct-response decisions, inherit only stable executable-search paths, and stop under
+a provider-specific stall bound instead of leaving later speech batched indefinitely. Brain
+providers share one recoverability policy across adapter, immediate retry, and lifecycle:
+temporary or unknown failures miss one turn but preserve the transcript, pending triggers, history,
+capture, and transcription for the next attempt; only an explicitly permanent failure stops.
+Saving an API key while running also preserves those live objects: existing Realtime sockets take
+the key on their next reconnect, and an OpenAI brain update remains transactional. Audio
+route rebuilds likewise retry before declaring capture unavailable, and stale capture callbacks
+cannot stop a replacement session; repeated route notifications cannot reset one incident's bounded
+budget. Activity persists stable event kinds and flushes at Stop. The sole evaluator is agentic: it
+receives the complete session directory and reads the full, unfiltered `jarvis-activity.jsonl`
+whenever it needs the user-visible sequence, alongside raw brain traffic, screenshots, and live
+source code. Activity's one-click **Evaluate** action launches that evaluator and opens its saved
+report; the standalone script calls the same Core implementation. The same runtime ghost-mode rule
 now covers microphone transcription, audio-route loss, in-place CLI preflight, and Activity-audit
 completion: no runtime error autonomously activates Jarvis, opens a browser, or presents a modal;
 fixed notices remain available in Activity. The gate statically rejects unreviewed presentation APIs.
@@ -49,7 +58,12 @@ While that session runs, switch providers and confirm the next completed turn pr
 adds the provider-only success notice to Activity; then exercise a failed replacement and confirm
 the previous provider continues the conversation with a provider-only fallback notice. Finish the
 in-app Codex smoke through audio and the overlay, then confirm a missing or signed-out CLI fails
-loudly. The standard release checklist remains in [build-and-run.md](./build-and-run.md).
+loudly. Exercise one forced temporary brain miss and one audio-route switch: Activity should say
+listening continues, the next turn should include the unsent speech, and capture should recover
+without rotating the session. Stop that session, click **Evaluate**, and confirm the agentic report
+opens and identifies the temporary miss from the complete Activity log without misclassifying it as
+a stopped conversation. The standard release checklist remains in
+[build-and-run.md](./build-and-run.md).
 
 ## Built
 
@@ -58,20 +72,21 @@ thin OS shell, verified by the smoke run.
 
 - `Sources/JarvisCore/Audio/` — transactional PCM + utterance buffering, adaptive content-free activity detection, non-destructive AEC reference alignment, and system-audio timeline preservation (`PCMBuffer`, `UtteranceBuffer`, `PCM16Framer`, `AudioDownmix`, `AdaptiveAudioActivityDetector`, `EchoReferenceAlignment`, `SystemAudioTimeline`).
 - `Sources/JarvisCore/Transcription/` — realtime session wire contract, per-item event ledger, and rolling transcript (`RealtimeSession`, `RealtimeTranscriptionLedger`, `Transcript`, `NoiseReduction`).
-- `Sources/JarvisCore/Brain/` — the LLM integration: the `BrainClient` contract (`Brain`), `OpenAIBrainClient`, `CLIBrainClient` + `AgentCLIProcessRunner` + `AgentCLIDetector`/`AgentCLIAuthenticationStatus` (the local Claude Code / Codex brain providers and sign-in state), `RetryingBrainClient`, `BrainProvider`, `BrainModelCatalog` (default `gpt-5.5`), `ReasoningEffort`.
+- `Sources/JarvisCore/Brain/` — the LLM integration: the `BrainClient` contract (`Brain`), `OpenAIBrainClient`, `CLIBrainClient` + `AgentCLIProcessRunner` + `AgentCLIDetector`/`AgentCLIAuthenticationStatus` (the local Claude Code / Codex brain providers and sign-in state), shared retry/lifecycle classification (`BrainFailure`), `RetryingBrainClient`, `BrainProvider`, `BrainModelCatalog` (default `gpt-5.5`), `ReasoningEffort`.
 - `Sources/JarvisCore/Coach/` — the event loop: `CoachDriver` (including transactional between-turn brain replacement), `CoachHistory` (client-managed session memory), `ToolDefs` (coach tools + system prompt).
 - `Sources/JarvisCore/Triggers/` — turn/silence trigger detection, substance classification, and silence backoff (`Trigger`, `TurnSubstance`, `SilenceBackoff`).
 - `Sources/JarvisCore/Screen/` — the model-triggered screen-capture tool contract + window-scoped capture logic (`ScreenCapture`, `ScreenSnapshot`, `FrontWindowSelector`, `RecognizedTextLayout`).
 - `Sources/JarvisCore/Overlay/` — overlay text model + length-proportional timing + fan-out (`OverlayRendering`, `OverlayTiming`, `OverlayAppearance`, `BroadcastOverlay`).
 - `Sources/JarvisCore/Config/` — config + owner-only secrets + brain/screen preferences (`Config`, `Secrets`, `BrainPreferences`, `ScreenCapturePreferences`, `ScreenCaptureScope`).
-- `Sources/JarvisCore/Diagnostics/` — logging, always-on activity log with fixed typed brain-change success/fallback notices, privacy-preserving audio continuity evidence, session-history store, wire-level brain traffic capture + one-click session evaluation (single-call in-app **and** the agentic dev-side audit's prompt/transcript prep), user-facing errors (`ActivityLog`, `AudioContinuityWitness`, `SessionStore`, `BrainTrafficLog`, `SessionEvaluator`, `AgenticEvaluation`, `UserFacingError`).
+- `Sources/JarvisCore/Support/` — small shared runtime primitives (`Clock`, `TurnTaskBox`, `RetrySchedule`, `RetryIncident`).
+- `Sources/JarvisCore/Diagnostics/` — logging, always-on activity log with stable persisted event kinds and fixed typed brain-change/failure notices, privacy-preserving audio continuity evidence, session-history store, wire-level brain traffic capture + the read-only agentic audit over the complete session directory, user-facing errors (`ActivityLog`, `AudioContinuityWitness`, `SessionStore`, `BrainTrafficLog`, `EvaluationTranscript`, `AgenticEvaluation`, `AgenticEvaluator`, `UserFacingError`).
 - `Sources/JarvisOverlay/` — the capture-invisible `NSPanel` surfaces: `OverlayCaptionPanel` (transient), `OverlayBoxPanel` (persistent), `NSPanel+CaptureExclusion`.
 - `Sources/JarvisApp/App/` + `MenuBar/` — entry point, connection-aware menu status, Start/Stop, `ErrorReporter` (startup alerts plus an unconditional no-presentation runtime policy).
 - `Sources/JarvisApp/Capture/` — one-clock aggregate mic + sample-preserving system-audio capture with AEC3 echo cancellation + resampling (`AggregateEchoCapture`, `WebRTCEchoCanceller`, `Resampler`), Realtime item/readiness/liveness/transactional-reconnect/witness handling (`RealtimeTranscriber`, `NetworkPathDiagnostics`), permissions, plus the window-scoped screenshot + OCR edge (`WindowScopedScreenCapture`, `ScreenTextRecognizer`).
 - `Sources/JarvisApp/Settings/` — the unified Settings window (`SettingsWindow` hosting Brain (provider + model + API key) / Overlay / Screen / Activity sections).
 - `Sources/JarvisApp/Shortcuts/HotkeyController.swift` — the global Carbon ⌥⌘J on-demand-hint hotkey.
-- `Sources/JarvisApp/Viewer/ActivityViewer.swift` — the in-app `WKWebView` activity viewer, with an exact selectable/copyable session ID and the one-click **Evaluate** session audit.
-- `Sources/EvalPrep/main.swift` — the Foundation-only CLI half of the agentic session audit; `scripts/eval-session.sh` drives it through an agentic CLI (`claude -p` / `codex exec`) over the repo + session dir (see the 2026-07-17 [decision](./decisions.md)).
+- `Sources/JarvisApp/Viewer/ActivityViewer.swift` — the in-app `WKWebView` activity viewer, with an exact selectable/copyable session ID and one-click **Evaluate** / **Open report** agentic audit flow.
+- `Sources/EvalPrep/main.swift` — the Foundation-only terminal entry point for the same `AgenticEvaluator` Activity invokes; `scripts/eval-session.sh` runs it over the repo + session dir.
 - `Sources/CJarvisAEC/lib/libjarvis-aec.a` — the prebuilt, zero-dylib WebRTC AEC3 C edge (the `CJarvisAEC` target; rebuilt by `scripts/build-aec.sh`).
 - `.github/workflows/release.yml` + `scripts/package-app.sh` — automated releases: release-please Release PR → Developer ID-signed, notarized, stapled `Jarvis-<version>.zip` attached to a GitHub Release ([build-and-run.md → Distribution](./build-and-run.md#distribution--signed-notarized-releases-from-ci)).
 

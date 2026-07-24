@@ -22,8 +22,9 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
     /// after reconnection is abandoned, so the app can stop instead of lying green.
     var onTerminalFailure: (@Sendable (TranscriptionFailureReason) -> Void)?
 
-    private let maxReconnects = 6
-    private let apiKey: String
+    private let reconnectSchedule = RetrySchedule(
+        maximumRetries: 6, initialDelay: 1, maximumDelay: 30)
+    private var apiKey: String
     private let model: String
     /// Who this socket is transcribing: `.me` (mic) or `.them` (system audio). Two transcribers run
     /// in parallel — one per side — feeding the same `RollingTranscript`, so the coach sees both.
@@ -132,8 +133,19 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         continuityReporter.start()
     }
 
+    /// Keep a healthy socket in place; the replacement credential is picked up if this side later
+    /// reconnects. This avoids destroying live transcript state merely because Settings saved a key.
+    func updateAPIKey(_ apiKey: String) {
+        lock.lock()
+        self.apiKey = apiKey
+        lock.unlock()
+    }
+
     private func openSocket() {
         var req = URLRequest(url: RealtimeSession.connectURL())
+        lock.lock()
+        let apiKey = self.apiKey
+        lock.unlock()
         req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         let session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
         let task = session.webSocketTask(with: req)
@@ -561,7 +573,7 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         // into the canceled socket during the reconnect delay.
         task = nil
         session = nil
-        if reconnectAttempt >= maxReconnects {
+        guard let retryDelay = reconnectSchedule.delay(forRetry: reconnectAttempt) else {
             isReconnecting = true
             terminalFailureReported = true
             lock.unlock()
@@ -572,7 +584,8 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
             failedTask.cancel(with: .goingAway, reason: nil)
             failedSession?.invalidateAndCancel()
             emitState(.failed)
-            jlog("Jarvis realtime [\(speaker.rawValue)]: giving up after \(maxReconnects) reconnect attempts — stopping")
+            jlog("Jarvis realtime [\(speaker.rawValue)]: giving up after "
+                 + "\(reconnectSchedule.maximumRetries) reconnect attempts — stopping")
             onTerminalFailure?(.connectionLost)
             return
         }
@@ -606,8 +619,7 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         failedSession?.invalidateAndCancel()
         emitState(.reconnecting(attempt: attempt + 1))
 
-        let delay = min(30.0, pow(2.0, Double(attempt)))   // 1, 2, 4, 8, 16, 30…
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + retryDelay) { [weak self] in
             guard let self else { return }
             self.lock.lock()
             let shouldReconnect = !self.stopped && self.generation == failedGeneration

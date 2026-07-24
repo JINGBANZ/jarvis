@@ -39,7 +39,7 @@ public final class CoachDriver: @unchecked Sendable {
         let brain: BrainClient
         let provider: BrainProvider?
         let summarizer: BrainClient?
-        let onFailure: (@MainActor @Sendable (String) -> Void)?
+        let onFailure: (@MainActor @Sendable (BrainFailure) -> Void)?
         let onChangeApplied: (@Sendable (BrainProvider?, BrainProvider?) -> Void)?
         let onFallback: (@Sendable (BrainProvider?, BrainProvider?) -> Void)?
     }
@@ -55,16 +55,16 @@ public final class CoachDriver: @unchecked Sendable {
     /// nothing is dropped and turns don't pile up. The first such trigger is kept and the batched
     /// speech rides along via the sent-index, so a later trigger needn't displace it.
     private var pendingTrigger: TriggerReason?
-    /// Latched only when the app supplied `onBrainFailure`, which means this provider failure is
-    /// terminal for the session. It prevents pending or newly arriving triggers from issuing another
-    /// request while the app's main-actor stop is still being scheduled.
+    /// Latched only when the app classifies a provider failure as terminal. It prevents pending or
+    /// newly arriving triggers from issuing another request while the app's main-actor stop is still
+    /// being scheduled. A temporary missed turn never touches this latch.
     private var terminalBrainFailure = false
 
     public init(config: Config, transcript: RollingTranscript,
                 brain: BrainClient, brainProvider: BrainProvider? = nil,
                 summarizer: BrainClient? = nil,
                 screen: ScreenCapturing, overlay: OverlayRendering, clock: Clock,
-                onBrainFailure: (@MainActor @Sendable (String) -> Void)? = nil) {
+                onBrainFailure: (@MainActor @Sendable (BrainFailure) -> Void)? = nil) {
         self.config = config
         self.transcript = transcript
         self.screen = screen
@@ -95,7 +95,7 @@ public final class CoachDriver: @unchecked Sendable {
         _ brain: BrainClient,
         provider: BrainProvider? = nil,
         summarizer: BrainClient? = nil,
-        onBrainFailure: (@MainActor @Sendable (String) -> Void)? = nil,
+        onBrainFailure: (@MainActor @Sendable (BrainFailure) -> Void)? = nil,
         onBrainChangeApplied: (@Sendable (BrainProvider?, BrainProvider?) -> Void)? = nil,
         onBrainFallback: (@Sendable (BrainProvider?, BrainProvider?) -> Void)? = nil
     ) {
@@ -345,16 +345,31 @@ public final class CoachDriver: @unchecked Sendable {
                     lastResponseCompleted = false
                     continue
                 }
-                if let onFailure = brains.onFailure {
-                    if latchTerminalBrainFailure(for: brains.revision) {
+                let failure = BrainFailure(error)
+                switch failure.disposition {
+                case .temporary:
+                    if let onFailure = brains.onFailure {
                         await MainActor.run {
                             guard isCurrentBrainConfiguration(brains.revision) else {
                                 jlog("… ignoring queued failure from superseded brain configuration")
                                 return
                             }
-                            onFailure(detail)
+                            onFailure(failure)
                         }
-                    } else {
+                    }
+                case .terminal:
+                    // Lifecycle policy is independent of observation: even a headless/test caller
+                    // with no callback must not issue more requests after a proven permanent failure.
+                    if latchTerminalBrainFailure(for: brains.revision),
+                       let onFailure = brains.onFailure {
+                        await MainActor.run {
+                            guard isCurrentBrainConfiguration(brains.revision) else {
+                                jlog("… ignoring queued failure from superseded brain configuration")
+                                return
+                            }
+                            onFailure(failure)
+                        }
+                    } else if !isCurrentBrainConfiguration(brains.revision) {
                         jlog("… ignoring failure from superseded brain configuration")
                     }
                 }
