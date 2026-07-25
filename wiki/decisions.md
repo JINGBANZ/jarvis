@@ -667,3 +667,32 @@
 - **Detail:** `Sources/JarvisCore/Diagnostics/AgenticEvaluator.swift`,
   `Sources/JarvisCore/Diagnostics/AgenticEvaluation.swift`,
   `Sources/JarvisApp/Viewer/ActivityViewer.swift`, [settings-window.md](./settings-window.md#sections).
+
+### 2026-07-25 — Provider fallback is explicit, transactional, and cooldown-recovered
+
+- **Chose:** Offer one optional provider distinct from the primary in Settings. After a temporary
+  primary failure exhausts its immediate retry policy, retry the same pending turn on that configured
+  fallback without restarting the session. Carry client-managed history, unsent transcript, and any
+  completed screen observation as provider-neutral context; never carry provider reasoning,
+  tool-call ids, or call/result pairing across transports. Keep the fallback active through
+  incomplete responses until it completes a non-truncated terminal turn, then wait 60 seconds before
+  probing the retained primary on a later turn. A failed probe restores the fallback for that same
+  turn and resets the cooldown. A terminal fallback failure disables it for the live session and
+  leaves the primary available on the next turn. Traffic metrics and evaluation transcripts identify
+  the provider per call.
+- **Why:** Missing one turn after retries is survivable, but it is avoidable when the user has
+  explicitly authorized a second ready provider. Client-owned memory makes the conversation portable;
+  provider-owned tool state does not. Keeping one provider active at a time preserves ordering and
+  avoids duplicate capture or speech, while a quiet recovery probe returns to the preferred provider
+  without turn-by-turn ping-pong.
+- **Rejected:** (a) Selecting any installed provider silently — conversation data crosses a new
+  provider boundary only by explicit user choice. (b) Calling providers concurrently or racing them —
+  duplicates cost, screenshots, and spoken side effects. (c) Copying the failed provider's raw tool
+  loop into the fallback — the schemas and reasoning/call linkage are transport-specific. (d)
+  Switching back immediately after one fallback response — ordinary subsequent turns would ping-pong
+  during an outage. (e) Restarting capture/transcription or rotating the session — failover is a
+  brain-transport concern, not a new coaching conversation.
+- **Detail:** [settings-window.md → Brain](./settings-window.md#brain),
+  [architecture.md → Resilience](./architecture.md#resilience),
+  `Sources/JarvisCore/Coach/CoachDriver.swift`,
+  `Sources/JarvisCore/Coach/ConfiguredBrainFallback.swift`.

@@ -81,6 +81,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 @Suite(.serialized) struct CoachDriverPipelineTests {
     private func makeDriver(brain: BrainClient, brainProvider: BrainProvider? = nil,
                             summarizer: BrainClient? = nil,
+                            configuredFallback: ConfiguredBrainFallback? = nil,
                             screen: ScreenCapturing = FakeScreen(),
                             overlay: OverlayRendering = FakeOverlay(),
                             clock: Clock, config: Config = .default,
@@ -90,6 +91,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let driver = CoachDriver(
             config: config, transcript: transcript,
             brain: brain, brainProvider: brainProvider, summarizer: summarizer,
+            configuredFallback: configuredFallback,
             screen: screen, overlay: overlay, clock: clock,
             onBrainFailure: onBrainFailure
         )
@@ -783,6 +785,284 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             .init(failed: .claudeCode, restored: .openAI),
         ])
         #expect(changeRecorder.events.isEmpty)
+    }
+
+    /// A configured provider is an opt-in fail-forward target, distinct from Settings rollback.
+    /// Once the primary's own retry policy gives up, the exact unsent turn is retried immediately
+    /// and the prior client-managed conversation remains intact.
+    @Test func configuredFallbackRetriesSamePendingTurnAndPreservesHistory() async {
+        let clock = ManualClock(now: 0)
+        let primary = ScriptedThrowBrain(script: [
+            .init(toolCalls: [.speak(callId: "primary", lines: ["first tip"])],
+                  rawToolCalls: [RawToolCall(
+                    id: "primary", name: "speak",
+                    argumentsJSON: #"{"lines":["first tip"]}"#)]),
+            nil,
+        ])
+        let fallback = ScriptedBrain(script: [
+            .init(toolCalls: [.speak(callId: "fallback", lines: ["fallback tip"])],
+                  rawToolCalls: [RawToolCall(
+                    id: "fallback", name: "speak",
+                    argumentsJSON: #"{"lines":["fallback tip"]}"#)]),
+        ])
+        let activated = BrainFallbackRecorder()
+        let fallbackConfiguration = ConfiguredBrainFallback(
+            brain: fallback,
+            provider: .claudeCode,
+            onActivated: { activated.record(failed: $0, restored: $1) })
+        let (driver, transcript) = makeDriver(
+            brain: primary,
+            brainProvider: .openAI,
+            configuredFallback: fallbackConfiguration,
+            clock: clock)
+
+        transcript.append(.init(speaker: .me, text: "the original problem", at: 0))
+        #expect(await driver.handleTrigger(.turnEnd) == .spoke)
+        transcript.append(.init(speaker: .me, text: "my unsent next idea", at: 1))
+        #expect(await driver.handleTrigger(.turnEnd) == .spoke)
+
+        #expect(primary.calls.count == 2)
+        #expect(fallback.calls.count == 1)
+        let fallbackRequest = fallback.calls[0]
+        #expect(fallbackRequest.contains {
+            ($0.text ?? "").contains("the original problem")
+        })
+        #expect(fallbackRequest.contains {
+            ($0.text ?? "").contains("my unsent next idea")
+        })
+        #expect(fallbackRequest.contains {
+            $0.role == .assistant && $0.toolCalls?.first?.id == "primary"
+        })
+        #expect(fallbackRequest.contains {
+            $0.role == .tool && $0.toolCallId == "primary"
+        })
+        #expect(activated.events == [
+            .init(failed: .openAI, restored: .claudeCode),
+        ])
+    }
+
+    /// A failed provider may already have requested a screenshot before it becomes unavailable.
+    /// Preserve the completed observation without recapturing, but rebuild it as ordinary user
+    /// context so no provider-specific reasoning items, call ids, or tool pairing cross providers.
+    @Test func configuredFallbackPreservesCaptureWithoutCrossingProviderState() async {
+        let clock = ManualClock(now: 0)
+        let primary = ScriptedThrowBrain(script: [
+            .init(toolCalls: [.captureScreen(callId: "primary-capture")],
+                  rawToolCalls: [RawToolCall(
+                    id: "primary-capture", name: "capture_screen",
+                    argumentsJSON: "{}")],
+                  outputItemsJSON: [
+                    #"{"type":"reasoning","id":"primary-reasoning"}"#,
+                    #"{"type":"function_call","id":"primary-call","call_id":"primary-capture","name":"capture_screen","arguments":"{}"}"#,
+                  ]),
+            nil,
+        ])
+        let fallback = ScriptedBrain(script: [
+            .init(toolCalls: [.speak(callId: "fallback", lines: ["use the captured code"])])
+        ])
+        let screen = FakeScreen(recognizedText: "let answer = values[index]")
+        let fallbackConfiguration = ConfiguredBrainFallback(
+            brain: fallback, provider: .codexCLI)
+        let (driver, transcript) = makeDriver(
+            brain: primary,
+            brainProvider: .openAI,
+            configuredFallback: fallbackConfiguration,
+            screen: screen,
+            clock: clock)
+        transcript.append(.init(speaker: .me, text: "please inspect this code", at: 0))
+
+        #expect(await driver.handleTrigger(.turnEnd) == .spoke)
+        #expect(primary.calls.count == 2)
+        #expect(fallback.calls.count == 1)
+        #expect(screen.captureCount == 1)
+        let fallbackRequest = fallback.calls[0]
+        #expect(fallbackRequest.contains {
+            ($0.text ?? "").contains("screenshot captured")
+                && ($0.text ?? "").contains("let answer = values[index]")
+        })
+        #expect(fallbackRequest.contains { $0.imageBase64JPEG == screen.payload })
+        #expect(!fallbackRequest.contains { $0.role == .tool })
+        #expect(!fallbackRequest.contains {
+            $0.role == .assistant && $0.toolCalls != nil
+        })
+        #expect(!fallbackRequest.contains { $0.rawItemsJSON != nil })
+    }
+
+    /// A truncated fallback response does not prove the fallback is healthy. Keep it installed
+    /// through later turns and do not start the primary recovery cooldown until a complete terminal
+    /// response arrives.
+    @Test func truncatedConfiguredFallbackStaysActiveUntilCompleteTurn() async {
+        let clock = ManualClock(now: 0)
+        let primary = ScriptedThrowBrain(script: [nil])
+        let fallback = ScriptedThrowBrain(script: [
+            .init(toolCalls: [], incompleteReason: "max_output_tokens"),
+            .init(toolCalls: [.speak(callId: "fallback", lines: ["complete tip"])],
+                  rawToolCalls: [RawToolCall(
+                    id: "fallback", name: "speak",
+                    argumentsJSON: #"{"lines":["complete tip"]}"#)]),
+        ])
+        let fallbackConfiguration = ConfiguredBrainFallback(
+            brain: fallback, provider: .claudeCode)
+        let (driver, transcript) = makeDriver(
+            brain: primary,
+            brainProvider: .openAI,
+            configuredFallback: fallbackConfiguration,
+            clock: clock)
+
+        transcript.append(.init(speaker: .me, text: "first turn", at: 0))
+        #expect(await driver.handleTrigger(.turnEnd) == .truncated)
+        transcript.append(.init(speaker: .me, text: "second turn", at: 1))
+        #expect(await driver.handleTrigger(.turnEnd) == .spoke)
+
+        #expect(primary.calls.count == 1)
+        #expect(fallback.calls.count == 2)
+    }
+
+    /// A confirmed fallback serves later turns without ping-pong. After the quiet cooldown, one
+    /// later turn probes the retained primary and commits recovery only after that turn completes.
+    @Test func configuredFallbackRecoversPrimaryAfterCooldown() async {
+        let clock = ManualClock(now: 0)
+        let primary = ScriptedThrowBrain(script: [
+            nil,
+            .init(toolCalls: [.speak(callId: "primary", lines: ["primary recovered"])],
+                  rawToolCalls: [RawToolCall(
+                    id: "primary", name: "speak",
+                    argumentsJSON: #"{"lines":["primary recovered"]}"#)]),
+        ])
+        let fallback = ScriptedBrain(script: [
+            .init(toolCalls: [.speak(callId: "fallback", lines: ["fallback tip"])])
+        ])
+        let recovered = BrainFallbackRecorder()
+        let fallbackConfiguration = ConfiguredBrainFallback(
+            brain: fallback,
+            provider: .claudeCode,
+            onPrimaryRecovered: {
+                recovered.record(failed: $0, restored: $1)
+            })
+        let (driver, transcript) = makeDriver(
+            brain: primary,
+            brainProvider: .openAI,
+            configuredFallback: fallbackConfiguration,
+            clock: clock)
+
+        transcript.append(.init(speaker: .me, text: "trigger failover", at: 0))
+        #expect(await driver.handleTrigger(.turnEnd) == .spoke)
+        clock.advance(by: CoachDriver.providerRecoveryCooldownSeconds - 1)
+        transcript.append(.init(speaker: .me, text: "stay on fallback", at: 59))
+        #expect(await driver.handleTrigger(.turnEnd) == .spoke)
+        clock.advance(by: 1)
+        transcript.append(.init(speaker: .me, text: "probe primary", at: 60))
+        #expect(await driver.handleTrigger(.turnEnd) == .spoke)
+
+        #expect(primary.calls.count == 2)
+        #expect(fallback.calls.count == 2)
+        #expect(recovered.events == [
+            .init(failed: .openAI, restored: .claudeCode),
+        ])
+    }
+
+    /// A failed recovery probe rolls the same pending turn back to the working fallback and starts
+    /// a fresh cooldown. The next turn therefore stays on fallback instead of immediately probing
+    /// the primary again.
+    @Test func failedPrimaryRecoveryRestoresFallbackAndResetsCooldown() async {
+        let clock = ManualClock(now: 0)
+        let primary = ScriptedThrowBrain(script: [nil, nil])
+        let fallback = ScriptedBrain(script: [
+            .init(toolCalls: [.speak(callId: "fallback", lines: ["fallback tip"])])
+        ])
+        let deferred = BrainFallbackRecorder()
+        let fallbackConfiguration = ConfiguredBrainFallback(
+            brain: fallback,
+            provider: .claudeCode,
+            onRecoveryDeferred: {
+                deferred.record(failed: $0, restored: $1)
+            })
+        let (driver, transcript) = makeDriver(
+            brain: primary,
+            brainProvider: .openAI,
+            configuredFallback: fallbackConfiguration,
+            clock: clock)
+
+        transcript.append(.init(speaker: .me, text: "trigger failover", at: 0))
+        #expect(await driver.handleTrigger(.turnEnd) == .spoke)
+        clock.advance(by: CoachDriver.providerRecoveryCooldownSeconds)
+        transcript.append(.init(speaker: .me, text: "failed recovery turn", at: 60))
+        #expect(await driver.handleTrigger(.turnEnd) == .spoke)
+        clock.advance(by: 1)
+        transcript.append(.init(speaker: .me, text: "cooldown turn", at: 61))
+        #expect(await driver.handleTrigger(.turnEnd) == .spoke)
+
+        #expect(primary.calls.count == 2)
+        #expect(fallback.calls.count == 3)
+        #expect(fallback.calls[1].contains {
+            ($0.text ?? "").contains("failed recovery turn")
+        })
+        #expect(deferred.events == [
+            .init(failed: .openAI, restored: .claudeCode),
+        ])
+    }
+
+    /// Only recoverable exhaustion may fail forward. A proven permanent primary failure retains the
+    /// existing lifecycle policy and never sends conversation data to the configured fallback.
+    @Test func terminalPrimaryFailureDoesNotActivateConfiguredFallback() async {
+        let primary = ThrowingBrain(error: BrainFailure(
+            disposition: .terminal,
+            detail: "primary credentials are invalid"))
+        let fallback = ScriptedBrain(script: [
+            .init(toolCalls: [.speak(callId: "fallback", lines: ["must not run"])])
+        ])
+        let activated = BrainFallbackRecorder()
+        let failureRecorder = BrainFailureRecorder()
+        let fallbackConfiguration = ConfiguredBrainFallback(
+            brain: fallback,
+            provider: .claudeCode,
+            onActivated: { activated.record(failed: $0, restored: $1) })
+        let (driver, transcript) = makeDriver(
+            brain: primary,
+            brainProvider: .openAI,
+            configuredFallback: fallbackConfiguration,
+            clock: ManualClock(),
+            onBrainFailure: { failureRecorder.record($0) })
+        transcript.append(.init(speaker: .me, text: "do not leak this turn", at: 0))
+
+        #expect(await driver.handleTrigger(.turnEnd) == .brainError)
+        #expect(primary.callCount == 1)
+        #expect(fallback.calls.isEmpty)
+        #expect(activated.events.isEmpty)
+        #expect(failureRecorder.failures.count == 1)
+    }
+
+    /// A terminal fallback failure disables only that fallback for this live session. The retained
+    /// primary remains available on the next trigger, avoiding a stop loop or repeated use of the
+    /// unusable provider.
+    @Test func unavailableConfiguredFallbackRestoresPrimaryForNextTurn() async {
+        let primary = TimeoutThenSpeakingBrain()
+        let fallback = ThrowingBrain(error: BrainFailure(
+            disposition: .terminal,
+            detail: "fallback credentials are invalid"))
+        let unavailable = BrainFallbackRecorder()
+        let fallbackConfiguration = ConfiguredBrainFallback(
+            brain: fallback,
+            provider: .claudeCode,
+            onUnavailable: {
+                unavailable.record(failed: $0, restored: $1)
+            })
+        let (driver, transcript) = makeDriver(
+            brain: primary,
+            brainProvider: .codexCLI,
+            configuredFallback: fallbackConfiguration,
+            clock: ManualClock())
+
+        transcript.append(.init(speaker: .me, text: "first turn", at: 0))
+        #expect(await driver.handleTrigger(.turnEnd) == .brainError)
+        transcript.append(.init(speaker: .me, text: "primary retry turn", at: 1))
+        #expect(await driver.handleTrigger(.turnEnd) == .spoke)
+
+        #expect(primary.calls.count == 2)
+        #expect(fallback.callCount == 1)
+        #expect(unavailable.events == [
+            .init(failed: .codexCLI, restored: .claudeCode),
+        ])
     }
 
     /// The delta is sent once: a line already carried by an earlier turn appears in the next request

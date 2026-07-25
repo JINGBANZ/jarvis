@@ -3,9 +3,10 @@ import JarvisCore
 
 /// Settings panel for the brain: the provider (OpenAI API, or a locally installed Claude Code /
 /// Codex CLI running on the user's subscription), the model + reasoning effort for whichever is
-/// active, and the OpenAI API key — one tab, because the four choices are one decision. The model
-/// list is per provider (each remembers its own); the effort is one global setting applied to all
-/// three, mapped onto each CLI's scale by `CLIBrainClient`. Installed CLIs are auto-detected
+/// active, an optional fallback provider, and the OpenAI API key — one tab, because these choices are
+/// one decision. The model list is per provider (each remembers its own); the effort is one global
+/// setting applied to all three, mapped onto each CLI's scale by `CLIBrainClient`. Installed CLIs are
+/// auto-detected
 /// whenever the tab is shown; Claude's bounded status command distinguishes signed in, signed out,
 /// and an unavailable probe. Selections persist immediately through `BrainPreferences`; while
 /// coaching, the driver swaps its model clients for the next turn without resetting transcript or
@@ -17,11 +18,14 @@ final class BrainSection: NSObject, SettingsSection {
 
     private let preferences: BrainPreferences
     private let detector: AgentCLIDetector
-    private let onPreferencesChanged: (DetectedAgentCLI?) -> Void
+    private let onPreferencesChanged: ([BrainProvider: DetectedAgentCLI]?) -> Void
     private let apiKey: APIKeyControls
 
     private var radios: [BrainProvider: NSButton] = [:]
     private var providerNote: NSTextField?
+    private var fallbackPopup: NSPopUpButton?
+    private var fallbackNote: NSTextField?
+    private var listedFallbackProviders: [BrainProvider?] = []
     private var modelPopup: NSPopUpButton?
     /// The models backing the current popup rows, so selection maps back without re-deriving.
     private var listedModels: [BrainModel] = []
@@ -34,7 +38,7 @@ final class BrainSection: NSObject, SettingsSection {
     private var applyPreferencesAfterDetection = false
 
     init(preferences: BrainPreferences, detector: AgentCLIDetector,
-         onPreferencesChanged: @escaping (DetectedAgentCLI?) -> Void,
+         onPreferencesChanged: @escaping ([BrainProvider: DetectedAgentCLI]?) -> Void,
          keyStore: FileSecretStore, onKeySaved: @escaping (String) -> Void) {
         self.preferences = preferences
         self.detector = detector
@@ -46,17 +50,35 @@ final class BrainSection: NSObject, SettingsSection {
         let view = NSView(frame: NSRect(x: 0, y: 0, width: 560, height: 432))
 
         let providerLabel = NSTextField(labelWithString: "Provider")
-        providerLabel.frame = NSRect(x: 24, y: 400, width: 200, height: 20)
+        providerLabel.frame = NSRect(x: 24, y: 400, width: 252, height: 20)
         view.addSubview(providerLabel)
 
         for (row, provider) in BrainProvider.allCases.enumerated() {
             let radio = NSButton(radioButtonWithTitle: provider.displayName,
                                  target: self, action: #selector(providerChanged))
-            radio.frame = NSRect(x: 24, y: 372 - CGFloat(row) * 28, width: 512, height: 20)
+            radio.frame = NSRect(x: 24, y: 372 - CGFloat(row) * 28, width: 252, height: 20)
             radio.setAccessibilityLabel("Brain provider: \(provider.displayName)")
             view.addSubview(radio)
             radios[provider] = radio
         }
+
+        let fallbackLabel = NSTextField(labelWithString: "Fallback Provider")
+        fallbackLabel.frame = NSRect(x: 300, y: 400, width: 236, height: 20)
+        view.addSubview(fallbackLabel)
+
+        let fallbackPopup = NSPopUpButton(
+            frame: NSRect(x: 300, y: 368, width: 236, height: 26))
+        fallbackPopup.target = self
+        fallbackPopup.action = #selector(fallbackChanged)
+        fallbackPopup.setAccessibilityLabel("Fallback brain provider")
+        view.addSubview(fallbackPopup)
+        self.fallbackPopup = fallbackPopup
+
+        let fallbackNote = NSTextField(wrappingLabelWithString: "")
+        fallbackNote.frame = NSRect(x: 300, y: 310, width: 236, height: 50)
+        fallbackNote.textColor = .secondaryLabelColor
+        view.addSubview(fallbackNote)
+        self.fallbackNote = fallbackNote
 
         let providerNote = NSTextField(labelWithString: "")
         providerNote.frame = NSRect(x: 24, y: 288, width: 512, height: 20)
@@ -131,7 +153,7 @@ final class BrainSection: NSObject, SettingsSection {
             renderDetection()
             if applyPreferencesAfterDetection {
                 applyPreferencesAfterDetection = false
-                onPreferencesChanged(detectedCLIs?[preferences.provider])
+                onPreferencesChanged(detectedCLIs)
             }
         }
     }
@@ -175,6 +197,7 @@ final class BrainSection: NSObject, SettingsSection {
         }
         providerNote?.stringValue = note
         reloadModels(for: selected)
+        reloadFallbackProviders(primary: selected)
     }
 
     private static func note(for provider: BrainProvider) -> String {
@@ -195,9 +218,58 @@ final class BrainSection: NSObject, SettingsSection {
         }
     }
 
+    private func reloadFallbackProviders(primary: BrainProvider) {
+        guard let popup = fallbackPopup else { return }
+        listedFallbackProviders = [nil] + BrainProvider.allCases
+            .filter { $0 != primary }
+            .map(Optional.some)
+        popup.removeAllItems()
+        popup.addItems(withTitles: listedFallbackProviders.map {
+            $0?.displayName ?? "Disabled"
+        })
+        let selected = preferences.fallbackProvider
+        if let row = listedFallbackProviders.firstIndex(where: { $0 == selected }) {
+            popup.selectItem(at: row)
+        }
+        for (row, provider) in listedFallbackProviders.enumerated() {
+            guard let provider, provider.usesLocalCLI, let detectedCLIs else { continue }
+            popup.item(at: row)?.isEnabled =
+                detectedCLIs[provider] != nil || provider == selected
+        }
+        guard let selected else {
+            fallbackNote?.stringValue =
+                "Disabled. Jarvis keeps listening after a temporary provider miss."
+            return
+        }
+        var note = "Continues the same conversation after \(primary.displayName) exhausts retries."
+        if selected.usesLocalCLI, let detectedCLIs {
+            if let cli = detectedCLIs[selected] {
+                switch cli.authenticationStatus {
+                case .signedIn:
+                    break
+                case .signedOut:
+                    note += " Sign in before it can be applied."
+                case .unknown:
+                    note += " Sign-in couldn't be confirmed."
+                }
+            } else {
+                note += " The CLI isn't installed."
+            }
+        }
+        fallbackNote?.stringValue = note
+    }
+
     @objc private func providerChanged(_ sender: NSButton) {
         guard let provider = radios.first(where: { $0.value === sender })?.key else { return }
         preferences.provider = provider
+        renderDetection()
+        preferencesDidChange()
+    }
+
+    @objc private func fallbackChanged(_ sender: NSPopUpButton) {
+        let row = sender.indexOfSelectedItem
+        guard listedFallbackProviders.indices.contains(row) else { return }
+        preferences.fallbackProvider = listedFallbackProviders[row]
         renderDetection()
         preferencesDidChange()
     }
@@ -217,10 +289,11 @@ final class BrainSection: NSObject, SettingsSection {
     }
 
     private func preferencesDidChange() {
-        let provider = preferences.provider
-        guard provider.usesLocalCLI else {
+        let providers = [preferences.provider, preferences.fallbackProvider]
+            .compactMap { $0 }
+        guard providers.contains(where: \.usesLocalCLI) else {
             applyPreferencesAfterDetection = false
-            onPreferencesChanged(nil)
+            onPreferencesChanged([:])
             return
         }
         // Never apply a cached preflight while a fresher probe is running. The completion collapses
@@ -230,7 +303,7 @@ final class BrainSection: NSObject, SettingsSection {
             return
         }
         if let detectedCLIs {
-            onPreferencesChanged(detectedCLIs[provider])
+            onPreferencesChanged(detectedCLIs)
         } else {
             applyPreferencesAfterDetection = true
             refreshDetection()

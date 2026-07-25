@@ -1,10 +1,11 @@
 import Foundation
 
-/// Persisted brain selection: the `BrainProvider`, the `BrainModel` chosen *per provider*, and the
-/// `ReasoningEffort` applied to whichever is active. Backed by UserDefaults; each is stored
-/// independently, so switching providers keeps every other choice (and each provider remembers its
-/// own model). Reads are validated against the catalog/enum — a stored value that no longer exists
-/// (e.g. a model dropped from the catalog) falls back to the default rather than reaching the API.
+/// Persisted brain selection: the primary and optional fallback `BrainProvider`, the `BrainModel`
+/// chosen *per provider*, and the `ReasoningEffort` applied to whichever is active. Backed by
+/// UserDefaults; each is stored independently, so switching providers keeps every other choice (and
+/// each provider remembers its own model). Reads are validated against the catalog/enum — a stored
+/// value that no longer exists (e.g. a model dropped from the catalog) falls back to the default
+/// rather than reaching the API.
 /// Foundation-only so it stays unit-testable in JarvisCore; inject a `UserDefaults(suiteName:)` in
 /// tests. Mirrors `OverlayAppearance`.
 public final class BrainPreferences {
@@ -12,6 +13,7 @@ public final class BrainPreferences {
 
     private enum Key {
         static let provider = "brain.provider"
+        static let fallbackProvider = "brain.fallbackProvider"
         static let effort = "brain.reasoningEffort"
         /// The OpenAI model keeps the pre-provider key ("brain.model") so existing installs keep
         /// their selection; CLI providers store under a suffixed key each.
@@ -31,7 +33,30 @@ public final class BrainPreferences {
                   let provider = BrainProvider(rawValue: raw) else { return .openAI }
             return provider
         }
-        set { defaults.set(newValue.rawValue, forKey: Key.provider) }
+        set {
+            defaults.set(newValue.rawValue, forKey: Key.provider)
+            if fallbackProvider == newValue {
+                defaults.removeObject(forKey: Key.fallbackProvider)
+            }
+        }
+    }
+
+    /// The opt-in fallback provider. It is always distinct from the primary; invalid, unknown, or
+    /// equal stored values disable fallback rather than creating a failover loop.
+    public var fallbackProvider: BrainProvider? {
+        get {
+            guard let raw = defaults.string(forKey: Key.fallbackProvider),
+                  let fallback = BrainProvider(rawValue: raw),
+                  fallback != provider else { return nil }
+            return fallback
+        }
+        set {
+            guard let newValue, newValue != provider else {
+                defaults.removeObject(forKey: Key.fallbackProvider)
+                return
+            }
+            defaults.set(newValue.rawValue, forKey: Key.fallbackProvider)
+        }
     }
 
     /// The selected model for the *current* provider. Absent or unknown id → that provider's default.

@@ -3,11 +3,11 @@ import Foundation
 /// The event loop. On a trigger, calls the brain with the timestamped transcript + timing context
 /// and the tool set, and routes tool calls (capture_screen, speak, stay_silent). All judgment lives
 /// in the model — including when to stay quiet and when to answer a direct address — so this just
-/// wires events to tool calls. There is no cooldown or rate cap: every substantive utterance (from
-/// either speaker — an interviewer question can draw a proactive tip) reaches the brain and the brain
-/// decides whether it has anything worth saying (the system prompt carries that restraint). The one
-/// client-side skip is the substance gate: a turn-end whose delta is pure back-channel filler
-/// ("Hmm", "嗯") never becomes a request — see `TurnSubstance`.
+/// wires events to tool calls. There is no coaching cooldown or rate cap: every substantive
+/// utterance (from either speaker — an interviewer question can draw a proactive tip) reaches the
+/// brain and the brain decides whether it has anything worth saying (the system prompt carries that
+/// restraint). The one client-side skip is the substance gate: a turn-end whose delta is pure
+/// back-channel filler ("Hmm", "嗯") never becomes a request — see `TurnSubstance`.
 ///
 /// Session memory is CLIENT-managed (`CoachHistory`): each request is `[system] + history + turn`,
 /// built append-only for prompt-cache hits, and compacted into a summary when it grows past the
@@ -29,6 +29,10 @@ public final class CoachDriver: @unchecked Sendable {
 
     /// Safety backstop against a pathological model that loops on capture_screen forever.
     private let maxToolIterations = 4
+    /// After a configured fallback proves one complete turn, keep it active for a quiet minute before
+    /// probing the primary on a later turn. A failed probe resets the same cooldown, preventing
+    /// provider ping-pong while still returning automatically after a brief outage.
+    static let providerRecoveryCooldownSeconds: TimeInterval = 60
 
     private let stateLock = NSLock()
     /// The coach, its cheaper compaction model, and its provider-specific failure policies move
@@ -47,6 +51,19 @@ public final class CoachDriver: @unchecked Sendable {
     /// The previous active configuration. A replacement keeps it until the replacement itself
     /// completes one non-truncated terminal turn, making a Settings change a transactional cutover.
     private var fallbackBrainConfiguration: BrainConfiguration?
+    /// The user's opt-in fail-forward target. Unlike `fallbackBrainConfiguration`, this is not the
+    /// previous side of a Settings transaction and is never selected implicitly.
+    private var configuredBrainFallback: ConfiguredBrainFallback?
+    private struct ActiveFailover {
+        let primary: BrainConfiguration
+        let fallback: ConfiguredBrainFallback
+        /// Nil until the fallback completes one non-truncated terminal response.
+        var recoveryNotBefore: TimeInterval?
+    }
+    /// Non-nil while the configured fallback owns turns. The primary is retained for a later probe.
+    private var activeFailover: ActiveFailover?
+    /// The failover snapshot whose primary is currently being probed transactionally.
+    private var recoveryAttempt: ActiveFailover?
     private var isHandling = false
     /// Number of transcript lines already sent to the brain. Each turn sends `lines[sentCount...]`
     /// and advances this ONLY after the input reached the server, so a failed turn re-sends its speech.
@@ -63,6 +80,7 @@ public final class CoachDriver: @unchecked Sendable {
     public init(config: Config, transcript: RollingTranscript,
                 brain: BrainClient, brainProvider: BrainProvider? = nil,
                 summarizer: BrainClient? = nil,
+                configuredFallback: ConfiguredBrainFallback? = nil,
                 screen: ScreenCapturing, overlay: OverlayRendering, clock: Clock,
                 onBrainFailure: (@MainActor @Sendable (BrainFailure) -> Void)? = nil) {
         self.config = config
@@ -73,6 +91,7 @@ public final class CoachDriver: @unchecked Sendable {
         self.brainConfiguration = BrainConfiguration(
             revision: 0, brain: brain, provider: brainProvider, summarizer: summarizer,
             onFailure: onBrainFailure, onChangeApplied: nil, onFallback: nil)
+        self.configuredBrainFallback = configuredFallback
         self.sessionStart = clock.now()
     }
 
@@ -95,6 +114,7 @@ public final class CoachDriver: @unchecked Sendable {
         _ brain: BrainClient,
         provider: BrainProvider? = nil,
         summarizer: BrainClient? = nil,
+        configuredFallback: ConfiguredBrainFallback? = nil,
         onBrainFailure: (@MainActor @Sendable (BrainFailure) -> Void)? = nil,
         onBrainChangeApplied: (@Sendable (BrainProvider?, BrainProvider?) -> Void)? = nil,
         onBrainFallback: (@Sendable (BrainProvider?, BrainProvider?) -> Void)? = nil
@@ -110,40 +130,81 @@ public final class CoachDriver: @unchecked Sendable {
             brain: brain, provider: provider, summarizer: summarizer,
             onFailure: onBrainFailure, onChangeApplied: onBrainChangeApplied,
             onFallback: onBrainFallback)
+        configuredBrainFallback = configuredFallback
+        activeFailover = nil
+        recoveryAttempt = nil
         // A provider change is a recovery path if the former provider failed just as Settings was
         // changed. Any failure from the superseded revision is ignored below instead of re-latching.
         terminalBrainFailure = false
         stateLock.unlock()
     }
 
-    private func currentBrainConfiguration() -> BrainConfiguration {
-        stateLock.lock(); defer { stateLock.unlock() }; return brainConfiguration
+    /// Snapshot the active configuration for a new turn. Once a confirmed fallback's cooldown has
+    /// elapsed, install the retained primary as an unconfirmed recovery probe and keep the fallback
+    /// as its transactional rollback.
+    private func brainConfigurationForNextTurn()
+        -> (configuration: BrainConfiguration, recoveryStarted: Bool) {
+        let now = clock.now()
+        stateLock.lock(); defer { stateLock.unlock() }
+        guard let failover = activeFailover,
+              let recoveryNotBefore = failover.recoveryNotBefore,
+              now >= recoveryNotBefore,
+              fallbackBrainConfiguration == nil,
+              brainConfiguration.provider == failover.fallback.provider else {
+            return (brainConfiguration, false)
+        }
+        let primary = BrainConfiguration(
+            revision: brainConfiguration.revision &+ 1,
+            brain: failover.primary.brain, provider: failover.primary.provider,
+            summarizer: failover.primary.summarizer, onFailure: failover.primary.onFailure,
+            onChangeApplied: failover.primary.onChangeApplied,
+            onFallback: failover.primary.onFallback)
+        fallbackBrainConfiguration = brainConfiguration
+        brainConfiguration = primary
+        activeFailover = nil
+        recoveryAttempt = failover
+        return (primary, true)
     }
 
     /// Commit a successful cutover only if this is still the active revision. A turn on a provider
     /// superseded while it was in flight must not discard the newer replacement's fallback.
     private func confirmBrainConfiguration(_ revision: UInt) {
-        var callback: (@Sendable (BrainProvider?, BrainProvider?) -> Void)?
-        var previousProvider: BrainProvider?
-        var activeProvider: BrainProvider?
+        let recoveryNotBefore = clock.now() + Self.providerRecoveryCooldownSeconds
+        var callback: (@Sendable () -> Void)?
         stateLock.lock()
-        if brainConfiguration.revision == revision,
-           let fallback = fallbackBrainConfiguration {
-            callback = brainConfiguration.onChangeApplied
-            previousProvider = fallback.provider
-            activeProvider = brainConfiguration.provider
-            fallbackBrainConfiguration = nil
+        if brainConfiguration.revision == revision {
+            if let attempt = recoveryAttempt,
+               fallbackBrainConfiguration != nil {
+                let primary = brainConfiguration.provider
+                callback = {
+                    attempt.fallback.onPrimaryRecovered?(
+                        primary, attempt.fallback.provider)
+                }
+                fallbackBrainConfiguration = nil
+                recoveryAttempt = nil
+            } else if var failover = activeFailover,
+                      failover.recoveryNotBefore == nil,
+                      brainConfiguration.provider == failover.fallback.provider {
+                failover.recoveryNotBefore = recoveryNotBefore
+                activeFailover = failover
+            } else if let fallback = fallbackBrainConfiguration {
+                let onChangeApplied = brainConfiguration.onChangeApplied
+                let previous = fallback.provider
+                let active = brainConfiguration.provider
+                callback = { onChangeApplied?(previous, active) }
+                fallbackBrainConfiguration = nil
+            }
         }
         stateLock.unlock()
-        callback?(previousProvider, activeProvider)
+        callback?()
     }
 
     /// Restore the previous active configuration when an unconfirmed replacement fails. The restored
     /// clients get a fresh revision so stale failures cannot match them through an ABA-style race.
     private func restoreFallback(
         for failing: BrainConfiguration
-    ) -> (configuration: BrainConfiguration,
-          callback: (@Sendable (BrainProvider?, BrainProvider?) -> Void)?)? {
+    ) -> (configuration: BrainConfiguration, callback: (@Sendable () -> Void)?)? {
+        let nextRecovery = clock.now() + Self.providerRecoveryCooldownSeconds
         stateLock.lock(); defer { stateLock.unlock() }
         guard brainConfiguration.revision == failing.revision,
               let fallback = fallbackBrainConfiguration else { return nil }
@@ -154,8 +215,77 @@ public final class CoachDriver: @unchecked Sendable {
             onFallback: fallback.onFallback)
         brainConfiguration = restored
         fallbackBrainConfiguration = nil
+        let callback: (@Sendable () -> Void)?
+        if var attempt = recoveryAttempt {
+            attempt.recoveryNotBefore = nextRecovery
+            let deferredAttempt = attempt
+            activeFailover = deferredAttempt
+            recoveryAttempt = nil
+            callback = {
+                deferredAttempt.fallback.onRecoveryDeferred?(
+                    failing.provider, deferredAttempt.fallback.provider)
+            }
+        } else {
+            let onFallback = failing.onFallback
+            callback = { onFallback?(failing.provider, restored.provider) }
+        }
         terminalBrainFailure = false
-        return (restored, failing.onFallback)
+        return (restored, callback)
+    }
+
+    /// Fail forward only from the established active provider, after its retry wrapper has thrown a
+    /// temporary failure. The configured fallback gets a fresh revision and remains active through
+    /// truncation or temporary misses until it proves one complete terminal response.
+    private func activateConfiguredFallback(
+        for failing: BrainConfiguration
+    ) -> (configuration: BrainConfiguration, callback: (@Sendable () -> Void)?)? {
+        stateLock.lock(); defer { stateLock.unlock() }
+        guard brainConfiguration.revision == failing.revision,
+              fallbackBrainConfiguration == nil,
+              activeFailover == nil,
+              recoveryAttempt == nil,
+              let fallback = configuredBrainFallback,
+              failing.provider != fallback.provider else { return nil }
+        let activated = BrainConfiguration(
+            revision: brainConfiguration.revision &+ 1,
+            brain: fallback.brain, provider: fallback.provider,
+            summarizer: fallback.summarizer, onFailure: fallback.onFailure,
+            onChangeApplied: nil, onFallback: nil)
+        brainConfiguration = activated
+        activeFailover = ActiveFailover(
+            primary: failing, fallback: fallback, recoveryNotBefore: nil)
+        terminalBrainFailure = false
+        let callback: (@Sendable () -> Void)? = {
+            fallback.onActivated?(failing.provider, fallback.provider)
+        }
+        return (activated, callback)
+    }
+
+    /// A terminal failure from the configured fallback disables that target for this live session
+    /// and restores the retained primary for the next trigger. It does not retry the same turn on the
+    /// provider that already failed, and it cannot re-enter the unusable fallback loop.
+    private func restorePrimaryAfterUnavailableFallback(
+        for failing: BrainConfiguration
+    ) -> (@Sendable () -> Void)? {
+        stateLock.lock(); defer { stateLock.unlock() }
+        guard brainConfiguration.revision == failing.revision,
+              let failover = activeFailover,
+              failing.provider == failover.fallback.provider else { return nil }
+        let restored = BrainConfiguration(
+            revision: brainConfiguration.revision &+ 1,
+            brain: failover.primary.brain, provider: failover.primary.provider,
+            summarizer: failover.primary.summarizer, onFailure: failover.primary.onFailure,
+            onChangeApplied: failover.primary.onChangeApplied,
+            onFallback: failover.primary.onFallback)
+        brainConfiguration = restored
+        configuredBrainFallback = nil
+        activeFailover = nil
+        recoveryAttempt = nil
+        terminalBrainFailure = false
+        return {
+            failover.fallback.onUnavailable?(
+                restored.provider, failover.fallback.provider)
+        }
     }
 
     /// Atomically claim the single in-flight slot, OR (if busy) record the trigger as pending. One
@@ -283,7 +413,11 @@ public final class CoachDriver: @unchecked Sendable {
         // Keep one provider/model for the whole turn, including the manual-hint capture below. This
         // snapshot must precede that await: a Settings update while capture is in flight belongs to
         // the next turn, not the already-started hint.
-        var brains = currentBrainConfiguration()
+        let selection = brainConfigurationForNextTurn()
+        var brains = selection.configuration
+        if selection.recoveryStarted {
+            jlog("Jarvis coach: fallback cooldown elapsed — probing the primary provider")
+        }
 
         // Manual hint (hotkey): the user explicitly asked for help, so capture the screen HERE and
         // inject it into THIS first request — no waiting for the model to call capture_screen.
@@ -322,6 +456,10 @@ public final class CoachDriver: @unchecked Sendable {
         // provider-specific tool state and restart this same turn from the original provider-neutral
         // messages on the last working brain.
         let initialTurnMessages = turnMessages
+        // A cross-provider retry may keep completed screen work, but never provider-specific raw
+        // reasoning, tool-call ids, or call/result pairing. Captures are mirrored here as ordinary
+        // user context so switching providers does not mechanically recapture the same screen.
+        var providerNeutralTurnMessages = initialTurnMessages
         var committed = false
         var iterations = 0
         var lastResponseCompleted = false
@@ -338,14 +476,34 @@ public final class CoachDriver: @unchecked Sendable {
                 jlog("Jarvis coach: brain request failed on \(reason): \(detail)")
                 if let fallback = restoreFallback(for: brains) {
                     jlog("Jarvis coach: replacement brain failed — retrying this turn on the previous configuration")
-                    fallback.callback?(brains.provider, fallback.configuration.provider)
+                    fallback.callback?()
                     brains = fallback.configuration
-                    turnMessages = initialTurnMessages
+                    turnMessages = providerNeutralTurnMessages
                     iterations = 0
                     lastResponseCompleted = false
                     continue
                 }
                 let failure = BrainFailure(error)
+                if failure.disposition == .temporary,
+                   let fallback = activateConfiguredFallback(for: brains) {
+                    jlog("Jarvis coach: primary retries exhausted — retrying this turn on the configured fallback")
+                    fallback.callback?()
+                    brains = fallback.configuration
+                    turnMessages = providerNeutralTurnMessages
+                    iterations = 0
+                    lastResponseCompleted = false
+                    continue
+                }
+                if failure.disposition == .terminal,
+                   let unavailable = restorePrimaryAfterUnavailableFallback(for: brains) {
+                    jlog("Jarvis coach: configured fallback is unavailable — disabling it for this session")
+                    unavailable()
+                    if committed {
+                        commitIfWorthKeeping(
+                            providerNeutralTurnMessages, deltaText: delta.text)
+                    }
+                    return .brainError
+                }
                 switch failure.disposition {
                 case .temporary:
                     if let onFailure = brains.onFailure {
@@ -376,7 +534,9 @@ public final class CoachDriver: @unchecked Sendable {
                 // Speech already marked sent (a later-iteration failure) must not vanish from memory —
                 // commit what this turn accumulated. A first-request failure commits nothing; the
                 // un-advanced sentCount re-sends the delta next turn instead.
-                if committed { commitIfWorthKeeping(turnMessages, deltaText: delta.text) }
+                if committed {
+                    commitIfWorthKeeping(providerNeutralTurnMessages, deltaText: delta.text)
+                }
                 return .brainError
             }
             lastResponseCompleted = response.incompleteReason == nil
@@ -433,6 +593,14 @@ public final class CoachDriver: @unchecked Sendable {
                 } else {
                     jlog("👁 screenshot failed")
                     ActivityLog.shared.record(.screenViewFailed)
+                }
+                if let shot {
+                    providerNeutralTurnMessages.append(
+                        .user(Self.captureResultText(shot)))
+                    providerNeutralTurnMessages.append(.userImage(shot.imageBase64))
+                } else {
+                    providerNeutralTurnMessages.append(
+                        .user("A screen capture requested earlier in this turn failed."))
                 }
                 // Thread the call + its result into this turn's messages; the next iteration's
                 // request carries them (and they land in history at commit, where the screenshot

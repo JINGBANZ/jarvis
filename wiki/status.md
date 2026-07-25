@@ -25,15 +25,21 @@ replacement socket replays the rest after a half-open failure. A live Wi-Fi reco
 that speech captured during the outage returns after recovery. The brain can also run through a
 locally installed Claude Code or Codex CLI on the user's subscription; Settings → Brain auto-detects
 those providers, reports Claude's current sign-in state from its bounded status command, and keeps
-the OpenAI API-key path available. Provider, model, and effort changes apply transactionally between
-turns without restarting the session: the previous brain remains available until the replacement
-finishes a non-truncated terminal turn, and Activity records a fixed provider-only success or
-fallback notice. Codex coaching calls suppress project instructions and its feature-gated agent
-tools, run as direct-response decisions, inherit only stable executable-search paths, and stop under
-a provider-specific stall bound instead of leaving later speech batched indefinitely. Brain
-providers share one recoverability policy across adapter, immediate retry, and lifecycle:
-temporary or unknown failures miss one turn but preserve the transcript, pending triggers, history,
-capture, and transcription for the next attempt; only an explicitly permanent failure stops.
+the OpenAI API-key path available. A distinct optional fallback provider can continue the same
+pending turn after a temporary primary failure exhausts its immediate retry policy; it keeps the
+client-managed conversation and completed screen observation without carrying provider-specific
+tool state across transports. The fallback stays active until a complete, non-truncated turn, then
+serves a 60-second cooldown before a later turn probes the retained primary; a failed probe restores
+the fallback transactionally and resets the cooldown. Provider, model, effort, and fallback changes
+apply transactionally between turns without restarting the session: the previous brain remains
+available until the replacement finishes a non-truncated terminal turn, and Activity records fixed
+provider-only switch, failover, recovery, or fallback notices. Codex coaching calls suppress project
+instructions and its feature-gated agent tools, run as direct-response decisions, inherit only stable
+executable-search paths, and stop under a provider-specific stall bound instead of leaving later
+speech batched indefinitely. Brain providers share one recoverability policy across adapter,
+immediate retry, and lifecycle: temporary or unknown failures preserve the transcript, pending
+triggers, history, capture, and transcription; they miss one turn only when no configured fallback
+can continue it. Only an explicitly permanent failure stops.
 Saving an API key while running also preserves those live objects: existing Realtime sockets take
 the key on their next reconnect, and an OpenAI brain update remains transactional. Audio
 route rebuilds likewise retry before declaring capture unavailable, and stale capture callbacks
@@ -56,10 +62,14 @@ question and confirm it can answer without an unnecessary capture. Finish the in
 provider smoke: confirm Settings shows it signed in, then confirm a coaching turn and screen request.
 While that session runs, switch providers and confirm the next completed turn preserves context and
 adds the provider-only success notice to Activity; then exercise a failed replacement and confirm
-the previous provider continues the conversation with a provider-only fallback notice. Finish the
-in-app Codex smoke through audio and the overlay, then confirm a missing or signed-out CLI fails
-loudly. Exercise one forced temporary brain miss and one audio-route switch: Activity should say
-listening continues, the next turn should include the unsent speech, and capture should recover
+the previous provider continues the conversation with a provider-only fallback notice. Configure
+Codex as the fallback, force a temporary primary miss after retries, and confirm that the same
+pending turn completes on Codex without a second screenshot. Confirm Activity names the failover,
+later turns remain on Codex during the quiet cooldown, and a successful primary probe records
+recovery without restarting capture or transcription. Then confirm a missing or signed-out fallback
+fails preflight without replacing the live configuration. Finish the in-app Codex smoke through
+audio and the overlay. Exercise one audio-route switch: Activity should say listening continues, the
+next turn should include any unsent speech, and capture should recover
 without rotating the session. Stop that session, click **Evaluate**, and confirm the agentic report
 opens and identifies the temporary miss from the complete Activity log without misclassifying it as
 a stopped conversation. The standard release checklist remains in
@@ -73,7 +83,7 @@ thin OS shell, verified by the smoke run.
 - `Sources/JarvisCore/Audio/` — transactional PCM + utterance buffering, adaptive content-free activity detection, non-destructive AEC reference alignment, and system-audio timeline preservation (`PCMBuffer`, `UtteranceBuffer`, `PCM16Framer`, `AudioDownmix`, `AdaptiveAudioActivityDetector`, `EchoReferenceAlignment`, `SystemAudioTimeline`).
 - `Sources/JarvisCore/Transcription/` — realtime session wire contract, per-item event ledger, and rolling transcript (`RealtimeSession`, `RealtimeTranscriptionLedger`, `Transcript`, `NoiseReduction`).
 - `Sources/JarvisCore/Brain/` — the LLM integration: the `BrainClient` contract (`Brain`), `OpenAIBrainClient`, `CLIBrainClient` + `AgentCLIProcessRunner` + `AgentCLIDetector`/`AgentCLIAuthenticationStatus` (the local Claude Code / Codex brain providers and sign-in state), shared retry/lifecycle classification (`BrainFailure`), `RetryingBrainClient`, `BrainProvider`, `BrainModelCatalog` (default `gpt-5.5`), `ReasoningEffort`.
-- `Sources/JarvisCore/Coach/` — the event loop: `CoachDriver` (including transactional between-turn brain replacement), `CoachHistory` (client-managed session memory), `ToolDefs` (coach tools + system prompt).
+- `Sources/JarvisCore/Coach/` — the event loop: `CoachDriver` (including transactional between-turn brain replacement and configured provider failover/recovery), `ConfiguredBrainFallback`, `CoachHistory` (client-managed session memory), `ToolDefs` (coach tools + system prompt).
 - `Sources/JarvisCore/Triggers/` — turn/silence trigger detection, substance classification, and silence backoff (`Trigger`, `TurnSubstance`, `SilenceBackoff`).
 - `Sources/JarvisCore/Screen/` — the model-triggered screen-capture tool contract + window-scoped capture logic (`ScreenCapture`, `ScreenSnapshot`, `FrontWindowSelector`, `RecognizedTextLayout`).
 - `Sources/JarvisCore/Overlay/` — overlay text model + length-proportional timing + fan-out (`OverlayRendering`, `OverlayTiming`, `OverlayAppearance`, `BroadcastOverlay`).
@@ -83,7 +93,7 @@ thin OS shell, verified by the smoke run.
 - `Sources/JarvisOverlay/` — the capture-invisible `NSPanel` surfaces: `OverlayCaptionPanel` (transient), `OverlayBoxPanel` (persistent), `NSPanel+CaptureExclusion`.
 - `Sources/JarvisApp/App/` + `MenuBar/` — entry point, connection-aware menu status, Start/Stop, `ErrorReporter` (startup alerts plus an unconditional no-presentation runtime policy).
 - `Sources/JarvisApp/Capture/` — one-clock aggregate mic + sample-preserving system-audio capture with AEC3 echo cancellation + resampling (`AggregateEchoCapture`, `WebRTCEchoCanceller`, `Resampler`), Realtime item/readiness/liveness/transactional-reconnect/witness handling (`RealtimeTranscriber`, `NetworkPathDiagnostics`), permissions, plus the window-scoped screenshot + OCR edge (`WindowScopedScreenCapture`, `ScreenTextRecognizer`).
-- `Sources/JarvisApp/Settings/` — the unified Settings window (`SettingsWindow` hosting Brain (provider + model + API key) / Overlay / Screen / Activity sections).
+- `Sources/JarvisApp/Settings/` — the unified Settings window (`SettingsWindow` hosting Brain (primary + optional fallback provider, model, effort, and API key) / Overlay / Screen / Activity sections).
 - `Sources/JarvisApp/Shortcuts/HotkeyController.swift` — the global Carbon ⌥⌘J on-demand-hint hotkey.
 - `Sources/JarvisApp/Viewer/ActivityViewer.swift` — the in-app `WKWebView` activity viewer, with an exact selectable/copyable session ID and one-click **Evaluate** / **Open report** agentic audit flow.
 - `Sources/EvalPrep/main.swift` — the Foundation-only terminal entry point for the same `AgenticEvaluator` Activity invokes; `scripts/eval-session.sh` runs it over the repo + session dir.

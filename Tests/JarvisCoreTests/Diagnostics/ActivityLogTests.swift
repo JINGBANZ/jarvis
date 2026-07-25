@@ -219,6 +219,42 @@ import Foundation
         ))
     }
 
+    @Test func providerFailoverLifecycleUsesFixedProviderOnlyCopy() throws {
+        let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
+        let log = ActivityLog(); log.enable(directory: dir)
+        log.record(.brainFailover(primary: .openAI, fallback: .claudeCode))
+        log.record(.brainPrimaryRecovered(primary: .openAI, fallback: .claudeCode))
+        log.record(.brainRecoveryDeferred(primary: .openAI, fallback: .claudeCode))
+        log.record(.brainFallbackUnavailable(primary: .openAI, fallback: .claudeCode))
+        let snapshot = log.attach { _ in }
+
+        #expect(snapshot.rows.count == 4)
+        #expect(snapshot.rows[0].contains(
+            "OpenAI API couldn't respond — continuing on Claude Code"))
+        #expect(snapshot.rows[1].contains(
+            "OpenAI API recovered — switching back from Claude Code"))
+        #expect(snapshot.rows[2].contains(
+            "OpenAI API recovery failed — continuing on Claude Code"))
+        #expect(snapshot.rows[3].contains(
+            "Claude Code fallback couldn't respond — OpenAI API will retry on the next turn"))
+        #expect(!snapshot.rows.joined().contains("timeout"))
+        #expect(!snapshot.rows.joined().contains("retry count"))
+
+        let jsonl = try String(
+            contentsOf: dir.appendingPathComponent(ActivityLog.filename), encoding: .utf8)
+        let kinds = try jsonl.split(separator: "\n").map { line in
+            let value = try #require(
+                try JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any])
+            return value["k"] as? String
+        }
+        #expect(kinds == [
+            ActivityLog.EventKind.brainFailover.rawValue,
+            ActivityLog.EventKind.brainPrimaryRecovered.rawValue,
+            ActivityLog.EventKind.brainRecoveryDeferred.rawValue,
+            ActivityLog.EventKind.brainFallbackUnavailable.rawValue,
+        ])
+    }
+
     @Test func runtimeFailureNoticesStayFixedAndDiagnosticFree() throws {
         let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         let log = ActivityLog(); log.enable(directory: dir)

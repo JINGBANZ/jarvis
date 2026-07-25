@@ -22,16 +22,23 @@ enum EvaluationTranscript {
             else { continue }
             callNumber += 1
             let tag = entry["tag"] as? String ?? "?"
+            let request = entry["request"] as? [String: Any]
+            let response = entry["response"] as? [String: Any]
+            let provider = SessionMetrics.providerName(request: request, response: response)
+            // A session can fail over while keeping the same logical client tag. Prefix-elision state
+            // must not cross providers: their wire schemas, cache behavior, and tool-loop state differ.
+            let streamKey = "\(tag)\u{1F}\(provider)"
             var lines: [String] = []
 
             var header = "=== call #\(callNumber) · \(tag) · \(entry["t"] as? String ?? "?")"
+            header += " · \(provider)"
             if let status = entry["status"] as? Int { header += " · HTTP \(status)" }
             if let ms = entry["ms"] as? Int { header += " · \(ms) ms" }
             lines.append(header)
             if let error = entry["error"] as? String { lines.append("TRANSPORT ERROR: \(error)") }
 
-            if let request = entry["request"] as? [String: Any] {
-                lines.append(contentsOf: renderRequest(request, tag: tag,
+            if let request {
+                lines.append(contentsOf: renderRequest(request, tag: tag, streamKey: streamKey,
                                                        prevInstructions: &prevInstructions,
                                                        prevTools: &prevTools,
                                                        prevInput: &prevInput))
@@ -49,7 +56,7 @@ enum EvaluationTranscript {
         return SessionMetrics.render(jsonl: jsonl) + "\n\n" + body
     }
 
-    private static func renderRequest(_ request: [String: Any], tag: String,
+    private static func renderRequest(_ request: [String: Any], tag: String, streamKey: String,
                                       prevInstructions: inout [String: String],
                                       prevTools: inout [String: String],
                                       prevInput: inout [String: [String]]) -> [String] {
@@ -61,26 +68,26 @@ enum EvaluationTranscript {
         lines.append(params)
 
         let instructions = request["instructions"] as? String ?? ""
-        if instructions == prevInstructions[tag] {
+        if instructions == prevInstructions[streamKey] {
             lines.append("instructions: (unchanged — \(instructions.count) chars)")
         } else if !instructions.isEmpty {
             lines.append("instructions (\(instructions.count) chars):\n\(instructions)")
         }
-        prevInstructions[tag] = instructions
+        prevInstructions[streamKey] = instructions
 
         let tools = canonical(request["tools"] ?? [])
-        if tools == prevTools[tag] {
+        if tools == prevTools[streamKey] {
             let count = (request["tools"] as? [Any])?.count ?? 0
             lines.append("tools: (unchanged — \(count) defs)")
         } else {
             lines.append("tools: \(tools)")
         }
-        prevTools[tag] = tools
+        prevTools[streamKey] = tools
 
         let items = request["input"] as? [Any] ?? []
         let rendered = items.map { renderInputItem($0) }
         let canon = items.map { canonical($0) }
-        let prev = prevInput[tag] ?? []
+        let prev = prevInput[streamKey] ?? []
         var shared = 0
         while shared < min(canon.count, prev.count), canon[shared] == prev[shared] { shared += 1 }
         lines.append("input (\(items.count) items):")
@@ -88,7 +95,7 @@ enum EvaluationTranscript {
             lines.append("  [items 1–\(shared) unchanged from the previous \(tag) call — the stable, cacheable prefix]")
         }
         lines.append(contentsOf: rendered.dropFirst(shared).map { "  \($0)" })
-        prevInput[tag] = canon
+        prevInput[streamKey] = canon
         return lines
     }
 

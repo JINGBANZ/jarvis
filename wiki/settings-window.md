@@ -49,7 +49,7 @@ so an unwrapped fixed-frame view would ride the bottom edge in a taller window).
 
 | Section class | Tab title | Always present | Description |
 |---|---|---|---|
-| `BrainSection` | "Brain" | yes | Everything that decides who answers a coaching turn, in one tab: the provider radios (OpenAI API / Claude Code / Codex CLI — see [Brain](#brain)), a per-provider model dropdown, the reasoning-effort dropdown (one global setting, mapped onto each provider's scale), and the OpenAI API-key controls (`APIKeyControls`: an `NSSecureTextField` that saves to an owner-only file). Saving a key never restarts a live conversation: established Realtime sockets stay connected and use it on a later reconnect, while an OpenAI brain update uses the same transactional between-turn fallback as other Brain changes. Brain choices take effect on the next coaching turn while running, or the next Start while stopped. |
+| `BrainSection` | "Brain" | yes | Everything that decides who answers a coaching turn, in one tab: the primary-provider radios (OpenAI API / Claude Code / Codex CLI — see [Brain](#brain)), an optional distinct fallback-provider dropdown, a per-provider model dropdown, the reasoning-effort dropdown (one global setting, mapped onto each provider's scale), and the OpenAI API-key controls (`APIKeyControls`: an `NSSecureTextField` that saves to an owner-only file). Saving a key never restarts a live conversation: established Realtime sockets stay connected and use it on a later reconnect, while an OpenAI brain update uses the same transactional between-turn fallback as other Brain changes. Brain choices take effect on the next coaching turn while running, or the next Start while stopped. |
 | `OverlaySection` | "Overlay" | yes | Two groups, one per overlay surface — **Overlay Caption** (the transient on-screen tip) and **Overlay Box** (the persistent response history). Each has a header with an On/Off toggle (an `NSSwitch` + "On"/"Off" label) and a one-line description. When a surface is **on** it also shows its Text Size + Opacity sliders (with live readouts) and a live sample, **only while the Overlay tab is selected** (`didBecomeActive`/`didResignActive`); when **off**, its sliders and sample are hidden and the layout collapses. Persists via `OverlayAppearance`. |
 | `DisplaySection` | "Screen" | yes | One dropdown — the capture scope: **Active window** (default) or one **Entire display** entry per connected display; persists via `ScreenCapturePreferences`. Applies to the next screenshot. |
 | `ActivitySection` | "Activity" | yes | Embeds the `ActivityViewer` content view (`makeContentView()` / `teardown()`); `fillsTab == true` so the log stretches with the window. Its header shows the selected session's exact directory ID with **Copy ID**. A session without a report shows **Evaluate**: one click runs the sole `AgenticEvaluator` through a locally installed Claude Code / Codex CLI over the source checkout plus the complete session directory, writes owner-only `eval-report.md`, and opens it. While it runs the button shows **Evaluating…**; afterward it becomes **Open report**, which reopens the saved result without another model run. The agent reads the full unfiltered `jarvis-activity.jsonl` whenever it needs the user-visible sequence and correlates it with `brain-traffic.jsonl`, screenshots, and live source. `scripts/eval-session.sh` is a second launcher for this same Core evaluator, not another evaluation path. `EvalReportPage` renders the markdown as `eval-report.html`; **Copy as Markdown** hands the raw report to an agent chat. Evaluation, report opening, and history clearing stay disabled through the live coaching/teardown lifecycle. |
@@ -126,6 +126,25 @@ fallback described below. Both paths keep detailed error and sign-in information
 HTTP failures remain temporary unless an explicit authentication, billing, access, or configuration
 signal proves the provider unusable.
 
+**Fallback provider.** A separate dropdown defaults to **Disabled** and lists only providers distinct
+from the primary. Selecting one is explicit authorization to send the same coaching conversation to
+that provider after a temporary primary failure exhausts its own immediate retry policy. It follows
+the same binary/sign-in preflight as a primary CLI: an unavailable selection cannot replace a live
+configuration or start a new session. The fallback uses its own remembered model and the shared
+effort setting. On failover, `CoachDriver` retries the same pending turn without restarting
+transcription, capture, history, or the session. If the failed primary already completed a screen
+capture, the fallback receives that observation once as provider-neutral user context; raw reasoning,
+tool-call ids, and call/result pairing never cross providers.
+
+The fallback remains active through incomplete responses and temporary misses until it completes one
+non-truncated terminal turn. It then serves later turns for a 60-second quiet cooldown. The first
+later turn after that deadline probes the retained primary transactionally; success switches back,
+while failure retries that turn on the fallback and starts a fresh cooldown. This permits automatic
+recovery without concurrent provider calls or turn-by-turn ping-pong. A terminal fallback failure
+disables it for the live session and restores the primary for the next turn. Activity records fixed,
+provider-only failover, recovery, deferred-recovery, and unavailable-fallback notices; raw failure and
+retry detail remains only in `jarvis-debug.log`.
+
 **Model + effort.** A **Model** dropdown drawn from `BrainModelCatalog` per provider (OpenAI ids for
 the API; CLI aliases like `sonnet` for the CLIs, plus a "CLI default" entry meaning "no model flag" —
 for Codex that is its built-in default, since harness runs ignore the user's codex config). Each
@@ -160,7 +179,7 @@ notice. Runtime fallback changes the live brain only; the attempted choice remai
 user can retry it or select something else deliberately. While stopped, persisted changes apply on
 the **next Start**.
 
-All four selections persist via `BrainPreferences` —
+All Brain choices persist via `BrainPreferences` —
 `Sources/JarvisCore/Config/BrainPreferences.swift` is the single source for the UserDefaults keys,
 defaults, and validation (the catalogs themselves live in
 `Sources/JarvisCore/Brain/BrainModelCatalog.swift`).
@@ -208,7 +227,7 @@ from an old entire-display selection never steers them.
 |---|---|
 | `Sources/JarvisApp/Settings/SettingsSection.swift` | Protocol definition |
 | `Sources/JarvisApp/Settings/SettingsWindow.swift` | Host window + tab view |
-| `Sources/JarvisApp/Settings/BrainSection.swift` | Brain tab: provider + model + effort + key |
+| `Sources/JarvisApp/Settings/BrainSection.swift` | Brain tab: primary/fallback providers + model + effort + key |
 | `Sources/JarvisApp/Settings/APIKeyControls.swift` | The API-key rows embedded in the Brain tab |
 | `Sources/JarvisApp/Settings/OverlaySection.swift` | Overlay-appearance tab |
 | `Sources/JarvisApp/Settings/DisplaySection.swift` | Capture-scope tab (scope + display in one dropdown) |
@@ -220,6 +239,7 @@ from an old entire-display selection never steers them.
 | `Sources/JarvisCore/Brain/ReasoningEffort.swift` | The four effort levels |
 | `Sources/JarvisCore/Diagnostics/AgenticEvaluator.swift` | Read-only Claude Code / Codex session audit invoked by Activity and `EvalPrep` |
 | `Sources/JarvisCore/Config/BrainPreferences.swift` | UserDefaults persistence + validation |
+| `Sources/JarvisCore/Coach/ConfiguredBrainFallback.swift` | Preflighted fallback clients and fixed lifecycle callbacks |
 | `Sources/JarvisCore/Config/ScreenCapturePreferences.swift` | Capture scope + display persistence + clamping |
 | `Sources/JarvisCore/Screen/ScreenCapture.swift` | `ScreenCaptureCLI` — reads the selection at capture time, falls back to the main display |
 | `Sources/JarvisCore/Config/Config.swift` | `overlayCaption*`/`overlayBox*` size + opacity ranges, enabled + appearance defaults |

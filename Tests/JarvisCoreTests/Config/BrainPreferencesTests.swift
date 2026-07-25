@@ -41,6 +41,7 @@ import Foundation
     @Test func providerDefaultsToOpenAIAndRoundTrips() {
         let d = freshDefaults()
         #expect(BrainPreferences(defaults: d).provider == .openAI)
+        #expect(BrainPreferences(defaults: d).fallbackProvider == nil)
         BrainPreferences(defaults: d).provider = .claudeCode
         #expect(BrainPreferences(defaults: d).provider == .claudeCode)
     }
@@ -49,6 +50,29 @@ import Foundation
         let d = freshDefaults()
         d.set("gemini-cli", forKey: "brain.provider")
         #expect(BrainPreferences(defaults: d).provider == .openAI)
+    }
+
+    @Test func fallbackProviderRoundTripsAndMustDifferFromPrimary() {
+        let d = freshDefaults()
+        let p = BrainPreferences(defaults: d)
+        p.fallbackProvider = .claudeCode
+        #expect(BrainPreferences(defaults: d).fallbackProvider == .claudeCode)
+
+        p.fallbackProvider = .openAI
+        #expect(p.fallbackProvider == nil)
+        #expect(d.string(forKey: "brain.fallbackProvider") == nil)
+
+        p.fallbackProvider = .claudeCode
+        p.provider = .claudeCode
+        #expect(p.fallbackProvider == nil)
+    }
+
+    @Test func unknownOrEqualStoredFallbackIsDisabled() {
+        let d = freshDefaults()
+        d.set("future-provider", forKey: "brain.fallbackProvider")
+        #expect(BrainPreferences(defaults: d).fallbackProvider == nil)
+        d.set(BrainProvider.openAI.rawValue, forKey: "brain.fallbackProvider")
+        #expect(BrainPreferences(defaults: d).fallbackProvider == nil)
     }
 
     @Test func eachProviderRemembersItsOwnModel() {

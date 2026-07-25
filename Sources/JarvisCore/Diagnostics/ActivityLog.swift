@@ -30,6 +30,10 @@ public final class ActivityLog: @unchecked Sendable {
         case settingsChangeNotApplied
         case brainChangeApplied
         case brainFallback
+        case brainFailover
+        case brainPrimaryRecovered
+        case brainRecoveryDeferred
+        case brainFallbackUnavailable
     }
 
     /// A human-visible event in the coaching exchange. Keeping this closed set typed prevents
@@ -73,6 +77,16 @@ public final class ActivityLog: @unchecked Sendable {
         /// A live brain replacement failed its first turn, so Jarvis restored the previous active
         /// provider. Carries provider identities only; raw failure detail stays in jlog.
         case brainFallback(failed: BrainProvider, restored: BrainProvider)
+        /// The established primary exhausted its immediate retry budget for a temporary failure, so
+        /// Jarvis continued the same turn on the user's configured fallback.
+        case brainFailover(primary: BrainProvider, fallback: BrainProvider)
+        /// A cooldown elapsed on the fallback and the primary completed its recovery probe.
+        case brainPrimaryRecovered(primary: BrainProvider, fallback: BrainProvider)
+        /// A primary recovery probe missed, so the working fallback keeps the conversation.
+        case brainRecoveryDeferred(primary: BrainProvider, fallback: BrainProvider)
+        /// The configured fallback proved unusable. It is disabled for this live session, while the
+        /// primary conversation remains available for a later turn.
+        case brainFallbackUnavailable(primary: BrainProvider, fallback: BrainProvider)
 
         var kind: EventKind {
             switch self {
@@ -90,6 +104,10 @@ public final class ActivityLog: @unchecked Sendable {
             case .settingsChangeNotApplied: .settingsChangeNotApplied
             case .brainChangeApplied: .brainChangeApplied
             case .brainFallback: .brainFallback
+            case .brainFailover: .brainFailover
+            case .brainPrimaryRecovered: .brainPrimaryRecovered
+            case .brainRecoveryDeferred: .brainRecoveryDeferred
+            case .brainFallbackUnavailable: .brainFallbackUnavailable
             }
         }
     }
@@ -224,6 +242,18 @@ public final class ActivityLog: @unchecked Sendable {
             } else {
                 message = "⚠️ brain switch failed — \(failed.displayName) couldn't respond; \(restored.displayName) restored"
             }
+            imageBase64 = nil
+        case .brainFailover(let primary, let fallback):
+            message = "⚠️ \(primary.displayName) couldn't respond — continuing on \(fallback.displayName)"
+            imageBase64 = nil
+        case .brainPrimaryRecovered(let primary, let fallback):
+            message = "🧠 \(primary.displayName) recovered — switching back from \(fallback.displayName)"
+            imageBase64 = nil
+        case .brainRecoveryDeferred(let primary, let fallback):
+            message = "⚠️ \(primary.displayName) recovery failed — continuing on \(fallback.displayName)"
+            imageBase64 = nil
+        case .brainFallbackUnavailable(let primary, let fallback):
+            message = "⚠️ \(fallback.displayName) fallback couldn't respond — \(primary.displayName) will retry on the next turn"
             imageBase64 = nil
         }
         queue.async { [self] in

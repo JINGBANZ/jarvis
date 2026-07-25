@@ -171,14 +171,21 @@ runtime context suppresses alerts unconditionally, including after teardown, so 
 report cannot reveal Jarvis during screen sharing. Permanent brain, microphone-transcription, and
 audio-capture failures stop without presenting UI; the system-audio failure degrades to
 microphone-only. Every brain provider crosses one typed `BrainFailure` boundary shared by immediate
-retry and `CoachDriver` lifecycle handling: temporary and unrecognized live-turn errors record a
-fixed missed-turn notice and leave capture, transcription, pending triggers, and unsent transcript
-intact; only an explicitly proven permanent failure may latch and stop. Audio-route rebuilds also
+retry and `CoachDriver` lifecycle handling: temporary and unrecognized live-turn errors leave
+capture, transcription, pending triggers, and unsent transcript intact; without a configured
+fallback they record a fixed missed-turn notice. Only an explicitly proven permanent failure may
+latch and stop. Audio-route rebuilds also
 retry under a bounded schedule before capture is declared unavailable, and stale callbacks are
 identity-guarded across Stop → Start. Each Activity row persists a stable event kind. The agentic
 session evaluator reads the complete Activity file, using those kinds and the full user-visible
 sequence rather than a preselected excerpt; dynamic provider and transport detail remains only in
-`JarvisLog`.
+`JarvisLog`. When the user explicitly configures a distinct fallback, a temporary primary failure
+that survives immediate retry instead retries the same pending turn on that fallback. Client-managed
+history and completed screen observations remain available, but provider-specific reasoning,
+tool-call ids, and call/result pairing do not cross the transport boundary. The fallback stays
+installed until a non-truncated terminal turn, then serves a 60-second cooldown before a later turn
+probes the retained primary. A failed probe restores the fallback and resets the cooldown; no two
+providers run concurrently.
 
 Ghost mode applies from a live pipeline through terminal teardown: no autonomous activation, alert,
 window, browser, notification, attention request, or sound is allowed outside the nonactivating,
@@ -346,7 +353,14 @@ The always-on legs are built to survive transient failure rather than die on it:
   4xx—defaults to a recoverable missed turn. Only an explicit allowlist proving unusable
   authentication, billing, access, or configuration may stop the session. A CLI watchdog expiration
   and ordinary rate limiting preserve the conversation but do not immediately repeat the request;
-  recovery waits for the **next trigger**. Sent-state advances only on a successful send, so that
+  recovery waits for the **next trigger**. If the user selected a distinct fallback provider, this
+  exhausted temporary failure instead fails forward transactionally on the same pending turn.
+  Client-owned memory makes the provider-neutral input portable; a completed screenshot is reused
+  once as ordinary user context, while raw provider reasoning and tool protocol state are discarded.
+  A complete fallback turn starts a 60-second recovery cooldown, after which one later turn probes
+  the retained primary. A failed probe retries that turn on the fallback and resets the cooldown,
+  preventing both concurrent use and provider ping-pong. Sent-state advances only on a successful
+  send, so that
   turn includes the failed transcript plus anything newer, including a trigger coalesced while the
   failure was in flight. Cancellation remains quiet. Memory **compaction** fails soft without this
   wrapper: a failed summary simply leaves the full history for the next attempt.
@@ -397,7 +411,7 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
   in the transcript, which the brain reads and answers — there is no wake-word detector. (A global
   **⌥⌘J** hotkey for an on-demand screen hint *does* exist — see [§2](#on-demand-hint-j) — but it
   complements the proactive default; it is not a trigger-to-listen wake key.)
-- Productization: auth, billing, onboarding, multi-provider.
+- Productization: hosted auth, billing, onboarding, or arbitrary provider chains.
 - Windows / cross-platform.
 
 ## 7. Design Principles

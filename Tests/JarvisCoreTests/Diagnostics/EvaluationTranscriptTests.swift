@@ -30,7 +30,8 @@ import Foundation
                                          "usage": ["input_tokens": 120]])
         let out = EvaluationTranscript.render(jsonl: "\(first)\n\(second)")
 
-        #expect(out.contains("=== call #1 · coach · 10:00:00 · HTTP 200 · 500 ms"))
+        #expect(out.contains(
+            "=== call #1 · coach · 10:00:00 · OpenAI API · HTTP 200 · 500 ms"))
         #expect(out.contains("instructions (3 chars):\nSYS"))
         #expect(out.contains("instructions: (unchanged — 3 chars)"))
         #expect(out.contains("[items 1–1 unchanged from the previous coach call"))
@@ -108,10 +109,26 @@ import Foundation
                                                  "output_tokens": 12]])
         let out = EvaluationTranscript.render(jsonl: call)
         #expect(out.hasPrefix("=== deterministic metrics"))
-        #expect(out.contains("| call | tag | model |"))
+        #expect(out.contains("| call | tag | provider | model |"))
         let metrics = try #require(out.range(of: "deterministic metrics"))
         let firstCall = try #require(out.range(of: "=== call #1"))
         #expect(metrics.lowerBound < firstCall.lowerBound)
+    }
+
+    @Test func mixedProvidersNeverShareAnElisionBaseline() throws {
+        let openAI = try line(
+            request: ["model": "gpt-5.5", "instructions": "SYS",
+                      "input": [userItem("same conversation")]])
+        let claude = try line(
+            request: ["provider": "claude-code", "model": "sonnet",
+                      "instructions": "SYS", "input": [userItem("same conversation")]])
+        let out = EvaluationTranscript.render(jsonl: "\(openAI)\n\(claude)")
+
+        #expect(out.contains("· OpenAI API"))
+        #expect(out.contains("· Claude Code"))
+        #expect(out.ranges(of: "instructions (3 chars):\nSYS").count == 2)
+        #expect(out.ranges(of: "user: same conversation").count == 2)
+        #expect(!out.contains("previous coach call"))
     }
 
 }
