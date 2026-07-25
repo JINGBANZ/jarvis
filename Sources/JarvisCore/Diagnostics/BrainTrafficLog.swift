@@ -21,7 +21,8 @@ public final class BrainTrafficLog: @unchecked Sendable {
     /// On-disk line: one round trip. `request`/`response` are the parsed JSON bodies (nested, not
     /// string-escaped) so the file is directly readable; a body that isn't valid JSON is kept as a
     /// string. `response` is nil when the transport threw (see `error`).
-    /// Keys: t=time, tag=which client (coach/summarizer), ms=latency, status=HTTP status.
+    /// Keys: t=time, tag=which client (coach/summarizer), ms=latency, status=HTTP status,
+    /// phases=named sub-phase latencies in ms (local-CLI turns only; omitted otherwise).
     private let queue = DispatchQueue(label: "jarvis.braintraffic")   // serializes state + disk writes
     private var dir: URL?         // nil ⇒ disabled (no disk writes)
     private let df: DateFormatter
@@ -51,7 +52,8 @@ public final class BrainTrafficLog: @unchecked Sendable {
     /// async request path), the redacted bodies are small, and a strict write order keeps the file an
     /// exact chronology of the session's calls.
     public func record(tag: String, request: Data, response: Data?, status: Int?,
-                       latencyMs: Int, error: String? = nil, at date: Date = Date()) {
+                       latencyMs: Int, error: String? = nil, phases: [String: Int]? = nil,
+                       at date: Date = Date()) {
         queue.sync { [self] in
             guard let dir else { return }
             var line: [String: Any] = [
@@ -61,6 +63,7 @@ public final class BrainTrafficLog: @unchecked Sendable {
             ]
             line["status"] = status
             line["error"] = error
+            if let phases, !phases.isEmpty { line["phases"] = phases }
             line["request"] = Self.redactingImages(Self.jsonValue(request))
             if let response { line["response"] = Self.jsonValue(response) }
             guard let data = try? JSONSerialization.data(withJSONObject: line) else { return }

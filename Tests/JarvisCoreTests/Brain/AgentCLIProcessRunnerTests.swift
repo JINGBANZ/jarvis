@@ -34,6 +34,79 @@ import Foundation
         #expect(error is CancellationError)
     }
 
+    @Test func stampsPhaseTimingsInMonotonicOrder() async throws {
+        // The fixture controls the two boundaries the runner can't otherwise observe deterministically:
+        // it sleeps, emits its first stdout byte, sleeps again, then exits — so first-output and exit
+        // are separated by real, measurable gaps.
+        let run = AgentCLIRun(executable: URL(fileURLWithPath: "/bin/sh"),
+                              arguments: ["-c", "sleep 0.2; echo ready; sleep 0.2; exit 0"],
+                              stdin: "hi",
+                              workingDirectory: FileManager.default.temporaryDirectory,
+                              timeout: 10)
+        let timings = AgentCLIPhaseTimings()
+        let output = try await AgentCLIProcessRunner.run(run, timings: timings)
+        #expect(output.stdout.contains("ready"))
+
+        let entered = try #require(timings.instant(.runnerEntered))
+        let launched = try #require(timings.instant(.processLaunched))
+        let stdin = try #require(timings.instant(.stdinDelivered))
+        let firstOut = try #require(timings.instant(.firstStdoutByte))
+        let exited = try #require(timings.instant(.processExited))
+        // Monotonic, in boundary order.
+        #expect(entered <= launched)
+        #expect(launched <= stdin)
+        #expect(stdin <= firstOut)
+        #expect(firstOut <= exited)
+        // The two 0.2s sleeps land as real gaps (allow slack for scheduling jitter).
+        #expect(firstOut - launched >= 150_000_000)   // ~0.2s before the first output byte
+        #expect(exited - firstOut >= 150_000_000)      // ~0.2s more before exit
+        // replyParsed is a client-side boundary — the runner never stamps it.
+        #expect(timings.instant(.replyParsed) == nil)
+    }
+
+    @Test func firstStdoutByteStaysUnobservedWithoutStdout() async throws {
+        // A run that writes only stderr must leave firstStdoutByte unrecorded (later omitted, not
+        // reported as a zero-length time-to-first-output).
+        let run = AgentCLIRun(executable: URL(fileURLWithPath: "/bin/sh"),
+                              arguments: ["-c", "echo diag 1>&2; exit 0"], stdin: nil,
+                              workingDirectory: FileManager.default.temporaryDirectory,
+                              timeout: 10)
+        let timings = AgentCLIPhaseTimings()
+        _ = try await AgentCLIProcessRunner.run(run, timings: timings)
+        #expect(timings.instant(.firstStdoutByte) == nil)
+        #expect(timings.instant(.processLaunched) != nil)
+        #expect(timings.instant(.processExited) != nil)
+    }
+
+    @Test func timeoutRetainsPhasesUpToProcessExit() async {
+        // The phases observed before the watchdog kill must survive the timeout throw.
+        let run = AgentCLIRun(executable: URL(fileURLWithPath: "/bin/sh"),
+                              arguments: ["-c", "echo started; exec /bin/sleep 30"], stdin: nil,
+                              workingDirectory: FileManager.default.temporaryDirectory,
+                              timeout: 0.3)
+        let timings = AgentCLIPhaseTimings()
+        _ = try? await AgentCLIProcessRunner.run(run, timings: timings)
+        #expect(timings.instant(.processLaunched) != nil)
+        #expect(timings.instant(.firstStdoutByte) != nil)   // "started" arrived before the stall
+        #expect(timings.instant(.processExited) != nil)      // the kill lets waitUntilExit return
+    }
+
+    @Test func cancellationRetainsPhasesObservedBeforeTheKill() async {
+        // Stop pressed mid-turn: the recorder still holds every phase completed before the kill.
+        let run = AgentCLIRun(executable: URL(fileURLWithPath: "/bin/sleep"),
+                              arguments: ["30"], stdin: nil,
+                              workingDirectory: FileManager.default.temporaryDirectory,
+                              timeout: 60)
+        let timings = AgentCLIPhaseTimings()
+        let task = Task { try await AgentCLIProcessRunner.run(run, timings: timings) }
+        try? await Task.sleep(nanoseconds: 200_000_000)
+        task.cancel()
+        _ = await task.result
+        #expect(timings.instant(.processLaunched) != nil)
+        #expect(timings.instant(.processExited) != nil)    // killed → waitUntilExit returns
+        #expect(timings.instant(.firstStdoutByte) == nil)   // sleep never writes stdout
+    }
+
     @Test func hungProcessIsTerminatedAtTimeout() async {
         // `exec` replaces the shell instead of forking sleep, so the timeout tests the watchdog and
         // also proves partial provider diagnostics survive into the reported error.

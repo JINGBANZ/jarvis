@@ -13,7 +13,12 @@ import Glibc
 public enum AgentCLIProcessRunner {
     static let errorDomain = "AgentCLIProcessRunner"
 
-    public static func run(_ invocation: AgentCLIRun) async throws -> AgentCLIOutput {
+    /// `timings` is stamped as the run reaches each observable boundary. It is passed in (not
+    /// returned) so a cancellation/timeout that unwinds through a throw still leaves the caller the
+    /// phases completed before the failure. Defaults to a throwaway recorder for callers that don't
+    /// care about phase latency.
+    public static func run(_ invocation: AgentCLIRun,
+                           timings: AgentCLIPhaseTimings = AgentCLIPhaseTimings()) async throws -> AgentCLIOutput {
         try Task.checkCancellation()   // don't even spawn for an already-cancelled turn
         let pidBox = Box<Int32?>(nil)
         let cancelled = Box(false)
@@ -21,7 +26,8 @@ public enum AgentCLIProcessRunner {
             try await withCheckedThrowingContinuation { continuation in
                 DispatchQueue.global(qos: .userInitiated).async {
                     continuation.resume(with: Result {
-                        try runBlocking(invocation, pidBox: pidBox, cancelled: cancelled)
+                        try runBlocking(invocation, timings: timings,
+                                        pidBox: pidBox, cancelled: cancelled)
                     })
                 }
             }
@@ -54,8 +60,10 @@ public enum AgentCLIProcessRunner {
         func set(_ newValue: T) { lock.lock(); value = newValue; lock.unlock() }
     }
 
-    private static func runBlocking(_ run: AgentCLIRun, pidBox: Box<Int32?>,
+    private static func runBlocking(_ run: AgentCLIRun, timings: AgentCLIPhaseTimings,
+                                    pidBox: Box<Int32?>,
                                     cancelled: Box<Bool>) throws -> AgentCLIOutput {
+        timings.mark(.runnerEntered)
         let process = Process()
         process.executableURL = run.executable
         process.arguments = run.arguments
@@ -86,23 +94,27 @@ public enum AgentCLIProcessRunner {
         // Drain stdout/stderr via readability handlers (they run on FileHandle's own queue) so
         // neither pipe can fill its buffer and stall the child while we block elsewhere — the
         // classic subprocess deadlock. Each signals its semaphore on EOF.
-        func drain(_ handle: FileHandle, into box: Box<Data>, done: DispatchSemaphore) {
+        func drain(_ handle: FileHandle, into box: Box<Data>, done: DispatchSemaphore,
+                   onFirstByte: (@Sendable () -> Void)? = nil) {
             handle.readabilityHandler = { h in
                 let chunk = h.availableData
                 if chunk.isEmpty {
                     h.readabilityHandler = nil
                     done.signal()
                 } else {
+                    onFirstByte?()   // no-op after the first stamp; the recorder keeps the earliest
                     box.set(box.get() + chunk)
                 }
             }
         }
         let stdoutBox = Box(Data()), stderrBox = Box(Data())
         let stdoutDone = DispatchSemaphore(value: 0), stderrDone = DispatchSemaphore(value: 0)
-        drain(stdoutPipe.fileHandleForReading, into: stdoutBox, done: stdoutDone)
+        drain(stdoutPipe.fileHandleForReading, into: stdoutBox, done: stdoutDone,
+              onFirstByte: { timings.mark(.firstStdoutByte) })
         drain(stderrPipe.fileHandleForReading, into: stderrBox, done: stderrDone)
 
         try process.run()
+        timings.mark(.processLaunched)
 
         // Watchdogs by pid (an Int32, so the Sendable closures needn't capture the Process object):
         // SIGTERM at the timeout, SIGKILL shortly after for a CLI that ignores SIGTERM — otherwise
@@ -127,8 +139,10 @@ public enum AgentCLIProcessRunner {
             try? stdinPipe.fileHandleForWriting.write(contentsOf: Data(stdin.utf8))
         }
         try? stdinPipe.fileHandleForWriting.close()
+        timings.mark(.stdinDelivered)
 
         process.waitUntilExit()
+        timings.mark(.processExited)
         watchdog.cancel()
         killer.cancel()
         // EOF normally lands with the exit, but a stray grandchild that inherited the pipes' write

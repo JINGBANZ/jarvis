@@ -12,8 +12,10 @@ import Foundation
 /// immutable, and `BrainTrafficLog` is internally synchronized.
 public struct CLIBrainClient: BrainClient, @unchecked Sendable {
     /// Injected subprocess transport, the same seam shape as `OpenAIBrainClient.Sender` — tests
-    /// fake it to assert the composed argv/stdin without spawning a process.
-    public typealias Runner = @Sendable (AgentCLIRun) async throws -> AgentCLIOutput
+    /// fake it to assert the composed argv/stdin without spawning a process. The `AgentCLIPhaseTimings`
+    /// is stamped by the runner as it reaches each observable boundary (a fake can stamp it to drive
+    /// the phase-recording path deterministically).
+    public typealias Runner = @Sendable (AgentCLIRun, AgentCLIPhaseTimings) async throws -> AgentCLIOutput
 
     let provider: BrainProvider
     let executable: URL
@@ -59,7 +61,7 @@ public struct CLIBrainClient: BrainClient, @unchecked Sendable {
                                    ? Self.codexDefaultTimeout : Self.defaultTimeout)
         self.traffic = traffic
         self.trafficTag = trafficTag
-        self.run = run ?? { try await AgentCLIProcessRunner.run($0) }
+        self.run = run ?? { try await AgentCLIProcessRunner.run($0, timings: $1) }
     }
 
     public func respond(messages: [ChatMessage], tools: [ToolDef],
@@ -77,28 +79,40 @@ public struct CLIBrainClient: BrainClient, @unchecked Sendable {
     /// not a recoverability taxonomy, so unclassified failures remain temporary by default.
     private func performRequest(messages: [ChatMessage], tools: [ToolDef],
                                 toolChoice: ToolChoice) async throws -> BrainResponse {
+        // Monotonic t0 for the phase timings; `started` (wall clock) still drives the total latency
+        // ms and the traffic line's timestamp. `respondEntered` is the boundary `queuedMs` measures
+        // from — prompt prep below plus the dispatch onto the runner thread.
+        let timings = AgentCLIPhaseTimings()
+        let respondEntered = DispatchTime.now().uptimeNanoseconds
         let prepared = try prepareInvocation(messages: messages, tools: tools, toolChoice: toolChoice)
         defer { for url in prepared.transientFiles { try? FileManager.default.removeItem(at: url) } }
 
         let started = Date()
         let output: AgentCLIOutput
         do {
-            output = try await run(prepared.run)
+            output = try await run(prepared.run, timings)
         } catch {
+            // Preserve the phases completed before the failure (cancellation, timeout, provider
+            // launch failure) — everything up to the throw is still on the recorder.
+            let phases = Self.phaseDurationsMs(timings, respondEntered: respondEntered)
+            logPhases(phases, note: "failed")
             traffic?.record(tag: trafficTag, request: Self.recordData(prepared.auditRequest),
                             response: nil, status: nil,
                             latencyMs: Self.elapsedMs(since: started),
-                            error: error.localizedDescription)
+                            error: error.localizedDescription, phases: phases)
             throw error
         }
         // Record the round trip for the session audit — the extracted reply (not raw stdout, which
         // is stream noise), mapped to the HTTP-ish status the audit understands (exit 0 → 200,
         // anything else → 500). Extraction happens first so a parse failure is still recorded.
         let reply = Result { try extractReply(output, codexReplyFile: prepared.codexReplyFile) }
+        timings.mark(.replyParsed)
+        let phases = Self.phaseDurationsMs(timings, respondEntered: respondEntered)
+        logPhases(phases, note: (try? reply.get()) == nil ? "unparsed" : "ok")
         traffic?.record(tag: trafficTag, request: Self.recordData(prepared.auditRequest),
                         response: responseRecord(output, reply: try? reply.get()),
                         status: output.exitCode == 0 ? 200 : 500,
-                        latencyMs: Self.elapsedMs(since: started))
+                        latencyMs: Self.elapsedMs(since: started), phases: phases)
 
         return parse(reply: try reply.get(), tools: tools, toolChoice: toolChoice)
     }
@@ -126,5 +140,38 @@ public struct CLIBrainClient: BrainClient, @unchecked Sendable {
 
     static func elapsedMs(since started: Date) -> Int {
         Int(Date().timeIntervalSince(started) * 1000)
+    }
+
+    // MARK: - Phase latency
+
+    /// The named sub-phase latencies of one turn, in ms, for `brain-traffic.jsonl`. Each interval is
+    /// present only when BOTH its boundary phases were observed — a phase that never happened (no
+    /// stdout before a kill, no parse after a failure) is omitted, never recorded as zero. The
+    /// boundaries and what each interval measures are documented on `AgentCLIPhaseTimings.Phase`;
+    /// `totalMs` spans the whole `respond` from `respondEntered` to now, so a later warm-runtime
+    /// change can compare cold vs warm at exactly these boundaries.
+    static func phaseDurationsMs(_ t: AgentCLIPhaseTimings, respondEntered: UInt64) -> [String: Int] {
+        let now = DispatchTime.now().uptimeNanoseconds
+        func ms(_ from: UInt64?, _ to: UInt64?) -> Int? {
+            guard let from, let to, to >= from else { return nil }
+            return Int((to - from) / 1_000_000)
+        }
+        var phases: [String: Int] = [:]
+        phases["queuedMs"] = ms(respondEntered, t.instant(.runnerEntered))
+        phases["spawnMs"]  = ms(t.instant(.runnerEntered), t.instant(.processLaunched))
+        phases["stdinMs"]  = ms(t.instant(.processLaunched), t.instant(.stdinDelivered))
+        phases["ttfbMs"]   = ms(t.instant(.stdinDelivered), t.instant(.firstStdoutByte))
+        phases["outputMs"] = ms(t.instant(.firstStdoutByte), t.instant(.processExited))
+        phases["parseMs"]  = ms(t.instant(.processExited), t.instant(.replyParsed))
+        phases["totalMs"]  = ms(respondEntered, now)
+        return phases   // assigning nil to a subscript omits the key — absent, not zero
+    }
+
+    /// One concise diagnostic line per turn (raw timing detail belongs in `jarvis-debug.log`, never
+    /// Activity). Lists only the phases that were observed, in boundary order.
+    func logPhases(_ phases: [String: Int], note: String) {
+        let order = ["queuedMs", "spawnMs", "stdinMs", "ttfbMs", "outputMs", "parseMs", "totalMs"]
+        let parts = order.compactMap { key in phases[key].map { "\(key.dropLast(2))=\($0)ms" } }
+        jlog("Jarvis coach: \(provider.rawValue) CLI phases (\(note)) — \(parts.joined(separator: " "))")
     }
 }
