@@ -97,7 +97,7 @@ import Foundation
             "k":"brainRouteAdvanced"}
             """,
             """
-            {"t":"10:00:01","m":"⚠️ Codex CLI fallback is unavailable — continuing to the next fallback target",\
+            {"t":"10:00:01","m":"⚠️ Codex CLI target is unavailable — skipping it",\
             "k":"brainRouteTargetSkipped"}
             """,
         ])
@@ -107,7 +107,7 @@ import Foundation
         let rows = store.entries(for: session)
         #expect(rows.map(\.0.message) == [
             "⚠️ OpenAI API couldn't respond — continuing on Claude Code",
-            "⚠️ Codex CLI fallback is unavailable — continuing to the next fallback target",
+            "⚠️ Codex CLI target is unavailable — skipping it",
         ])
     }
 

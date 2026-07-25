@@ -11,7 +11,7 @@ enum EvaluationTranscript {
     /// comment). Malformed lines are skipped; an empty/blank file renders as "".
     static func render(jsonl: String) -> String {
         var blocks: [String] = []
-        // Elision state, per tag (coach and summarizer interleave but never share a prefix).
+        // Elision state, per logical client and provider/model destination.
         var prevInstructions: [String: String] = [:]
         var prevTools: [String: String] = [:]
         var prevInput: [String: [String]] = [:]
@@ -26,8 +26,10 @@ enum EvaluationTranscript {
             let response = entry["response"] as? [String: Any]
             let provider = SessionMetrics.providerName(request: request, response: response)
             // A session can fail over while keeping the same logical client tag. Prefix-elision state
-            // must not cross providers: their wire schemas, cache behavior, and tool-loop state differ.
-            let streamKey = "\(tag)\u{1F}\(provider)"
+            // must not cross provider/model targets: their wire schemas, cache behavior, and
+            // tool-loop state can differ.
+            let model = request?["model"] as? String ?? "?"
+            let streamKey = "\(tag)\u{1F}\(provider)\u{1F}\(model)"
             var lines: [String] = []
 
             var header = "=== call #\(callNumber) · \(tag) · \(entry["t"] as? String ?? "?")"

@@ -784,6 +784,40 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(refreshedFallback.calls.count == 1)
     }
 
+    @Test func inFlightSuccessAcrossClientRefreshResetsTheFailureSequence() async {
+        let primaryTarget = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
+        let fallbackTarget = BrainTarget(provider: .claudeCode, modelID: "sonnet")
+        let successGate = AsyncGate()
+        let originalPrimary = TwoFailuresThenGatedSuccessBrain(gate: successGate)
+        let fallback = ScriptedBrain(script: [
+            .init(toolCalls: [.speak(callId: "fallback", lines: ["should not advance"])]),
+        ])
+        let (driver, transcript) = makeRouteDriver([
+            (primaryTarget, originalPrimary),
+            (fallbackTarget, fallback),
+        ])
+        transcript.append(.init(speaker: .me, text: "complete across the key refresh", at: 0))
+
+        async let firstOutcome = driver.handleTrigger(.turnEnd)
+        await successGate.waitUntilEntered()
+
+        let refreshedPrimary = ScriptedThrowBrain(script: [
+            nil,
+            .init(toolCalls: [.speak(callId: "recovered", lines: ["same target recovered"])]),
+        ])
+        #expect(driver.refreshBrainRouteClients(ConfiguredBrainRoute(targets: [
+            ConfiguredBrainTarget(target: primaryTarget, brain: refreshedPrimary),
+            ConfiguredBrainTarget(target: fallbackTarget, brain: fallback),
+        ])))
+        await successGate.release()
+
+        #expect(await firstOutcome == .silentByModel)
+        transcript.append(.init(speaker: .me, text: "one later temporary failure", at: 1))
+        #expect(await driver.handleTrigger(.turnEnd) == .spoke)
+        #expect(refreshedPrimary.calls.count == 2)
+        #expect(fallback.calls.isEmpty)
+    }
+
     @Test func refreshingClientsCannotDropOrRedirectCommittedExhaustion() async {
         let target = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
         let responseGate = AsyncGate()
@@ -1663,6 +1697,40 @@ private final class GatedThrowingBrain: BrainClient, @unchecked Sendable {
         lock.withLock { calls += 1 }
         await gate.enter()
         throw error
+    }
+}
+
+/// Two temporary failures establish a near-exhausted sequence, then a successful third request
+/// parks so the runtime clients can be refreshed before the completion is recorded.
+private final class TwoFailuresThenGatedSuccessBrain: BrainClient, @unchecked Sendable {
+    private let gate: AsyncGate
+    private let lock = NSLock()
+    private var calls = 0
+
+    init(gate: AsyncGate) {
+        self.gate = gate
+    }
+
+    func respond(
+        messages: [ChatMessage],
+        tools: [ToolDef],
+        toolChoice: ToolChoice
+    ) async throws -> BrainResponse {
+        _ = messages
+        _ = tools
+        _ = toolChoice
+        let call = lock.withLock {
+            calls += 1
+            return calls
+        }
+        if call <= 2 {
+            throw NSError(
+                domain: "FutureProvider",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "temporary provider interruption"])
+        }
+        await gate.enter()
+        return BrainResponse(toolCalls: [.staySilent(callId: "success")])
     }
 }
 

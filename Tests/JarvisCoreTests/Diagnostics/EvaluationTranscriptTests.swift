@@ -131,4 +131,18 @@ import Foundation
         #expect(!out.contains("previous coach call"))
     }
 
+    @Test func differentModelsFromTheSameProviderNeverShareAnElisionBaseline() throws {
+        let sonnet = try line(
+            request: ["provider": "claude-code", "model": "sonnet",
+                      "instructions": "SYS", "input": [userItem("same conversation")]])
+        let opus = try line(
+            request: ["provider": "claude-code", "model": "opus",
+                      "instructions": "SYS", "input": [userItem("same conversation")]])
+        let out = EvaluationTranscript.render(jsonl: "\(sonnet)\n\(opus)")
+
+        #expect(out.ranges(of: "instructions (3 chars):\nSYS").count == 2)
+        #expect(out.ranges(of: "user: same conversation").count == 2)
+        #expect(!out.contains("previous coach call"))
+    }
+
 }

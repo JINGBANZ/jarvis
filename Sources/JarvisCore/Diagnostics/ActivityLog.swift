@@ -235,7 +235,7 @@ public final class ActivityLog: @unchecked Sendable {
             }
             imageBase64 = nil
         case .brainRouteTargetSkipped(let provider):
-            message = "⚠️ \(provider.displayName) fallback is unavailable — continuing to the next fallback target"
+            message = "⚠️ \(provider.displayName) target is unavailable — skipping it"
             imageBase64 = nil
         case .brainRouteExhausted(let provider):
             message = "⏹ coaching stopped — all configured provider targets were exhausted; last target: \(provider.displayName)"

@@ -257,8 +257,9 @@ final class ProviderRouteEditor: NSObject {
             render(detectedCLIs: detectedCLIs, activeTarget: activeTarget)
             return
         }
-        preferences.provider = provider
-        preferences.setModel(model, for: provider)
+        preferences.route = BrainRoute(
+            primary: BrainTarget(provider: provider, modelID: model.id),
+            fallbackTargets: preferences.fallbackTargets)
         render(detectedCLIs: detectedCLIs, activeTarget: activeTarget)
         onChange()
     }

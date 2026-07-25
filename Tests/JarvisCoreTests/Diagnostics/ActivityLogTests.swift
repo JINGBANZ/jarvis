@@ -213,7 +213,7 @@ import Foundation
         #expect(snapshot.rows[1].contains(
             "Claude Code target couldn't respond — continuing with the next Claude Code model"))
         #expect(snapshot.rows[2].contains(
-            "Codex CLI fallback is unavailable — continuing to the next fallback target"))
+            "Codex CLI target is unavailable — skipping it"))
         #expect(snapshot.rows[3].contains(
             "coaching stopped — all configured provider targets were exhausted; last target: Claude Code"))
         #expect(!snapshot.rows.joined().contains("timeout"))

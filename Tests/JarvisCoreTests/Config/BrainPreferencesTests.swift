@@ -150,6 +150,25 @@ import Foundation
         #expect(d.object(forKey: "brain.routeFailureCount") == nil)
     }
 
+    @Test func atomicPrimaryTargetChangePreservesADifferentModelFromTheSameProvider() {
+        let p = BrainPreferences(defaults: freshDefaults())
+        p.setModel(
+            BrainModelCatalog.model(id: "sonnet", for: .claudeCode)!,
+            for: .claudeCode)
+        p.fallbackTargets = [
+            BrainTarget(provider: .claudeCode, modelID: "sonnet"),
+        ]
+
+        p.route = BrainRoute(
+            primary: BrainTarget(provider: .claudeCode, modelID: "opus"),
+            fallbackTargets: p.fallbackTargets)
+
+        #expect(p.primaryTarget == BrainTarget(provider: .claudeCode, modelID: "opus"))
+        #expect(p.fallbackTargets == [
+            BrainTarget(provider: .claudeCode, modelID: "sonnet"),
+        ])
+    }
+
     @Test func eachProviderRemembersItsOwnModel() {
         let d = freshDefaults()
         let p = BrainPreferences(defaults: d)

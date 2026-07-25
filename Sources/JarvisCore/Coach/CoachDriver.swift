@@ -53,6 +53,7 @@ public final class CoachDriver: @unchecked Sendable {
 
     private struct AttemptBrain {
         let routeRevision: UInt
+        let routeTopologyRevision: UInt
         let routeIndex: Int
         let target: BrainTarget
         let brain: BrainClient
@@ -361,6 +362,7 @@ public final class CoachDriver: @unchecked Sendable {
             }
             step.selected = AttemptBrain(
                 routeRevision: routeRevision,
+                routeTopologyRevision: routeTopologyRevision,
                 routeIndex: index,
                 target: configured.target,
                 brain: brain,
@@ -457,7 +459,7 @@ public final class CoachDriver: @unchecked Sendable {
 
     private func recordAttemptSuccess(on attempt: AttemptBrain) {
         stateLock.lock()
-        if routeRevision == attempt.routeRevision
+        if routeTopologyRevision == attempt.routeTopologyRevision
             && routeSession.activeIndex == attempt.routeIndex {
             routeSession.recordSuccess()
         }
