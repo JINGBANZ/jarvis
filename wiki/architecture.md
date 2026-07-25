@@ -207,9 +207,9 @@ that target for the complete tool loop. Every provider request in that loop is m
 non-truncated terminal `speak` or `stay_silent` commits the attempt and clears that target's consecutive
 failure count. A provider error, malformed/incomplete terminal response, or failure after an
 intermediate `capture_screen` fails the attempt once; cancellation, filler suppression, and local
-screen-capture failure do not count as provider failures. Completed screen observations remain
-provider-neutral input for the next attempt, but raw reasoning, tool-call identifiers, and call/result
-pairing never cross an attempt or provider boundary.
+screen-capture failure do not count as provider failures. The most recent completed screen observation
+remains provider-neutral input for the next attempt, but older captures, raw reasoning, tool-call
+identifiers, and call/result pairing never cross an attempt or provider boundary.
 
 Failed conversation work remains pending and schedules another coaching attempt under bounded
 backoff. This internal wake-up does not depend on a new natural trigger. If a turn-end, silence, or

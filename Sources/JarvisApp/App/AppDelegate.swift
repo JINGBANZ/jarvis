@@ -42,6 +42,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The running session's event loop. Stored so Brain Settings can replace only its model clients
     /// without restarting transcription or discarding the session's transcript/history.
     private var coachDriver: CoachDriver?
+    /// Runtime route state for truthful Settings and Activity updates. A Settings edit is announced
+    /// only when the replacement route actually selects its first target for a fresh attempt.
+    private var activeBrainTarget: BrainTarget?
+    private var pendingBrainChangeFrom: BrainTarget?
+    /// Invalidates a slower CLI probe when the user saves another transcription key first.
+    private var savedAPIKeyRevision: UInt = 0
     /// The global hint hotkey. Lives for the whole app run; its callback beeps when no session runs.
     private var hotkeys: HotkeyController?
     /// Fires an on-demand hint for the running session. Non-nil only while running — set in `start()`,
@@ -283,6 +289,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     jlog("Jarvis: ignoring target selection from a stopped or superseded session.")
                     return
                 }
+                if let previous = self.pendingBrainChangeFrom {
+                    ActivityLog.shared.record(.brainChangeApplied(
+                        previous: previous.provider,
+                        current: target.provider))
+                    self.pendingBrainChangeFrom = nil
+                }
+                self.activeBrainTarget = target
                 self.brainSection.setActiveTarget(target)
             },
             onAdvanced: { [weak self] previous, current in
@@ -349,9 +362,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             apiKey: key,
             effort: brainPreferences.effort,
             sessionDirectory: sessionDirectory)
+        if pendingBrainChangeFrom == nil {
+            pendingBrainChangeFrom = activeBrainTarget
+        }
         coachDriver.updateBrainRoute(configuredRoute)
-        ActivityLog.shared.record(
-            .brainChangeApplied(previous: provider, current: provider))
         let model = route.primary.model ?? BrainModelCatalog.defaultModel(for: provider)
         jlog("Jarvis: brain settings will apply on the next turn — \(provider.displayName), "
              + "\(model.displayName), \(brainPreferences.effort.displayName) effort.")
@@ -369,16 +383,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             jlog("Jarvis: saved API key will apply to future Realtime connections.")
             return
         }
-        var detectedCLIs: [BrainProvider: DetectedAgentCLI] = [:]
+        savedAPIKeyRevision &+= 1
+        let revision = savedAPIKeyRevision
+        let sessionDirectory = currentSessionDir
         let detector = AgentCLIDetector()
-        for provider in Set(brainPreferences.route.targets.map(\.provider))
-            where provider.usesLocalCLI {
-            if let detected = detector.detect(provider) {
-                detectedCLIs[provider] = detected
+        Task { [weak self] in
+            let detected = await detector.detectAllAsync()
+            guard let self,
+                  self.savedAPIKeyRevision == revision,
+                  self.currentSessionDir == sessionDirectory,
+                  self.coachDriver != nil else {
+                return
             }
+            let detectedCLIs = Dictionary(
+                uniqueKeysWithValues: detected.map { ($0.provider, $0) })
+            self.applyBrainPreferencesToRunningSession(
+                detectedCLIs: detectedCLIs, apiKeyOverride: key)
         }
-        applyBrainPreferencesToRunningSession(
-            detectedCLIs: detectedCLIs, apiKeyOverride: key)
     }
 
     /// Build the brain + driver and start the transcription pipeline. Returns `false` (and stays
@@ -559,6 +580,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.aggregateCapture = capture
         self.turns = turns
         self.coachDriver = driver
+        activeBrainTarget = brainRoute.primary
+        pendingBrainChangeFrom = nil
         brainSection.setActiveTarget(brainRoute.primary)
         micConnectionState = .connecting
         systemConnectionState = .connecting
@@ -610,6 +633,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         requestManualHint = nil              // hotkey beeps again once there's no live session
         let cancelled = turns?.cancelAll() ?? []; turns = nil   // cancel any in-flight coaching turn
         coachDriver = nil
+        activeBrainTarget = nil
+        pendingBrainChangeFrom = nil
         brainSection?.setActiveTarget(nil)
         // Mark both delivery endpoints stopped before draining the IOProc. Aggregate capture hands
         // chunks off asynchronously, so callbacks already queued during teardown must see the

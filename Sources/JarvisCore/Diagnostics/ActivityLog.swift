@@ -29,11 +29,8 @@ public final class ActivityLog: @unchecked Sendable {
         case systemAudioStopped
         case settingsChangeNotApplied
         case brainChangeApplied
+        /// Retained so logs written by the superseded transactional-switch build remain decodable.
         case brainFallback
-        case brainFailover
-        case brainPrimaryRecovered
-        case brainRecoveryDeferred
-        case brainFallbackUnavailable
         case brainRouteAdvanced
         case brainRouteTargetSkipped
         case brainRouteExhausted
@@ -350,7 +347,14 @@ public final class ActivityLog: @unchecked Sendable {
 
     /// Whether a persisted row belongs in the human-facing viewer. New rows are guaranteed by the
     /// typed `Event` API; this also hides diagnostic rows from sessions written by older builds.
-    static func isHumanFacing(message: String, imageFile: String?) -> Bool {
+    static func isHumanFacing(
+        message: String,
+        imageFile: String?,
+        kind: EventKind? = nil
+    ) -> Bool {
+        // Current builds persist a stable kind only for typed, human-facing events. Prefix matching
+        // remains the compatibility path for logs created before event kinds were added.
+        if kind != nil { return true }
         if imageFile != nil { return true }
         let m = message.trimmingCharacters(in: .whitespaces)
         return m.hasPrefix("🗣 heard") || m.hasPrefix("⌨️ hint shortcut")

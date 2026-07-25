@@ -540,6 +540,26 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(brain.calls.count == 1)
     }
 
+    @Test func fillerWakeCannotCancelFailedSilenceAttempt() async {
+        let gate = AsyncGate()
+        let brain = GatedFailureThenSpeakingBrain(gate: gate)
+        let overlay = FakeOverlay()
+        let (driver, transcript) = makeDriver(
+            brain: brain,
+            overlay: overlay,
+            clock: ManualClock())
+
+        async let outcome = driver.handleTrigger(.silence(secondsQuiet: 120))
+        await gate.waitUntilEntered()
+        transcript.append(.init(speaker: .them, text: "嗯", at: 1))
+        #expect(await driver.handleTrigger(.turnEnd) == .busy)
+        await gate.release()
+
+        #expect(await outcome == .spoke)
+        #expect(brain.calls.count == 2)
+        #expect(overlay.rendered == [["recovered pending turn"]])
+    }
+
     // MARK: - Client-managed session memory (CoachHistory)
 
     /// The next request carries the whole prior turn: the user's words, the model's `speak` call, and
@@ -911,6 +931,25 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(brain.calls.count == 2)
     }
 
+    @Test func manualHintWakesFailedAttemptEvenWhileSpeechIsUnsettled() async {
+        let gate = AsyncGate()
+        let brain = GatedFailureThenSpeakingBrain(gate: gate)
+        let (driver, transcript) = makeDriver(
+            brain: brain,
+            clock: ManualClock())
+        driver.updateSpeechActivity(true, for: .them)
+        transcript.append(.init(speaker: .me, text: "first attempt", at: 0))
+
+        async let outcome = driver.handleTrigger(.turnEnd)
+        await gate.waitUntilEntered()
+        #expect(await driver.handleTrigger(.manualHint) == .busy)
+        await gate.release()
+
+        #expect(await outcome == .spoke)
+        #expect(brain.calls.count == 2)
+        driver.updateSpeechActivity(false, for: .them)
+    }
+
     @Test func automaticManualHintAttemptDoesNotRecapture() async {
         let brain = TimeoutThenSpeakingBrain()
         let screen = FakeScreen()
@@ -1126,6 +1165,38 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(overlay.rendered.isEmpty)
     }
 
+    @Test func freshAttemptCarriesOnlyTheLatestScreenObservation() async {
+        let captures = (0..<8).map { index in
+            BrainResponse(
+                toolCalls: [.captureScreen(callId: "capture-\(index)")],
+                rawToolCalls: [
+                    RawToolCall(
+                        id: "capture-\(index)",
+                        name: "capture_screen",
+                        argumentsJSON: "{}"),
+                ])
+        }
+        let brain = ScriptedBrain(script: captures + [
+            .init(toolCalls: [.speak(callId: "done", lines: ["bounded context"])]),
+        ])
+        let screen = FakeScreen(recognizedText: "latest visible code")
+        let overlay = FakeOverlay()
+        let (driver, transcript) = makeDriver(
+            brain: brain,
+            screen: screen,
+            overlay: overlay,
+            clock: ManualClock())
+        transcript.append(.init(speaker: .me, text: "inspect this code", at: 0))
+
+        #expect(await driver.handleTrigger(.turnEnd) == .spoke)
+        #expect(brain.calls.count == 9)
+        #expect(brain.calls[8].count(where: { $0.imageBase64JPEG != nil }) == 1)
+        #expect(brain.calls[8].count(where: {
+            ($0.text ?? "").contains("latest visible code")
+        }) == 1)
+        #expect(overlay.rendered == [["bounded context"]])
+    }
+
     @Test func brainErrorOutcome() async {
         let clock = ManualClock(now: 0)
         let brain = ThrowingBrain()
@@ -1294,6 +1365,7 @@ private func blockMainActor(entered: DispatchSemaphore, release: DispatchSemapho
     release.wait()
 }
 
+/// `@unchecked Sendable` is safe because `lock` guards the recorded route transitions.
 private final class RouteTransitionRecorder: @unchecked Sendable {
     struct Event: Equatable {
         let from: BrainTarget
@@ -1308,6 +1380,7 @@ private final class RouteTransitionRecorder: @unchecked Sendable {
     }
 }
 
+/// `@unchecked Sendable` is safe because `lock` guards the recorded exhausted targets.
 private final class RouteExhaustionRecorder: @unchecked Sendable {
     private let lock = NSLock()
     private var recordedTargets: [BrainTarget] = []
@@ -1318,6 +1391,7 @@ private final class RouteExhaustionRecorder: @unchecked Sendable {
     }
 }
 
+/// `@unchecked Sendable` is safe because `lock` guards the recorded route targets.
 private final class RouteTargetRecorder: @unchecked Sendable {
     private let lock = NSLock()
     private var recorded: [BrainTarget] = []
@@ -1327,6 +1401,7 @@ private final class RouteTargetRecorder: @unchecked Sendable {
     }
 }
 
+/// `@unchecked Sendable` is safe because `lock` guards the installed driver reference.
 private final class CoachDriverHolder: @unchecked Sendable {
     private let lock = NSLock()
     private var driver: CoachDriver?

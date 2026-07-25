@@ -683,11 +683,11 @@
   fallback without restarting the session. Carry client-managed history, unsent transcript, and any
   completed screen observation as provider-neutral context; never carry provider reasoning,
   tool-call ids, or call/result pairing across transports. Keep the fallback active through
-  incomplete responses until it completes a non-truncated terminal turn, then wait 60 seconds before
-  probing the retained primary on a later turn. A failed probe restores the fallback for that same
-  turn and resets the cooldown. A terminal fallback failure disables it for the live session and
-  leaves the primary available on the next turn. Traffic metrics and evaluation transcripts identify
-  the provider per call.
+  incomplete responses until it completes a non-truncated terminal turn, then serve a bounded
+  recovery cooldown before probing the retained primary on a later turn. A failed probe restores the
+  fallback for that same turn and resets the cooldown. A terminal fallback failure disables it for
+  the live session and leaves the primary available on the next turn. Traffic metrics and evaluation
+  transcripts identify the provider per call.
 - **Why:** Missing one turn after retries is survivable, but it is avoidable when the user has
   explicitly authorized a second ready provider. Client-owned memory makes the conversation portable;
   provider-owned tool state does not. Keeping one provider active at a time preserves ordering and
@@ -703,7 +703,8 @@
 - **Detail:** [settings-window.md → Brain](./settings-window.md#brain),
   [architecture.md → Resilience](./architecture.md#resilience),
   `Sources/JarvisCore/Coach/CoachDriver.swift`,
-  `Sources/JarvisCore/Coach/ConfiguredBrainFallback.swift`.
+  `Sources/JarvisCore/Coach/ConfiguredBrainRoute.swift`,
+  `Sources/JarvisCore/Coach/ConfiguredBrainTarget.swift`.
 - **Superseded by:** 2026-07-25 — Coaching attempts exhaust an ordered provider route.
 
 ### 2026-07-25 — Coaching attempts exhaust an ordered provider route
@@ -726,9 +727,9 @@
   detail stay in `jarvis-debug.log`.
 - **Chose:** Runtime failover never mutates the saved route. Stop → Start begins at the persisted
   primary, while a valid explicit Settings edit may install a new route and reset its cursor between
-  attempts. Client-managed history, unsent transcript, and completed screen observations are
-  provider-neutral; raw reasoning, tool-call identifiers, and provider call/result linkage are not
-  carried into a new attempt.
+  attempts. Client-managed history, unsent transcript, and the most recent completed screen
+  observation are provider-neutral; older captures, raw reasoning, tool-call identifiers, and provider
+  call/result linkage are not carried into a new attempt.
 - **Why:** Conversation changes while a failed request is unwinding. Replaying its frozen body inside
   the same attempt is both stale and unnecessary; a new attempt can incorporate the latest speech and
   still make progress when the room stays quiet. A finite user-authored route gives outages a bounded,

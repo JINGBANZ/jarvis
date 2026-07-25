@@ -52,6 +52,7 @@ final class BrainTargetRowView: NSView {
         }
 
         let providerPopup = NSPopUpButton()
+        providerPopup.menu?.autoenablesItems = false
         providerPopup.addItems(withTitles: BrainProvider.allCases.map(providerTitle))
         providerPopup.selectItem(
             at: BrainProvider.allCases.firstIndex(of: target.provider) ?? 0)
@@ -65,6 +66,7 @@ final class BrainTargetRowView: NSView {
         let models = BrainModelCatalog.models(for: target.provider)
         self.models = models
         let modelPopup = NSPopUpButton()
+        modelPopup.menu?.autoenablesItems = false
         modelPopup.addItems(withTitles: models.map(\.displayName))
         if let selected = models.firstIndex(where: { $0.id == target.modelID }) {
             modelPopup.selectItem(at: selected)

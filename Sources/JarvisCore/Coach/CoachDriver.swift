@@ -56,9 +56,13 @@ public final class CoachDriver: @unchecked Sendable {
     private struct PendingCoachingWork {
         var reason: TriggerReason
         /// Completed effects safe to carry between attempts and providers: ordinary user context
-        /// only. Never raw reasoning, tool ids, or call/result linkage.
+        /// only. At most the latest screen observation is retained. Never raw reasoning, tool ids,
+        /// or call/result linkage.
         var observations: [ChatMessage] = []
         var manualHintPrepared = false
+        /// Distinguishes a fresh natural event from a failed attempt whose automatic wake was
+        /// coalesced with that event. Filler suppression must never cancel the latter.
+        var hasFailedAttempt = false
     }
 
     private enum AttemptResult {
@@ -569,6 +573,7 @@ public final class CoachDriver: @unchecked Sendable {
                 if let reason = wake.reason {
                     failedWork.reason = Self.coalescing(failedWork.reason, with: reason)
                 }
+                failedWork.hasFailedAttempt = true
                 work = failedWork
                 automaticSequence += 1
 
@@ -590,7 +595,9 @@ public final class CoachDriver: @unchecked Sendable {
                 if let reason = wake.reason {
                     work.reason = Self.coalescing(work.reason, with: reason)
                 }
-                await speechActivity.waitUntilInactive()
+                if work.reason != .manualHint {
+                    await speechActivity.waitUntilInactive()
+                }
             }
         }
 
@@ -620,10 +627,11 @@ public final class CoachDriver: @unchecked Sendable {
             sessionElapsedSeconds: now - sessionStart)
         let delta = transcript.renderFrom(index: currentCommittedTranscriptCount())
 
-        // Filler-only natural events do not spend a provider attempt. Pending failed work is visible
-        // through the still-uncommitted transcript boundary, so a substantive failed delta cannot be
-        // mistaken for an empty new event.
-        if reason == .turnEnd && !delta.lines.contains(where: TurnSubstance.isSubstantive) {
+        // Filler-only natural events do not spend a provider attempt. A natural wake may also
+        // coalesce with failed pending work whose transcript delta is empty (for example, a silence
+        // attempt); that automatic attempt must still run.
+        if reason == .turnEnd && !work.hasFailedAttempt
+            && !delta.lines.contains(where: TurnSubstance.isSubstantive) {
             let preview = delta.lines.isEmpty
                 ? "nothing new"
                 : String(delta.lines.map(\.text).joined(separator: " · ").prefix(80))
@@ -654,17 +662,21 @@ public final class CoachDriver: @unchecked Sendable {
             if let shot {
                 jlog("👁 looking at your screen")
                 ActivityLog.shared.record(.screenViewed(imageBase64JPEG: shot.imageBase64))
-                work.observations.append(.userImage(shot.imageBase64))
+                var observations: [ChatMessage] = [.userImage(shot.imageBase64)]
                 turnMessages.append(.userImage(shot.imageBase64))
                 if let text = shot.recognizedText {
                     jlog("🔤 read \(text.count(where: { $0 == "\n" }) + 1) lines of on-screen text")
                     let observation = ChatMessage.user(Self.recognizedTextBlock(text))
-                    work.observations.append(observation)
+                    observations.append(observation)
                     turnMessages.append(observation)
                 }
+                work.observations = observations
             } else {
                 jlog("👁 screenshot failed")
                 ActivityLog.shared.record(.screenViewFailed)
+                work.observations = [
+                    .user("The screen capture requested for the manual hint failed."),
+                ]
             }
             work.manualHintPrepared = true
         }
@@ -736,13 +748,16 @@ public final class CoachDriver: @unchecked Sendable {
                     if let text = shot.recognizedText {
                         jlog("🔤 read \(text.count(where: { $0 == "\n" }) + 1) lines of on-screen text")
                     }
-                    work.observations.append(.user(Self.captureResultText(shot)))
-                    work.observations.append(.userImage(shot.imageBase64))
+                    work.observations = [
+                        .user(Self.captureResultText(shot)),
+                        .userImage(shot.imageBase64),
+                    ]
                 } else {
                     jlog("👁 screenshot failed")
                     ActivityLog.shared.record(.screenViewFailed)
-                    work.observations.append(
-                        .user("A screen capture requested earlier in this turn failed."))
+                    work.observations = [
+                        .user("A screen capture requested earlier in this turn failed."),
+                    ]
                 }
 
                 // Provider-specific linkage remains inside this attempt only.

@@ -31,7 +31,14 @@ public struct SessionStore: Sendable {
         s.wholeMatch(of: /^shot-[0-9]+\.jpg$/) != nil
     }
 
-    private struct Line: Decodable { let t: String; let m: String; let s: String? }
+    private struct Line: Decodable {
+        let t: String
+        let m: String
+        let s: String?
+        /// A raw value keeps rows with future kinds readable by older builds; only kinds known to
+        /// this build bypass the legacy human-copy classifier.
+        let k: String?
+    }
 
     /// Immediate subdirectories of `base` that look like a session and hold a `jarvis-activity.jsonl`,
     /// newest-first. The current session always appears (so the live run shows in the picker even
@@ -66,7 +73,13 @@ public struct SessionStore: Sendable {
                     sessionURL.appendingPathComponent(name).path) else { return nil }
                 return name
             }
-            if ActivityLog.isHumanFacing(message: line.m, imageFile: shot) { return true }
+            if ActivityLog.isHumanFacing(
+                message: line.m,
+                imageFile: shot,
+                kind: line.k.flatMap { ActivityLog.EventKind(rawValue: $0) }
+            ) {
+                return true
+            }
         }
         return false
     }
@@ -87,7 +100,13 @@ public struct SessionStore: Sendable {
                 bytes = try? Data(contentsOf: session.url.appendingPathComponent(s))
             }
             if bytes == nil { shotName = nil }
-            guard ActivityLog.isHumanFacing(message: line.m, imageFile: shotName) else { continue }
+            guard ActivityLog.isHumanFacing(
+                message: line.m,
+                imageFile: shotName,
+                kind: line.k.flatMap { ActivityLog.EventKind(rawValue: $0) }
+            ) else {
+                continue
+            }
             out.append((ActivityLog.Entry(time: line.t, message: line.m,
                                           imageFile: shotName), bytes))
         }
