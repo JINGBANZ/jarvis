@@ -741,6 +741,39 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(fallback.calls.count == 2)
     }
 
+    @Test func refreshingRouteClientsPreservesFallbackCursor() async {
+        let primaryTarget = BrainTarget(provider: .claudeCode, modelID: "sonnet")
+        let fallbackTarget = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
+        let primary = ThrowingBrain(error: BrainFailure(
+            disposition: .permanent,
+            detail: "primary permanently failed"))
+        let originalFallback = ScriptedBrain(script: [
+            .init(toolCalls: [.staySilent(callId: "original-fallback")]),
+        ])
+        let (driver, transcript) = makeRouteDriver([
+            (primaryTarget, primary),
+            (fallbackTarget, originalFallback),
+        ])
+        transcript.append(.init(speaker: .me, text: "move to fallback", at: 0))
+        #expect(await driver.handleTrigger(.turnEnd) == .silentByModel)
+
+        let refreshedPrimary = ScriptedBrain(script: [
+            .init(toolCalls: [.speak(callId: "wrong-target", lines: ["went backward"])]),
+        ])
+        let refreshedFallback = ScriptedBrain(script: [
+            .init(toolCalls: [.speak(callId: "refreshed", lines: ["new key works"])]),
+        ])
+        #expect(driver.refreshBrainRouteClients(ConfiguredBrainRoute(targets: [
+            ConfiguredBrainTarget(target: primaryTarget, brain: refreshedPrimary),
+            ConfiguredBrainTarget(target: fallbackTarget, brain: refreshedFallback),
+        ])))
+
+        transcript.append(.init(speaker: .me, text: "continue on fallback", at: 1))
+        #expect(await driver.handleTrigger(.turnEnd) == .spoke)
+        #expect(refreshedPrimary.calls.isEmpty)
+        #expect(refreshedFallback.calls.count == 1)
+    }
+
     @Test func allTargetsExhaustOnceAndStopTheConversation() async {
         let first = ThrowingBrain()
         let second = ThrowingBrain()

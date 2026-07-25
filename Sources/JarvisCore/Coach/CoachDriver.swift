@@ -138,6 +138,24 @@ public final class CoachDriver: @unchecked Sendable {
         stateLock.unlock()
     }
 
+    /// Replace runtime clients for the same ordered route without changing session-local health.
+    ///
+    /// Credential refreshes use this boundary: an in-flight attempt keeps its old client snapshot,
+    /// while the next attempt uses the replacement clients at the same forward-only cursor and
+    /// failure count. A topology change belongs to `updateBrainRoute(_:)` because only an explicit
+    /// Settings edit may restart route selection.
+    @discardableResult
+    public func refreshBrainRouteClients(_ route: ConfiguredBrainRoute) -> Bool {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        guard configuredRoute.targets.map(\.target) == route.targets.map(\.target) else {
+            return false
+        }
+        routeRevision &+= 1
+        configuredRoute = route
+        return true
+    }
+
     /// Realtime VAD feeds both speakers into one aggregate gate. Automatic pending-work attempts wait
     /// until both sides are inactive; natural triggers still coalesce while waiting.
     public func updateSpeechActivity(_ isActive: Bool, for speaker: Speaker) {

@@ -48,6 +48,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var pendingBrainChangeFrom: BrainTarget?
     /// Invalidates a slower CLI probe when the user saves another transcription key first.
     private var savedAPIKeyRevision: UInt = 0
+    /// A Start that is still discovering local CLIs. Stop or a newer Start cancels it before the
+    /// prepared runtime can be installed on the main actor.
+    private var pendingStartTask: Task<Void, Never>?
+    private var pendingStartRevision: UInt = 0
     /// The global hint hotkey. Lives for the whole app run; its callback beeps when no session runs.
     private var hotkeys: HotkeyController?
     /// Fires an on-demand hint for the running session. Non-nil only while running — set in `start()`,
@@ -340,11 +344,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             })
     }
 
+    private enum RunningBrainUpdate: Equatable {
+        case settingsEdit
+        case credentialRefresh
+    }
+
     /// Apply provider/model/effort changes without touching capture, transcription, history, or the
     /// session directory. An in-flight turn finishes on its old snapshot; the next turn uses this.
     private func applyBrainPreferencesToRunningSession(
         detectedCLIs: [BrainProvider: DetectedAgentCLI]?,
-        apiKeyOverride: String? = nil
+        apiKeyOverride: String? = nil,
+        update: RunningBrainUpdate = .settingsEdit
     ) {
         guard let coachDriver, transcriber != nil, let sessionDirectory = currentSessionDir else {
             return
@@ -360,13 +370,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         let provider = route.primary.provider
-        let preflight = preflightBrainProvider(
-            provider, detectedCLI: detectedCLIs?[provider], context: .runtime,
-                                               recordSettingsFailure: true)
-        guard preflight.isReady else { return }
         var readyCLIs = detectedCLIs ?? [:]
-        if let cli = preflight.cli {
-            readyCLIs[provider] = cli
+        if update == .settingsEdit {
+            let preflight = preflightBrainProvider(
+                provider, detectedCLI: detectedCLIs?[provider], context: .runtime,
+                                                   recordSettingsFailure: true)
+            guard preflight.isReady else { return }
+            if let cli = preflight.cli {
+                readyCLIs[provider] = cli
+            }
         }
         let configuredRoute = makeConfiguredRoute(
             route,
@@ -374,13 +386,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             apiKey: key,
             effort: brainPreferences.effort,
             sessionDirectory: sessionDirectory)
-        if pendingBrainChangeFrom == nil {
-            pendingBrainChangeFrom = activeBrainTarget
+        switch update {
+        case .settingsEdit:
+            if pendingBrainChangeFrom == nil {
+                pendingBrainChangeFrom = activeBrainTarget
+            }
+            coachDriver.updateBrainRoute(configuredRoute)
+            let model = route.primary.model ?? BrainModelCatalog.defaultModel(for: provider)
+            jlog("Jarvis: brain settings will apply on the next turn — \(provider.displayName), "
+                 + "\(model.displayName), \(brainPreferences.effort.displayName) effort.")
+        case .credentialRefresh:
+            guard coachDriver.refreshBrainRouteClients(configuredRoute) else {
+                jlog("Jarvis: skipped stale API-key brain refresh after the route topology changed.")
+                return
+            }
+            jlog("Jarvis: saved API key will apply to OpenAI on the next coaching attempt.")
         }
-        coachDriver.updateBrainRoute(configuredRoute)
-        let model = route.primary.model ?? BrainModelCatalog.defaultModel(for: provider)
-        jlog("Jarvis: brain settings will apply on the next turn — \(provider.displayName), "
-             + "\(model.displayName), \(brainPreferences.effort.displayName) effort.")
     }
 
     /// Keep a healthy live conversation intact when the credential file changes. Existing Realtime
@@ -411,16 +432,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let detectedCLIs = Dictionary(
                 uniqueKeysWithValues: detected.map { ($0.provider, $0) })
             self.applyBrainPreferencesToRunningSession(
-                detectedCLIs: detectedCLIs, apiKeyOverride: key)
+                detectedCLIs: detectedCLIs,
+                apiKeyOverride: key,
+                update: .credentialRefresh)
         }
     }
 
-    /// Build the brain + driver and start the transcription pipeline. Returns `false` (and stays
-    /// stopped) if no API key is available yet (transcription always needs it), or if the selected
-    /// brain provider's CLI is missing.
+    /// Validate a Start immediately, then prepare any local-CLI targets away from the main actor.
+    /// Returns `true` once startup is accepted; the menu remains in Starting until preparation and
+    /// the Realtime connections finish. Stop, a newer Start, a key change, or a route edit makes the
+    /// prepared result stale before it can install a pipeline.
     @discardableResult
     private func start() -> Bool {
-        // Capture whether this Start is replacing a live pipeline before any guard or teardown.
         let wasRunning = transcriber != nil || themTranscriber != nil
         let reportContext: UserFacingError.PresentationContext =
             wasRunning ? .runtime : .startup
@@ -441,20 +464,67 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 .brainProviderNotConfigured, context: reportContext)
             return false
         }
-        let brainProvider = brainRoute.primary.provider
-        // A CLI brain provider's binary/auth must pass before anything is torn down.
-        let detector = AgentCLIDetector()
-        var detectedCLIs: [BrainProvider: DetectedAgentCLI] = [:]
-        for provider in Set(brainRoute.targets.map(\.provider)) where provider.usesLocalCLI {
-            if let detected = detector.detect(provider) {
-                detectedCLIs[provider] = detected
-            }
+
+        pendingStartRevision &+= 1
+        let revision = pendingStartRevision
+        pendingStartTask?.cancel()
+        pendingStartTask = nil
+        let cliProviders = Set(brainRoute.targets.map(\.provider)).filter(\.usesLocalCLI)
+        guard !cliProviders.isEmpty else {
+            return installPreparedStart(
+                apiKey: key,
+                brainRoute: brainRoute,
+                detectedCLIs: [:],
+                wasRunning: wasRunning,
+                reportContext: reportContext)
         }
+
+        menuBar.setState(.starting)
+        let detector = AgentCLIDetector()
+        pendingStartTask = Task { [weak self] in
+            let detected = await detector.detectAllAsync()
+            guard let self, !Task.isCancelled,
+                  self.pendingStartRevision == revision else {
+                return
+            }
+            guard self.secrets.apiKey() == key,
+                  self.brainPreferences.configuredRoute == brainRoute else {
+                self.pendingStartTask = nil
+                self.refreshConnectionUI()
+                return
+            }
+            self.pendingStartTask = nil
+            let detectedCLIs = Dictionary(
+                uniqueKeysWithValues: detected.map { ($0.provider, $0) })
+            _ = self.installPreparedStart(
+                apiKey: key,
+                brainRoute: brainRoute,
+                detectedCLIs: detectedCLIs,
+                wasRunning: wasRunning,
+                reportContext: reportContext)
+        }
+        return true
+    }
+
+    /// Install a fully prepared route on the main actor. The primary preflight still happens before
+    /// tearing down a running pipeline, while unavailable fallback CLIs remain ordered skip targets.
+    private func installPreparedStart(
+        apiKey key: String,
+        brainRoute: BrainRoute,
+        detectedCLIs initialDetectedCLIs: [BrainProvider: DetectedAgentCLI],
+        wasRunning: Bool,
+        reportContext: UserFacingError.PresentationContext
+    ) -> Bool {
+        let brainProvider = brainRoute.primary.provider
+        var detectedCLIs = initialDetectedCLIs
         let preflight = preflightBrainProvider(
             brainProvider, detectedCLI: detectedCLIs[brainProvider],
                                                context: reportContext,
                                                recordSettingsFailure: wasRunning)
-        guard preflight.isReady else { return false }
+        guard preflight.isReady else {
+            refreshConnectionUI()
+            return false
+        }
         if let primaryCLI = preflight.cli {
             detectedCLIs[brainProvider] = primaryCLI
         }
@@ -650,6 +720,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// coaching turn on a torn-down driver — the exact "speak after Stop" failure the turns box exists
     /// to prevent — and a subsequent Start would leak the orphaned IOProc/sockets.
     private func stop() {
+        pendingStartRevision &+= 1
+        pendingStartTask?.cancel()
+        pendingStartTask = nil
         let wasRunning = transcriber != nil || themTranscriber != nil
         requestManualHint = nil              // hotkey beeps again once there's no live session
         let cancelled = turns?.cancelAll() ?? []; turns = nil   // cancel any in-flight coaching turn
