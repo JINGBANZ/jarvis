@@ -20,12 +20,12 @@ final class ProviderRouteEditor: NSObject {
     private var activeTarget: BrainTarget?
 
     private static let headerHeight: CGFloat = 42
-    private static let rowHeight: CGFloat = 54
     private static let addHeight: CGFloat = 42
 
     var preferredHeight: CGFloat {
         Self.headerHeight
-            + CGFloat(preferences.fallbackTargets.count + 1) * Self.rowHeight
+            + (primaryRow?.preferredHeight ?? 54)
+            + fallbackRows.map(\.preferredHeight).reduce(0, +)
             + Self.addHeight
     }
 
@@ -152,19 +152,26 @@ final class ProviderRouteEditor: NSObject {
         let height = preferredHeight
         groupLabel.frame = NSRect(
             x: 16, y: height - 30, width: width - 32, height: 18)
-        primaryRow?.frame = rowFrame(at: 0, width: width, height: height)
-        for (index, row) in fallbackRows.enumerated() {
-            row.frame = rowFrame(at: index + 1, width: width, height: height)
+        var nextTop = height - Self.headerHeight
+        if let primaryRow {
+            nextTop -= primaryRow.preferredHeight
+            primaryRow.frame = rowFrame(
+                top: nextTop, width: width, rowHeight: primaryRow.preferredHeight)
+        }
+        for row in fallbackRows {
+            nextTop -= row.preferredHeight
+            row.frame = rowFrame(
+                top: nextTop, width: width, rowHeight: row.preferredHeight)
         }
         addButton.frame = NSRect(x: 12, y: 5, width: 132, height: 32)
     }
 
-    private func rowFrame(at index: Int, width: CGFloat, height: CGFloat) -> NSRect {
+    private func rowFrame(top: CGFloat, width: CGFloat, rowHeight: CGFloat) -> NSRect {
         NSRect(
             x: 16,
-            y: height - Self.headerHeight - CGFloat(index + 1) * Self.rowHeight,
+            y: top,
             width: max(200, width - 32),
-            height: Self.rowHeight)
+            height: rowHeight)
     }
 
     private func providerTitle(for provider: BrainProvider) -> String {

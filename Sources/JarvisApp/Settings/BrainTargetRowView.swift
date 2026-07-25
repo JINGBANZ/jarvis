@@ -20,10 +20,13 @@ final class BrainTargetRowView: NSView {
     private let providerPopup: NSPopUpButton
     private let modelPopup: NSPopUpButton
     private let trailingView: NSView?
+    private let placesActionsBelow: Bool
     private let providerIndexOffset: Int
     private let models: [BrainModel]
     private let onProviderChanged: (BrainProvider) -> Void
     private let onModelChanged: (BrainModel) -> Void
+
+    let preferredHeight: CGFloat
 
     init(
         title: String,
@@ -107,6 +110,8 @@ final class BrainTargetRowView: NSView {
             badge.layer?.masksToBounds = true
             badge.setAccessibilityLabel(trailingBadge)
             self.trailingView = badge
+            self.placesActionsBelow = false
+            self.preferredHeight = 54
         } else if let actions {
             // Start at its final frame size so AppKit never solves the button constraints against
             // a transient zero-sized stack while the Provider card is being assembled.
@@ -129,14 +134,18 @@ final class BrainTargetRowView: NSView {
             controls.addArrangedSubview(moveDown)
             controls.addArrangedSubview(remove)
             self.trailingView = controls
+            self.placesActionsBelow = true
+            self.preferredHeight = 84
         } else {
             self.trailingView = nil
+            self.placesActionsBelow = false
+            self.preferredHeight = 54
         }
 
         self.onProviderChanged = onProviderChanged
         self.onModelChanged = onModelChanged
 
-        super.init(frame: NSRect(x: 0, y: 0, width: 680, height: 52))
+        super.init(frame: NSRect(x: 0, y: 0, width: 680, height: preferredHeight))
 
         providerPopup.target = self
         providerPopup.action = #selector(providerChanged)
@@ -158,29 +167,46 @@ final class BrainTargetRowView: NSView {
     override func layout() {
         super.layout()
 
-        // Matches the selected mock's compact label column; the optional "IN USE" marker fits below.
+        // Every target uses the same full-width provider/model columns. Fallback actions occupy a
+        // separate compact line below, so adding controls never changes either popup's width.
         let labelWidth: CGFloat = 92
         let gap: CGFloat = 9
-        let actionsWidth: CGFloat = trailingView == nil ? 0 : 98
-        let actionsGap: CGFloat = trailingView == nil ? 0 : gap
+        let trailingBadgeWidth: CGFloat =
+            trailingView != nil && !placesActionsBelow ? 98 : 0
+        let trailingBadgeGap: CGFloat = trailingBadgeWidth > 0 ? gap : 0
         let selectionWidth = max(
             225,
-            bounds.width - labelWidth - gap - actionsWidth - actionsGap)
+            bounds.width - labelWidth - gap - trailingBadgeWidth - trailingBadgeGap)
         let popupWidth = max(108, (selectionWidth - gap) / 2)
+        let selectionY = bounds.height - 42
 
         if statusLabel == nil {
-            titleLabel.frame = NSRect(x: 0, y: 16, width: labelWidth, height: 20)
+            titleLabel.frame = NSRect(
+                x: 0, y: selectionY + 6, width: labelWidth, height: 20)
         } else {
-            titleLabel.frame = NSRect(x: 0, y: 27, width: labelWidth, height: 20)
-            statusLabel?.frame = NSRect(x: 0, y: 8, width: labelWidth, height: 15)
+            titleLabel.frame = NSRect(
+                x: 0, y: selectionY + 14, width: labelWidth, height: 18)
+            statusLabel?.frame = NSRect(
+                x: 0, y: selectionY, width: labelWidth, height: 14)
         }
 
         let providerX = labelWidth + gap
-        providerPopup.frame = NSRect(x: providerX, y: 10, width: popupWidth, height: 32)
+        providerPopup.frame = NSRect(
+            x: providerX, y: selectionY, width: popupWidth, height: 32)
         let modelX = providerPopup.frame.maxX + gap
-        modelPopup.frame = NSRect(x: modelX, y: 10, width: popupWidth, height: 32)
-        trailingView?.frame = NSRect(
-            x: bounds.width - actionsWidth, y: 10, width: actionsWidth, height: 32)
+        modelPopup.frame = NSRect(
+            x: modelX, y: selectionY, width: popupWidth, height: 32)
+
+        if placesActionsBelow {
+            trailingView?.frame = NSRect(
+                x: bounds.width - 98, y: 3, width: 98, height: 32)
+        } else if trailingView != nil {
+            trailingView?.frame = NSRect(
+                x: bounds.width - trailingBadgeWidth,
+                y: selectionY,
+                width: trailingBadgeWidth,
+                height: 32)
+        }
     }
 
     private static func actionButton(
