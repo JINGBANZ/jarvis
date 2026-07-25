@@ -784,6 +784,132 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(refreshedFallback.calls.count == 1)
     }
 
+    @Test func refreshingClientsCannotDropOrRedirectACommittedSkip() async {
+        let unavailableTarget = BrainTarget(provider: .claudeCode, modelID: "sonnet")
+        let availableTarget = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
+        let originalAvailable = ScriptedBrain(script: [
+            .init(toolCalls: [.staySilent(callId: "old-client")]),
+        ])
+        let originalSkip = RouteTargetRecorder()
+        let refreshedSkip = RouteTargetRecorder()
+        let transcript = RollingTranscript()
+        let driver = CoachDriver(
+            config: .default,
+            transcript: transcript,
+            route: ConfiguredBrainRoute(
+                targets: [
+                    ConfiguredBrainTarget(
+                        unavailable: unavailableTarget,
+                        detail: "Claude Code is signed out"),
+                    ConfiguredBrainTarget(target: availableTarget, brain: originalAvailable),
+                ],
+                onSkipped: { originalSkip.record($0) }),
+            screen: FakeScreen(),
+            overlay: FakeOverlay(),
+            clock: ManualClock(),
+            automaticAttemptDelay: { _ in })
+        transcript.append(.init(speaker: .me, text: "skip without losing the notice", at: 0))
+
+        let mainActorEntered = DispatchSemaphore(value: 0)
+        let releaseMainActor = DispatchSemaphore(value: 0)
+        let mainActorBlocker = Task { @MainActor in
+            blockMainActor(entered: mainActorEntered, release: releaseMainActor)
+        }
+        await waitForSemaphore(mainActorEntered)
+        async let outcome = driver.handleTrigger(.turnEnd)
+        await allowPendingRouteDeliveryToReachMainActor()
+
+        let refreshedAvailable = ScriptedBrain(script: [
+            .init(toolCalls: [.staySilent(callId: "new-client")]),
+        ])
+        #expect(driver.refreshBrainRouteClients(ConfiguredBrainRoute(
+            targets: [
+                ConfiguredBrainTarget(
+                    unavailable: unavailableTarget,
+                    detail: "Claude Code is still signed out"),
+                ConfiguredBrainTarget(target: availableTarget, brain: refreshedAvailable),
+            ],
+            onSkipped: { refreshedSkip.record($0) })))
+
+        releaseMainActor.signal()
+        await mainActorBlocker.value
+        #expect(await outcome == .silentByModel)
+        #expect(originalSkip.targets == [unavailableTarget])
+        #expect(refreshedSkip.targets.isEmpty)
+        #expect(originalAvailable.calls.isEmpty)
+        #expect(refreshedAvailable.calls.count == 1)
+    }
+
+    @Test func refreshingClientsCannotDropOrRedirectACommittedAdvance() async {
+        let primaryTarget = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
+        let fallbackTarget = BrainTarget(provider: .claudeCode, modelID: "sonnet")
+        let responseGate = AsyncGate()
+        let originalPrimary = GatedThrowingBrain(
+            gate: responseGate,
+            error: BrainFailure(
+                disposition: .permanent,
+                detail: "primary permanently failed"))
+        let originalFallback = ScriptedBrain(script: [
+            .init(toolCalls: [.staySilent(callId: "old-fallback")]),
+        ])
+        let originalAdvance = RouteTransitionRecorder()
+        let refreshedAdvance = RouteTransitionRecorder()
+        let transcript = RollingTranscript()
+        let driver = CoachDriver(
+            config: .default,
+            transcript: transcript,
+            route: ConfiguredBrainRoute(
+                targets: [
+                    ConfiguredBrainTarget(target: primaryTarget, brain: originalPrimary),
+                    ConfiguredBrainTarget(target: fallbackTarget, brain: originalFallback),
+                ],
+                onAdvanced: {
+                    originalAdvance.record(from: $0, to: $1)
+                }),
+            screen: FakeScreen(),
+            overlay: FakeOverlay(),
+            clock: ManualClock(),
+            automaticAttemptDelay: { _ in })
+        transcript.append(.init(speaker: .me, text: "advance without losing the notice", at: 0))
+
+        async let outcome = driver.handleTrigger(.turnEnd)
+        await responseGate.waitUntilEntered()
+        let mainActorEntered = DispatchSemaphore(value: 0)
+        let releaseMainActor = DispatchSemaphore(value: 0)
+        let mainActorBlocker = Task { @MainActor in
+            blockMainActor(entered: mainActorEntered, release: releaseMainActor)
+        }
+        await waitForSemaphore(mainActorEntered)
+        await responseGate.release()
+        await allowPendingRouteDeliveryToReachMainActor()
+
+        let refreshedPrimary = ThrowingBrain(error: BrainFailure(
+            disposition: .permanent,
+            detail: "refreshed primary should not run"))
+        let refreshedFallback = ScriptedBrain(script: [
+            .init(toolCalls: [.staySilent(callId: "new-fallback")]),
+        ])
+        #expect(driver.refreshBrainRouteClients(ConfiguredBrainRoute(
+            targets: [
+                ConfiguredBrainTarget(target: primaryTarget, brain: refreshedPrimary),
+                ConfiguredBrainTarget(target: fallbackTarget, brain: refreshedFallback),
+            ],
+            onAdvanced: {
+                refreshedAdvance.record(from: $0, to: $1)
+            })))
+
+        releaseMainActor.signal()
+        await mainActorBlocker.value
+        #expect(await outcome == .silentByModel)
+        #expect(originalAdvance.events == [
+            .init(from: primaryTarget, to: fallbackTarget),
+        ])
+        #expect(refreshedAdvance.events.isEmpty)
+        #expect(originalFallback.calls.isEmpty)
+        #expect(refreshedPrimary.callCount == 0)
+        #expect(refreshedFallback.calls.count == 1)
+    }
+
     @Test func inFlightSuccessAcrossClientRefreshResetsTheFailureSequence() async {
         let primaryTarget = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
         let fallbackTarget = BrainTarget(provider: .claudeCode, modelID: "sonnet")
@@ -1600,6 +1726,14 @@ private func waitForSemaphore(_ semaphore: DispatchSemaphore) async {
             semaphore.wait()
             continuation.resume()
         }
+    }
+}
+
+/// The main actor is deliberately blocked before the route task starts. Yielding here lets that task
+/// commit its lock-protected notice and park at the actor hop before the test refreshes clients.
+private func allowPendingRouteDeliveryToReachMainActor() async {
+    for _ in 0..<1_000 {
+        await Task.yield()
     }
 }
 

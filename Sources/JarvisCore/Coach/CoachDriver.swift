@@ -94,19 +94,26 @@ public final class CoachDriver: @unchecked Sendable {
         let callback: (@MainActor @Sendable (BrainTarget, BrainFailure) -> Void)?
     }
 
+    /// A route-health notice committed under the lock and consumed once after crossing to the main
+    /// actor. Client-only refreshes preserve it; an explicit topology edit supersedes it.
+    private struct RouteSkipDelivery {
+        let topologyRevision: UInt
+        let target: BrainTarget
+        let callback: (@MainActor @Sendable (BrainTarget) -> Void)?
+    }
+
+    /// The paired target transition committed when the next constructible target is selected.
+    private struct RouteAdvanceDelivery {
+        let topologyRevision: UInt
+        let previous: BrainTarget
+        let current: BrainTarget
+        let callback: (@MainActor @Sendable (BrainTarget, BrainTarget) -> Void)?
+    }
+
     private struct BrainSelectionStep {
         var selected: AttemptBrain? = nil
-        var advanced: (
-            UInt,
-            BrainTarget,
-            BrainTarget,
-            (@MainActor @Sendable (BrainTarget, BrainTarget) -> Void)?
-        )? = nil
-        var skipped: (
-            UInt,
-            BrainTarget,
-            (@MainActor @Sendable (BrainTarget) -> Void)?
-        )? = nil
+        var advanced: RouteAdvanceDelivery? = nil
+        var skipped: RouteSkipDelivery? = nil
         var diagnostic: String? = nil
         var exhaustion: RouteExhaustionDelivery? = nil
         var alreadyExhausted = false
@@ -317,17 +324,10 @@ public final class CoachDriver: @unchecked Sendable {
                 jlog(diagnostic)
             }
             if let skipped = step.skipped {
-                await deliverRouteSkip(
-                    revision: skipped.0,
-                    target: skipped.1,
-                    callback: skipped.2)
+                await deliverRouteSkip(skipped)
             }
             if let advanced = step.advanced {
-                await deliverRouteAdvance(
-                    revision: advanced.0,
-                    previous: advanced.1,
-                    current: advanced.2,
-                    callback: advanced.3)
+                await deliverRouteAdvance(advanced)
             }
             if let exhausted = step.exhaustion {
                 if await deliverRouteExhaustion(exhausted) {
@@ -356,8 +356,11 @@ public final class CoachDriver: @unchecked Sendable {
         let configured = configuredRoute.targets[index]
         if let brain = configured.brain {
             if let origin = pendingTransitionOrigin {
-                step.advanced = (
-                    routeRevision, origin, configured.target, configuredRoute.onAdvanced)
+                step.advanced = RouteAdvanceDelivery(
+                    topologyRevision: routeTopologyRevision,
+                    previous: origin,
+                    current: configured.target,
+                    callback: configuredRoute.onAdvanced)
                 pendingTransitionOrigin = nil
             }
             step.selected = AttemptBrain(
@@ -377,7 +380,10 @@ public final class CoachDriver: @unchecked Sendable {
                 ?? "\(configured.target.provider.displayName) is unavailable")
         step.diagnostic = "Jarvis coach: skipping unavailable route target "
             + "\(configured.target.provider.displayName): \(failure.detail)"
-        step.skipped = (routeRevision, configured.target, configuredRoute.onSkipped)
+        step.skipped = RouteSkipDelivery(
+            topologyRevision: routeTopologyRevision,
+            target: configured.target,
+            callback: configuredRoute.onSkipped)
         if pendingTransitionOrigin == nil {
             pendingTransitionOrigin = configured.target
         }
@@ -502,6 +508,12 @@ public final class CoachDriver: @unchecked Sendable {
         return routeRevision == revision
     }
 
+    private func isCurrentRouteTopologyRevision(_ revision: UInt) -> Bool {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return routeTopologyRevision == revision
+    }
+
     private func deliverRouteSelection(_ attempt: AttemptBrain) async -> Bool {
         await MainActor.run {
             guard isCurrentRouteRevision(attempt.routeRevision) else {
@@ -513,34 +525,25 @@ public final class CoachDriver: @unchecked Sendable {
         }
     }
 
-    private func deliverRouteSkip(
-        revision: UInt,
-        target: BrainTarget,
-        callback: (@MainActor @Sendable (BrainTarget) -> Void)?
-    ) async {
-        guard let callback else { return }
+    private func deliverRouteSkip(_ delivery: RouteSkipDelivery) async {
+        guard let callback = delivery.callback else { return }
         await MainActor.run {
-            guard isCurrentRouteRevision(revision) else {
+            guard isCurrentRouteTopologyRevision(delivery.topologyRevision) else {
                 jlog("Jarvis coach: ignoring target skip from a superseded Settings revision")
                 return
             }
-            callback(target)
+            callback(delivery.target)
         }
     }
 
-    private func deliverRouteAdvance(
-        revision: UInt,
-        previous: BrainTarget,
-        current: BrainTarget,
-        callback: (@MainActor @Sendable (BrainTarget, BrainTarget) -> Void)?
-    ) async {
-        guard let callback else { return }
+    private func deliverRouteAdvance(_ delivery: RouteAdvanceDelivery) async {
+        guard let callback = delivery.callback else { return }
         await MainActor.run {
-            guard isCurrentRouteRevision(revision) else {
+            guard isCurrentRouteTopologyRevision(delivery.topologyRevision) else {
                 jlog("Jarvis coach: ignoring route transition from a superseded Settings revision")
                 return
             }
-            callback(previous, current)
+            callback(delivery.previous, delivery.current)
         }
     }
 
