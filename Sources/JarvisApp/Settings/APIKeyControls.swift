@@ -1,104 +1,166 @@
 import AppKit
 import JarvisCore
 
-/// The OpenAI API-key controls embedded in the Brain settings tab. Saves to an owner-only file and
-/// reports back via `onKeySaved` (the app applies it without restarting a live conversation).
+/// Minimal transcription-provider and OpenAI credential editor for Brain Settings.
 ///
-/// Two states: when no key is stored yet it shows the entry field + Save; when one already exists it
-/// shows a "key is saved" summary + an Edit button (we never display the stored key — it's write-only,
-/// matching the owner-only-file posture). Edit reveals an empty field to paste a replacement.
+/// The collapsed state communicates configuration through its action only: `Add API key` when
+/// absent, `Edit` when present. Entry controls expand on explicit user action; errors appear only
+/// when needed, so the normal Settings surface stays quiet.
 @MainActor
 final class APIKeyControls: NSObject {
     private let store: FileSecretStore
     private let onKeySaved: (String) -> Void
 
-    private var prompt: NSTextField?           // entry instructions
+    private var card: SettingsCardView?
+    private var onHeightChanged: ((CGFloat) -> Void)?
+    private var editing = false
+    private var providerPopup: NSPopUpButton?
+    private var actionButton: NSButton?
     private var field: NSSecureTextField?
     private var saveButton: NSButton?
-    private var cancelButton: NSButton?        // shown only when editing an existing key
-    private var savedLabel: NSTextField?       // "a key is saved" summary
-    private var editButton: NSButton?
+    private var cancelButton: NSButton?
     private var status: NSTextField?
 
-    /// When true the entry field is shown; when false the saved summary is. Starts in entry mode only
-    /// if no key exists yet.
-    private var editing = true
+    private static let collapsedHeight: CGFloat = 150
+    private static let expandedHeight: CGFloat = 214
+
+    var preferredHeight: CGFloat {
+        editing ? Self.expandedHeight : Self.collapsedHeight
+    }
 
     init(store: FileSecretStore, onKeySaved: @escaping (String) -> Void) {
         self.store = store
         self.onKeySaved = onKeySaved
     }
 
-    /// Add the control rows to `view`, laid out downward from `top` (the y of the first row).
-    ///
-    /// The caller supplies the horizontal content bounds so the same controls fit a grouped card
-    /// and continue resizing with the Settings window.
-    func addControls(to view: NSView, top: CGFloat, x: CGFloat, width: CGFloat) {
-        let prompt = NSTextField(labelWithString: "Paste your OpenAI API key.")
-        prompt.frame = NSRect(x: x, y: top, width: width, height: 20)
-        prompt.autoresizingMask = [.width]
-        view.addSubview(prompt)
-        self.prompt = prompt
+    func makeView(onHeightChanged: @escaping (CGFloat) -> Void) -> NSView {
+        editing = false
+        self.onHeightChanged = onHeightChanged
 
-        let field = NSSecureTextField(frame: NSRect(x: x, y: top - 38, width: width, height: 26))
-        field.autoresizingMask = [.width]
+        let card = SettingsCardView(
+            frame: NSRect(x: 0, y: 0, width: 712, height: preferredHeight))
+        card.boxType = .custom
+        card.borderWidth = 1
+        card.cornerRadius = 12
+        card.borderColor = .separatorColor
+        card.fillColor = .controlBackgroundColor
+        card.contentViewMargins = .zero
+        card.onLayout = { [weak self] in self?.layout() }
+        self.card = card
+
+        guard let content = card.contentView else { return card }
+
+        let heading = NSTextField(labelWithString: "TRANSCRIPTION")
+        heading.font = .boldSystemFont(ofSize: NSFont.smallSystemFontSize)
+        heading.textColor = .secondaryLabelColor
+        heading.setAccessibilityLabel("Transcription")
+        heading.identifier = NSUserInterfaceItemIdentifier("transcription-heading")
+        content.addSubview(heading)
+
+        let providerLabel = NSTextField(labelWithString: "Provider")
+        providerLabel.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
+        providerLabel.identifier = NSUserInterfaceItemIdentifier("transcription-provider-label")
+        content.addSubview(providerLabel)
+
+        let provider = NSPopUpButton()
+        provider.addItem(withTitle: BrainProvider.openAI.displayName)
+        provider.setAccessibilityLabel("Transcription provider")
+        provider.identifier = NSUserInterfaceItemIdentifier("transcription-provider")
+        content.addSubview(provider)
+        providerPopup = provider
+
+        let keyLabel = NSTextField(labelWithString: "API key")
+        keyLabel.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
+        keyLabel.identifier = NSUserInterfaceItemIdentifier("transcription-key-label")
+        content.addSubview(keyLabel)
+
+        let action = NSButton(
+            title: store.apiKey() == nil ? "Add API key" : "Edit",
+            target: self,
+            action: #selector(editTapped))
+        action.bezelStyle = .rounded
+        action.identifier = NSUserInterfaceItemIdentifier("transcription-key-action")
+        content.addSubview(action)
+        actionButton = action
+
+        let field = NSSecureTextField()
         field.placeholderString = "sk-…"
         field.setAccessibilityLabel("OpenAI API key")
-        view.addSubview(field)
+        field.identifier = NSUserInterfaceItemIdentifier("transcription-key-field")
+        content.addSubview(field)
         self.field = field
 
+        let cancel = NSButton(title: "Cancel", target: self, action: #selector(cancelTapped))
+        cancel.bezelStyle = .rounded
+        cancel.keyEquivalent = "\u{1b}"
+        content.addSubview(cancel)
+        cancelButton = cancel
+
         let save = NSButton(title: "Save", target: self, action: #selector(saveTapped))
-        save.frame = NSRect(x: x + width - 92, y: top - 78, width: 92, height: 32)
-        save.autoresizingMask = [.minXMargin]
         save.bezelStyle = .rounded
         save.keyEquivalent = "\r"
-        view.addSubview(save)
-        self.saveButton = save
+        content.addSubview(save)
+        saveButton = save
 
-        // Sits just left of Save; only meaningful when a key already exists, so canceling has a saved
-        // state to return to (a first-time entry has nothing to cancel back to).
-        let cancel = NSButton(title: "Cancel", target: self, action: #selector(cancelTapped))
-        cancel.frame = NSRect(x: x + width - 192, y: top - 78, width: 92, height: 32)
-        cancel.autoresizingMask = [.minXMargin]
-        cancel.bezelStyle = .rounded
-        cancel.keyEquivalent = "\u{1b}" // Esc
-        view.addSubview(cancel)
-        self.cancelButton = cancel
-
-        let savedLabel = NSTextField(labelWithString: "An OpenAI API key is saved on this Mac.")
-        savedLabel.frame = NSRect(x: x, y: top, width: width, height: 20)
-        savedLabel.autoresizingMask = [.width]
-        view.addSubview(savedLabel)
-        self.savedLabel = savedLabel
-
-        let edit = NSButton(title: "Edit", target: self, action: #selector(editTapped))
-        edit.frame = NSRect(x: x, y: top - 42, width: 92, height: 32)
-        edit.bezelStyle = .rounded
-        view.addSubview(edit)
-        self.editButton = edit
-
-        // Below the Save/Cancel row — at the buttons' own height its frame would overlap (and, being
-        // a later subview, swallow clicks on) the Cancel button.
         let status = NSTextField(labelWithString: "")
-        status.frame = NSRect(x: x, y: top - 110, width: width, height: 20)
-        status.autoresizingMask = [.width]
-        status.textColor = .secondaryLabelColor
-        view.addSubview(status)
+        status.textColor = .systemRed
+        status.identifier = NSUserInterfaceItemIdentifier("transcription-key-error")
+        content.addSubview(status)
         self.status = status
 
-        editing = store.apiKey() == nil
         applyState()
+        layout()
+        return card
     }
 
-    /// Show the entry field + Save, or the saved summary + Edit, per `editing`. Cancel appears only
-    /// while editing a key that's already stored — a first-time entry has no saved state to revert to.
+    private func layout() {
+        guard let card, let content = card.contentView else { return }
+        let width = content.bounds.width
+        let height = preferredHeight
+        let controlWidth: CGFloat = min(220, max(150, width * 0.46))
+        let controlX = width - 14 - controlWidth
+
+        content.subviews.first {
+            $0.identifier?.rawValue == "transcription-heading"
+        }?.frame = NSRect(x: 16, y: height - 30, width: width - 32, height: 18)
+        content.subviews.first {
+            $0.identifier?.rawValue == "transcription-provider-label"
+        }?.frame = NSRect(x: 16, y: height - 74, width: 150, height: 20)
+        providerPopup?.frame = NSRect(
+            x: controlX, y: height - 80, width: controlWidth, height: 32)
+        content.subviews.first {
+            $0.identifier?.rawValue == "transcription-key-label"
+        }?.frame = NSRect(x: 16, y: height - 128, width: 150, height: 20)
+
+        if editing {
+            field?.frame = NSRect(
+                x: controlX, y: height - 134, width: controlWidth, height: 26)
+            saveButton?.frame = NSRect(
+                x: width - 14 - 82, y: 31, width: 82, height: 32)
+            cancelButton?.frame = NSRect(
+                x: width - 14 - 172, y: 31, width: 82, height: 32)
+            status?.frame = NSRect(
+                x: 16, y: 8, width: max(160, width - 206), height: 20)
+        } else {
+            actionButton?.sizeToFit()
+            let actionWidth = max(82, (actionButton?.frame.width ?? 0) + 20)
+            actionButton?.frame = NSRect(
+                x: width - 14 - actionWidth,
+                y: height - 134,
+                width: actionWidth,
+                height: 32)
+        }
+    }
+
     private func applyState() {
-        prompt?.isHidden = !editing
+        actionButton?.isHidden = editing
         field?.isHidden = !editing
         saveButton?.isHidden = !editing
-        cancelButton?.isHidden = !(editing && store.apiKey() != nil)
-        savedLabel?.isHidden = editing
-        editButton?.isHidden = editing
+        cancelButton?.isHidden = !editing
+        status?.isHidden = !editing
+        card?.frame.size.height = preferredHeight
+        card?.needsLayout = true
+        onHeightChanged?(preferredHeight)
     }
 
     @objc private func editTapped() {
@@ -106,6 +168,7 @@ final class APIKeyControls: NSObject {
         status?.stringValue = ""
         field?.stringValue = ""
         applyState()
+        layout()
         field?.window?.makeFirstResponder(field)
     }
 
@@ -114,16 +177,25 @@ final class APIKeyControls: NSObject {
         status?.stringValue = ""
         field?.stringValue = ""
         applyState()
+        layout()
     }
 
     @objc private func saveTapped() {
-        let token = (field?.stringValue ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !token.isEmpty else { status?.stringValue = "Enter a key first."; return }
-        guard store.setApiKey(token) else { status?.stringValue = "Couldn't save key — check disk permissions."; return }
+        let token = (field?.stringValue ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !token.isEmpty else {
+            status?.stringValue = "Enter a key first."
+            return
+        }
+        guard store.setApiKey(token) else {
+            status?.stringValue = "Couldn’t save the key."
+            return
+        }
         onKeySaved(token)
-        status?.stringValue = "Key saved ✓"
         field?.stringValue = ""
         editing = false
+        actionButton?.title = "Edit"
         applyState()
+        layout()
     }
 }

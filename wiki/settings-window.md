@@ -108,12 +108,12 @@ tracks intent separately from `panel.isVisible` so the setting can't desync). Th
 The Brain tab owns the whole "who answers a coaching attempt" decision, persisted through
 `BrainPreferences` (UserDefaults).
 
-The tab is one vertically scrolling stack of rounded groups: a live-session banner when coaching is
-running, **Primary**, **Fallback route**, **Reasoning**, then **OpenAI API key**. Target rows share the
-same wide inline shape — label, provider menu, model menu, then saved-state or ordering actions — so
-the saved route reads in the same order it executes. Fallback rows expand the outer document instead
-of hiding inside a second scroll area. The live banner and an **active this session** row marker expose
-the runtime cursor without moving or rewriting any saved target.
+The tab is one vertically scrolling stack of three rounded groups: **Provider**, **Reasoning
+effort**, then **Transcription**. The Provider group is one uninterrupted route: Primary and every
+Fallback row share the same label / provider / model alignment, with ordering actions only on
+fallbacks. There are no row dividers or permanent explanatory paragraphs. Fallback rows expand the
+outer document instead of hiding inside a second scroll area. While coaching runs, a compact **In
+use** marker exposes the runtime cursor without moving or rewriting any saved target.
 
 **Primary.** The first row selects a provider and model: the **OpenAI API** (metered by the key), or a
 locally installed **Claude Code** / **Codex CLI** — in which case coaching attempts are spawned as CLI
@@ -127,13 +127,18 @@ selectable while the first result is pending. The provider menus then show **sig
 **sign-in unknown**; a confirmed logout refuses Start, while an unavailable probe warns but does not
 falsely claim logout. An actual CLI request can still fail after preflight.
 
-**Fallback route.** Below the primary, an ordered list contains zero or more explicitly authorized
+Before first-time setup, Primary shows **Choose provider…**, its model menu is disabled, and **Add
+fallback** is disabled. Selecting Primary creates the first valid route. Older installations that
+already have the required transcription key retain the historical OpenAI default through a one-time
+compatibility migration instead of being forced through setup again.
+
+**Fallbacks.** Below the primary, an ordered list contains zero or more explicitly authorized
 provider/model targets. **Add fallback** appends a row; each row has provider and model menus,
 accessible `↑` / `↓` / `×` actions for Move Up, Move Down, and Remove. Rows are labelled **Fallback 1**,
 **Fallback 2**, and so on, so visual order and failover order are identical. Exact duplicate targets
-are rejected; a second model from the same provider is allowed as a deliberate separate target. The
-card states that edits save immediately and apply on the next coaching attempt. The shared effort
-setting sits in its own group and applies to every row.
+are rejected; a second model from the same provider is allowed as a deliberate separate target.
+Edits still save immediately and apply on the next coaching attempt, but the normal UI does not
+repeat that implementation detail.
 
 The list is finite and follows the [ordered provider-route contract](./architecture.md#ordered-provider-route).
 One target owns a complete coaching attempt. A provider error ends that attempt without replaying its
@@ -152,19 +157,21 @@ unavailable after Start, activation skips it and moves forward without inventing
 cannot run. Runtime movement through the route never changes the saved list. Stop → Start begins at
 the saved primary again.
 
-**Model + effort.** A **Model** dropdown drawn from `BrainModelCatalog` per provider (OpenAI ids for
+**Model + reasoning effort.** A **Model** dropdown drawn from `BrainModelCatalog` per provider (OpenAI ids for
 the API; CLI aliases like `sonnet` for the CLIs, plus a "CLI default" entry meaning "no model flag" —
 for Codex that is its built-in default, since harness runs ignore the user's codex config). Each
-provider remembers its own model. The **Reasoning
-Effort** picker (`ReasoningEffort`: None / Low / Medium / High, default Low) is stored once and
+provider remembers its own model. The **Reasoning effort** picker (`ReasoningEffort`: None / Low /
+Medium / High, default Low) is stored once and
 applies uniformly to whichever provider is active — `CLIBrainClient` maps it onto each CLI's own
 scale (Claude Code `--effort`, floor `low`; Codex `model_reasoning_effort`, passed through
 unchanged), so model + effort behave the same way across all three providers.
 
-**API key.** The OpenAI key controls (`APIKeyControls`) live at the bottom of the same tab because
-the key is part of the same decision — and it stays **required regardless of provider**: realtime
-voice transcription always runs on the OpenAI Realtime API. A CLI provider moves only the brain off
-the key.
+**Transcription.** This group names the separate speech-to-text role explicitly so future
+transcription providers can be added without conflating them with the brain route. It currently
+shows **OpenAI API** as the sole provider and an **API key** row whose action is **Add API key** or
+**Edit**—there is no persistent saved-status sentence. The key stays **required regardless of brain
+provider** because realtime voice transcription runs on the OpenAI Realtime API. A CLI brain moves
+only coaching off the key.
 
 Reads are validated: a persisted model id no longer in that provider's catalog (or an unrecognized
 provider/effort) falls back to the default rather than reaching the API. The transcription model is
@@ -231,11 +238,11 @@ from an old entire-display selection never steers them.
 |---|---|
 | `Sources/JarvisApp/Settings/SettingsSection.swift` | Protocol definition |
 | `Sources/JarvisApp/Settings/SettingsWindow.swift` | Host window + tab view |
-| `Sources/JarvisApp/Settings/BrainSection.swift` | Brain tab composition: live banner + primary + fallback + reasoning + key groups |
+| `Sources/JarvisApp/Settings/BrainSection.swift` | Minimal Brain tab composition: Provider + Reasoning effort + Transcription |
 | `Sources/JarvisApp/Settings/BrainTargetRowView.swift` | Shared inline provider/model row for primary and fallback targets |
-| `Sources/JarvisApp/Settings/FallbackRouteEditor.swift` | Ordered inline fallback card + persistence mutations |
+| `Sources/JarvisApp/Settings/ProviderRouteEditor.swift` | Unified Primary + ordered fallback card and persistence mutations |
 | `Sources/JarvisApp/Settings/SettingsCardView.swift` | Resize callback at the grouped-card boundary |
-| `Sources/JarvisApp/Settings/APIKeyControls.swift` | The API-key rows embedded in the Brain tab |
+| `Sources/JarvisApp/Settings/APIKeyControls.swift` | Transcription provider + collapsed API-key editor |
 | `Sources/JarvisApp/Settings/OverlaySection.swift` | Overlay-appearance tab |
 | `Sources/JarvisApp/Settings/DisplaySection.swift` | Capture-scope tab (scope + display in one dropdown) |
 | `Sources/JarvisApp/Settings/NSScreen+DisplayTitles.swift` | Display naming for the dropdown's entire-display entries |

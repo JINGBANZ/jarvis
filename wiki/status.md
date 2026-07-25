@@ -33,7 +33,9 @@ automatic return to an earlier target.
 Runtime movement never changes preferences; exhausting the finite route stops coaching with a fixed
 typed Activity event. That route is implemented as immutable provider/model values, a pure
 Foundation-only session cursor, a single-flight fresh-attempt scheduler, and the ordered Settings
-card editor with shared inline target rows; the old immediate request retry, scalar fallback,
+Provider editor with one uninterrupted Primary/fallback route, a separate right-aligned Reasoning
+effort row, and an explicit Transcription provider/key group. A first-open install remains
+unconfigured until Primary is chosen; the old immediate request retry, scalar fallback,
 same-attempt failover, and primary recovery
 probing are removed. Codex coaching calls
 suppress project instructions and its feature-gated agent tools, run as direct-response decisions, inherit only stable
@@ -61,7 +63,8 @@ question and confirm it can answer without an unnecessary capture. Finish the in
 provider smoke: confirm Settings shows it signed in, then confirm a coaching turn and screen request.
 While that session runs, switch providers and confirm the next completed turn preserves context and
 adds the provider-only success notice to Activity; then exercise a failed replacement and confirm
-the pending conversation is preserved. Configure multiple fallbacks and force a temporary
+the pending conversation is preserved. Verify the first-open Brain state (no Primary selection,
+disabled model/Add fallback, and Add API key), then configure multiple fallbacks and force a temporary
 three-attempt transition, a proven-permanent one-attempt transition, an unavailable-target skip, and
 final route exhaustion. Confirm no provider-specific tool state crosses attempts and verify a
 successful fallback remains active without changing preferences. Finish the in-app Codex smoke through
@@ -90,7 +93,7 @@ thin OS shell, verified by the smoke run.
 - `Sources/JarvisOverlay/` — the capture-invisible `NSPanel` surfaces: `OverlayCaptionPanel` (transient), `OverlayBoxPanel` (persistent), `NSPanel+CaptureExclusion`.
 - `Sources/JarvisApp/App/` + `MenuBar/` — entry point, connection-aware menu status, Start/Stop, `ErrorReporter` (startup alerts plus an unconditional no-presentation runtime policy).
 - `Sources/JarvisApp/Capture/` — one-clock aggregate mic + sample-preserving system-audio capture with AEC3 echo cancellation + resampling (`AggregateEchoCapture`, `WebRTCEchoCanceller`, `Resampler`), Realtime item/readiness/liveness/transactional-reconnect/witness handling (`RealtimeTranscriber`, `NetworkPathDiagnostics`), permissions, plus the window-scoped screenshot + OCR edge (`WindowScopedScreenCapture`, `ScreenTextRecognizer`).
-- `Sources/JarvisApp/Settings/` — the unified Settings window (`SettingsWindow` hosting Brain (primary + ordered provider/model fallbacks, model, effort, and API key) / Overlay / Screen / Activity sections).
+- `Sources/JarvisApp/Settings/` — the unified Settings window (`SettingsWindow` hosting Brain (minimal Provider route / Reasoning effort / Transcription groups) / Overlay / Screen / Activity sections).
 - `Sources/JarvisApp/Shortcuts/HotkeyController.swift` — the global Carbon ⌥⌘J on-demand-hint hotkey.
 - `Sources/JarvisApp/Viewer/ActivityViewer.swift` — the in-app `WKWebView` activity viewer, with an exact selectable/copyable session ID and one-click **Evaluate** / **Open report** agentic audit flow.
 - `Sources/EvalPrep/main.swift` — the Foundation-only terminal entry point for the same `AgenticEvaluator` Activity invokes; `scripts/eval-session.sh` runs it over the repo + session dir.

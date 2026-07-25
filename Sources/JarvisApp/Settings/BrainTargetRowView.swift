@@ -1,7 +1,7 @@
 import AppKit
 import JarvisCore
 
-/// One provider/model target row shared by the primary and fallback route cards.
+/// One provider/model target row shared by Primary and fallbacks in the unified Provider card.
 ///
 /// The row owns only presentation and discrete control callbacks. Primary-route persistence,
 /// fallback-list mutation, availability policy, and runtime state remain with their existing owners.
@@ -19,7 +19,8 @@ final class BrainTargetRowView: NSView {
     private let statusLabel: NSTextField?
     private let providerPopup: NSPopUpButton
     private let modelPopup: NSPopUpButton
-    private let trailingView: NSView
+    private let trailingView: NSView?
+    private let providerIndexOffset: Int
     private let models: [BrainModel]
     private let onProviderChanged: (BrainProvider) -> Void
     private let onModelChanged: (BrainModel) -> Void
@@ -27,7 +28,7 @@ final class BrainTargetRowView: NSView {
     init(
         title: String,
         status: String? = nil,
-        target: BrainTarget,
+        target: BrainTarget?,
         providerTitle: (BrainProvider) -> String,
         canSelectProvider: (BrainProvider) -> Bool,
         canSelectModel: (BrainModel) -> Bool,
@@ -36,7 +37,7 @@ final class BrainTargetRowView: NSView {
         onProviderChanged: @escaping (BrainProvider) -> Void,
         onModelChanged: @escaping (BrainModel) -> Void
     ) {
-        precondition((trailingBadge == nil) != (actions == nil))
+        precondition(trailingBadge == nil || actions == nil)
 
         let titleLabel = NSTextField(labelWithString: title)
         titleLabel.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
@@ -53,28 +54,43 @@ final class BrainTargetRowView: NSView {
 
         let providerPopup = NSPopUpButton()
         providerPopup.menu?.autoenablesItems = false
+        if target == nil {
+            providerPopup.addItem(withTitle: "Choose provider…")
+        }
         providerPopup.addItems(withTitles: BrainProvider.allCases.map(providerTitle))
-        providerPopup.selectItem(
-            at: BrainProvider.allCases.firstIndex(of: target.provider) ?? 0)
+        let providerIndexOffset = target == nil ? 1 : 0
+        self.providerIndexOffset = providerIndexOffset
+        if let target {
+            providerPopup.selectItem(
+                at: (BrainProvider.allCases.firstIndex(of: target.provider) ?? 0)
+                    + providerIndexOffset)
+        } else {
+            providerPopup.selectItem(at: 0)
+        }
         providerPopup.setAccessibilityLabel("\(title) provider")
         for (index, provider) in BrainProvider.allCases.enumerated() {
-            providerPopup.item(at: index)?.isEnabled =
-                provider == target.provider || canSelectProvider(provider)
+            providerPopup.item(at: index + providerIndexOffset)?.isEnabled =
+                provider == target?.provider || canSelectProvider(provider)
         }
         self.providerPopup = providerPopup
 
-        let models = BrainModelCatalog.models(for: target.provider)
+        let models = target.map { BrainModelCatalog.models(for: $0.provider) } ?? []
         self.models = models
         let modelPopup = NSPopUpButton()
         modelPopup.menu?.autoenablesItems = false
-        modelPopup.addItems(withTitles: models.map(\.displayName))
-        if let selected = models.firstIndex(where: { $0.id == target.modelID }) {
-            modelPopup.selectItem(at: selected)
+        if let target {
+            modelPopup.addItems(withTitles: models.map(\.displayName))
+            if let selected = models.firstIndex(where: { $0.id == target.modelID }) {
+                modelPopup.selectItem(at: selected)
+            }
+        } else {
+            modelPopup.addItem(withTitle: "Choose model…")
+            modelPopup.isEnabled = false
         }
         modelPopup.setAccessibilityLabel("\(title) model")
         for (index, model) in models.enumerated() {
             modelPopup.item(at: index)?.isEnabled =
-                model.id == target.modelID || canSelectModel(model)
+                model.id == target?.modelID || canSelectModel(model)
         }
         self.modelPopup = modelPopup
 
@@ -110,7 +126,7 @@ final class BrainTargetRowView: NSView {
             controls.addArrangedSubview(remove)
             self.trailingView = controls
         } else {
-            preconditionFailure("A target row needs either a badge or actions")
+            self.trailingView = nil
         }
 
         self.onProviderChanged = onProviderChanged
@@ -127,7 +143,7 @@ final class BrainTargetRowView: NSView {
         if let statusLabel { addSubview(statusLabel) }
         addSubview(providerPopup)
         addSubview(modelPopup)
-        addSubview(trailingView)
+        if let trailingView { addSubview(trailingView) }
     }
 
     @available(*, unavailable)
@@ -138,9 +154,8 @@ final class BrainTargetRowView: NSView {
     override func layout() {
         super.layout()
 
-        // The HTML's compact active marker needs a little more room in native SF Text once
-        // uppercased; 116 keeps the full phrase visible even at the minimum Settings width.
-        let labelWidth: CGFloat = 116
+        // Matches the selected mock's compact label column; the optional "IN USE" marker fits below.
+        let labelWidth: CGFloat = 92
         let trailingWidth: CGFloat = 98
         let gap: CGFloat = 9
         let popupWidth = max(
@@ -161,14 +176,8 @@ final class BrainTargetRowView: NSView {
         providerPopup.frame = NSRect(x: providerX, y: 10, width: popupWidth, height: 32)
         let modelX = providerPopup.frame.maxX + gap
         modelPopup.frame = NSRect(x: modelX, y: 10, width: popupWidth, height: 32)
-        trailingView.frame = NSRect(
+        trailingView?.frame = NSRect(
             x: bounds.width - controlsWidth, y: 10, width: controlsWidth, height: 32)
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        super.draw(dirtyRect)
-        NSColor.separatorColor.withAlphaComponent(0.55).setFill()
-        NSRect(x: 0, y: 0, width: bounds.width, height: 1).fill()
     }
 
     private static func actionButton(
@@ -188,7 +197,7 @@ final class BrainTargetRowView: NSView {
     }
 
     @objc private func providerChanged(_ sender: NSPopUpButton) {
-        let index = sender.indexOfSelectedItem
+        let index = sender.indexOfSelectedItem - providerIndexOffset
         guard BrainProvider.allCases.indices.contains(index) else { return }
         onProviderChanged(BrainProvider.allCases[index])
     }
