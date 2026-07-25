@@ -128,9 +128,9 @@ plugins ship only with full Xcode, and Jarvis builds **CLT-only** (see
 |---|---|---|
 | **AggregateEchoCapture** | The whole capture path: one **private Core Audio aggregate device** = the built-in mic (`me`, clock master) + a system-output **process tap** (`them`, drift-compensated onto the mic's clock). A single IOProc delivers both sample-synced at the device's **native rate** — the one-clock case AEC3 needs; the capture **reads that rate and resamples mic+tap up to 48 kHz** for AEC3 (a no-op when the device is already 48 kHz). So **any input device works** — built-in, USB, 44.1 kHz gear, or AirPods (Bluetooth HFP at 16/24 kHz) — instead of the old hard 48 kHz pin that silently failed to start on Bluetooth mics. Inside the callback it runs AEC3 (tap = far reference, mic = near), removing the other side's speaker bleed from the mic *before* transcription — no headphones, and double-talk works (measured 30–50 dB cancellation). The untouched resampled tap remains the `them` source while a separate padded/truncated copy aligns AEC; wire delivery is serialized off the realtime IOProc. Then both sides downsample to 24 kHz. Replaces the old separate `AVAudioEngine` mic + `SCStream`. | Core Audio (`AudioHardwareCreateProcessTap`, private aggregate device, drift compensation) + `AVAudioConverter` resampling + WebRTC **AEC3**. |
 | **WebRTCEchoCanceller** | AEC3 echo canceller driven at 48 kHz on 10 ms frames inside the capture IOProc; far reference first, then the mic cleaned in place. | WebRTC **AEC3** (`webrtc-audio-processing`), vendored static + zero-dylib via `scripts/build-aec.sh`. |
-| **ErrorReporter** | The single funnel for user-facing failures. Severity on a Foundation-only `UserFacingError` decides the lifecycle consequence; an explicit startup/runtime context decides presentation. Startup failures may alert, but runtime failures never activate Jarvis or present UI even when they stop the session. `BrainFailure` separately guarantees that temporary or unknown missed turns never enter this terminal funnel. Fixed, typed Activity outcomes carry stable on-disk identities while raw detail stays in `JarvisLog`. | AppKit (`NSAlert`) for startup only. |
-| **Transcriber** | Maintain a rolling, speaker-labeled, **spoken-time timestamped** transcript; emit turn-end events and backing-off silence checks (with quiet duration). Two instances run in parallel — one per side — tagging lines `me`/`them` into one shared transcript. A per-`item_id` ledger reconciles out-of-order delta/completed/failed/VAD events and salvages streamed text. An utterance-local failure with no usable words stays diagnostic and cannot trigger the brain; a permanent account or configuration rejection stops the unusable session with a fixed Activity reason. A privacy-preserving continuity witness records content-free capture/delivery/socket/server checkpoints and locally derived activity intervals, so the session log can locate a future gap without retaining PCM or adding pseudo-speech to model context. A socket is ready only after the server acknowledges its configuration; active ping/pong probes, send/receive errors, and startup timeouts all drive the same reconnect path. | `gpt-4o-transcribe` (Realtime API; tuned `server_vad`). |
-| **CoachDriver** | The event loop. On every substantive trigger (plus every silence check and hint keypress), call the brain with the session memory + transcript delta + timing context and tools, route tool calls, and compact the memory when it grows long. No cooldown/rate cap — restraint is the model's; the only client-side skip is the filler-only turn-end gate (`TurnSubstance`). | `gpt-5.5` (vision + tool-use) with `gpt-5.4-mini` for memory summaries — or a local Claude Code / Codex CLI on the user's subscription (see [§4 Local CLI brain providers](#local-cli-brain-providers)). |
+| **ErrorReporter** | The single funnel for user-facing failures. Severity on a Foundation-only `UserFacingError` decides the lifecycle consequence; an explicit startup/runtime context decides presentation. Startup failures may alert, but runtime failures never activate Jarvis or present UI even when they stop the session. `BrainFailure` feeds attempt outcomes into the finite provider route; only route exhaustion enters terminal reporting. Fixed, typed Activity outcomes carry stable on-disk identities while raw detail stays in `JarvisLog`. | AppKit (`NSAlert`) for startup only. |
+| **Transcriber** | Maintain a rolling, speaker-labeled, **spoken-time timestamped** transcript; emit speech-activity, turn-end, and backing-off silence events (with quiet duration). Two instances run in parallel — one per side — tagging lines `me`/`them` into one shared transcript. A per-`item_id` ledger reconciles out-of-order delta/completed/failed/VAD events and salvages streamed text. An utterance-local failure with no usable words stays diagnostic and cannot trigger the brain; a permanent account or configuration rejection stops the unusable session with a fixed Activity reason. A privacy-preserving continuity witness records content-free capture/delivery/socket/server checkpoints and locally derived activity intervals, so the session log can locate a future gap without retaining PCM or adding pseudo-speech to model context. A socket is ready only after the server acknowledges its configuration; active ping/pong probes, send/receive errors, and startup timeouts all drive the same reconnect path. | `gpt-4o-transcribe` (Realtime API; tuned `server_vad`). |
+| **CoachDriver** | Coordinate one single-flighted coaching attempt from a natural trigger or pending-work wake-up: snapshot one route target plus the latest conversation, route its tool calls, commit only a complete terminal action, and report one outcome to the scheduler. No speaking cooldown/rate cap — restraint is the model's; the only client-side content skip is the filler-only turn-end gate (`TurnSubstance`). | `gpt-5.5` (vision + tool-use) with `gpt-5.4-mini` for memory summaries — or a local Claude Code / Codex CLI on the user's subscription (see [§4 Local CLI brain providers](#local-cli-brain-providers)). |
 | **ScreenTool** | Fulfill `capture_screen`: silently shoot the **active window** (default scope) — the window-server frontmost, on whichever display, clean even when partially covered — and attach an **on-device OCR** of the shot to the tool result so the model reads exact text instead of pixels. Falls back to a full-display capture (no OCR) — the Settings-chosen display in Entire-display scope, the main display when no window is eligible; the overlay window is excluded either way. See [settings-window.md](./settings-window.md#capture-scope). | macOS `screencapture` CLI + Apple Vision (`VNRecognizeTextRequest`). |
 | **Overlay Caption** | Render `speak` output: up to ~3 short lines (model-split), shown one at a time and queued so a newer tip never cuts off the current one; non-activating, always-on-top, excluded from capture. Switchable from Settings — **off by default**; when off, tips are suppressed. | AppKit NSPanel; `OverlayCaptionPanel`. |
 | **Overlay Box** | A persistent window logging every `speak` tip in full, timestamped — the scrollable history of what the caption flashed one line at a time. Movable, resizable, opaque, also excluded from capture; switched on/off from Settings (**on by default**), cleared on each Start. Fed by the same `speak` call as the caption via **`BroadcastOverlay`**, which fans one `OverlayRendering.render` out to both sinks (so `CoachDriver` is unchanged). | AppKit NSPanel; `OverlayBoxPanel`. |
@@ -170,22 +170,17 @@ failure site decides presentation. Startup failures caused by an explicit Start 
 runtime context suppresses alerts unconditionally, including after teardown, so a queued main-actor
 report cannot reveal Jarvis during screen sharing. Permanent brain, microphone-transcription, and
 audio-capture failures stop without presenting UI; the system-audio failure degrades to
-microphone-only. Every brain provider crosses one typed `BrainFailure` boundary shared by immediate
-retry and `CoachDriver` lifecycle handling: temporary and unrecognized live-turn errors leave
-capture, transcription, pending triggers, and unsent transcript intact; without a configured
-fallback they record a fixed missed-turn notice. Only an explicitly proven permanent failure may
-latch and stop. Audio-route rebuilds also
+microphone-only. Every brain provider crosses one typed `BrainFailure` boundary, but provider
+classification never replays a failed request inside its coaching attempt. A failed attempt leaves
+capture, transcription, pending triggers, unsent transcript, and committed history intact; the
+provider-route state machine decides whether to try the active target again, advance to the next
+user-authorized target, or stop after the finite route is exhausted. Audio-route rebuilds separately
 retry under a bounded schedule before capture is declared unavailable, and stale callbacks are
 identity-guarded across Stop → Start. Each Activity row persists a stable event kind. The agentic
 session evaluator reads the complete Activity file, using those kinds and the full user-visible
 sequence rather than a preselected excerpt; dynamic provider and transport detail remains only in
-`JarvisLog`. When the user explicitly configures a distinct fallback, a temporary primary failure
-that survives immediate retry instead retries the same pending turn on that fallback. Client-managed
-history and completed screen observations remain available, but provider-specific reasoning,
-tool-call ids, and call/result pairing do not cross the transport boundary. The fallback stays
-installed until a non-truncated terminal turn, then serves a 60-second cooldown before a later turn
-probes the retained primary. A failed probe restores the fallback and resets the cooldown; no two
-providers run concurrently.
+`JarvisLog`. Route changes and final exhaustion use fixed, provider-level Activity events; individual
+request errors, attempt scheduling, and failure counts remain diagnostic detail.
 
 Ghost mode applies from a live pipeline through terminal teardown: no autonomous activation, alert,
 window, browser, notification, attention request, or sound is allowed outside the nonactivating,
@@ -194,6 +189,74 @@ Settings/Activity surfaces are explicit exceptions, as is unavoidable macOS priv
 presentation matrix is unit-tested, and `scripts/check-ghost-mode.sh` rejects unreviewed presentation
 API calls from the normal test gate. Realtime health remains visible only through the existing
 menu-bar status; `ErrorReporter` owns failure lifecycle and permitted startup surfacing.
+
+### Ordered provider route
+
+Settings persists one primary target followed by an ordered list of explicitly authorized fallback
+targets. A target is a provider/model pair; the shared reasoning-effort preference is snapshotted with
+the route when an attempt begins. Exact duplicate targets are invalid, while two different models from
+the same provider are allowed when the user deliberately places both in the list. The live route cursor
+starts at the primary, only moves forward, and is session-local: automatic failover never rewrites
+preferences. A successful fallback remains active for the rest of the session unless it later exhausts
+its own failure budget. Stop → Start begins again at the persisted primary. A valid Settings edit is
+the only live-session override: it installs a fresh route between attempts and starts at the newly
+selected primary.
+
+A **coaching attempt** snapshots one target and the latest provider-neutral conversation, then keeps
+that target for the complete tool loop. Every provider request in that loop is made once. A complete,
+non-truncated terminal `speak` or `stay_silent` commits the attempt and clears that target's consecutive
+failure count. A provider error, malformed/incomplete terminal response, or failure after an
+intermediate `capture_screen` fails the attempt once; cancellation, filler suppression, and local
+screen-capture failure do not count as provider failures. Completed screen observations remain
+provider-neutral input for the next attempt, but raw reasoning, tool-call identifiers, and call/result
+pairing never cross an attempt or provider boundary.
+
+Failed conversation work remains pending and schedules another coaching attempt under bounded
+backoff. This internal wake-up does not depend on a new natural trigger. If a turn-end, silence, or
+manual-hint trigger arrives first, it coalesces with the pending wake-up; the next attempt contains the
+failed conversation plus every newer finalized transcript item. If nothing new arrives, the new
+attempt uses the same pending conversation. Automatic wake-ups wait while speech is active so they do
+not race an utterance that is about to finalize. `TriggerReason` remains the model-facing reason that
+made coaching useful (`turnEnd`, `silence`, or `manualHint`); pending work is scheduler state, not a
+fourth instruction to the model. A retry-only attempt preserves the latest natural trigger reason,
+while a newer natural trigger becomes the current reason.
+
+After three consecutive failed coaching attempts, the active target is exhausted and the cursor
+advances once. A terminal success resets the active target's count but never moves the cursor
+backward. A fallback that is already proven impossible to construct at activation time—for example, a
+missing executable, confirmed signed-out CLI, or invalid configuration—is skipped as unavailable
+rather than consuming three synthetic attempts. If no target remains, coaching stops, Activity records
+one fixed typed route-exhausted event, and raw errors stay in `jarvis-debug.log`.
+
+```mermaid
+flowchart TD
+    T[Turn end, silence, manual hint,<br/>or pending-work wake] --> S{Speech active?}
+    S -- Yes, automatic wake --> P[Keep work pending<br/>and postpone]
+    S -- No --> A[Snapshot active target +<br/>latest finalized conversation]
+    A --> R[Run one coaching attempt<br/>on one target]
+    R -- Complete terminal action --> C[Commit conversation<br/>reset failure count<br/>stay on target]
+    R -- Provider attempt fails --> U[Leave work uncommitted<br/>increment target failures]
+    U --> B{Three consecutive<br/>failed attempts?}
+    B -- No --> W[Schedule a new attempt]
+    B -- Yes --> N{Next configured<br/>target exists?}
+    N -- Yes --> F[Advance once<br/>schedule a new attempt]
+    N -- No --> X[Stop coaching<br/>typed Activity event]
+    W --> T
+    F --> T
+    P --> T
+```
+
+The implementation keeps orchestration, route policy, and OS edges separate:
+
+| Component | Responsibility | Must not do |
+|---|---|---|
+| Route value (`JarvisCore/Brain`) | Immutable ordered targets and validation. | Schedule work or create UI. |
+| Route state machine (`JarvisCore/Coach`) | Count attempt outcomes, move forward, and emit pure transition commands. | Call providers, read preferences, or own timers. |
+| Attempt scheduler (`JarvisCore/Coach`) | Own pending work, bounded backoff, trigger coalescing, single-flight, and speech-aware postponement. | Classify provider payloads or mutate the route directly. |
+| Attempt runner (`CoachDriver`) | Snapshot one target, run its tool loop, normalize completed provider-neutral effects, and report one outcome. | Retry a failed request or choose another target mid-attempt. |
+| Client factory (`JarvisCore/Brain`) | Build a `BrainClient` for an explicit target and surface preflight availability. | Select or reorder targets. |
+| Preferences (`JarvisCore/Config`) | Persist primary, ordered fallbacks, per-provider models, and shared effort. | Store the live route cursor or failure counts. |
+| App adapters (`JarvisApp`) | Render the list editor and feed speech-activity/timer events into Core. | Contain retry or failover policy. |
 
 ## 4. Data Flow & Cost Model
 
@@ -238,7 +301,7 @@ The brain can alternatively run through a locally installed **Claude Code** or *
 (`BrainProvider`, selected in [Settings → Brain](./settings-window.md#brain)), so coaching turns are
 billed to the user's existing Claude / ChatGPT **subscription** instead of the metered API key.
 `CLIBrainClient` implements the same `BrainClient` protocol, so `CoachDriver`, the client-managed
-memory, retries, and traffic recording are all unchanged — only the transport differs:
+memory, provider-route policy, and traffic recording are all unchanged — only the transport differs:
 
 - **One stateless subprocess per turn** (`claude -p` / `codex exec`, spawned by
   `AgentCLIProcessRunner`) — no CLI session is created, resumed, or left behind: every call is
@@ -345,25 +408,16 @@ The always-on legs are built to survive transient failure rather than die on it:
 - **The brain call** is single-flighted (a turn can't double-speak) and runs under a provider-aware
   request timeout. The API and Claude ceilings stay well above the reasoning-turn tail; Codex has a
   shorter bound because a healthy decision turn takes seconds and a silent agent-runtime stall would
-  otherwise batch every later transcript turn behind it. Because client-owned memory makes every
-  request self-contained and tool effects happen only after a response reaches the driver, a
-  transient API transport failure or retryable server error gets **one immediate automatic retry**
-  without duplicating a screenshot or spoken tip. Retry and lifecycle consume the same typed
-  classification: an unknown/new provider error—including an unrecognized or request-local HTTP
-  4xx—defaults to a recoverable missed turn. Only an explicit allowlist proving unusable
-  authentication, billing, access, or configuration may stop the session. A CLI watchdog expiration
-  and ordinary rate limiting preserve the conversation but do not immediately repeat the request;
-  recovery waits for the **next trigger**. If the user selected a distinct fallback provider, this
-  exhausted temporary failure instead fails forward transactionally on the same pending turn.
-  Client-owned memory makes the provider-neutral input portable; a completed screenshot is reused
-  once as ordinary user context, while raw provider reasoning and tool protocol state are discarded.
-  A complete fallback turn starts a 60-second recovery cooldown, after which one later turn probes
-  the retained primary. A failed probe retries that turn on the fallback and resets the cooldown,
-  preventing both concurrent use and provider ping-pong. Sent-state advances only on a successful
-  send, so that
-  turn includes the failed transcript plus anything newer, including a trigger coalesced while the
-  failure was in flight. Cancellation remains quiet. Memory **compaction** fails soft without this
-  wrapper: a failed summary simply leaves the full history for the next attempt.
+  otherwise batch every later transcript turn behind it. A failed provider request is never replayed
+  inside its coaching attempt. The attempt ends, sent-state and provider-neutral work remain
+  uncommitted, and the scheduler makes a new attempt after bounded backoff or an earlier coalesced
+  natural trigger. That new attempt rebuilds its input from the latest committed history, the failed
+  conversation, and every newer finalized transcript item; with no new speech, it simply re-attempts
+  the pending work. Three consecutive failed attempts exhaust the active target and advance the
+  forward-only route. A terminal success resets the active target's count and keeps that target
+  installed. No provider is probed concurrently, and no automatic recovery returns to the primary.
+  Cancellation remains quiet. Memory **compaction** fails soft outside this route: a failed summary
+  simply leaves the full history for the next attempt.
 - **The audit edge** drains Activity's asynchronous writer as Stop completes. An explicit
   Activity → **Evaluate** click then runs the read-only agentic evaluator over the source checkout
   plus the completed session directory; it reads `jarvis-activity.jsonl` itself in full, so no

@@ -235,6 +235,9 @@
 - **Rejected:** (a) In-request retry with backoff — near-useless for `conversation_locked` (a >ceiling generation outlasts it) and it resends stale content; the only thing given up is `Retry-After` backoff on transient 429/5xx, negligible for a single-user app. (b) Cancel-and-send-the-latest via background mode + `POST /responses/{id}/cancel` — the only way to *abandon* a stale turn and jump to freshest context, but a much larger build; deferred.
 - **Revisit if:** the app grows beyond single-user (429 backpressure starts to matter), or the ceiling-length wait on a genuinely slow turn proves too laggy live (then reach for background-mode cancel).
 - **Superseded by:** 2026-07-15 — Explicit Realtime health and one transient brain retry. The generous ceiling and next-trigger fallback remain; the one-attempt rule does not.
+- **Superseded in part by:** 2026-07-25 — Coaching attempts exhaust an ordered provider route. The
+  no-in-request-replay boundary returns, and pending work now schedules a new attempt even without a
+  natural trigger.
 - **Detail:** [architecture.md → Resilience](./architecture.md#resilience).
 
 ### 2026-07-06 — Silence is a tool call; audio turns require one
@@ -280,6 +283,8 @@
 - **Chose:** Treat Realtime connectivity as an explicit state machine. A transcription socket becomes ready only after the server acknowledges `session.update`; a startup deadline plus active ping/pong probes detect silent and idle failures; every failure source enters one generation-guarded reconnect path; and the menu shows starting/reconnecting/degraded states instead of claiming the pipeline is listening. Wrap each self-contained primary brain request in exactly one retry for transient network and retryable server failures, then preserve the existing next-trigger recovery.
 - **Why:** Live sessions showed both startup and mid-session WebSockets being reset or losing the network, while the old app accepted the initial handshake as readiness and learned about an idle dead socket only when speech produced network I/O. A separate preflight connection would test a socket that the app immediately discards, so it cannot establish that the two real transcription sockets are healthy. Client-managed brain memory also removed the server-conversation lock that made an in-request retry unsafe: tool effects occur only after the response reaches the driver, so replaying the same request once cannot duplicate a screenshot or tip.
 - **Rejected:** (a) A disposable startup connectivity test — it races the real sockets and can pass while they fail. (b) Passive WebSocket keepalive — it leaves half-open sockets invisible until the user speaks. (c) Retrying authentication, malformed requests, or rate limits — these need correction or backoff, not an immediate duplicate. (d) Unlimited brain retries — excessive latency and duplicate load during an outage.
+- **Superseded in part by:** 2026-07-25 — Coaching attempts exhaust an ordered provider route.
+  Realtime health stands; the immediate brain-request replay does not.
 - **Detail:** [architecture.md → Resilience](./architecture.md#resilience).
 
 ### 2026-07-15 — Brain traffic is recorded per session; one-click LLM audit
@@ -605,6 +610,9 @@
 - **Superseded in part by:** 2026-07-24 — Session evaluation is agentic-only and reads complete
   source logs. Stable Activity kinds and Stop-time flushing stand; preselecting evaluator outcomes
   and maintaining two evaluator paths do not.
+- **Superseded in part by:** 2026-07-25 — Coaching attempts exhaust an ordered provider route. Failed
+  conversation preservation and the typed failure boundary stand; immediate brain retry and
+  one-failure terminal teardown do not.
 - **Detail:** [architecture.md → Failure surfacing](./architecture.md#failure-surfacing--startup-loud-runtime-ghost),
   [architecture.md → Resilience](./architecture.md#resilience),
   `Sources/JarvisCore/Brain/BrainFailure.swift`,
@@ -696,3 +704,45 @@
   [architecture.md → Resilience](./architecture.md#resilience),
   `Sources/JarvisCore/Coach/CoachDriver.swift`,
   `Sources/JarvisCore/Coach/ConfiguredBrainFallback.swift`.
+- **Superseded by:** 2026-07-25 — Coaching attempts exhaust an ordered provider route.
+
+### 2026-07-25 — Coaching attempts exhaust an ordered provider route
+
+- **Chose:** Persist one primary provider/model target followed by an ordered list of zero or more
+  fallback targets. A coaching attempt snapshots one target for its complete tool loop and never
+  replays a failed provider request or switches target inside that attempt. Failure leaves the
+  conversation uncommitted and schedules a new attempt independently of natural triggers; the new
+  attempt batches the failed conversation with every newer finalized transcript item, or re-attempts
+  the same pending work when nothing new arrived. Natural triggers and the pending wake-up coalesce,
+  and an automatic wake-up waits for active speech to finish.
+- **Chose:** Three consecutive failed coaching attempts exhaust the active target and move the
+  session-local cursor forward once. A complete, non-truncated terminal `speak` or `stay_silent`
+  clears that target's failure count without returning to an earlier target. Once fallback is active,
+  it remains active until it too exhausts three attempts; automatic routing never revisits the primary
+  or another exhausted target. A proven-unconstructable target is skipped rather than charged three
+  synthetic attempts. Exhausting the finite route stops coaching with one fixed typed Activity event;
+  raw failures and scheduling detail stay in `jarvis-debug.log`.
+- **Chose:** Runtime failover never mutates the saved route. Stop → Start begins at the persisted
+  primary, while a valid explicit Settings edit may install a new route and reset its cursor between
+  attempts. Client-managed history, unsent transcript, and completed screen observations are
+  provider-neutral; raw reasoning, tool-call identifiers, and provider call/result linkage are not
+  carried into a new attempt.
+- **Why:** Conversation changes while a failed request is unwinding. Replaying its frozen body inside
+  the same attempt is both stale and unnecessary; a new attempt can incorporate the latest speech and
+  still make progress when the room stays quiet. A finite user-authored route gives outages a bounded,
+  deterministic outcome without sending conversation data to an unapproved provider or making
+  preferences reflect a temporary runtime incident.
+- **Rejected:** (a) One immediate replay of the failed request — it uses stale input and breaks the
+  attempt boundary. (b) Same-attempt failover — it mixes provider ownership inside one tool loop.
+  (c) Returning to the primary after a cooldown or success probe — it causes automatic route
+  backtracking and outage ping-pong. (d) One scalar fallback — it cannot express an ordered recovery
+  policy. (e) Racing providers — it duplicates spend and side effects. (f) Waiting only for the next
+  natural trigger — pending work could remain stuck forever in a quiet conversation.
+- **Supersedes:** 2026-07-25 — Provider fallback is explicit, transactional, and
+  cooldown-recovered; the brain-retry half of 2026-07-15 — Explicit Realtime health and one transient
+  brain retry; and the one-failure terminal brain lifecycle in 2026-07-24 — Temporary runtime
+  failures preserve the live conversation.
+- **Detail:** [architecture.md → Ordered provider route](./architecture.md#ordered-provider-route),
+  [settings-window.md → Brain](./settings-window.md#brain),
+  `Sources/JarvisCore/Coach/CoachDriver.swift`,
+  `Sources/JarvisCore/Config/BrainPreferences.swift`.

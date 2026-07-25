@@ -59,6 +59,13 @@ demand, and proactively offers short coaching tips via a capture-invisible overl
   remove pre-existing dead code where there's clear room for improvement.
 - **Goal-driven execution.** Turn the request into verifiable success criteria, state a brief plan for
   complex tasks, then loop until the criteria are met.
+- **Preserve the conversational attempt boundary.** A coaching attempt snapshots one brain target for
+  its entire tool loop; never retry a failed provider request or switch providers inside that attempt.
+  Keep failed conversation work uncommitted, then let the scheduler start a new attempt with the latest
+  finalized transcript. Runtime failover may only move forward through the user's persisted ordered
+  route, never rewrite that preference or return to an exhausted target during the session. Keep the
+  route and scheduling policy as Foundation-only state machines in Core; the app only supplies clients,
+  timers, and speech-activity events.
 
 ## Workflow
 

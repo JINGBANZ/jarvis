@@ -49,7 +49,7 @@ so an unwrapped fixed-frame view would ride the bottom edge in a taller window).
 
 | Section class | Tab title | Always present | Description |
 |---|---|---|---|
-| `BrainSection` | "Brain" | yes | Everything that decides who answers a coaching turn, in one tab: the primary-provider radios (OpenAI API / Claude Code / Codex CLI — see [Brain](#brain)), an optional distinct fallback-provider dropdown, a per-provider model dropdown, the reasoning-effort dropdown (one global setting, mapped onto each provider's scale), and the OpenAI API-key controls (`APIKeyControls`: an `NSSecureTextField` that saves to an owner-only file). Saving a key never restarts a live conversation: established Realtime sockets stay connected and use it on a later reconnect, while an OpenAI brain update uses the same transactional between-turn fallback as other Brain changes. Brain choices take effect on the next coaching turn while running, or the next Start while stopped. |
+| `BrainSection` | "Brain" | yes | Everything that decides who answers a coaching attempt, in one tab: the primary provider/model, an ordered editable fallback list of provider/model targets, the reasoning-effort dropdown (one global setting, mapped onto each provider's scale), and the OpenAI API-key controls (`APIKeyControls`: an `NSSecureTextField` that saves to an owner-only file). Saving a key never restarts a live conversation: established Realtime sockets stay connected and use it on a later reconnect. Valid Brain changes take effect between coaching attempts while running, or on the next Start while stopped. |
 | `OverlaySection` | "Overlay" | yes | Two groups, one per overlay surface — **Overlay Caption** (the transient on-screen tip) and **Overlay Box** (the persistent response history). Each has a header with an On/Off toggle (an `NSSwitch` + "On"/"Off" label) and a one-line description. When a surface is **on** it also shows its Text Size + Opacity sliders (with live readouts) and a live sample, **only while the Overlay tab is selected** (`didBecomeActive`/`didResignActive`); when **off**, its sliders and sample are hidden and the layout collapses. Persists via `OverlayAppearance`. |
 | `DisplaySection` | "Screen" | yes | One dropdown — the capture scope: **Active window** (default) or one **Entire display** entry per connected display; persists via `ScreenCapturePreferences`. Applies to the next screenshot. |
 | `ActivitySection` | "Activity" | yes | Embeds the `ActivityViewer` content view (`makeContentView()` / `teardown()`); `fillsTab == true` so the log stretches with the window. Its header shows the selected session's exact directory ID with **Copy ID**. A session without a report shows **Evaluate**: one click runs the sole `AgenticEvaluator` through a locally installed Claude Code / Codex CLI over the source checkout plus the complete session directory, writes owner-only `eval-report.md`, and opens it. While it runs the button shows **Evaluating…**; afterward it becomes **Open report**, which reopens the saved result without another model run. The agent reads the full unfiltered `jarvis-activity.jsonl` whenever it needs the user-visible sequence and correlates it with `brain-traffic.jsonl`, screenshots, and live source. `scripts/eval-session.sh` is a second launcher for this same Core evaluator, not another evaluation path. `EvalReportPage` renders the markdown as `eval-report.html`; **Copy as Markdown** hands the raw report to an agent chat. Evaluation, report opening, and history clearing stay disabled through the live coaching/teardown lifecycle. |
@@ -104,11 +104,11 @@ tracks intent separately from `panel.isVisible` so the setting can't desync). Th
 
 ## Brain
 
-The Brain tab owns the whole "who answers a coaching turn" decision, persisted through
+The Brain tab owns the whole "who answers a coaching attempt" decision, persisted through
 `BrainPreferences` (UserDefaults).
 
-**Provider.** Three radios (`BrainProvider`): the **OpenAI API** (metered by the key), or a locally
-installed **Claude Code** / **Codex CLI** — in which case coaching turns are spawned as CLI
+**Primary.** The first row selects a provider and model: the **OpenAI API** (metered by the key), or a
+locally installed **Claude Code** / **Codex CLI** — in which case coaching attempts are spawned as CLI
 subprocesses and billed to the user's existing Claude / ChatGPT *subscription* instead of the key
 (`CLIBrainClient`; see [architecture.md](./architecture.md#local-cli-brain-providers)). Installed
 CLIs are auto-detected by `AgentCLIDetector`: binary discovery is a pure file probe over $PATH + the
@@ -117,33 +117,28 @@ short timeout because account metadata can outlive an expired OAuth session. Cod
 auth-file marker. Settings runs these probes asynchronously and keeps local-provider controls
 selectable while the first result is pending. The radios then show **signed in**, **signed out**, or
 **sign-in unknown**; a confirmed logout refuses Start, while an unavailable probe warns but does not
-falsely claim logout. An actual CLI request can still fail after preflight. A provider that was
-selected at Start or has already completed a turn uses the shared `BrainFailure` policy: temporary
-or unknown errors miss one turn while the same conversation keeps listening, and only an explicitly
-permanent failure stops without activating the app; a newly switched provider uses the transactional
-fallback described below. Both paths keep detailed error and sign-in information in
-`jarvis-debug.log` and put only fixed provider-level copy in Activity. Unknown and request-local
-HTTP failures remain temporary unless an explicit authentication, billing, access, or configuration
-signal proves the provider unusable.
+falsely claim logout. An actual CLI request can still fail after preflight.
 
-**Fallback provider.** A separate dropdown defaults to **Disabled** and lists only providers distinct
-from the primary. Selecting one is explicit authorization to send the same coaching conversation to
-that provider after a temporary primary failure exhausts its own immediate retry policy. It follows
-the same binary/sign-in preflight as a primary CLI: an unavailable selection cannot replace a live
-configuration or start a new session. The fallback uses its own remembered model and the shared
-effort setting. On failover, `CoachDriver` retries the same pending turn without restarting
-transcription, capture, history, or the session. If the failed primary already completed a screen
-capture, the fallback receives that observation once as provider-neutral user context; raw reasoning,
-tool-call ids, and call/result pairing never cross providers.
+**Fallback route.** Below the primary, an ordered list contains zero or more explicitly authorized
+provider/model targets. **Add fallback** appends a row; each row has provider and model menus, an
+accessible drag handle plus Move Up/Move Down actions, and Remove. Rows are labelled **Fallback 1**,
+**Fallback 2**, and so on, so visual order and failover order are identical. Exact duplicate targets
+are rejected; a second model from the same provider is allowed as a deliberate separate target. The
+shared effort setting applies to every row.
 
-The fallback remains active through incomplete responses and temporary misses until it completes one
-non-truncated terminal turn. It then serves later turns for a 60-second quiet cooldown. The first
-later turn after that deadline probes the retained primary transactionally; success switches back,
-while failure retries that turn on the fallback and starts a fresh cooldown. This permits automatic
-recovery without concurrent provider calls or turn-by-turn ping-pong. A terminal fallback failure
-disables it for the live session and restores the primary for the next turn. Activity records fixed,
-provider-only failover, recovery, deferred-recovery, and unavailable-fallback notices; raw failure and
-retry detail remains only in `jarvis-debug.log`.
+The list is finite and follows the [ordered provider-route contract](./architecture.md#ordered-provider-route).
+One target owns a complete coaching attempt. A provider error ends that attempt without replaying its
+failed request; pending conversation schedules a new attempt with the newest finalized transcript.
+Three consecutive failed coaching attempts advance to the next row. A successful attempt clears the
+active row's failure count but keeps that row active, including after fallback activation. The runtime
+never returns to the primary or an exhausted row. When every row is exhausted, coaching stops and
+Activity receives fixed typed route-exhausted copy; request details and attempt counts remain in
+`jarvis-debug.log`.
+
+Confirmed-unavailable targets are visibly disabled while editing. If a configured fallback becomes
+unavailable after Start, activation skips it and moves forward without inventing three requests that
+cannot run. Runtime movement through the route never changes the saved list. Stop → Start begins at
+the saved primary again.
 
 **Model + effort.** A **Model** dropdown drawn from `BrainModelCatalog` per provider (OpenAI ids for
 the API; CLI aliases like `sonnet` for the CLIs, plus a "CLI default" entry meaning "no model flag" —
@@ -162,22 +157,19 @@ the key.
 Reads are validated: a persisted model id no longer in that provider's catalog (or an unrecognized
 provider/effort) falls back to the default rather than reaching the API. The transcription model is
 deliberately **not** here — it's a separate field and code path (`Config.transcriptionModel`). A
-running `CoachDriver` atomically replaces its coach, summarizer, and provider-failure policy when a
-brain value changes. An in-flight turn keeps one snapshotted provider through its whole tool loop;
-the replacement starts on the **next coaching turn** while the transcript, client-managed history,
-audio pipeline, and session logs continue unchanged. The previous active provider remains available
-until the replacement completes one non-truncated terminal turn; an incomplete response does not
-commit the cutover. If the replacement fails, the driver
-discards its provider-specific tool-loop state, restores the prior provider, and retries that same
-turn from its provider-neutral starting messages. Once the replacement completes its first
-non-truncated terminal turn, Activity records fixed provider-only switch-applied copy; a fallback
-instead records the failed and restored providers without retry lifecycle or raw error detail.
-Several Settings edits before a turn still fall back to the original active provider, not an untried
-intermediate selection. A local-CLI choice is preflighted first; if its binary is missing or it is
-signed out, the existing brain keeps running and Activity records the fixed settings-not-applied
-notice. Runtime fallback changes the live brain only; the attempted choice remains persisted so the
-user can retry it or select something else deliberately. While stopped, persisted changes apply on
-the **next Start**.
+running `CoachDriver` applies a valid primary, route, model, or effort edit atomically **between
+coaching attempts**. An in-flight attempt keeps one snapshotted target through its complete tool loop;
+the replacement route begins on the next attempt while transcript, client-managed history, audio
+pipeline, and session logs continue unchanged. This explicit user edit resets the session-local route
+cursor to the newly selected primary and is the only way to revisit a target that automatic failover
+left behind. The old active provider is not retained as a hidden fallback; it remains available only
+when the user includes it in the new list.
+
+A local-CLI target is preflighted first. A confirmed missing binary or signed-out account cannot
+activate; the running route stays intact and Activity records fixed settings-not-applied copy.
+Provider-specific partial tool-loop state from a failed attempt is discarded, while provider-neutral
+pending conversation follows the newly installed route on its next attempt. While stopped, persisted
+changes apply on the **next Start**.
 
 All Brain choices persist via `BrainPreferences` —
 `Sources/JarvisCore/Config/BrainPreferences.swift` is the single source for the UserDefaults keys,
@@ -227,7 +219,7 @@ from an old entire-display selection never steers them.
 |---|---|
 | `Sources/JarvisApp/Settings/SettingsSection.swift` | Protocol definition |
 | `Sources/JarvisApp/Settings/SettingsWindow.swift` | Host window + tab view |
-| `Sources/JarvisApp/Settings/BrainSection.swift` | Brain tab: primary/fallback providers + model + effort + key |
+| `Sources/JarvisApp/Settings/BrainSection.swift` | Brain tab: primary + ordered fallback targets + model + effort + key |
 | `Sources/JarvisApp/Settings/APIKeyControls.swift` | The API-key rows embedded in the Brain tab |
 | `Sources/JarvisApp/Settings/OverlaySection.swift` | Overlay-appearance tab |
 | `Sources/JarvisApp/Settings/DisplaySection.swift` | Capture-scope tab (scope + display in one dropdown) |
@@ -238,8 +230,8 @@ from an old entire-display selection never steers them.
 | `Sources/JarvisCore/Brain/BrainModelCatalog.swift` | Curated per-provider model lists (`BrainModel`) |
 | `Sources/JarvisCore/Brain/ReasoningEffort.swift` | The four effort levels |
 | `Sources/JarvisCore/Diagnostics/AgenticEvaluator.swift` | Read-only Claude Code / Codex session audit invoked by Activity and `EvalPrep` |
-| `Sources/JarvisCore/Config/BrainPreferences.swift` | UserDefaults persistence + validation |
-| `Sources/JarvisCore/Coach/ConfiguredBrainFallback.swift` | Preflighted fallback clients and fixed lifecycle callbacks |
+| `Sources/JarvisCore/Config/BrainPreferences.swift` | UserDefaults persistence + route validation |
+| `Sources/JarvisCore/Coach/CoachDriver.swift` | Between-attempt route application and attempt orchestration |
 | `Sources/JarvisCore/Config/ScreenCapturePreferences.swift` | Capture scope + display persistence + clamping |
 | `Sources/JarvisCore/Screen/ScreenCapture.swift` | `ScreenCaptureCLI` — reads the selection at capture time, falls back to the main display |
 | `Sources/JarvisCore/Config/Config.swift` | `overlayCaption*`/`overlayBox*` size + opacity ranges, enabled + appearance defaults |

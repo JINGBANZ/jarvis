@@ -25,21 +25,17 @@ replacement socket replays the rest after a half-open failure. A live Wi-Fi reco
 that speech captured during the outage returns after recovery. The brain can also run through a
 locally installed Claude Code or Codex CLI on the user's subscription; Settings → Brain auto-detects
 those providers, reports Claude's current sign-in state from its bounded status command, and keeps
-the OpenAI API-key path available. A distinct optional fallback provider can continue the same
-pending turn after a temporary primary failure exhausts its immediate retry policy; it keeps the
-client-managed conversation and completed screen observation without carrying provider-specific
-tool state across transports. The fallback stays active until a complete, non-truncated turn, then
-serves a 60-second cooldown before a later turn probes the retained primary; a failed probe restores
-the fallback transactionally and resets the cooldown. Provider, model, effort, and fallback changes
-apply transactionally between turns without restarting the session: the previous brain remains
-available until the replacement finishes a non-truncated terminal turn, and Activity records fixed
-provider-only switch, failover, recovery, or fallback notices. Codex coaching calls suppress project
-instructions and its feature-gated agent tools, run as direct-response decisions, inherit only stable
+the OpenAI API-key path available. The ordered provider-route contract is now settled: one primary
+plus a user-editable ordered fallback list, one target per coaching attempt, no failed-request replay
+inside the attempt, automatic pending-work attempts with the newest finalized transcript, three
+consecutive failed attempts before moving forward, and no automatic return to an earlier target.
+Runtime movement never changes preferences; exhausting the finite route stops coaching with a fixed
+typed Activity event. The current provider-fallback branch still contains the earlier interim
+implementation—one optional fallback, one immediate retry, same-attempt failover, and primary
+recovery probing—so the route design is **not implemented or shippable yet**. Codex coaching calls
+suppress project instructions and its feature-gated agent tools, run as direct-response decisions, inherit only stable
 executable-search paths, and stop under a provider-specific stall bound instead of leaving later
-speech batched indefinitely. Brain providers share one recoverability policy across adapter,
-immediate retry, and lifecycle: temporary or unknown failures preserve the transcript, pending
-triggers, history, capture, and transcription; they miss one turn only when no configured fallback
-can continue it. Only an explicitly permanent failure stops.
+speech batched indefinitely.
 Saving an API key while running also preserves those live objects: existing Realtime sockets take
 the key on their next reconnect, and an OpenAI brain update remains transactional. Audio
 route rebuilds likewise retry before declaring capture unavailable, and stale capture callbacks
@@ -62,12 +58,13 @@ question and confirm it can answer without an unnecessary capture. Finish the in
 provider smoke: confirm Settings shows it signed in, then confirm a coaching turn and screen request.
 While that session runs, switch providers and confirm the next completed turn preserves context and
 adds the provider-only success notice to Activity; then exercise a failed replacement and confirm
-the previous provider continues the conversation with a provider-only fallback notice. Configure
-Codex as the fallback, force a temporary primary miss after retries, and confirm that the same
-pending turn completes on Codex without a second screenshot. Confirm Activity names the failover,
-later turns remain on Codex during the quiet cooldown, and a successful primary probe records
-recovery without restarting capture or transcription. Then confirm a missing or signed-out fallback
-fails preflight without replacing the live configuration. Finish the in-app Codex smoke through
+the pending conversation is preserved. Before that live smoke, replace the interim provider fallback
+with the [ordered route design](./architecture.md#ordered-provider-route): remove coaching-request
+replay, persist and edit multiple ordered targets, expose speech activity to the Core scheduler, and
+test trigger coalescing, transcript batching, three-attempt advancement, forward-only fallback,
+Settings override, unavailable-target skipping, and terminal route exhaustion. Then configure
+multiple fallbacks, force each transition, confirm no provider-specific tool state crosses attempts,
+and verify a successful fallback remains active without changing preferences. Finish the in-app Codex smoke through
 audio and the overlay. Exercise one audio-route switch: Activity should say listening continues, the
 next turn should include any unsent speech, and capture should recover
 without rotating the session. Stop that session, click **Evaluate**, and confirm the agentic report
@@ -102,6 +99,9 @@ thin OS shell, verified by the smoke run.
 
 ## Not yet built
 
+- **Ordered provider route** — implement the approved
+  [attempt, scheduling, and forward-only failover contract](./architecture.md#ordered-provider-route)
+  plus the ordered Settings list before shipping provider fallback.
 - **First notarized release** — the release workflow needs its five repo secrets (Developer ID `.p12` + App Store Connect API key; names in `.github/workflows/release.yml`) set before the first Release PR is merged; the first run is the pipeline's live test.
 - **Universal binary** — `Sources/CJarvisAEC/lib/libjarvis-aec.a` is arm64-only; `lipo` in an x86_64 slice if Intel is ever needed.
 - **Neural double-talk canceller** (DTLN / Muesli-style on the same aligned streams) — the escalation if AEC3 over-attenuates the user under loud far audio in practice.
