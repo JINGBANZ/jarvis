@@ -1,6 +1,21 @@
 import AppKit
 import JarvisCore
 
+/// Reports viewport changes so the document stack can stay top-aligned as Settings resizes.
+@MainActor
+private final class BrainSettingsScrollView: NSScrollView {
+    var onViewportChanged: (() -> Void)?
+    private var lastViewportSize = NSSize.zero
+
+    override func layout() {
+        super.layout()
+        let size = contentView.bounds.size
+        guard size != lastViewportSize else { return }
+        lastViewportSize = size
+        onViewportChanged?()
+    }
+}
+
 /// Minimal Brain Settings surface: one provider route, one reasoning-effort row, and transcription.
 ///
 /// Provider/model ordering is edited by `ProviderRouteEditor`; credentials remain isolated in
@@ -20,7 +35,7 @@ final class BrainSection: NSObject, SettingsSection {
     private let onPreferencesChanged: ([BrainProvider: DetectedAgentCLI]?) -> Void
     private let apiKey: APIKeyControls
 
-    private var scrollView: NSScrollView?
+    private var scrollView: BrainSettingsScrollView?
     private var documentStack: NSStackView?
     private var providerEditor: ProviderRouteEditor?
     private var providerHeightConstraint: NSLayoutConstraint?
@@ -48,7 +63,8 @@ final class BrainSection: NSObject, SettingsSection {
     }
 
     func makeView() -> NSView {
-        let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 760, height: 560))
+        let scrollView = BrainSettingsScrollView(
+            frame: NSRect(x: 0, y: 0, width: 760, height: 560))
         scrollView.autoresizingMask = [.width, .height]
         scrollView.drawsBackground = false
         scrollView.hasVerticalScroller = true
@@ -65,7 +81,6 @@ final class BrainSection: NSObject, SettingsSection {
             bottom: Self.documentInsets,
             right: Self.documentInsets)
         stack.autoresizingMask = [.width]
-        scrollView.documentView = stack
         self.scrollView = scrollView
         self.documentStack = stack
 
@@ -100,6 +115,23 @@ final class BrainSection: NSObject, SettingsSection {
         transcriptionHeightConstraint = transcriptionHeight
         stack.addArrangedSubview(transcriptionCard)
 
+        // When the cards are shorter than the viewport, this flexible tail absorbs the remaining
+        // height below them. Without it, AppKit anchors the short document at the bottom and leaves
+        // a large empty band above Provider.
+        let bottomSpacer = NSView()
+        bottomSpacer.setContentHuggingPriority(.defaultLow, for: .vertical)
+        bottomSpacer.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+        bottomSpacer.heightAnchor.constraint(greaterThanOrEqualToConstant: 0).isActive = true
+        stack.setCustomSpacing(0, after: transcriptionCard)
+        stack.addArrangedSubview(bottomSpacer)
+
+        // Attach only after every fixed-height card and the flexible tail exist. Attaching the
+        // partially assembled stack makes AppKit briefly solve an impossible intermediate layout.
+        scrollView.documentView = stack
+        scrollView.onViewportChanged = { [weak self] in
+            self?.recalculateDocumentHeight()
+            self?.revealTop()
+        }
         renderDetection()
         recalculateDocumentHeight()
         revealTop()
@@ -187,10 +219,11 @@ final class BrainSection: NSObject, SettingsSection {
             Self.reasoningHeight,
             apiKey.preferredHeight,
         ].compactMap { $0 }
-        let height = Self.documentInsets * 2
+        let contentHeight = Self.documentInsets * 2
             + visibleHeights.reduce(0, +)
             + CGFloat(max(0, visibleHeights.count - 1)) * Self.sectionSpacing
         let viewportHeight = scrollView?.contentView.bounds.height ?? 0
+        let height = max(contentHeight, viewportHeight)
         let oldHeight = stack.frame.height
         let oldOrigin = scrollView?.contentView.bounds.origin.y ?? 0
         let distanceFromTop = max(0, oldHeight - oldOrigin - viewportHeight)

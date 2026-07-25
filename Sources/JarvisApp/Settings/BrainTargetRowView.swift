@@ -41,6 +41,7 @@ final class BrainTargetRowView: NSView {
 
         let titleLabel = NSTextField(labelWithString: title)
         titleLabel.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
+        titleLabel.alignment = .left
         self.titleLabel = titleLabel
 
         if let status {
@@ -107,7 +108,10 @@ final class BrainTargetRowView: NSView {
             badge.setAccessibilityLabel(trailingBadge)
             self.trailingView = badge
         } else if let actions {
-            let controls = NSStackView()
+            // Start at its final frame size so AppKit never solves the button constraints against
+            // a transient zero-sized stack while the Provider card is being assembled.
+            let controls = NSStackView(
+                frame: NSRect(x: 0, y: 0, width: 98, height: 32))
             controls.orientation = .horizontal
             controls.alignment = .centerY
             controls.spacing = 4
@@ -156,14 +160,13 @@ final class BrainTargetRowView: NSView {
 
         // Matches the selected mock's compact label column; the optional "IN USE" marker fits below.
         let labelWidth: CGFloat = 92
-        let trailingWidth: CGFloat = 98
         let gap: CGFloat = 9
-        let popupWidth = max(
-            108,
-            (bounds.width - labelWidth - trailingWidth - gap * 3) / 2)
-        let controlsWidth = min(
-            trailingWidth,
-            max(72, bounds.width - labelWidth - popupWidth * 2 - gap * 3))
+        let actionsWidth: CGFloat = trailingView == nil ? 0 : 98
+        let actionsGap: CGFloat = trailingView == nil ? 0 : gap
+        let selectionWidth = max(
+            225,
+            bounds.width - labelWidth - gap - actionsWidth - actionsGap)
+        let popupWidth = max(108, (selectionWidth - gap) / 2)
 
         if statusLabel == nil {
             titleLabel.frame = NSRect(x: 0, y: 16, width: labelWidth, height: 20)
@@ -177,7 +180,7 @@ final class BrainTargetRowView: NSView {
         let modelX = providerPopup.frame.maxX + gap
         modelPopup.frame = NSRect(x: modelX, y: 10, width: popupWidth, height: 32)
         trailingView?.frame = NSRect(
-            x: bounds.width - controlsWidth, y: 10, width: controlsWidth, height: 32)
+            x: bounds.width - actionsWidth, y: 10, width: actionsWidth, height: 32)
     }
 
     private static func actionButton(
