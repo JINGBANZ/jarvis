@@ -238,7 +238,7 @@ public final class ActivityLog: @unchecked Sendable {
             message = "⚠️ \(provider.displayName) fallback is unavailable — continuing to the next fallback target"
             imageBase64 = nil
         case .brainRouteExhausted(let provider):
-            message = "⏹ coaching stopped — every fallback target was exhausted; last target: \(provider.displayName)"
+            message = "⏹ coaching stopped — all configured provider targets were exhausted; last target: \(provider.displayName)"
             imageBase64 = nil
         }
         queue.async { [self] in

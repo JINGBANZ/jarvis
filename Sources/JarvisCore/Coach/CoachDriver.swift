@@ -570,6 +570,7 @@ public final class CoachDriver: @unchecked Sendable {
                 }
 
                 var wake = takePendingTriggerSnapshot()
+                var explicitManualWake = wake.reason == .manualHint
                 if let reason = wake.reason {
                     failedWork.reason = Self.coalescing(failedWork.reason, with: reason)
                 }
@@ -593,9 +594,10 @@ public final class CoachDriver: @unchecked Sendable {
                 // attempt so an explicit manual hint retains its force-speak semantics.
                 wake = takePendingTriggerSnapshot()
                 if let reason = wake.reason {
+                    explicitManualWake = explicitManualWake || reason == .manualHint
                     work.reason = Self.coalescing(work.reason, with: reason)
                 }
-                if work.reason != .manualHint {
+                if !explicitManualWake {
                     await speechActivity.waitUntilInactive()
                 }
             }

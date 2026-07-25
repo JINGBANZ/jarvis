@@ -215,7 +215,7 @@ import Foundation
         #expect(snapshot.rows[2].contains(
             "Codex CLI fallback is unavailable — continuing to the next fallback target"))
         #expect(snapshot.rows[3].contains(
-            "coaching stopped — every fallback target was exhausted; last target: Claude Code"))
+            "coaching stopped — all configured provider targets were exhausted; last target: Claude Code"))
         #expect(!snapshot.rows.joined().contains("timeout"))
         #expect(!snapshot.rows.joined().contains("OAuth"))
         #expect(!snapshot.rows.joined().contains("token"))

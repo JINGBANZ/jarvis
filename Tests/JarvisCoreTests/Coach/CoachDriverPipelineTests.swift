@@ -950,6 +950,25 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         driver.updateSpeechActivity(false, for: .them)
     }
 
+    @Test func automaticRetryOfFailedManualHintWaitsForUnsettledSpeech() async {
+        let gate = AsyncGate()
+        let brain = GatedFailureThenSpeakingBrain(gate: gate)
+        let (driver, _) = makeDriver(
+            brain: brain,
+            clock: ManualClock())
+        driver.updateSpeechActivity(true, for: .them)
+
+        async let outcome = driver.handleTrigger(.manualHint)
+        await gate.waitUntilEntered()
+        await gate.release()
+        try? await Task.sleep(nanoseconds: 10_000_000)
+        #expect(brain.calls.count == 1)
+
+        driver.updateSpeechActivity(false, for: .them)
+        #expect(await outcome == .spoke)
+        #expect(brain.calls.count == 2)
+    }
+
     @Test func automaticManualHintAttemptDoesNotRecapture() async {
         let brain = TimeoutThenSpeakingBrain()
         let screen = FakeScreen()
