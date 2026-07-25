@@ -3,26 +3,52 @@ import JarvisCore
 
 /// Ordered fallback-target list editing for the Brain Settings section.
 ///
-/// This AppKit adapter owns only list rendering and discrete preference mutations. It deliberately
-/// knows nothing about attempt scheduling or runtime failover; `onChange` lets `BrainSection`
-/// preflight and apply the newly persisted route through the existing session boundary.
+/// This AppKit adapter owns the complete fallback card from the agreed UI: inline rows, ordering
+/// controls, the add action, route semantics, and save/apply status. It deliberately knows nothing
+/// about attempt scheduling or runtime failover; `onChange` lets `BrainSection` preflight and apply
+/// the newly persisted route through the existing session boundary.
 @MainActor
 final class FallbackRouteEditor: NSObject {
-    let view = NSView(frame: NSRect(x: 0, y: 0, width: 512, height: 214))
+    let view = SettingsCardView(frame: NSRect(x: 0, y: 0, width: 712, height: 220))
 
     private let preferences: BrainPreferences
     private let onChange: () -> Void
-    private let rowsView = NSView(frame: NSRect(x: 0, y: 0, width: 492, height: 142))
+    private let onHeightChanged: (CGFloat) -> Void
     private let addButton: NSButton
+    private let groupLabel = NSTextField(labelWithString: "FALLBACK ROUTE")
+    private let routeNote = NSTextField(wrappingLabelWithString:
+        "ⓘ  Jarvis moves forward after 3 temporary/unknown failed attempts, or 1 proven permanent failure. The next row begins only in a fresh attempt. Jarvis stays there after recovery and never changes this saved order automatically.")
+    private let savedFooter = NSTextField(labelWithString:
+        "Each completed edit is saved immediately.")
+    private let applyFooter = NSTextField(labelWithString:
+        "Applies on the next coaching attempt")
+    private var rowViews: [BrainTargetRowView] = []
+    private var emptyLabel: NSTextField?
     private var detectedCLIs: [BrainProvider: DetectedAgentCLI]?
     private var activeTarget: BrainTarget?
 
-    init(preferences: BrainPreferences, onChange: @escaping () -> Void) {
+    private static let rowHeight: CGFloat = 52
+    private static let emptyHeight: CGFloat = 38
+
+    var preferredHeight: CGFloat {
+        let rowsHeight = preferences.fallbackTargets.isEmpty
+            ? Self.emptyHeight
+            : CGFloat(preferences.fallbackTargets.count) * Self.rowHeight
+        return 182 + rowsHeight
+    }
+
+    init(
+        preferences: BrainPreferences,
+        onChange: @escaping () -> Void,
+        onHeightChanged: @escaping (CGFloat) -> Void
+    ) {
         self.preferences = preferences
         self.onChange = onChange
-        self.addButton = NSButton(title: "Add fallback", target: nil, action: nil)
+        self.onHeightChanged = onHeightChanged
+        self.addButton = NSButton(title: "＋ Add fallback", target: nil, action: nil)
         super.init()
         build()
+        view.onLayout = { [weak self] in self?.layoutFixedContent() }
     }
 
     func render(
@@ -31,168 +57,133 @@ final class FallbackRouteEditor: NSObject {
     ) {
         self.detectedCLIs = detectedCLIs
         self.activeTarget = activeTarget
-        let rowsScroll = rowsView.enclosingScrollView
-        let oldDocumentHeight = rowsView.frame.height
-        let viewportHeight = rowsScroll?.contentView.bounds.height ?? oldDocumentHeight
-        let distanceFromTop = max(
-            0,
-            oldDocumentHeight
-                - (rowsScroll?.contentView.bounds.origin.y ?? 0)
-                - viewportHeight)
-        rowsView.subviews.forEach { $0.removeFromSuperview() }
+
+        rowViews.forEach { $0.removeFromSuperview() }
+        rowViews.removeAll()
+        emptyLabel?.removeFromSuperview()
+        emptyLabel = nil
 
         let targets = preferences.fallbackTargets
-        let rowHeight: CGFloat = 38
-        let documentHeight = max(142, CGFloat(targets.count) * rowHeight + 8)
-        rowsView.frame.size.height = documentHeight
+        let height = preferredHeight
+        view.frame.size.height = height
 
-        guard !targets.isEmpty else {
-            let empty = NSTextField(labelWithString: "No fallback targets")
-            empty.frame = NSRect(x: 12, y: 60, width: 460, height: 20)
-            empty.alignment = .center
+        if targets.isEmpty {
+            let empty = NSTextField(wrappingLabelWithString:
+                "No fallback targets. Coaching stops after 3 temporary failures or 1 proven permanent primary failure.")
             empty.textColor = .secondaryLabelColor
-            rowsView.addSubview(empty)
-            addButton.isEnabled = nextAvailableTarget() != nil
-            restoreScrollPosition(
-                rowsScroll, documentHeight: documentHeight,
-                viewportHeight: viewportHeight, distanceFromTop: distanceFromTop)
-            return
+            empty.frame = NSRect(
+                x: 16, y: height - 92,
+                width: max(200, view.bounds.width - 32), height: Self.emptyHeight)
+            empty.autoresizingMask = [.width]
+            view.contentView?.addSubview(empty)
+            emptyLabel = empty
+        } else {
+            for (index, target) in targets.enumerated() {
+                let title = "Fallback \(index + 1)"
+                let row = BrainTargetRowView(
+                    title: title,
+                    status: target == activeTarget ? "Active this session" : nil,
+                    target: target,
+                    providerTitle: { [weak self] provider in
+                        self?.providerTitle(for: provider) ?? provider.displayName
+                    },
+                    canSelectProvider: { [weak self] provider in
+                        self?.canSelect(provider: provider, replacingTargetAt: index) ?? false
+                    },
+                    canSelectModel: { [weak self] model in
+                        guard let self else { return false }
+                        return !self.isDuplicate(
+                            BrainTarget(provider: target.provider, modelID: model.id),
+                            replacingTargetAt: index)
+                    },
+                    actions: BrainTargetRowView.Actions(
+                        canMoveUp: index > 0,
+                        canMoveDown: index < targets.count - 1,
+                        moveUp: { [weak self] in self?.move(from: index, offset: -1) },
+                        moveDown: { [weak self] in self?.move(from: index, offset: 1) },
+                        remove: { [weak self] in self?.remove(at: index) }),
+                    onProviderChanged: { [weak self] provider in
+                        self?.changeProvider(at: index, to: provider)
+                    },
+                    onModelChanged: { [weak self] model in
+                        self?.changeModel(at: index, to: model)
+                    })
+                row.frame = NSRect(
+                    x: 16,
+                    y: height - 58 - CGFloat(index + 1) * Self.rowHeight,
+                    width: max(200, view.bounds.width - 32),
+                    height: Self.rowHeight)
+                row.autoresizingMask = [.width]
+                view.contentView?.addSubview(row)
+                rowViews.append(row)
+            }
         }
 
-        for (index, target) in targets.enumerated() {
-            addRow(for: target, at: index, targetCount: targets.count,
-                   y: documentHeight - 38 - CGFloat(index) * rowHeight)
-        }
         addButton.isEnabled = nextAvailableTarget() != nil
-        restoreScrollPosition(
-            rowsScroll, documentHeight: documentHeight,
-            viewportHeight: viewportHeight, distanceFromTop: distanceFromTop)
+        // Rows are rebuilt after the persistent controls. Reinsert the footer controls so the
+        // accessibility and keyboard traversal order matches the visible top-to-bottom route.
+        if let content = view.contentView {
+            for control in [addButton, routeNote, savedFooter, applyFooter] {
+                control.removeFromSuperview()
+                content.addSubview(control)
+            }
+        }
+        layoutFixedContent()
+        onHeightChanged(height)
     }
 
     private func build() {
-        for (title, x, width) in [
-            ("Priority", CGFloat(8), CGFloat(68)),
-            ("Provider", CGFloat(80), CGFloat(130)),
-            ("Model", CGFloat(214), CGFloat(136)),
-            ("Actions", CGFloat(354), CGFloat(120)),
-        ] {
-            let label = NSTextField(labelWithString: title)
-            label.frame = NSRect(x: x, y: 198, width: width, height: 18)
-            label.textColor = .secondaryLabelColor
-            label.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-            view.addSubview(label)
-        }
+        view.boxType = .custom
+        view.borderWidth = 1
+        view.cornerRadius = 12
+        view.borderColor = .separatorColor
+        view.fillColor = .controlBackgroundColor
+        view.contentViewMargins = .zero
 
-        let scrollView = NSScrollView(frame: NSRect(x: 0, y: 46, width: 512, height: 144))
-        scrollView.borderType = .bezelBorder
-        scrollView.hasVerticalScroller = true
-        scrollView.autohidesScrollers = true
-        scrollView.documentView = rowsView
-        view.addSubview(scrollView)
+        groupLabel.font = .boldSystemFont(ofSize: NSFont.smallSystemFontSize)
+        groupLabel.textColor = .secondaryLabelColor
+        groupLabel.setAccessibilityLabel("Fallback route")
+        view.contentView?.addSubview(groupLabel)
 
         addButton.target = self
         addButton.action = #selector(addFallback)
-        addButton.frame = NSRect(x: -4, y: 4, width: 122, height: 32)
         addButton.bezelStyle = .rounded
         addButton.setAccessibilityLabel("Add fallback target")
-        view.addSubview(addButton)
+        view.contentView?.addSubview(addButton)
 
-        let routeNote = NSTextField(wrappingLabelWithString:
-            "3 temporary/unknown failed attempts, or 1 proven permanent failure, advance on the next fresh attempt. The saved order never changes automatically.")
-        routeNote.frame = NSRect(x: 126, y: 0, width: 386, height: 38)
         routeNote.textColor = .secondaryLabelColor
-        view.addSubview(routeNote)
+        routeNote.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        view.contentView?.addSubview(routeNote)
+
+        savedFooter.textColor = .secondaryLabelColor
+        savedFooter.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        view.contentView?.addSubview(savedFooter)
+
+        applyFooter.alignment = .right
+        applyFooter.font = .boldSystemFont(ofSize: NSFont.smallSystemFontSize)
+        applyFooter.textColor = .secondaryLabelColor
+        view.contentView?.addSubview(applyFooter)
     }
 
-    private func addRow(
-        for target: BrainTarget,
-        at index: Int,
-        targetCount: Int,
-        y: CGFloat
-    ) {
-        let label = NSTextField(labelWithString: "Fallback \(index + 1)")
-        label.frame = NSRect(x: 8, y: y + 7, width: 68, height: 20)
-        let isActive = target == activeTarget
-        if isActive {
-            label.textColor = .controlAccentColor
-            label.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
-            let marker = NSTextField(labelWithString: "●")
-            marker.frame = NSRect(x: 67, y: y + 7, width: 10, height: 20)
-            marker.textColor = .controlAccentColor
-            marker.setAccessibilityElement(false)
-            rowsView.addSubview(marker)
+    private func layoutFixedContent() {
+        let width = view.bounds.width
+        let height = preferredHeight
+        groupLabel.frame = NSRect(x: 16, y: height - 34, width: width - 32, height: 18)
+        addButton.frame = NSRect(x: 12, y: 91, width: 132, height: 32)
+        routeNote.frame = NSRect(x: 16, y: 43, width: width - 32, height: 42)
+        savedFooter.frame = NSRect(x: 16, y: 16, width: (width - 40) / 2, height: 18)
+        applyFooter.frame = NSRect(
+            x: width / 2, y: 16, width: width / 2 - 16, height: 18)
+
+        for (index, row) in rowViews.enumerated() {
+            row.frame = NSRect(
+                x: 16,
+                y: height - 58 - CGFloat(index + 1) * Self.rowHeight,
+                width: width - 32,
+                height: Self.rowHeight)
         }
-        label.setAccessibilityLabel(
-            "Fallback priority \(index + 1)" + (isActive ? ", active this session" : ""))
-        rowsView.addSubview(label)
-
-        let providerPopup = NSPopUpButton(frame: NSRect(x: 80, y: y + 3, width: 130, height: 28))
-        providerPopup.addItems(withTitles:
-            BrainProvider.allCases.map { providerTitle(for: $0) })
-        providerPopup.selectItem(at: BrainProvider.allCases.firstIndex(of: target.provider) ?? 0)
-        providerPopup.tag = index
-        providerPopup.target = self
-        providerPopup.action = #selector(providerChanged)
-        providerPopup.setAccessibilityLabel("Fallback \(index + 1) provider")
-        for (providerIndex, provider) in BrainProvider.allCases.enumerated() {
-            providerPopup.item(at: providerIndex)?.isEnabled =
-                provider == target.provider || canSelect(
-                    provider: provider, replacingTargetAt: index)
-        }
-        rowsView.addSubview(providerPopup)
-
-        let models = BrainModelCatalog.models(for: target.provider)
-        let modelPopup = NSPopUpButton(frame: NSRect(x: 214, y: y + 3, width: 136, height: 28))
-        modelPopup.addItems(withTitles: models.map(\.displayName))
-        if let selected = models.firstIndex(where: { $0.id == target.modelID }) {
-            modelPopup.selectItem(at: selected)
-        }
-        modelPopup.tag = index
-        modelPopup.target = self
-        modelPopup.action = #selector(modelChanged)
-        modelPopup.setAccessibilityLabel("Fallback \(index + 1) model")
-        for (modelIndex, model) in models.enumerated() {
-            let candidate = BrainTarget(provider: target.provider, modelID: model.id)
-            modelPopup.item(at: modelIndex)?.isEnabled =
-                candidate == target || !isDuplicate(candidate, replacingTargetAt: index)
-        }
-        rowsView.addSubview(modelPopup)
-
-        let moveUp = NSButton(title: "↑", target: self, action: #selector(moveUp))
-        moveUp.frame = NSRect(x: 352, y: y + 1, width: 30, height: 30)
-        moveUp.bezelStyle = .rounded
-        moveUp.tag = index
-        moveUp.isEnabled = index > 0
-        moveUp.setAccessibilityLabel("Move Fallback \(index + 1) up")
-        rowsView.addSubview(moveUp)
-
-        let moveDown = NSButton(title: "↓", target: self, action: #selector(moveDown))
-        moveDown.frame = NSRect(x: 384, y: y + 1, width: 30, height: 30)
-        moveDown.bezelStyle = .rounded
-        moveDown.tag = index
-        moveDown.isEnabled = index < targetCount - 1
-        moveDown.setAccessibilityLabel("Move Fallback \(index + 1) down")
-        rowsView.addSubview(moveDown)
-
-        let remove = NSButton(title: "Remove", target: self, action: #selector(remove))
-        remove.frame = NSRect(x: 416, y: y + 1, width: 70, height: 30)
-        remove.bezelStyle = .rounded
-        remove.tag = index
-        remove.setAccessibilityLabel("Remove Fallback \(index + 1)")
-        rowsView.addSubview(remove)
-    }
-
-    private func restoreScrollPosition(
-        _ scrollView: NSScrollView?,
-        documentHeight: CGFloat,
-        viewportHeight: CGFloat,
-        distanceFromTop: CGFloat
-    ) {
-        guard let scrollView else { return }
-        scrollView.contentView.scroll(to: NSPoint(
-            x: 0,
-            y: max(0, documentHeight - viewportHeight - distanceFromTop)))
-        scrollView.reflectScrolledClipView(scrollView.contentView)
+        emptyLabel?.frame = NSRect(
+            x: 16, y: height - 92, width: width - 32, height: Self.emptyHeight)
     }
 
     private func providerTitle(for provider: BrainProvider) -> String {
@@ -249,8 +240,6 @@ final class FallbackRouteEditor: NSObject {
     private func nextAvailableTarget() -> BrainTarget? {
         let configuredProviders = Set(
             [preferences.provider] + preferences.fallbackTargets.map(\.provider))
-        // Adding a row should normally broaden the route first. Once every available provider is
-        // represented, continue offering distinct models from already represented providers.
         let providers = BrainProvider.allCases.filter { !configuredProviders.contains($0) }
             + BrainProvider.allCases.filter { configuredProviders.contains($0) }
         for provider in providers {
@@ -264,7 +253,7 @@ final class FallbackRouteEditor: NSObject {
         return nil
     }
 
-    @objc private func addFallback(_ sender: NSButton) {
+    @objc private func addFallback() {
         guard let target = nextAvailableTarget() else {
             NSSound.beep() // ghost-mode-allowed: explicit user action in Settings
             return
@@ -274,62 +263,46 @@ final class FallbackRouteEditor: NSObject {
         save(targets)
     }
 
-    @objc private func providerChanged(_ sender: NSPopUpButton) {
-        let row = sender.tag
-        let providerRow = sender.indexOfSelectedItem
+    private func changeProvider(at index: Int, to provider: BrainProvider) {
         var targets = preferences.fallbackTargets
-        guard targets.indices.contains(row),
-              BrainProvider.allCases.indices.contains(providerRow) else { return }
-        let provider = BrainProvider.allCases[providerRow]
+        guard targets.indices.contains(index) else { return }
         let preferred = preferences.model(for: provider).id
         guard let model = availableModel(
-            for: provider, replacingTargetAt: row, preferredModelID: preferred) else {
+            for: provider, replacingTargetAt: index, preferredModelID: preferred) else {
             NSSound.beep() // ghost-mode-allowed: explicit user action in Settings
             render(detectedCLIs: detectedCLIs, activeTarget: activeTarget)
             return
         }
-        targets[row] = BrainTarget(provider: provider, modelID: model.id)
+        targets[index] = BrainTarget(provider: provider, modelID: model.id)
         save(targets)
     }
 
-    @objc private func modelChanged(_ sender: NSPopUpButton) {
-        let row = sender.tag
-        let modelRow = sender.indexOfSelectedItem
+    private func changeModel(at index: Int, to model: BrainModel) {
         var targets = preferences.fallbackTargets
-        guard targets.indices.contains(row) else { return }
-        let target = targets[row]
-        let models = BrainModelCatalog.models(for: target.provider)
-        guard models.indices.contains(modelRow) else { return }
-        let candidate = BrainTarget(provider: target.provider, modelID: models[modelRow].id)
-        guard !isDuplicate(candidate, replacingTargetAt: row) else {
+        guard targets.indices.contains(index) else { return }
+        let target = targets[index]
+        let candidate = BrainTarget(provider: target.provider, modelID: model.id)
+        guard !isDuplicate(candidate, replacingTargetAt: index) else {
             NSSound.beep() // ghost-mode-allowed: explicit user action in Settings
             render(detectedCLIs: detectedCLIs, activeTarget: activeTarget)
             return
         }
-        targets[row] = candidate
+        targets[index] = candidate
         save(targets)
     }
 
-    @objc private func moveUp(_ sender: NSButton) {
-        move(from: sender.tag, offset: -1)
-    }
-
-    @objc private func moveDown(_ sender: NSButton) {
-        move(from: sender.tag, offset: 1)
-    }
-
-    private func move(from row: Int, offset: Int) {
+    private func move(from index: Int, offset: Int) {
         var targets = preferences.fallbackTargets
-        let destination = row + offset
-        guard targets.indices.contains(row), targets.indices.contains(destination) else { return }
-        targets.swapAt(row, destination)
+        let destination = index + offset
+        guard targets.indices.contains(index), targets.indices.contains(destination) else { return }
+        targets.swapAt(index, destination)
         save(targets)
     }
 
-    @objc private func remove(_ sender: NSButton) {
+    private func remove(at index: Int) {
         var targets = preferences.fallbackTargets
-        guard targets.indices.contains(sender.tag) else { return }
-        targets.remove(at: sender.tag)
+        guard targets.indices.contains(index) else { return }
+        targets.remove(at: index)
         save(targets)
     }
 

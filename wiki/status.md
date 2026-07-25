@@ -33,7 +33,8 @@ automatic return to an earlier target.
 Runtime movement never changes preferences; exhausting the finite route stops coaching with a fixed
 typed Activity event. That route is implemented as immutable provider/model values, a pure
 Foundation-only session cursor, a single-flight fresh-attempt scheduler, and the ordered Settings
-editor; the old immediate request retry, scalar fallback, same-attempt failover, and primary recovery
+card editor with shared inline target rows; the old immediate request retry, scalar fallback,
+same-attempt failover, and primary recovery
 probing are removed. Codex coaching calls
 suppress project instructions and its feature-gated agent tools, run as direct-response decisions, inherit only stable
 executable-search paths, and stop under a provider-specific stall bound instead of leaving later

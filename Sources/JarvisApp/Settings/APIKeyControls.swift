@@ -30,20 +30,26 @@ final class APIKeyControls: NSObject {
     }
 
     /// Add the control rows to `view`, laid out downward from `top` (the y of the first row).
-    func addControls(to view: NSView, top: CGFloat) {
+    ///
+    /// The caller supplies the horizontal content bounds so the same controls fit a grouped card
+    /// and continue resizing with the Settings window.
+    func addControls(to view: NSView, top: CGFloat, x: CGFloat, width: CGFloat) {
         let prompt = NSTextField(labelWithString: "Paste your OpenAI API key.")
-        prompt.frame = NSRect(x: 24, y: top, width: 512, height: 20)
+        prompt.frame = NSRect(x: x, y: top, width: width, height: 20)
+        prompt.autoresizingMask = [.width]
         view.addSubview(prompt)
         self.prompt = prompt
 
-        let field = NSSecureTextField(frame: NSRect(x: 24, y: top - 38, width: 512, height: 26))
+        let field = NSSecureTextField(frame: NSRect(x: x, y: top - 38, width: width, height: 26))
+        field.autoresizingMask = [.width]
         field.placeholderString = "sk-…"
         field.setAccessibilityLabel("OpenAI API key")
         view.addSubview(field)
         self.field = field
 
         let save = NSButton(title: "Save", target: self, action: #selector(saveTapped))
-        save.frame = NSRect(x: 444, y: top - 78, width: 92, height: 32)
+        save.frame = NSRect(x: x + width - 92, y: top - 78, width: 92, height: 32)
+        save.autoresizingMask = [.minXMargin]
         save.bezelStyle = .rounded
         save.keyEquivalent = "\r"
         view.addSubview(save)
@@ -52,19 +58,21 @@ final class APIKeyControls: NSObject {
         // Sits just left of Save; only meaningful when a key already exists, so canceling has a saved
         // state to return to (a first-time entry has nothing to cancel back to).
         let cancel = NSButton(title: "Cancel", target: self, action: #selector(cancelTapped))
-        cancel.frame = NSRect(x: 344, y: top - 78, width: 92, height: 32)
+        cancel.frame = NSRect(x: x + width - 192, y: top - 78, width: 92, height: 32)
+        cancel.autoresizingMask = [.minXMargin]
         cancel.bezelStyle = .rounded
         cancel.keyEquivalent = "\u{1b}" // Esc
         view.addSubview(cancel)
         self.cancelButton = cancel
 
         let savedLabel = NSTextField(labelWithString: "An OpenAI API key is saved on this Mac.")
-        savedLabel.frame = NSRect(x: 24, y: top, width: 512, height: 20)
+        savedLabel.frame = NSRect(x: x, y: top, width: width, height: 20)
+        savedLabel.autoresizingMask = [.width]
         view.addSubview(savedLabel)
         self.savedLabel = savedLabel
 
         let edit = NSButton(title: "Edit", target: self, action: #selector(editTapped))
-        edit.frame = NSRect(x: 24, y: top - 42, width: 92, height: 32)
+        edit.frame = NSRect(x: x, y: top - 42, width: 92, height: 32)
         edit.bezelStyle = .rounded
         view.addSubview(edit)
         self.editButton = edit
@@ -72,7 +80,8 @@ final class APIKeyControls: NSObject {
         // Below the Save/Cancel row — at the buttons' own height its frame would overlap (and, being
         // a later subview, swallow clicks on) the Cancel button.
         let status = NSTextField(labelWithString: "")
-        status.frame = NSRect(x: 24, y: top - 110, width: 512, height: 20)
+        status.frame = NSRect(x: x, y: top - 110, width: width, height: 20)
+        status.autoresizingMask = [.width]
         status.textColor = .secondaryLabelColor
         view.addSubview(status)
         self.status = status

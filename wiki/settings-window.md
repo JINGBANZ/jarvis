@@ -108,6 +108,13 @@ tracks intent separately from `panel.isVisible` so the setting can't desync). Th
 The Brain tab owns the whole "who answers a coaching attempt" decision, persisted through
 `BrainPreferences` (UserDefaults).
 
+The tab is one vertically scrolling stack of rounded groups: a live-session banner when coaching is
+running, **Primary**, **Fallback route**, **Reasoning**, then **OpenAI API key**. Target rows share the
+same wide inline shape — label, provider menu, model menu, then saved-state or ordering actions — so
+the saved route reads in the same order it executes. Fallback rows expand the outer document instead
+of hiding inside a second scroll area. The live banner and an **active this session** row marker expose
+the runtime cursor without moving or rewriting any saved target.
+
 **Primary.** The first row selects a provider and model: the **OpenAI API** (metered by the key), or a
 locally installed **Claude Code** / **Codex CLI** — in which case coaching attempts are spawned as CLI
 subprocesses and billed to the user's existing Claude / ChatGPT *subscription* instead of the key
@@ -116,16 +123,17 @@ CLIs are auto-detected by `AgentCLIDetector`: binary discovery is a pure file pr
 known install dirs, while Claude sign-in uses its non-billing `auth status --json` command under a
 short timeout because account metadata can outlive an expired OAuth session. Codex keeps using its
 auth-file marker. Settings runs these probes asynchronously and keeps local-provider controls
-selectable while the first result is pending. The radios then show **signed in**, **signed out**, or
+selectable while the first result is pending. The provider menus then show **signed in**, **signed out**, or
 **sign-in unknown**; a confirmed logout refuses Start, while an unavailable probe warns but does not
 falsely claim logout. An actual CLI request can still fail after preflight.
 
 **Fallback route.** Below the primary, an ordered list contains zero or more explicitly authorized
 provider/model targets. **Add fallback** appends a row; each row has provider and model menus,
-accessible Move Up/Move Down actions, and Remove. Rows are labelled **Fallback 1**,
+accessible `↑` / `↓` / `×` actions for Move Up, Move Down, and Remove. Rows are labelled **Fallback 1**,
 **Fallback 2**, and so on, so visual order and failover order are identical. Exact duplicate targets
 are rejected; a second model from the same provider is allowed as a deliberate separate target. The
-shared effort setting applies to every row.
+card states that edits save immediately and apply on the next coaching attempt. The shared effort
+setting sits in its own group and applies to every row.
 
 The list is finite and follows the [ordered provider-route contract](./architecture.md#ordered-provider-route).
 One target owns a complete coaching attempt. A provider error ends that attempt without replaying its
@@ -223,7 +231,10 @@ from an old entire-display selection never steers them.
 |---|---|
 | `Sources/JarvisApp/Settings/SettingsSection.swift` | Protocol definition |
 | `Sources/JarvisApp/Settings/SettingsWindow.swift` | Host window + tab view |
-| `Sources/JarvisApp/Settings/BrainSection.swift` | Brain tab: primary + ordered fallback targets + model + effort + key |
+| `Sources/JarvisApp/Settings/BrainSection.swift` | Brain tab composition: live banner + primary + fallback + reasoning + key groups |
+| `Sources/JarvisApp/Settings/BrainTargetRowView.swift` | Shared inline provider/model row for primary and fallback targets |
+| `Sources/JarvisApp/Settings/FallbackRouteEditor.swift` | Ordered inline fallback card + persistence mutations |
+| `Sources/JarvisApp/Settings/SettingsCardView.swift` | Resize callback at the grouped-card boundary |
 | `Sources/JarvisApp/Settings/APIKeyControls.swift` | The API-key rows embedded in the Brain tab |
 | `Sources/JarvisApp/Settings/OverlaySection.swift` | Overlay-appearance tab |
 | `Sources/JarvisApp/Settings/DisplaySection.swift` | Capture-scope tab (scope + display in one dropdown) |
