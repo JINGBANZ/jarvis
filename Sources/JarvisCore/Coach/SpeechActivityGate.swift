@@ -9,6 +9,7 @@ final class SpeechActivityGate: @unchecked Sendable {
     private let lock = NSLock()
     private var activeSpeakers: Set<Speaker> = []
     private var waiters: [UUID: CheckedContinuation<Void, Never>] = [:]
+    private var interruptGeneration: UInt = 0
 
     func setActive(_ isActive: Bool, for speaker: Speaker) {
         let continuations: [CheckedContinuation<Void, Never>]
@@ -28,12 +29,35 @@ final class SpeechActivityGate: @unchecked Sendable {
         continuations.forEach { $0.resume() }
     }
 
-    func waitUntilInactive() async {
+    /// Wake the attempts currently parked on speech without changing the tracked activity state.
+    ///
+    /// An explicit manual hint uses this interruption boundary. A later automatic attempt still
+    /// observes the unchanged active-speaker set and waits normally.
+    func interruptWaiters() {
+        let continuations: [CheckedContinuation<Void, Never>]
+        lock.lock()
+        interruptGeneration &+= 1
+        continuations = Array(waiters.values)
+        waiters.removeAll()
+        lock.unlock()
+        continuations.forEach { $0.resume() }
+    }
+
+    func interruptGenerationSnapshot() -> UInt {
+        lock.withLock { interruptGeneration }
+    }
+
+    /// Wait for inactive speech unless an explicit interruption occurred after `generation`.
+    ///
+    /// Comparing the generation while registering closes the lost-wakeup window where a manual
+    /// hint arrives after the caller checks pending triggers but before this continuation exists.
+    func waitUntilInactive(unlessInterruptedAfter generation: UInt) async {
         let id = UUID()
         await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
                 lock.lock()
-                if activeSpeakers.isEmpty || Task.isCancelled {
+                if activeSpeakers.isEmpty || Task.isCancelled
+                    || interruptGeneration != generation {
                     lock.unlock()
                     continuation.resume()
                 } else {

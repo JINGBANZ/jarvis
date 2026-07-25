@@ -28,12 +28,19 @@ public final class CoachDriver: @unchecked Sendable {
 
     private let stateLock = NSLock()
     private var routeRevision: UInt = 0
+    /// Advances only when an explicit Settings edit replaces route topology. Client refreshes use
+    /// `routeRevision` for stale attempt gating but must not supersede committed route health.
+    private var routeTopologyRevision: UInt = 0
     private var configuredRoute: ConfiguredBrainRoute
     private var routeSession: BrainRouteSession
     /// Set after a target exhausts, then consumed when the next constructible target is selected.
     /// This avoids announcing an unavailable intermediate target as active.
     private var pendingTransitionOrigin: BrainTarget?
     private var routeIsExhausted = false
+    /// A committed terminal transition owns one delivery token independent of client revisions.
+    /// Same-topology credential refreshes preserve it; an explicit replacement route clears it.
+    private var exhaustionDeliveryGeneration: UInt = 0
+    private var pendingExhaustionDeliveryGeneration: UInt?
     private var isHandling = false
     /// Transcript is committed only by a complete, non-truncated `speak` or `stay_silent`.
     private var committedTranscriptCount = 0
@@ -77,9 +84,12 @@ public final class CoachDriver: @unchecked Sendable {
     }
 
     private struct RouteExhaustionDelivery {
-        let revision: UInt
+        let generation: UInt
+        let topologyRevision: UInt
         let target: BrainTarget
         let failure: BrainFailure
+        /// Captured when exhaustion commits. A later same-topology client refresh must neither
+        /// redirect the already-committed event to a second callback nor suppress this one.
         let callback: (@MainActor @Sendable (BrainTarget, BrainFailure) -> Void)?
     }
 
@@ -131,10 +141,12 @@ public final class CoachDriver: @unchecked Sendable {
     public func updateBrainRoute(_ route: ConfiguredBrainRoute) {
         stateLock.lock()
         routeRevision &+= 1
+        routeTopologyRevision &+= 1
         configuredRoute = route
         routeSession = BrainRouteSession(targetCount: route.targets.count)
         pendingTransitionOrigin = nil
         routeIsExhausted = false
+        pendingExhaustionDeliveryGeneration = nil
         stateLock.unlock()
     }
 
@@ -196,6 +208,12 @@ public final class CoachDriver: @unchecked Sendable {
             pendingTriggerWaiters.removeAll()
             stateLock.unlock()
             waiters.forEach { $0.resume() }
+            if reason == .manualHint {
+                // A hint arriving after an automatic attempt has parked on unsettled speech must
+                // wake that exact pending attempt. The trigger stays queued until the fresh-attempt
+                // boundary consumes it together with the newest transcript.
+                speechActivity.interruptWaiters()
+            }
             return .pending
         }
         isHandling = true
@@ -311,12 +329,7 @@ public final class CoachDriver: @unchecked Sendable {
                     callback: advanced.3)
             }
             if let exhausted = step.exhaustion {
-                await deliverRouteExhaustion(
-                    revision: exhausted.revision,
-                    target: exhausted.target,
-                    failure: exhausted.failure,
-                    callback: exhausted.callback)
-                if isCurrentRouteExhaustion(revision: exhausted.revision) {
+                if await deliverRouteExhaustion(exhausted) {
                     return nil
                 }
                 continue
@@ -372,8 +385,11 @@ public final class CoachDriver: @unchecked Sendable {
         case .exhausted:
             routeIsExhausted = true
             pendingTrigger = nil
+            exhaustionDeliveryGeneration &+= 1
+            pendingExhaustionDeliveryGeneration = exhaustionDeliveryGeneration
             step.exhaustion = RouteExhaustionDelivery(
-                revision: routeRevision,
+                generation: exhaustionDeliveryGeneration,
+                topologyRevision: routeTopologyRevision,
                 target: configured.target,
                 failure: failure,
                 callback: configuredRoute.onExhausted)
@@ -395,14 +411,9 @@ public final class CoachDriver: @unchecked Sendable {
     ) async -> RouteFailureAction {
         let record = applyAttemptFailure(failure, on: attempt)
         if let exhaustion = record.exhaustion {
-            await deliverRouteExhaustion(
-                revision: exhaustion.revision,
-                target: exhaustion.target,
-                failure: exhaustion.failure,
-                callback: exhaustion.callback)
-            if !isCurrentRouteExhaustion(revision: exhaustion.revision) {
-                return .staleRevision
-            }
+            return await deliverRouteExhaustion(exhaustion)
+                ? record.action
+                : .staleRevision
         }
         return record.action
     }
@@ -431,10 +442,13 @@ public final class CoachDriver: @unchecked Sendable {
         case .exhausted:
             routeIsExhausted = true
             pendingTrigger = nil
+            exhaustionDeliveryGeneration &+= 1
+            pendingExhaustionDeliveryGeneration = exhaustionDeliveryGeneration
             return (
                 .exhausted,
                 RouteExhaustionDelivery(
-                    revision: routeRevision,
+                    generation: exhaustionDeliveryGeneration,
+                    topologyRevision: routeTopologyRevision,
                     target: attempt.target,
                     failure: failure,
                     callback: configuredRoute.onExhausted))
@@ -450,22 +464,33 @@ public final class CoachDriver: @unchecked Sendable {
         stateLock.unlock()
     }
 
-    private func deliverRouteExhaustion(
-        revision: UInt,
-        target: BrainTarget,
-        failure: BrainFailure,
-        callback: (@MainActor @Sendable (BrainTarget, BrainFailure) -> Void)?
-    ) async {
-        guard let callback else { return }
+    /// Deliver one committed terminal transition exactly once.
+    ///
+    /// Client-only refreshes intentionally do not invalidate this token. An explicit route update
+    /// clears it before this main-actor boundary and therefore supersedes the old terminal event.
+    private func deliverRouteExhaustion(_ delivery: RouteExhaustionDelivery) async -> Bool {
         await MainActor.run {
             stateLock.lock()
-            let isCurrent = routeRevision == revision && routeIsExhausted
-            stateLock.unlock()
-            guard isCurrent else {
-                jlog("Jarvis coach: ignoring route exhaustion from a superseded Settings revision")
-                return
+            let shouldDeliver = routeIsExhausted
+                && pendingExhaustionDeliveryGeneration == delivery.generation
+            if shouldDeliver {
+                pendingExhaustionDeliveryGeneration = nil
             }
-            callback(target, failure)
+            stateLock.unlock()
+            guard shouldDeliver else {
+                jlog("Jarvis coach: ignoring route exhaustion from a superseded Settings revision")
+                return false
+            }
+            delivery.callback?(delivery.target, delivery.failure)
+
+            // A callback may synchronously install an explicit replacement route. That edit
+            // supersedes terminal teardown and preserves pending work on the new topology. A
+            // same-topology client refresh does not change this revision.
+            stateLock.lock()
+            let remainsTerminal = routeIsExhausted
+                && routeTopologyRevision == delivery.topologyRevision
+            stateLock.unlock()
+            return remainsTerminal
         }
     }
 
@@ -473,12 +498,6 @@ public final class CoachDriver: @unchecked Sendable {
         stateLock.lock()
         defer { stateLock.unlock() }
         return routeRevision == revision
-    }
-
-    private func isCurrentRouteExhaustion(revision: UInt) -> Bool {
-        stateLock.lock()
-        defer { stateLock.unlock() }
-        return routeRevision == revision && routeIsExhausted
     }
 
     private func deliverRouteSelection(_ attempt: AttemptBrain) async -> Bool {
@@ -609,14 +628,25 @@ public final class CoachDriver: @unchecked Sendable {
                 }
 
                 // A trigger may arrive while the delay is sleeping. Consume it before the fresh
-                // attempt so an explicit manual hint retains its force-speak semantics.
+                // attempt so an explicit manual hint retains its force-speak semantics. Snapshot
+                // the speech-interrupt generation first so a hint landing between this trigger
+                // snapshot and waiter registration cannot be lost.
+                let speechInterruptGeneration = speechActivity.interruptGenerationSnapshot()
                 wake = takePendingTriggerSnapshot()
                 if let reason = wake.reason {
                     explicitManualWake = explicitManualWake || reason == .manualHint
                     work.reason = Self.coalescing(work.reason, with: reason)
                 }
                 if !explicitManualWake {
-                    await speechActivity.waitUntilInactive()
+                    await speechActivity.waitUntilInactive(
+                        unlessInterruptedAfter: speechInterruptGeneration)
+                    // Consume a trigger that arrived while parked. Natural triggers still wait for
+                    // speech inactivity; a manual hint interrupts that wait and turns this same
+                    // pending-work attempt into the force-speak attempt.
+                    wake = takePendingTriggerSnapshot()
+                    if let reason = wake.reason {
+                        work.reason = Self.coalescing(work.reason, with: reason)
+                    }
                 }
             }
         }

@@ -27,9 +27,10 @@ locally installed Claude Code or Codex CLI on the user's subscription; Settings 
 those providers, reports Claude's current sign-in state from its bounded status command, and keeps
 the OpenAI API-key path available. The ordered provider-route contract is now settled: one primary
 plus a user-editable ordered fallback list, one target per coaching attempt, no failed-request replay
-inside the attempt, automatic pending-work attempts with the newest finalized transcript, three
-temporary/unknown failed attempts—or one proven permanent failure—before moving forward, and no
-automatic return to an earlier target.
+inside the attempt, automatic pending-work attempts with the newest finalized transcript, the
+code-owned temporary/unknown failure threshold in
+[`BrainRouteSession.failuresPerTarget`](../Sources/JarvisCore/Coach/BrainRouteSession.swift)—or one
+proven permanent failure—before moving forward, and no automatic return to an earlier target.
 Runtime movement never changes preferences; exhausting the finite route stops coaching with a fixed
 typed Activity event. That route is implemented as immutable provider/model values, a pure
 Foundation-only session cursor, a single-flight fresh-attempt scheduler, and the ordered Settings
@@ -65,7 +66,7 @@ While that session runs, switch providers and confirm the next completed turn pr
 adds the provider-only success notice to Activity; then exercise a failed replacement and confirm
 the pending conversation is preserved. Verify the first-open Brain state (no Primary selection,
 disabled model/Add fallback, and Add API key), then configure multiple fallbacks and force a temporary
-three-attempt transition, a proven-permanent one-attempt transition, an unavailable-target skip, and
+failure-budget transition, a proven-permanent one-attempt transition, an unavailable-target skip, and
 final route exhaustion. Confirm no provider-specific tool state crosses attempts and verify a
 successful fallback remains active without changing preferences. Finish the in-app Codex smoke through
 audio and the overlay. Exercise one audio-route switch: Activity should say listening continues, the

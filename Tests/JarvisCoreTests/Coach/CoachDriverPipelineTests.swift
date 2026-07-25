@@ -145,6 +145,16 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         ]))
     }
 
+    private func waitUntilRouteReportsExhaustion(_ driver: CoachDriver) async -> Bool {
+        for _ in 0..<1_000 {
+            if await driver.handleTrigger(.turnEnd) == .brainError {
+                return true
+            }
+            await Task.yield()
+        }
+        return false
+    }
+
     @Test func captureThenSpeakPipeline() async {
         let clock = ManualClock(now: 100)
         let brain = ScriptedBrain(script: [
@@ -774,6 +784,108 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(refreshedFallback.calls.count == 1)
     }
 
+    @Test func refreshingClientsCannotDropOrRedirectCommittedExhaustion() async {
+        let target = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
+        let responseGate = AsyncGate()
+        let failed = GatedThrowingBrain(
+            gate: responseGate,
+            error: BrainFailure(
+                disposition: .permanent,
+                detail: "terminal route failure"))
+        let originalDelivery = RouteExhaustionRecorder()
+        let refreshedDelivery = RouteExhaustionRecorder()
+        let transcript = RollingTranscript()
+        let driver = CoachDriver(
+            config: .default,
+            transcript: transcript,
+            route: ConfiguredBrainRoute(
+                targets: [ConfiguredBrainTarget(target: target, brain: failed)],
+                onExhausted: { originalDelivery.record(target: $0, failure: $1) }),
+            screen: FakeScreen(),
+            overlay: FakeOverlay(),
+            clock: ManualClock(),
+            automaticAttemptDelay: { _ in })
+        transcript.append(.init(speaker: .me, text: "deliver terminal state", at: 0))
+
+        async let outcome = driver.handleTrigger(.turnEnd)
+        await responseGate.waitUntilEntered()
+        let mainActorEntered = DispatchSemaphore(value: 0)
+        let releaseMainActor = DispatchSemaphore(value: 0)
+        let mainActorBlocker = Task { @MainActor in
+            blockMainActor(entered: mainActorEntered, release: releaseMainActor)
+        }
+        await waitForSemaphore(mainActorEntered)
+        await responseGate.release()
+        #expect(await waitUntilRouteReportsExhaustion(driver))
+
+        let refreshed = ThrowingBrain(error: BrainFailure(
+            disposition: .permanent,
+            detail: "refreshed client should never run"))
+        #expect(driver.refreshBrainRouteClients(ConfiguredBrainRoute(
+            targets: [ConfiguredBrainTarget(target: target, brain: refreshed)],
+            onExhausted: { refreshedDelivery.record(target: $0, failure: $1) })))
+
+        releaseMainActor.signal()
+        await mainActorBlocker.value
+        #expect(await outcome == .brainError)
+        #expect(originalDelivery.targets == [target])
+        #expect(refreshedDelivery.targets.isEmpty)
+        #expect(refreshed.callCount == 0)
+        #expect(await driver.handleTrigger(.turnEnd) == .brainError)
+        #expect(originalDelivery.targets == [target])
+    }
+
+    @Test func explicitRouteUpdateSupersedesUndeliveredExhaustion() async {
+        let failedTarget = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
+        let replacementTarget = BrainTarget(provider: .claudeCode, modelID: "sonnet")
+        let responseGate = AsyncGate()
+        let failed = GatedThrowingBrain(
+            gate: responseGate,
+            error: BrainFailure(
+                disposition: .permanent,
+                detail: "old route failed"))
+        let oldDelivery = RouteExhaustionRecorder()
+        let replacement = ScriptedBrain(script: [
+            .init(toolCalls: [.speak(callId: "replacement", lines: ["new route recovered"])]),
+        ])
+        let transcript = RollingTranscript()
+        let driver = CoachDriver(
+            config: .default,
+            transcript: transcript,
+            route: ConfiguredBrainRoute(
+                targets: [ConfiguredBrainTarget(target: failedTarget, brain: failed)],
+                onExhausted: { oldDelivery.record(target: $0, failure: $1) }),
+            screen: FakeScreen(),
+            overlay: FakeOverlay(),
+            clock: ManualClock(),
+            automaticAttemptDelay: { _ in })
+        transcript.append(.init(speaker: .me, text: "preserve pending conversation", at: 0))
+
+        async let outcome = driver.handleTrigger(.turnEnd)
+        await responseGate.waitUntilEntered()
+        let mainActorEntered = DispatchSemaphore(value: 0)
+        let releaseMainActor = DispatchSemaphore(value: 0)
+        let mainActorBlocker = Task { @MainActor in
+            blockMainActor(entered: mainActorEntered, release: releaseMainActor)
+        }
+        await waitForSemaphore(mainActorEntered)
+        await responseGate.release()
+        #expect(await waitUntilRouteReportsExhaustion(driver))
+
+        driver.updateBrainRoute(ConfiguredBrainRoute(targets: [
+            ConfiguredBrainTarget(target: replacementTarget, brain: replacement),
+        ]))
+        releaseMainActor.signal()
+        await mainActorBlocker.value
+
+        #expect(await outcome == .spoke)
+        #expect(oldDelivery.targets.isEmpty)
+        #expect(replacement.calls.count == 1)
+        #expect(replacement.calls[0].contains {
+            ($0.text ?? "").contains("preserve pending conversation")
+        })
+    }
+
     @Test func allTargetsExhaustOnceAndStopTheConversation() async {
         let first = ThrowingBrain()
         let second = ThrowingBrain()
@@ -962,6 +1074,37 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         driver.updateSpeechActivity(false, for: .them)
         #expect(await outcome == .spoke)
         #expect(brain.calls.count == 2)
+    }
+
+    @Test func lateManualHintInterruptsSpeechWaitAndJoinsPendingAttempt() async {
+        let gate = AsyncGate()
+        let brain = GatedFailureThenSpeakingBrain(gate: gate)
+        let screen = FakeScreen()
+        let (driver, transcript) = makeDriver(
+            brain: brain,
+            screen: screen,
+            clock: ManualClock())
+        driver.updateSpeechActivity(true, for: .them)
+        transcript.append(.init(speaker: .me, text: "failed pending thought", at: 0))
+
+        async let outcome = driver.handleTrigger(.turnEnd)
+        await gate.waitUntilEntered()
+        await gate.release()
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        #expect(brain.calls.count == 1)
+
+        transcript.append(.init(speaker: .me, text: "latest words for the hint", at: 1))
+        #expect(await driver.handleTrigger(.manualHint) == .busy)
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        #expect(brain.calls.count == 2)
+
+        // Cleanup also prevents a regression from parking the test forever after the expectation.
+        driver.updateSpeechActivity(false, for: .them)
+        #expect(await outcome == .spoke)
+        #expect(screen.captureCount == 1)
+        #expect(brain.calls[1].contains {
+            ($0.text ?? "").contains("latest words for the hint")
+        })
     }
 
     @Test func manualHintWakesFailedAttemptEvenWhileSpeechIsUnsettled() async {
@@ -1417,6 +1560,15 @@ private func blockMainActor(entered: DispatchSemaphore, release: DispatchSemapho
     release.wait()
 }
 
+private func waitForSemaphore(_ semaphore: DispatchSemaphore) async {
+    await withCheckedContinuation { continuation in
+        DispatchQueue.global().async {
+            semaphore.wait()
+            continuation.resume()
+        }
+    }
+}
+
 /// `@unchecked Sendable` is safe because `lock` guards the recorded route transitions.
 private final class RouteTransitionRecorder: @unchecked Sendable {
     struct Event: Equatable {
@@ -1482,6 +1634,34 @@ final class ThrowingBrain: BrainClient, @unchecked Sendable {
 
     func respond(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice) async throws -> BrainResponse {
         lock.withLock { calls += 1 }
+        throw error
+    }
+}
+
+/// A permanent failure parked behind an async gate so tests can commit route exhaustion while the
+/// main actor is deliberately occupied. `lock` guards the observable call count.
+private final class GatedThrowingBrain: BrainClient, @unchecked Sendable {
+    private let gate: AsyncGate
+    private let error: Error
+    private let lock = NSLock()
+    private var calls = 0
+    var callCount: Int { lock.withLock { calls } }
+
+    init(gate: AsyncGate, error: Error) {
+        self.gate = gate
+        self.error = error
+    }
+
+    func respond(
+        messages: [ChatMessage],
+        tools: [ToolDef],
+        toolChoice: ToolChoice
+    ) async throws -> BrainResponse {
+        _ = messages
+        _ = tools
+        _ = toolChoice
+        lock.withLock { calls += 1 }
+        await gate.enter()
         throw error
     }
 }

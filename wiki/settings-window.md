@@ -143,19 +143,21 @@ repeat that implementation detail.
 The list is finite and follows the [ordered provider-route contract](./architecture.md#ordered-provider-route).
 One target owns a complete coaching attempt. A provider error ends that attempt without replaying its
 failed request; pending conversation schedules a new attempt with the newest finalized transcript.
-Three consecutive temporary/unknown failed attempts advance to the next row. A failure proven
-permanent by the provider adapter exhausts the active row immediately, so the next fresh attempt uses
-the next row; it never switches provider inside the failed attempt. A successful attempt clears the
-active row's failure count but keeps that row active, including after fallback activation. The runtime
-never returns to the primary or an exhausted row. When every row is exhausted, coaching stops and
-Activity receives fixed typed route-exhausted copy; request details and attempt counts remain in
-`jarvis-debug.log`.
+Consecutive temporary/unknown failures advance when the active row reaches Core's code-owned failure
+budget (see
+[`BrainRouteSession.failuresPerTarget`](../Sources/JarvisCore/Coach/BrainRouteSession.swift)).
+A failure proven permanent by the provider adapter exhausts the active row immediately, so the next
+fresh attempt uses the next row; it never switches provider inside the failed attempt. A successful
+attempt clears the active row's failure count but keeps that row active, including after fallback
+activation. The runtime never returns to the primary or an exhausted row. When every row is
+exhausted, coaching stops and Activity receives fixed typed route-exhausted copy; request details and
+attempt counts remain in `jarvis-debug.log`.
 
 Confirmed-missing or signed-out targets are disabled for new selection while editing; an existing
 saved row stays visible so the user can repair or remove it. If a configured fallback becomes
-unavailable after Start, activation skips it and moves forward without inventing three requests that
-cannot run. Runtime movement through the route never changes the saved list. Stop → Start begins at
-the saved primary again.
+unavailable after Start, activation skips it and moves forward without inventing provider requests
+solely to consume the failure budget. Runtime movement through the route never changes the saved
+list. Stop → Start begins at the saved primary again.
 
 **Model + reasoning effort.** A **Model** dropdown drawn from `BrainModelCatalog` per provider (OpenAI ids for
 the API; CLI aliases like `sonnet` for the CLIs, plus a "CLI default" entry meaning "no model flag" —

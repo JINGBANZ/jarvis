@@ -4,8 +4,8 @@ import Foundation
 ///
 /// `brain == nil` represents a target that was proven unavailable while the app assembled the
 /// route (for example, a missing or signed-out CLI). The session skips it without manufacturing
-/// three provider attempts. Keeping the unavailable entry in the runtime route preserves ordering
-/// and lets the driver emit one fixed, typed transition when the cursor reaches it.
+/// provider attempts against the failure budget. Keeping the unavailable entry in the runtime route
+/// preserves ordering and lets the driver emit one fixed, typed transition when the cursor reaches it.
 public struct ConfiguredBrainTarget: Sendable {
     public let target: BrainTarget
     let brain: BrainClient?
