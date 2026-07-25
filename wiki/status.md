@@ -28,11 +28,13 @@ those providers, reports Claude's current sign-in state from its bounded status 
 the OpenAI API-key path available. The ordered provider-route contract is now settled: one primary
 plus a user-editable ordered fallback list, one target per coaching attempt, no failed-request replay
 inside the attempt, automatic pending-work attempts with the newest finalized transcript, three
-consecutive failed attempts before moving forward, and no automatic return to an earlier target.
+temporary/unknown failed attempts—or one proven permanent failure—before moving forward, and no
+automatic return to an earlier target.
 Runtime movement never changes preferences; exhausting the finite route stops coaching with a fixed
-typed Activity event. The current provider-fallback branch still contains the earlier interim
-implementation—one optional fallback, one immediate retry, same-attempt failover, and primary
-recovery probing—so the route design is **not implemented or shippable yet**. Codex coaching calls
+typed Activity event. That route is implemented as immutable provider/model values, a pure
+Foundation-only session cursor, a single-flight fresh-attempt scheduler, and the ordered Settings
+editor; the old immediate request retry, scalar fallback, same-attempt failover, and primary recovery
+probing are removed. Codex coaching calls
 suppress project instructions and its feature-gated agent tools, run as direct-response decisions, inherit only stable
 executable-search paths, and stop under a provider-specific stall bound instead of leaving later
 speech batched indefinitely.
@@ -58,13 +60,10 @@ question and confirm it can answer without an unnecessary capture. Finish the in
 provider smoke: confirm Settings shows it signed in, then confirm a coaching turn and screen request.
 While that session runs, switch providers and confirm the next completed turn preserves context and
 adds the provider-only success notice to Activity; then exercise a failed replacement and confirm
-the pending conversation is preserved. Before that live smoke, replace the interim provider fallback
-with the [ordered route design](./architecture.md#ordered-provider-route): remove coaching-request
-replay, persist and edit multiple ordered targets, expose speech activity to the Core scheduler, and
-test trigger coalescing, transcript batching, three-attempt advancement, forward-only fallback,
-Settings override, unavailable-target skipping, and terminal route exhaustion. Then configure
-multiple fallbacks, force each transition, confirm no provider-specific tool state crosses attempts,
-and verify a successful fallback remains active without changing preferences. Finish the in-app Codex smoke through
+the pending conversation is preserved. Configure multiple fallbacks and force a temporary
+three-attempt transition, a proven-permanent one-attempt transition, an unavailable-target skip, and
+final route exhaustion. Confirm no provider-specific tool state crosses attempts and verify a
+successful fallback remains active without changing preferences. Finish the in-app Codex smoke through
 audio and the overlay. Exercise one audio-route switch: Activity should say listening continues, the
 next turn should include any unsent speech, and capture should recover
 without rotating the session. Stop that session, click **Evaluate**, and confirm the agentic report
@@ -79,8 +78,8 @@ thin OS shell, verified by the smoke run.
 
 - `Sources/JarvisCore/Audio/` — transactional PCM + utterance buffering, adaptive content-free activity detection, non-destructive AEC reference alignment, and system-audio timeline preservation (`PCMBuffer`, `UtteranceBuffer`, `PCM16Framer`, `AudioDownmix`, `AdaptiveAudioActivityDetector`, `EchoReferenceAlignment`, `SystemAudioTimeline`).
 - `Sources/JarvisCore/Transcription/` — realtime session wire contract, per-item event ledger, and rolling transcript (`RealtimeSession`, `RealtimeTranscriptionLedger`, `Transcript`, `NoiseReduction`).
-- `Sources/JarvisCore/Brain/` — the LLM integration: the `BrainClient` contract (`Brain`), `OpenAIBrainClient`, `CLIBrainClient` + `AgentCLIProcessRunner` + `AgentCLIDetector`/`AgentCLIAuthenticationStatus` (the local Claude Code / Codex brain providers and sign-in state), shared retry/lifecycle classification (`BrainFailure`), `RetryingBrainClient`, `BrainProvider`, `BrainModelCatalog` (default `gpt-5.5`), `ReasoningEffort`.
-- `Sources/JarvisCore/Coach/` — the event loop: `CoachDriver` (including transactional between-turn brain replacement and configured provider failover/recovery), `ConfiguredBrainFallback`, `CoachHistory` (client-managed session memory), `ToolDefs` (coach tools + system prompt).
+- `Sources/JarvisCore/Brain/` — the LLM integration: the `BrainClient` contract (`Brain`), `OpenAIBrainClient`, `CLIBrainClient` + `AgentCLIProcessRunner` + `AgentCLIDetector`/`AgentCLIAuthenticationStatus` (the local Claude Code / Codex brain providers and sign-in state), provider-boundary failure classification (`BrainFailure`), immutable `BrainTarget`/`BrainRoute`, `BrainProvider`, `BrainModelCatalog` (default `gpt-5.5`), `ReasoningEffort`.
+- `Sources/JarvisCore/Coach/` — the event loop: `CoachDriver` (fresh-attempt scheduling and one-target tool-loop orchestration), the pure forward-only `BrainRouteSession`, `SpeechActivityGate`, `CoachHistory` (client-managed session memory), `ToolDefs` (coach tools + system prompt).
 - `Sources/JarvisCore/Triggers/` — turn/silence trigger detection, substance classification, and silence backoff (`Trigger`, `TurnSubstance`, `SilenceBackoff`).
 - `Sources/JarvisCore/Screen/` — the model-triggered screen-capture tool contract + window-scoped capture logic (`ScreenCapture`, `ScreenSnapshot`, `FrontWindowSelector`, `RecognizedTextLayout`).
 - `Sources/JarvisCore/Overlay/` — overlay text model + length-proportional timing + fan-out (`OverlayRendering`, `OverlayTiming`, `OverlayAppearance`, `BroadcastOverlay`).
@@ -90,7 +89,7 @@ thin OS shell, verified by the smoke run.
 - `Sources/JarvisOverlay/` — the capture-invisible `NSPanel` surfaces: `OverlayCaptionPanel` (transient), `OverlayBoxPanel` (persistent), `NSPanel+CaptureExclusion`.
 - `Sources/JarvisApp/App/` + `MenuBar/` — entry point, connection-aware menu status, Start/Stop, `ErrorReporter` (startup alerts plus an unconditional no-presentation runtime policy).
 - `Sources/JarvisApp/Capture/` — one-clock aggregate mic + sample-preserving system-audio capture with AEC3 echo cancellation + resampling (`AggregateEchoCapture`, `WebRTCEchoCanceller`, `Resampler`), Realtime item/readiness/liveness/transactional-reconnect/witness handling (`RealtimeTranscriber`, `NetworkPathDiagnostics`), permissions, plus the window-scoped screenshot + OCR edge (`WindowScopedScreenCapture`, `ScreenTextRecognizer`).
-- `Sources/JarvisApp/Settings/` — the unified Settings window (`SettingsWindow` hosting Brain (primary + optional fallback provider, model, effort, and API key) / Overlay / Screen / Activity sections).
+- `Sources/JarvisApp/Settings/` — the unified Settings window (`SettingsWindow` hosting Brain (primary + ordered provider/model fallbacks, model, effort, and API key) / Overlay / Screen / Activity sections).
 - `Sources/JarvisApp/Shortcuts/HotkeyController.swift` — the global Carbon ⌥⌘J on-demand-hint hotkey.
 - `Sources/JarvisApp/Viewer/ActivityViewer.swift` — the in-app `WKWebView` activity viewer, with an exact selectable/copyable session ID and one-click **Evaluate** / **Open report** agentic audit flow.
 - `Sources/EvalPrep/main.swift` — the Foundation-only terminal entry point for the same `AgenticEvaluator` Activity invokes; `scripts/eval-session.sh` runs it over the repo + session dir.
@@ -99,9 +98,6 @@ thin OS shell, verified by the smoke run.
 
 ## Not yet built
 
-- **Ordered provider route** — implement the approved
-  [attempt, scheduling, and forward-only failover contract](./architecture.md#ordered-provider-route)
-  plus the ordered Settings list before shipping provider fallback.
 - **First notarized release** — the release workflow needs its five repo secrets (Developer ID `.p12` + App Store Connect API key; names in `.github/workflows/release.yml`) set before the first Release PR is merged; the first run is the pipeline's live test.
 - **Universal binary** — `Sources/CJarvisAEC/lib/libjarvis-aec.a` is arm64-only; `lipo` in an x86_64 slice if Intel is ever needed.
 - **Neural double-talk canceller** (DTLN / Muesli-style on the same aligned streams) — the escalation if AEC3 over-attenuates the user under loud far audio in practice.

@@ -195,6 +195,56 @@ import Testing
         #expect(!disconnected.hasPendingItems)
     }
 
+    @Test func activeSpeechTracksOverlappingItemsUntilEveryItemStops() {
+        let ledger = RealtimeTranscriptionLedger()
+        #expect(!ledger.hasActiveSpeech)
+
+        ledger.recordSpeechStarted(itemID: "first", audioStartMilliseconds: 0, timelineOrigin: 0)
+        ledger.recordSpeechStarted(itemID: "second", audioStartMilliseconds: 500, timelineOrigin: 0)
+        #expect(ledger.hasActiveSpeech)
+
+        ledger.recordSpeechStopped(itemID: "first", audioEndMilliseconds: 1_000)
+        #expect(ledger.hasActiveSpeech)
+
+        ledger.recordSpeechStopped(itemID: "second", audioEndMilliseconds: 1_500)
+        #expect(!ledger.hasActiveSpeech)
+        #expect(ledger.hasPendingItems)
+    }
+
+    @Test func terminalEventsClearActiveSpeechEvenWithoutVadStop() {
+        let completed = RealtimeTranscriptionLedger()
+        completed.recordSpeechStarted(
+            itemID: "completed", audioStartMilliseconds: 0, timelineOrigin: 0)
+        #expect(completed.hasActiveSpeech)
+        _ = completed.recordCompleted(
+            itemID: "completed", transcript: "done", speaker: .them)
+        #expect(!completed.hasActiveSpeech)
+
+        let failed = RealtimeTranscriptionLedger()
+        failed.recordSpeechStarted(
+            itemID: "failed", audioStartMilliseconds: 0, timelineOrigin: 0)
+        #expect(failed.hasActiveSpeech)
+        _ = failed.recordFailed(itemID: "failed", speaker: .me)
+        #expect(!failed.hasActiveSpeech)
+    }
+
+    @Test func recoveryAndActiveTimeoutCannotLeaveSpeechMarkedActive() {
+        let timedOut = RealtimeTranscriptionLedger()
+        timedOut.recordDelta(itemID: "active", delta: "still speaking")
+        #expect(timedOut.hasActiveSpeech)
+        _ = timedOut.resolveActiveItemTimeout(itemID: "active", speaker: .me)
+        #expect(!timedOut.hasActiveSpeech)
+
+        let interrupted = RealtimeTranscriptionLedger()
+        interrupted.recordSpeechStarted(
+            itemID: "first", audioStartMilliseconds: 0, timelineOrigin: 0)
+        interrupted.recordDelta(itemID: "second", delta: "partial")
+        #expect(interrupted.hasActiveSpeech)
+        _ = interrupted.resolveAllInterruptedItems(speaker: .them)
+        #expect(!interrupted.hasActiveSpeech)
+        #expect(!interrupted.hasPendingItems)
+    }
+
     @Test func replayDiscardBoundaryWaitsForOutOfOrderEarlierItem() throws {
         let ledger = RealtimeTranscriptionLedger()
         ledger.recordSpeechStarted(itemID: "first", audioStartMilliseconds: 1_000,

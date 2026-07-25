@@ -26,6 +26,7 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
     private let discardConfirmedAudio: @Sendable (TimeInterval) -> Void
     private let resetSilenceTimer: @Sendable () -> Void
     private let onTurnEnd: @Sendable () -> Void
+    private let onSpeechActivityChanged: @Sendable (Bool) -> Void
 
     private let lock = NSLock()
     private let pending = UtteranceBuffer()
@@ -34,6 +35,7 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
     private var debounceTimer: Timer?
     private var replayRecoveryTimer: Timer?
     private var stopped = true
+    private var reportedSpeechActive = false
 
     init(speaker: Speaker, transcript: RollingTranscript, clock: Clock,
          sessionStart: TimeInterval, turnDebounce: TimeInterval,
@@ -42,7 +44,8 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
          isReady: @escaping @Sendable (Int) -> Bool,
          discardConfirmedAudio: @escaping @Sendable (TimeInterval) -> Void,
          resetSilenceTimer: @escaping @Sendable () -> Void,
-         onTurnEnd: @escaping @Sendable () -> Void) {
+         onTurnEnd: @escaping @Sendable () -> Void,
+         onSpeechActivityChanged: @escaping @Sendable (Bool) -> Void) {
         self.speaker = speaker
         self.transcript = transcript
         self.clock = clock
@@ -55,6 +58,7 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
         self.discardConfirmedAudio = discardConfirmedAudio
         self.resetSilenceTimer = resetSilenceTimer
         self.onTurnEnd = onTurnEnd
+        self.onSpeechActivityChanged = onSpeechActivityChanged
     }
 
     func start() {
@@ -63,7 +67,9 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
         pending.clear()
         ledger.clear()
         reconnectRecovery.clear()
+        let speechChange = takeSpeechActivityChangeLocked()
         lock.unlock()
+        emitSpeechActivityChange(speechChange)
     }
 
     var hasUnsettledItems: Bool {
@@ -81,11 +87,13 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
         pending.clear()
         ledger.clear()
         reconnectRecovery.clear()
+        let speechChange = takeSpeechActivityChangeLocked()
         lock.unlock()
         DispatchQueue.main.async {
             debounceTimer?.invalidate()
             replayRecoveryTimer?.invalidate()
         }
+        emitSpeechActivityChange(speechChange)
     }
 
     func recordSpeechStarted(itemID: String, audioStartMilliseconds: Int,
@@ -96,7 +104,9 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
             itemID: itemID, audioStartMilliseconds: audioStartMilliseconds,
             timelineOrigin: timelineOrigin)
         discardServerConfirmedAudioLocked()
+        let speechChange = takeSpeechActivityChangeLocked()
         lock.unlock()
+        emitSpeechActivityChange(speechChange)
         if didStart { scheduleActiveDeadline(itemID: itemID, socketGeneration: socketGeneration) }
         return didStart
     }
@@ -106,7 +116,9 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
         lock.lock()
         guard !stopped, isCurrentGeneration(socketGeneration) else { lock.unlock(); return false }
         let created = ledger.recordDelta(itemID: itemID, delta: delta)
+        let speechChange = takeSpeechActivityChangeLocked()
         lock.unlock()
+        emitSpeechActivityChange(speechChange)
         if created { scheduleActiveDeadline(itemID: itemID, socketGeneration: socketGeneration) }
         return created
     }
@@ -123,7 +135,9 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
                  + "with no usable text (item \(itemID))")
         }
         let shouldResume = shouldResumeDeferredTurnLocked()
+        let speechChange = takeSpeechActivityChangeLocked()
         lock.unlock()
+        emitSpeechActivityChange(speechChange)
         if shouldResume { scheduleTurnDebounce() }
     }
 
@@ -144,7 +158,9 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
              + "(item \(itemID), \(error)); \(recovery)")
         _ = reconcileReplacementItemLocked(item, reason: "transcription failed")
         let shouldResume = shouldResumeDeferredTurnLocked()
+        let speechChange = takeSpeechActivityChangeLocked()
         lock.unlock()
+        emitSpeechActivityChange(speechChange)
         if shouldResume { scheduleTurnDebounce() }
     }
 
@@ -155,7 +171,9 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
         let didStop = ledger.recordSpeechStopped(
             itemID: itemID, audioEndMilliseconds: audioEndMilliseconds)
         discardServerConfirmedAudioLocked()
+        let speechChange = takeSpeechActivityChangeLocked()
         lock.unlock()
+        emitSpeechActivityChange(speechChange)
         if didStop { scheduleTerminalDeadline(itemID: itemID, socketGeneration: socketGeneration) }
         return didStop
     }
@@ -169,7 +187,9 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
                                 duplicateRiskItemCount: duplicateRiskItems,
                                 replayAvailable: replayAvailable)
         let count = reconnectRecovery.unresolvedItemCount
+        let speechChange = takeSpeechActivityChangeLocked()
         lock.unlock()
+        emitSpeechActivityChange(speechChange)
         return count
     }
 
@@ -181,7 +201,9 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
         for item in fallbackItems { appendFinalizedItemLocked(item, reason: "replay unavailable") }
         let waiting = reconnectRecovery.blocksCoaching
         let shouldResume = shouldResumeDeferredTurnLocked()
+        let speechChange = takeSpeechActivityChangeLocked()
         lock.unlock()
+        emitSpeechActivityChange(speechChange)
         if shouldResume { scheduleTurnDebounce() }
         if waiting { scheduleReplayRecoveryDeadline(socketGeneration: socketGeneration) }
         return .init(unresolvedItems: unresolvedItems, fallbackItems: fallbackItems.count,
@@ -193,7 +215,9 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
         let fallbackItems = reconnectRecovery.recordCoverageLoss()
         for item in fallbackItems { appendFinalizedItemLocked(item, reason: "replay coverage lost") }
         let shouldResume = shouldResumeDeferredTurnLocked()
+        let speechChange = takeSpeechActivityChangeLocked()
         lock.unlock()
+        emitSpeechActivityChange(speechChange)
         if !fallbackItems.isEmpty { cancelReplayRecoveryDeadline() }
         if shouldResume { scheduleTurnDebounce() }
     }
@@ -208,7 +232,9 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
             for item in items { appendFinalizedItemLocked(item, reason: reason) }
         }
         let shouldResume = shouldResumeDeferredTurnLocked()
+        let speechChange = takeSpeechActivityChangeLocked()
         lock.unlock()
+        emitSpeechActivityChange(speechChange)
         cancelReplayRecoveryDeadline()
         if shouldResume { scheduleTurnDebounce() }
     }
@@ -260,7 +286,9 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
                 let handled = self.reconcileReplacementItemLocked(
                     nil, reason: "replacement terminal timeout")
                 let shouldResume = self.shouldResumeDeferredTurnLocked()
+                let speechChange = self.takeSpeechActivityChangeLocked()
                 self.lock.unlock()
+                self.emitSpeechActivityChange(speechChange)
                 if handled {
                     jlog("Jarvis realtime [\(self.speaker.rawValue)] replay recovery settled after "
                          + "\(timeout)s terminal timeout (item \(itemID))")
@@ -275,7 +303,9 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
                  + "after \(timeout)s (item \(itemID)); \(recovery)")
             _ = self.reconcileReplacementItemLocked(item, reason: "terminal timeout")
             let shouldResume = self.shouldResumeDeferredTurnLocked()
+            let speechChange = self.takeSpeechActivityChangeLocked()
             self.lock.unlock()
+            self.emitSpeechActivityChange(speechChange)
             if shouldResume { self.scheduleTurnDebounce() }
         }
     }
@@ -296,7 +326,9 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
                  + "after \(timeout)s (item \(itemID)); \(recovery)")
             _ = self.reconcileReplacementItemLocked(item, reason: "active-item timeout")
             let shouldResume = self.shouldResumeDeferredTurnLocked()
+            let speechChange = self.takeSpeechActivityChangeLocked()
             self.lock.unlock()
+            self.emitSpeechActivityChange(speechChange)
             if shouldResume { self.scheduleTurnDebounce() }
         }
     }
@@ -390,5 +422,18 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
     private func shouldResumeDeferredTurnLocked() -> Bool {
         pending.shouldResumeAfterPendingTranscriptionsSettle(
             hasPendingTranscriptions: ledger.hasPendingItems || reconnectRecovery.blocksCoaching)
+    }
+
+    private func takeSpeechActivityChangeLocked() -> Bool? {
+        let active = ledger.hasActiveSpeech
+        guard active != reportedSpeechActive else { return nil }
+        reportedSpeechActive = active
+        return active
+    }
+
+    private func emitSpeechActivityChange(_ active: Bool?) {
+        if let active {
+            onSpeechActivityChanged(active)
+        }
     }
 }

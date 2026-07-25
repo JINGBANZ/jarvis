@@ -218,15 +218,19 @@ failed conversation plus every newer finalized transcript item. If nothing new a
 attempt uses the same pending conversation. Automatic wake-ups wait while speech is active so they do
 not race an utterance that is about to finalize. `TriggerReason` remains the model-facing reason that
 made coaching useful (`turnEnd`, `silence`, or `manualHint`); pending work is scheduler state, not a
-fourth instruction to the model. A retry-only attempt preserves the latest natural trigger reason,
-while a newer natural trigger becomes the current reason.
+fourth instruction to the model. An automatic attempt with no newer trigger reuses the pending
+work's reason; when another natural trigger arrives, its newer reason describes the fresh snapshot.
 
-After three consecutive failed coaching attempts, the active target is exhausted and the cursor
-advances once. A terminal success resets the active target's count but never moves the cursor
-backward. A fallback that is already proven impossible to construct at activation time—for example, a
-missing executable, confirmed signed-out CLI, or invalid configuration—is skipped as unavailable
-rather than consuming three synthetic attempts. If no target remains, coaching stops, Activity records
-one fixed typed route-exhausted event, and raw errors stay in `jarvis-debug.log`.
+Temporary and unknown failures increment the active target's consecutive count; the third failed
+coaching attempt exhausts that target. A failure classified as permanent at the provider boundary
+(for example, proven authentication, billing, access, or model configuration failure) exhausts the
+target immediately. Either transition only changes the route cursor after the failed attempt ends:
+the next target starts in a separate fresh attempt with rebuilt conversation context. A terminal
+success resets the active target's count but never moves the cursor backward. A fallback that is
+already proven impossible to construct at activation time—for example, a missing executable,
+confirmed signed-out CLI, or invalid configuration—is skipped as unavailable rather than consuming
+three synthetic attempts. If no target remains, coaching stops, Activity records one fixed typed
+route-exhausted event, and raw errors stay in `jarvis-debug.log`.
 
 ```mermaid
 flowchart TD
@@ -235,10 +239,12 @@ flowchart TD
     S -- No --> A[Snapshot active target +<br/>latest finalized conversation]
     A --> R[Run one coaching attempt<br/>on one target]
     R -- Complete terminal action --> C[Commit conversation<br/>reset failure count<br/>stay on target]
-    R -- Provider attempt fails --> U[Leave work uncommitted<br/>increment target failures]
-    U --> B{Three consecutive<br/>failed attempts?}
-    B -- No --> W[Schedule a new attempt]
-    B -- Yes --> N{Next configured<br/>target exists?}
+    R -- Provider attempt fails --> U[Leave work uncommitted]
+    U --> D{Proven permanent?}
+    D -- No --> B{Third consecutive<br/>temporary/unknown failure?}
+    B -- No --> W[Schedule a fresh attempt<br/>on the same target]
+    D -- Yes --> N{Next configured<br/>target exists?}
+    B -- Yes --> N
     N -- Yes --> F[Advance once<br/>schedule a new attempt]
     N -- No --> X[Stop coaching<br/>typed Activity event]
     W --> T
@@ -413,11 +419,12 @@ The always-on legs are built to survive transient failure rather than die on it:
   uncommitted, and the scheduler makes a new attempt after bounded backoff or an earlier coalesced
   natural trigger. That new attempt rebuilds its input from the latest committed history, the failed
   conversation, and every newer finalized transcript item; with no new speech, it simply re-attempts
-  the pending work. Three consecutive failed attempts exhaust the active target and advance the
-  forward-only route. A terminal success resets the active target's count and keeps that target
-  installed. No provider is probed concurrently, and no automatic recovery returns to the primary.
-  Cancellation remains quiet. Memory **compaction** fails soft outside this route: a failed summary
-  simply leaves the full history for the next attempt.
+  the pending work. Three consecutive temporary/unknown failed attempts exhaust the active target;
+  a provider-boundary failure proven permanent exhausts it after one attempt. In both cases, only the
+  next fresh attempt runs the next target on the forward-only route. A terminal success resets the
+  active target's count and keeps that target installed. No provider is probed concurrently, and no
+  automatic recovery returns to the primary. Cancellation remains quiet. Memory **compaction** fails
+  soft outside this route: a failed summary simply leaves the full history for the next attempt.
 - **The audit edge** drains Activity's asynchronous writer as Stop completes. An explicit
   Activity → **Evaluate** click then runs the read-only agentic evaluator over the source checkout
   plus the completed session directory; it reads `jarvis-activity.jsonl` itself in full, so no

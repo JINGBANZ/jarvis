@@ -65,7 +65,9 @@ demand, and proactively offers short coaching tips via a capture-invisible overl
   finalized transcript. Runtime failover may only move forward through the user's persisted ordered
   route, never rewrite that preference or return to an exhausted target during the session. Keep the
   route and scheduling policy as Foundation-only state machines in Core; the app only supplies clients,
-  timers, and speech-activity events.
+  timers, and speech-activity events. Temporary and unknown failures exhaust a target after three
+  failed attempts; only a provider-boundary error proven permanent may exhaust it immediately, and
+  even then the next provider starts only in a fresh attempt.
 
 ## Workflow
 

@@ -715,13 +715,15 @@
   attempt batches the failed conversation with every newer finalized transcript item, or re-attempts
   the same pending work when nothing new arrived. Natural triggers and the pending wake-up coalesce,
   and an automatic wake-up waits for active speech to finish.
-- **Chose:** Three consecutive failed coaching attempts exhaust the active target and move the
-  session-local cursor forward once. A complete, non-truncated terminal `speak` or `stay_silent`
-  clears that target's failure count without returning to an earlier target. Once fallback is active,
-  it remains active until it too exhausts three attempts; automatic routing never revisits the primary
-  or another exhausted target. A proven-unconstructable target is skipped rather than charged three
-  synthetic attempts. Exhausting the finite route stops coaching with one fixed typed Activity event;
-  raw failures and scheduling detail stay in `jarvis-debug.log`.
+- **Chose:** Three consecutive temporary or unknown failed coaching attempts exhaust the active
+  target. A provider-boundary failure proven permanent exhausts that target after one attempt. Both
+  transitions move the session-local cursor forward once and run the next target only in a separate
+  fresh attempt. A complete, non-truncated terminal `speak` or `stay_silent` clears that target's
+  failure count without returning to an earlier target. Once fallback is active, it remains active
+  until it too exhausts; automatic routing never revisits the primary or another exhausted target. A
+  proven-unconstructable target is skipped rather than charged three synthetic attempts. Exhausting
+  the finite route stops coaching with one fixed typed Activity event; raw failures and scheduling
+  detail stay in `jarvis-debug.log`.
 - **Chose:** Runtime failover never mutates the saved route. Stop → Start begins at the persisted
   primary, while a valid explicit Settings edit may install a new route and reset its cursor between
   attempts. Client-managed history, unsent transcript, and completed screen observations are

@@ -40,8 +40,9 @@ its tab is visible** rather than for the whole time the window is open.
 
 One user-resizable window size for every tab — 820×600 by default, minimum 560×460 (which keeps the
 fixed-form panels fully visible). Switching tabs never resizes the window; whatever size the user
-set stays. A section whose content should stretch with the window returns `fillsTab == true` (only
-`ActivitySection` — the embedded log viewer); the fixed-form panels keep their designed frame,
+set stays. A section whose content should stretch with the window returns `fillsTab == true`
+(`BrainSection` and `ActivitySection`, whose scrollable content uses the available height); the other
+fixed-form panels keep their designed frame,
 wrapped so they pin to the top of the tab and center horizontally (AppKit's y-origin is the bottom,
 so an unwrapped fixed-frame view would ride the bottom edge in a taller window).
 
@@ -120,8 +121,8 @@ selectable while the first result is pending. The radios then show **signed in**
 falsely claim logout. An actual CLI request can still fail after preflight.
 
 **Fallback route.** Below the primary, an ordered list contains zero or more explicitly authorized
-provider/model targets. **Add fallback** appends a row; each row has provider and model menus, an
-accessible drag handle plus Move Up/Move Down actions, and Remove. Rows are labelled **Fallback 1**,
+provider/model targets. **Add fallback** appends a row; each row has provider and model menus,
+accessible Move Up/Move Down actions, and Remove. Rows are labelled **Fallback 1**,
 **Fallback 2**, and so on, so visual order and failover order are identical. Exact duplicate targets
 are rejected; a second model from the same provider is allowed as a deliberate separate target. The
 shared effort setting applies to every row.
@@ -129,13 +130,16 @@ shared effort setting applies to every row.
 The list is finite and follows the [ordered provider-route contract](./architecture.md#ordered-provider-route).
 One target owns a complete coaching attempt. A provider error ends that attempt without replaying its
 failed request; pending conversation schedules a new attempt with the newest finalized transcript.
-Three consecutive failed coaching attempts advance to the next row. A successful attempt clears the
+Three consecutive temporary/unknown failed attempts advance to the next row. A failure proven
+permanent by the provider adapter exhausts the active row immediately, so the next fresh attempt uses
+the next row; it never switches provider inside the failed attempt. A successful attempt clears the
 active row's failure count but keeps that row active, including after fallback activation. The runtime
 never returns to the primary or an exhausted row. When every row is exhausted, coaching stops and
 Activity receives fixed typed route-exhausted copy; request details and attempt counts remain in
 `jarvis-debug.log`.
 
-Confirmed-unavailable targets are visibly disabled while editing. If a configured fallback becomes
+Confirmed-missing or signed-out targets are disabled for new selection while editing; an existing
+saved row stays visible so the user can repair or remove it. If a configured fallback becomes
 unavailable after Start, activation skips it and moves forward without inventing three requests that
 cannot run. Runtime movement through the route never changes the saved list. Stop → Start begins at
 the saved primary again.

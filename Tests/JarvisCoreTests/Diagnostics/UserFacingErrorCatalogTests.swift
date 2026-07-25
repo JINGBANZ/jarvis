@@ -68,17 +68,15 @@ import Testing
         #expect(!e.severity.stopsSession)
     }
 
-    @Test func brainCLIRuntimeFailureStopsQuietlyAndKeepsDiagnosticRecoveryDetail() {
-        let e = UserFacingError.brainStopped(
-            provider: "Claude Code",
-            recovery: "Run “claude auth login” in Terminal.",
-            reason: "OAuth session expired"
-        )
+    @Test func exhaustedBrainRouteStopsQuietlyAndKeepsDiagnosticDetail() {
+        let e = UserFacingError.brainRouteExhausted(
+            lastProvider: "Claude Code",
+            reason: "OAuth session expired")
         #expect(e.severity == .terminal)
         #expect(!e.severity.showsAlert)
         #expect(e.severity.stopsSession)
-        #expect(e.title.contains("Claude Code"))
+        #expect(e.title.contains("route exhausted"))
         #expect(e.message.contains("OAuth session expired"))
-        #expect(e.message.contains("claude auth login"))
+        #expect(e.message.contains("Claude Code"))
     }
 }

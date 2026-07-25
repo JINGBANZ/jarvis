@@ -40,14 +40,11 @@ public extension UserFacingError {
               severity: .degraded)
     }
 
-    /// A provider proved that an actual coaching request cannot recover. Temporary and unknown
-    /// failures never use this path; they preserve the session for a later trigger. The Activity log
-    /// gets a discreet fixed notice while the detailed reason and provider-specific recovery stay in
-    /// diagnostics.
-    static func brainStopped(provider: String, recovery: String,
-                             reason: String) -> UserFacingError {
-        .init(title: "\(provider) couldn't respond",
-              message: "\(reason)\n\nCoaching has stopped. \(recovery)",
+    /// The finite user-authorized brain route was exhausted. Individual target failures never use
+    /// this terminal path; their raw detail stays diagnostic while pending work moves forward.
+    static func brainRouteExhausted(lastProvider: String, reason: String) -> UserFacingError {
+        .init(title: "Brain fallback route exhausted",
+              message: "\(reason)\n\nCoaching stopped after every configured target was exhausted. The last target was \(lastProvider). Check Settings → Brain, then Start again.",
               severity: .terminal)
     }
 

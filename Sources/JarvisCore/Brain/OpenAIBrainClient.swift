@@ -74,8 +74,8 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
         }
     }
 
-    /// Keep classification at the provider boundary: callers—including the retry wrapper and
-    /// `CoachDriver`—receive the same typed recoverability decision.
+    /// Keep classification at the provider boundary so the ordered route never guesses from raw
+    /// provider strings.
     private func performRequest(messages: [ChatMessage], tools: [ToolDef],
                                 toolChoice: ToolChoice) async throws -> BrainResponse {
         var request = URLRequest(url: endpoint, timeoutInterval: timeout)
@@ -85,12 +85,8 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
         let body = try encodeBody(messages: messages, tools: tools, toolChoice: toolChoice)
         request.httpBody = body
 
-        // This transport makes one attempt. The app wraps it in `RetryingBrainClient`, which may
-        // repeat the same self-contained request once for a transient transport/server failure.
-        // After that, the error reaches the driver and the NEXT trigger recovers: `sentCount` only
-        // advances on success, so the next turn's delta includes the failed lines plus newer ones.
-        // Each attempt records its own traffic entry (the retry re-enters this method), so a failed
-        // round trip AND its retry are both visible to the session audit.
+        // This transport makes exactly one request. `CoachDriver` never replays it; a failure leaves
+        // the conversation pending so a fresh attempt can include newer finalized transcript.
         let started = Date()
         let data: Data
         let http: HTTPURLResponse?

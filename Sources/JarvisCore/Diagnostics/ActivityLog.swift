@@ -2,7 +2,7 @@ import Foundation
 
 /// The model behind the human-facing activity viewer. It records the coaching exchange — heard
 /// speech, manual hint requests, every brain action (screen view, tip, or deliberate silence), and
-/// fixed non-sensitive notices when a brain change succeeds, falls back, degrades, or must stop. It
+/// fixed non-sensitive notices when a brain change succeeds, a route advances, degrades, or stops. It
 /// pushes those entries into an in-app `WKWebView` window (see `ActivityViewer` in JarvisApp) and
 /// persists them so past sessions can be browsed later. Detailed diagnostics belong exclusively in
 /// `JarvisLog`.
@@ -34,6 +34,9 @@ public final class ActivityLog: @unchecked Sendable {
         case brainPrimaryRecovered
         case brainRecoveryDeferred
         case brainFallbackUnavailable
+        case brainRouteAdvanced
+        case brainRouteTargetSkipped
+        case brainRouteExhausted
     }
 
     /// A human-visible event in the coaching exchange. Keeping this closed set typed prevents
@@ -74,19 +77,12 @@ public final class ActivityLog: @unchecked Sendable {
         /// identities are enough for a fixed human-facing success notice; model transport details
         /// remain in jlog.
         case brainChangeApplied(previous: BrainProvider, current: BrainProvider)
-        /// A live brain replacement failed its first turn, so Jarvis restored the previous active
-        /// provider. Carries provider identities only; raw failure detail stays in jlog.
-        case brainFallback(failed: BrainProvider, restored: BrainProvider)
-        /// The established primary exhausted its immediate retry budget for a temporary failure, so
-        /// Jarvis continued the same turn on the user's configured fallback.
-        case brainFailover(primary: BrainProvider, fallback: BrainProvider)
-        /// A cooldown elapsed on the fallback and the primary completed its recovery probe.
-        case brainPrimaryRecovered(primary: BrainProvider, fallback: BrainProvider)
-        /// A primary recovery probe missed, so the working fallback keeps the conversation.
-        case brainRecoveryDeferred(primary: BrainProvider, fallback: BrainProvider)
-        /// The configured fallback proved unusable. It is disabled for this live session, while the
-        /// primary conversation remains available for a later turn.
-        case brainFallbackUnavailable(primary: BrainProvider, fallback: BrainProvider)
+        /// A failed target was exhausted and the next user-authorized route target became active.
+        case brainRouteAdvanced(previous: BrainProvider, current: BrainProvider)
+        /// A route target was proven unavailable before a provider request could be constructed.
+        case brainRouteTargetSkipped(provider: BrainProvider)
+        /// Every user-authorized target was exhausted, so coaching stopped.
+        case brainRouteExhausted(lastProvider: BrainProvider)
 
         var kind: EventKind {
             switch self {
@@ -103,11 +99,9 @@ public final class ActivityLog: @unchecked Sendable {
             case .systemAudioStopped: .systemAudioStopped
             case .settingsChangeNotApplied: .settingsChangeNotApplied
             case .brainChangeApplied: .brainChangeApplied
-            case .brainFallback: .brainFallback
-            case .brainFailover: .brainFailover
-            case .brainPrimaryRecovered: .brainPrimaryRecovered
-            case .brainRecoveryDeferred: .brainRecoveryDeferred
-            case .brainFallbackUnavailable: .brainFallbackUnavailable
+            case .brainRouteAdvanced: .brainRouteAdvanced
+            case .brainRouteTargetSkipped: .brainRouteTargetSkipped
+            case .brainRouteExhausted: .brainRouteExhausted
             }
         }
     }
@@ -236,24 +230,18 @@ public final class ActivityLog: @unchecked Sendable {
                 message = "🧠 brain switch applied — \(previous.displayName) → \(current.displayName)"
             }
             imageBase64 = nil
-        case .brainFallback(let failed, let restored):
-            if failed == restored {
-                message = "⚠️ brain change failed — previous \(restored.displayName) setup restored"
+        case .brainRouteAdvanced(let previous, let current):
+            if previous == current {
+                message = "⚠️ \(previous.displayName) target couldn't respond — continuing with the next \(current.displayName) model"
             } else {
-                message = "⚠️ brain switch failed — \(failed.displayName) couldn't respond; \(restored.displayName) restored"
+                message = "⚠️ \(previous.displayName) couldn't respond — continuing on \(current.displayName)"
             }
             imageBase64 = nil
-        case .brainFailover(let primary, let fallback):
-            message = "⚠️ \(primary.displayName) couldn't respond — continuing on \(fallback.displayName)"
+        case .brainRouteTargetSkipped(let provider):
+            message = "⚠️ \(provider.displayName) fallback is unavailable — continuing to the next fallback target"
             imageBase64 = nil
-        case .brainPrimaryRecovered(let primary, let fallback):
-            message = "🧠 \(primary.displayName) recovered — switching back from \(fallback.displayName)"
-            imageBase64 = nil
-        case .brainRecoveryDeferred(let primary, let fallback):
-            message = "⚠️ \(primary.displayName) recovery failed — continuing on \(fallback.displayName)"
-            imageBase64 = nil
-        case .brainFallbackUnavailable(let primary, let fallback):
-            message = "⚠️ \(fallback.displayName) fallback couldn't respond — \(primary.displayName) will retry on the next turn"
+        case .brainRouteExhausted(let provider):
+            message = "⏹ coaching stopped — every fallback target was exhausted; last target: \(provider.displayName)"
             imageBase64 = nil
         }
         queue.async { [self] in

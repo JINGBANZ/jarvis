@@ -3,18 +3,20 @@ import JarvisCore
 
 /// Settings panel for the brain: the provider (OpenAI API, or a locally installed Claude Code /
 /// Codex CLI running on the user's subscription), the model + reasoning effort for whichever is
-/// active, an optional fallback provider, and the OpenAI API key — one tab, because these choices are
-/// one decision. The model list is per provider (each remembers its own); the effort is one global
-/// setting applied to all three, mapped onto each CLI's scale by `CLIBrainClient`. Installed CLIs are
-/// auto-detected
-/// whenever the tab is shown; Claude's bounded status command distinguishes signed in, signed out,
-/// and an unavailable probe. Selections persist immediately through `BrainPreferences`; while
-/// coaching, the driver swaps its model clients for the next turn without resetting transcript or
-/// history. The transcription model is deliberately NOT here; it's a separate concern — which is
-/// also why the key stays required: transcription always runs on it.
+/// active, an ordered fallback route, and the OpenAI API key — one tab, because these choices are one
+/// decision. Every fallback row is a provider/model target; rows may reuse one provider with
+/// different models, but exact targets stay unique. The model list is per provider (each remembers
+/// its own); the effort is one global setting applied to all three, mapped onto each CLI's scale by
+/// `CLIBrainClient`. Installed CLIs are auto-detected whenever the tab is shown; Claude's bounded
+/// status command distinguishes signed in, signed out, and an unavailable probe. Every list edit
+/// persists immediately through `BrainPreferences`; while coaching, the driver applies the new route
+/// between attempts without resetting transcript or history. The transcription model is deliberately
+/// NOT here; it's a separate concern — which is also why the key stays required: transcription always
+/// runs on it.
 @MainActor
 final class BrainSection: NSObject, SettingsSection {
     let title = "Brain"
+    let fillsTab = true
 
     private let preferences: BrainPreferences
     private let detector: AgentCLIDetector
@@ -23,9 +25,8 @@ final class BrainSection: NSObject, SettingsSection {
 
     private var radios: [BrainProvider: NSButton] = [:]
     private var providerNote: NSTextField?
-    private var fallbackPopup: NSPopUpButton?
-    private var fallbackNote: NSTextField?
-    private var listedFallbackProviders: [BrainProvider?] = []
+    private var routeStatus: NSTextField?
+    private var fallbackEditor: FallbackRouteEditor?
     private var modelPopup: NSPopUpButton?
     /// The models backing the current popup rows, so selection maps back without re-deriving.
     private var listedModels: [BrainModel] = []
@@ -36,6 +37,8 @@ final class BrainSection: NSObject, SettingsSection {
     private var detectionTask: Task<Void, Never>?
     /// Several edits during one probe collapse into one application of the latest persisted values.
     private var applyPreferencesAfterDetection = false
+    /// Session-local runtime state only. This marker never writes preferences or reorders the route.
+    private var activeTarget: BrainTarget?
 
     init(preferences: BrainPreferences, detector: AgentCLIDetector,
          onPreferencesChanged: @escaping ([BrainProvider: DetectedAgentCLI]?) -> Void,
@@ -47,50 +50,42 @@ final class BrainSection: NSObject, SettingsSection {
     }
 
     func makeView() -> NSView {
-        let view = NSView(frame: NSRect(x: 0, y: 0, width: 560, height: 432))
+        // The route editor adds useful vertical content but Settings must still fit its established
+        // minimum window. Keep the form at a comfortable fixed width and scroll the whole tab when
+        // needed instead of squeezing list rows or enlarging every Settings section.
+        let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 560, height: 432))
+        scrollView.autoresizingMask = [.width, .height]
+        scrollView.drawsBackground = false
+        scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = true
+
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: 560, height: 690))
+        scrollView.documentView = view
 
         let providerLabel = NSTextField(labelWithString: "Provider")
-        providerLabel.frame = NSRect(x: 24, y: 400, width: 252, height: 20)
+        providerLabel.frame = NSRect(x: 24, y: 658, width: 252, height: 20)
         view.addSubview(providerLabel)
 
         for (row, provider) in BrainProvider.allCases.enumerated() {
             let radio = NSButton(radioButtonWithTitle: provider.displayName,
                                  target: self, action: #selector(providerChanged))
-            radio.frame = NSRect(x: 24, y: 372 - CGFloat(row) * 28, width: 252, height: 20)
+            radio.frame = NSRect(x: 24, y: 630 - CGFloat(row) * 28, width: 512, height: 20)
             radio.setAccessibilityLabel("Brain provider: \(provider.displayName)")
             view.addSubview(radio)
             radios[provider] = radio
         }
 
-        let fallbackLabel = NSTextField(labelWithString: "Fallback Provider")
-        fallbackLabel.frame = NSRect(x: 300, y: 400, width: 236, height: 20)
-        view.addSubview(fallbackLabel)
-
-        let fallbackPopup = NSPopUpButton(
-            frame: NSRect(x: 300, y: 368, width: 236, height: 26))
-        fallbackPopup.target = self
-        fallbackPopup.action = #selector(fallbackChanged)
-        fallbackPopup.setAccessibilityLabel("Fallback brain provider")
-        view.addSubview(fallbackPopup)
-        self.fallbackPopup = fallbackPopup
-
-        let fallbackNote = NSTextField(wrappingLabelWithString: "")
-        fallbackNote.frame = NSRect(x: 300, y: 310, width: 236, height: 50)
-        fallbackNote.textColor = .secondaryLabelColor
-        view.addSubview(fallbackNote)
-        self.fallbackNote = fallbackNote
-
         let providerNote = NSTextField(labelWithString: "")
-        providerNote.frame = NSRect(x: 24, y: 288, width: 512, height: 20)
+        providerNote.frame = NSRect(x: 24, y: 544, width: 512, height: 20)
         providerNote.textColor = .secondaryLabelColor
         view.addSubview(providerNote)
         self.providerNote = providerNote
 
         let modelLabel = NSTextField(labelWithString: "Model")
-        modelLabel.frame = NSRect(x: 24, y: 256, width: 200, height: 20)
+        modelLabel.frame = NSRect(x: 24, y: 512, width: 200, height: 20)
         view.addSubview(modelLabel)
 
-        let modelPopup = NSPopUpButton(frame: NSRect(x: 24, y: 224, width: 250, height: 26))
+        let modelPopup = NSPopUpButton(frame: NSRect(x: 24, y: 480, width: 250, height: 26))
         modelPopup.target = self
         modelPopup.action = #selector(modelChanged)
         modelPopup.setAccessibilityLabel("Brain model")
@@ -100,10 +95,10 @@ final class BrainSection: NSObject, SettingsSection {
         // One effort for every provider, mapped onto each CLI's own scale by `CLIBrainClient`
         // (Claude Code's floor is low; Codex accepts the value unchanged).
         let effortLabel = NSTextField(labelWithString: "Reasoning Effort")
-        effortLabel.frame = NSRect(x: 290, y: 256, width: 200, height: 20)
+        effortLabel.frame = NSRect(x: 290, y: 512, width: 200, height: 20)
         view.addSubview(effortLabel)
 
-        let effortPopup = NSPopUpButton(frame: NSRect(x: 290, y: 224, width: 246, height: 26))
+        let effortPopup = NSPopUpButton(frame: NSRect(x: 290, y: 480, width: 246, height: 26))
         effortPopup.addItems(withTitles: ReasoningEffort.allCases.map(\.displayName))
         effortPopup.target = self
         effortPopup.action = #selector(effortChanged)
@@ -113,11 +108,23 @@ final class BrainSection: NSObject, SettingsSection {
         }
         view.addSubview(effortPopup)
 
-        let applyNote = NSTextField(
-            labelWithString: "Changes apply on the next coaching turn (or the next Start while stopped).")
-        applyNote.frame = NSRect(x: 24, y: 192, width: 512, height: 20)
-        applyNote.textColor = .secondaryLabelColor
-        view.addSubview(applyNote)
+        let routeStatus = NSTextField(wrappingLabelWithString: "")
+        routeStatus.frame = NSRect(x: 24, y: 438, width: 512, height: 34)
+        routeStatus.textColor = .secondaryLabelColor
+        view.addSubview(routeStatus)
+        self.routeStatus = routeStatus
+
+        let fallbackLabel = NSTextField(labelWithString: "Fallback Route")
+        fallbackLabel.frame = NSRect(x: 24, y: 412, width: 200, height: 20)
+        fallbackLabel.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
+        view.addSubview(fallbackLabel)
+
+        let fallbackEditor = FallbackRouteEditor(
+            preferences: preferences,
+            onChange: { [weak self] in self?.preferencesDidChange() })
+        fallbackEditor.view.frame.origin = NSPoint(x: 24, y: 190)
+        view.addSubview(fallbackEditor.view)
+        self.fallbackEditor = fallbackEditor
 
         let keyHeader = NSTextField(labelWithString: "OpenAI API Key")
         keyHeader.frame = NSRect(x: 24, y: 158, width: 200, height: 20)
@@ -132,7 +139,19 @@ final class BrainSection: NSObject, SettingsSection {
         apiKey.addControls(to: view, top: 112)
 
         renderDetection()
-        return view
+        renderRouteStatus()
+        // NSView coordinates grow upward; reveal the top of the form on first presentation.
+        scrollView.contentView.scroll(
+            to: NSPoint(x: 0, y: max(0, view.bounds.height - scrollView.contentView.bounds.height)))
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+        return scrollView
+    }
+
+    /// Reflect the driver's selected runtime target without mutating the saved route.
+    func setActiveTarget(_ target: BrainTarget?) {
+        activeTarget = target
+        renderRouteStatus()
+        fallbackEditor?.render(detectedCLIs: detectedCLIs, activeTarget: activeTarget)
     }
 
     /// Re-probe whenever the tab becomes visible so an install or sign-in completed while the app
@@ -197,7 +216,28 @@ final class BrainSection: NSObject, SettingsSection {
         }
         providerNote?.stringValue = note
         reloadModels(for: selected)
-        reloadFallbackProviders(primary: selected)
+        fallbackEditor?.render(detectedCLIs: detectedCLIs, activeTarget: activeTarget)
+        renderRouteStatus()
+    }
+
+    private func renderRouteStatus() {
+        guard let activeTarget else {
+            routeStatus?.stringValue =
+                "Changes apply on the next coaching attempt (or the next Start while stopped)."
+            return
+        }
+        let position: String
+        if activeTarget == preferences.primaryTarget {
+            position = "Primary"
+        } else if let index = preferences.fallbackTargets.firstIndex(of: activeTarget) {
+            position = "Fallback \(index + 1)"
+        } else {
+            position = "Current route"
+        }
+        let model = activeTarget.model?.displayName ?? activeTarget.modelID
+        routeStatus?.stringValue =
+            "Live: \(position) · \(activeTarget.provider.displayName) · \(model). "
+            + "Saved order is unchanged."
     }
 
     private static func note(for provider: BrainProvider) -> String {
@@ -218,58 +258,9 @@ final class BrainSection: NSObject, SettingsSection {
         }
     }
 
-    private func reloadFallbackProviders(primary: BrainProvider) {
-        guard let popup = fallbackPopup else { return }
-        listedFallbackProviders = [nil] + BrainProvider.allCases
-            .filter { $0 != primary }
-            .map(Optional.some)
-        popup.removeAllItems()
-        popup.addItems(withTitles: listedFallbackProviders.map {
-            $0?.displayName ?? "Disabled"
-        })
-        let selected = preferences.fallbackProvider
-        if let row = listedFallbackProviders.firstIndex(where: { $0 == selected }) {
-            popup.selectItem(at: row)
-        }
-        for (row, provider) in listedFallbackProviders.enumerated() {
-            guard let provider, provider.usesLocalCLI, let detectedCLIs else { continue }
-            popup.item(at: row)?.isEnabled =
-                detectedCLIs[provider] != nil || provider == selected
-        }
-        guard let selected else {
-            fallbackNote?.stringValue =
-                "Disabled. Jarvis keeps listening after a temporary provider miss."
-            return
-        }
-        var note = "Continues the same conversation after \(primary.displayName) exhausts retries."
-        if selected.usesLocalCLI, let detectedCLIs {
-            if let cli = detectedCLIs[selected] {
-                switch cli.authenticationStatus {
-                case .signedIn:
-                    break
-                case .signedOut:
-                    note += " Sign in before it can be applied."
-                case .unknown:
-                    note += " Sign-in couldn't be confirmed."
-                }
-            } else {
-                note += " The CLI isn't installed."
-            }
-        }
-        fallbackNote?.stringValue = note
-    }
-
     @objc private func providerChanged(_ sender: NSButton) {
         guard let provider = radios.first(where: { $0.value === sender })?.key else { return }
         preferences.provider = provider
-        renderDetection()
-        preferencesDidChange()
-    }
-
-    @objc private func fallbackChanged(_ sender: NSPopUpButton) {
-        let row = sender.indexOfSelectedItem
-        guard listedFallbackProviders.indices.contains(row) else { return }
-        preferences.fallbackProvider = listedFallbackProviders[row]
         renderDetection()
         preferencesDidChange()
     }
@@ -278,6 +269,7 @@ final class BrainSection: NSObject, SettingsSection {
         let row = sender.indexOfSelectedItem
         guard listedModels.indices.contains(row) else { return }
         preferences.setModel(listedModels[row], for: preferences.provider)
+        fallbackEditor?.render(detectedCLIs: detectedCLIs, activeTarget: activeTarget)
         preferencesDidChange()
     }
 
@@ -289,8 +281,7 @@ final class BrainSection: NSObject, SettingsSection {
     }
 
     private func preferencesDidChange() {
-        let providers = [preferences.provider, preferences.fallbackProvider]
-            .compactMap { $0 }
+        let providers = [preferences.provider] + preferences.fallbackTargets.map(\.provider)
         guard providers.contains(where: \.usesLocalCLI) else {
             applyPreferencesAfterDetection = false
             onPreferencesChanged([:])

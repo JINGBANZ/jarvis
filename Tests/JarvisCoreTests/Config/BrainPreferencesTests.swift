@@ -15,6 +15,9 @@ import Foundation
         let p = BrainPreferences(defaults: freshDefaults())
         #expect(p.model == BrainModelCatalog.default)
         #expect(p.effort == .default)
+        #expect(p.primaryTarget == BrainTarget(provider: .openAI, modelID: BrainModelCatalog.default.id))
+        #expect(p.fallbackTargets.isEmpty)
+        #expect(p.route.targets == [p.primaryTarget])
     }
 
     @Test func roundTripsThroughDefaults() {
@@ -41,7 +44,7 @@ import Foundation
     @Test func providerDefaultsToOpenAIAndRoundTrips() {
         let d = freshDefaults()
         #expect(BrainPreferences(defaults: d).provider == .openAI)
-        #expect(BrainPreferences(defaults: d).fallbackProvider == nil)
+        #expect(BrainPreferences(defaults: d).fallbackTargets.isEmpty)
         BrainPreferences(defaults: d).provider = .claudeCode
         #expect(BrainPreferences(defaults: d).provider == .claudeCode)
     }
@@ -52,27 +55,93 @@ import Foundation
         #expect(BrainPreferences(defaults: d).provider == .openAI)
     }
 
-    @Test func fallbackProviderRoundTripsAndMustDifferFromPrimary() {
+    @Test func orderedFallbackTargetsRoundTrip() {
         let d = freshDefaults()
         let p = BrainPreferences(defaults: d)
-        p.fallbackProvider = .claudeCode
-        #expect(BrainPreferences(defaults: d).fallbackProvider == .claudeCode)
-
-        p.fallbackProvider = .openAI
-        #expect(p.fallbackProvider == nil)
-        #expect(d.string(forKey: "brain.fallbackProvider") == nil)
-
-        p.fallbackProvider = .claudeCode
-        p.provider = .claudeCode
-        #expect(p.fallbackProvider == nil)
+        let targets = [
+            BrainTarget(provider: .claudeCode, modelID: "opus"),
+            BrainTarget(provider: .codexCLI, modelID: ""),
+            BrainTarget(provider: .claudeCode, modelID: "haiku"),
+        ]
+        p.fallbackTargets = targets
+        #expect(BrainPreferences(defaults: d).fallbackTargets == targets)
+        #expect(BrainPreferences(defaults: d).route.targets == [p.primaryTarget] + targets)
     }
 
-    @Test func unknownOrEqualStoredFallbackIsDisabled() {
+    @Test func storedFallbackTargetsAreSanitizedWithoutChangingValidOrder() {
+        let d = freshDefaults()
+        d.set([
+            ["provider": "future-provider", "modelID": "future-model"],
+            ["provider": BrainProvider.claudeCode.rawValue, "modelID": "opus"],
+            ["provider": BrainProvider.openAI.rawValue, "modelID": BrainModelCatalog.default.id],
+            ["provider": BrainProvider.claudeCode.rawValue, "modelID": "removed-model"],
+            ["provider": BrainProvider.codexCLI.rawValue, "modelID": ""],
+            ["provider": BrainProvider.claudeCode.rawValue, "modelID": "opus"],
+            ["provider": BrainProvider.claudeCode.rawValue, "modelID": "haiku"],
+        ], forKey: "brain.fallbackTargets")
+
+        let expected = [
+            BrainTarget(provider: .claudeCode, modelID: "opus"),
+            BrainTarget(provider: .codexCLI, modelID: ""),
+            BrainTarget(provider: .claudeCode, modelID: "haiku"),
+        ]
+        #expect(BrainPreferences(defaults: d).fallbackTargets == expected)
+        #expect((d.array(forKey: "brain.fallbackTargets") ?? []).count == expected.count)
+    }
+
+    @Test func legacyScalarFallbackMigratesWithRememberedModel() {
+        let d = freshDefaults()
+        d.set(BrainProvider.claudeCode.rawValue, forKey: "brain.fallbackProvider")
+        d.set("opus", forKey: "brain.model.\(BrainProvider.claudeCode.rawValue)")
+
+        let p = BrainPreferences(defaults: d)
+        #expect(p.fallbackTargets == [
+            BrainTarget(provider: .claudeCode, modelID: "opus")
+        ])
+        #expect(d.object(forKey: "brain.fallbackTargets") != nil)
+        #expect(d.object(forKey: "brain.fallbackProvider") == nil)
+        #expect(BrainPreferences(defaults: d).fallbackTargets == p.fallbackTargets)
+    }
+
+    @Test func invalidLegacyFallbackMigratesToEmptyRoute() {
         let d = freshDefaults()
         d.set("future-provider", forKey: "brain.fallbackProvider")
-        #expect(BrainPreferences(defaults: d).fallbackProvider == nil)
-        d.set(BrainProvider.openAI.rawValue, forKey: "brain.fallbackProvider")
-        #expect(BrainPreferences(defaults: d).fallbackProvider == nil)
+        #expect(BrainPreferences(defaults: d).fallbackTargets.isEmpty)
+        #expect(d.object(forKey: "brain.fallbackTargets") != nil)
+        #expect(d.object(forKey: "brain.fallbackProvider") == nil)
+    }
+
+    @Test func primaryChangeRemovesOnlyItsExactDuplicate() {
+        let d = freshDefaults()
+        let p = BrainPreferences(defaults: d)
+        p.fallbackTargets = [
+            BrainTarget(provider: .claudeCode, modelID: "sonnet"),
+            BrainTarget(provider: .claudeCode, modelID: "opus"),
+        ]
+
+        p.provider = .claudeCode
+
+        #expect(p.primaryTarget == BrainTarget(provider: .claudeCode, modelID: "sonnet"))
+        #expect(p.fallbackTargets == [
+            BrainTarget(provider: .claudeCode, modelID: "opus")
+        ])
+    }
+
+    @Test func routeSetterPersistsPrimaryAndFallbackTargetsWithoutRuntimeState() {
+        let d = freshDefaults()
+        let p = BrainPreferences(defaults: d)
+        let route = BrainRoute(
+            primary: BrainTarget(provider: .codexCLI, modelID: "gpt-5.5"),
+            fallbackTargets: [
+                BrainTarget(provider: .openAI, modelID: "gpt-5.4-mini"),
+                BrainTarget(provider: .codexCLI, modelID: ""),
+            ])
+
+        p.route = route
+
+        #expect(BrainPreferences(defaults: d).route == route)
+        #expect(d.object(forKey: "brain.routeCursor") == nil)
+        #expect(d.object(forKey: "brain.routeFailureCount") == nil)
     }
 
     @Test func eachProviderRemembersItsOwnModel() {

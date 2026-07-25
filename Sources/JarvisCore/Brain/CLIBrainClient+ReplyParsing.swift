@@ -85,7 +85,8 @@ extension CLIBrainClient {
                                                                 argumentsJSON: argsJSON)])
             }
         }
-        // No usable tool call: surface the text and let the driver treat it as silence.
+        // No usable tool call: preserve the text for traffic/debugging. The attempt runner treats
+        // the missing required action as a failed attempt; deliberate silence is `stay_silent`.
         return BrainResponse(toolCalls: [], outputText: text.isEmpty ? nil : text)
     }
 

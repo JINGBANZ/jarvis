@@ -19,6 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var overlayBox: OverlayBoxPanel!            // persistent, movable history of every spoken response
     private var menuBar: MenuBarController!
     private var settingsWindow: SettingsWindow!
+    private var brainSection: BrainSection!
     private let appearance = OverlayAppearance()
     private let brainPreferences = BrainPreferences()
     private let screenPreferences = ScreenCapturePreferences()
@@ -113,14 +114,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // activity log. A pasted key is stored but does not auto-start. While running, it updates
         // future Realtime connections and transactionally replaces only an OpenAI brain—never the
         // capture/transcript pipeline.
-        let sections: [SettingsSection] = [
-            BrainSection(preferences: brainPreferences, detector: AgentCLIDetector(),
-                         onPreferencesChanged: { [weak self] clis in
+        brainSection = BrainSection(
+            preferences: brainPreferences,
+            detector: AgentCLIDetector(),
+            onPreferencesChanged: { [weak self] clis in
                 self?.applyBrainPreferencesToRunningSession(detectedCLIs: clis)
             },
-                         keyStore: secretFile, onKeySaved: { [weak self] key in
+            keyStore: secretFile,
+            onKeySaved: { [weak self] key in
                 self?.applySavedAPIKeyToRunningSession(key)
-            }),
+            })
+        let sections: [SettingsSection] = [
+            brainSection,
             OverlaySection(appearance: appearance, caption: overlayCaption, box: overlayBox),
             DisplaySection(preferences: screenPreferences),
             ActivitySection(viewer: activityViewer),
@@ -159,13 +164,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         activityViewer?.cancelEvaluation()
     }
 
-    /// The three pieces that must change together when the selected brain changes. Every provider
-    /// uses the same typed failure policy: temporary/unknown misses keep the live pipeline, while
-    /// only an explicitly permanent failure stops it.
+    /// The two clients that move together with one provider/model route target.
     private struct BrainRuntime {
         let coach: BrainClient
         let summarizer: BrainClient
-        let onFailure: (@MainActor @Sendable (BrainFailure) -> Void)?
     }
 
     /// Check the selected local provider before disturbing a live session. OpenAI needs no provider
@@ -203,130 +205,117 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Construct the coach + compaction clients for one preferences snapshot. Both keep writing to
     /// the current session's traffic recorder, so a hot switch remains one auditable conversation.
-    private func makeBrainRuntime(apiKey key: String, provider: BrainProvider,
-                                  cli: DetectedAgentCLI?) -> BrainRuntime {
+    private func makeBrainRuntime(
+        apiKey key: String,
+        target: BrainTarget,
+        effort: ReasoningEffort,
+        cli: DetectedAgentCLI?
+    ) -> BrainRuntime {
         let coachBase: BrainClient
         let summarizer: BrainClient
         if let cli {
             let sessionDir = currentSessionDir ?? logDirectory()
-            coachBase = CLIBrainClient(provider: provider, executable: cli.executableURL,
-                                       model: brainPreferences.model(for: provider).id,
-                                       reasoningEffort: brainPreferences.effort.rawValue,
+            coachBase = CLIBrainClient(provider: target.provider, executable: cli.executableURL,
+                                       model: target.modelID,
+                                       reasoningEffort: effort.rawValue,
                                        workDirectory: sessionDir,
                                        codexSupportedFeatures: cli.supportedFeatures,
                                        traffic: sessionTraffic, trafficTag: "coach")
-            summarizer = CLIBrainClient(provider: provider, executable: cli.executableURL,
-                                        model: BrainModelCatalog.summarizerModelID(for: provider),
+            summarizer = CLIBrainClient(provider: target.provider, executable: cli.executableURL,
+                                        model: BrainModelCatalog.summarizerModelID(for: target.provider),
                                         reasoningEffort: ReasoningEffort.low.rawValue,
                                         workDirectory: sessionDir,
                                         codexSupportedFeatures: cli.supportedFeatures,
                                         traffic: sessionTraffic, trafficTag: "summarizer")
         } else {
             coachBase = OpenAIBrainClient(
-                apiKey: key, model: brainPreferences.model(for: provider).id,
-                                          reasoningEffort: brainPreferences.effort.rawValue,
-                                          maxOutputTokens: brainPreferences.effort.maxOutputTokens,
-                                          traffic: sessionTraffic, trafficTag: "coach")
+                apiKey: key, model: target.modelID,
+                reasoningEffort: effort.rawValue,
+                maxOutputTokens: effort.maxOutputTokens,
+                traffic: sessionTraffic, trafficTag: "coach")
             summarizer = OpenAIBrainClient(
                 apiKey: key, model: BrainModelCatalog.summarizerModelID(for: .openAI),
                 reasoningEffort: ReasoningEffort.low.rawValue, maxOutputTokens: 2_048,
                 traffic: sessionTraffic, trafficTag: "summarizer")
         }
-
-        // Bind App-facing failure delivery to the session that owns these clients. CoachDriver
-        // revision-gates provider switches within one session; this second identity gate covers
-        // Stop → Start, where an old driver can finish unwinding after a replacement driver exists.
-        let sessionDirectory = currentSessionDir
-        let onFailure: @MainActor @Sendable (BrainFailure) -> Void = {
-            [weak self, errorReporter] failure in
-            guard let self, self.coachDriver != nil,
-                  self.currentSessionDir == sessionDirectory else {
-                jlog("Jarvis: ignoring brain failure from a stopped or superseded session.")
-                return
-            }
-            switch failure.disposition {
-            case .temporary:
-                ActivityLog.shared.record(.coachingTurnFailed(provider: provider))
-            case .terminal:
-                let recovery: String
-                switch provider {
-                case .claudeCode:
-                    recovery = "Run \u{201C}claude auth login\u{201D} in Terminal, or choose another brain provider in Settings \u{2192} Brain, then Start again."
-                case .codexCLI:
-                    recovery = "Run \u{201C}codex login\u{201D} in Terminal, or choose another brain provider in Settings \u{2192} Brain, then Start again."
-                case .openAI:
-                    recovery = "Check the OpenAI API key in Settings \u{2192} Brain, then Start again."
-                }
-                ActivityLog.shared.record(.coachingStopped(provider: provider))
-                errorReporter.reportImmediately(
-                    .brainStopped(provider: provider.displayName,
-                                  recovery: recovery,
-                                  reason: failure.detail),
-                    context: .runtime)
-            }
-        }
-        return BrainRuntime(coach: RetryingBrainClient(base: coachBase),
-                            summarizer: summarizer, onFailure: onFailure)
+        return BrainRuntime(coach: coachBase, summarizer: summarizer)
     }
 
-    /// Bind a preflighted fallback runtime to one live session. Provider-only callbacks become fixed
-    /// Activity events; revision checks stay in `CoachDriver`, while this identity check covers
-    /// Stop → Start and prevents an old driver's notice from landing in a replacement session.
-    private func makeConfiguredFallback(
-        runtime: BrainRuntime,
-        provider: BrainProvider,
+    /// Missing or definitively signed-out fallback CLIs remain in the runtime route as unavailable
+    /// entries. The driver skips them only if the session cursor reaches them.
+    private func fallbackUnavailability(
+        for target: BrainTarget,
+        detectedCLI: DetectedAgentCLI?
+    ) -> String? {
+        guard target.provider.usesLocalCLI else { return nil }
+        guard let detectedCLI else {
+            return "\(target.provider.displayName) CLI was not found"
+        }
+        if detectedCLI.authenticationStatus == .signedOut {
+            return "\(target.provider.displayName) is signed out"
+        }
+        return nil
+    }
+
+    private func makeConfiguredRoute(
+        _ route: BrainRoute,
+        detectedCLIs: [BrainProvider: DetectedAgentCLI],
+        apiKey key: String,
+        effort: ReasoningEffort,
         sessionDirectory: URL
-    ) -> ConfiguredBrainFallback {
-        ConfiguredBrainFallback(
-            brain: runtime.coach, provider: provider, summarizer: runtime.summarizer,
-            onFailure: runtime.onFailure,
-            onActivated: { [weak self] primary, fallback in
-                guard let primary else { return }
-                Task { @MainActor [weak self] in
-                    guard let self, self.coachDriver != nil,
-                          self.currentSessionDir == sessionDirectory else {
-                        jlog("Jarvis: ignoring failover notice from a stopped or superseded session.")
-                        return
-                    }
-                    ActivityLog.shared.record(
-                        .brainFailover(primary: primary, fallback: fallback))
+    ) -> ConfiguredBrainRoute {
+        let targets = route.targets.map { target -> ConfiguredBrainTarget in
+            let cli = detectedCLIs[target.provider]
+            if let detail = fallbackUnavailability(for: target, detectedCLI: cli) {
+                return ConfiguredBrainTarget(unavailable: target, detail: detail)
+            }
+            let runtime = makeBrainRuntime(
+                apiKey: key, target: target, effort: effort, cli: cli)
+            return ConfiguredBrainTarget(
+                target: target, brain: runtime.coach, summarizer: runtime.summarizer)
+        }
+
+        return ConfiguredBrainRoute(
+            targets: targets,
+            onSelected: { [weak self] target in
+                guard let self, self.coachDriver != nil,
+                      self.currentSessionDir == sessionDirectory else {
+                    jlog("Jarvis: ignoring target selection from a stopped or superseded session.")
+                    return
                 }
+                self.brainSection.setActiveTarget(target)
             },
-            onPrimaryRecovered: { [weak self] primary, fallback in
-                guard let primary else { return }
-                Task { @MainActor [weak self] in
-                    guard let self, self.coachDriver != nil,
-                          self.currentSessionDir == sessionDirectory else {
-                        jlog("Jarvis: ignoring recovery notice from a stopped or superseded session.")
-                        return
-                    }
-                    ActivityLog.shared.record(
-                        .brainPrimaryRecovered(primary: primary, fallback: fallback))
+            onAdvanced: { [weak self] previous, current in
+                guard let self, self.coachDriver != nil,
+                      self.currentSessionDir == sessionDirectory else {
+                    jlog("Jarvis: ignoring route transition from a stopped or superseded session.")
+                    return
                 }
+                ActivityLog.shared.record(.brainRouteAdvanced(
+                    previous: previous.provider, current: current.provider))
             },
-            onRecoveryDeferred: { [weak self] primary, fallback in
-                guard let primary else { return }
-                Task { @MainActor [weak self] in
-                    guard let self, self.coachDriver != nil,
-                          self.currentSessionDir == sessionDirectory else {
-                        jlog("Jarvis: ignoring recovery-fallback notice from a stopped or superseded session.")
-                        return
-                    }
-                    ActivityLog.shared.record(
-                        .brainRecoveryDeferred(primary: primary, fallback: fallback))
+            onSkipped: { [weak self] target in
+                guard let self, self.coachDriver != nil,
+                      self.currentSessionDir == sessionDirectory else {
+                    jlog("Jarvis: ignoring unavailable-target notice from a stopped session.")
+                    return
                 }
+                ActivityLog.shared.record(
+                    .brainRouteTargetSkipped(provider: target.provider))
             },
-            onUnavailable: { [weak self] primary, fallback in
-                guard let primary else { return }
-                Task { @MainActor [weak self] in
-                    guard let self, self.coachDriver != nil,
-                          self.currentSessionDir == sessionDirectory else {
-                        jlog("Jarvis: ignoring unavailable-fallback notice from a stopped or superseded session.")
-                        return
-                    }
-                    ActivityLog.shared.record(
-                        .brainFallbackUnavailable(primary: primary, fallback: fallback))
+            onExhausted: { [weak self, errorReporter] target, failure in
+                guard let self, self.coachDriver != nil,
+                      self.currentSessionDir == sessionDirectory else {
+                    jlog("Jarvis: ignoring route exhaustion from a stopped or superseded session.")
+                    return
                 }
+                ActivityLog.shared.record(
+                    .brainRouteExhausted(lastProvider: target.provider))
+                errorReporter.reportImmediately(
+                    .brainRouteExhausted(
+                        lastProvider: target.provider.displayName,
+                        reason: failure.detail),
+                    context: .runtime)
             })
     }
 
@@ -344,73 +333,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ActivityLog.shared.record(.settingsChangeNotApplied)
             return
         }
-        let provider = brainPreferences.provider
+        let route = brainPreferences.route
+        let provider = route.primary.provider
         let preflight = preflightBrainProvider(
             provider, detectedCLI: detectedCLIs?[provider], context: .runtime,
                                                recordSettingsFailure: true)
         guard preflight.isReady else { return }
-        let runtime = makeBrainRuntime(apiKey: key, provider: provider, cli: preflight.cli)
-        var configuredFallback: ConfiguredBrainFallback?
-        if let fallbackProvider = brainPreferences.fallbackProvider {
-            let fallbackPreflight = preflightBrainProvider(
-                fallbackProvider, detectedCLI: detectedCLIs?[fallbackProvider],
-                context: .runtime, recordSettingsFailure: true)
-            guard fallbackPreflight.isReady else { return }
-            let fallbackRuntime = makeBrainRuntime(
-                apiKey: key, provider: fallbackProvider, cli: fallbackPreflight.cli)
-            configuredFallback = makeConfiguredFallback(
-                runtime: fallbackRuntime, provider: fallbackProvider,
-                sessionDirectory: sessionDirectory)
+        var readyCLIs = detectedCLIs ?? [:]
+        if let cli = preflight.cli {
+            readyCLIs[provider] = cli
         }
-        coachDriver.updateBrain(
-            runtime.coach, provider: provider, summarizer: runtime.summarizer,
-            configuredFallback: configuredFallback,
-            onBrainFailure: runtime.onFailure,
-            onBrainChangeApplied: { [weak self] previous, current in
-                guard let previous, let current else { return }
-                Task { @MainActor [weak self] in
-                    guard let self, self.coachDriver != nil,
-                          self.currentSessionDir == sessionDirectory else {
-                        jlog("Jarvis: ignoring brain-change notice from a stopped or superseded session.")
-                        return
-                    }
-                    ActivityLog.shared.record(
-                        .brainChangeApplied(previous: previous, current: current))
-                }
-            },
-            onBrainFallback: { [weak self] failed, restored in
-                guard let failed, let restored else { return }
-                Task { @MainActor [weak self] in
-                    guard let self, self.coachDriver != nil,
-                          self.currentSessionDir == sessionDirectory else {
-                        jlog("Jarvis: ignoring brain-fallback notice from a stopped or superseded session.")
-                        return
-                    }
-                    ActivityLog.shared.record(
-                        .brainFallback(failed: failed, restored: restored))
-                }
-            })
-        let model = brainPreferences.model(for: provider)
+        let configuredRoute = makeConfiguredRoute(
+            route,
+            detectedCLIs: readyCLIs,
+            apiKey: key,
+            effort: brainPreferences.effort,
+            sessionDirectory: sessionDirectory)
+        coachDriver.updateBrainRoute(configuredRoute)
+        ActivityLog.shared.record(
+            .brainChangeApplied(previous: provider, current: provider))
+        let model = route.primary.model ?? BrainModelCatalog.defaultModel(for: provider)
         jlog("Jarvis: brain settings will apply on the next turn — \(provider.displayName), "
              + "\(model.displayName), \(brainPreferences.effort.displayName) effort.")
     }
 
     /// Keep a healthy live conversation intact when the credential file changes. Existing Realtime
     /// sockets are already authenticated; retain them and use the new key only if either socket later
-    /// reconnects. If OpenAI is the selected brain, `CoachDriver`'s established transactional update
-    /// keeps the old client as fallback until the replacement completes a real turn.
+    /// reconnects. If OpenAI is in the selected brain route, install fresh target clients between
+    /// coaching attempts without changing the route policy or restarting transcription.
     private func applySavedAPIKeyToRunningSession(_ key: String) {
         guard let transcriber else { return }
         transcriber.updateAPIKey(key)
         themTranscriber?.updateAPIKey(key)
-        guard brainPreferences.provider == .openAI else {
+        guard brainPreferences.route.targets.contains(where: { $0.provider == .openAI }) else {
             jlog("Jarvis: saved API key will apply to future Realtime connections.")
             return
         }
         var detectedCLIs: [BrainProvider: DetectedAgentCLI] = [:]
-        if let fallback = brainPreferences.fallbackProvider, fallback.usesLocalCLI,
-           let detected = AgentCLIDetector().detect(fallback) {
-            detectedCLIs[fallback] = detected
+        let detector = AgentCLIDetector()
+        for provider in Set(brainPreferences.route.targets.map(\.provider))
+            where provider.usesLocalCLI {
+            if let detected = detector.detect(provider) {
+                detectedCLIs[provider] = detected
+            }
         }
         applyBrainPreferencesToRunningSession(
             detectedCLIs: detectedCLIs, apiKeyOverride: key)
@@ -433,28 +398,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             errorReporter.reportImmediately(.noAPIKey, context: reportContext)
             return false
         }
-        let brainProvider = brainPreferences.provider
-        let fallbackProvider = brainPreferences.fallbackProvider
+        let brainRoute = brainPreferences.route
+        let brainProvider = brainRoute.primary.provider
         // A CLI brain provider's binary/auth must pass before anything is torn down.
         let detector = AgentCLIDetector()
-        let detectedCLI = brainProvider.usesLocalCLI
-            ? detector.detect(brainProvider)
-            : nil
-        let preflight = preflightBrainProvider(brainProvider, detectedCLI: detectedCLI,
+        var detectedCLIs: [BrainProvider: DetectedAgentCLI] = [:]
+        for provider in Set(brainRoute.targets.map(\.provider)) where provider.usesLocalCLI {
+            if let detected = detector.detect(provider) {
+                detectedCLIs[provider] = detected
+            }
+        }
+        let preflight = preflightBrainProvider(
+            brainProvider, detectedCLI: detectedCLIs[brainProvider],
                                                context: reportContext,
                                                recordSettingsFailure: wasRunning)
         guard preflight.isReady else { return false }
-        let fallbackPreflight: (isReady: Bool, cli: DetectedAgentCLI?)
-        if let fallbackProvider {
-            let fallbackCLI = fallbackProvider.usesLocalCLI
-                ? detector.detect(fallbackProvider)
-                : nil
-            fallbackPreflight = preflightBrainProvider(
-                fallbackProvider, detectedCLI: fallbackCLI, context: reportContext,
-                recordSettingsFailure: wasRunning)
-            guard fallbackPreflight.isReady else { return false }
-        } else {
-            fallbackPreflight = (true, nil)
+        if let primaryCLI = preflight.cli {
+            detectedCLIs[brainProvider] = primaryCLI
         }
         stop() // tear down any existing pipeline so we start cleanly
         reportedTranscriptionFailure = false
@@ -465,33 +425,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         beginNewSession()  // rotate to a fresh session dir + activity/debug log
         overlayBox.clear() // …and a fresh response history for the new conversation
 
-        // Both clients record their wire traffic into the session's `brain-traffic.jsonl` (enabled in
-        // `beginNewSession`), tagged so the evaluation can tell the coach and summarizer apart. The
-        // recording sits INSIDE the retry wrapper, so each retry attempt is its own audit-visible entry.
-        // History-compaction summaries don't need the coaching model — each provider's cheap tier
-        // (see `BrainModelCatalog.summarizerModelID`) writes a 250-word briefing a few times an hour.
-        let brainRuntime = makeBrainRuntime(apiKey: key, provider: brainProvider,
-                                            cli: preflight.cli)
+        // Each target's coach and summarizer share the session traffic log. Every fresh attempt is a
+        // distinct audit-visible request; no transport wrapper replays a failed request.
         let sessionDirectory = currentSessionDir!
-        let configuredFallback: ConfiguredBrainFallback?
-        if let fallbackProvider {
-            let fallbackRuntime = makeBrainRuntime(
-                apiKey: key, provider: fallbackProvider, cli: fallbackPreflight.cli)
-            configuredFallback = makeConfiguredFallback(
-                runtime: fallbackRuntime, provider: fallbackProvider,
-                sessionDirectory: sessionDirectory)
-        } else {
-            configuredFallback = nil
-        }
+        let configuredRoute = makeConfiguredRoute(
+            brainRoute,
+            detectedCLIs: detectedCLIs,
+            apiKey: key,
+            effort: brainPreferences.effort,
+            sessionDirectory: sessionDirectory)
         // Fan each spoken tip out to both the Overlay Caption and the persistent Overlay Box.
         let overlaySink = BroadcastOverlay([overlayCaption, overlayBox])
-        let driver = CoachDriver(config: config, transcript: transcript,
-                                 brain: brainRuntime.coach, brainProvider: brainProvider,
-                                 summarizer: brainRuntime.summarizer,
-                                 configuredFallback: configuredFallback,
-                                 screen: WindowScopedScreenCapture(preferences: screenPreferences),
-                                 overlay: overlaySink, clock: clock,
-                                 onBrainFailure: brainRuntime.onFailure)
+        let driver = CoachDriver(
+            config: config,
+            transcript: transcript,
+            route: configuredRoute,
+            screen: WindowScopedScreenCapture(preferences: screenPreferences),
+            overlay: overlaySink,
+            clock: clock)
 
         // CoachDriver is @unchecked Sendable; capture it (not @MainActor self) in the callbacks.
         // Route turns through TurnTaskBox so Stop can cancel an in-flight one. Concurrent triggers are
@@ -515,6 +466,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                               })
         transcriber.onTurnEnd = { turns.run { await driver.handleTrigger(.turnEnd) } }
         transcriber.onSilence = { secs in turns.run { await driver.handleTrigger(.silence(secondsQuiet: secs)) } }
+        transcriber.onSpeechActivityChanged = {
+            driver.updateSpeechActivity($0, for: .me)
+        }
 
         // "Them" side: system audio (remote participants). Drives turn-end so Jarvis can react when the
         // other side finishes (e.g. asks you something), but NOT the silence check — the "are you
@@ -534,6 +488,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                                       networkDiagnostics.currentSummary
                                                   })
         themTranscriber.onTurnEnd = { turns.run { await driver.handleTrigger(.turnEnd) } }
+        themTranscriber.onSpeechActivityChanged = {
+            driver.updateSpeechActivity($0, for: .them)
+        }
         // Bind terminal callbacks to the transcriber that emitted them. A callback already queued
         // across Stop → Start must not report against or tear down the replacement session.
         transcriber.onTerminalFailure = { [weak self, weak transcriber] reason in
@@ -602,6 +559,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.aggregateCapture = capture
         self.turns = turns
         self.coachDriver = driver
+        brainSection.setActiveTarget(brainRoute.primary)
         micConnectionState = .connecting
         systemConnectionState = .connecting
         reportedCoachingReady = false
@@ -652,6 +610,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         requestManualHint = nil              // hotkey beeps again once there's no live session
         let cancelled = turns?.cancelAll() ?? []; turns = nil   // cancel any in-flight coaching turn
         coachDriver = nil
+        brainSection?.setActiveTarget(nil)
         // Mark both delivery endpoints stopped before draining the IOProc. Aggregate capture hands
         // chunks off asynchronously, so callbacks already queued during teardown must see the
         // transcribers' stopped guards and become no-ops.

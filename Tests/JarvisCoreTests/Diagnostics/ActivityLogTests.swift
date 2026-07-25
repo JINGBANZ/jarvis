@@ -198,47 +198,27 @@ import Foundation
         ))
     }
 
-    @Test func brainFallbackNamesProvidersWithoutDiagnosticDetail() throws {
+    @Test func providerRouteLifecycleUsesFixedProviderOnlyCopy() throws {
         let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         let log = ActivityLog(); log.enable(directory: dir)
-        log.record(.brainFallback(failed: .claudeCode, restored: .openAI))
-        let snapshot = log.attach { _ in }
-
-        let row = try #require(snapshot.rows.first)
-        #expect(row.contains("brain switch failed"))
-        #expect(row.contains("Claude Code"))
-        #expect(row.contains("OpenAI API"))
-        #expect(row.contains("OpenAI API restored"))
-        #expect(!row.contains("retry"))
-        #expect(!row.contains("turn"))
-        #expect(!row.contains("OAuth"))
-        #expect(!row.contains("token"))
-        #expect(ActivityLog.isHumanFacing(
-            message: "⚠️ brain switch failed — Claude Code couldn't respond; OpenAI API restored",
-            imageFile: nil
-        ))
-    }
-
-    @Test func providerFailoverLifecycleUsesFixedProviderOnlyCopy() throws {
-        let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
-        let log = ActivityLog(); log.enable(directory: dir)
-        log.record(.brainFailover(primary: .openAI, fallback: .claudeCode))
-        log.record(.brainPrimaryRecovered(primary: .openAI, fallback: .claudeCode))
-        log.record(.brainRecoveryDeferred(primary: .openAI, fallback: .claudeCode))
-        log.record(.brainFallbackUnavailable(primary: .openAI, fallback: .claudeCode))
+        log.record(.brainRouteAdvanced(previous: .openAI, current: .claudeCode))
+        log.record(.brainRouteAdvanced(previous: .claudeCode, current: .claudeCode))
+        log.record(.brainRouteTargetSkipped(provider: .codexCLI))
+        log.record(.brainRouteExhausted(lastProvider: .claudeCode))
         let snapshot = log.attach { _ in }
 
         #expect(snapshot.rows.count == 4)
         #expect(snapshot.rows[0].contains(
             "OpenAI API couldn't respond — continuing on Claude Code"))
         #expect(snapshot.rows[1].contains(
-            "OpenAI API recovered — switching back from Claude Code"))
+            "Claude Code target couldn't respond — continuing with the next Claude Code model"))
         #expect(snapshot.rows[2].contains(
-            "OpenAI API recovery failed — continuing on Claude Code"))
+            "Codex CLI fallback is unavailable — continuing to the next fallback target"))
         #expect(snapshot.rows[3].contains(
-            "Claude Code fallback couldn't respond — OpenAI API will retry on the next turn"))
+            "coaching stopped — every fallback target was exhausted; last target: Claude Code"))
         #expect(!snapshot.rows.joined().contains("timeout"))
-        #expect(!snapshot.rows.joined().contains("retry count"))
+        #expect(!snapshot.rows.joined().contains("OAuth"))
+        #expect(!snapshot.rows.joined().contains("token"))
 
         let jsonl = try String(
             contentsOf: dir.appendingPathComponent(ActivityLog.filename), encoding: .utf8)
@@ -248,10 +228,10 @@ import Foundation
             return value["k"] as? String
         }
         #expect(kinds == [
-            ActivityLog.EventKind.brainFailover.rawValue,
-            ActivityLog.EventKind.brainPrimaryRecovered.rawValue,
-            ActivityLog.EventKind.brainRecoveryDeferred.rawValue,
-            ActivityLog.EventKind.brainFallbackUnavailable.rawValue,
+            ActivityLog.EventKind.brainRouteAdvanced.rawValue,
+            ActivityLog.EventKind.brainRouteAdvanced.rawValue,
+            ActivityLog.EventKind.brainRouteTargetSkipped.rawValue,
+            ActivityLog.EventKind.brainRouteExhausted.rawValue,
         ])
     }
 
