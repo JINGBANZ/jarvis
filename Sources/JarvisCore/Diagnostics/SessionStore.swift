@@ -35,8 +35,8 @@ public struct SessionStore: Sendable {
         let t: String
         let m: String
         let s: String?
-        /// A raw value keeps rows with future kinds readable by older builds; only kinds known to
-        /// this build bypass the legacy human-copy classifier.
+        /// A raw value keeps rows with legacy or future kinds readable; only current kinds bypass the
+        /// legacy human-copy classifier.
         let k: String?
     }
 
