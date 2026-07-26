@@ -35,8 +35,8 @@ import Foundation
         let out = SessionMetrics.render(jsonl: "\(first)\n\(second)")
 
         #expect(out.hasPrefix("=== deterministic metrics"))
-        #expect(out.contains("| 1 | coach | gpt-5.5 | 200 | 500 | 100 | 40 | 25 | 12 | — |"))
-        #expect(out.contains("| 2 | coach | gpt-5.5 | 200 | 500 | 200 | 0 | 0 | 20 | — |"))
+        #expect(out.contains("| 1 | coach | OpenAI API | gpt-5.5 | 200 | 500 | 100 | 40 | 25 | 12 | — |"))
+        #expect(out.contains("| 2 | coach | OpenAI API | gpt-5.5 | 200 | 500 | 200 | 0 | 0 | 20 | — |"))
         #expect(out.contains("session totals: 2 calls · input 300 · cache-read 40 · cache-write 25 · output 32 · cost —"))
     }
 
@@ -47,7 +47,7 @@ import Foundation
                                                  "output_tokens": 12]])
         let out = SessionMetrics.render(jsonl: call)
 
-        #expect(out.contains("| 1 | coach | gpt-5.5 | 200 | 500 | 100 | 40 | — | 12 | — |"))
+        #expect(out.contains("| 1 | coach | OpenAI API | gpt-5.5 | 200 | 500 | 100 | 40 | — | 12 | — |"))
         #expect(out.contains("session totals: 1 calls · input 100 · cache-read 40 · cache-write — · output 12 · cost —"))
     }
 
@@ -55,7 +55,7 @@ import Foundation
     @Test func rendersTransportErrorCallWithUnknownUsage() throws {
         let failed = try line(status: nil, request: ["model": "gpt-5.5"], error: "timed out")
         let out = SessionMetrics.render(jsonl: failed)
-        #expect(out.contains("| 1 | coach | gpt-5.5 | — | 500 | — | — | — | — | — |"))
+        #expect(out.contains("| 1 | coach | OpenAI API | gpt-5.5 | — | 500 | — | — | — | — | — |"))
         #expect(out.contains("session totals: 1 calls · input — · cache-read — · cache-write — · output — · cost —"))
         #expect(out.contains("| gpt-5.5 | 1 | — | — | — | — | — |"))
     }
@@ -82,7 +82,7 @@ import Foundation
         let out = SessionMetrics.render(jsonl: call)
 
         // Per-call: the cache creation/read split and the dollar cost, all from the CLI envelope.
-        #expect(out.contains("| 1 | coach | (CLI default) | 200 | 900 | 4 | 1285 | 12000 | 200 | $1.4400 |"))
+        #expect(out.contains("| 1 | coach | Claude Code | (CLI default) | 200 | 900 | 4 | 1285 | 12000 | 200 | $1.4400 |"))
         #expect(out.contains("session totals: 1 calls · input 4 · cache-read 1285 · cache-write 12000 · output 200 · cost $1.4400"))
         // The per-model table breaks out both the main model and the sidecar haiku pass.
         #expect(out.contains("per-model totals"))
@@ -97,7 +97,7 @@ import Foundation
                             response: ["exitCode": 0, "reply": "hi"])
         let out = SessionMetrics.render(jsonl: call)
 
-        #expect(out.contains("| 1 | coach | gpt-5.4 | 200 | 500 | — | — | — | — | — |"))
+        #expect(out.contains("| 1 | coach | Codex CLI | gpt-5.4 | 200 | 500 | — | — | — | — | — |"))
         #expect(out.contains("session totals: 1 calls · input — · cache-read — · cache-write — · output — · cost —"))
         #expect(out.contains("| gpt-5.4 | 1 | — | — | — | — | — |"))
     }

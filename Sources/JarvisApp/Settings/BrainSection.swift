@@ -1,41 +1,72 @@
 import AppKit
 import JarvisCore
 
-/// Settings panel for the brain: the provider (OpenAI API, or a locally installed Claude Code /
-/// Codex CLI running on the user's subscription), the model + reasoning effort for whichever is
-/// active, and the OpenAI API key — one tab, because the four choices are one decision. The model
-/// list is per provider (each remembers its own); the effort is one global setting applied to all
-/// three, mapped onto each CLI's scale by `CLIBrainClient`. Installed CLIs are auto-detected
-/// whenever the tab is shown; Claude's bounded status command distinguishes signed in, signed out,
-/// and an unavailable probe. Selections persist immediately through `BrainPreferences`; while
-/// coaching, the driver swaps its model clients for the next turn without resetting transcript or
-/// history. The transcription model is deliberately NOT here; it's a separate concern — which is
-/// also why the key stays required: transcription always runs on it.
+/// Reports viewport changes so the document stack can stay top-aligned as Settings resizes.
+@MainActor
+private final class BrainSettingsScrollView: NSScrollView {
+    var onViewportChanged: (() -> Void)?
+    private var lastViewportSize = NSSize.zero
+
+    override func layout() {
+        super.layout()
+        let size = contentView.bounds.size
+        guard size != lastViewportSize else { return }
+        lastViewportSize = size
+        onViewportChanged?()
+    }
+}
+
+/// Minimal Brain Settings surface: one provider route, one reasoning-effort row, and transcription.
+///
+/// Provider/model ordering is edited by `ProviderRouteEditor`; credentials remain isolated in
+/// `APIKeyControls`. This section only composes those modules, refreshes CLI availability, and
+/// applies completed preference edits at the running driver's between-attempt boundary.
 @MainActor
 final class BrainSection: NSObject, SettingsSection {
+    enum PreferenceChange: Equatable {
+        case topology
+        case effort
+
+        func merged(with newer: PreferenceChange) -> PreferenceChange {
+            self == .topology || newer == .topology ? .topology : .effort
+        }
+    }
+
     let title = "Brain"
+    let fillsTab = true
+
+    private static let reasoningHeight: CGFloat = 54
+    private static let sectionSpacing: CGFloat = 14
+    private static let documentInsets: CGFloat = 24
 
     private let preferences: BrainPreferences
     private let detector: AgentCLIDetector
-    private let onPreferencesChanged: (DetectedAgentCLI?) -> Void
+    private let onPreferencesChanged:
+        (PreferenceChange, [BrainProvider: DetectedAgentCLI]?) -> Void
     private let apiKey: APIKeyControls
 
-    private var radios: [BrainProvider: NSButton] = [:]
-    private var providerNote: NSTextField?
-    private var modelPopup: NSPopUpButton?
-    /// The models backing the current popup rows, so selection maps back without re-deriving.
-    private var listedModels: [BrainModel] = []
+    private var scrollView: BrainSettingsScrollView?
+    private var documentStack: NSStackView?
+    private var providerEditor: ProviderRouteEditor?
+    private var providerHeightConstraint: NSLayoutConstraint?
+    private var transcriptionHeightConstraint: NSLayoutConstraint?
     /// The latest completed probe remains usable while the next refresh runs in the background.
     private var detectedCLIs: [BrainProvider: DetectedAgentCLI]?
-    /// Deliberately survives a Settings close so a local-provider edit made during the probe still
-    /// reaches the running coaching session when detection finishes.
+    /// Deliberately survives a Settings close so an edit made during the probe still reaches the
+    /// running coaching session when detection finishes.
     private var detectionTask: Task<Void, Never>?
-    /// Several edits during one probe collapse into one application of the latest persisted values.
-    private var applyPreferencesAfterDetection = false
+    private var pendingPreferenceChange: PreferenceChange?
+    /// Session-local runtime state only. This marker never writes preferences or reorders the route.
+    private var activeTarget: BrainTarget?
 
-    init(preferences: BrainPreferences, detector: AgentCLIDetector,
-         onPreferencesChanged: @escaping (DetectedAgentCLI?) -> Void,
-         keyStore: FileSecretStore, onKeySaved: @escaping (String) -> Void) {
+    init(
+        preferences: BrainPreferences,
+        detector: AgentCLIDetector,
+        onPreferencesChanged:
+            @escaping (PreferenceChange, [BrainProvider: DetectedAgentCLI]?) -> Void,
+        keyStore: FileSecretStore,
+        onKeySaved: @escaping (String) -> Void
+    ) {
         self.preferences = preferences
         self.detector = detector
         self.onPreferencesChanged = onPreferencesChanged
@@ -43,81 +74,133 @@ final class BrainSection: NSObject, SettingsSection {
     }
 
     func makeView() -> NSView {
-        let view = NSView(frame: NSRect(x: 0, y: 0, width: 560, height: 432))
+        let scrollView = BrainSettingsScrollView(
+            frame: NSRect(x: 0, y: 0, width: 760, height: 560))
+        scrollView.autoresizingMask = [.width, .height]
+        scrollView.drawsBackground = false
+        scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = true
 
-        let providerLabel = NSTextField(labelWithString: "Provider")
-        providerLabel.frame = NSRect(x: 24, y: 400, width: 200, height: 20)
-        view.addSubview(providerLabel)
+        let stack = NSStackView(frame: NSRect(x: 0, y: 0, width: 760, height: 560))
+        stack.orientation = .vertical
+        stack.alignment = .width
+        stack.distribution = .fill
+        stack.spacing = Self.sectionSpacing
+        stack.edgeInsets = NSEdgeInsets(
+            top: Self.documentInsets,
+            left: Self.documentInsets,
+            bottom: Self.documentInsets,
+            right: Self.documentInsets)
+        stack.autoresizingMask = [.width]
+        self.scrollView = scrollView
+        self.documentStack = stack
 
-        for (row, provider) in BrainProvider.allCases.enumerated() {
-            let radio = NSButton(radioButtonWithTitle: provider.displayName,
-                                 target: self, action: #selector(providerChanged))
-            radio.frame = NSRect(x: 24, y: 372 - CGFloat(row) * 28, width: 512, height: 20)
-            radio.setAccessibilityLabel("Brain provider: \(provider.displayName)")
-            view.addSubview(radio)
-            radios[provider] = radio
+        let providerEditor = ProviderRouteEditor(
+            preferences: preferences,
+            onChange: { [weak self] in self?.preferencesDidChange(.topology) },
+            onHeightChanged: { [weak self] height in
+                self?.providerHeightConstraint?.constant = height
+                self?.recalculateDocumentHeight()
+            })
+        providerEditor.view.translatesAutoresizingMaskIntoConstraints = false
+        let providerHeight = providerEditor.view.heightAnchor.constraint(
+            equalToConstant: providerEditor.preferredHeight)
+        providerHeight.isActive = true
+        providerHeightConstraint = providerHeight
+        stack.addArrangedSubview(providerEditor.view)
+        self.providerEditor = providerEditor
+
+        let reasoningCard = makeReasoningCard()
+        reasoningCard.heightAnchor.constraint(
+            equalToConstant: Self.reasoningHeight).isActive = true
+        stack.addArrangedSubview(reasoningCard)
+
+        let transcriptionCard = apiKey.makeView { [weak self] height in
+            self?.transcriptionHeightConstraint?.constant = height
+            self?.recalculateDocumentHeight()
         }
+        transcriptionCard.translatesAutoresizingMaskIntoConstraints = false
+        let transcriptionHeight = transcriptionCard.heightAnchor.constraint(
+            equalToConstant: apiKey.preferredHeight)
+        transcriptionHeight.isActive = true
+        transcriptionHeightConstraint = transcriptionHeight
+        stack.addArrangedSubview(transcriptionCard)
 
-        let providerNote = NSTextField(labelWithString: "")
-        providerNote.frame = NSRect(x: 24, y: 288, width: 512, height: 20)
-        providerNote.textColor = .secondaryLabelColor
-        view.addSubview(providerNote)
-        self.providerNote = providerNote
+        // When the cards are shorter than the viewport, this flexible tail absorbs the remaining
+        // height below them. Without it, AppKit anchors the short document at the bottom and leaves
+        // a large empty band above Provider.
+        let bottomSpacer = NSView()
+        bottomSpacer.setContentHuggingPriority(.defaultLow, for: .vertical)
+        bottomSpacer.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+        bottomSpacer.heightAnchor.constraint(greaterThanOrEqualToConstant: 0).isActive = true
+        stack.setCustomSpacing(0, after: transcriptionCard)
+        stack.addArrangedSubview(bottomSpacer)
 
-        let modelLabel = NSTextField(labelWithString: "Model")
-        modelLabel.frame = NSRect(x: 24, y: 256, width: 200, height: 20)
-        view.addSubview(modelLabel)
-
-        let modelPopup = NSPopUpButton(frame: NSRect(x: 24, y: 224, width: 250, height: 26))
-        modelPopup.target = self
-        modelPopup.action = #selector(modelChanged)
-        modelPopup.setAccessibilityLabel("Brain model")
-        view.addSubview(modelPopup)
-        self.modelPopup = modelPopup
-
-        // One effort for every provider, mapped onto each CLI's own scale by `CLIBrainClient`
-        // (Claude Code's floor is low; Codex accepts the value unchanged).
-        let effortLabel = NSTextField(labelWithString: "Reasoning Effort")
-        effortLabel.frame = NSRect(x: 290, y: 256, width: 200, height: 20)
-        view.addSubview(effortLabel)
-
-        let effortPopup = NSPopUpButton(frame: NSRect(x: 290, y: 224, width: 246, height: 26))
-        effortPopup.addItems(withTitles: ReasoningEffort.allCases.map(\.displayName))
-        effortPopup.target = self
-        effortPopup.action = #selector(effortChanged)
-        effortPopup.setAccessibilityLabel("Reasoning effort")
-        if let row = ReasoningEffort.allCases.firstIndex(of: preferences.effort) {
-            effortPopup.selectItem(at: row)
+        // Attach only after every fixed-height card and the flexible tail exist. Attaching the
+        // partially assembled stack makes AppKit briefly solve an impossible intermediate layout.
+        scrollView.documentView = stack
+        scrollView.onViewportChanged = { [weak self] in
+            self?.recalculateDocumentHeight()
+            self?.revealTop()
         }
-        view.addSubview(effortPopup)
-
-        let applyNote = NSTextField(
-            labelWithString: "Changes apply on the next coaching turn (or the next Start while stopped).")
-        applyNote.frame = NSRect(x: 24, y: 192, width: 512, height: 20)
-        applyNote.textColor = .secondaryLabelColor
-        view.addSubview(applyNote)
-
-        let keyHeader = NSTextField(labelWithString: "OpenAI API Key")
-        keyHeader.frame = NSRect(x: 24, y: 158, width: 200, height: 20)
-        keyHeader.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
-        view.addSubview(keyHeader)
-
-        let keyNote = NSTextField(labelWithString: "Needed for voice transcription even when the brain runs on a local CLI.")
-        keyNote.frame = NSRect(x: 24, y: 138, width: 512, height: 20)
-        keyNote.textColor = .secondaryLabelColor
-        view.addSubview(keyNote)
-
-        apiKey.addControls(to: view, top: 112)
-
         renderDetection()
-        return view
+        recalculateDocumentHeight()
+        revealTop()
+        return scrollView
     }
 
-    /// Re-probe whenever the tab becomes visible so an install or sign-in completed while the app
-    /// was open appears. The subprocesses stay off the main actor; cached or base labels render
-    /// immediately and the status suffixes update when detection finishes.
+    /// Reflect the driver's selected runtime target without mutating the saved route.
+    func setActiveTarget(_ target: BrainTarget?) {
+        activeTarget = target
+        providerEditor?.render(detectedCLIs: detectedCLIs, activeTarget: activeTarget)
+    }
+
     func didBecomeActive() {
         refreshDetection()
+    }
+
+    private func makeReasoningCard() -> SettingsCardView {
+        let card = Self.makeCard()
+        guard let content = card.contentView else { return card }
+
+        let label = NSTextField(labelWithString: "Reasoning effort")
+        label.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
+        content.addSubview(label)
+
+        let popup = NSPopUpButton()
+        popup.addItems(withTitles: ReasoningEffort.allCases.map(\.displayName))
+        popup.target = self
+        popup.action = #selector(effortChanged)
+        popup.setAccessibilityLabel("Reasoning effort")
+        if let row = ReasoningEffort.allCases.firstIndex(of: preferences.effort) {
+            popup.selectItem(at: row)
+        }
+        content.addSubview(popup)
+
+        card.onLayout = { [weak content, weak label, weak popup] in
+            guard let content, let label, let popup else { return }
+            let controlWidth = min(220, max(150, content.bounds.width * 0.46))
+            label.frame = NSRect(x: 16, y: 17, width: 180, height: 20)
+            popup.frame = NSRect(
+                x: content.bounds.width - 14 - controlWidth,
+                y: 11,
+                width: controlWidth,
+                height: 32)
+        }
+        card.onLayout?()
+        return card
+    }
+
+    private static func makeCard() -> SettingsCardView {
+        let card = SettingsCardView(frame: NSRect(x: 0, y: 0, width: 712, height: 54))
+        card.translatesAutoresizingMaskIntoConstraints = false
+        card.boxType = .custom
+        card.borderWidth = 1
+        card.cornerRadius = 12
+        card.borderColor = .separatorColor
+        card.fillColor = .controlBackgroundColor
+        card.contentViewMargins = .zero
+        return card
     }
 
     private func refreshDetection() {
@@ -129,110 +212,76 @@ final class BrainSection: NSObject, SettingsSection {
             detectionTask = nil
             detectedCLIs = Dictionary(uniqueKeysWithValues: values.map { ($0.provider, $0) })
             renderDetection()
-            if applyPreferencesAfterDetection {
-                applyPreferencesAfterDetection = false
-                onPreferencesChanged(detectedCLIs?[preferences.provider])
+            if let change = pendingPreferenceChange {
+                pendingPreferenceChange = nil
+                onPreferencesChanged(change, detectedCLIs)
             }
         }
     }
 
-    /// Update radio titles/enablement from the most recent detection and re-aim the model controls at
-    /// the selected provider. Before the first probe completes, local providers stay selectable and
-    /// use their base labels rather than being misreported as missing.
     private func renderDetection() {
-        let selected = preferences.provider
-        for (provider, radio) in radios {
-            var title = provider.displayName
-            var enabled = true
-            if provider.usesLocalCLI, let detectedCLIs {
-                if let cli = detectedCLIs[provider] {
-                    switch cli.authenticationStatus {
-                    case .signedIn: title += " — detected, signed in"
-                    case .signedOut: title += " — detected, signed out"
-                    case .unknown: title += " — detected, sign-in unknown"
-                    }
-                } else {
-                    title += " — not installed"
-                    enabled = false
-                }
-            }
-            radio.title = title
-            // A stored selection whose CLI has vanished stays clickable so the state is visible and
-            // recoverable; Start reports the missing CLI loudly.
-            radio.isEnabled = enabled || provider == selected
-            radio.state = provider == selected ? .on : .off
-        }
-        var note = Self.note(for: selected)
-        if selected.usesLocalCLI, let cli = detectedCLIs?[selected] {
-            switch cli.authenticationStatus {
-            case .signedIn:
-                break
-            case .signedOut:
-                note += " Sign in through the CLI before starting Jarvis."
-            case .unknown:
-                note += " Couldn't check its sign-in status — run the CLI once if turns fail."
-            }
-        }
-        providerNote?.stringValue = note
-        reloadModels(for: selected)
+        providerEditor?.render(detectedCLIs: detectedCLIs, activeTarget: activeTarget)
     }
 
-    private static func note(for provider: BrainProvider) -> String {
-        switch provider {
-        case .openAI: return "Coaching runs on the OpenAI API, billed to the key below."
-        case .claudeCode: return "Coaching runs through your local Claude Code CLI — billed to your Claude subscription."
-        case .codexCLI: return "Coaching runs through your local Codex CLI — billed to your ChatGPT subscription."
+    private func recalculateDocumentHeight() {
+        guard let stack = documentStack else { return }
+        let visibleHeights = [
+            providerEditor?.preferredHeight,
+            Self.reasoningHeight,
+            apiKey.preferredHeight,
+        ].compactMap { $0 }
+        let contentHeight = Self.documentInsets * 2
+            + visibleHeights.reduce(0, +)
+            + CGFloat(max(0, visibleHeights.count - 1)) * Self.sectionSpacing
+        let viewportHeight = scrollView?.contentView.bounds.height ?? 0
+        let height = max(contentHeight, viewportHeight)
+        let oldHeight = stack.frame.height
+        let oldOrigin = scrollView?.contentView.bounds.origin.y ?? 0
+        let distanceFromTop = max(0, oldHeight - oldOrigin - viewportHeight)
+
+        stack.frame.size.height = height
+        stack.needsLayout = true
+        stack.layoutSubtreeIfNeeded()
+        if let scrollView {
+            scrollView.contentView.scroll(to: NSPoint(
+                x: 0, y: max(0, height - viewportHeight - distanceFromTop)))
+            scrollView.reflectScrolledClipView(scrollView.contentView)
         }
     }
 
-    private func reloadModels(for provider: BrainProvider) {
-        guard let popup = modelPopup else { return }
-        listedModels = BrainModelCatalog.models(for: provider)
-        popup.removeAllItems()
-        popup.addItems(withTitles: listedModels.map(\.displayName))
-        if let row = listedModels.firstIndex(of: preferences.model(for: provider)) {
-            popup.selectItem(at: row)
-        }
-    }
-
-    @objc private func providerChanged(_ sender: NSButton) {
-        guard let provider = radios.first(where: { $0.value === sender })?.key else { return }
-        preferences.provider = provider
-        renderDetection()
-        preferencesDidChange()
-    }
-
-    @objc private func modelChanged(_ sender: NSPopUpButton) {
-        let row = sender.indexOfSelectedItem
-        guard listedModels.indices.contains(row) else { return }
-        preferences.setModel(listedModels[row], for: preferences.provider)
-        preferencesDidChange()
+    private func revealTop() {
+        guard let scrollView, let stack = documentStack else { return }
+        scrollView.contentView.scroll(to: NSPoint(
+            x: 0,
+            y: max(0, stack.bounds.height - scrollView.contentView.bounds.height)))
+        scrollView.reflectScrolledClipView(scrollView.contentView)
     }
 
     @objc private func effortChanged(_ sender: NSPopUpButton) {
         let row = sender.indexOfSelectedItem
         guard ReasoningEffort.allCases.indices.contains(row) else { return }
         preferences.effort = ReasoningEffort.allCases[row]
-        preferencesDidChange()
+        preferencesDidChange(.effort)
     }
 
-    private func preferencesDidChange() {
-        let provider = preferences.provider
-        guard provider.usesLocalCLI else {
-            applyPreferencesAfterDetection = false
-            onPreferencesChanged(nil)
+    private func preferencesDidChange(_ change: PreferenceChange) {
+        guard let route = preferences.configuredRoute else { return }
+        let providers = route.targets.map(\.provider)
+        guard providers.contains(where: \.usesLocalCLI) else {
+            pendingPreferenceChange = nil
+            onPreferencesChanged(change, [:])
             return
         }
         // Never apply a cached preflight while a fresher probe is running. The completion collapses
         // any edits made during that probe into one application of the latest persisted preferences.
         if detectionTask != nil {
-            applyPreferencesAfterDetection = true
+            pendingPreferenceChange = pendingPreferenceChange?.merged(with: change) ?? change
             return
         }
         if let detectedCLIs {
-            onPreferencesChanged(detectedCLIs[provider])
+            onPreferencesChanged(change, detectedCLIs)
         } else {
-            applyPreferencesAfterDetection = true
+            pendingPreferenceChange = pendingPreferenceChange?.merged(with: change) ?? change
             refreshDetection()
         }
     }

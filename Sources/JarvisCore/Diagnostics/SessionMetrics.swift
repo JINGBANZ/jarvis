@@ -74,10 +74,11 @@ enum SessionMetrics {
         lines.append(
             "=== deterministic metrics (computed from \(BrainTrafficLog.filename); interpret these — do NOT recompute totals by eye) ===")
         lines.append("")
-        lines.append("| call | tag | model | HTTP | ms | input | cache read | cache write | output | cost |")
-        lines.append("|--:|---|---|--:|--:|--:|--:|--:|--:|--:|")
+        lines.append("| call | tag | provider | model | HTTP | ms | input | cache read | cache write | output | cost |")
+        lines.append("|--:|---|---|---|--:|--:|--:|--:|--:|--:|--:|")
         for c in calls {
-            lines.append("| \(c.number) | \(c.tag) | \(c.model) | \(c.status.map(String.init) ?? "—") "
+            lines.append("| \(c.number) | \(c.tag) | \(c.provider) | \(c.model) "
+                + "| \(c.status.map(String.init) ?? "—") "
                 + "| \(c.ms.map(String.init) ?? "—") | \(number(c.input)) | \(number(c.cacheRead)) "
                 + "| \(number(c.cacheWrite)) | \(number(c.output)) | \(money(c.cost)) |")
         }
@@ -248,7 +249,7 @@ enum SessionMetrics {
         return lhs + rhs
     }
 
-    private static func providerName(request: [String: Any]?, response: [String: Any]?) -> String {
+    static func providerName(request: [String: Any]?, response: [String: Any]?) -> String {
         switch request?["provider"] as? String {
         case BrainProvider.claudeCode.rawValue: return BrainProvider.claudeCode.displayName
         case BrainProvider.codexCLI.rawValue: return BrainProvider.codexCLI.displayName

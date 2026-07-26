@@ -9,9 +9,16 @@ import Testing
 @Suite struct CoachDriverContextMessageTests {
     private func makeDriver(brain: BrainClient, clock: Clock) -> (CoachDriver, RollingTranscript) {
         let transcript = RollingTranscript()
+        let target = BrainTarget(
+            provider: .openAI,
+            modelID: BrainModelCatalog.defaultModel(for: .openAI).id)
         let driver = CoachDriver(
             config: .default, transcript: transcript,
-            brain: brain, screen: FakeScreen(), overlay: FakeOverlay(), clock: clock
+            route: ConfiguredBrainRoute(targets: [
+                ConfiguredBrainTarget(target: target, brain: brain),
+            ]),
+            screen: FakeScreen(), overlay: FakeOverlay(), clock: clock,
+            automaticAttemptDelay: { _ in }
         )
         return (driver, transcript)
     }
@@ -24,7 +31,9 @@ import Testing
     /// A turn-end sends the delta block and nothing else: no boilerplate trigger sentence to be
     /// committed and re-billed every turn — the [mm:ss] stamps already carry the timing.
     @Test func turnEndSendsTheDeltaBlockAlone() async {
-        let brain = ScriptedBrain(script: [.init(toolCalls: [])])   // stay silent → one call
+        let brain = ScriptedBrain(script: [
+            .init(toolCalls: [.staySilent(callId: "quiet")]),
+        ])
         let (driver, transcript) = makeDriver(brain: brain, clock: ManualClock(now: 0))
         transcript.append(.init(speaker: .me, text: "brute force two-sum", at: 0))
 
@@ -36,7 +45,9 @@ import Testing
     /// No new speech (a silence wake-up with nothing said): the message is the bare trigger note —
     /// no "New since last turn" wrapper and no "(nothing new)" filler burying the real signal.
     @Test func emptySpeechSendsOnlyTheTriggerNote() async {
-        let brain = ScriptedBrain(script: [.init(toolCalls: [])])
+        let brain = ScriptedBrain(script: [
+            .init(toolCalls: [.staySilent(callId: "quiet")]),
+        ])
         let (driver, _) = makeDriver(brain: brain, clock: ManualClock(now: 0))   // empty transcript
 
         await driver.handleTrigger(.silence(secondsQuiet: 30))
@@ -49,7 +60,9 @@ import Testing
 
     /// A silence wake-up WITH unsent speech carries both: the delta block first, then the note.
     @Test func silenceWithNewSpeechCarriesBlockThenNote() async {
-        let brain = ScriptedBrain(script: [.init(toolCalls: [])])
+        let brain = ScriptedBrain(script: [
+            .init(toolCalls: [.staySilent(callId: "quiet")]),
+        ])
         let (driver, transcript) = makeDriver(brain: brain, clock: ManualClock(now: 0))
         transcript.append(.init(speaker: .me, text: "hmm let me think", at: 0))
 

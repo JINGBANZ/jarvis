@@ -17,6 +17,7 @@ import JarvisCore
 final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @unchecked Sendable {
     var onTurnEnd: (@Sendable () -> Void)?
     var onSilence: (@Sendable (TimeInterval) -> Void)?
+    var onSpeechActivityChanged: (@Sendable (Bool) -> Void)?
     var onConnectionStateChange: (@Sendable (RealtimeConnectionState) -> Void)?
     /// Fired when transcription becomes unusable, either from an unrecoverable provider rejection or
     /// after reconnection is abandoned, so the app can stop instead of lying green.
@@ -112,7 +113,10 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
                 _ = self?.audioBuffer.discardSent(through: boundary)
             },
             resetSilenceTimer: { [weak self] in self?.resetSilenceTimer() },
-            onTurnEnd: { [weak self] in self?.onTurnEnd?() })
+            onTurnEnd: { [weak self] in self?.onTurnEnd?() },
+            onSpeechActivityChanged: { [weak self] active in
+                self?.onSpeechActivityChanged?(active)
+            })
     }
 
     func connect() {

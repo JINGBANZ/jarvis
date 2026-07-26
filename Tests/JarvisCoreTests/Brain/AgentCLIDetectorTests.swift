@@ -249,4 +249,30 @@ import Glibc
         let result = await d.detectAllAsync()
         #expect(result.first(where: { $0.provider == .claudeCode })?.authenticationStatus == .signedIn)
     }
+
+    @Test func scopedAsyncDetectionProbesOnlyRequestedProvidersOnce() async throws {
+        let home = try makeHome()
+        let bin = home.appendingPathComponent("fakebin")
+        let claudeProbe = home.appendingPathComponent("claude-probed")
+        let codexProbe = home.appendingPathComponent("codex-probed")
+        try installBinary("claude", in: bin, script: """
+            #!/bin/sh
+            printf 'probe\\n' >> "$HOME/claude-probed"
+            printf '%s\\n' '{"loggedIn":true,"authMethod":"claude.ai"}'
+            """)
+        try installBinary("codex", in: bin, script: """
+            #!/bin/sh
+            printf 'probe\\n' >> "$HOME/codex-probed"
+            exit 2
+            """)
+        try write("{}", to: home.appendingPathComponent(".codex/auth.json"))
+        let d = detector(home: home, pathVariable: bin.path, authStatusTimeout: 10)
+
+        let result = await d.detectAllAsync([.codexCLI, .openAI, .codexCLI])
+
+        #expect(result.map(\.provider) == [.codexCLI])
+        #expect(fm.fileExists(atPath: codexProbe.path))
+        #expect(!fm.fileExists(atPath: claudeProbe.path))
+        #expect(try String(contentsOf: codexProbe, encoding: .utf8) == "probe\n")
+    }
 }

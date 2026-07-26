@@ -88,6 +88,29 @@ import Foundation
         #expect(rows[0].1 == nil)                    // missing shot degrades to text row
     }
 
+    @Test func typedRouteEventsRemainVisibleWhenSessionIsReopened() throws {
+        let base = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: base) }
+        let id = "2026-06-16_10-00-00_aaaa"
+        try makeSession(base, id, lines: [
+            """
+            {"t":"10:00:00","m":"⚠️ OpenAI API couldn't respond — continuing on Claude Code",\
+            "k":"brainRouteAdvanced"}
+            """,
+            """
+            {"t":"10:00:01","m":"⚠️ Codex CLI target is unavailable — skipping it",\
+            "k":"brainRouteTargetSkipped"}
+            """,
+        ])
+
+        let store = SessionStore(base: base, current: nil)
+        let session = try #require(store.listSessions().first)
+        let rows = store.entries(for: session)
+        #expect(rows.map(\.0.message) == [
+            "⚠️ OpenAI API couldn't respond — continuing on Claude Code",
+            "⚠️ Codex CLI target is unavailable — skipping it",
+        ])
+    }
+
     @Test func clearHistoryDeletesPastButSparesCurrentAndBase() throws {
         let base = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: base) }
         try makeSession(base, "2026-06-16_10-00-00_aaaa", lines: ["{\"t\":\"1\",\"m\":\"x\"}"])

@@ -27,15 +27,30 @@ public struct AgentCLIDetector: Sendable {
 
     /// All CLI providers found on this machine, in `BrainProvider` declaration order.
     public func detectAll() -> [DetectedAgentCLI] {
-        BrainProvider.allCases.compactMap(detect)
+        detectAll(BrainProvider.allCases)
+    }
+
+    /// Only the requested CLI providers, in first-occurrence order. Duplicate providers are probed
+    /// once, and direct API providers are ignored because they have no local executable.
+    public func detectAll(_ providers: [BrainProvider]) -> [DetectedAgentCLI] {
+        var seen = Set<BrainProvider>()
+        return providers
+            .filter { seen.insert($0).inserted }
+            .compactMap { detect($0) }
     }
 
     /// Run the blocking subprocess probes away from the caller's executor. Settings uses this path
     /// so a slow CLI cannot hold the main actor and delay or freeze its window.
     public func detectAllAsync() async -> [DetectedAgentCLI] {
+        await detectAllAsync(BrainProvider.allCases)
+    }
+
+    /// Probe only the requested providers away from the caller's executor. Startup uses this path
+    /// so an unrelated installed CLI cannot delay a route that will never invoke it.
+    public func detectAllAsync(_ providers: [BrainProvider]) async -> [DetectedAgentCLI] {
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
-                continuation.resume(returning: detectAll())
+                continuation.resume(returning: detectAll(providers))
             }
         }
     }

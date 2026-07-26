@@ -2,7 +2,7 @@ import Foundation
 
 /// The model behind the human-facing activity viewer. It records the coaching exchange — heard
 /// speech, manual hint requests, every brain action (screen view, tip, or deliberate silence), and
-/// fixed non-sensitive notices when a brain change succeeds, falls back, degrades, or must stop. It
+/// fixed non-sensitive notices when a brain change succeeds, a route advances, degrades, or stops. It
 /// pushes those entries into an in-app `WKWebView` window (see `ActivityViewer` in JarvisApp) and
 /// persists them so past sessions can be browsed later. Detailed diagnostics belong exclusively in
 /// `JarvisLog`.
@@ -29,7 +29,11 @@ public final class ActivityLog: @unchecked Sendable {
         case systemAudioStopped
         case settingsChangeNotApplied
         case brainChangeApplied
+        /// Retained so logs written by the superseded transactional-switch build remain decodable.
         case brainFallback
+        case brainRouteAdvanced
+        case brainRouteTargetSkipped
+        case brainRouteExhausted
     }
 
     /// A human-visible event in the coaching exchange. Keeping this closed set typed prevents
@@ -70,9 +74,12 @@ public final class ActivityLog: @unchecked Sendable {
         /// identities are enough for a fixed human-facing success notice; model transport details
         /// remain in jlog.
         case brainChangeApplied(previous: BrainProvider, current: BrainProvider)
-        /// A live brain replacement failed its first turn, so Jarvis restored the previous active
-        /// provider. Carries provider identities only; raw failure detail stays in jlog.
-        case brainFallback(failed: BrainProvider, restored: BrainProvider)
+        /// A failed target was exhausted and the next user-authorized route target became active.
+        case brainRouteAdvanced(previous: BrainProvider, current: BrainProvider)
+        /// A route target was proven unavailable before a provider request could be constructed.
+        case brainRouteTargetSkipped(provider: BrainProvider)
+        /// Every user-authorized target was exhausted, so coaching stopped.
+        case brainRouteExhausted(lastProvider: BrainProvider)
 
         var kind: EventKind {
             switch self {
@@ -89,7 +96,9 @@ public final class ActivityLog: @unchecked Sendable {
             case .systemAudioStopped: .systemAudioStopped
             case .settingsChangeNotApplied: .settingsChangeNotApplied
             case .brainChangeApplied: .brainChangeApplied
-            case .brainFallback: .brainFallback
+            case .brainRouteAdvanced: .brainRouteAdvanced
+            case .brainRouteTargetSkipped: .brainRouteTargetSkipped
+            case .brainRouteExhausted: .brainRouteExhausted
             }
         }
     }
@@ -218,12 +227,18 @@ public final class ActivityLog: @unchecked Sendable {
                 message = "🧠 brain switch applied — \(previous.displayName) → \(current.displayName)"
             }
             imageBase64 = nil
-        case .brainFallback(let failed, let restored):
-            if failed == restored {
-                message = "⚠️ brain change failed — previous \(restored.displayName) setup restored"
+        case .brainRouteAdvanced(let previous, let current):
+            if previous == current {
+                message = "⚠️ \(previous.displayName) target couldn't respond — continuing with the next \(current.displayName) model"
             } else {
-                message = "⚠️ brain switch failed — \(failed.displayName) couldn't respond; \(restored.displayName) restored"
+                message = "⚠️ \(previous.displayName) couldn't respond — continuing on \(current.displayName)"
             }
+            imageBase64 = nil
+        case .brainRouteTargetSkipped(let provider):
+            message = "⚠️ \(provider.displayName) target is unavailable — skipping it"
+            imageBase64 = nil
+        case .brainRouteExhausted(let provider):
+            message = "⏹ coaching stopped — all configured provider targets were exhausted; last target: \(provider.displayName)"
             imageBase64 = nil
         }
         queue.async { [self] in
@@ -332,7 +347,14 @@ public final class ActivityLog: @unchecked Sendable {
 
     /// Whether a persisted row belongs in the human-facing viewer. New rows are guaranteed by the
     /// typed `Event` API; this also hides diagnostic rows from sessions written by older builds.
-    static func isHumanFacing(message: String, imageFile: String?) -> Bool {
+    static func isHumanFacing(
+        message: String,
+        imageFile: String?,
+        kind: EventKind? = nil
+    ) -> Bool {
+        // Current builds persist a stable kind only for typed, human-facing events. Prefix matching
+        // remains the compatibility path for logs created before event kinds were added.
+        if kind != nil { return true }
         if imageFile != nil { return true }
         let m = message.trimmingCharacters(in: .whitespaces)
         return m.hasPrefix("🗣 heard") || m.hasPrefix("⌨️ hint shortcut")
