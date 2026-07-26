@@ -198,25 +198,41 @@ import Foundation
         ))
     }
 
-    @Test func brainFallbackNamesProvidersWithoutDiagnosticDetail() throws {
+    @Test func providerRouteLifecycleUsesFixedProviderOnlyCopy() throws {
         let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         let log = ActivityLog(); log.enable(directory: dir)
-        log.record(.brainFallback(failed: .claudeCode, restored: .openAI))
+        log.record(.brainRouteAdvanced(previous: .openAI, current: .claudeCode))
+        log.record(.brainRouteAdvanced(previous: .claudeCode, current: .claudeCode))
+        log.record(.brainRouteTargetSkipped(provider: .codexCLI))
+        log.record(.brainRouteExhausted(lastProvider: .claudeCode))
         let snapshot = log.attach { _ in }
 
-        let row = try #require(snapshot.rows.first)
-        #expect(row.contains("brain switch failed"))
-        #expect(row.contains("Claude Code"))
-        #expect(row.contains("OpenAI API"))
-        #expect(row.contains("OpenAI API restored"))
-        #expect(!row.contains("retry"))
-        #expect(!row.contains("turn"))
-        #expect(!row.contains("OAuth"))
-        #expect(!row.contains("token"))
-        #expect(ActivityLog.isHumanFacing(
-            message: "⚠️ brain switch failed — Claude Code couldn't respond; OpenAI API restored",
-            imageFile: nil
-        ))
+        #expect(snapshot.rows.count == 4)
+        #expect(snapshot.rows[0].contains(
+            "OpenAI API couldn't respond — continuing on Claude Code"))
+        #expect(snapshot.rows[1].contains(
+            "Claude Code target couldn't respond — continuing with the next Claude Code model"))
+        #expect(snapshot.rows[2].contains(
+            "Codex CLI target is unavailable — skipping it"))
+        #expect(snapshot.rows[3].contains(
+            "coaching stopped — all configured provider targets were exhausted; last target: Claude Code"))
+        #expect(!snapshot.rows.joined().contains("timeout"))
+        #expect(!snapshot.rows.joined().contains("OAuth"))
+        #expect(!snapshot.rows.joined().contains("token"))
+
+        let jsonl = try String(
+            contentsOf: dir.appendingPathComponent(ActivityLog.filename), encoding: .utf8)
+        let kinds = try jsonl.split(separator: "\n").map { line in
+            let value = try #require(
+                try JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any])
+            return value["k"] as? String
+        }
+        #expect(kinds == [
+            ActivityLog.EventKind.brainRouteAdvanced.rawValue,
+            ActivityLog.EventKind.brainRouteAdvanced.rawValue,
+            ActivityLog.EventKind.brainRouteTargetSkipped.rawValue,
+            ActivityLog.EventKind.brainRouteExhausted.rawValue,
+        ])
     }
 
     @Test func runtimeFailureNoticesStayFixedAndDiagnosticFree() throws {

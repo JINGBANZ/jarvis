@@ -135,14 +135,29 @@ public enum AgentCLIProcessRunner {
 
         // Feeding stdin inline is safe: the output pipes are already draining concurrently, so a
         // prompt larger than the pipe buffer just blocks here until the child consumes it.
-        if let stdin = run.stdin {
-            try? stdinPipe.fileHandleForWriting.write(contentsOf: Data(stdin.utf8))
+        #if canImport(Darwin)
+        // A provider that exits before reading the prompt must become a normal EPIPE write error,
+        // not SIGPIPE terminating the Jarvis process before Swift can preserve the failure timing.
+        _ = fcntl(stdinPipe.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
+        #else
+        // Linux has no per-pipe F_SETNOSIGPIPE. Ignore it process-wide so Foundation surfaces
+        // EPIPE from the write instead; CLI invocations never use SIGPIPE as application control.
+        _ = signal(SIGPIPE, SIG_IGN)
+        #endif
+        var stdinDelivered = true
+        do {
+            if let stdin = run.stdin {
+                try stdinPipe.fileHandleForWriting.write(contentsOf: Data(stdin.utf8))
+            }
+            try stdinPipe.fileHandleForWriting.close()
+        } catch {
+            stdinDelivered = false
+            try? stdinPipe.fileHandleForWriting.close()
         }
-        try? stdinPipe.fileHandleForWriting.close()
-        timings.mark(.stdinDelivered)
+        if stdinDelivered { timings.mark(.stdinDelivered) }
 
         process.waitUntilExit()
-        timings.mark(.processExited)
+        let processExited = DispatchTime.now().uptimeNanoseconds
         watchdog.cancel()
         killer.cancel()
         // EOF normally lands with the exit, but a stray grandchild that inherited the pipes' write
@@ -152,6 +167,10 @@ public enum AgentCLIProcessRunner {
         _ = stderrDone.wait(timeout: .now() + 2)
         stdoutPipe.fileHandleForReading.readabilityHandler = nil
         stderrPipe.fileHandleForReading.readabilityHandler = nil
+        // Finalize exit only after the stdout handler has drained. A very short-lived process can
+        // exit before its readability callback is scheduled; the recorder clamps that necessarily
+        // pre-exit byte to this captured exit instant instead of dropping the reversed interval.
+        timings.mark(.processExited, at: processExited)
 
         // Only a SIGTERM exit counts as our timeout — the flag alone could race a normal exit that
         // lands just as the watchdog fires.

@@ -1,6 +1,6 @@
 import Foundation
 
-public enum Speaker: String, Sendable {
+public enum Speaker: String, Sendable, Hashable {
     case me        // the user thinking aloud (mic)
     case them      // the other side of a call (system audio)
 }

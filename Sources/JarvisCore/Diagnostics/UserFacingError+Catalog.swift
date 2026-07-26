@@ -5,6 +5,14 @@ import Foundation
 /// runtime severity may reveal UI. Dynamic copy composed at the failure site (e.g. a capture reason)
 /// is passed through. Call sites reference these so the policy is centralized and unit-testable.
 public extension UserFacingError {
+    /// First-time setup has not selected a primary brain provider, so no route can be constructed.
+    static var brainProviderNotConfigured: UserFacingError {
+        .init(
+            title: "Choose a provider",
+            message: "Open Settings → Brain and choose a Primary provider, then press Start.",
+            severity: .fatal)
+    }
+
     /// No API key on Start. Realtime voice transcription always runs on the OpenAI key — whichever
     /// brain provider is selected — so the session never comes up: fatal.
     static var noAPIKey: UserFacingError {
@@ -40,14 +48,11 @@ public extension UserFacingError {
               severity: .degraded)
     }
 
-    /// A provider proved that an actual coaching request cannot recover. Temporary and unknown
-    /// failures never use this path; they preserve the session for a later trigger. The Activity log
-    /// gets a discreet fixed notice while the detailed reason and provider-specific recovery stay in
-    /// diagnostics.
-    static func brainStopped(provider: String, recovery: String,
-                             reason: String) -> UserFacingError {
-        .init(title: "\(provider) couldn't respond",
-              message: "\(reason)\n\nCoaching has stopped. \(recovery)",
+    /// The finite user-authorized brain route was exhausted. Individual target failures never use
+    /// this terminal path; their raw detail stays diagnostic while pending work moves forward.
+    static func brainRouteExhausted(lastProvider: String, reason: String) -> UserFacingError {
+        .init(title: "Brain fallback route exhausted",
+              message: "\(reason)\n\nCoaching stopped after every configured target was exhausted. The last target was \(lastProvider). Check Settings → Brain, then Start again.",
               severity: .terminal)
     }
 

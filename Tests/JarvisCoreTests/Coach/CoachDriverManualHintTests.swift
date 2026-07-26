@@ -16,9 +16,16 @@ private final class FailingScreen: ScreenCapturing, @unchecked Sendable {
     private func makeDriver(brain: BrainClient, screen: ScreenCapturing, overlay: OverlayRendering,
                             clock: Clock) -> (CoachDriver, RollingTranscript) {
         let transcript = RollingTranscript()
+        let target = BrainTarget(
+            provider: .openAI,
+            modelID: BrainModelCatalog.defaultModel(for: .openAI).id)
         let driver = CoachDriver(
             config: .default, transcript: transcript,
-            brain: brain, screen: screen, overlay: overlay, clock: clock
+            route: ConfiguredBrainRoute(targets: [
+                ConfiguredBrainTarget(target: target, brain: brain),
+            ]),
+            screen: screen, overlay: overlay, clock: clock,
+            automaticAttemptDelay: { _ in }
         )
         return (driver, transcript)
     }

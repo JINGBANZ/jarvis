@@ -79,15 +79,14 @@ public struct CLIBrainClient: BrainClient, @unchecked Sendable {
     /// not a recoverability taxonomy, so unclassified failures remain temporary by default.
     private func performRequest(messages: [ChatMessage], tools: [ToolDef],
                                 toolChoice: ToolChoice) async throws -> BrainResponse {
-        // Monotonic t0 for the phase timings; `started` (wall clock) still drives the total latency
-        // ms and the traffic line's timestamp. `respondEntered` is the boundary `queuedMs` measures
-        // from — prompt prep below plus the dispatch onto the runner thread.
+        // Monotonic t0 for the phase timings. `respondEntered` is the boundary `queuedMs` measures
+        // from — prompt prep below plus dispatch onto the runner thread — and also drives the
+        // traffic line's top-level total so the two duration fields cannot disagree.
         let timings = AgentCLIPhaseTimings()
         let respondEntered = DispatchTime.now().uptimeNanoseconds
         let prepared = try prepareInvocation(messages: messages, tools: tools, toolChoice: toolChoice)
         defer { for url in prepared.transientFiles { try? FileManager.default.removeItem(at: url) } }
 
-        let started = Date()
         let output: AgentCLIOutput
         do {
             output = try await run(prepared.run, timings)
@@ -98,23 +97,36 @@ public struct CLIBrainClient: BrainClient, @unchecked Sendable {
             logPhases(phases, note: "failed")
             traffic?.record(tag: trafficTag, request: Self.recordData(prepared.auditRequest),
                             response: nil, status: nil,
-                            latencyMs: Self.elapsedMs(since: started),
+                            latencyMs: Self.totalLatencyMs(in: phases),
                             error: error.localizedDescription, phases: phases)
             throw error
         }
         // Record the round trip for the session audit — the extracted reply (not raw stdout, which
         // is stream noise), mapped to the HTTP-ish status the audit understands (exit 0 → 200,
         // anything else → 500). Extraction happens first so a parse failure is still recorded.
-        let reply = Result { try extractReply(output, codexReplyFile: prepared.codexReplyFile) }
+        let reply: String
+        do {
+            reply = try extractReply(output, codexReplyFile: prepared.codexReplyFile)
+        } catch {
+            let phases = Self.phaseDurationsMs(timings, respondEntered: respondEntered)
+            logPhases(phases, note: "failed")
+            traffic?.record(tag: trafficTag, request: Self.recordData(prepared.auditRequest),
+                            response: responseRecord(output, reply: nil),
+                            status: output.exitCode == 0 ? 200 : 500,
+                            latencyMs: Self.totalLatencyMs(in: phases),
+                            error: error.localizedDescription, phases: phases)
+            throw error
+        }
+        let response = parse(reply: reply, tools: tools, toolChoice: toolChoice)
         timings.mark(.replyParsed)
         let phases = Self.phaseDurationsMs(timings, respondEntered: respondEntered)
-        logPhases(phases, note: (try? reply.get()) == nil ? "unparsed" : "ok")
+        logPhases(phases, note: "ok")
         traffic?.record(tag: trafficTag, request: Self.recordData(prepared.auditRequest),
-                        response: responseRecord(output, reply: try? reply.get()),
+                        response: responseRecord(output, reply: reply),
                         status: output.exitCode == 0 ? 200 : 500,
-                        latencyMs: Self.elapsedMs(since: started), phases: phases)
+                        latencyMs: Self.totalLatencyMs(in: phases), phases: phases)
 
-        return parse(reply: try reply.get(), tools: tools, toolChoice: toolChoice)
+        return response
     }
 
     // MARK: - Audit records
@@ -138,10 +150,6 @@ public struct CLIBrainClient: BrainClient, @unchecked Sendable {
         return Self.recordData(record)
     }
 
-    static func elapsedMs(since started: Date) -> Int {
-        Int(Date().timeIntervalSince(started) * 1000)
-    }
-
     // MARK: - Phase latency
 
     /// The named sub-phase latencies of one turn, in ms, for `brain-traffic.jsonl`. Each interval is
@@ -160,18 +168,28 @@ public struct CLIBrainClient: BrainClient, @unchecked Sendable {
         phases["queuedMs"] = ms(respondEntered, t.instant(.runnerEntered))
         phases["spawnMs"]  = ms(t.instant(.runnerEntered), t.instant(.processLaunched))
         phases["stdinMs"]  = ms(t.instant(.processLaunched), t.instant(.stdinDelivered))
-        phases["ttfbMs"]   = ms(t.instant(.stdinDelivered), t.instant(.firstStdoutByte))
-        phases["outputMs"] = ms(t.instant(.firstStdoutByte), t.instant(.processExited))
-        phases["parseMs"]  = ms(t.instant(.processExited), t.instant(.replyParsed))
-        phases["totalMs"]  = ms(respondEntered, now)
+        phases["firstOutputMs"] = ms(t.instant(.processLaunched), t.instant(.firstStdoutByte))
+        phases["outputMs"]      = ms(t.instant(.firstStdoutByte), t.instant(.processExited))
+        phases["parseMs"]       = ms(t.instant(.processExited), t.instant(.replyParsed))
+        phases["totalMs"]       = ms(respondEntered, now)
         return phases   // assigning nil to a subscript omits the key — absent, not zero
+    }
+
+    static func totalLatencyMs(in phases: [String: Int]) -> Int {
+        guard let total = phases["totalMs"] else {
+            preconditionFailure("a completed phase snapshot always has a total")
+        }
+        return total
     }
 
     /// One concise diagnostic line per turn (raw timing detail belongs in `jarvis-debug.log`, never
     /// Activity). Lists only the phases that were observed, in boundary order.
     func logPhases(_ phases: [String: Int], note: String) {
-        let order = ["queuedMs", "spawnMs", "stdinMs", "ttfbMs", "outputMs", "parseMs", "totalMs"]
+        let order = [
+            "queuedMs", "spawnMs", "stdinMs", "firstOutputMs", "outputMs", "parseMs", "totalMs",
+        ]
         let parts = order.compactMap { key in phases[key].map { "\(key.dropLast(2))=\($0)ms" } }
-        jlog("Jarvis coach: \(provider.rawValue) CLI phases (\(note)) — \(parts.joined(separator: " "))")
+        jlog("Jarvis \(trafficTag): \(provider.rawValue) CLI phases (\(note)) — "
+             + parts.joined(separator: " "))
     }
 }

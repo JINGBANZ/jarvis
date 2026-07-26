@@ -5,6 +5,13 @@ import Testing
 /// loudness of each canonical failure so a regression (e.g. silently downgrading a capture failure, or
 /// making the graceful "them"-socket degrade pop a modal) is caught without a UI session.
 @Suite struct UserFacingErrorCatalogTests {
+    @Test func unconfiguredBrainProviderIsFatal() {
+        let error = UserFacingError.brainProviderNotConfigured
+        #expect(error.severity == .fatal)
+        #expect(error.severity.showsAlert)
+        #expect(error.message.contains("Primary provider"))
+    }
+
     @Test func noAPIKeyIsFatal() {
         #expect(UserFacingError.noAPIKey.severity == .fatal)
         #expect(UserFacingError.noAPIKey.severity.showsAlert)
@@ -68,17 +75,15 @@ import Testing
         #expect(!e.severity.stopsSession)
     }
 
-    @Test func brainCLIRuntimeFailureStopsQuietlyAndKeepsDiagnosticRecoveryDetail() {
-        let e = UserFacingError.brainStopped(
-            provider: "Claude Code",
-            recovery: "Run “claude auth login” in Terminal.",
-            reason: "OAuth session expired"
-        )
+    @Test func exhaustedBrainRouteStopsQuietlyAndKeepsDiagnosticDetail() {
+        let e = UserFacingError.brainRouteExhausted(
+            lastProvider: "Claude Code",
+            reason: "OAuth session expired")
         #expect(e.severity == .terminal)
         #expect(!e.severity.showsAlert)
         #expect(e.severity.stopsSession)
-        #expect(e.title.contains("Claude Code"))
+        #expect(e.title.contains("route exhausted"))
         #expect(e.message.contains("OAuth session expired"))
-        #expect(e.message.contains("claude auth login"))
+        #expect(e.message.contains("Claude Code"))
     }
 }

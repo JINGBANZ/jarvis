@@ -190,6 +190,13 @@ public final class RealtimeTranscriptionLedger: @unchecked Sendable {
         return !items.isEmpty
     }
 
+    /// True only while at least one item has started (or emitted deltas without a start event) and
+    /// has not reached its VAD stop/finalization boundary.
+    public var hasActiveSpeech: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return items.values.contains { !$0.speechStopped }
+    }
+
     public var pendingItemCount: Int {
         lock.lock(); defer { lock.unlock() }
         return items.count

@@ -78,6 +78,57 @@ import Foundation
         #expect(timings.instant(.processExited) != nil)
     }
 
+    @Test func shortLivedStdoutIsOrderedBeforeProcessExit() async throws {
+        // A child can write and exit before FileHandle schedules its readability callback. Repeat
+        // the smallest such process so captured stdout never produces a reversed or missing phase.
+        for _ in 0..<20 {
+            let run = AgentCLIRun(executable: URL(fileURLWithPath: "/bin/sh"),
+                                  arguments: ["-c", "printf ready"], stdin: nil,
+                                  workingDirectory: FileManager.default.temporaryDirectory,
+                                  timeout: 10)
+            let timings = AgentCLIPhaseTimings()
+            let output = try await AgentCLIProcessRunner.run(run, timings: timings)
+            #expect(output.stdout == "ready")
+            let firstOut = try #require(timings.instant(.firstStdoutByte))
+            let exited = try #require(timings.instant(.processExited))
+            #expect(firstOut <= exited)
+        }
+    }
+
+    @Test func stdoutObservedAfterExitIsClampedToTheExitBoundary() throws {
+        let timings = AgentCLIPhaseTimings()
+        let exited = DispatchTime.now().uptimeNanoseconds
+        timings.mark(.firstStdoutByte, at: exited + 1)
+        timings.mark(.processExited, at: exited)
+        #expect(try #require(timings.instant(.firstStdoutByte)) == exited)
+        #expect(try #require(timings.instant(.processExited)) == exited)
+    }
+
+    @Test func stdoutObservedBeforeLaunchReturnsIsClampedToTheLaunchBoundary() throws {
+        let timings = AgentCLIPhaseTimings()
+        let launched = DispatchTime.now().uptimeNanoseconds
+        timings.mark(.firstStdoutByte, at: launched - 1)
+        timings.mark(.processLaunched, at: launched)
+        #expect(try #require(timings.instant(.firstStdoutByte)) == launched)
+        #expect(try #require(timings.instant(.processLaunched)) == launched)
+    }
+
+    @Test func failedStdinWriteDoesNotClaimPromptDelivery() async throws {
+        // Close the child's read end immediately, then make the prompt exceed the pipe buffer so
+        // the parent observes EPIPE instead of reporting delivery from a swallowed write error.
+        let run = AgentCLIRun(executable: URL(fileURLWithPath: "/bin/sh"),
+                              arguments: ["-c", "exec 0<&-; sleep 0.1; exit 2"],
+                              stdin: String(repeating: "x", count: 1_000_000),
+                              workingDirectory: FileManager.default.temporaryDirectory,
+                              timeout: 10)
+        let timings = AgentCLIPhaseTimings()
+        let output = try await AgentCLIProcessRunner.run(run, timings: timings)
+        #expect(output.exitCode == 2)
+        #expect(timings.instant(.processLaunched) != nil)
+        #expect(timings.instant(.stdinDelivered) == nil)
+        #expect(timings.instant(.processExited) != nil)
+    }
+
     @Test func timeoutRetainsPhasesUpToProcessExit() async {
         // The phases observed before the watchdog kill must survive the timeout throw.
         let run = AgentCLIRun(executable: URL(fileURLWithPath: "/bin/sh"),

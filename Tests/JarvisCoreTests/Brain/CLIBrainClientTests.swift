@@ -380,9 +380,13 @@ import Foundation
         }
         _ = try await c.respond(messages: [.user("hi")], tools: coachTools, toolChoice: .required)
         let phases = try #require(try onlyTrafficEntry(in: workDir)["phases"] as? [String: Any])
-        for key in ["queuedMs", "spawnMs", "stdinMs", "ttfbMs", "outputMs", "parseMs", "totalMs"] {
+        for key in [
+            "queuedMs", "spawnMs", "stdinMs", "firstOutputMs", "outputMs", "parseMs", "totalMs",
+        ] {
             #expect(phases[key] is Int, "expected \(key) to be a recorded Int ms")
         }
+        let entry = try onlyTrafficEntry(in: workDir)
+        #expect(entry["ms"] as? Int == phases["totalMs"] as? Int)
     }
 
     @Test func unobservedPhasesAreAbsentNotZero() async throws {
@@ -398,11 +402,27 @@ import Foundation
         }
         _ = try await c.respond(messages: [.user("hi")], tools: coachTools, toolChoice: .required)
         let phases = try #require(try onlyTrafficEntry(in: workDir)["phases"] as? [String: Any])
-        #expect(phases["ttfbMs"] == nil)
+        #expect(phases["firstOutputMs"] == nil)
         #expect(phases["outputMs"] == nil)
         #expect(phases["stdinMs"] is Int)
         #expect(phases["parseMs"] is Int)
         #expect(phases["totalMs"] is Int)
+    }
+
+    @Test func startupOutputBeforeStdinDeliveryStillRecordsFirstOutput() async throws {
+        let workDir = try makeWorkDir()
+        let (c, _) = clientWithTraffic(.claudeCode, workDir: workDir) { _, timings in
+            timings.mark(.runnerEntered)
+            timings.mark(.processLaunched)
+            timings.mark(.firstStdoutByte)  // startup/progress event before the prompt write finishes
+            timings.mark(.stdinDelivered)
+            timings.mark(.processExited)
+            return AgentCLIOutput(stdout: self.claudeEnvelope("ok"), stderr: "", exitCode: 0)
+        }
+        _ = try await c.respond(messages: [.user("hi")], tools: coachTools, toolChoice: .required)
+        let phases = try #require(try onlyTrafficEntry(in: workDir)["phases"] as? [String: Any])
+        #expect(phases["firstOutputMs"] is Int)
+        #expect(phases["stdinMs"] is Int)
     }
 
     @Test func failedRunRecordsPhasesCompletedBeforeTheThrow() async throws {
@@ -422,8 +442,32 @@ import Foundation
         #expect(entry["response"] == nil)
         let phases = try #require(entry["phases"] as? [String: Any])
         #expect(phases["spawnMs"] is Int)       // runnerEntered → processLaunched was observed
-        #expect(phases["ttfbMs"] == nil)         // never reached first output
+        #expect(phases["firstOutputMs"] == nil)  // never reached first output
         #expect(phases["parseMs"] == nil)        // reply was never parsed
+        #expect(phases["totalMs"] is Int)
+    }
+
+    @Test func nonZeroExitRetainsCompletedPhasesButNotParse() async throws {
+        let workDir = try makeWorkDir()
+        let (c, _) = clientWithTraffic(.claudeCode, workDir: workDir) { _, timings in
+            timings.mark(.runnerEntered)
+            timings.mark(.processLaunched)
+            timings.mark(.stdinDelivered)
+            timings.mark(.processExited)
+            return AgentCLIOutput(stdout: "", stderr: "not logged in", exitCode: 2)
+        }
+        await #expect(throws: BrainFailure.self) {
+            _ = try await c.respond(messages: [.user("x")], tools: coachTools,
+                                    toolChoice: .required)
+        }
+        let entry = try onlyTrafficEntry(in: workDir)
+        #expect(entry["status"] as? Int == 500)
+        #expect((entry["error"] as? String)?.contains("not logged in") == true)
+        let phases = try #require(entry["phases"] as? [String: Any])
+        #expect(phases["spawnMs"] is Int)
+        #expect(phases["stdinMs"] is Int)
+        #expect(phases["firstOutputMs"] == nil)
+        #expect(phases["parseMs"] == nil)
         #expect(phases["totalMs"] is Int)
     }
 
@@ -443,7 +487,7 @@ import Foundation
                                            toolChoice: .required)
         #expect(response.toolCalls.isEmpty)
         let phases = try #require(try onlyTrafficEntry(in: workDir)["phases"] as? [String: Any])
-        #expect(phases["ttfbMs"] is Int)
+        #expect(phases["firstOutputMs"] is Int)
         #expect(phases["parseMs"] is Int)
         #expect(phases["totalMs"] is Int)
     }
