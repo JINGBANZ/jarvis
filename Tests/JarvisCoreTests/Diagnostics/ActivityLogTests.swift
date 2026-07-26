@@ -13,6 +13,9 @@ import Foundation
         #expect(ActivityLog.cssClass(for: "… nothing useful to add, staying silent") == "think")
         #expect(ActivityLog.cssClass(for: "🧠 brain switch applied — OpenAI API → Claude Code") == "think")
         #expect(ActivityLog.cssClass(for: "⏹ coaching stopped — Claude Code couldn't respond") == "think")
+        #expect(ActivityLog.cssClass(for: "⏹ session ended by user") == "think")
+        #expect(ActivityLog.cssClass(
+            for: "⏹ session ended by error — check jarvis-debug.log") == "err")
         #expect(ActivityLog.cssClass(for: "Jarvis realtime error event: oops") == "err")
         #expect(ActivityLog.cssClass(for: "Jarvis: coaching started.") == "")
         // A spoken tip can legitimately contain "failed"; it must stay a 💬 say line.
@@ -66,13 +69,13 @@ import Foundation
         let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         let log = ActivityLog(); log.enable(directory: dir)
 
-        log.record(.coachingStopped(provider: .codexCLI))
+        log.record(.sessionEnded(reason: .stoppedByUser))
         log.flush()
 
         let jsonl = try String(
             contentsOf: dir.appendingPathComponent(ActivityLog.filename), encoding: .utf8)
-        #expect(jsonl.contains(#""k":"coachingStopped""#)
-            || jsonl.contains(#""k": "coachingStopped""#))
+        #expect(jsonl.contains(#""k":"sessionEnded""#)
+            || jsonl.contains(#""k": "sessionEnded""#))
     }
 
     @Test func attachSnapshotReplaysExistingEntriesWithImageBytes() throws {
@@ -141,23 +144,6 @@ import Foundation
         ))
     }
 
-    @Test func coachingStoppedPersistsOnlyADiscreetHumanFacingNotice() throws {
-        let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
-        let log = ActivityLog(); log.enable(directory: dir)
-        log.record(.coachingStopped(provider: .claudeCode))
-        let snapshot = log.attach { _ in }
-
-        let row = try #require(snapshot.rows.first)
-        #expect(row.contains("coaching stopped"))
-        #expect(row.contains("Claude Code"))
-        #expect(row.contains("Settings"))
-        #expect(!row.contains("OAuth"))
-        #expect(ActivityLog.isHumanFacing(
-            message: "⏹ coaching stopped — Claude Code couldn't respond; check Settings → Brain",
-            imageFile: nil
-        ))
-    }
-
     @Test func temporaryBrainFailureSaysListeningContinuesWithoutDiagnosticDetail() throws {
         let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         let log = ActivityLog(); log.enable(directory: dir)
@@ -204,18 +190,15 @@ import Foundation
         log.record(.brainRouteAdvanced(previous: .openAI, current: .claudeCode))
         log.record(.brainRouteAdvanced(previous: .claudeCode, current: .claudeCode))
         log.record(.brainRouteTargetSkipped(provider: .codexCLI))
-        log.record(.brainRouteExhausted(lastProvider: .claudeCode))
         let snapshot = log.attach { _ in }
 
-        #expect(snapshot.rows.count == 4)
+        #expect(snapshot.rows.count == 3)
         #expect(snapshot.rows[0].contains(
             "OpenAI API couldn't respond — continuing on Claude Code"))
         #expect(snapshot.rows[1].contains(
             "Claude Code target couldn't respond — continuing with the next Claude Code model"))
         #expect(snapshot.rows[2].contains(
             "Codex CLI target is unavailable — skipping it"))
-        #expect(snapshot.rows[3].contains(
-            "coaching stopped — all configured provider targets were exhausted; last target: Claude Code"))
         #expect(!snapshot.rows.joined().contains("timeout"))
         #expect(!snapshot.rows.joined().contains("OAuth"))
         #expect(!snapshot.rows.joined().contains("token"))
@@ -231,25 +214,24 @@ import Foundation
             ActivityLog.EventKind.brainRouteAdvanced.rawValue,
             ActivityLog.EventKind.brainRouteAdvanced.rawValue,
             ActivityLog.EventKind.brainRouteTargetSkipped.rawValue,
-            ActivityLog.EventKind.brainRouteExhausted.rawValue,
         ])
     }
 
     @Test func runtimeFailureNoticesStayFixedAndDiagnosticFree() throws {
         let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         let log = ActivityLog(); log.enable(directory: dir)
-        log.record(.transcriptionStopped(reason: .connectionLost))
-        log.record(.transcriptionStopped(reason: .quotaExceeded))
-        log.record(.transcriptionStopped(reason: .authenticationFailed))
-        log.record(.transcriptionStopped(reason: .accessDenied))
-        log.record(.transcriptionStopped(reason: .configurationRejected))
-        log.record(.audioCaptureStopped)
+        log.record(.sessionEnded(reason: .transcriptionStopped(reason: .connectionLost)))
+        log.record(.sessionEnded(reason: .transcriptionStopped(reason: .quotaExceeded)))
+        log.record(.sessionEnded(reason: .transcriptionStopped(reason: .authenticationFailed)))
+        log.record(.sessionEnded(reason: .transcriptionStopped(reason: .accessDenied)))
+        log.record(.sessionEnded(reason: .transcriptionStopped(reason: .configurationRejected)))
+        log.record(.sessionEnded(reason: .audioCaptureUnavailable))
         log.record(.systemAudioStopped)
         log.record(.settingsChangeNotApplied)
         let snapshot = log.attach { _ in }
 
         #expect(snapshot.rows.count == 8)
-        #expect(snapshot.rows[0].contains("session failed"))
+        #expect(snapshot.rows[0].contains("session ended by error"))
         #expect(snapshot.rows[0].contains("transcription connection was lost"))
         #expect(snapshot.rows[1].contains("API quota is exhausted"))
         #expect(snapshot.rows[1].contains("billing"))
@@ -269,11 +251,59 @@ import Foundation
             imageFile: nil
         ))
         #expect(ActivityLog.isHumanFacing(
-            message: "⏹ session failed — the OpenAI API quota is exhausted; check billing",
+            message: "⏹ session ended by error — the OpenAI API quota is exhausted; check billing",
             imageFile: nil
         ))
         #expect(ActivityLog.isHumanFacing(
             message: "⚠️ settings change wasn't applied — current coaching session continues; check Settings → Brain",
+            imageFile: nil
+        ))
+    }
+
+    @Test func sessionEndReasonsAreExplicitSanitizedAndStable() throws {
+        let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
+        let log = ActivityLog(); log.enable(directory: dir)
+        let reasons: [SessionEndReason] = [
+            .stoppedByUser,
+            .applicationQuit,
+            .replacedByNewSession,
+            .openAIAPIKeyMissing,
+            .brainProviderNotConfigured,
+            .brainRouteExhausted(lastProvider: .claudeCode),
+            .transcriptionStopped(reason: .quotaExceeded),
+            .audioCaptureUnavailable,
+            .unexpectedError,
+        ]
+        for reason in reasons {
+            log.record(.sessionEnded(reason: reason))
+        }
+        let snapshot = log.attach { _ in }
+
+        #expect(snapshot.rows.count == reasons.count)
+        #expect(snapshot.rows[0].contains("session ended by user"))
+        #expect(snapshot.rows[1].contains("session ended because Jarvis quit"))
+        #expect(snapshot.rows[2].contains("session ended because a new session started"))
+        #expect(snapshot.rows[3].contains("API key is missing"))
+        #expect(snapshot.rows[4].contains("no Primary brain provider"))
+        #expect(snapshot.rows[5].contains("last target: Claude Code"))
+        #expect(snapshot.rows[6].contains("API quota is exhausted"))
+        #expect(snapshot.rows[7].contains("audio capture became unavailable"))
+        #expect(snapshot.rows[8].contains("check jarvis-debug.log"))
+        #expect(!snapshot.rows.joined().contains("OAuth"))
+        #expect(!snapshot.rows.joined().contains("AirPods"))
+        #expect(!snapshot.rows.joined().contains("item_"))
+
+        let jsonl = try String(
+            contentsOf: dir.appendingPathComponent(ActivityLog.filename), encoding: .utf8)
+        let kinds = try jsonl.split(separator: "\n").map { line in
+            let value = try #require(
+                try JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any])
+            return value["k"] as? String
+        }
+        #expect(kinds == Array(repeating: ActivityLog.EventKind.sessionEnded.rawValue,
+                              count: reasons.count))
+        #expect(ActivityLog.isHumanFacing(
+            message: "⏹ session ended by user",
             imageFile: nil
         ))
     }

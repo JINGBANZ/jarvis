@@ -42,10 +42,15 @@ public struct UserFacingError: Error, Sendable, Equatable {
     public let title: String
     public let message: String
     public let severity: Severity
+    /// The fixed Activity reason used if this error ends a live session. Raw `message` detail is
+    /// intentionally separate and remains available only to the debug log and permitted startup UI.
+    public let sessionEndReason: SessionEndReason?
 
-    public init(title: String, message: String, severity: Severity) {
+    public init(title: String, message: String, severity: Severity,
+                sessionEndReason: SessionEndReason? = nil) {
         self.title = title
         self.message = message
         self.severity = severity
+        self.sessionEndReason = sessionEndReason
     }
 }

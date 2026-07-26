@@ -2,10 +2,10 @@ import Foundation
 
 /// The model behind the human-facing activity viewer. It records the coaching exchange — heard
 /// speech, manual hint requests, every brain action (screen view, tip, or deliberate silence), and
-/// fixed non-sensitive notices when a brain change succeeds, a route advances, degrades, or stops. It
-/// pushes those entries into an in-app `WKWebView` window (see `ActivityViewer` in JarvisApp) and
-/// persists them so past sessions can be browsed later. Detailed diagnostics belong exclusively in
-/// `JarvisLog`.
+/// fixed non-sensitive notices when a brain change succeeds, a route advances, degrades, or stops,
+/// and one typed reason whenever the live session ends. It pushes those entries into an in-app
+/// `WKWebView` window (see `ActivityViewer` in JarvisApp) and persists them so past sessions can be
+/// browsed later. Detailed diagnostics belong exclusively in `JarvisLog`.
 ///
 /// This type is UI-free (Foundation only): it generates the page HTML and the per-row JS as plain
 /// strings; the WebView lives in JarvisApp. See wiki/build-and-run.md.
@@ -22,9 +22,13 @@ public final class ActivityLog: @unchecked Sendable {
         case screenViewFailed
         case tip
         case stayedSilent
+        case sessionEnded
+        /// Retained so logs written before session teardown was unified remain decodable.
         case coachingStopped
         case coachingTurnFailed
+        /// Retained so logs written before session teardown was unified remain decodable.
         case transcriptionStopped
+        /// Retained so logs written before session teardown was unified remain decodable.
         case audioCaptureStopped
         case systemAudioStopped
         case settingsChangeNotApplied
@@ -33,6 +37,7 @@ public final class ActivityLog: @unchecked Sendable {
         case brainFallback
         case brainRouteAdvanced
         case brainRouteTargetSkipped
+        /// Retained so logs written before session teardown was unified remain decodable.
         case brainRouteExhausted
     }
 
@@ -53,19 +58,12 @@ public final class ActivityLog: @unchecked Sendable {
         case tip(lines: [String])
         /// The brain explicitly chose `stay_silent` for this turn.
         case stayedSilent
-        /// Coaching ended because the selected brain could not respond. Carries only the provider,
-        /// never the raw error, so the notice cannot expose provider diagnostics during screen
-        /// sharing.
-        case coachingStopped(provider: BrainProvider)
+        /// The single terminal lifecycle event for a live coaching session. The reason is a closed,
+        /// sanitized set so raw errors cannot leak into Activity.
+        case sessionEnded(reason: SessionEndReason)
         /// One coaching turn failed temporarily while capture and transcription remain live. The
         /// provider identity is enough for fixed recovery copy; raw error detail stays in debug.
         case coachingTurnFailed(provider: BrainProvider)
-        /// The session ended because transcription became unusable. Carries a fixed, typed reason;
-        /// raw provider and transport details remain exclusively in diagnostics.
-        case transcriptionStopped(reason: TranscriptionFailureReason)
-        /// Coaching ended because the running audio capture became unavailable. No device or route
-        /// detail is carried; the fixed copy points to diagnostics.
-        case audioCaptureStopped
         /// The secondary system-audio transcription stopped while microphone coaching continued.
         case systemAudioStopped
         /// An explicit Settings reapply failed its preflight while the existing session continued.
@@ -78,8 +76,6 @@ public final class ActivityLog: @unchecked Sendable {
         case brainRouteAdvanced(previous: BrainProvider, current: BrainProvider)
         /// A route target was proven unavailable before a provider request could be constructed.
         case brainRouteTargetSkipped(provider: BrainProvider)
-        /// Every user-authorized target was exhausted, so coaching stopped.
-        case brainRouteExhausted(lastProvider: BrainProvider)
 
         var kind: EventKind {
             switch self {
@@ -89,16 +85,13 @@ public final class ActivityLog: @unchecked Sendable {
             case .screenViewFailed: .screenViewFailed
             case .tip: .tip
             case .stayedSilent: .stayedSilent
-            case .coachingStopped: .coachingStopped
+            case .sessionEnded: .sessionEnded
             case .coachingTurnFailed: .coachingTurnFailed
-            case .transcriptionStopped: .transcriptionStopped
-            case .audioCaptureStopped: .audioCaptureStopped
             case .systemAudioStopped: .systemAudioStopped
             case .settingsChangeNotApplied: .settingsChangeNotApplied
             case .brainChangeApplied: .brainChangeApplied
             case .brainRouteAdvanced: .brainRouteAdvanced
             case .brainRouteTargetSkipped: .brainRouteTargetSkipped
-            case .brainRouteExhausted: .brainRouteExhausted
             }
         }
     }
@@ -202,17 +195,11 @@ public final class ActivityLog: @unchecked Sendable {
         case .stayedSilent:
             message = "🤫 stayed silent — nothing useful to add"
             imageBase64 = nil
-        case .coachingStopped(let provider):
-            message = "⏹ coaching stopped — \(provider.displayName) couldn't respond; check Settings → Brain"
+        case .sessionEnded(let reason):
+            message = "⏹ \(reason.activityMessage)"
             imageBase64 = nil
         case .coachingTurnFailed(let provider):
             message = "⚠️ \(provider.displayName) couldn't respond this turn — listening continues"
-            imageBase64 = nil
-        case .transcriptionStopped(let reason):
-            message = "⏹ session failed — \(reason.activityDescription)"
-            imageBase64 = nil
-        case .audioCaptureStopped:
-            message = "⏹ coaching stopped — audio capture became unavailable; check jarvis-debug.log"
             imageBase64 = nil
         case .systemAudioStopped:
             message = "⚠️ system audio stopped — microphone coaching continues; check jarvis-debug.log"
@@ -236,9 +223,6 @@ public final class ActivityLog: @unchecked Sendable {
             imageBase64 = nil
         case .brainRouteTargetSkipped(let provider):
             message = "⚠️ \(provider.displayName) target is unavailable — skipping it"
-            imageBase64 = nil
-        case .brainRouteExhausted(let provider):
-            message = "⏹ coaching stopped — all configured provider targets were exhausted; last target: \(provider.displayName)"
             imageBase64 = nil
         }
         queue.async { [self] in
@@ -338,7 +322,8 @@ public final class ActivityLog: @unchecked Sendable {
         if m.hasPrefix("🗣") || m.hasPrefix("🤫 quiet") { return "hear" }
         if m.hasPrefix("🤫 stayed silent") || m.hasPrefix("💭") || m.hasPrefix("…") { return "think" }
         if m.hasPrefix("🧠") { return "think" }
-        if m.hasPrefix("⏹ coaching stopped") { return "think" }
+        if m.hasPrefix("⏹ session ended by error") { return "err" }
+        if m.hasPrefix("⏹ coaching stopped") || m.hasPrefix("⏹ session ended") { return "think" }
         if m.hasPrefix("⚠️") { return "think" }
         let low = m.lowercased()
         if low.contains("error") || low.contains("failed") || low.contains("denied") { return "err" }
@@ -362,6 +347,7 @@ public final class ActivityLog: @unchecked Sendable {
             || m.hasPrefix("💬") || m.hasPrefix("🤫 stayed silent")
             || m.hasPrefix("⏹ coaching stopped")
             || m.hasPrefix("⏹ session failed")
+            || m.hasPrefix("⏹ session ended")
             || (m.hasPrefix("⚠️") && m.contains("couldn't respond this turn")
                 && m.hasSuffix("listening continues"))
             || m.hasPrefix("⚠️ system audio stopped")

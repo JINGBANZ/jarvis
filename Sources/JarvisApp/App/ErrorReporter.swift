@@ -14,7 +14,7 @@ import JarvisCore
 final class ErrorReporter {
     /// Invoked for an error whose severity stops the session (on the main actor), correcting the
     /// menu without requiring a modal alert. Wired by `AppDelegate` once the menu bar exists.
-    var onFatal: (() -> Void)?
+    var onFatal: ((SessionEndReason) -> Void)?
 
     nonisolated func report(_ error: UserFacingError,
                             context: UserFacingError.PresentationContext) {
@@ -32,7 +32,9 @@ final class ErrorReporter {
     private func present(_ error: UserFacingError,
                          context: UserFacingError.PresentationContext) {
         jlog("Jarvis: \(error.severity) — \(error.title): \(error.message)")  // diagnostics still go to JarvisLog
-        if error.severity.stopsSession { onFatal?() }
+        if error.severity.stopsSession {
+            onFatal?(error.sessionEndReason ?? .unexpectedError)
+        }
         guard error.severity.showsAlert(in: context) else { return }
         NSApp.activate(ignoringOtherApps: true) // ghost-mode-allowed: explicit startup failure
         let alert = NSAlert() // ghost-mode-allowed: explicit startup failure

@@ -42,5 +42,6 @@ import Testing
         #expect(e.title == "T")
         #expect(e.message == "M")
         #expect(e.severity == .fatal)
+        #expect(e.sessionEndReason == nil)
     }
 }

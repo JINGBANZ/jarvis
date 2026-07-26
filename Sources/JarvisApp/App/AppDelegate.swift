@@ -153,11 +153,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // The menu drives the pipeline lifecycle. Jarvis does NOT auto-start; the user presses Start.
         menuBar.onStart = { [weak self] in self?.start() ?? false }
-        menuBar.onStop = { [weak self] in self?.stop() }
+        menuBar.onStop = { [weak self] in self?.stop(reason: .stoppedByUser) }
 
         // A fatal error tears the session down and corrects the menu — one place owns that.
-        errorReporter.onFatal = { [weak self] in
-            self?.stop()
+        errorReporter.onFatal = { [weak self] reason in
+            self?.stop(reason: reason)
         }
 
         // Global hint hotkey: while a session is running, screenshot + ask the brain for a hint in one
@@ -180,6 +180,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         activityViewer?.cancelEvaluation()
+        stop(reason: .applicationQuit)
     }
 
     /// The two clients that move together with one provider/model route target.
@@ -334,11 +335,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     jlog("Jarvis: ignoring route exhaustion from a stopped or superseded session.")
                     return
                 }
-                ActivityLog.shared.record(
-                    .brainRouteExhausted(lastProvider: target.provider))
                 errorReporter.reportImmediately(
                     .brainRouteExhausted(
-                        lastProvider: target.provider.displayName,
+                        lastProvider: target.provider,
                         reason: failure.detail),
                     context: .runtime)
             })
@@ -521,7 +520,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let primaryCLI = preflight.cli {
             detectedCLIs[brainProvider] = primaryCLI
         }
-        stop() // tear down any existing pipeline so we start cleanly
+        stop(reason: .replacedByNewSession) // tear down any existing pipeline so we start cleanly
         reportedTranscriptionFailure = false
         // A fresh transcript for the fresh pipeline. Reusing the old one would re-send a dead run's
         // lines as "new since last turn" — their [mm:ss] stamps minted against the previous
@@ -654,7 +653,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let capture else { return }
             Task { @MainActor [weak self] in
                 guard let self, self.aggregateCapture === capture else { return }
-                ActivityLog.shared.record(.audioCaptureStopped)
                 self.errorReporter.reportImmediately(
                     .captureStopped(reason: reason), context: .runtime)
             }
@@ -693,10 +691,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         transcriber.connect()
         themTranscriber.connect()
         if let reason = capture.start() {
-            stop()                      // tear down the sockets we just opened
-            if reportContext == .runtime {
-                ActivityLog.shared.record(.audioCaptureStopped)
-            }
             errorReporter.reportImmediately(
                 .captureFailed(reason: reason), context: reportContext)
             return false
@@ -712,7 +706,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// transcribers must go: otherwise a turn-end trigger from a still-live socket could drive a
     /// coaching turn on a torn-down driver — the exact "speak after Stop" failure the turns box exists
     /// to prevent — and a subsequent Start would leak the orphaned IOProc/sockets.
-    private func stop() {
+    private func stop(reason: SessionEndReason) {
         pendingStartRevision &+= 1
         pendingStartTask?.cancel()
         pendingStartTask = nil
@@ -735,7 +729,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         systemConnectionState = .stopped
         reportedCoachingReady = false
         menuBar?.setState(.stopped)
-        if wasRunning { jlog("Jarvis: stopped.") }
+        if wasRunning {
+            jlog("Jarvis: stopped.")
+            ActivityLog.shared.record(.sessionEnded(reason: reason))
+        }
         // Activity writes are asynchronous during live capture. Persist every fixed failure outcome
         // before this session can become evaluable, or an immediate Evaluate could miss why it ended.
         ActivityLog.shared.flush()
@@ -760,7 +757,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func reportTranscriptionFailure(_ reason: TranscriptionFailureReason) {
         guard !reportedTranscriptionFailure, transcriber != nil || themTranscriber != nil else { return }
         reportedTranscriptionFailure = true
-        ActivityLog.shared.record(.transcriptionStopped(reason: reason))
         // This method already runs on the main actor after checking the emitting transcriber's
         // identity. Deliver synchronously so Stop → Start cannot slip between that check and the
         // terminal lifecycle consequence and let a stale failure stop the replacement session.

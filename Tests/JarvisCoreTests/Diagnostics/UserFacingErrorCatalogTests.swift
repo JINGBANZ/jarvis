@@ -10,11 +10,13 @@ import Testing
         #expect(error.severity == .fatal)
         #expect(error.severity.showsAlert)
         #expect(error.message.contains("Primary provider"))
+        #expect(error.sessionEndReason == .brainProviderNotConfigured)
     }
 
     @Test func noAPIKeyIsFatal() {
         #expect(UserFacingError.noAPIKey.severity == .fatal)
         #expect(UserFacingError.noAPIKey.severity.showsAlert)
+        #expect(UserFacingError.noAPIKey.sessionEndReason == .openAIAPIKeyMissing)
     }
 
     @Test func captureFailedIsFatalAndCarriesReason() {
@@ -22,6 +24,7 @@ import Testing
         #expect(e.severity == .fatal)
         #expect(e.severity.stopsSession)
         #expect(e.message.contains("no input device"))
+        #expect(e.sessionEndReason == .audioCaptureUnavailable)
     }
 
     @Test func runtimeCaptureFailureStopsQuietlyAndCarriesReason() {
@@ -30,6 +33,7 @@ import Testing
         #expect(e.severity.stopsSession)
         #expect(!e.severity.showsAlert)
         #expect(e.message.contains("route disappeared"))
+        #expect(e.sessionEndReason == .audioCaptureUnavailable)
     }
 
     @Test func transcriptionStoppedIsTerminal() {
@@ -39,6 +43,7 @@ import Testing
             #expect(error.severity.stopsSession)
             #expect(!error.severity.showsAlert)
             #expect(error.message.contains(reason.activityDescription))
+            #expect(error.sessionEndReason == .transcriptionStopped(reason: reason))
         }
     }
 
@@ -77,7 +82,7 @@ import Testing
 
     @Test func exhaustedBrainRouteStopsQuietlyAndKeepsDiagnosticDetail() {
         let e = UserFacingError.brainRouteExhausted(
-            lastProvider: "Claude Code",
+            lastProvider: .claudeCode,
             reason: "OAuth session expired")
         #expect(e.severity == .terminal)
         #expect(!e.severity.showsAlert)
@@ -85,5 +90,6 @@ import Testing
         #expect(e.title.contains("route exhausted"))
         #expect(e.message.contains("OAuth session expired"))
         #expect(e.message.contains("Claude Code"))
+        #expect(e.sessionEndReason == .brainRouteExhausted(lastProvider: .claudeCode))
     }
 }
