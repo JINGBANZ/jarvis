@@ -46,8 +46,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// only when the replacement route actually selects its first target for a fresh attempt.
     private var activeBrainTarget: BrainTarget?
     private var pendingBrainChangeFrom: BrainTarget?
-    /// Invalidates a slower CLI probe when the user saves another transcription key first.
-    private var savedAPIKeyRevision: UInt = 0
     /// A Start that is still discovering local CLIs. Stop or a newer Start cancels it before the
     /// prepared runtime can be installed on the main actor.
     private var pendingStartTask: Task<Void, Never>?
@@ -135,8 +133,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         brainSection = BrainSection(
             preferences: brainPreferences,
             detector: AgentCLIDetector(),
-            onPreferencesChanged: { [weak self] clis in
-                self?.applyBrainPreferencesToRunningSession(detectedCLIs: clis)
+            onPreferencesChanged: { [weak self] change, clis in
+                self?.applyBrainPreferencesToRunningSession(
+                    detectedCLIs: clis,
+                    update: change == .topology ? .topologyEdit : .effortEdit)
             },
             keyStore: secretFile,
             onKeySaved: { [weak self] key in
@@ -345,16 +345,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private enum RunningBrainUpdate: Equatable {
-        case settingsEdit
+        case topologyEdit
+        case effortEdit
         case credentialRefresh
     }
 
-    /// Apply provider/model/effort changes without touching capture, transcription, history, or the
-    /// session directory. An in-flight turn finishes on its old snapshot; the next turn uses this.
+    /// Apply provider/model topology or effort changes without touching capture, transcription,
+    /// history, or the session directory. An in-flight turn finishes on its old client snapshot.
     private func applyBrainPreferencesToRunningSession(
         detectedCLIs: [BrainProvider: DetectedAgentCLI]?,
         apiKeyOverride: String? = nil,
-        update: RunningBrainUpdate = .settingsEdit
+        update: RunningBrainUpdate
     ) {
         guard let coachDriver, transcriber != nil, let sessionDirectory = currentSessionDir else {
             return
@@ -371,7 +372,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let provider = route.primary.provider
         var readyCLIs = detectedCLIs ?? [:]
-        if update == .settingsEdit {
+        if update == .topologyEdit {
             let preflight = preflightBrainProvider(
                 provider, detectedCLI: detectedCLIs?[provider], context: .runtime,
                                                    recordSettingsFailure: true)
@@ -387,7 +388,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             effort: brainPreferences.effort,
             sessionDirectory: sessionDirectory)
         switch update {
-        case .settingsEdit:
+        case .topologyEdit:
             if pendingBrainChangeFrom == nil {
                 pendingBrainChangeFrom = activeBrainTarget
             }
@@ -395,8 +396,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let model = route.primary.model ?? BrainModelCatalog.defaultModel(for: provider)
             jlog("Jarvis: brain settings will apply on the next turn — \(provider.displayName), "
                  + "\(model.displayName), \(brainPreferences.effort.displayName) effort.")
+        case .effortEdit:
+            if pendingBrainChangeFrom == nil {
+                pendingBrainChangeFrom = activeBrainTarget
+            }
+            guard coachDriver.reconfigureBrainRouteClients(configuredRoute) else {
+                jlog("Jarvis: skipped stale effort refresh after the route topology changed.")
+                return
+            }
+            jlog("Jarvis: reasoning effort will apply on the next coaching attempt.")
         case .credentialRefresh:
-            guard coachDriver.refreshBrainRouteClients(configuredRoute) else {
+            guard coachDriver.refreshBrainRouteClients(configuredRoute, for: [.openAI]) else {
                 jlog("Jarvis: skipped stale API-key brain refresh after the route topology changed.")
                 return
             }
@@ -417,25 +427,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             jlog("Jarvis: saved API key will apply to future Realtime connections.")
             return
         }
-        savedAPIKeyRevision &+= 1
-        let revision = savedAPIKeyRevision
-        let sessionDirectory = currentSessionDir
-        let detector = AgentCLIDetector()
-        Task { [weak self] in
-            let detected = await detector.detectAllAsync()
-            guard let self,
-                  self.savedAPIKeyRevision == revision,
-                  self.currentSessionDir == sessionDirectory,
-                  self.coachDriver != nil else {
-                return
-            }
-            let detectedCLIs = Dictionary(
-                uniqueKeysWithValues: detected.map { ($0.provider, $0) })
-            self.applyBrainPreferencesToRunningSession(
-                detectedCLIs: detectedCLIs,
-                apiKeyOverride: key,
-                update: .credentialRefresh)
-        }
+        applyBrainPreferencesToRunningSession(
+            detectedCLIs: nil,
+            apiKeyOverride: key,
+            update: .credentialRefresh)
     }
 
     /// Validate a Start immediately, then prepare any local-CLI targets away from the main actor.
@@ -469,7 +464,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let revision = pendingStartRevision
         pendingStartTask?.cancel()
         pendingStartTask = nil
-        let cliProviders = Set(brainRoute.targets.map(\.provider)).filter(\.usesLocalCLI)
+        let cliProviders = brainRoute.targets.map(\.provider).filter(\.usesLocalCLI)
         guard !cliProviders.isEmpty else {
             return installPreparedStart(
                 apiKey: key,
@@ -482,7 +477,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menuBar.setState(.starting)
         let detector = AgentCLIDetector()
         pendingStartTask = Task { [weak self] in
-            let detected = await detector.detectAllAsync()
+            let detected = await detector.detectAllAsync(cliProviders)
             guard let self, !Task.isCancelled,
                   self.pendingStartRevision == revision else {
                 return

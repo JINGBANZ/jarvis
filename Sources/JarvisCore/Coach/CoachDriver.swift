@@ -28,8 +28,8 @@ public final class CoachDriver: @unchecked Sendable {
 
     private let stateLock = NSLock()
     private var routeRevision: UInt = 0
-    /// Advances only when an explicit Settings edit replaces route topology. Client refreshes use
-    /// `routeRevision` for stale attempt gating but must not supersede committed route health.
+    /// Advances only when an explicit Settings edit replaces route topology. Credential refreshes
+    /// use `routeRevision` for stale attempt gating but must not supersede committed route health.
     private var routeTopologyRevision: UInt = 0
     private var configuredRoute: ConfiguredBrainRoute
     private var routeSession: BrainRouteSession
@@ -38,7 +38,7 @@ public final class CoachDriver: @unchecked Sendable {
     private var pendingTransitionOrigin: BrainTarget?
     private var routeIsExhausted = false
     /// A committed terminal transition owns one delivery token independent of client revisions.
-    /// Same-topology credential refreshes preserve it; an explicit replacement route clears it.
+    /// Same-topology client changes preserve it; an explicit replacement route clears it.
     private var exhaustionDeliveryGeneration: UInt = 0
     private var pendingExhaustionDeliveryGeneration: UInt?
     private var isHandling = false
@@ -158,20 +158,60 @@ public final class CoachDriver: @unchecked Sendable {
         stateLock.unlock()
     }
 
-    /// Replace runtime clients for the same ordered route without changing session-local health.
+    /// Refresh credential-bound clients for the same ordered route without changing session-local
+    /// health.
     ///
-    /// Credential refreshes use this boundary: an in-flight attempt keeps its old client snapshot,
-    /// while the next attempt uses the replacement clients at the same forward-only cursor and
-    /// failure count. A topology change belongs to `updateBrainRoute(_:)` because only an explicit
-    /// Settings edit may restart route selection.
+    /// An in-flight attempt keeps its old client snapshot. Its failure is ignored because it belongs
+    /// to the superseded credential, while its terminal success still resets route health. The next
+    /// attempt uses replacement clients at the same forward-only cursor and failure count. When
+    /// `providers` is supplied, clients for every other provider stay intact and an in-flight
+    /// attempt on one of those providers keeps normal success/failure accounting.
     @discardableResult
-    public func refreshBrainRouteClients(_ route: ConfiguredBrainRoute) -> Bool {
+    public func refreshBrainRouteClients(
+        _ route: ConfiguredBrainRoute,
+        for providers: Set<BrainProvider>? = nil
+    ) -> Bool {
         stateLock.lock()
         defer { stateLock.unlock() }
         guard configuredRoute.targets.map(\.target) == route.targets.map(\.target) else {
             return false
         }
-        routeRevision &+= 1
+        let refreshesActiveTarget = providers.map {
+            $0.contains(configuredRoute.targets[routeSession.activeIndex].target.provider)
+        } ?? true
+        if refreshesActiveTarget {
+            routeRevision &+= 1
+        }
+        let targets: [ConfiguredBrainTarget]
+        if let providers {
+            targets = zip(configuredRoute.targets, route.targets).map { current, replacement in
+                providers.contains(replacement.target.provider) ? replacement : current
+            }
+        } else {
+            targets = route.targets
+        }
+        configuredRoute = ConfiguredBrainRoute(
+            targets: targets,
+            onSelected: route.onSelected,
+            onAdvanced: route.onAdvanced,
+            onSkipped: route.onSkipped,
+            onExhausted: route.onExhausted)
+        return true
+    }
+
+    /// Reconfigure clients for a non-topology Settings edit without changing route health or
+    /// invalidating the attempt already in flight.
+    ///
+    /// Reasoning-effort changes use this boundary. The current attempt remains a valid attempt on
+    /// the same target: its terminal success resets the failure sequence and its failure counts
+    /// normally. Only a target identity/order change belongs to `updateBrainRoute(_:)`.
+    @discardableResult
+    public func reconfigureBrainRouteClients(_ route: ConfiguredBrainRoute) -> Bool {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        guard configuredRoute.targets.map(\.target) == route.targets.map(\.target) else {
+            return false
+        }
         configuredRoute = route
         return true
     }

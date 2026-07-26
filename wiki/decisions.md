@@ -751,3 +751,25 @@
   [settings-window.md → Brain](./settings-window.md#brain),
   `Sources/JarvisCore/Coach/CoachDriver.swift`,
   `Sources/JarvisCore/Config/BrainPreferences.swift`.
+
+### 2026-07-26 — Live route health is scoped to target topology
+
+- **Chose:** Reset the live route cursor and failure counts only when a Settings edit changes the
+  ordered provider/model targets. A reasoning-effort edit rebuilds clients at the same topology
+  without invalidating the in-flight attempt, so that attempt's success or failure still updates
+  health normally. Saving the transcription API key refreshes only OpenAI target clients: an
+  in-flight old-key OpenAI failure is stale, while an unaffected CLI attempt remains authoritative.
+  Both same-topology paths preserve the forward-only cursor and accumulated failure counts.
+- **Why:** Reasoning effort and credentials change how an existing target is invoked, not which
+  target the user authorized or where runtime failover has progressed. Treating either as a fresh
+  route could silently jump from a working fallback back to primary; treating an effort edit like a
+  credential replacement could also erase a valid provider failure already in flight. Provider-
+  scoped key refresh avoids probing or replacing unrelated CLIs.
+- **Rejected:** (a) Resetting route health for every Brain Settings edit — it makes a presentation
+  preference a routing command. (b) Invalidating every in-flight outcome after any client rebuild —
+  effort does not make the current target or credential stale. (c) Probing all installed CLIs when
+  only OpenAI credentials changed — unrelated local subprocess work cannot improve that refresh.
+- **Detail:** [architecture.md → Ordered provider route](./architecture.md#ordered-provider-route),
+  `Sources/JarvisCore/Coach/CoachDriver.swift`,
+  `Sources/JarvisApp/App/AppDelegate.swift`,
+  `Sources/JarvisCore/Brain/AgentCLIDetector.swift`.

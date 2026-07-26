@@ -784,6 +784,113 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(refreshedFallback.calls.count == 1)
     }
 
+    @Test func reconfiguringRouteClientsPreservesFallbackCursor() async {
+        let primaryTarget = BrainTarget(provider: .claudeCode, modelID: "sonnet")
+        let fallbackTarget = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
+        let primary = ThrowingBrain(error: BrainFailure(
+            disposition: .permanent,
+            detail: "primary permanently failed"))
+        let originalFallback = ScriptedBrain(script: [
+            .init(toolCalls: [.staySilent(callId: "original-fallback")]),
+        ])
+        let (driver, transcript) = makeRouteDriver([
+            (primaryTarget, primary),
+            (fallbackTarget, originalFallback),
+        ])
+        transcript.append(.init(speaker: .me, text: "move to fallback", at: 0))
+        #expect(await driver.handleTrigger(.turnEnd) == .silentByModel)
+
+        let reconfiguredPrimary = ScriptedBrain(script: [
+            .init(toolCalls: [.speak(callId: "wrong-target", lines: ["went backward"])]),
+        ])
+        let reconfiguredFallback = ScriptedBrain(script: [
+            .init(toolCalls: [.speak(callId: "effort", lines: ["new effort"])]),
+        ])
+        #expect(driver.reconfigureBrainRouteClients(ConfiguredBrainRoute(targets: [
+            ConfiguredBrainTarget(target: primaryTarget, brain: reconfiguredPrimary),
+            ConfiguredBrainTarget(target: fallbackTarget, brain: reconfiguredFallback),
+        ])))
+
+        transcript.append(.init(speaker: .me, text: "continue on fallback", at: 1))
+        #expect(await driver.handleTrigger(.turnEnd) == .spoke)
+        #expect(reconfiguredPrimary.calls.isEmpty)
+        #expect(reconfiguredFallback.calls.count == 1)
+    }
+
+    @Test func scopedCredentialRefreshKeepsOtherProviderClients() async {
+        let primaryTarget = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
+        let fallbackTarget = BrainTarget(provider: .claudeCode, modelID: "sonnet")
+        let originalPrimary = ScriptedBrain(script: [
+            .init(toolCalls: [.staySilent(callId: "original-primary")]),
+        ])
+        let originalFallback = ScriptedBrain(script: [
+            .init(toolCalls: [.speak(callId: "original-fallback", lines: ["retained CLI"])]),
+        ])
+        let (driver, transcript) = makeRouteDriver([
+            (primaryTarget, originalPrimary),
+            (fallbackTarget, originalFallback),
+        ])
+        transcript.append(.init(speaker: .me, text: "establish primary", at: 0))
+        #expect(await driver.handleTrigger(.turnEnd) == .silentByModel)
+
+        let refreshedPrimary = ThrowingBrain(error: BrainFailure(
+            disposition: .permanent,
+            detail: "new credential rejected"))
+        let unwantedFallback = ScriptedBrain(script: [
+            .init(toolCalls: [.speak(callId: "wrong-client", lines: ["replaced CLI"])]),
+        ])
+        #expect(driver.refreshBrainRouteClients(
+            ConfiguredBrainRoute(targets: [
+                ConfiguredBrainTarget(target: primaryTarget, brain: refreshedPrimary),
+                ConfiguredBrainTarget(target: fallbackTarget, brain: unwantedFallback),
+            ]),
+            for: [.openAI]))
+
+        transcript.append(.init(speaker: .me, text: "advance after refresh", at: 1))
+        #expect(await driver.handleTrigger(.turnEnd) == .spoke)
+        #expect(refreshedPrimary.callCount == 1)
+        #expect(originalFallback.calls.count == 1)
+        #expect(unwantedFallback.calls.isEmpty)
+    }
+
+    @Test func scopedCredentialRefreshKeepsOtherProviderInFlightFailureValid() async {
+        let primaryTarget = BrainTarget(provider: .claudeCode, modelID: "sonnet")
+        let fallbackTarget = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
+        let failureGate = AsyncGate()
+        let originalPrimary = TwoFailuresThenGatedFailureBrain(gate: failureGate)
+        let originalFallback = ScriptedBrain(script: [
+            .init(toolCalls: [.speak(callId: "old-key", lines: ["wrong OpenAI client"])]),
+        ])
+        let (driver, transcript) = makeRouteDriver([
+            (primaryTarget, originalPrimary),
+            (fallbackTarget, originalFallback),
+        ])
+        transcript.append(.init(speaker: .me, text: "keep CLI failure valid", at: 0))
+
+        async let outcome = driver.handleTrigger(.turnEnd)
+        await failureGate.waitUntilEntered()
+
+        let unwantedPrimary = ScriptedBrain(script: [
+            .init(toolCalls: [.speak(callId: "wrong-cli", lines: ["replaced CLI"])]),
+        ])
+        let refreshedFallback = ScriptedBrain(script: [
+            .init(toolCalls: [.speak(callId: "new-key", lines: ["refreshed OpenAI"])]),
+        ])
+        #expect(driver.refreshBrainRouteClients(
+            ConfiguredBrainRoute(targets: [
+                ConfiguredBrainTarget(target: primaryTarget, brain: unwantedPrimary),
+                ConfiguredBrainTarget(target: fallbackTarget, brain: refreshedFallback),
+            ]),
+            for: [.openAI]))
+        await failureGate.release()
+
+        #expect(await outcome == .spoke)
+        #expect(originalPrimary.callCount == 3)
+        #expect(unwantedPrimary.calls.isEmpty)
+        #expect(originalFallback.calls.isEmpty)
+        #expect(refreshedFallback.calls.count == 1)
+    }
+
     @Test func refreshingClientsCannotDropOrRedirectACommittedSkip() async {
         let unavailableTarget = BrainTarget(provider: .claudeCode, modelID: "sonnet")
         let availableTarget = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
@@ -942,6 +1049,71 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
         #expect(refreshedPrimary.calls.count == 2)
         #expect(fallback.calls.isEmpty)
+    }
+
+    @Test func inFlightSuccessAcrossEffortReconfigurationResetsFailureSequence() async {
+        let primaryTarget = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
+        let fallbackTarget = BrainTarget(provider: .claudeCode, modelID: "sonnet")
+        let successGate = AsyncGate()
+        let originalPrimary = TwoFailuresThenGatedSuccessBrain(gate: successGate)
+        let fallback = ScriptedBrain(script: [
+            .init(toolCalls: [.speak(callId: "fallback", lines: ["should not advance"])]),
+        ])
+        let (driver, transcript) = makeRouteDriver([
+            (primaryTarget, originalPrimary),
+            (fallbackTarget, fallback),
+        ])
+        transcript.append(.init(speaker: .me, text: "complete across effort edit", at: 0))
+
+        async let firstOutcome = driver.handleTrigger(.turnEnd)
+        await successGate.waitUntilEntered()
+
+        let reconfiguredPrimary = ScriptedThrowBrain(script: [
+            nil,
+            .init(toolCalls: [.speak(callId: "recovered", lines: ["same target recovered"])]),
+        ])
+        #expect(driver.reconfigureBrainRouteClients(ConfiguredBrainRoute(targets: [
+            ConfiguredBrainTarget(target: primaryTarget, brain: reconfiguredPrimary),
+            ConfiguredBrainTarget(target: fallbackTarget, brain: fallback),
+        ])))
+        await successGate.release()
+
+        #expect(await firstOutcome == .silentByModel)
+        transcript.append(.init(speaker: .me, text: "one later temporary failure", at: 1))
+        #expect(await driver.handleTrigger(.turnEnd) == .spoke)
+        #expect(reconfiguredPrimary.calls.count == 2)
+        #expect(fallback.calls.isEmpty)
+    }
+
+    @Test func inFlightFailureAcrossEffortReconfigurationCountsTowardRouteHealth() async {
+        let primaryTarget = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
+        let fallbackTarget = BrainTarget(provider: .claudeCode, modelID: "sonnet")
+        let failureGate = AsyncGate()
+        let originalPrimary = TwoFailuresThenGatedFailureBrain(gate: failureGate)
+        let fallback = ScriptedBrain(script: [
+            .init(toolCalls: [.speak(callId: "fallback", lines: ["advanced after third failure"])]),
+        ])
+        let (driver, transcript) = makeRouteDriver([
+            (primaryTarget, originalPrimary),
+            (fallbackTarget, fallback),
+        ])
+        transcript.append(.init(speaker: .me, text: "count the in-flight failure", at: 0))
+
+        async let outcome = driver.handleTrigger(.turnEnd)
+        await failureGate.waitUntilEntered()
+
+        let reconfiguredPrimary = ScriptedBrain(script: [
+            .init(toolCalls: [.speak(callId: "wrong", lines: ["failure was ignored"])]),
+        ])
+        #expect(driver.reconfigureBrainRouteClients(ConfiguredBrainRoute(targets: [
+            ConfiguredBrainTarget(target: primaryTarget, brain: reconfiguredPrimary),
+            ConfiguredBrainTarget(target: fallbackTarget, brain: fallback),
+        ])))
+        await failureGate.release()
+
+        #expect(await outcome == .spoke)
+        #expect(reconfiguredPrimary.calls.isEmpty)
+        #expect(fallback.calls.count == 1)
     }
 
     @Test func refreshingClientsCannotDropOrRedirectCommittedExhaustion() async {
@@ -1865,6 +2037,40 @@ private final class TwoFailuresThenGatedSuccessBrain: BrainClient, @unchecked Se
         }
         await gate.enter()
         return BrainResponse(toolCalls: [.staySilent(callId: "success")])
+    }
+}
+
+/// Two temporary failures establish a near-exhausted sequence, then a third failure parks so a
+/// same-topology effort reconfiguration can happen before that valid attempt outcome is recorded.
+private final class TwoFailuresThenGatedFailureBrain: BrainClient, @unchecked Sendable {
+    private let gate: AsyncGate
+    private let lock = NSLock()
+    private var calls = 0
+    var callCount: Int { lock.withLock { calls } }
+
+    init(gate: AsyncGate) {
+        self.gate = gate
+    }
+
+    func respond(
+        messages: [ChatMessage],
+        tools: [ToolDef],
+        toolChoice: ToolChoice
+    ) async throws -> BrainResponse {
+        _ = messages
+        _ = tools
+        _ = toolChoice
+        let call = lock.withLock {
+            calls += 1
+            return calls
+        }
+        if call == 3 {
+            await gate.enter()
+        }
+        throw NSError(
+            domain: "FutureProvider",
+            code: 1,
+            userInfo: [NSLocalizedDescriptionKey: "temporary provider interruption"])
     }
 }
 

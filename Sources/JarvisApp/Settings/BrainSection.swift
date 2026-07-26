@@ -23,6 +23,15 @@ private final class BrainSettingsScrollView: NSScrollView {
 /// applies completed preference edits at the running driver's between-attempt boundary.
 @MainActor
 final class BrainSection: NSObject, SettingsSection {
+    enum PreferenceChange: Equatable {
+        case topology
+        case effort
+
+        func merged(with newer: PreferenceChange) -> PreferenceChange {
+            self == .topology || newer == .topology ? .topology : .effort
+        }
+    }
+
     let title = "Brain"
     let fillsTab = true
 
@@ -32,7 +41,8 @@ final class BrainSection: NSObject, SettingsSection {
 
     private let preferences: BrainPreferences
     private let detector: AgentCLIDetector
-    private let onPreferencesChanged: ([BrainProvider: DetectedAgentCLI]?) -> Void
+    private let onPreferencesChanged:
+        (PreferenceChange, [BrainProvider: DetectedAgentCLI]?) -> Void
     private let apiKey: APIKeyControls
 
     private var scrollView: BrainSettingsScrollView?
@@ -45,14 +55,15 @@ final class BrainSection: NSObject, SettingsSection {
     /// Deliberately survives a Settings close so an edit made during the probe still reaches the
     /// running coaching session when detection finishes.
     private var detectionTask: Task<Void, Never>?
-    private var applyPreferencesAfterDetection = false
+    private var pendingPreferenceChange: PreferenceChange?
     /// Session-local runtime state only. This marker never writes preferences or reorders the route.
     private var activeTarget: BrainTarget?
 
     init(
         preferences: BrainPreferences,
         detector: AgentCLIDetector,
-        onPreferencesChanged: @escaping ([BrainProvider: DetectedAgentCLI]?) -> Void,
+        onPreferencesChanged:
+            @escaping (PreferenceChange, [BrainProvider: DetectedAgentCLI]?) -> Void,
         keyStore: FileSecretStore,
         onKeySaved: @escaping (String) -> Void
     ) {
@@ -86,7 +97,7 @@ final class BrainSection: NSObject, SettingsSection {
 
         let providerEditor = ProviderRouteEditor(
             preferences: preferences,
-            onChange: { [weak self] in self?.preferencesDidChange() },
+            onChange: { [weak self] in self?.preferencesDidChange(.topology) },
             onHeightChanged: { [weak self] height in
                 self?.providerHeightConstraint?.constant = height
                 self?.recalculateDocumentHeight()
@@ -201,9 +212,9 @@ final class BrainSection: NSObject, SettingsSection {
             detectionTask = nil
             detectedCLIs = Dictionary(uniqueKeysWithValues: values.map { ($0.provider, $0) })
             renderDetection()
-            if applyPreferencesAfterDetection {
-                applyPreferencesAfterDetection = false
-                onPreferencesChanged(detectedCLIs)
+            if let change = pendingPreferenceChange {
+                pendingPreferenceChange = nil
+                onPreferencesChanged(change, detectedCLIs)
             }
         }
     }
@@ -250,27 +261,27 @@ final class BrainSection: NSObject, SettingsSection {
         let row = sender.indexOfSelectedItem
         guard ReasoningEffort.allCases.indices.contains(row) else { return }
         preferences.effort = ReasoningEffort.allCases[row]
-        preferencesDidChange()
+        preferencesDidChange(.effort)
     }
 
-    private func preferencesDidChange() {
+    private func preferencesDidChange(_ change: PreferenceChange) {
         guard let route = preferences.configuredRoute else { return }
         let providers = route.targets.map(\.provider)
         guard providers.contains(where: \.usesLocalCLI) else {
-            applyPreferencesAfterDetection = false
-            onPreferencesChanged([:])
+            pendingPreferenceChange = nil
+            onPreferencesChanged(change, [:])
             return
         }
         // Never apply a cached preflight while a fresher probe is running. The completion collapses
         // any edits made during that probe into one application of the latest persisted preferences.
         if detectionTask != nil {
-            applyPreferencesAfterDetection = true
+            pendingPreferenceChange = pendingPreferenceChange?.merged(with: change) ?? change
             return
         }
         if let detectedCLIs {
-            onPreferencesChanged(detectedCLIs)
+            onPreferencesChanged(change, detectedCLIs)
         } else {
-            applyPreferencesAfterDetection = true
+            pendingPreferenceChange = pendingPreferenceChange?.merged(with: change) ?? change
             refreshDetection()
         }
     }

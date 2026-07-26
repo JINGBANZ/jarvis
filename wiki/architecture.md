@@ -198,9 +198,16 @@ the route when an attempt begins. Exact duplicate targets are invalid, while two
 the same provider are allowed when the user deliberately places both in the list. The live route cursor
 starts at the primary, only moves forward, and is session-local: automatic failover never rewrites
 preferences. A successful fallback remains active for the rest of the session unless it later exhausts
-its own failure budget. Stop → Start begins again at the persisted primary. A valid Settings edit is
-the only live-session override: it installs a fresh route between attempts and starts at the newly
-selected primary.
+its own failure budget. Stop → Start begins again at the persisted primary. Only a Settings edit that
+changes route topology—the ordered provider/model target identities—installs a fresh route and resets
+the live cursor between attempts. A reasoning-effort edit rebuilds clients at the existing cursor and
+failure counts; the already-running attempt remains valid, so its success or failure updates route
+health normally.
+
+Saving the transcription API key refreshes only OpenAI clients and never probes or replaces CLI
+clients. It preserves the route cursor and counts. An in-flight OpenAI failure belongs to the
+superseded credential and is ignored, while an in-flight attempt on an unaffected CLI retains normal
+success/failure accounting.
 
 A **coaching attempt** snapshots one target and the latest provider-neutral conversation, then keeps
 that target for the complete tool loop. Every provider request in that loop is made once. A complete,
@@ -346,7 +353,8 @@ memory, provider-route policy, and traffic recording are all unchanged — only 
   a short timeout, because stale account metadata can survive an expired OAuth session; Codex uses
   its auth-file marker and a bounded, non-model `features list` capability probe. Settings
   distinguishes signed in, signed out, and an unavailable auth probe, and Start refuses a confirmed
-  logout.
+  logout. Settings availability discovery probes every supported CLI; Start probes only the CLI
+  providers present in the configured route. Saving the transcription API key probes no CLI.
 - **The OpenAI key stays required**: transcription always runs on the Realtime API. A CLI provider
   moves the brain/summarizer off the key, not the ears; the session evaluator independently runs
   through a local agentic CLI over the completed session directory. **Latency is the tradeoff**,
