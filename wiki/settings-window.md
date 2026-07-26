@@ -178,13 +178,18 @@ only coaching off the key.
 Reads are validated: a persisted model id no longer in that provider's catalog (or an unrecognized
 provider/effort) falls back to the default rather than reaching the API. The transcription model is
 deliberately **not** here — it's a separate field and code path (`Config.transcriptionModel`). A
-running `CoachDriver` applies a valid primary, route, model, or effort edit atomically **between
-coaching attempts**. An in-flight attempt keeps one snapshotted target through its complete tool loop;
-the replacement route begins on the next attempt while transcript, client-managed history, audio
-pipeline, and session logs continue unchanged. This explicit user edit resets the session-local route
-cursor to the newly selected primary and is the only way to revisit a target that automatic failover
-left behind. The old active provider is not retained as a hidden fallback; it remains available only
-when the user includes it in the new list.
+running `CoachDriver` applies valid edits atomically at the coaching-attempt boundary while
+transcript, client-managed history, audio pipeline, and session logs continue unchanged. A provider,
+model, or route-order edit replaces the route for the next attempt and resets the session-local
+cursor to the newly selected primary; this topology edit is the only way to revisit a target that
+automatic failover left behind. The old active provider is not retained as a hidden fallback; it
+remains available only when the user includes it in the new list.
+
+A reasoning-effort edit instead rebuilds the clients at the current forward-only cursor and preserves
+its failure counts. An attempt already in flight keeps its snapshotted client and remains
+authoritative: its success or failure updates route health normally, and the new effort begins with
+the next attempt. Saving the transcription API key likewise preserves route health, but refreshes
+only OpenAI clients and never probes or replaces a CLI client.
 
 A local-CLI target is preflighted first. A confirmed missing binary or signed-out account cannot
 activate; the running route stays intact and Activity records fixed settings-not-applied copy.

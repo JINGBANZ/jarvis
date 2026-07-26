@@ -397,9 +397,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             jlog("Jarvis: brain settings will apply on the next turn — \(provider.displayName), "
                  + "\(model.displayName), \(brainPreferences.effort.displayName) effort.")
         case .effortEdit:
-            if pendingBrainChangeFrom == nil {
-                pendingBrainChangeFrom = activeBrainTarget
-            }
             guard coachDriver.reconfigureBrainRouteClients(configuredRoute) else {
                 jlog("Jarvis: skipped stale effort refresh after the route topology changed.")
                 return
@@ -416,8 +413,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Keep a healthy live conversation intact when the credential file changes. Existing Realtime
     /// sockets are already authenticated; retain them and use the new key only if either socket later
-    /// reconnects. If OpenAI is in the selected brain route, install fresh target clients between
-    /// coaching attempts without changing the route policy or restarting transcription.
+    /// reconnects. If OpenAI is in the selected brain route, install fresh OpenAI target clients
+    /// between coaching attempts without probing or replacing CLI clients, changing route policy, or
+    /// restarting transcription.
     private func applySavedAPIKeyToRunningSession(_ key: String) {
         guard let transcriber else { return }
         transcriber.updateAPIKey(key)
