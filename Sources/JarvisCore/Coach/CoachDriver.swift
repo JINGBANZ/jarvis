@@ -644,6 +644,10 @@ public final class CoachDriver: @unchecked Sendable {
                     jlog("Jarvis coach: preserving pending work from superseded route revision")
                 case .retry(let failureCount, let advanced):
                     routeChanged = false
+                    if !advanced {
+                        ActivityLog.shared.record(
+                            .coachingTurnFailed(provider: attempt.target.provider))
+                    }
                     let policy = failure.disposition == .permanent
                         ? "permanent failure"
                         : "temporary/unknown failure \(failureCount)/\(BrainRouteSession.failuresPerTarget)"

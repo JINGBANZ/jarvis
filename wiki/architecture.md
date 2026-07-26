@@ -180,7 +180,9 @@ identity-guarded across Stop → Start. Each Activity row persists a stable even
 session evaluator reads the complete Activity file, using those kinds and the full user-visible
 sequence rather than a preselected excerpt; dynamic provider and transport detail remains only in
 `JarvisLog`. Route changes and final exhaustion use fixed, provider-level Activity events; individual
-request errors, attempt scheduling, and failure counts remain diagnostic detail.
+failed attempts that have not yet advanced the route use fixed provider-only Activity copy because
+the missed coaching turn is user-visible. Raw request errors, attempt scheduling, and failure counts
+remain diagnostic detail.
 
 Ghost mode applies from a live pipeline through terminal teardown: no autonomous activation, alert,
 window, browser, notification, attention request, or sound is allowed outside the nonactivating,

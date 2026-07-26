@@ -316,6 +316,34 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(debug.contains("activity-boundary-tip-417"))
     }
 
+    @Test func nonExhaustingAttemptFailuresLandInActivityBeforeRecovery() async throws {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(
+                "jarvis-attempt-failure-\(ProcessInfo.processInfo.globallyUniqueString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { ActivityLog.shared.disable(); try? FileManager.default.removeItem(at: dir) }
+        ActivityLog.shared.enable(directory: dir)
+
+        let brain = ScriptedThrowBrain(script: [
+            nil,
+            nil,
+            .init(toolCalls: [.speak(callId: "recovered", lines: ["recovered coaching"])]),
+        ])
+        let (driver, transcript) = makeDriver(brain: brain, clock: ManualClock(now: 0))
+        transcript.append(.init(speaker: .me, text: "keep listening after failures", at: 0))
+
+        #expect(await driver.handleTrigger(.turnEnd) == .spoke)
+
+        let snapshot = ActivityLog.shared.attach { _ in }
+        #expect(snapshot.rows.count == 3)
+        #expect(snapshot.rows[0].contains("couldn't respond this turn"))
+        #expect(snapshot.rows[0].contains("listening continues"))
+        #expect(snapshot.rows[1].contains("couldn't respond this turn"))
+        #expect(snapshot.rows[1].contains("listening continues"))
+        #expect(snapshot.rows[2].contains("recovered coaching"))
+        #expect(!snapshot.rows.joined().contains("test"))
+    }
+
     /// Stop cancelling a turn *while the screenshot is being captured* must abort before emitting:
     /// no "👁" line, no follow-up reasoning, no `speak`. The detached capture doesn't inherit
     /// cancellation, so without the post-capture guard the screenshot (and a stale tip) would leak —
