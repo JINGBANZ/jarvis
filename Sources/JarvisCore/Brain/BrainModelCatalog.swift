@@ -22,8 +22,9 @@ public enum BrainModelCatalog {
         all.first { $0.id == id }
     }
 
-    /// Exactly six concrete models per provider. OpenAI API and Codex CLI intentionally share one
-    /// list. Claude's invitation-only Mythos releases and rolling aliases are excluded.
+    /// Concrete models per provider. OpenAI API and Codex CLI intentionally share one list.
+    /// Claude exposes only the newest release in each family; invitation-only Mythos releases and
+    /// rolling aliases are excluded.
     public static func models(for provider: BrainProvider) -> [BrainModel] {
         switch provider {
         case .openAI, .codexCLI:
@@ -33,8 +34,6 @@ public enum BrainModelCatalog {
                 BrainModel(id: "claude-opus-5", displayName: "Claude Opus 5"),
                 BrainModel(id: "claude-sonnet-5", displayName: "Claude Sonnet 5"),
                 BrainModel(id: "claude-fable-5", displayName: "Claude Fable 5"),
-                BrainModel(id: "claude-opus-4-8", displayName: "Claude Opus 4.8"),
-                BrainModel(id: "claude-sonnet-4-6", displayName: "Claude Sonnet 4.6"),
                 BrainModel(id: "claude-haiku-4-5", displayName: "Claude Haiku 4.5"),
             ]
         }

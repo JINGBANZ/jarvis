@@ -24,13 +24,11 @@ import Testing
         ])
     }
 
-    @Test func claudeCodeListsExactlySixConcreteModels() {
+    @Test func claudeCodeListsOnlyTheNewestReleaseInEachFamily() {
         #expect(BrainModelCatalog.models(for: .claudeCode).map(\.id) == [
             "claude-opus-5",
             "claude-sonnet-5",
             "claude-fable-5",
-            "claude-opus-4-8",
-            "claude-sonnet-4-6",
             "claude-haiku-4-5",
         ])
     }
@@ -49,7 +47,7 @@ import Testing
     @Test func everyProviderHasModelsAndAContainedDefault() {
         for provider in BrainProvider.allCases {
             let models = BrainModelCatalog.models(for: provider)
-            #expect(models.count == 6)
+            #expect(models.count == (provider == .claudeCode ? 4 : 6))
             #expect(Set(models.map(\.id)).count == models.count)
             #expect(models.allSatisfy { !$0.id.isEmpty })
             #expect(models.contains(BrainModelCatalog.defaultModel(for: provider)))
