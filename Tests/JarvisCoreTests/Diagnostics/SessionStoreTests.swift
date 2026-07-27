@@ -37,6 +37,12 @@ import Foundation
             "{\"t\":\"09:00:01\",\"m\":\"💭 thinking…\"}",
             "{\"t\":\"09:00:02\",\"m\":\"Jarvis realtime error event: oops\"}",
         ])
+        // A typed end marker remains visible inside a real session, but is not coaching content alone.
+        try makeSession(base, "2026-06-16_09-30-00_eeee", lines: [
+            """
+            {"t":"09:30:00","m":"⏹ session ended by user","k":"sessionEnded"}
+            """,
+        ])
         // A past session that actually coached (has a 💬 line) — keep it.
         try makeSession(base, "2026-06-16_10-00-00_bbbb", lines: ["{\"t\":\"10:00:00\",\"m\":\"💬 try this\"}"])
         // A past session whose only content is a screenshot reference — keep it.
@@ -52,6 +58,7 @@ import Foundation
                         "2026-06-16_10-30-00_cccc",   // has a screenshot
                         "2026-06-16_10-00-00_bbbb"])  // has a coaching line
         #expect(!ids.contains("2026-06-16_09-00-00_aaaa"))   // aborted run hidden
+        #expect(!ids.contains("2026-06-16_09-30-00_eeee"))   // end-only run hidden
     }
 
     @Test func entriesDecodeTolerateMalformedAndGuardTraversal() throws {
@@ -64,16 +71,20 @@ import Foundation
             "{\"t\":\"10:00:02\",\"m\":\"🗣 heard (me): text only\"}",
             "{\"t\":\"10:00:03\",\"m\":\"💭 thinking…\"}",
             "{\"t\":\"10:00:04\",\"m\":\"🤫 stayed silent — nothing useful to add\"}",
+            """
+            {"t":"10:00:05","m":"⏹ session ended by user","k":"sessionEnded"}
+            """,
         ], shot: ("shot-1.jpg", Data([0xFF, 0xD8, 0xFF, 0xD9])))
         let store = SessionStore(base: base, current: nil)
         let session = try #require(store.listSessions().first)
         let rows = store.entries(for: session)
-        #expect(rows.count == 3)                     // malformed + diagnostic rows skipped
+        #expect(rows.count == 4)                     // malformed + diagnostic rows skipped
         #expect(rows[0].0.message == "👁 looking at your screen")
         #expect(rows[0].1 != nil)                    // valid shot bytes loaded
         #expect(rows[1].0.message == "🗣 heard (me): text only")
         #expect(rows[1].1 == nil)                    // text-only coaching line
         #expect(rows[2].0.message.contains("stayed silent"))
+        #expect(rows[3].0.message.contains("session ended by user"))
     }
 
     @Test func entriesDropImageWhenShotFileMissing() throws {

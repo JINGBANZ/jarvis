@@ -61,8 +61,8 @@ public struct SessionStore: Sendable {
             .sorted { $0.id > $1.id }   // id is a lexically-sortable timestamp ⇒ newest first
     }
 
-    /// Whether a session's log holds at least one human-facing coaching event. The classifier also
-    /// keeps lifecycle and diagnostic rows written by older builds from making aborted runs visible.
+    /// Whether a session's log holds at least one human-facing coaching event. A terminal marker is
+    /// visible inside a retained session, but does not make an otherwise empty run worth retaining.
     private static func hasCoachingContent(_ sessionURL: URL) -> Bool {
         let url = sessionURL.appendingPathComponent("jarvis-activity.jsonl")
         guard let text = try? String(contentsOf: url, encoding: .utf8) else { return false }
@@ -73,10 +73,14 @@ public struct SessionStore: Sendable {
                     sessionURL.appendingPathComponent(name).path) else { return nil }
                 return name
             }
+            let kind = line.k.flatMap { ActivityLog.EventKind(rawValue: $0) }
+            if kind == .sessionEnded {
+                continue
+            }
             if ActivityLog.isHumanFacing(
                 message: line.m,
                 imageFile: shot,
-                kind: line.k.flatMap { ActivityLog.EventKind(rawValue: $0) }
+                kind: kind
             ) {
                 return true
             }

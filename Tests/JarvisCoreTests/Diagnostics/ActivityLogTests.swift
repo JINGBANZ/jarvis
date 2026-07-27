@@ -77,6 +77,22 @@ import Foundation
             || jsonl.contains(#""k": "sessionEnded""#))
     }
 
+    @Test func sessionEndMarkerRejectsLaterActivity() throws {
+        let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
+        let log = ActivityLog(); log.enable(directory: dir)
+
+        log.record(.tip(lines: ["before stop"]))
+        log.record(.sessionEnded(reason: .stoppedByUser))
+        log.record(.stayedSilent)
+        log.flush()
+
+        let snapshot = log.attach { _ in }
+        #expect(snapshot.rows.count == 2)
+        #expect(snapshot.rows[0].contains("before stop"))
+        #expect(snapshot.rows[1].contains("session ended by user"))
+        #expect(!snapshot.rows.joined().contains("stayed silent"))
+    }
+
     @Test func attachSnapshotReplaysExistingEntriesWithImageBytes() throws {
         let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         let log = ActivityLog(); log.enable(directory: dir)
@@ -216,34 +232,34 @@ import Foundation
         ])
     }
 
-    @Test func runtimeFailureNoticesStayFixedAndDiagnosticFree() throws {
-        let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
-        let log = ActivityLog(); log.enable(directory: dir)
-        log.record(.sessionEnded(reason: .transcriptionStopped(reason: .connectionLost)))
-        log.record(.sessionEnded(reason: .transcriptionStopped(reason: .quotaExceeded)))
-        log.record(.sessionEnded(reason: .transcriptionStopped(reason: .authenticationFailed)))
-        log.record(.sessionEnded(reason: .transcriptionStopped(reason: .accessDenied)))
-        log.record(.sessionEnded(reason: .transcriptionStopped(reason: .configurationRejected)))
-        log.record(.sessionEnded(reason: .audioCaptureUnavailable))
-        log.record(.systemAudioStopped)
-        log.record(.settingsChangeNotApplied)
-        let snapshot = log.attach { _ in }
+    @Test func runtimeFailureNoticesStayFixedAndDiagnosticFree() {
+        let events: [ActivityLog.Event] = [
+            .sessionEnded(reason: .transcriptionStopped(reason: .connectionLost)),
+            .sessionEnded(reason: .transcriptionStopped(reason: .quotaExceeded)),
+            .sessionEnded(reason: .transcriptionStopped(reason: .authenticationFailed)),
+            .sessionEnded(reason: .transcriptionStopped(reason: .accessDenied)),
+            .sessionEnded(reason: .transcriptionStopped(reason: .configurationRejected)),
+            .sessionEnded(reason: .audioCaptureUnavailable),
+            .systemAudioStopped,
+            .settingsChangeNotApplied,
+        ]
+        let messages = events.map { $0.rendered.message }
 
-        #expect(snapshot.rows.count == 8)
-        #expect(snapshot.rows[0].contains("session ended by error"))
-        #expect(snapshot.rows[0].contains("transcription connection was lost"))
-        #expect(snapshot.rows[1].contains("API quota is exhausted"))
-        #expect(snapshot.rows[1].contains("billing"))
-        #expect(snapshot.rows[2].contains("rejected the API key"))
-        #expect(snapshot.rows[3].contains("denied transcription access"))
-        #expect(snapshot.rows[4].contains("rejected the transcription configuration"))
-        #expect(snapshot.rows[5].contains("audio capture became unavailable"))
-        #expect(snapshot.rows[6].contains("microphone coaching continues"))
-        #expect(snapshot.rows[7].contains("current coaching session continues"))
-        for row in snapshot.rows {
-            #expect(!row.contains("OAuth"))
-            #expect(!row.contains("AirPods"))
-            #expect(!row.contains("item_"))
+        #expect(messages.count == 8)
+        #expect(messages[0].contains("session ended by error"))
+        #expect(messages[0].contains("transcription connection was lost"))
+        #expect(messages[1].contains("API quota is exhausted"))
+        #expect(messages[1].contains("billing"))
+        #expect(messages[2].contains("rejected the API key"))
+        #expect(messages[3].contains("denied transcription access"))
+        #expect(messages[4].contains("rejected the transcription configuration"))
+        #expect(messages[5].contains("audio capture became unavailable"))
+        #expect(messages[6].contains("microphone coaching continues"))
+        #expect(messages[7].contains("current coaching session continues"))
+        for message in messages {
+            #expect(!message.contains("OAuth"))
+            #expect(!message.contains("AirPods"))
+            #expect(!message.contains("item_"))
         }
         #expect(ActivityLog.isHumanFacing(
             message: "⚠️ system audio stopped — microphone coaching continues; check jarvis-debug.log",
@@ -259,9 +275,7 @@ import Foundation
         ))
     }
 
-    @Test func sessionEndReasonsAreExplicitSanitizedAndStable() throws {
-        let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
-        let log = ActivityLog(); log.enable(directory: dir)
+    @Test func sessionEndReasonsAreExplicitSanitizedAndStable() {
         let reasons: [SessionEndReason] = [
             .stoppedByUser,
             .applicationQuit,
@@ -273,34 +287,26 @@ import Foundation
             .audioCaptureUnavailable,
             .unexpectedError,
         ]
-        for reason in reasons {
-            log.record(.sessionEnded(reason: reason))
-        }
-        let snapshot = log.attach { _ in }
+        let rendered = reasons.map { ActivityLog.Event.sessionEnded(reason: $0).rendered }
+        let messages = rendered.map { $0.message }
 
-        #expect(snapshot.rows.count == reasons.count)
-        #expect(snapshot.rows[0].contains("session ended by user"))
-        #expect(snapshot.rows[1].contains("session ended because Jarvis quit"))
-        #expect(snapshot.rows[2].contains("session ended because a new session started"))
-        #expect(snapshot.rows[3].contains("API key is missing"))
-        #expect(snapshot.rows[4].contains("no Primary brain provider"))
-        #expect(snapshot.rows[5].contains("last target: Claude Code"))
-        #expect(snapshot.rows[6].contains("API quota is exhausted"))
-        #expect(snapshot.rows[7].contains("audio capture became unavailable"))
-        #expect(snapshot.rows[8].contains("check jarvis-debug.log"))
-        #expect(!snapshot.rows.joined().contains("OAuth"))
-        #expect(!snapshot.rows.joined().contains("AirPods"))
-        #expect(!snapshot.rows.joined().contains("item_"))
-
-        let jsonl = try String(
-            contentsOf: dir.appendingPathComponent(ActivityLog.filename), encoding: .utf8)
-        let kinds = try jsonl.split(separator: "\n").map { line in
-            let value = try #require(
-                try JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any])
-            return value["k"] as? String
-        }
-        #expect(kinds == Array(repeating: ActivityLog.EventKind.sessionEnded.rawValue,
-                              count: reasons.count))
+        #expect(messages.count == reasons.count)
+        #expect(messages[0].contains("session ended by user"))
+        #expect(messages[1].contains("session ended because Jarvis quit"))
+        #expect(messages[2].contains("session ended because a new session started"))
+        #expect(messages[3].contains("API key is missing"))
+        #expect(messages[4].contains("no Primary brain provider"))
+        #expect(messages[5].contains("last target: Claude Code"))
+        #expect(messages[6].contains("API quota is exhausted"))
+        #expect(messages[7].contains("audio capture became unavailable"))
+        #expect(messages[8].contains("check jarvis-debug.log"))
+        #expect(!messages.joined().contains("OAuth"))
+        #expect(!messages.joined().contains("AirPods"))
+        #expect(!messages.joined().contains("item_"))
+        #expect(rendered.map { $0.kind } == Array(
+            repeating: ActivityLog.EventKind.sessionEnded,
+            count: reasons.count
+        ))
         #expect(ActivityLog.isHumanFacing(
             message: "⏹ session ended by user",
             imageFile: nil

@@ -169,6 +169,7 @@ public final class ActivityLog: @unchecked Sendable {
     private var entries: [Entry] = []
     private var totalCount = 0    // everything recorded this session (survives the maxLines cap)
     private var shotSeq = 0       // monotonic id for saved screenshot files this session
+    private var sessionHasEnded = false
     private let df: DateFormatter
     private var dir: URL?         // nil ⇒ disabled (no observer pushes, no disk writes)
     private var onAppend: ((String) -> Void)?
@@ -189,7 +190,7 @@ public final class ActivityLog: @unchecked Sendable {
     public func enable(directory: URL) {
         queue.sync {
             dir = directory
-            entries.removeAll(); totalCount = 0; shotSeq = 0; onAppend = nil
+            entries.removeAll(); totalCount = 0; shotSeq = 0; sessionHasEnded = false; onAppend = nil
             let url = directory.appendingPathComponent(Self.filename)
             FileManager.default.createFile(atPath: url.path, contents: Data(),
                                            attributes: [.posixPermissions: 0o600])
@@ -198,7 +199,14 @@ public final class ActivityLog: @unchecked Sendable {
 
     /// Turn the viewer back off (no further pushes or disk writes).
     public func disable() {
-        queue.sync { dir = nil; entries.removeAll(); totalCount = 0; shotSeq = 0; onAppend = nil }
+        queue.sync {
+            dir = nil
+            entries.removeAll()
+            totalCount = 0
+            shotSeq = 0
+            sessionHasEnded = false
+            onAppend = nil
+        }
     }
 
     /// Append one human-facing coaching event: persist it, then push it to the observer. No-op when
@@ -210,13 +218,18 @@ public final class ActivityLog: @unchecked Sendable {
     public func record(_ event: Event, at date: Date = Date()) {
         let rendered = event.rendered
         queue.async { [self] in
-            guard let dir else { return }
+            // Teardown can race a coaching task that is finishing cancellation. Once the typed end
+            // marker reaches this serial queue, it is the final event for this session by definition.
+            guard let dir, !sessionHasEnded else { return }
             let shotName = rendered.imageBase64.flatMap { saveShot($0, in: dir) }
             let entry = Entry(time: df.string(from: date), message: rendered.message,
                               imageFile: shotName)
             appendJSONL(entry, kind: rendered.kind, in: dir)
             entries.append(entry)
             totalCount += 1
+            if rendered.kind == .sessionEnded {
+                sessionHasEnded = true
+            }
             if entries.count > maxLines { entries.removeFirst(entries.count - maxLines) }
             // Push with the live bytes in hand (no disk read on the hot path).
             onAppend?(Self.rowScript(time: entry.time, message: entry.message,
