@@ -13,7 +13,30 @@ import Testing
         #expect(BrainModelCatalog.default.id == "gpt-5.5")
     }
 
+    @Test func openAIListsSixNewestModelsFirst() {
+        #expect(BrainModelCatalog.all.prefix(6).map(\.id) == [
+            "gpt-5.6-sol",
+            "gpt-5.6-terra",
+            "gpt-5.6-luna",
+            "gpt-5.5",
+            "gpt-5.4-mini",
+            "gpt-5.4-nano",
+        ])
+    }
+
+    @Test func claudeCodeListsSixNewestGenerallyAvailableReleasesFirst() {
+        #expect(BrainModelCatalog.models(for: .claudeCode).prefix(6).map(\.id) == [
+            "claude-opus-5",
+            "claude-sonnet-5",
+            "claude-fable-5",
+            "claude-opus-4-8",
+            "claude-opus-4-7",
+            "claude-sonnet-4-6",
+        ])
+    }
+
     @Test func lookupFindsKnownModelsAndRejectsUnknown() {
+        #expect(BrainModelCatalog.model(id: "gpt-5.6-terra")?.displayName == "GPT-5.6 Terra")
         #expect(BrainModelCatalog.model(id: "gpt-5.4-mini")?.displayName == "GPT-5.4 mini")
         #expect(BrainModelCatalog.model(id: "gpt-9000") == nil)
     }
@@ -33,6 +56,9 @@ import Testing
     }
 
     @Test func perProviderLookupIsScopedToThatProvider() {
+        #expect(
+            BrainModelCatalog.model(id: "claude-opus-5", for: .claudeCode)?.displayName
+                == "Claude Opus 5")
         #expect(BrainModelCatalog.model(id: "sonnet", for: .claudeCode) != nil)
         #expect(BrainModelCatalog.model(id: "sonnet", for: .openAI) == nil)
         #expect(BrainModelCatalog.model(id: "gpt-5.5", for: .claudeCode) == nil)
