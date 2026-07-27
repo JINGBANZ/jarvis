@@ -44,7 +44,7 @@ import Foundation
         let workDir = try makeWorkDir()
         let captured = Captured<AgentCLIRun>()
         let envelope = claudeEnvelope(#"{"tool":"stay_silent","arguments":{}}"#)
-        let c = client(.claudeCode, workDir: workDir) { run in
+        let c = client(.claudeCode, workDir: workDir) { run, _ in
             captured.value = run
             return AgentCLIOutput(stdout: envelope, stderr: "", exitCode: 0)
         }
@@ -85,7 +85,7 @@ import Foundation
         for reply in [#"{"tool":"speak","arguments":{"lines":["tip one","tip two"]}}"#,
                       #"{"tool":"speak","lines":["tip one","tip two"]}"#] {
             let workDir = try makeWorkDir()
-            let c = client(.claudeCode, workDir: workDir) { _ in
+            let c = client(.claudeCode, workDir: workDir) { _, _ in
                 AgentCLIOutput(stdout: self.claudeEnvelope(reply), stderr: "", exitCode: 0)
             }
             let response = try await c.respond(messages: [.user("hi")], tools: coachTools,
@@ -121,7 +121,7 @@ import Foundation
         let workDir = try makeWorkDir()
         let base64 = Data("fake-jpeg".utf8).base64EncodedString()
         let observed = Captured<(files: [String], run: AgentCLIRun)>()
-        let c = client(.claudeCode, workDir: workDir) { run in
+        let c = client(.claudeCode, workDir: workDir) { run, _ in
             observed.value = (files: try FileManager.default.contentsOfDirectory(atPath: workDir.path),
                               run: run)
             return AgentCLIOutput(stdout: self.claudeEnvelope(#"{"tool":"stay_silent","arguments":{}}"#),
@@ -145,7 +145,7 @@ import Foundation
         let workDir = try makeWorkDir()
         let base64 = Data("fake-jpeg".utf8).base64EncodedString()
         let captured = Captured<AgentCLIRun>()
-        let c = client(.codexCLI, workDir: workDir, model: "") { run in
+        let c = client(.codexCLI, workDir: workDir, model: "") { run, _ in
             captured.value = run
             // Codex's reply lands in the --output-last-message file, not stdout.
             if let i = run.arguments.firstIndex(of: "--output-last-message") {
@@ -183,7 +183,7 @@ import Foundation
         // "none" must reach the CLI unchanged; user MCP servers must never load in a Jarvis turn.
         let workDir = try makeWorkDir()
         let captured = Captured<AgentCLIRun>()
-        let c = client(.codexCLI, workDir: workDir, model: "gpt-5.5", effort: "none") { run in
+        let c = client(.codexCLI, workDir: workDir, model: "gpt-5.5", effort: "none") { run, _ in
             captured.value = run
             return AgentCLIOutput(stdout: "", stderr: "", exitCode: 0)
         }
@@ -198,7 +198,7 @@ import Foundation
         let workDir = try makeWorkDir()
         let captured = Captured<AgentCLIRun>()
         let c = client(.codexCLI, workDir: workDir, model: "",
-                       codexSupportedFeatures: ["shell_tool", "renamed_future_feature"]) { run in
+                       codexSupportedFeatures: ["shell_tool", "renamed_future_feature"]) { run, _ in
             captured.value = run
             return AgentCLIOutput(stdout: "", stderr: "", exitCode: 0)
         }
@@ -219,7 +219,7 @@ import Foundation
         for (effort, expected) in [("none", "low"), ("low", "low"), ("high", "high")] {
             let workDir = try makeWorkDir()
             let captured = Captured<AgentCLIRun>()
-            let c = client(.claudeCode, workDir: workDir, effort: effort) { run in
+            let c = client(.claudeCode, workDir: workDir, effort: effort) { run, _ in
                 captured.value = run
                 return AgentCLIOutput(stdout: self.claudeEnvelope("ok"), stderr: "", exitCode: 0)
             }
@@ -235,7 +235,7 @@ import Foundation
     @Test func toolLessCallReturnsPlainText() async throws {
         // The summarizer/evaluator path: no tools, the reply text IS the payload.
         let workDir = try makeWorkDir()
-        let c = client(.claudeCode, workDir: workDir) { _ in
+        let c = client(.claudeCode, workDir: workDir) { _, _ in
             AgentCLIOutput(stdout: self.claudeEnvelope("a tidy briefing"), stderr: "", exitCode: 0)
         }
         let response = try await c.respond(messages: [.system("summarize"), .user("stuff")],
@@ -251,7 +251,7 @@ import Foundation
     @Test func forcedToolKeepsInstructionsStableAndDirectsViaTheTurn() async throws {
         let instructionsAndStdin = { (choice: ToolChoice) async throws -> (String, String) in
             let captured = Captured<AgentCLIRun>()
-            let c = self.client(.claudeCode, workDir: try self.makeWorkDir()) { run in
+            let c = self.client(.claudeCode, workDir: try self.makeWorkDir()) { run, _ in
                 captured.value = run
                 return AgentCLIOutput(stdout: self.claudeEnvelope(#"{"tool":"speak","arguments":{"lines":["t"]}}"#),
                                       stderr: "", exitCode: 0)
@@ -273,7 +273,7 @@ import Foundation
         // The Responses API enforces a forced tool server-side; the CLI protocol is prompt text,
         // so a stay_silent reply to the hint hotkey must not eat the hint.
         let workDir = try makeWorkDir()
-        let c = client(.claudeCode, workDir: workDir) { _ in
+        let c = client(.claudeCode, workDir: workDir) { _, _ in
             AgentCLIOutput(stdout: self.claudeEnvelope("""
             Try a hash map here.
             {"tool":"stay_silent","arguments":{}}
@@ -293,7 +293,7 @@ import Foundation
     @Test func forcedSpeakWithNoUsableProseFallsSilent() async throws {
         // A wrong-tool reply with no prose has nothing worth rendering — silence over an empty tip.
         let workDir = try makeWorkDir()
-        let c = client(.claudeCode, workDir: workDir) { _ in
+        let c = client(.claudeCode, workDir: workDir) { _, _ in
             AgentCLIOutput(stdout: self.claudeEnvelope(#"{"tool":"stay_silent","arguments":{}}"#),
                            stderr: "", exitCode: 0)
         }
@@ -306,7 +306,7 @@ import Foundation
         // No Structured Outputs on the CLI path: {"tool":"speak","arguments":{}} must not become a
         // .speak with empty lines (an empty overlay that still counts as a spoken turn).
         let workDir = try makeWorkDir()
-        let c = client(.claudeCode, workDir: workDir) { _ in
+        let c = client(.claudeCode, workDir: workDir) { _, _ in
             AgentCLIOutput(stdout: self.claudeEnvelope(#"{"tool":"speak","arguments":{}}"#),
                            stderr: "", exitCode: 0)
         }
@@ -325,7 +325,7 @@ import Foundation
         let base64 = Data("fake-jpeg-payload".utf8).base64EncodedString()
         let c = CLIBrainClient(provider: .claudeCode, executable: URL(fileURLWithPath: "/fake/bin/cli"),
                                model: "sonnet", reasoningEffort: "low", workDirectory: workDir,
-                               traffic: traffic, trafficTag: "coach") { _ in
+                               traffic: traffic, trafficTag: "coach") { _, _ in
             AgentCLIOutput(stdout: self.claudeEnvelope(#"{"tool":"stay_silent","arguments":{}}"#),
                            stderr: "", exitCode: 0)
         }
@@ -345,10 +345,157 @@ import Foundation
         #expect((response["reply"] as? String)?.contains("stay_silent") == true)
     }
 
+    // MARK: - Phase latency
+
+    /// Read the single traffic line the run wrote.
+    private func onlyTrafficEntry(in workDir: URL) throws -> [String: Any] {
+        let jsonl = try String(contentsOf: workDir.appendingPathComponent(BrainTrafficLog.filename),
+                               encoding: .utf8)
+        let first = try #require(jsonl.split(separator: "\n").first.map(String.init))
+        return try #require(try JSONSerialization.jsonObject(with: Data(first.utf8)) as? [String: Any])
+    }
+
+    private func clientWithTraffic(_ provider: BrainProvider, workDir: URL,
+                                   run: @escaping CLIBrainClient.Runner) -> (CLIBrainClient, BrainTrafficLog) {
+        let traffic = BrainTrafficLog()
+        traffic.enable(directory: workDir)
+        let c = CLIBrainClient(provider: provider, executable: URL(fileURLWithPath: "/fake/bin/cli"),
+                               model: "sonnet", reasoningEffort: "low", workDirectory: workDir,
+                               traffic: traffic, trafficTag: "coach", run: run)
+        return (c, traffic)
+    }
+
+    @Test func trafficRecordCarriesNamedPhaseLatencies() async throws {
+        // A run that reaches every observable boundary records the full fixed set of named phases
+        // (each an Int ms) — the same names for Claude and Codex, and the client-side parse phase.
+        let workDir = try makeWorkDir()
+        let (c, _) = clientWithTraffic(.claudeCode, workDir: workDir) { _, timings in
+            timings.mark(.runnerEntered)
+            timings.mark(.processLaunched)
+            timings.mark(.stdinDelivered)
+            timings.mark(.firstStdoutByte)
+            timings.mark(.processExited)
+            return AgentCLIOutput(stdout: self.claudeEnvelope(#"{"tool":"stay_silent","arguments":{}}"#),
+                                  stderr: "", exitCode: 0)
+        }
+        _ = try await c.respond(messages: [.user("hi")], tools: coachTools, toolChoice: .required)
+        let phases = try #require(try onlyTrafficEntry(in: workDir)["phases"] as? [String: Any])
+        for key in [
+            "queuedMs", "spawnMs", "stdinMs", "firstOutputMs", "outputMs", "parseMs", "totalMs",
+        ] {
+            #expect(phases[key] is Int, "expected \(key) to be a recorded Int ms")
+        }
+        let entry = try onlyTrafficEntry(in: workDir)
+        #expect(entry["ms"] as? Int == phases["totalMs"] as? Int)
+    }
+
+    @Test func unobservedPhasesAreAbsentNotZero() async throws {
+        // No stdout byte was ever seen, so the intervals that touch firstStdoutByte are omitted —
+        // never recorded as a misleading zero — while the observed ones remain.
+        let workDir = try makeWorkDir()
+        let (c, _) = clientWithTraffic(.claudeCode, workDir: workDir) { _, timings in
+            timings.mark(.runnerEntered)
+            timings.mark(.processLaunched)
+            timings.mark(.stdinDelivered)
+            timings.mark(.processExited)   // no firstStdoutByte
+            return AgentCLIOutput(stdout: self.claudeEnvelope("ok"), stderr: "", exitCode: 0)
+        }
+        _ = try await c.respond(messages: [.user("hi")], tools: coachTools, toolChoice: .required)
+        let phases = try #require(try onlyTrafficEntry(in: workDir)["phases"] as? [String: Any])
+        #expect(phases["firstOutputMs"] == nil)
+        #expect(phases["outputMs"] == nil)
+        #expect(phases["stdinMs"] is Int)
+        #expect(phases["parseMs"] is Int)
+        #expect(phases["totalMs"] is Int)
+    }
+
+    @Test func startupOutputBeforeStdinDeliveryStillRecordsFirstOutput() async throws {
+        let workDir = try makeWorkDir()
+        let (c, _) = clientWithTraffic(.claudeCode, workDir: workDir) { _, timings in
+            timings.mark(.runnerEntered)
+            timings.mark(.processLaunched)
+            timings.mark(.firstStdoutByte)  // startup/progress event before the prompt write finishes
+            timings.mark(.stdinDelivered)
+            timings.mark(.processExited)
+            return AgentCLIOutput(stdout: self.claudeEnvelope("ok"), stderr: "", exitCode: 0)
+        }
+        _ = try await c.respond(messages: [.user("hi")], tools: coachTools, toolChoice: .required)
+        let phases = try #require(try onlyTrafficEntry(in: workDir)["phases"] as? [String: Any])
+        #expect(phases["firstOutputMs"] is Int)
+        #expect(phases["stdinMs"] is Int)
+    }
+
+    @Test func failedRunRecordsPhasesCompletedBeforeTheThrow() async throws {
+        // A transport failure (the runner throws) still writes the phases finished before it, with
+        // no response body — the timing up to the failure is not lost.
+        let workDir = try makeWorkDir()
+        let (c, _) = clientWithTraffic(.claudeCode, workDir: workDir) { _, timings in
+            timings.mark(.runnerEntered)
+            timings.mark(.processLaunched)
+            throw CLIBrainClient.error("launch blew up")
+        }
+        await #expect(throws: BrainFailure.self) {
+            _ = try await c.respond(messages: [.user("x")], tools: coachTools, toolChoice: .required)
+        }
+        let entry = try onlyTrafficEntry(in: workDir)
+        #expect(entry["error"] != nil)
+        #expect(entry["response"] == nil)
+        let phases = try #require(entry["phases"] as? [String: Any])
+        #expect(phases["spawnMs"] is Int)       // runnerEntered → processLaunched was observed
+        #expect(phases["firstOutputMs"] == nil)  // never reached first output
+        #expect(phases["parseMs"] == nil)        // reply was never parsed
+        #expect(phases["totalMs"] is Int)
+    }
+
+    @Test func nonZeroExitRetainsCompletedPhasesButNotParse() async throws {
+        let workDir = try makeWorkDir()
+        let (c, _) = clientWithTraffic(.claudeCode, workDir: workDir) { _, timings in
+            timings.mark(.runnerEntered)
+            timings.mark(.processLaunched)
+            timings.mark(.stdinDelivered)
+            timings.mark(.processExited)
+            return AgentCLIOutput(stdout: "", stderr: "not logged in", exitCode: 2)
+        }
+        await #expect(throws: BrainFailure.self) {
+            _ = try await c.respond(messages: [.user("x")], tools: coachTools,
+                                    toolChoice: .required)
+        }
+        let entry = try onlyTrafficEntry(in: workDir)
+        #expect(entry["status"] as? Int == 500)
+        #expect((entry["error"] as? String)?.contains("not logged in") == true)
+        let phases = try #require(entry["phases"] as? [String: Any])
+        #expect(phases["spawnMs"] is Int)
+        #expect(phases["stdinMs"] is Int)
+        #expect(phases["firstOutputMs"] == nil)
+        #expect(phases["parseMs"] == nil)
+        #expect(phases["totalMs"] is Int)
+    }
+
+    @Test func malformedFinalOutputStillRecordsPhases() async throws {
+        // A clean exit whose stdout carries no usable protocol (the parse yields silence) must still
+        // record the full observed timing, parse phase included.
+        let workDir = try makeWorkDir()
+        let (c, _) = clientWithTraffic(.claudeCode, workDir: workDir) { _, timings in
+            timings.mark(.runnerEntered)
+            timings.mark(.processLaunched)
+            timings.mark(.stdinDelivered)
+            timings.mark(.firstStdoutByte)
+            timings.mark(.processExited)
+            return AgentCLIOutput(stdout: "not json at all", stderr: "", exitCode: 0)
+        }
+        let response = try await c.respond(messages: [.user("hm")], tools: coachTools,
+                                           toolChoice: .required)
+        #expect(response.toolCalls.isEmpty)
+        let phases = try #require(try onlyTrafficEntry(in: workDir)["phases"] as? [String: Any])
+        #expect(phases["firstOutputMs"] is Int)
+        #expect(phases["parseMs"] is Int)
+        #expect(phases["totalMs"] is Int)
+    }
+
     @Test func forcedSpeakDegradesToSpeakingTheRawReply() async throws {
         // A hotkey press must yield a visible hint even when the CLI forgets the JSON protocol.
         let workDir = try makeWorkDir()
-        let c = client(.claudeCode, workDir: workDir) { _ in
+        let c = client(.claudeCode, workDir: workDir) { _, _ in
             AgentCLIOutput(stdout: self.claudeEnvelope("Try a hash map.\nIt remembers seen values."),
                            stderr: "", exitCode: 0)
         }
@@ -362,7 +509,7 @@ import Foundation
 
     @Test func unparseableRequiredReplyIsSilenceNotACrash() async throws {
         let workDir = try makeWorkDir()
-        let c = client(.claudeCode, workDir: workDir) { _ in
+        let c = client(.claudeCode, workDir: workDir) { _, _ in
             AgentCLIOutput(stdout: self.claudeEnvelope("I have nothing structured to say."),
                            stderr: "", exitCode: 0)
         }
@@ -376,7 +523,7 @@ import Foundation
 
     @Test func claudeErrorEnvelopeThrows() async throws {
         let workDir = try makeWorkDir()
-        let c = client(.claudeCode, workDir: workDir) { _ in
+        let c = client(.claudeCode, workDir: workDir) { _, _ in
             AgentCLIOutput(stdout: self.claudeEnvelope("credit balance too low", isError: true),
                            stderr: "", exitCode: 1)
         }
@@ -387,7 +534,7 @@ import Foundation
 
     @Test func nonZeroExitWithoutEnvelopeThrowsWithStderr() async throws {
         let workDir = try makeWorkDir()
-        let c = client(.claudeCode, workDir: workDir) { _ in
+        let c = client(.claudeCode, workDir: workDir) { _, _ in
             AgentCLIOutput(stdout: "", stderr: "not logged in", exitCode: 2)
         }
         do {
