@@ -14,6 +14,9 @@ let package = Package(
         // The AppKit overlay lives in its own library target (not the executable) so it can be
         // imported by tests — see Tests/JarvisOverlayTests for the screen-capture invisibility checks.
         .target(name: "JarvisOverlay", dependencies: ["JarvisCore"]),
+        // OS-bound private IPC plus the MCP stdio adapter. The action policy and validation stay in
+        // JarvisCore; this target only carries calls between a local CLI child and that broker.
+        .target(name: "JarvisMCPBridge", dependencies: ["JarvisCore"]),
         // Acoustic echo cancellation (WebRTC AEC3), the OS/native-bound edge. The C++ implementation
         // is prebuilt + statically merged with abseil into Sources/CJarvisAEC/lib/libjarvis-aec.a by scripts/build-aec.sh
         // (zero runtime dylib deps), so `swift build` compiles only the pure-C shim header and links
@@ -29,7 +32,17 @@ let package = Package(
         ),
         .executableTarget(
             name: "JarvisApp",
-            dependencies: ["JarvisCore", "JarvisOverlay", "CJarvisAEC"]
+            dependencies: ["JarvisCore", "JarvisOverlay", "JarvisMCPBridge", "CJarvisAEC"]
+        ),
+        .executableTarget(
+            name: "JarvisMCPServer",
+            dependencies: ["JarvisMCPBridge"]
+        ),
+        // Developer-only, bounded A/B harness for issue #111. It runs the same synthetic
+        // evidence-dependent coaching turn through prompt JSON and private MCP.
+        .executableTarget(
+            name: "ActionTransportComparison",
+            dependencies: ["JarvisCore", "JarvisMCPBridge"]
         ),
         // The dev-side CLI half of the agentic session audit (see AgenticEvaluation): renders a
         // session's traffic to a compact transcript and prints the agent task prompt. A separate,
@@ -46,6 +59,10 @@ let package = Package(
         .testTarget(
             name: "JarvisOverlayTests",
             dependencies: ["JarvisOverlay"]
+        ),
+        .testTarget(
+            name: "JarvisMCPBridgeTests",
+            dependencies: ["JarvisCore", "JarvisMCPBridge"]
         ),
         // WebKit-driven end-to-end tests for the activity viewer's shipped HTML/JS. Kept separate
         // from JarvisCoreTests so the core's own test target stays Foundation-only and the

@@ -208,6 +208,74 @@ import Glibc
         #expect(d.detect(.codexCLI)?.supportedFeatures == [])
     }
 
+    @Test func installedHelpOutputFormsTheMCPCompatibilityProfile() throws {
+        let home = try makeHome()
+        let bin = home.appendingPathComponent("fakebin")
+        let codexFeatureArguments = CLIBrainClient.codexMCPRequiredDisableFeatures
+            .sorted()
+            .map { "'\($0) stable true'" }
+            .joined(separator: " ")
+        try installBinary("claude", in: bin, script: """
+            #!/bin/sh
+            if [ "$1" = "--help" ]; then
+                printf '%s\\n' '  --mcp-config <file>' '  --strict-mcp-config'
+                exit 0
+            fi
+            printf '%s\\n' '{"loggedIn":true}'
+            """)
+        try installBinary("codex", in: bin, script: """
+            #!/bin/sh
+            if [ "$1" = "features" ] && [ "$2" = "list" ]; then
+                printf '%s\\n' \(codexFeatureArguments)
+                exit 0
+            fi
+            if [ "$1" = "mcp" ] && [ "$2" = "--help" ]; then
+                printf '%s\\n' 'Manage external MCP servers'
+                exit 0
+            fi
+            exit 2
+            """)
+        let d = detector(home: home, pathVariable: bin.path, authStatusTimeout: 10)
+
+        #expect(d.detect(.claudeCode)?.supportsMCP == true)
+        #expect(d.detect(.codexCLI)?.supportsMCP == true)
+    }
+
+    @Test func codexMCPFallsBackWhenBuiltInsCannotAllBeDisabled() throws {
+        let home = try makeHome()
+        let bin = home.appendingPathComponent("fakebin")
+        try installBinary("codex", in: bin, script: """
+            #!/bin/sh
+            if [ "$1" = "features" ] && [ "$2" = "list" ]; then
+                printf '%s\\n' 'shell_tool stable true'
+                exit 0
+            fi
+            if [ "$1" = "mcp" ] && [ "$2" = "--help" ]; then
+                printf '%s\\n' 'Manage external MCP servers'
+                exit 0
+            fi
+            exit 2
+            """)
+        let d = detector(home: home, pathVariable: bin.path, authStatusTimeout: 10)
+
+        #expect(d.detect(.codexCLI)?.supportsMCP == false)
+    }
+
+    @Test func unfamiliarHelpOutputSelectsCompatibilityTransport() throws {
+        let home = try makeHome()
+        let bin = home.appendingPathComponent("fakebin")
+        try installBinary("claude", in: bin, script: """
+            #!/bin/sh
+            if [ "$1" = "--help" ]; then
+                printf '%s\\n' 'old help'
+                exit 0
+            fi
+            printf '%s\\n' '{"loggedIn":true}'
+            """)
+        let d = detector(home: home, pathVariable: bin.path, authStatusTimeout: 10)
+        #expect(d.detect(.claudeCode)?.supportsMCP == false)
+    }
+
     @Test func codexFeatureProbeIsBounded() throws {
         let home = try makeHome()
         let bin = home.appendingPathComponent("fakebin")
@@ -273,6 +341,6 @@ import Glibc
         #expect(result.map(\.provider) == [.codexCLI])
         #expect(fm.fileExists(atPath: codexProbe.path))
         #expect(!fm.fileExists(atPath: claudeProbe.path))
-        #expect(try String(contentsOf: codexProbe, encoding: .utf8) == "probe\n")
+        #expect(try String(contentsOf: codexProbe, encoding: .utf8) == "probe\nprobe\n")
     }
 }

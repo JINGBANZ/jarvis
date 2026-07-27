@@ -126,20 +126,245 @@ extension CLIBrainClient {
         }
     }
 
+    /// Build a one-process agentic turn whose only callable surface is Jarvis's private MCP server.
+    /// Unlike `prepareInvocation`, this does not describe an output-shaped JSON protocol: the CLI
+    /// must call a real tool, and the attempt broker independently rejects a clean exit without a
+    /// terminal action.
+    func prepareMCPInvocation(
+        messages: [ChatMessage],
+        tools: [ToolDef],
+        toolChoice: ToolChoice,
+        configuration: CLIMCPConfiguration
+    ) throws -> PreparedInvocation {
+        let rendered = renderConversation(messages)
+        let instructions = composeMCPInstructions(
+            system: rendered.system,
+            tools: tools,
+            toolChoice: toolChoice)
+        var auditRequest: [String: Any] = [
+            "provider": provider.rawValue,
+            "model": model.isEmpty ? "(CLI default)" : model,
+            "executable": executable.path,
+            "instructions": instructions,
+            "actionTransport": "mcp",
+            "mcpServer": configuration.serverName,
+        ]
+
+        switch provider {
+        case .claudeCode:
+            var args = [
+                "-p", "--verbose",
+                "--input-format", "stream-json",
+                "--output-format", "stream-json",
+                "--no-session-persistence",
+                "--setting-sources", "",
+                "--strict-mcp-config",
+                "--mcp-config", configuration.claudeConfigFile.path,
+                "--system-prompt", instructions,
+                "--effort", Self.claudeEffort(reasoningEffort),
+                "--permission-mode", "dontAsk",
+                "--tools", "",
+                "--allowedTools",
+                "mcp__\(configuration.serverName)__\(captureScreenTool.name)",
+                "mcp__\(configuration.serverName)__\(speakTool.name)",
+                "mcp__\(configuration.serverName)__\(staySilentTool.name)",
+            ]
+            if !model.isEmpty { args += ["--model", model] }
+            let message = try Self.claudeStreamMessage(
+                segments: rendered.segments,
+                hasTools: true,
+                forcedTool: Self.forcedToolDirective(toolChoice))
+            auditRequest["input"] = message.auditInput
+            return PreparedInvocation(
+                run: AgentCLIRun(
+                    executable: executable,
+                    arguments: args,
+                    stdin: message.stdin,
+                    workingDirectory: workDirectory,
+                    timeout: timeout),
+                auditRequest: auditRequest,
+                transientFiles: [],
+                codexReplyFile: nil)
+
+        case .codexCLI:
+            let replyFile = workDirectory
+                .appendingPathComponent("cli-reply-\(UUID().uuidString.prefix(8)).txt")
+            var transientFiles = [replyFile]
+            let name = configuration.serverName
+            let command = Self.tomlString(configuration.serverExecutable.path)
+            let ticket = Self.tomlString(configuration.ticketFile.path)
+            let enabledTools = [captureScreenTool, speakTool, staySilentTool]
+                .map { Self.tomlString($0.name) }
+                .joined(separator: ",")
+            var args = [
+                "exec", "--skip-git-repo-check", "--sandbox", "read-only", "--ephemeral",
+                "--ignore-user-config", "--ignore-rules",
+                "--output-last-message", replyFile.path,
+                "-c", "project_root_markers=[]",
+                "-c", "project_doc_max_bytes=0",
+                "-c", "model_reasoning_effort=\(Self.codexEffort(reasoningEffort))",
+                "-c", "mcp_servers={}",
+                "-c", "mcp_servers.\(name).command=\(command)",
+                "-c", "mcp_servers.\(name).args=[\"--ticket\",\(ticket)]",
+                "-c", "mcp_servers.\(name).enabled_tools=[\(enabledTools)]",
+                // `codex exec` cannot prompt for MCP approval. Approve only this authenticated
+                // attempt server; its enabled-tools allowlist is the same closed three-action set.
+                "-c", "mcp_servers.\(name).default_tools_approval_mode=\"approve\"",
+                "-c", "mcp_servers.\(name).startup_timeout_sec=10",
+                "-c", "mcp_servers.\(name).tool_timeout_sec=\(Int(timeout))",
+            ]
+            for feature in Self.codexDisabledAgentFeatures
+                where codexSupportedFeatures.contains(feature) {
+                args += ["--disable", feature]
+            }
+            if !model.isEmpty { args += ["-m", model] }
+
+            var blocks: [String] = []
+            var auditInput: [[String: Any]] = []
+            for segment in rendered.segments {
+                switch segment {
+                case .text(let block):
+                    blocks.append(block)
+                    auditInput.append(["type": "text", "text": block])
+                case .imageJPEG(let base64):
+                    let url = try writeImage(base64)
+                    transientFiles.append(url)
+                    args += ["-i", url.path]
+                    blocks.append("[user]\n(screenshot attached as an image input)")
+                    auditInput.append(["type": "image", "image": Self.imageStub(base64)])
+                }
+            }
+            var document = instructions
+                + "\n\n## Conversation\n\n"
+                + blocks.joined(separator: "\n\n")
+                + "\n\nAct now by calling a Jarvis MCP tool."
+            if let forced = Self.forcedToolDirective(toolChoice) {
+                document += " \(forced)"
+            }
+            auditRequest["input"] = auditInput
+            return PreparedInvocation(
+                run: AgentCLIRun(
+                    executable: executable,
+                    arguments: args,
+                    stdin: document,
+                    workingDirectory: workDirectory,
+                    timeout: timeout),
+                auditRequest: auditRequest,
+                transientFiles: transientFiles,
+                codexReplyFile: replyFile)
+
+        case .openAI:
+            preconditionFailure("guarded in init")
+        }
+    }
+
+    private func composeMCPInstructions(
+        system: [String],
+        tools: [ToolDef],
+        toolChoice: ToolChoice
+    ) -> String {
+        var sections = system
+        var lines = [
+            "## Jarvis actions",
+            "",
+            "You are inside an automated coaching harness. Use the callable tools from the `jarvis` "
+                + "MCP server; do not describe or print a tool call.",
+        ]
+        for tool in tools {
+            lines.append("- \(tool.name) — \(tool.description)")
+        }
+        lines += [
+            "",
+            "You may call capture_screen serially when visual context is needed. After any capture, "
+                + "continue in this same run and inspect its result.",
+        ]
+        switch toolChoice {
+        case .force(let name):
+            lines.append("End by calling exactly one `\(name)` action. Do not call another terminal action.")
+        case .required:
+            lines.append(
+                "End by calling exactly one terminal action: `speak` or `stay_silent`. "
+                    + "A text-only final answer is a failed coaching attempt.")
+        case .auto:
+            lines.append("When tools are supplied, end by calling one terminal action.")
+        }
+        sections.append(lines.joined(separator: "\n"))
+        return sections.joined(separator: "\n\n")
+    }
+
+    private static func tomlString(_ value: String) -> String {
+        let escaped = value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        return "\"\(escaped)\""
+    }
+
     /// Codex is a coding agent even under `exec`; these feature gates remove built-in surfaces that
     /// can turn a three-way text decision into an agentic run. The invocation intersects this list
     /// with the installed CLI's advertised features, so renamed or unavailable names are omitted.
     static let codexDisabledAgentFeatures = [
         "apps",
+        "auth_elicitation",
         "browser_use",
+        "browser_use_external",
+        "browser_use_full_cdp_access",
+        "code_mode",
+        "code_mode_buffered_exec",
+        "code_mode_host",
+        "code_mode_only",
+        "computer_use",
+        "deferred_executor",
+        "enable_mcp_apps",
+        "goals",
+        "hooks",
+        "in_app_browser",
+        "image_generation",
+        "memories",
+        "multi_agent",
+        "multi_agent_v2",
+        "network_proxy",
+        "plugin_sharing",
+        "plugins",
+        "remote_plugin",
+        "request_permissions_tool",
+        "shell_snapshot",
+        "shell_tool",
+        "shell_zsh_fork",
+        "skill_mcp_dependency_install",
+        "skill_search",
+        "standalone_web_search",
+        "tool_call_mcp_elicitation",
+        "tool_suggest",
+        "unified_exec",
+        "unified_exec_zsh_fork",
+        "workspace_dependencies",
+    ]
+
+    /// Native MCP is enabled only when the installed Codex build advertises disable switches for
+    /// every stable surface that could inspect data, invoke another agent/tool host, or widen the
+    /// three-action contract. An older/renamed build falls back to the brokered JSON adapter.
+    static let codexMCPRequiredDisableFeatures: Set<String> = [
+        "apps",
+        "browser_use",
+        "browser_use_external",
+        "browser_use_full_cdp_access",
         "code_mode_host",
         "computer_use",
         "goals",
+        "hooks",
         "image_generation",
+        "in_app_browser",
+        "memories",
         "multi_agent",
         "plugins",
+        "remote_plugin",
+        "shell_snapshot",
         "shell_tool",
+        "skill_mcp_dependency_install",
+        "skill_search",
+        "tool_suggest",
         "unified_exec",
+        "workspace_dependencies",
     ]
 
     static let codexDirectResponseInstruction = """

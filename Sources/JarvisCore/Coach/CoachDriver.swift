@@ -784,20 +784,39 @@ public final class CoachDriver: @unchecked Sendable {
             reason == .manualHint ? .force(speakTool.name) : .required
         jlog("💭 thinking… [\(attempt.target.provider.displayName)]")
 
+        let screen = self.screen
+        let actionBroker = CoachingActionBroker(
+            identity: .init(configurationRevision: attempt.routeRevision),
+            capture: {
+                await Task.detached(
+                    priority: .userInitiated,
+                    operation: { screen.capture() }).value
+            },
+            captureObserver: { snapshot in
+                Self.recordCaptureActivity(snapshot)
+            })
+        defer { actionBroker.invalidate() }
+
         var iterations = 0
         while iterations < maxToolIterations {
             iterations += 1
             let response: BrainResponse
             do {
-                response = try await attempt.brain.respond(
-                    messages: historyBase + turnMessages,
-                    tools: coachTools,
-                    toolChoice: toolChoice)
+                response = try await withTaskCancellationHandler {
+                    try await attempt.brain.respond(
+                        messages: historyBase + turnMessages,
+                        tools: coachTools,
+                        toolChoice: toolChoice,
+                        actionBroker: actionBroker)
+                } onCancel: {
+                    actionBroker.invalidate()
+                }
             } catch {
                 if Task.isCancelled || error is CancellationError {
                     jlog("… attempt cancelled (interrupted)")
                     return .cancelled
                 }
+                await preserveBrokerObservation(actionBroker, in: &work)
                 let failure = BrainFailure(error)
                 jlog("Jarvis coach: brain request failed on \(reason) via "
                      + "\(attempt.target.provider.displayName): \(failure.detail)")
@@ -812,6 +831,7 @@ public final class CoachDriver: @unchecked Sendable {
             // Incomplete output cannot prove a terminal action, even if it happens to contain one.
             // Do not render a partial tip or execute a partial tool decision.
             if let incompleteReason = response.incompleteReason {
+                await preserveBrokerObservation(actionBroker, in: &work)
                 jlog("⚠️ response incomplete (\(incompleteReason)) — scheduling fresh attempt")
                 return .failed(
                     outcome: .truncated,
@@ -821,96 +841,91 @@ public final class CoachDriver: @unchecked Sendable {
                     work: work)
             }
 
-            guard let call = response.toolCalls.first else {
-                jlog("⚠️ required coaching action missing — scheduling fresh attempt")
-                return .failed(
-                    outcome: .brainError,
-                    failure: BrainFailure(
-                        disposition: .temporary,
-                        detail: "provider returned no required coaching tool call"),
-                    work: work)
-            }
-
-            switch call {
-            case .captureScreen(let callID):
-                let screen = self.screen
-                let shot = await Task.detached(
-                    priority: .userInitiated,
-                    operation: { screen.capture() }).value
-                if Task.isCancelled {
-                    jlog("… attempt cancelled (stopped) after capture")
-                    return .cancelled
-                }
-                if let shot {
-                    jlog("👁 looking at your screen")
-                    ActivityLog.shared.record(.screenViewed(imageBase64JPEG: shot.imageBase64))
-                    if let text = shot.recognizedText {
-                        jlog("🔤 read \(text.count(where: { $0 == "\n" }) + 1) lines of on-screen text")
+            do {
+                switch response.actionDelivery {
+                case .returnedCalls:
+                    guard response.toolCalls.count <= 1 else {
+                        try await actionBroker.rejectMultipleCallsInResponse()
+                        preconditionFailure("rejectMultipleCallsInResponse always throws")
                     }
-                    work.observations = [
-                        .user(Self.captureResultText(shot)),
-                        .userImage(shot.imageBase64),
-                    ]
-                } else {
-                    jlog("👁 screenshot failed")
-                    ActivityLog.shared.record(.screenViewFailed)
-                    work.observations = [
-                        .user("A screen capture requested earlier in this turn failed."),
-                    ]
+                    guard let call = response.toolCalls.first else {
+                        _ = try await actionBroker.requireTerminal()
+                        preconditionFailure("requireTerminal throws when no action was returned")
+                    }
+                    let result = try await withTaskCancellationHandler {
+                        try await actionBroker.submit(call)
+                    } onCancel: {
+                        actionBroker.invalidate()
+                    }
+                    if case .capture(let snapshot) = result {
+                        try Task.checkCancellation()
+                        Self.appendCapture(
+                            callID: call.callID,
+                            snapshot: snapshot,
+                            response: response,
+                            to: &turnMessages,
+                            work: &work)
+                        continue
+                    }
+
+                case .broker:
+                    guard response.toolCalls.isEmpty else {
+                        try await actionBroker.rejectMultipleCallsInResponse()
+                        preconditionFailure("rejectMultipleCallsInResponse always throws")
+                    }
+                    Self.appendBrokerCaptures(
+                        await actionBroker.events(),
+                        to: &turnMessages,
+                        work: &work)
                 }
 
-                // Provider-specific linkage remains inside this attempt only.
-                if !response.outputItemsJSON.isEmpty {
-                    turnMessages.append(.rawItems(response.outputItemsJSON))
-                } else {
-                    turnMessages.append(.assistantToolCalls(response.rawToolCalls))
-                }
-                if let shot {
-                    turnMessages.append(.init(
-                        role: .tool,
-                        text: Self.captureResultText(shot),
-                        toolCallId: callID))
-                    turnMessages.append(.userImage(shot.imageBase64))
-                } else {
-                    turnMessages.append(.init(
-                        role: .tool,
-                        text: "screenshot failed",
-                        toolCallId: callID))
-                }
-
-            case .speak(let callID, let lines):
+                _ = try await actionBroker.requireTerminal()
                 if Task.isCancelled {
-                    jlog("… attempt cancelled (stopped) before speaking")
+                    jlog("… attempt cancelled (stopped) before committing action")
                     return .cancelled
                 }
-                jlog("💬 \(lines.joined(separator: " "))")
-                ActivityLog.shared.record(.tip(lines: lines))
-                overlay.render(
-                    lines,
-                    perLineSeconds: lines.map {
-                        OverlayTiming.displaySeconds(for: $0, config: config)
-                    })
-                turnMessages.append(.assistantToolCalls(response.rawToolCalls))
-                turnMessages.append(.init(
-                    role: .tool,
-                    text: "shown to the user",
-                    toolCallId: callID))
-                history.commit(turnMessages)
-                commitTranscript(through: delta.upTo)
-                await compactIfNeeded(using: attempt)
-                return .completed(.spoke)
+                let decision = try await actionBroker.commit()
 
-            case .staySilent:
-                if Task.isCancelled {
-                    jlog("… attempt cancelled (stopped) before recording silence")
-                    return .cancelled
+                switch decision {
+                case .speak(let callID, let lines):
+                    jlog("💬 \(lines.joined(separator: " "))")
+                    ActivityLog.shared.record(.tip(lines: lines))
+                    overlay.render(
+                        lines,
+                        perLineSeconds: lines.map {
+                            OverlayTiming.displaySeconds(for: $0, config: config)
+                        })
+                    let rawCalls = response.actionDelivery == .returnedCalls
+                        ? response.rawToolCalls
+                        : [decision.rawToolCall]
+                    turnMessages.append(.assistantToolCalls(rawCalls))
+                    turnMessages.append(.init(
+                        role: .tool,
+                        text: "shown to the user",
+                        toolCallId: callID))
+                    history.commit(turnMessages)
+                    commitTranscript(through: delta.upTo)
+                    await compactIfNeeded(using: attempt)
+                    return .completed(.spoke)
+
+                case .staySilent:
+                    if Task.isCancelled {
+                        jlog("… attempt cancelled (stopped) before recording silence")
+                        return .cancelled
+                    }
+                    jlog("… nothing useful to add, staying silent")
+                    ActivityLog.shared.record(.stayedSilent)
+                    commitIfWorthKeeping(turnMessages, deltaText: delta.text)
+                    commitTranscript(through: delta.upTo)
+                    await compactIfNeeded(using: attempt)
+                    return .completed(.silentByModel)
                 }
-                jlog("… nothing useful to add, staying silent")
-                ActivityLog.shared.record(.stayedSilent)
-                commitIfWorthKeeping(turnMessages, deltaText: delta.text)
-                commitTranscript(through: delta.upTo)
-                await compactIfNeeded(using: attempt)
-                return .completed(.silentByModel)
+            } catch {
+                await preserveBrokerObservation(actionBroker, in: &work)
+                let failure = BrainFailure(error)
+                jlog("Jarvis coach: invalid coaching action via "
+                     + "\(attempt.target.provider.displayName): \(failure.detail)")
+                return .failed(outcome: .brainError, failure: failure, work: work)
             }
         }
 
@@ -921,6 +936,103 @@ public final class CoachDriver: @unchecked Sendable {
                 disposition: .temporary,
                 detail: "coaching tool loop exhausted"),
             work: work)
+    }
+
+    private static func recordCaptureActivity(_ snapshot: ScreenSnapshot?) {
+        if let snapshot {
+            jlog("👁 looking at your screen")
+            ActivityLog.shared.record(.screenViewed(imageBase64JPEG: snapshot.imageBase64))
+            if let text = snapshot.recognizedText {
+                jlog("🔤 read \(text.count(where: { $0 == "\n" }) + 1) lines of on-screen text")
+            }
+        } else {
+            jlog("👁 screenshot failed")
+            ActivityLog.shared.record(.screenViewFailed)
+        }
+    }
+
+    private static func appendBrokerCaptures(
+        _ events: [CoachingActionBroker.Event],
+        to turnMessages: inout [ChatMessage],
+        work: inout PendingCoachingWork
+    ) {
+        for event in events {
+            guard case .captured(let callID, let snapshot) = event else { continue }
+            let raw = RawToolCall(
+                id: callID,
+                name: captureScreenTool.name,
+                argumentsJSON: "{}")
+            appendCapture(
+                callID: callID,
+                snapshot: snapshot,
+                rawAssistantMessage: .assistantToolCalls([raw]),
+                to: &turnMessages,
+                work: &work)
+        }
+    }
+
+    private static func appendCapture(
+        callID: String,
+        snapshot: ScreenSnapshot?,
+        response: BrainResponse,
+        to turnMessages: inout [ChatMessage],
+        work: inout PendingCoachingWork
+    ) {
+        let assistantMessage: ChatMessage = response.outputItemsJSON.isEmpty
+            ? .assistantToolCalls(response.rawToolCalls)
+            : .rawItems(response.outputItemsJSON)
+        appendCapture(
+            callID: callID,
+            snapshot: snapshot,
+            rawAssistantMessage: assistantMessage,
+            to: &turnMessages,
+            work: &work)
+    }
+
+    private static func appendCapture(
+        callID: String,
+        snapshot: ScreenSnapshot?,
+        rawAssistantMessage: ChatMessage,
+        to turnMessages: inout [ChatMessage],
+        work: inout PendingCoachingWork
+    ) {
+        turnMessages.append(rawAssistantMessage)
+        if let snapshot {
+            turnMessages.append(.init(
+                role: .tool,
+                text: captureResultText(snapshot),
+                toolCallId: callID))
+            turnMessages.append(.userImage(snapshot.imageBase64))
+            work.observations = [
+                .user(captureResultText(snapshot)),
+                .userImage(snapshot.imageBase64),
+            ]
+        } else {
+            turnMessages.append(.init(
+                role: .tool,
+                text: "screenshot failed",
+                toolCallId: callID))
+            work.observations = [
+                .user("A screen capture requested earlier in this turn failed."),
+            ]
+        }
+    }
+
+    private func preserveBrokerObservation(
+        _ broker: CoachingActionBroker,
+        in work: inout PendingCoachingWork
+    ) async {
+        guard await broker.hasCaptureAttempt() else { return }
+        if let snapshot = await broker.latestCapture() {
+            work.observations = [
+                .user(Self.captureResultText(snapshot)),
+                .userImage(snapshot.imageBase64),
+            ]
+        } else {
+            work.observations = [
+                .user("A screen capture requested earlier in this turn failed."),
+            ]
+        }
     }
 
     private func commitIfWorthKeeping(_ turn: [ChatMessage], deltaText: String) {
@@ -990,4 +1102,13 @@ public enum TurnOutcome: Sendable, Equatable {
     case cancelled
     case brainError
     case exhausted
+}
+
+private extension ToolInvocation {
+    var callID: String {
+        switch self {
+        case .captureScreen(let callID), .speak(let callID, _), .staySilent(let callID):
+            return callID
+        }
+    }
 }

@@ -75,6 +75,26 @@ public struct CLIBrainClient: BrainClient, @unchecked Sendable {
         }
     }
 
+    /// Run the CLI with Jarvis's private MCP server as its only action surface. The returned text is
+    /// diagnostic/fallback material only; the caller proves success from the shared attempt broker.
+    public func respondUsingMCP(
+        messages: [ChatMessage],
+        tools: [ToolDef],
+        toolChoice: ToolChoice,
+        configuration: CLIMCPConfiguration
+    ) async throws -> BrainResponse {
+        do {
+            return try await performMCPRequest(
+                messages: messages,
+                tools: tools,
+                toolChoice: toolChoice,
+                configuration: configuration)
+        } catch {
+            if Task.isCancelled || error is CancellationError { throw error }
+            throw BrainFailure(error)
+        }
+    }
+
     /// Keep classification at the provider boundary. CLI exit codes and stderr are diagnostics,
     /// not a recoverability taxonomy, so unclassified failures remain temporary by default.
     private func performRequest(messages: [ChatMessage], tools: [ToolDef],
@@ -127,6 +147,76 @@ public struct CLIBrainClient: BrainClient, @unchecked Sendable {
                         latencyMs: Self.totalLatencyMs(in: phases), phases: phases)
 
         return response
+    }
+
+    private func performMCPRequest(
+        messages: [ChatMessage],
+        tools: [ToolDef],
+        toolChoice: ToolChoice,
+        configuration: CLIMCPConfiguration
+    ) async throws -> BrainResponse {
+        let timings = AgentCLIPhaseTimings()
+        let respondEntered = DispatchTime.now().uptimeNanoseconds
+        let prepared = try prepareMCPInvocation(
+            messages: messages,
+            tools: tools,
+            toolChoice: toolChoice,
+            configuration: configuration)
+        defer {
+            for url in prepared.transientFiles {
+                try? FileManager.default.removeItem(at: url)
+            }
+        }
+
+        let output: AgentCLIOutput
+        do {
+            output = try await run(prepared.run, timings)
+        } catch {
+            let phases = Self.phaseDurationsMs(timings, respondEntered: respondEntered)
+            logPhases(phases, note: "mcp failed")
+            traffic?.record(
+                tag: trafficTag,
+                request: Self.recordData(prepared.auditRequest),
+                response: nil,
+                status: nil,
+                latencyMs: Self.totalLatencyMs(in: phases),
+                error: error.localizedDescription,
+                phases: phases)
+            throw error
+        }
+
+        let reply: String
+        do {
+            reply = try extractReply(output, codexReplyFile: prepared.codexReplyFile)
+        } catch {
+            let phases = Self.phaseDurationsMs(timings, respondEntered: respondEntered)
+            logPhases(phases, note: "mcp failed")
+            traffic?.record(
+                tag: trafficTag,
+                request: Self.recordData(prepared.auditRequest),
+                response: responseRecord(output, reply: nil),
+                status: output.exitCode == 0 ? 200 : 500,
+                latencyMs: Self.totalLatencyMs(in: phases),
+                error: error.localizedDescription,
+                phases: phases)
+            throw error
+        }
+
+        timings.mark(.replyParsed)
+        let phases = Self.phaseDurationsMs(timings, respondEntered: respondEntered)
+        logPhases(phases, note: "mcp ok")
+        traffic?.record(
+            tag: trafficTag,
+            request: Self.recordData(prepared.auditRequest),
+            response: responseRecord(output, reply: reply),
+            status: output.exitCode == 0 ? 200 : 500,
+            latencyMs: Self.totalLatencyMs(in: phases),
+            phases: phases)
+        let text = reply.trimmingCharacters(in: .whitespacesAndNewlines)
+        return BrainResponse(
+            toolCalls: [],
+            outputText: text.isEmpty ? nil : text,
+            actionDelivery: .broker)
     }
 
     // MARK: - Audit records

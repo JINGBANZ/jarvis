@@ -1,5 +1,6 @@
 import AppKit
 import JarvisCore
+import JarvisMCPBridge
 import JarvisOverlay
 
 @MainActor
@@ -237,12 +238,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let summarizer: BrainClient
         if let cli {
             let sessionDir = currentSessionDir ?? logDirectory()
-            coachBase = CLIBrainClient(provider: target.provider, executable: cli.executableURL,
-                                       model: target.modelID,
-                                       reasoningEffort: effort.rawValue,
-                                       workDirectory: sessionDir,
-                                       codexSupportedFeatures: cli.supportedFeatures,
-                                       traffic: sessionTraffic, trafficTag: "coach")
+            let cliCoach = CLIBrainClient(
+                provider: target.provider,
+                executable: cli.executableURL,
+                model: target.modelID,
+                reasoningEffort: effort.rawValue,
+                workDirectory: sessionDir,
+                codexSupportedFeatures: cli.supportedFeatures,
+                traffic: sessionTraffic,
+                trafficTag: "coach")
+            if let server = mcpServerExecutable(),
+               shouldUseMCP(for: cli) {
+                coachBase = MCPBrainClient(
+                    base: cliCoach,
+                    sessionDirectory: sessionDir,
+                    serverExecutable: server)
+                jlog("Jarvis coach: \(target.provider.displayName) action transport = MCP")
+            } else {
+                coachBase = cliCoach
+                jlog("Jarvis coach: \(target.provider.displayName) action transport = JSON")
+            }
             summarizer = CLIBrainClient(provider: target.provider, executable: cli.executableURL,
                                         model: BrainModelCatalog.summarizerModelID(for: target.provider),
                                         reasoningEffort: ReasoningEffort.low.rawValue,
@@ -261,6 +276,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 traffic: sessionTraffic, trafficTag: "summarizer")
         }
         return BrainRuntime(coach: coachBase, summarizer: summarizer)
+    }
+
+    private enum CLIActionTransport: String {
+        case automatic
+        case json
+        case mcp
+    }
+
+    /// Developer/validation override; ordinary sessions use capability-based automatic selection.
+    /// Keeping this out of user preferences avoids making an implementation transport a UX choice.
+    private var requestedCLIActionTransport: CLIActionTransport {
+        let value = ProcessInfo.processInfo.environment["JARVIS_CLI_ACTION_TRANSPORT"]?.lowercased()
+        return value.flatMap(CLIActionTransport.init(rawValue:)) ?? .automatic
+    }
+
+    private func shouldUseMCP(for cli: DetectedAgentCLI) -> Bool {
+        switch requestedCLIActionTransport {
+        case .automatic:
+            return cli.supportsMCP
+        case .json:
+            return false
+        case .mcp:
+            return true
+        }
+    }
+
+    private func mcpServerExecutable() -> URL? {
+        let candidates: [URL]
+        if Bundle.main.bundleURL.pathExtension == "app" {
+            candidates = [
+                Bundle.main.bundleURL
+                    .appendingPathComponent("Contents/Helpers/JarvisMCPServer"),
+            ]
+        } else if let executable = Bundle.main.executableURL {
+            candidates = [
+                executable.deletingLastPathComponent()
+                    .appendingPathComponent("JarvisMCPServer"),
+            ]
+        } else {
+            candidates = []
+        }
+        let server = candidates.first {
+            FileManager.default.isExecutableFile(atPath: $0.path)
+        }
+        if server == nil, requestedCLIActionTransport == .mcp {
+            jlog("Jarvis coach: MCP was forced but the bundled sidecar is unavailable; using JSON")
+        }
+        return server
     }
 
     /// Missing or definitively signed-out fallback CLIs remain in the runtime route as unavailable

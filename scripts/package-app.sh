@@ -24,6 +24,7 @@ cd "$(dirname "$0")/.."
 
 APP="Jarvis.app"
 BIN_NAME="JarvisApp"
+MCP_BIN_NAME="JarvisMCPServer"
 
 if [[ -z "${IDENTITY:-}" ]]; then
   IDENTITY="$(security find-identity -v -p codesigning \
@@ -46,17 +47,21 @@ fi
 
 echo "▶ swift build -c release"
 swift build -c release
-BIN_PATH="$(swift build -c release --show-bin-path)/$BIN_NAME"
+BIN_DIR="$(swift build -c release --show-bin-path)"
+BIN_PATH="$BIN_DIR/$BIN_NAME"
 
 echo "▶ assembling $APP"
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Helpers" "$APP/Contents/Resources"
 cp "$BIN_PATH" "$APP/Contents/MacOS/$BIN_NAME"
+cp "$BIN_DIR/$MCP_BIN_NAME" "$APP/Contents/Helpers/$MCP_BIN_NAME"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 cp Resources/Jarvis.icns "$APP/Contents/Resources/Jarvis.icns"
 
 echo "▶ signing (hardened runtime + timestamp)"
-# No --deep: the bundle is a single statically-linked executable with no nested code.
+# Sign nested code first, then seal the containing app. No --deep: every executable is intentional.
+codesign --force --options runtime --timestamp \
+  --sign "$IDENTITY" "$APP/Contents/Helpers/$MCP_BIN_NAME"
 codesign --force --options runtime --timestamp \
   --entitlements Resources/Jarvis.entitlements \
   --sign "$IDENTITY" "$APP"

@@ -81,6 +81,88 @@ import Foundation
         #expect(response.rawToolCalls.first?.name == "stay_silent")
     }
 
+    @Test func claudeMCPRunLoadsOnlyThePrivateServerAndDoesNotRequestOutputJSON() async throws {
+        let workDir = try makeWorkDir()
+        let captured = Captured<AgentCLIRun>()
+        let c = client(.claudeCode, workDir: workDir) { run, _ in
+            captured.value = run
+            return AgentCLIOutput(
+                stdout: self.claudeEnvelope("tool calls completed"),
+                stderr: "",
+                exitCode: 0)
+        }
+        let configuration = CLIMCPConfiguration(
+            serverExecutable: URL(fileURLWithPath: "/bundle/JarvisMCPServer"),
+            ticketFile: workDir.appendingPathComponent("attempt.ticket.json"),
+            claudeConfigFile: workDir.appendingPathComponent("attempt.claude.json"))
+
+        let response = try await c.respondUsingMCP(
+            messages: [.system("coach prompt"), .user("look first")],
+            tools: coachTools,
+            toolChoice: .required,
+            configuration: configuration)
+
+        let run = try #require(captured.value)
+        let configIndex = try #require(run.arguments.firstIndex(of: "--mcp-config"))
+        #expect(run.arguments[configIndex + 1] == configuration.claudeConfigFile.path)
+        #expect(run.arguments.contains("--strict-mcp-config"))
+        #expect(run.arguments.contains("mcp__jarvis__capture_screen"))
+        #expect(run.arguments.contains("mcp__jarvis__speak"))
+        #expect(run.arguments.contains("mcp__jarvis__stay_silent"))
+        let promptIndex = try #require(run.arguments.firstIndex(of: "--system-prompt"))
+        let instructions = run.arguments[promptIndex + 1]
+        #expect(instructions.contains("callable tools"))
+        #expect(!instructions.contains(#"{"tool":"<tool name>""#))
+        #expect(response.actionDelivery == .broker)
+        #expect(response.toolCalls.isEmpty)
+    }
+
+    @Test func codexMCPRunReplacesInheritedServersWithOneAllowlistedServer() async throws {
+        let workDir = try makeWorkDir()
+        let captured = Captured<AgentCLIRun>()
+        let c = client(.codexCLI, workDir: workDir, model: "") { run, _ in
+            captured.value = run
+            if let index = run.arguments.firstIndex(of: "--output-last-message") {
+                try "tool calls completed".write(
+                    toFile: run.arguments[index + 1],
+                    atomically: true,
+                    encoding: .utf8)
+            }
+            return AgentCLIOutput(stdout: "codex log", stderr: "", exitCode: 0)
+        }
+        let configuration = CLIMCPConfiguration(
+            serverExecutable: URL(fileURLWithPath: "/bundle/JarvisMCPServer"),
+            ticketFile: workDir.appendingPathComponent("attempt.ticket.json"),
+            claudeConfigFile: workDir.appendingPathComponent("attempt.claude.json"))
+
+        let response = try await c.respondUsingMCP(
+            messages: [.system("coach prompt"), .user("look first")],
+            tools: coachTools,
+            toolChoice: .required,
+            configuration: configuration)
+
+        let run = try #require(captured.value)
+        #expect(run.arguments.contains {
+            $0 == #"mcp_servers.jarvis.command="/bundle/JarvisMCPServer""#
+        })
+        #expect(run.arguments.contains {
+            $0.contains("mcp_servers.jarvis.enabled_tools=")
+                && $0.contains("capture_screen")
+                && $0.contains("speak")
+                && $0.contains("stay_silent")
+        })
+        #expect(run.arguments.contains(
+            #"mcp_servers.jarvis.default_tools_approval_mode="approve""#))
+        #expect(run.arguments.contains("mcp_servers={}"))
+        let disabled = Set(zip(run.arguments, run.arguments.dropFirst()).compactMap {
+            flag, value in flag == "--disable" ? value : nil
+        })
+        #expect(disabled == Set(CLIBrainClient.codexDisabledAgentFeatures))
+        #expect(run.stdin?.contains("callable tools") == true)
+        #expect(!run.stdin!.contains(#"{"tool":"<tool name>""#))
+        #expect(response.actionDelivery == .broker)
+    }
+
     @Test func speakArgumentsParseNestedAndFlattenedShapes() async throws {
         for reply in [#"{"tool":"speak","arguments":{"lines":["tip one","tip two"]}}"#,
                       #"{"tool":"speak","lines":["tip one","tip two"]}"#] {

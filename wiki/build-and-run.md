@@ -11,13 +11,15 @@ The Command Line Tools SDK (`/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk
 ScreenCaptureKit, AVFoundation, AppKit, SwiftUI, Vision, CoreAudio, and Security — everything Jarvis
 needs — so a SwiftUI + ScreenCaptureKit binary builds with plain `swift build`. No `.xcodeproj`.
 
-- **Three-target split (load-bearing for testability):** `JarvisCore` holds the pure, deterministic
+- **Target split (load-bearing for testability):** `JarvisCore` holds the pure, deterministic
   logic behind protocols (config, transcript, the coach loop, the OpenAI client, …) and is
   unit-tested with mocks on **any** machine — no Mac UI, key, or permissions needed. `JarvisOverlay`
   is a small library holding just the `NSPanel` overlay, split out so `JarvisOverlayTests` can import
   it to verify screen-capture invisibility headlessly. `JarvisApp` is the thin executable that wires
-  the other two to the side-effectful macOS frameworks (mic, ScreenCaptureKit, the realtime websocket,
-  the menu bar). That split is what lets most of the system be verified headless.
+  those libraries to the side-effectful macOS frameworks (mic, ScreenCaptureKit, the realtime
+  websocket, the menu bar). `JarvisMCPBridge` is the narrow Unix-socket/stdio protocol edge shared
+  by the app and `JarvisMCPServer`; the helper owns no coaching policy or OS effect. That split is
+  what lets most of the system be verified headless.
 - **Tests use swift-testing, not XCTest.** `import XCTest` fails with "no such module" under
   CLT-only. Run the suite via **`./scripts/run-tests.sh`**, which adds the swift-testing framework
   search/rpath flags that plain `swift test` lacks CLT-only. (One sharp edge: a direct
@@ -28,6 +30,11 @@ needs — so a SwiftUI + ScreenCaptureKit binary builds with plain `swift build`
 
 `scripts/build-app.sh` assembles the executable into a hand-built `.app` bundle (the bundle layout
 and the stable bundle id live in the script and `Resources/Info.plist`).
+
+The build also places `JarvisMCPServer` in `Jarvis.app/Contents/Helpers`. The helper is signed before
+the containing app—inside out, without relying on `codesign --deep`—so local and Developer ID builds
+carry the same nested-code shape. A checkout build may locate the sibling SwiftPM helper for
+development, but a bundled app always resolves it from `Bundle.main`.
 
 **Permission persistence is a signing problem.** macOS TCC keys a Screen-Recording/Microphone grant
 to **code signature + bundle id + bundle path**. An ad-hoc signature changes every build, so macOS
@@ -137,6 +144,9 @@ the human-facing coaching record. The current validation priority lives in
   entry, so a deliberate no-op cannot look like a stalled brain.
 - Press **⌥⌘J** with a question visible; confirm a shortcut entry, one screen view, and a tip appear in
   Activity.
+- With Claude Code selected, repeat the screen-dependent turn and confirm the same attempt records one
+  screen view followed by one terminal tip or deliberate silence. Repeat with Codex. A provider exit
+  without either terminal action must be a failed attempt with no overlay—not a successful empty turn.
 - Confirm saved screenshots exclude both overlay surfaces. Toggle each overlay in Settings, verify its
   controls and preview follow the toggle, and confirm the choice survives relaunch.
 - If validating realtime recovery, disconnect the network, say a unique phrase, reconnect, and confirm
@@ -145,3 +155,19 @@ the human-facing coaching record. The current validation priority lives in
   transcription or coaching events.
 - In Activity, choose the stopped session and click **Evaluate**. Confirm the button shows
   **Evaluating…**, the report opens when the agent finishes, and the button then shows **Open report**.
+
+## CLI action-transport comparison
+
+For a synthetic, evidence-dependent comparison that does not need audio or the app UI:
+
+```sh
+./scripts/compare-cli-actions.sh claude
+./scripts/compare-cli-actions.sh codex
+```
+
+Each command gives prompt-JSON and MCP the same task: call `capture_screen`, recover a fixed OCR
+token, then speak that token. The report compares CLI process count, capture count, terminal
+validity, evidence use, and wall time. It is intentionally a transport/action-loop benchmark, not a
+general coaching-quality evaluation. For local diagnostics, set
+`JARVIS_CLI_ACTION_TRANSPORT=json|mcp|automatic` before building/running the app to select one path;
+release behavior is `automatic`.

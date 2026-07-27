@@ -70,11 +70,18 @@ public struct AgentCLIDetector: Sendable {
     public func detect(_ provider: BrainProvider) -> DetectedAgentCLI? {
         guard let name = provider.cliExecutableName else { return nil }
         guard let url = firstExecutable(named: name) else { return nil }
+        let supportedFeatures = provider == .codexCLI
+            ? codexSupportedFeatures(executable: url)
+            : []
         return DetectedAgentCLI(
             provider: provider,
             executableURL: url,
             authenticationStatus: authenticationStatus(provider, executable: url),
-            supportedFeatures: provider == .codexCLI ? codexSupportedFeatures(executable: url) : []
+            supportedFeatures: supportedFeatures,
+            supportsMCP: supportsMCP(
+                provider,
+                executable: url,
+                supportedFeatures: supportedFeatures)
         )
     }
 
@@ -174,6 +181,39 @@ public struct AgentCLIDetector: Sendable {
         return Set(text.split(separator: "\n").compactMap { line in
             line.split(whereSeparator: \.isWhitespace).first.map(String.init)
         })
+    }
+
+    /// Capability comes from the installed binary, never its version string. Missing or unfamiliar
+    /// help output selects the prompt-JSON compatibility path instead of guessing provider flags.
+    private func supportsMCP(
+        _ provider: BrainProvider,
+        executable: URL,
+        supportedFeatures: Set<String>
+    ) -> Bool {
+        let arguments: [String]
+        switch provider {
+        case .claudeCode:
+            arguments = ["--help"]
+        case .codexCLI:
+            arguments = ["mcp", "--help"]
+        case .openAI:
+            return false
+        }
+        guard let output = runProbe(executable: executable, arguments: arguments),
+              output.status == 0,
+              let text = String(data: output.data, encoding: .utf8) else {
+            return false
+        }
+        switch provider {
+        case .claudeCode:
+            return text.contains("--mcp-config") && text.contains("--strict-mcp-config")
+        case .codexCLI:
+            return text.localizedCaseInsensitiveContains("mcp")
+                && CLIBrainClient.codexMCPRequiredDisableFeatures
+                    .isSubset(of: supportedFeatures)
+        case .openAI:
+            return false
+        }
     }
 
     private struct ProbeOutput {

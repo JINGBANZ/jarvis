@@ -773,3 +773,44 @@
   `Sources/JarvisCore/Coach/CoachDriver.swift`,
   `Sources/JarvisApp/App/AppDelegate.swift`,
   `Sources/JarvisCore/Brain/AgentCLIDetector.swift`.
+
+### 2026-07-27 — Private MCP is an action transport behind one broker
+
+- **Chose:** Route every coaching action—OpenAI function call, local-CLI compatibility JSON, or
+  private MCP call—through one Foundation-only `CoachingActionBroker`. One attempt may make zero or
+  more serial `capture_screen` calls followed by exactly one staged `speak` or `stay_silent`;
+  malformed, unknown, concurrent, replayed, post-terminal, missing-terminal, stale, cancelled, or
+  duplicate-commit work fails the attempt. `CoachDriver` commits the terminal only after the provider
+  completes cleanly and the attempt remains current.
+- **Chose:** For installed CLI versions with the required MCP surface, give each coaching attempt
+  exactly one private Jarvis stdio server backed by an authenticated, owner-only, session-local Unix
+  socket. Claude eagerly loads only that server with built-ins disabled and an exact tool allowlist.
+  Codex ignores user/project configuration, stays ephemeral/read-only, receives only that server,
+  disables its advertised agent surfaces, and auto-approves only the three Jarvis calls. The helper
+  owns no OS effect or coaching policy. A pre-launch capability/bootstrap failure may use the same
+  broker through compatibility JSON; an MCP run is never replayed through JSON inside its attempt.
+- **Why:** MCP makes capture results callable inside one live local-agent process, but the protocol
+  does not force the agent to call anything. Live Claude and Codex comparison runs both reproduced a
+  no-observed-action failure before their generated provider configuration was corrected. Requiring
+  a brokered terminal made those failures safe: no overlay rendered and no history committed. With
+  the provider configuration corrected, both JSON and MCP recovered the same synthetic OCR evidence;
+  MCP used one CLI process where JSON needed two. That supports better action-loop continuity and
+  lower capture-loop overhead, not an intrinsic increase in model intelligence or general coaching
+  quality.
+- **Rejected:** (a) Letting the MCP sidecar invoke capture/overlay/Activity directly—the provider
+  process would bypass attempt cancellation and commit policy. (b) Treating clean CLI exit as success
+  without a terminal call—it turns model non-use into silent coaching loss. (c) MCP-only rollout
+  without capability/bootstrap fallback—older installed CLIs would become unusable. (d) Keeping
+  prompt JSON as the normal supported-CLI path—it needs an extra full process after capture and
+  cannot return observations into the same agent run. (e) Wrapping the Responses API in MCP—its
+  strict native function calls already enter the broker without another process or protocol.
+- **Supersedes in part:** 2026-07-16 — Local Claude Code / Codex CLIs as alternative brain
+  providers. Prompt JSON remains a brokered compatibility path rather than the normal path for a
+  supported CLI.
+- **Detail:** [architecture.md → Local CLI brain providers](./architecture.md#local-cli-brain-providers),
+  [sandbox.md → Data Egress](./sandbox.md#data-egress),
+  `Sources/JarvisCore/Coach/CoachingActionBroker.swift`,
+  `Sources/JarvisMCPBridge/MCPBridgeHost.swift`,
+  `Sources/JarvisMCPBridge/MCPBrainClient.swift`,
+  `Sources/JarvisMCPBridge/MCPStdioServer.swift`,
+  `scripts/compare-cli-actions.sh`.

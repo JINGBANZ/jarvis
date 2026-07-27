@@ -25,6 +25,7 @@ done
 
 APP="Jarvis.app"
 BIN_NAME="JarvisApp"
+MCP_BIN_NAME="JarvisMCPServer"
 IDENTITY="Jarvis Dev"
 
 # Create the stable signing identity once, on demand. Self-signed and untrusted (CSSMERR_TP_NOT_TRUSTED
@@ -64,17 +65,20 @@ ensure_identity
 
 echo "▶ swift build -c $CONFIG"
 swift build -c "$CONFIG"
-BIN_PATH="$(swift build -c "$CONFIG" --show-bin-path)/$BIN_NAME"
+BIN_DIR="$(swift build -c "$CONFIG" --show-bin-path)"
+BIN_PATH="$BIN_DIR/$BIN_NAME"
 
 echo "▶ assembling $APP"
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Helpers" "$APP/Contents/Resources"
 cp "$BIN_PATH" "$APP/Contents/MacOS/$BIN_NAME"
+cp "$BIN_DIR/$MCP_BIN_NAME" "$APP/Contents/Helpers/$MCP_BIN_NAME"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 cp Resources/Jarvis.icns "$APP/Contents/Resources/Jarvis.icns"
 
 echo "▶ signing with '$IDENTITY'"
-codesign --force --deep --sign "$IDENTITY" "$APP"
+codesign --force --sign "$IDENTITY" "$APP/Contents/Helpers/$MCP_BIN_NAME"
+codesign --force --sign "$IDENTITY" "$APP"
 codesign --verify --verbose "$APP"
 echo "✅ built $APP"
 
