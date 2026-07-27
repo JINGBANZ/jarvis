@@ -13,14 +13,14 @@ import Testing
         #expect(BrainModelCatalog.default.id == "gpt-5.5")
     }
 
-    @Test func openAIListsExactlySixNewestModels() {
+    @Test func sharedOpenAIListContainsExactlySixModels() {
         #expect(BrainModelCatalog.all.map(\.id) == [
             "gpt-5.6-sol",
             "gpt-5.6-terra",
             "gpt-5.6-luna",
             "gpt-5.5",
+            "gpt-5.4",
             "gpt-5.4-mini",
-            "gpt-5.4-nano",
         ])
     }
 
@@ -35,15 +35,9 @@ import Testing
         ])
     }
 
-    @Test func codexCLIListsExactlySixOfficialModels() {
-        #expect(BrainModelCatalog.models(for: .codexCLI).map(\.id) == [
-            "gpt-5.6-sol",
-            "gpt-5.6-terra",
-            "gpt-5.6-luna",
-            "gpt-5.5",
-            "gpt-5.4",
-            "gpt-5.4-mini",
-        ])
+    @Test func openAIAndCodexCLIShareTheSameCatalog() {
+        #expect(BrainModelCatalog.models(for: .openAI) == BrainModelCatalog.all)
+        #expect(BrainModelCatalog.models(for: .codexCLI) == BrainModelCatalog.all)
     }
 
     @Test func lookupFindsKnownModelsAndRejectsUnknown() {
@@ -62,9 +56,11 @@ import Testing
         }
     }
 
-    @Test func openAIProviderListMatchesLegacyCatalog() {
-        #expect(BrainModelCatalog.models(for: .openAI) == BrainModelCatalog.all)
+    @Test func sharedOpenAICatalogContainsProviderDefaults() {
         #expect(BrainModelCatalog.defaultModel(for: .openAI) == BrainModelCatalog.default)
+        #expect(
+            BrainModelCatalog.models(for: .codexCLI).contains(
+                BrainModelCatalog.defaultModel(for: .codexCLI)))
     }
 
     @Test func perProviderLookupIsScopedToThatProvider() {
