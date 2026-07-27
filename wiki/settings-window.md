@@ -161,11 +161,12 @@ list. Stop → Start begins at the saved primary again.
 
 **Model + reasoning effort.** A **Model** dropdown is drawn from `BrainModelCatalog` per provider.
 OpenAI API and Codex CLI share one concrete model list; Claude Code exposes the current concrete
-release in each supported family. Each provider remembers its own model. The **Reasoning effort**
-picker (`ReasoningEffort`: None / Low / Medium / High, default Low) is stored once and applies
-uniformly to whichever provider is active. `CLIBrainClient` maps it onto Claude Code's `--effort`
-and Codex's `model_reasoning_effort`; both CLI scales start at `low`, so None clamps to Low while the
-three shared levels pass through.
+release in each supported family. Each provider remembers its own model; without a valid preference,
+the first entry in that provider's catalog is selected. The **Reasoning effort** picker
+(`ReasoningEffort`: None / Low / Medium / High, default Low) is stored once and applies uniformly to
+whichever provider is active. `CLIBrainClient` maps it onto Claude Code's `--effort` and Codex's
+`model_reasoning_effort`; both CLI scales start at `low`, so None clamps to Low while the three shared
+levels pass through.
 
 **Transcription.** This group names the separate speech-to-text role explicitly so future
 transcription providers can be added without conflating them with the brain route. It currently
@@ -174,17 +175,16 @@ shows **OpenAI API** as the sole provider and an **API key** row whose action is
 provider** because realtime voice transcription runs on the OpenAI Realtime API. A CLI brain moves
 only coaching off the key.
 
-Reads are validated: `BrainPreferences` migrates known retired model ids to their concrete
-replacements before route normalization, preserving saved fallback order. Any other persisted model
-id no longer in that provider's catalog (or an unrecognized provider/effort) falls back to the
-default rather than reaching the API. The transcription model is deliberately **not** here — it's a
-separate field and code path (`Config.transcriptionModel`). A running `CoachDriver` applies valid
-edits atomically at the coaching-attempt boundary while transcript, client-managed history, audio
-pipeline, and session logs continue unchanged. A provider, model, or route-order edit replaces the
-route for the next attempt and resets the session-local cursor to the newly selected primary; this
-topology edit is the only way to revisit a target that automatic failover left behind. The old
-active provider is not retained as a hidden fallback; it remains available only when the user
-includes it in the new list.
+Reads are validated: a persisted primary model id no longer in that provider's catalog uses the
+provider default without rewriting the invalid value, while invalid fallback rows are removed during
+route normalization. An unrecognized provider/effort likewise uses its existing default rather than
+reaching the API. The transcription model is deliberately **not** here — it's a separate field and
+code path (`Config.transcriptionModel`). A running `CoachDriver` applies valid edits atomically at
+the coaching-attempt boundary while transcript, client-managed history, audio pipeline, and session
+logs continue unchanged. A provider, model, or route-order edit replaces the route for the next
+attempt and resets the session-local cursor to the newly selected primary; this topology edit is the
+only way to revisit a target that automatic failover left behind. The old active provider is not
+retained as a hidden fallback; it remains available only when the user includes it in the new list.
 
 A reasoning-effort edit instead rebuilds the clients at the current forward-only cursor and preserves
 its failure counts. An attempt already in flight keeps its snapshotted client and remains

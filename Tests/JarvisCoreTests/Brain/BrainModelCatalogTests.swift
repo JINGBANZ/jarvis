@@ -8,11 +8,6 @@ import Testing
         #expect(Set(ids).count == ids.count)   // no duplicate model ids
     }
 
-    @Test func defaultModelIsInCatalogAndIsGPT55() {
-        #expect(BrainModelCatalog.all.contains(BrainModelCatalog.default))
-        #expect(BrainModelCatalog.default.id == "gpt-5.5")
-    }
-
     @Test func sharedOpenAIListContainsExactlySixModels() {
         #expect(BrainModelCatalog.all.map(\.id) == [
             "gpt-5.6-sol",
@@ -44,21 +39,20 @@ import Testing
         #expect(BrainModelCatalog.model(id: "gpt-9000") == nil)
     }
 
-    @Test func everyProviderHasModelsAndAContainedDefault() {
+    @Test func everyProviderUsesItsFirstCatalogEntryAsDefault() {
         for provider in BrainProvider.allCases {
             let models = BrainModelCatalog.models(for: provider)
             #expect(models.count == (provider == .claudeCode ? 4 : 6))
             #expect(Set(models.map(\.id)).count == models.count)
             #expect(models.allSatisfy { !$0.id.isEmpty })
-            #expect(models.contains(BrainModelCatalog.defaultModel(for: provider)))
+            #expect(BrainModelCatalog.defaultModel(for: provider) == models.first)
         }
     }
 
-    @Test func sharedOpenAICatalogContainsProviderDefaults() {
-        #expect(BrainModelCatalog.defaultModel(for: .openAI) == BrainModelCatalog.default)
-        #expect(
-            BrainModelCatalog.models(for: .codexCLI).contains(
-                BrainModelCatalog.defaultModel(for: .codexCLI)))
+    @Test func providerDefaultsFollowCatalogOrder() {
+        #expect(BrainModelCatalog.defaultModel(for: .openAI).id == "gpt-5.6-sol")
+        #expect(BrainModelCatalog.defaultModel(for: .codexCLI).id == "gpt-5.6-sol")
+        #expect(BrainModelCatalog.defaultModel(for: .claudeCode).id == "claude-opus-5")
     }
 
     @Test func perProviderLookupIsScopedToThatProvider() {

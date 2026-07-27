@@ -15,9 +15,6 @@ public enum BrainModelCatalog {
         BrainModel(id: "gpt-5.4-mini", displayName: "GPT-5.4 mini"),
     ]
 
-    /// Adding picker choices must not silently change the model for a user with no saved override.
-    public static let `default` = all.first { $0.id == "gpt-5.5" }!
-
     public static func model(id: String) -> BrainModel? {
         all.first { $0.id == id }
     }
@@ -39,17 +36,9 @@ public enum BrainModelCatalog {
         }
     }
 
-    /// The model used for a provider when nothing is persisted yet. Claude keeps the Sonnet tier's
-    /// predictable latency; Codex uses the official default Power model.
+    /// The first curated model is the provider default when nothing valid is persisted.
     public static func defaultModel(for provider: BrainProvider) -> BrainModel {
-        switch provider {
-        case .openAI:
-            return `default`
-        case .claudeCode:
-            return model(id: "claude-sonnet-5", for: provider)!
-        case .codexCLI:
-            return model(id: "gpt-5.6-sol", for: provider)!
-        }
+        models(for: provider).first!
     }
 
     public static func model(id: String, for provider: BrainProvider) -> BrainModel? {

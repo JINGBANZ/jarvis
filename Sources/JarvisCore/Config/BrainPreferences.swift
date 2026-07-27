@@ -3,9 +3,9 @@ import Foundation
 /// Persisted brain selection: a primary provider/model target, an ordered list of fallback targets,
 /// the `BrainModel` remembered *per provider*, and the `ReasoningEffort` applied to whichever target
 /// is active. Backed by UserDefaults; each provider keeps its remembered model independently.
-/// Reads migrate known retired model ids, then normalize stale providers/models and exact route
-/// duplicates before they reach the runtime. Foundation-only so it stays unit-testable in
-/// JarvisCore; inject a `UserDefaults(suiteName:)` in tests. Mirrors `OverlayAppearance`.
+/// Reads normalize stale providers/models and exact route duplicates before they reach the runtime.
+/// Foundation-only so it stays unit-testable in JarvisCore; inject a `UserDefaults(suiteName:)` in
+/// tests. Mirrors `OverlayAppearance`.
 public final class BrainPreferences {
     private let defaults: UserDefaults
 
@@ -57,9 +57,9 @@ public final class BrainPreferences {
 
     /// Ordered, explicitly authorized fallback provider/model targets.
     ///
-    /// Reads also migrate the legacy scalar provider key and known retired model ids. Unknown
-    /// providers/models, exact primary duplicates, and repeated fallback targets are removed; order
-    /// and same-provider/different-model targets are preserved.
+    /// Reads also migrate the legacy scalar provider key. Unknown providers/models, exact primary
+    /// duplicates, and repeated fallback targets are removed; order and same-provider/different-model
+    /// targets are preserved.
     public var fallbackTargets: [BrainTarget] {
         get {
             if defaults.object(forKey: Key.fallbackTargets) == nil {
@@ -102,24 +102,16 @@ public final class BrainPreferences {
         return BrainRoute(primary: primary, fallbackTargets: fallbackTargets)
     }
 
-    /// The selected model for the *current* provider. Known retired ids migrate to their concrete
-    /// replacement; absent or otherwise unknown ids use that provider's default.
+    /// The selected model for the *current* provider. Absent or unknown id → that provider's default.
     public var model: BrainModel {
         get { model(for: provider) }
         set { setModel(newValue, for: provider) }
     }
 
     public func model(for provider: BrainProvider) -> BrainModel {
-        let key = Key.model(for: provider)
-        guard let storedID = defaults.string(forKey: key) else {
+        guard let id = defaults.string(forKey: Key.model(for: provider)),
+              let model = BrainModelCatalog.model(id: id, for: provider) else {
             return BrainModelCatalog.defaultModel(for: provider)
-        }
-        let modelID = migratedModelID(storedID, for: provider)
-        guard let model = BrainModelCatalog.model(id: modelID, for: provider) else {
-            return BrainModelCatalog.defaultModel(for: provider)
-        }
-        if modelID != storedID {
-            defaults.set(modelID, forKey: key)
         }
         return model
     }
@@ -168,31 +160,7 @@ public final class BrainPreferences {
               let modelID = dictionary["modelID"] as? String else {
             return nil
         }
-        return BrainTarget(
-            provider: provider,
-            modelID: migratedModelID(modelID, for: provider))
-    }
-
-    private func migratedModelID(_ modelID: String, for provider: BrainProvider) -> String {
-        switch (provider, modelID) {
-        case (.openAI, "gpt-5.4-nano"):
-            return "gpt-5.4-mini"
-        case (.claudeCode, "sonnet"),
-             (.claudeCode, "claude-sonnet-4-6"):
-            return "claude-sonnet-5"
-        case (.claudeCode, "opus"),
-             (.claudeCode, "claude-opus-4-7"),
-             (.claudeCode, "claude-opus-4-8"):
-            return "claude-opus-5"
-        case (.claudeCode, "haiku"):
-            return "claude-haiku-4-5"
-        case (.claudeCode, ""):
-            return BrainModelCatalog.defaultModel(for: .claudeCode).id
-        case (.codexCLI, ""):
-            return BrainModelCatalog.defaultModel(for: .codexCLI).id
-        default:
-            return modelID
-        }
+        return BrainTarget(provider: provider, modelID: modelID)
     }
 
     private func persistFallbackTargets(_ targets: [BrainTarget]) {
