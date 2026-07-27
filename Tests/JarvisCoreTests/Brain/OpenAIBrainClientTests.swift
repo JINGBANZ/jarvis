@@ -266,6 +266,31 @@ private func speakResponseBody(arguments: String) -> Data {
         #expect(body.contains("\"name\":\"capture_screen\""))
     }
 
+    @Test func everySelectableOpenAIModelReusesTheSharedEffort() async throws {
+        for model in BrainModelCatalog.models(for: .openAI) {
+            for effort in ReasoningEffort.allCases {
+                let box = CapturedBody()
+                let client = OpenAIBrainClient(
+                    apiKey: "sk-x",
+                    model: model.id,
+                    reasoningEffort: effort.rawValue,
+                    maxOutputTokens: effort.maxOutputTokens,
+                    send: { request in
+                        box.set(request.httpBody)
+                        return (Data(#"{"output":[]}"#.utf8), http(200))
+                    })
+                _ = try await client.respond(messages: [.user("hi")], tools: coachTools)
+                let body = try #require(box.get())
+                let request = try #require(
+                    try JSONSerialization.jsonObject(with: body) as? [String: Any])
+                #expect(request["model"] as? String == model.id)
+                #expect(
+                    (request["reasoning"] as? [String: Any])?["effort"] as? String
+                        == effort.rawValue)
+            }
+        }
+    }
+
     /// The caller's `max_output_tokens` budget is encoded verbatim — this is what carries the
     /// per-effort cap (high → 25k) so high-effort reasoning isn't truncated before the tip.
     @Test func encodesProvidedMaxOutputTokens() async throws {

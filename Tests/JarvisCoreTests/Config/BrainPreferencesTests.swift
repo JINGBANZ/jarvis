@@ -13,9 +13,11 @@ import Foundation
 
     @Test func defaultsWhenUnset() {
         let p = BrainPreferences(defaults: freshDefaults())
-        #expect(p.model == BrainModelCatalog.default)
+        #expect(p.model == BrainModelCatalog.defaultModel(for: .openAI))
         #expect(p.effort == .default)
-        #expect(p.primaryTarget == BrainTarget(provider: .openAI, modelID: BrainModelCatalog.default.id))
+        #expect(p.primaryTarget == BrainTarget(
+            provider: .openAI,
+            modelID: BrainModelCatalog.defaultModel(for: .openAI).id))
         #expect(p.fallbackTargets.isEmpty)
         #expect(p.route.targets == [p.primaryTarget])
         #expect(p.configuredPrimaryTarget == nil)
@@ -34,7 +36,10 @@ import Foundation
     @Test func unknownStoredModelFallsBackToDefault() {
         let d = freshDefaults()
         d.set("gpt-removed-from-catalog", forKey: "brain.model")
-        #expect(BrainPreferences(defaults: d).model == BrainModelCatalog.default)
+        #expect(
+            BrainPreferences(defaults: d).model
+                == BrainModelCatalog.defaultModel(for: .openAI))
+        #expect(d.string(forKey: "brain.model") == "gpt-removed-from-catalog")
     }
 
     @Test func unknownStoredEffortFallsBackToDefault() {
@@ -64,9 +69,9 @@ import Foundation
         let d = freshDefaults()
         let p = BrainPreferences(defaults: d)
         let targets = [
-            BrainTarget(provider: .claudeCode, modelID: "opus"),
-            BrainTarget(provider: .codexCLI, modelID: ""),
-            BrainTarget(provider: .claudeCode, modelID: "haiku"),
+            BrainTarget(provider: .claudeCode, modelID: "claude-opus-5"),
+            BrainTarget(provider: .codexCLI, modelID: "gpt-5.6-terra"),
+            BrainTarget(provider: .claudeCode, modelID: "claude-haiku-4-5"),
         ]
         p.fallbackTargets = targets
         #expect(BrainPreferences(defaults: d).fallbackTargets == targets)
@@ -77,18 +82,24 @@ import Foundation
         let d = freshDefaults()
         d.set([
             ["provider": "future-provider", "modelID": "future-model"],
-            ["provider": BrainProvider.claudeCode.rawValue, "modelID": "opus"],
-            ["provider": BrainProvider.openAI.rawValue, "modelID": BrainModelCatalog.default.id],
+            ["provider": BrainProvider.claudeCode.rawValue, "modelID": "claude-opus-5"],
+            [
+                "provider": BrainProvider.openAI.rawValue,
+                "modelID": BrainModelCatalog.defaultModel(for: .openAI).id,
+            ],
             ["provider": BrainProvider.claudeCode.rawValue, "modelID": "removed-model"],
-            ["provider": BrainProvider.codexCLI.rawValue, "modelID": ""],
+            ["provider": BrainProvider.openAI.rawValue, "modelID": "gpt-5.4-nano"],
             ["provider": BrainProvider.claudeCode.rawValue, "modelID": "opus"],
-            ["provider": BrainProvider.claudeCode.rawValue, "modelID": "haiku"],
+            ["provider": BrainProvider.codexCLI.rawValue, "modelID": ""],
+            ["provider": BrainProvider.codexCLI.rawValue, "modelID": "gpt-5.6-terra"],
+            ["provider": BrainProvider.claudeCode.rawValue, "modelID": "claude-opus-5"],
+            ["provider": BrainProvider.claudeCode.rawValue, "modelID": "claude-haiku-4-5"],
         ], forKey: "brain.fallbackTargets")
 
         let expected = [
-            BrainTarget(provider: .claudeCode, modelID: "opus"),
-            BrainTarget(provider: .codexCLI, modelID: ""),
-            BrainTarget(provider: .claudeCode, modelID: "haiku"),
+            BrainTarget(provider: .claudeCode, modelID: "claude-opus-5"),
+            BrainTarget(provider: .codexCLI, modelID: "gpt-5.6-terra"),
+            BrainTarget(provider: .claudeCode, modelID: "claude-haiku-4-5"),
         ]
         #expect(BrainPreferences(defaults: d).fallbackTargets == expected)
         #expect((d.array(forKey: "brain.fallbackTargets") ?? []).count == expected.count)
@@ -97,11 +108,11 @@ import Foundation
     @Test func legacyScalarFallbackMigratesWithRememberedModel() {
         let d = freshDefaults()
         d.set(BrainProvider.claudeCode.rawValue, forKey: "brain.fallbackProvider")
-        d.set("opus", forKey: "brain.model.\(BrainProvider.claudeCode.rawValue)")
+        d.set("claude-opus-5", forKey: "brain.model.\(BrainProvider.claudeCode.rawValue)")
 
         let p = BrainPreferences(defaults: d)
         #expect(p.fallbackTargets == [
-            BrainTarget(provider: .claudeCode, modelID: "opus")
+            BrainTarget(provider: .claudeCode, modelID: "claude-opus-5")
         ])
         #expect(d.object(forKey: "brain.fallbackTargets") != nil)
         #expect(d.object(forKey: "brain.fallbackProvider") == nil)
@@ -119,16 +130,19 @@ import Foundation
     @Test func primaryChangeRemovesOnlyItsExactDuplicate() {
         let d = freshDefaults()
         let p = BrainPreferences(defaults: d)
+        let claudeDefault = BrainModelCatalog.defaultModel(for: .claudeCode)
+        let claudeAlternate = BrainModelCatalog.models(for: .claudeCode)[1]
         p.fallbackTargets = [
-            BrainTarget(provider: .claudeCode, modelID: "sonnet"),
-            BrainTarget(provider: .claudeCode, modelID: "opus"),
+            BrainTarget(provider: .claudeCode, modelID: claudeAlternate.id),
+            BrainTarget(provider: .claudeCode, modelID: claudeDefault.id),
         ]
 
         p.provider = .claudeCode
 
-        #expect(p.primaryTarget == BrainTarget(provider: .claudeCode, modelID: "sonnet"))
+        #expect(p.primaryTarget == BrainTarget(
+            provider: .claudeCode, modelID: claudeDefault.id))
         #expect(p.fallbackTargets == [
-            BrainTarget(provider: .claudeCode, modelID: "opus")
+            BrainTarget(provider: .claudeCode, modelID: claudeAlternate.id)
         ])
     }
 
@@ -139,7 +153,7 @@ import Foundation
             primary: BrainTarget(provider: .codexCLI, modelID: "gpt-5.5"),
             fallbackTargets: [
                 BrainTarget(provider: .openAI, modelID: "gpt-5.4-mini"),
-                BrainTarget(provider: .codexCLI, modelID: ""),
+                BrainTarget(provider: .codexCLI, modelID: "gpt-5.6-terra"),
             ])
 
         p.route = route
@@ -153,19 +167,20 @@ import Foundation
     @Test func atomicPrimaryTargetChangePreservesADifferentModelFromTheSameProvider() {
         let p = BrainPreferences(defaults: freshDefaults())
         p.setModel(
-            BrainModelCatalog.model(id: "sonnet", for: .claudeCode)!,
+            BrainModelCatalog.model(id: "claude-sonnet-5", for: .claudeCode)!,
             for: .claudeCode)
         p.fallbackTargets = [
-            BrainTarget(provider: .claudeCode, modelID: "sonnet"),
+            BrainTarget(provider: .claudeCode, modelID: "claude-sonnet-5"),
         ]
 
         p.route = BrainRoute(
-            primary: BrainTarget(provider: .claudeCode, modelID: "opus"),
+            primary: BrainTarget(provider: .claudeCode, modelID: "claude-opus-5"),
             fallbackTargets: p.fallbackTargets)
 
-        #expect(p.primaryTarget == BrainTarget(provider: .claudeCode, modelID: "opus"))
+        #expect(p.primaryTarget == BrainTarget(
+            provider: .claudeCode, modelID: "claude-opus-5"))
         #expect(p.fallbackTargets == [
-            BrainTarget(provider: .claudeCode, modelID: "sonnet"),
+            BrainTarget(provider: .claudeCode, modelID: "claude-sonnet-5"),
         ])
     }
 
@@ -173,32 +188,39 @@ import Foundation
         let d = freshDefaults()
         let p = BrainPreferences(defaults: d)
         p.setModel(BrainModelCatalog.model(id: "gpt-5.4-mini", for: .openAI)!, for: .openAI)
-        p.setModel(BrainModelCatalog.model(id: "opus", for: .claudeCode)!, for: .claudeCode)
+        p.setModel(
+            BrainModelCatalog.model(id: "claude-opus-5", for: .claudeCode)!,
+            for: .claudeCode)
         // Switching providers keeps each one's model; the OpenAI model stays under the legacy
         // "brain.model" key so pre-provider installs keep their selection.
         #expect(p.model(for: .openAI).id == "gpt-5.4-mini")
-        #expect(p.model(for: .claudeCode).id == "opus")
+        #expect(p.model(for: .claudeCode).id == "claude-opus-5")
         #expect(d.string(forKey: "brain.model") == "gpt-5.4-mini")
         p.provider = .claudeCode
-        #expect(p.model.id == "opus")
+        #expect(p.model.id == "claude-opus-5")
     }
 
     @Test func modelStoredForOneProviderNeverLeaksToAnother() {
         let d = freshDefaults()
         let p = BrainPreferences(defaults: d)
-        p.setModel(BrainModelCatalog.model(id: "haiku", for: .claudeCode)!, for: .claudeCode)
-        // A claude alias is not a valid codex/openai model — those providers stay on their defaults.
-        #expect(p.model(for: .openAI) == BrainModelCatalog.default)
+        p.setModel(
+            BrainModelCatalog.model(id: "claude-haiku-4-5", for: .claudeCode)!,
+            for: .claudeCode)
+        // A Claude model is not a valid Codex/OpenAI model — those providers stay on their defaults.
+        #expect(p.model(for: .openAI) == BrainModelCatalog.defaultModel(for: .openAI))
         #expect(p.model(for: .codexCLI) == BrainModelCatalog.defaultModel(for: .codexCLI))
     }
 
-    @Test func modelAndEffortPersistIndependently() {
-        // The effort is set once and applies to whichever model is selected: changing the model must
-        // not disturb the stored effort.
-        let d = freshDefaults()
-        let p = BrainPreferences(defaults: d)
-        p.effort = .medium
-        p.model = BrainModelCatalog.model(id: "gpt-5.4-nano")!
-        #expect(p.effort == .medium)
+    @Test func everySelectableModelReusesTheExistingReasoningEffort() {
+        for provider in BrainProvider.allCases {
+            for model in BrainModelCatalog.models(for: provider) {
+                let p = BrainPreferences(defaults: freshDefaults())
+                p.provider = provider
+                p.effort = .medium
+                p.model = model
+                #expect(p.model == model)
+                #expect(p.effort == .medium)
+            }
+        }
     }
 }

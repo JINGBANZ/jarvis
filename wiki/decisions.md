@@ -192,6 +192,8 @@
 - **Chose:** A Brain settings tab picks the model from a code-owned `BrainModelCatalog` (default `gpt-5.5`) and one global reasoning effort (default `low`), persisted via `BrainPreferences` and applied on next Start; moved out of `Config`.
 - **Why:** The catalog/enum becomes the single source of truth, and the user can trade quality versus cost/latency.
 - **Superseded by:** 2026-07-22 — Brain settings hot-switch between coaching turns. Persistence and catalog ownership stand; next-Start-only application does not.
+- **Superseded in part by:** 2026-07-27 — Catalog order defines the unset model. The first-entry
+  default replaces the pinned `gpt-5.5` default; model selection and shared effort stand.
 - **Detail:** [settings-window.md](./settings-window.md).
 
 ### 2026-06-20 — Persistent response box beside the overlay
@@ -773,3 +775,32 @@
   `Sources/JarvisCore/Coach/CoachDriver.swift`,
   `Sources/JarvisApp/App/AppDelegate.swift`,
   `Sources/JarvisCore/Brain/AgentCLIDetector.swift`.
+
+### 2026-07-27 — Catalog order defines the unset model
+
+- **Chose:** Use the first entry in each provider's `BrainModelCatalog` list whenever no valid model
+  preference exists. Keep no separate global or provider-specific pinned default. Invalid remembered
+  primary ids use that first entry; invalid fallback rows are ignored during route normalization.
+- **Why:** The picker is already curated in preferred order. Making that order authoritative removes
+  a second default policy that could drift from what Settings presents.
+- **Rejected:** Hard-coded defaults independent of list order, and a compatibility mapping from
+  retired ids to different current models.
+- **Supersedes in part:** 2026-06-20 — Brain model + reasoning effort are user-selectable. Catalog
+  ownership and shared effort stand; the pinned default does not.
+- **Detail:** [settings-window.md → Brain](./settings-window.md#brain),
+  `Sources/JarvisCore/Brain/BrainModelCatalog.swift`.
+
+### 2026-07-27 — Persist concrete model releases, not rolling aliases
+
+- **Chose:** Show and persist concrete model ids for every provider. Refresh
+  `BrainModelCatalog` manually from official provider documentation when a new public release should
+  replace or extend the curated lists. Invalid remembered ids use the first provider entry; invalid
+  fallback rows are ignored. Invitation-only models remain excluded.
+- **Why:** A saved route should continue naming the release the user selected. A rolling alias can
+  silently retarget that route when its provider advances the alias, changing behavior without a
+  Settings edit.
+- **Rejected:** Rolling aliases such as `sonnet`, `opus`, and provider-managed CLI defaults as
+  persisted picker selections. The Codex summarizer may still omit its model override because that is
+  internal compaction behavior, not a saved route selection.
+- **Detail:** [settings-window.md → Brain](./settings-window.md#brain),
+  `Sources/JarvisCore/Brain/BrainModelCatalog.swift`.

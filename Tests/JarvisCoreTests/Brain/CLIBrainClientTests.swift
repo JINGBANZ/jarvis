@@ -26,7 +26,8 @@ import Foundation
         return String(data: try! JSONSerialization.data(withJSONObject: obj), encoding: .utf8)!
     }
 
-    private func client(_ provider: BrainProvider, workDir: URL, model: String = "sonnet",
+    private func client(_ provider: BrainProvider, workDir: URL,
+                        model: String = "claude-sonnet-5",
                         effort: String = "low",
                         codexSupportedFeatures: Set<String>? = nil,
                         run: @escaping CLIBrainClient.Runner) -> CLIBrainClient {
@@ -54,7 +55,7 @@ import Foundation
         let run = try #require(captured.value)
         #expect(run.arguments.contains("-p"))
         #expect(run.arguments.contains("stream-json"))              // inline-image capable input
-        #expect(run.arguments.contains("sonnet"))
+        #expect(run.arguments.contains("claude-sonnet-5"))
         #expect(run.arguments.contains("--setting-sources"))        // no CLAUDE.md/plugins bleed-in
         #expect(run.arguments.contains("--no-session-persistence")) // no transcript copy in ~/.claude
         #expect(run.arguments.contains("--strict-mcp-config"))      // zero MCP servers in a Jarvis turn
@@ -145,7 +146,7 @@ import Foundation
         let workDir = try makeWorkDir()
         let base64 = Data("fake-jpeg".utf8).base64EncodedString()
         let captured = Captured<AgentCLIRun>()
-        let c = client(.codexCLI, workDir: workDir, model: "") { run, _ in
+        let c = client(.codexCLI, workDir: workDir, model: "gpt-5.6-sol") { run, _ in
             captured.value = run
             // Codex's reply lands in the --output-last-message file, not stdout.
             if let i = run.arguments.firstIndex(of: "--output-last-message") {
@@ -171,33 +172,45 @@ import Foundation
         #expect(run.stdin?.contains("not callable Codex tools") == true)
         #expect(run.timeout == CLIBrainClient.codexDefaultTimeout)
         #expect(run.arguments.contains("-i"))
-        #expect(!run.arguments.contains("-m"))          // empty model = the CLI's own default
+        let modelIndex = try #require(run.arguments.firstIndex(of: "-m"))
+        #expect(run.arguments[modelIndex + 1] == "gpt-5.6-sol")
         guard case .staySilent = response.toolCalls.first else {
             Issue.record("expected staySilent"); return
         }
         #expect(try FileManager.default.contentsOfDirectory(atPath: workDir.path).isEmpty)
     }
 
-    @Test func codexEffortPassesThroughUnmappedAndMCPIsDisabled() async throws {
-        // Current codex models accept our scale natively (and 400 on the older "minimal"), so
-        // "none" must reach the CLI unchanged; user MCP servers must never load in a Jarvis turn.
-        let workDir = try makeWorkDir()
-        let captured = Captured<AgentCLIRun>()
-        let c = client(.codexCLI, workDir: workDir, model: "gpt-5.5", effort: "none") { run, _ in
-            captured.value = run
-            return AgentCLIOutput(stdout: "", stderr: "", exitCode: 0)
+    @Test func everyCodexModelReusesTheSharedEffortAndDisablesMCP() async throws {
+        let efforts = [
+            (ReasoningEffort.none, ReasoningEffort.low),
+            (.low, .low),
+            (.medium, .medium),
+            (.high, .high),
+        ]
+        for model in BrainModelCatalog.models(for: .codexCLI) {
+            for (effort, expected) in efforts {
+                let workDir = try makeWorkDir()
+                let captured = Captured<AgentCLIRun>()
+                let c = client(
+                    .codexCLI, workDir: workDir, model: model.id, effort: effort.rawValue
+                ) { run, _ in
+                    captured.value = run
+                    return AgentCLIOutput(stdout: "", stderr: "", exitCode: 0)
+                }
+                _ = try? await c.respond(messages: [.user("x")], tools: [], toolChoice: .auto)
+                let arguments = try #require(captured.value).arguments
+                #expect(arguments.contains("model_reasoning_effort=\(expected.rawValue)"))
+                #expect(arguments.contains("mcp_servers={}"))
+                let modelIndex = try #require(arguments.firstIndex(of: "-m"))
+                #expect(arguments[modelIndex + 1] == model.id)
+            }
         }
-        _ = try? await c.respond(messages: [.user("x")], tools: [], toolChoice: .auto)
-        let run = try #require(captured.value)
-        #expect(run.arguments.contains("model_reasoning_effort=none"))
-        #expect(run.arguments.contains("mcp_servers={}"))
-        #expect(run.arguments.contains("gpt-5.5"))
     }
 
     @Test func codexDisablesOnlyFeaturesAdvertisedByTheInstalledCLI() async throws {
         let workDir = try makeWorkDir()
         let captured = Captured<AgentCLIRun>()
-        let c = client(.codexCLI, workDir: workDir, model: "",
+        let c = client(.codexCLI, workDir: workDir, model: "gpt-5.6-sol",
                        codexSupportedFeatures: ["shell_tool", "renamed_future_feature"]) { run, _ in
             captured.value = run
             return AgentCLIOutput(stdout: "", stderr: "", exitCode: 0)
@@ -213,20 +226,31 @@ import Foundation
         #expect(!arguments.contains("renamed_future_feature"))
     }
 
-    @Test func claudeEffortMapsNoneToItsFloorAndPassesTheRestThrough() async throws {
-        // One global effort setting, consistent across providers: claude's scale has no "none", so
-        // it clamps to low; the shared levels pass through unchanged.
-        for (effort, expected) in [("none", "low"), ("low", "low"), ("high", "high")] {
-            let workDir = try makeWorkDir()
-            let captured = Captured<AgentCLIRun>()
-            let c = client(.claudeCode, workDir: workDir, effort: effort) { run, _ in
-                captured.value = run
-                return AgentCLIOutput(stdout: self.claudeEnvelope("ok"), stderr: "", exitCode: 0)
+    @Test func everyClaudeModelReusesTheSharedEffort() async throws {
+        let efforts = [
+            (ReasoningEffort.none, ReasoningEffort.low),
+            (.low, .low),
+            (.medium, .medium),
+            (.high, .high),
+        ]
+        for model in BrainModelCatalog.models(for: .claudeCode) {
+            for (effort, expected) in efforts {
+                let workDir = try makeWorkDir()
+                let captured = Captured<AgentCLIRun>()
+                let c = client(
+                    .claudeCode, workDir: workDir, model: model.id, effort: effort.rawValue
+                ) { run, _ in
+                    captured.value = run
+                    return AgentCLIOutput(
+                        stdout: self.claudeEnvelope("ok"), stderr: "", exitCode: 0)
+                }
+                _ = try await c.respond(messages: [.user("x")], tools: [], toolChoice: .auto)
+                let arguments = try #require(captured.value).arguments
+                let effortIndex = try #require(arguments.firstIndex(of: "--effort"))
+                #expect(arguments[effortIndex + 1] == expected.rawValue)
+                let modelIndex = try #require(arguments.firstIndex(of: "--model"))
+                #expect(arguments[modelIndex + 1] == model.id)
             }
-            _ = try await c.respond(messages: [.user("x")], tools: [], toolChoice: .auto)
-            let args = try #require(captured.value).arguments
-            let idx = try #require(args.firstIndex(of: "--effort"))
-            #expect(args[idx + 1] == expected)
         }
     }
 
@@ -324,7 +348,8 @@ import Foundation
         traffic.enable(directory: workDir)
         let base64 = Data("fake-jpeg-payload".utf8).base64EncodedString()
         let c = CLIBrainClient(provider: .claudeCode, executable: URL(fileURLWithPath: "/fake/bin/cli"),
-                               model: "sonnet", reasoningEffort: "low", workDirectory: workDir,
+                               model: "claude-sonnet-5", reasoningEffort: "low",
+                               workDirectory: workDir,
                                traffic: traffic, trafficTag: "coach") { _, _ in
             AgentCLIOutput(stdout: self.claudeEnvelope(#"{"tool":"stay_silent","arguments":{}}"#),
                            stderr: "", exitCode: 0)
@@ -360,7 +385,8 @@ import Foundation
         let traffic = BrainTrafficLog()
         traffic.enable(directory: workDir)
         let c = CLIBrainClient(provider: provider, executable: URL(fileURLWithPath: "/fake/bin/cli"),
-                               model: "sonnet", reasoningEffort: "low", workDirectory: workDir,
+                               model: "claude-sonnet-5", reasoningEffort: "low",
+                               workDirectory: workDir,
                                traffic: traffic, trafficTag: "coach", run: run)
         return (c, traffic)
     }

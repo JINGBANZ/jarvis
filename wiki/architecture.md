@@ -20,9 +20,10 @@ has something genuinely useful to add, it speaks up **unprompted** with a short 
 on-screen overlay.
 
 The guiding belief: **build the harness, not the intelligence.** The intelligence already exists
-(`gpt-5.5`, the `gpt-4o-transcribe` model on the OpenAI Realtime API). The macOS capabilities already exist (ScreenCaptureKit,
-AVFoundation, Vision, the built-in `screencapture` tool, NSPanel). Jarvis is the thin layer of
-glue that wires them into a proactive coach. We write the least code possible and reinvent nothing.
+(the selected brain model and `gpt-4o-transcribe` on the OpenAI Realtime API). The macOS capabilities
+already exist (ScreenCaptureKit, AVFoundation, Vision, the built-in `screencapture` tool, NSPanel).
+Jarvis is the thin layer of glue that wires them into a proactive coach. We write the least code
+possible and reinvent nothing.
 
 ## 2. Core Loop
 
@@ -33,7 +34,7 @@ glue that wires them into a proactive coach. We write the least code possible an
   mic  ─────┤  AudioInput ──► Transcriber (gpt-4o-transcribe) ──► transcript    │
   sys-audio ┤                          │ turn-end / silence events           │
             │                          ▼                                      │
-            │                    CoachDriver ──(gpt-5.5 + tools)──┐           │
+            │                 CoachDriver ──(brain model + tools)─┐           │
             │                       ▲   │                         │           │
             │          capture_screen   │ speak(lines)            │           │
             │                       │   ▼                         │           │
@@ -67,10 +68,10 @@ moments the model judges worthwhile.
    as "No" is substantive, even though the same user-side fragment is normally filler. Interviewer
    questions remain first-class and may draw a proactive tip. Skipped lines ride along on the next
    substantive turn; silence checks and the hint hotkey always go through.
-3. It calls **`gpt-5.5`** with the coach system prompt, the session memory (`CoachHistory`), the
-   new transcript delta, the timing context (seconds silent, session elapsed), and the tool set
-   `[capture_screen, speak, stay_silent]`. The timing is what lets the model tell "thinking" from
-   "stuck."
+3. It calls the active route's brain model with the coach system prompt, the session memory
+   (`CoachHistory`), the new transcript delta, the timing context (seconds silent, session elapsed),
+   and the tool set `[capture_screen, speak, stay_silent]`. The timing is what lets the model tell
+   "thinking" from "stuck."
 4. Before speaking, the model calls `capture_screen` when a specific, correct reply depends on
    visible context missing from the conversation — including unresolved references such as “this”
    or “here” — and no fresh capture is already available for that request. It may also capture when
@@ -130,7 +131,7 @@ plugins ship only with full Xcode, and Jarvis builds **CLT-only** (see
 | **WebRTCEchoCanceller** | AEC3 echo canceller driven at 48 kHz on 10 ms frames inside the capture IOProc; far reference first, then the mic cleaned in place. | WebRTC **AEC3** (`webrtc-audio-processing`), vendored static + zero-dylib via `scripts/build-aec.sh`. |
 | **ErrorReporter** | The single funnel for user-facing failures. Severity on a Foundation-only `UserFacingError` decides the lifecycle consequence; an explicit startup/runtime context decides presentation. Startup failures may alert, but runtime failures never activate Jarvis or present UI even when they stop the session. `BrainFailure` feeds attempt outcomes into the finite provider route; only route exhaustion enters terminal reporting. Fixed, typed Activity outcomes carry stable on-disk identities while raw detail stays in `JarvisLog`. | AppKit (`NSAlert`) for startup only. |
 | **Transcriber** | Maintain a rolling, speaker-labeled, **spoken-time timestamped** transcript; emit speech-activity, turn-end, and backing-off silence events (with quiet duration). Two instances run in parallel — one per side — tagging lines `me`/`them` into one shared transcript. A per-`item_id` ledger reconciles out-of-order delta/completed/failed/VAD events and salvages streamed text. An utterance-local failure with no usable words stays diagnostic and cannot trigger the brain; a permanent account or configuration rejection stops the unusable session with a fixed Activity reason. A privacy-preserving continuity witness records content-free capture/delivery/socket/server checkpoints and locally derived activity intervals, so the session log can locate a future gap without retaining PCM or adding pseudo-speech to model context. A socket is ready only after the server acknowledges its configuration; active ping/pong probes, send/receive errors, and startup timeouts all drive the same reconnect path. | `gpt-4o-transcribe` (Realtime API; tuned `server_vad`). |
-| **CoachDriver** | Coordinate one single-flighted coaching attempt from a natural trigger or pending-work wake-up: snapshot one route target plus the latest conversation, route its tool calls, commit only a complete terminal action, and report one outcome to the scheduler. No speaking cooldown/rate cap — restraint is the model's; the only client-side content skip is the filler-only turn-end gate (`TurnSubstance`). | `gpt-5.5` (vision + tool-use) with `gpt-5.4-mini` for memory summaries — or a local Claude Code / Codex CLI on the user's subscription (see [§4 Local CLI brain providers](#local-cli-brain-providers)). |
+| **CoachDriver** | Coordinate one single-flighted coaching attempt from a natural trigger or pending-work wake-up: snapshot one route target plus the latest conversation, route its tool calls, commit only a complete terminal action, and report one outcome to the scheduler. No speaking cooldown/rate cap — restraint is the model's; the only client-side content skip is the filler-only turn-end gate (`TurnSubstance`). | The selected OpenAI Responses API, Claude Code, or Codex CLI route target (see [§4 Local CLI brain providers](#local-cli-brain-providers)); provider-specific summary tiers are defined in `BrainModelCatalog`. |
 | **ScreenTool** | Fulfill `capture_screen`: silently shoot the **active window** (default scope) — the window-server frontmost, on whichever display, clean even when partially covered — and attach an **on-device OCR** of the shot to the tool result so the model reads exact text instead of pixels. Falls back to a full-display capture (no OCR) — the Settings-chosen display in Entire-display scope, the main display when no window is eligible; the overlay window is excluded either way. See [settings-window.md](./settings-window.md#capture-scope). | macOS `screencapture` CLI + Apple Vision (`VNRecognizeTextRequest`). |
 | **Overlay Caption** | Render `speak` output: up to ~3 short lines (model-split), shown one at a time and queued so a newer tip never cuts off the current one; non-activating, always-on-top, excluded from capture. Switchable from Settings — **off by default**; when off, tips are suppressed. | AppKit NSPanel; `OverlayCaptionPanel`. |
 | **Overlay Box** | A persistent window logging every `speak` tip in full, timestamped — the scrollable history of what the caption flashed one line at a time. Movable, resizable, opaque, also excluded from capture; switched on/off from Settings (**on by default**), cleared on each Start. Fed by the same `speak` call as the caption via **`BroadcastOverlay`**, which fans one `OverlayRendering.render` out to both sinks (so `CoachDriver` is unchanged). | AppKit NSPanel; `OverlayBoxPanel`. |
@@ -281,9 +282,9 @@ The implementation keeps orchestration, route policy, and OS edges separate:
 ## 4. Data Flow & Cost Model
 
 - **Continuous (cheap):** audio → Realtime → transcript. This runs the whole session.
-- **Per-turn (cheap):** a `gpt-5.5` call on each substantive turn-end and each silence event, with a
-  bounded, mostly-cached working set. Filler-only turn-ends (from either speaker) are skipped
-  client-side — free. No image unless the model asks.
+- **Per-turn (cheap):** a selected-brain-model call on each substantive turn-end and each silence
+  event, with a bounded, mostly-cached working set. Filler-only turn-ends (from either speaker) are
+  skipped client-side — free. No image unless the model asks.
 - **On-demand (expensive):** a screenshot + vision tokens, only when the model calls
   `capture_screen`. A coaching response, only when the model calls `speak`.
 
@@ -293,11 +294,11 @@ rather than a per-turn screenshot.
 
 ### Models and APIs
 
-- **Brain — `gpt-5.5` via the OpenAI Responses API** (`POST /v1/responses`), not Chat Completions:
-  for the gpt-5 family, function/tool calling is the recommended (and least restricted) path on
-  Responses. The tool loop is threaded with `function_call` / `function_call_output` items, with the
-  model's `reasoning` items replayed verbatim ahead of the call — OpenAI's requirement for the model
-  to continue its chain of thought over a tool result instead of re-reasoning from scratch.
+- **OpenAI brain — the selected `BrainModelCatalog` model via the Responses API**
+  (`POST /v1/responses`), not Chat Completions. Function/tool calling uses the Responses tool loop,
+  threaded with `function_call` / `function_call_output` items and the model's `reasoning` items
+  replayed verbatim ahead of the call so it can continue over a tool result instead of re-reasoning
+  from scratch.
 - **Per-session memory — client-managed (`CoachHistory`).** The coach needs to remember its *own*
   prior replies (the transcript only holds user speech), so `CoachDriver` keeps the session memory
   itself and rebuilds every request as `[system] + memory + new delta`. Owning the memory is what
@@ -461,10 +462,11 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
 - **Built and run in the main `forrest` account inside a git worktree** (recoverability). The
   separate-restricted-account requirement is waived for the personal build; see [sandbox.md](./sandbox.md).
 - **Egress is narrow and explicit:** audio to `gpt-4o-transcribe`; a screenshot + transcript window
-  to `gpt-5.5` *only when the model triggers a capture/response*. The audio witness persists only
-  counters, sequence/sample metadata, timestamps, socket generations, server audio-clock values, and
-  a local activity bit in the owner-only session log — never PCM or recovered words. The only screen-/audio-derived data
-  written to **local** disk is the owner-only, bounded per-session **activity log** (spoken tips,
+  to the selected brain provider/model *only when the model triggers a capture/response*. The audio
+  witness persists only counters, sequence/sample metadata, timestamps, socket generations, server
+  audio-clock values, and a local activity bit in the owner-only session log — never PCM or
+  recovered words. The only screen-/audio-derived data written to **local** disk is the owner-only,
+  bounded per-session **activity log** (spoken tips,
   deliberate-silence outcomes, fixed failed-action and stop/degrade notices, transcribed lines, and
   the screenshots the model saw); raw mic audio and the live transcript are never archived. Requests
   are sent `store:true`, so what the model saw does remain inspectable (and retained) server-side at

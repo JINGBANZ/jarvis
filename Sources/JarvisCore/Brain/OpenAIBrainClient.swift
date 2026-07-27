@@ -3,10 +3,10 @@ import Foundation
 import FoundationNetworking   // URLSession/URLRequest live here on non-Darwin (Core tests on Linux)
 #endif
 
-/// Brain client over the OpenAI **Responses API** (`POST /v1/responses`) — the recommended
-/// endpoint for tool use with gpt-5.5. System text is passed via `instructions`; the conversation
-/// is sent as typed `input` items; function calls are threaded with `function_call` /
-/// `function_call_output`. Every call is self-contained: session memory is client-managed
+/// Brain client over the OpenAI **Responses API** (`POST /v1/responses`). System text is passed via
+/// `instructions`; the conversation is sent as typed `input` items; function calls are threaded with
+/// `function_call` / `function_call_output`. Every call is self-contained: session memory is
+/// client-managed
 /// (`CoachHistory`) and arrives in `messages`, built in stable append-only order so OpenAI's prompt
 /// cache keeps hitting. `store:true` keeps each request/response inspectable in the OpenAI dashboard
 /// logs for debugging (a documented retention tradeoff; see wiki/sandbox.md).

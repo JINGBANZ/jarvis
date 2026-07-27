@@ -19,10 +19,11 @@ public struct CLIBrainClient: BrainClient, @unchecked Sendable {
 
     let provider: BrainProvider
     let executable: URL
-    /// A CLI model alias (`sonnet`, `gpt-5.5`, …); empty = the CLI's own configured default.
+    /// A CLI model id; empty retains the low-level invocation's CLI-default compatibility behavior.
     let model: String
-    /// One global effort, mapped onto each CLI's own scale — `--effort` on Claude Code (whose scale
-    /// starts at `low`), `-c model_reasoning_effort=…` on Codex (which accepts ours unchanged).
+    /// One global effort, mapped onto each CLI's own scale — `--effort` on Claude Code and
+    /// `-c model_reasoning_effort=…` on Codex. Both CLI scales start at `low`, so `none` clamps to
+    /// that floor while the shared `low` / `medium` / `high` levels pass through.
     let reasoningEffort: String
     let workDirectory: URL
     /// Feature names advertised by this Codex installation. Empty is the compatible fallback: never
