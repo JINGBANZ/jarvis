@@ -428,11 +428,10 @@ extension CLIBrainClient {
 
     // MARK: - Effort mapping
 
-    /// Codex's current models accept exactly our scale (none/low/medium/high, plus xhigh) — and
-    /// REJECT the older "minimal" (verified: a 400 on codex 0.144 / gpt-5.6-sol), so the value
-    /// passes through unmapped.
+    /// Codex's current catalog starts at "low" (low/medium/high/xhigh/max/ultra depending on the
+    /// model). Ours starts at "none", which clamps to the CLI's floor. The shared levels match.
     static func codexEffort(_ effort: String) -> String {
-        effort
+        effort == ReasoningEffort.none.rawValue ? ReasoningEffort.low.rawValue : effort
     }
 
     /// Claude Code's `--effort` scale starts at "low" (low/medium/high/xhigh/max); ours starts at

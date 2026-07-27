@@ -27,7 +27,7 @@ import Testing
     private func client(
         _ provider: BrainProvider,
         workDir: URL,
-        model: String = "sonnet",
+        model: String = "claude-sonnet-5",
         effort: String = "low",
         codexSupportedFeatures: Set<String>? = nil,
         run: @escaping CLIBrainClient.Runner
@@ -89,6 +89,11 @@ import Testing
             configuration: mcpConfiguration(in: workDir))
 
         let run = try #require(captured.value)
+        #expect(run.arguments.contains("-p"))
+        #expect(run.arguments.contains("stream-json"))
+        #expect(run.arguments.contains("claude-sonnet-5"))
+        #expect(run.arguments.contains("--setting-sources"))
+        #expect(run.arguments.contains("--no-session-persistence"))
         let configIndex = try #require(run.arguments.firstIndex(of: "--mcp-config"))
         #expect(run.arguments[configIndex + 1].hasSuffix("attempt.claude.json"))
         #expect(run.arguments.contains("--strict-mcp-config"))
@@ -99,6 +104,11 @@ import Testing
         let instructions = run.arguments[promptIndex + 1]
         #expect(instructions.contains("callable tools"))
         #expect(!instructions.contains(#"{"tool":"<tool name>""#))
+        let effortIndex = try #require(run.arguments.firstIndex(of: "--effort"))
+        #expect(run.arguments[effortIndex + 1] == "low")
+        let toolsIndex = try #require(run.arguments.firstIndex(of: "--tools"))
+        #expect(run.arguments[toolsIndex + 1] == "")
+        #expect(run.stdin?.contains("look first") == true)
         #expect(response.actionDelivery == .broker)
         #expect(response.toolCalls.isEmpty)
     }
@@ -106,7 +116,7 @@ import Testing
     @Test func codexMCPRunReplacesInheritedServersWithOneAllowlistedServer() async throws {
         let workDir = try makeWorkDir()
         let captured = Captured<AgentCLIRun>()
-        let c = client(.codexCLI, workDir: workDir, model: "") { run, _ in
+        let c = client(.codexCLI, workDir: workDir, model: "gpt-5.6-sol") { run, _ in
             captured.value = run
             if let index = run.arguments.firstIndex(of: "--output-last-message") {
                 try "tool calls completed".write(
@@ -136,6 +146,8 @@ import Testing
         #expect(run.arguments.contains(
             #"mcp_servers.jarvis.default_tools_approval_mode="approve""#))
         #expect(run.arguments.contains("mcp_servers={}"))
+        let modelIndex = try #require(run.arguments.firstIndex(of: "-m"))
+        #expect(run.arguments[modelIndex + 1] == "gpt-5.6-sol")
         let disabled = Set(zip(run.arguments, run.arguments.dropFirst()).compactMap {
             flag, value in flag == "--disable" ? value : nil
         })
@@ -182,7 +194,7 @@ import Testing
         let workDir = try makeWorkDir()
         let base64 = Data("fake-jpeg".utf8).base64EncodedString()
         let captured = Captured<AgentCLIRun>()
-        let c = client(.codexCLI, workDir: workDir, model: "") { run, _ in
+        let c = client(.codexCLI, workDir: workDir, model: "gpt-5.6-sol") { run, _ in
             captured.value = run
             if let index = run.arguments.firstIndex(of: "--output-last-message") {
                 try "tool calls completed".write(
@@ -208,22 +220,36 @@ import Testing
         #expect(run.arguments.contains("project_doc_max_bytes=0"))
         #expect(run.timeout == CLIBrainClient.codexDefaultTimeout)
         #expect(run.arguments.contains("-i"))
-        #expect(!run.arguments.contains("-m"))
+        let modelIndex = try #require(run.arguments.firstIndex(of: "-m"))
+        #expect(run.arguments[modelIndex + 1] == "gpt-5.6-sol")
         #expect(try FileManager.default.contentsOfDirectory(atPath: workDir.path).isEmpty)
     }
 
-    @Test func codexEffortPassesThroughUnmappedAndMCPIsDisabledForToollessCalls() async throws {
-        let workDir = try makeWorkDir()
-        let captured = Captured<AgentCLIRun>()
-        let c = client(.codexCLI, workDir: workDir, model: "gpt-5.5", effort: "none") { run, _ in
-            captured.value = run
-            return AgentCLIOutput(stdout: "", stderr: "", exitCode: 0)
+    @Test func everyCodexModelReusesTheSharedEffortAndDisablesMCP() async throws {
+        let efforts = [
+            (ReasoningEffort.none, ReasoningEffort.low),
+            (.low, .low),
+            (.medium, .medium),
+            (.high, .high),
+        ]
+        for model in BrainModelCatalog.models(for: .codexCLI) {
+            for (effort, expected) in efforts {
+                let workDir = try makeWorkDir()
+                let captured = Captured<AgentCLIRun>()
+                let c = client(
+                    .codexCLI, workDir: workDir, model: model.id, effort: effort.rawValue
+                ) { run, _ in
+                    captured.value = run
+                    return AgentCLIOutput(stdout: "", stderr: "", exitCode: 0)
+                }
+                _ = try? await c.respond(messages: [.user("x")], tools: [], toolChoice: .auto)
+                let arguments = try #require(captured.value).arguments
+                #expect(arguments.contains("model_reasoning_effort=\(expected.rawValue)"))
+                #expect(arguments.contains("mcp_servers={}"))
+                let modelIndex = try #require(arguments.firstIndex(of: "-m"))
+                #expect(arguments[modelIndex + 1] == model.id)
+            }
         }
-        _ = try await c.respond(messages: [.user("x")], tools: [], toolChoice: .auto)
-        let run = try #require(captured.value)
-        #expect(run.arguments.contains("model_reasoning_effort=none"))
-        #expect(run.arguments.contains("mcp_servers={}"))
-        #expect(run.arguments.contains("gpt-5.5"))
     }
 
     @Test func codexDisablesOnlyFeaturesAdvertisedByTheInstalledCLI() async throws {
@@ -232,7 +258,7 @@ import Testing
         let c = client(
             .codexCLI,
             workDir: workDir,
-            model: "",
+            model: "gpt-5.6-sol",
             codexSupportedFeatures: ["shell_tool", "renamed_future_feature"]
         ) { run, _ in
             captured.value = run
@@ -249,21 +275,31 @@ import Testing
         #expect(!arguments.contains("renamed_future_feature"))
     }
 
-    @Test func claudeEffortMapsNoneToItsFloorAndPassesTheRestThrough() async throws {
-        for (effort, expected) in [("none", "low"), ("low", "low"), ("high", "high")] {
-            let workDir = try makeWorkDir()
-            let captured = Captured<AgentCLIRun>()
-            let c = client(.claudeCode, workDir: workDir, effort: effort) { run, _ in
-                captured.value = run
-                return AgentCLIOutput(
-                    stdout: self.claudeEnvelope("ok"),
-                    stderr: "",
-                    exitCode: 0)
+    @Test func everyClaudeModelReusesTheSharedEffort() async throws {
+        let efforts = [
+            (ReasoningEffort.none, ReasoningEffort.low),
+            (.low, .low),
+            (.medium, .medium),
+            (.high, .high),
+        ]
+        for model in BrainModelCatalog.models(for: .claudeCode) {
+            for (effort, expected) in efforts {
+                let workDir = try makeWorkDir()
+                let captured = Captured<AgentCLIRun>()
+                let c = client(
+                    .claudeCode, workDir: workDir, model: model.id, effort: effort.rawValue
+                ) { run, _ in
+                    captured.value = run
+                    return AgentCLIOutput(
+                        stdout: self.claudeEnvelope("ok"), stderr: "", exitCode: 0)
+                }
+                _ = try await c.respond(messages: [.user("x")], tools: [], toolChoice: .auto)
+                let arguments = try #require(captured.value).arguments
+                let effortIndex = try #require(arguments.firstIndex(of: "--effort"))
+                #expect(arguments[effortIndex + 1] == expected.rawValue)
+                let modelIndex = try #require(arguments.firstIndex(of: "--model"))
+                #expect(arguments[modelIndex + 1] == model.id)
             }
-            _ = try await c.respond(messages: [.user("x")], tools: [], toolChoice: .auto)
-            let args = try #require(captured.value).arguments
-            let index = try #require(args.firstIndex(of: "--effort"))
-            #expect(args[index + 1] == expected)
         }
     }
 
@@ -291,7 +327,7 @@ import Testing
         let c = CLIBrainClient(
             provider: .claudeCode,
             executable: URL(fileURLWithPath: "/fake/bin/cli"),
-            model: "sonnet",
+            model: "claude-sonnet-5",
             reasoningEffort: "low",
             workDirectory: workDir,
             traffic: traffic,
@@ -342,7 +378,7 @@ import Testing
         return CLIBrainClient(
             provider: provider,
             executable: URL(fileURLWithPath: "/fake/bin/cli"),
-            model: "sonnet",
+            model: "claude-sonnet-5",
             reasoningEffort: "low",
             workDirectory: workDir,
             traffic: traffic,

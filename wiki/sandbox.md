@@ -87,8 +87,9 @@ empty), and optionally delete the now-orphaned item with `security delete-generi
 Narrow and explicit. Data leaves the machine only via:
 
 - **Audio → `gpt-4o-transcribe`** on the OpenAI Realtime API (continuous, for transcription).
-- **Screenshot + transcript window → `gpt-5.5`** — and *only* when the model triggers a
-  `capture_screen` and/or a coaching turn. No screen content leaves the machine on idle turns.
+- **Screenshot + transcript window → the selected brain provider/model** — and *only* when the
+  model triggers a `capture_screen` and/or a coaching turn. No screen content leaves the machine on
+  idle turns.
 - **With a local CLI brain provider selected** ([architecture.md §4](./architecture.md#local-cli-brain-providers)),
   the same brain payload instead goes to the `claude` / `codex` subprocess, which sends it to
   Anthropic / OpenAI under the *user's own signed-in account* and that vendor's consumer retention
