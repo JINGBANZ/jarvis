@@ -94,6 +94,9 @@ import Foundation
         #expect(prompt.contains("MUST be counted here"))
         #expect(prompt.contains("re-check every number"))
         #expect(prompt.contains("session-level UX failure"))
+        #expect(prompt.contains("`session ended by error`"))
+        #expect(prompt.contains("legacy `coaching stopped`"))
+        #expect(prompt.contains("`session failed` phrases"))
         #expect(prompt.contains("stable event kinds in `k`"))
     }
 

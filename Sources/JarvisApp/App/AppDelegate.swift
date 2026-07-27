@@ -31,6 +31,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var systemConnectionState: RealtimeConnectionState = .stopped
     private var reportedCoachingReady = false
     private var reportedTranscriptionFailure = false
+    /// Resource allocation begins before audio capture can prove startup succeeded. Keep that
+    /// provisional state separate so tearing it down cannot look like the end of a live session.
+    private var sessionIsLive = false
     /// One-clock capture: a single private aggregate device (built-in mic + system-output tap on one
     /// drift-compensated clock) feeds both transcription sockets, running AEC3 inside its IOProc so the
     /// other side's speaker bleed is cancelled from the mic. Replaces the separate AVAudioEngine mic +
@@ -695,6 +698,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 .captureFailed(reason: reason), context: reportContext)
             return false
         }
+        sessionIsLive = true
         jlog("Jarvis: coaching starting — verifying realtime transcription connections.")
         jlog("Jarvis network path at start: \(networkDiagnostics.currentSummary)")
         activityViewer.coachingStateDidChange()   // the live session is no longer evaluable
@@ -710,7 +714,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         pendingStartRevision &+= 1
         pendingStartTask?.cancel()
         pendingStartTask = nil
-        let wasRunning = transcriber != nil || themTranscriber != nil
+        let hadAllocatedPipeline = transcriber != nil || themTranscriber != nil
+        let endedLiveSession = sessionIsLive
+        sessionIsLive = false
         requestManualHint = nil              // hotkey beeps again once there's no live session
         let cancelled = turns?.cancelAll() ?? []; turns = nil   // cancel any in-flight coaching turn
         coachDriver = nil
@@ -729,8 +735,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         systemConnectionState = .stopped
         reportedCoachingReady = false
         menuBar?.setState(.stopped)
-        if wasRunning {
+        if hadAllocatedPipeline {
             jlog("Jarvis: stopped.")
+        }
+        if endedLiveSession {
             ActivityLog.shared.record(.sessionEnded(reason: reason))
         }
         // Activity writes are asynchronous during live capture. Persist every fixed failure outcome
