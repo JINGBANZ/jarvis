@@ -789,3 +789,18 @@
   ownership and shared effort stand; the pinned default does not.
 - **Detail:** [settings-window.md → Brain](./settings-window.md#brain),
   `Sources/JarvisCore/Brain/BrainModelCatalog.swift`.
+
+### 2026-07-27 — Persist concrete model releases, not rolling aliases
+
+- **Chose:** Show and persist concrete model ids for every provider. Refresh
+  `BrainModelCatalog` manually from official provider documentation when a new public release should
+  replace or extend the curated lists. Invalid remembered ids use the first provider entry; invalid
+  fallback rows are ignored. Invitation-only models remain excluded.
+- **Why:** A saved route should continue naming the release the user selected. A rolling alias can
+  silently retarget that route when its provider advances the alias, changing behavior without a
+  Settings edit.
+- **Rejected:** Rolling aliases such as `sonnet`, `opus`, and provider-managed CLI defaults as
+  persisted picker selections. The Codex summarizer may still omit its model override because that is
+  internal compaction behavior, not a saved route selection.
+- **Detail:** [settings-window.md → Brain](./settings-window.md#brain),
+  `Sources/JarvisCore/Brain/BrainModelCatalog.swift`.

@@ -64,9 +64,9 @@ import Testing
         #expect(BrainModelCatalog.model(id: "gpt-5.5", for: .claudeCode) == nil)
     }
 
-    @Test func summarizerModelIsAnExplicitCheaperTier() {
+    @Test func summarizerModelsUseVerifiedProviderBehavior() {
         #expect(BrainModelCatalog.summarizerModelID(for: .openAI) == "gpt-5.4-mini")
         #expect(BrainModelCatalog.summarizerModelID(for: .claudeCode) == "claude-haiku-4-5")
-        #expect(BrainModelCatalog.summarizerModelID(for: .codexCLI) == "gpt-5.4-mini")
+        #expect(BrainModelCatalog.summarizerModelID(for: .codexCLI) == "")
     }
 }

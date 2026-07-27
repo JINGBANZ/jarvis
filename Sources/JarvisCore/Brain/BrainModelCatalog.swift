@@ -45,13 +45,13 @@ public enum BrainModelCatalog {
         models(for: provider).first { $0.id == id }
     }
 
-    /// The cheap model each provider uses for history-compaction summaries — text-only briefings a
-    /// few times an hour, so the smallest adequate tier.
+    /// The cheap verified model each API-backed provider uses for history-compaction summaries.
+    /// Codex omits a model override until a separate cheaper CLI model id is verified.
     public static func summarizerModelID(for provider: BrainProvider) -> String {
         switch provider {
         case .openAI: return "gpt-5.4-mini"
         case .claudeCode: return "claude-haiku-4-5"
-        case .codexCLI: return "gpt-5.4-mini"
+        case .codexCLI: return ""
         }
     }
 }
