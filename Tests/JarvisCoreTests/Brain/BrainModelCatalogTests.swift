@@ -13,8 +13,8 @@ import Testing
         #expect(BrainModelCatalog.default.id == "gpt-5.5")
     }
 
-    @Test func openAIListsSixNewestModelsFirst() {
-        #expect(BrainModelCatalog.all.prefix(6).map(\.id) == [
+    @Test func openAIListsExactlySixNewestModels() {
+        #expect(BrainModelCatalog.all.map(\.id) == [
             "gpt-5.6-sol",
             "gpt-5.6-terra",
             "gpt-5.6-luna",
@@ -24,14 +24,25 @@ import Testing
         ])
     }
 
-    @Test func claudeCodeListsSixNewestGenerallyAvailableReleasesFirst() {
-        #expect(BrainModelCatalog.models(for: .claudeCode).prefix(6).map(\.id) == [
+    @Test func claudeCodeListsExactlySixConcreteModels() {
+        #expect(BrainModelCatalog.models(for: .claudeCode).map(\.id) == [
             "claude-opus-5",
             "claude-sonnet-5",
             "claude-fable-5",
             "claude-opus-4-8",
-            "claude-opus-4-7",
             "claude-sonnet-4-6",
+            "claude-haiku-4-5",
+        ])
+    }
+
+    @Test func codexCLIListsExactlySixOfficialModels() {
+        #expect(BrainModelCatalog.models(for: .codexCLI).map(\.id) == [
+            "gpt-5.6-sol",
+            "gpt-5.6-terra",
+            "gpt-5.6-luna",
+            "gpt-5.5",
+            "gpt-5.4",
+            "gpt-5.4-mini",
         ])
     }
 
@@ -44,8 +55,9 @@ import Testing
     @Test func everyProviderHasModelsAndAContainedDefault() {
         for provider in BrainProvider.allCases {
             let models = BrainModelCatalog.models(for: provider)
-            #expect(!models.isEmpty)
+            #expect(models.count == 6)
             #expect(Set(models.map(\.id)).count == models.count)
+            #expect(models.allSatisfy { !$0.id.isEmpty })
             #expect(models.contains(BrainModelCatalog.defaultModel(for: provider)))
         }
     }
@@ -59,14 +71,14 @@ import Testing
         #expect(
             BrainModelCatalog.model(id: "claude-opus-5", for: .claudeCode)?.displayName
                 == "Claude Opus 5")
-        #expect(BrainModelCatalog.model(id: "sonnet", for: .claudeCode) != nil)
-        #expect(BrainModelCatalog.model(id: "sonnet", for: .openAI) == nil)
+        #expect(BrainModelCatalog.model(id: "sonnet", for: .claudeCode) == nil)
+        #expect(BrainModelCatalog.model(id: "", for: .codexCLI) == nil)
         #expect(BrainModelCatalog.model(id: "gpt-5.5", for: .claudeCode) == nil)
     }
 
-    @Test func summarizerModelIsCheaperTierOrCLIDefault() {
+    @Test func summarizerModelIsAnExplicitCheaperTier() {
         #expect(BrainModelCatalog.summarizerModelID(for: .openAI) == "gpt-5.4-mini")
-        #expect(BrainModelCatalog.summarizerModelID(for: .claudeCode) == "haiku")
-        #expect(BrainModelCatalog.summarizerModelID(for: .codexCLI).isEmpty)
+        #expect(BrainModelCatalog.summarizerModelID(for: .claudeCode) == "claude-haiku-4-5")
+        #expect(BrainModelCatalog.summarizerModelID(for: .codexCLI) == "gpt-5.4-mini")
     }
 }
