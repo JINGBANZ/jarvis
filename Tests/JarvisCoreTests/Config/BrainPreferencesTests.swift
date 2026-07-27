@@ -37,6 +37,34 @@ import Foundation
         #expect(BrainPreferences(defaults: d).model == BrainModelCatalog.default)
     }
 
+    @Test func retiredRememberedModelsMigrateToConcreteCatalogEntries() {
+        let cases: [(BrainProvider, String, String)] = [
+            (.openAI, "gpt-5.4-nano", "gpt-5.4-mini"),
+            (.claudeCode, "sonnet", "claude-sonnet-5"),
+            (.claudeCode, "claude-sonnet-4-6", "claude-sonnet-5"),
+            (.claudeCode, "opus", "claude-opus-5"),
+            (.claudeCode, "claude-opus-4-7", "claude-opus-5"),
+            (.claudeCode, "claude-opus-4-8", "claude-opus-5"),
+            (.claudeCode, "haiku", "claude-haiku-4-5"),
+            (.claudeCode, "", "claude-sonnet-5"),
+            (.codexCLI, "", "gpt-5.6-sol"),
+        ]
+
+        for (provider, retiredID, replacementID) in cases {
+            let d = freshDefaults()
+            let key = provider == .openAI
+                ? "brain.model"
+                : "brain.model.\(provider.rawValue)"
+            d.set(provider.rawValue, forKey: "brain.provider")
+            d.set(retiredID, forKey: key)
+
+            let p = BrainPreferences(defaults: d)
+            #expect(p.primaryTarget == BrainTarget(
+                provider: provider, modelID: replacementID))
+            #expect(d.string(forKey: key) == replacementID)
+        }
+    }
+
     @Test func unknownStoredEffortFallsBackToDefault() {
         let d = freshDefaults()
         d.set("extreme", forKey: "brain.reasoningEffort")
@@ -94,15 +122,42 @@ import Foundation
         #expect((d.array(forKey: "brain.fallbackTargets") ?? []).count == expected.count)
     }
 
+    @Test func retiredFallbackModelsMigrateWithoutChangingRouteOrder() {
+        let d = freshDefaults()
+        d.set([
+            ["provider": BrainProvider.openAI.rawValue, "modelID": "gpt-5.4-nano"],
+            ["provider": BrainProvider.claudeCode.rawValue, "modelID": "opus"],
+            ["provider": BrainProvider.codexCLI.rawValue, "modelID": ""],
+            ["provider": BrainProvider.claudeCode.rawValue, "modelID": "claude-sonnet-4-6"],
+            ["provider": BrainProvider.claudeCode.rawValue, "modelID": "haiku"],
+        ], forKey: "brain.fallbackTargets")
+
+        let expected = [
+            BrainTarget(provider: .openAI, modelID: "gpt-5.4-mini"),
+            BrainTarget(provider: .claudeCode, modelID: "claude-opus-5"),
+            BrainTarget(provider: .codexCLI, modelID: "gpt-5.6-sol"),
+            BrainTarget(provider: .claudeCode, modelID: "claude-sonnet-5"),
+            BrainTarget(provider: .claudeCode, modelID: "claude-haiku-4-5"),
+        ]
+        #expect(BrainPreferences(defaults: d).fallbackTargets == expected)
+        let persistedIDs = (d.array(forKey: "brain.fallbackTargets") ?? []).compactMap {
+            ($0 as? [String: Any])?["modelID"] as? String
+        }
+        #expect(persistedIDs == expected.map(\.modelID))
+    }
+
     @Test func legacyScalarFallbackMigratesWithRememberedModel() {
         let d = freshDefaults()
         d.set(BrainProvider.claudeCode.rawValue, forKey: "brain.fallbackProvider")
-        d.set("claude-opus-5", forKey: "brain.model.\(BrainProvider.claudeCode.rawValue)")
+        d.set("opus", forKey: "brain.model.\(BrainProvider.claudeCode.rawValue)")
 
         let p = BrainPreferences(defaults: d)
         #expect(p.fallbackTargets == [
             BrainTarget(provider: .claudeCode, modelID: "claude-opus-5")
         ])
+        #expect(
+            d.string(forKey: "brain.model.\(BrainProvider.claudeCode.rawValue)")
+                == "claude-opus-5")
         #expect(d.object(forKey: "brain.fallbackTargets") != nil)
         #expect(d.object(forKey: "brain.fallbackProvider") == nil)
         #expect(BrainPreferences(defaults: d).fallbackTargets == p.fallbackTargets)
