@@ -12,7 +12,6 @@ import Foundation
         #expect(ActivityLog.cssClass(for: "💭 thinking…") == "think")
         #expect(ActivityLog.cssClass(for: "… nothing useful to add, staying silent") == "think")
         #expect(ActivityLog.cssClass(for: "🧠 brain switch applied — OpenAI API → Claude Code") == "think")
-        #expect(ActivityLog.cssClass(for: "⏹ coaching stopped — Claude Code couldn't respond") == "think")
         #expect(ActivityLog.cssClass(for: "⏹ session ended by user") == "think")
         #expect(ActivityLog.cssClass(
             for: "⏹ session ended by error — check jarvis-debug.log") == "err")

@@ -309,7 +309,7 @@ public final class ActivityLog: @unchecked Sendable {
         if m.hasPrefix("🤫 stayed silent") || m.hasPrefix("💭") || m.hasPrefix("…") { return "think" }
         if m.hasPrefix("🧠") { return "think" }
         if m.hasPrefix("⏹ session ended by error") { return "err" }
-        if m.hasPrefix("⏹ coaching stopped") || m.hasPrefix("⏹ session ended") { return "think" }
+        if m.hasPrefix("⏹ session ended") { return "think" }
         if m.hasPrefix("⚠️") { return "think" }
         let low = m.lowercased()
         if low.contains("error") || low.contains("failed") || low.contains("denied") { return "err" }
@@ -331,8 +331,6 @@ public final class ActivityLog: @unchecked Sendable {
         return m.hasPrefix("🗣 heard") || m.hasPrefix("⌨️ hint shortcut")
             || m.hasPrefix("👁 looking at your screen") || m.hasPrefix("👁 couldn't view your screen")
             || m.hasPrefix("💬") || m.hasPrefix("🤫 stayed silent")
-            || m.hasPrefix("⏹ coaching stopped")
-            || m.hasPrefix("⏹ session failed")
             || m.hasPrefix("⏹ session ended")
             || (m.hasPrefix("⚠️") && m.contains("couldn't respond this turn")
                 && m.hasSuffix("listening continues"))
