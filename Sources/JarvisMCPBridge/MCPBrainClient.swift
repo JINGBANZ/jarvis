@@ -47,15 +47,9 @@ public struct MCPBrainClient: BrainClient, Sendable {
         do {
             configuration = try host.start()
         } catch {
-            // No provider request has started, so this is still the same conversational attempt.
-            // A local IPC/bootstrap incompatibility may safely use the established returned-JSON
-            // transport; once an MCP provider run starts, failures never replay inside the attempt.
-            jlog("Jarvis MCP: private bridge unavailable; using JSON compatibility transport — "
-                 + error.localizedDescription)
-            return try await base.respond(
-                messages: messages,
-                tools: tools,
-                toolChoice: toolChoice)
+            throw BrainFailure(
+                disposition: .temporary,
+                detail: "private MCP bridge unavailable: \(error.localizedDescription)")
         }
         defer { host.close() }
         let response = try await base.respondUsingMCP(

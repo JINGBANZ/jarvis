@@ -79,7 +79,7 @@ public enum ToolInvocation: Sendable, Equatable {
 /// needed to replay the assistant turn during the tool loop.
 public struct BrainResponse: Sendable {
     public enum ActionDelivery: Sendable, Equatable {
-        /// Tool calls are returned to `CoachDriver`, which submits them to the attempt broker.
+        /// Native provider tool calls are returned to `CoachDriver`, which submits them to the broker.
         case returnedCalls
         /// The provider called the attempt broker during its run (the local MCP path).
         case broker
@@ -145,8 +145,8 @@ public protocol BrainClient: Sendable {
 }
 
 public extension BrainClient {
-    /// Native APIs and prompt-JSON compatibility clients return calls for the driver to broker.
-    /// MCP-aware clients override this overload and call the supplied broker during their run.
+    /// Native APIs return calls for the driver to broker. MCP-aware clients override this overload
+    /// and call the supplied broker during their run.
     func respond(
         messages: [ChatMessage],
         tools: [ToolDef],

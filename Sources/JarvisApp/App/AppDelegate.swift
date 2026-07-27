@@ -194,8 +194,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Check the selected local provider before disturbing a live session. OpenAI needs no provider
-    /// preflight; a missing/signed-out CLI leaves the current brain intact and reports fixed Activity
-    /// copy while raw detection detail stays in the debug log.
+    /// preflight; a missing, signed-out, or MCP-incompatible CLI leaves the current brain intact and
+    /// reports fixed Activity copy while raw detection detail stays in the debug log.
     private func preflightBrainProvider(_ provider: BrainProvider,
                                         detectedCLI: DetectedAgentCLI?,
                                         context: UserFacingError.PresentationContext,
@@ -223,6 +223,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             errorReporter.reportImmediately(
                 .brainCLISignInUnconfirmed(provider: provider.displayName), context: context)
         }
+        guard cli.supportsMCP else {
+            jlog("Jarvis: can't \(action) — \(provider.displayName) did not pass the MCP capability probe.")
+            if recordSettingsFailure { ActivityLog.shared.record(.settingsChangeNotApplied) }
+            errorReporter.reportImmediately(
+                .brainCLIMCPUnsupported(provider: provider.displayName), context: context)
+            return (false, nil)
+        }
+        guard mcpServerExecutable() != nil else {
+            jlog("Jarvis: can't \(action) — the bundled MCP helper is unavailable.")
+            if recordSettingsFailure { ActivityLog.shared.record(.settingsChangeNotApplied) }
+            errorReporter.reportImmediately(.brainMCPHelperMissing, context: context)
+            return (false, nil)
+        }
         return (true, cli)
     }
 
@@ -247,17 +260,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 codexSupportedFeatures: cli.supportedFeatures,
                 traffic: sessionTraffic,
                 trafficTag: "coach")
-            if let server = mcpServerExecutable(),
-               shouldUseMCP(for: cli) {
-                coachBase = MCPBrainClient(
-                    base: cliCoach,
-                    sessionDirectory: sessionDir,
-                    serverExecutable: server)
-                jlog("Jarvis coach: \(target.provider.displayName) action transport = MCP")
-            } else {
-                coachBase = cliCoach
-                jlog("Jarvis coach: \(target.provider.displayName) action transport = JSON")
+            guard cli.supportsMCP, let server = mcpServerExecutable() else {
+                preconditionFailure("unavailable CLI target reached runtime construction")
             }
+            coachBase = MCPBrainClient(
+                base: cliCoach,
+                sessionDirectory: sessionDir,
+                serverExecutable: server)
+            jlog("Jarvis coach: \(target.provider.displayName) action transport = MCP")
             summarizer = CLIBrainClient(provider: target.provider, executable: cli.executableURL,
                                         model: BrainModelCatalog.summarizerModelID(for: target.provider),
                                         reasoningEffort: ReasoningEffort.low.rawValue,
@@ -278,30 +288,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return BrainRuntime(coach: coachBase, summarizer: summarizer)
     }
 
-    private enum CLIActionTransport: String {
-        case automatic
-        case json
-        case mcp
-    }
-
-    /// Developer/validation override; ordinary sessions use capability-based automatic selection.
-    /// Keeping this out of user preferences avoids making an implementation transport a UX choice.
-    private var requestedCLIActionTransport: CLIActionTransport {
-        let value = ProcessInfo.processInfo.environment["JARVIS_CLI_ACTION_TRANSPORT"]?.lowercased()
-        return value.flatMap(CLIActionTransport.init(rawValue:)) ?? .automatic
-    }
-
-    private func shouldUseMCP(for cli: DetectedAgentCLI) -> Bool {
-        switch requestedCLIActionTransport {
-        case .automatic:
-            return cli.supportsMCP
-        case .json:
-            return false
-        case .mcp:
-            return true
-        }
-    }
-
     private func mcpServerExecutable() -> URL? {
         let candidates: [URL]
         if Bundle.main.bundleURL.pathExtension == "app" {
@@ -317,17 +303,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             candidates = []
         }
-        let server = candidates.first {
+        return candidates.first {
             FileManager.default.isExecutableFile(atPath: $0.path)
         }
-        if server == nil, requestedCLIActionTransport == .mcp {
-            jlog("Jarvis coach: MCP was forced but the bundled sidecar is unavailable; using JSON")
-        }
-        return server
     }
 
-    /// Missing or definitively signed-out fallback CLIs remain in the runtime route as unavailable
-    /// entries. The driver skips them only if the session cursor reaches them.
+    /// Unusable fallback CLIs remain in the runtime route as unavailable entries. The driver skips
+    /// them only if the session cursor reaches them.
     private func fallbackUnavailability(
         for target: BrainTarget,
         detectedCLI: DetectedAgentCLI?
@@ -338,6 +320,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if detectedCLI.authenticationStatus == .signedOut {
             return "\(target.provider.displayName) is signed out"
+        }
+        if !detectedCLI.supportsMCP {
+            return "\(target.provider.displayName) does not support Jarvis MCP actions"
+        }
+        if mcpServerExecutable() == nil {
+            return "Jarvis's bundled MCP helper is unavailable"
         }
         return nil
     }

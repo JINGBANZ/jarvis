@@ -208,7 +208,7 @@ import Glibc
         #expect(d.detect(.codexCLI)?.supportedFeatures == [])
     }
 
-    @Test func installedHelpOutputFormsTheMCPCompatibilityProfile() throws {
+    @Test func installedHelpOutputProvesTheMCPConformanceProfile() throws {
         let home = try makeHome()
         let bin = home.appendingPathComponent("fakebin")
         let codexFeatureArguments = CLIBrainClient.codexMCPRequiredDisableFeatures
@@ -241,7 +241,7 @@ import Glibc
         #expect(d.detect(.codexCLI)?.supportsMCP == true)
     }
 
-    @Test func codexMCPFallsBackWhenBuiltInsCannotAllBeDisabled() throws {
+    @Test func codexMCPIsUnavailableWhenBuiltInsCannotAllBeDisabled() throws {
         let home = try makeHome()
         let bin = home.appendingPathComponent("fakebin")
         try installBinary("codex", in: bin, script: """
@@ -261,7 +261,7 @@ import Glibc
         #expect(d.detect(.codexCLI)?.supportsMCP == false)
     }
 
-    @Test func unfamiliarHelpOutputSelectsCompatibilityTransport() throws {
+    @Test func unfamiliarHelpOutputDoesNotProveMCPAvailability() throws {
         let home = try makeHome()
         let bin = home.appendingPathComponent("fakebin")
         try installBinary("claude", in: bin, script: """

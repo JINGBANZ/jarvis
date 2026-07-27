@@ -43,15 +43,16 @@ suppress project instructions and its feature-gated agent tools, run as direct-r
 executable-search paths, and stop under a provider-specific stall bound instead of leaving later
 speech batched indefinitely. Supported Claude Code and Codex coaching attempts now receive only the
 private Jarvis MCP server, whose three actions all enter the same Foundation-only
-`CoachingActionBroker` used by API-native and compatibility-JSON calls. The broker permits serial
+`CoachingActionBroker` used by API-native calls. The broker permits serial
 captures followed by exactly one staged terminal action, rejects stale, replayed, malformed,
 post-terminal, cancelled, or missing-terminal work, and commits only after a clean current attempt.
-The session-local owner-only bridge gives the sidecar no direct OS effect. Capability/bootstrap
-failure falls back to brokered JSON before the provider starts; once an MCP provider run begins,
-there is no same-attempt replay. A synthetic live A/B on both installed CLIs recovered the same OCR
-evidence through both transports while MCP used one CLI process instead of JSON's two for the
-capture→terminal loop. It does not establish greater model intelligence; it establishes lower action
-loop overhead and a fail-closed terminal contract.
+The session-local owner-only bridge gives the sidecar no direct OS effect. CLI coaching is MCP-only:
+an installation that cannot prove the required MCP/isolation profile is unavailable, a missing
+bundled helper blocks preflight, and a per-attempt bridge bootstrap failure fails that attempt before
+the provider starts. There is no prompt-JSON action route or same-attempt replay. The historical live
+A/B on both installed CLIs recovered the same OCR evidence through both transports while MCP used one
+CLI process instead of JSON's two for the capture→terminal loop. It does not establish greater model
+intelligence; it establishes lower action-loop overhead and a fail-closed terminal contract.
 Saving an API key while running also preserves those live objects: existing Realtime sockets take
 the key on their next reconnect, and an OpenAI brain update remains transactional. Audio
 route rebuilds likewise retry before declaring capture unavailable, and stale capture callbacks
@@ -89,7 +90,7 @@ a stopped conversation. The standard release checklist remains in
 
 ## Built
 
-Tested `JarvisCore` + `JarvisOverlay` harness is green (555 tests in 62 suites through
+Tested `JarvisCore` + `JarvisOverlay` harness is green (546 tests in 62 suites through
 `./scripts/run-tests.sh`); `JarvisApp` is the thin OS shell, verified by the smoke run.
 
 - `Sources/JarvisCore/Audio/` — transactional PCM + utterance buffering, adaptive content-free activity detection, non-destructive AEC reference alignment, and system-audio timeline preservation (`PCMBuffer`, `UtteranceBuffer`, `PCM16Framer`, `AudioDownmix`, `AdaptiveAudioActivityDetector`, `EchoReferenceAlignment`, `SystemAudioTimeline`).
@@ -110,7 +111,6 @@ Tested `JarvisCore` + `JarvisOverlay` harness is green (555 tests in 62 suites t
 - `Sources/JarvisApp/Shortcuts/HotkeyController.swift` — the global Carbon ⌥⌘J on-demand-hint hotkey.
 - `Sources/JarvisApp/Viewer/ActivityViewer.swift` — the in-app `WKWebView` activity viewer, with an exact selectable/copyable session ID and one-click **Evaluate** / **Open report** agentic audit flow.
 - `Sources/EvalPrep/main.swift` — the Foundation-only terminal entry point for the same `AgenticEvaluator` Activity invokes; `scripts/eval-session.sh` runs it over the repo + session dir.
-- `Sources/ActionTransportComparison/main.swift` + `scripts/compare-cli-actions.sh` — the synthetic JSON/MCP capture→terminal A/B harness for Claude Code and Codex.
 - `Sources/CJarvisAEC/lib/libjarvis-aec.a` — the prebuilt, zero-dylib WebRTC AEC3 C edge (the `CJarvisAEC` target; rebuilt by `scripts/build-aec.sh`).
 - `.github/workflows/release.yml` + `scripts/package-app.sh` — automated releases: release-please Release PR → Developer ID-signed, notarized, stapled `Jarvis-<version>.zip` attached to a GitHub Release ([build-and-run.md → Distribution](./build-and-run.md#distribution--signed-notarized-releases-from-ci)).
 

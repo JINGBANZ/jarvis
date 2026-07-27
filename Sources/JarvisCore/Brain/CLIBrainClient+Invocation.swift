@@ -17,12 +17,9 @@ extension CLIBrainClient {
     /// `BrainTrafficLog.redactingImages`, which only recognizes parsed `data:` URIs). It reuses the
     /// evaluator's schema keys (model / instructions / input), so `EvaluationTranscript` renders and
     /// prefix-elides CLI traffic exactly like API traffic.
-    func prepareInvocation(messages: [ChatMessage], tools: [ToolDef],
-                           toolChoice: ToolChoice) throws -> PreparedInvocation {
+    func prepareInvocation(messages: [ChatMessage]) throws -> PreparedInvocation {
         let rendered = renderConversation(messages)
-        // System text + tool protocol are the *instructions*; the conversation is the *input*.
-        let instructions = composeInstructions(system: rendered.system, tools: tools,
-                                               toolChoice: toolChoice)
+        let instructions = rendered.system.joined(separator: "\n\n")
         var auditRequest: [String: Any] = [
             "provider": provider.rawValue,
             "model": model.isEmpty ? "(CLI default)" : model,
@@ -58,8 +55,7 @@ extension CLIBrainClient {
                         "--tools", ""]
             if !model.isEmpty { args += ["--model", model] }
             let message = try Self.claudeStreamMessage(segments: rendered.segments,
-                                                       hasTools: !tools.isEmpty,
-                                                       forcedTool: Self.forcedToolDirective(toolChoice))
+                                                       hasTools: false)
             auditRequest["input"] = message.auditInput
             return PreparedInvocation(
                 run: AgentCLIRun(executable: executable, arguments: args, stdin: message.stdin,
@@ -110,10 +106,6 @@ extension CLIBrainClient {
             var document = Self.codexDirectResponseInstruction + "\n\n"
             if !instructions.isEmpty { document += instructions + "\n\n" }
             document += "## Conversation\n\n" + blocks.joined(separator: "\n\n")
-            if !tools.isEmpty {
-                document += "\n\nAnswer now, following the tool protocol."
-                if let forced = Self.forcedToolDirective(toolChoice) { document += " \(forced)" }
-            }
             auditRequest["input"] = auditInput
             return PreparedInvocation(
                 run: AgentCLIRun(executable: executable, arguments: args, stdin: document,
@@ -127,9 +119,8 @@ extension CLIBrainClient {
     }
 
     /// Build a one-process agentic turn whose only callable surface is Jarvis's private MCP server.
-    /// Unlike `prepareInvocation`, this does not describe an output-shaped JSON protocol: the CLI
-    /// must call a real tool, and the attempt broker independently rejects a clean exit without a
-    /// terminal action.
+    /// The CLI must call a real tool, and the attempt broker independently rejects a clean exit
+    /// without a terminal action.
     func prepareMCPInvocation(
         messages: [ChatMessage],
         tools: [ToolDef],
@@ -340,9 +331,9 @@ extension CLIBrainClient {
         "workspace_dependencies",
     ]
 
-    /// Native MCP is enabled only when the installed Codex build advertises disable switches for
+    /// Codex coaching is available only when the installed build advertises disable switches for
     /// every stable surface that could inspect data, invoke another agent/tool host, or widen the
-    /// three-action contract. An older/renamed build falls back to the brokered JSON adapter.
+    /// three-action contract.
     static let codexMCPRequiredDisableFeatures: Set<String> = [
         "apps",
         "browser_use",
@@ -369,8 +360,7 @@ extension CLIBrainClient {
 
     static let codexDirectResponseInstruction = """
         Answer this decision request immediately without inspecting files, running commands,
-        browsing, planning, delegating, or invoking any Codex built-in tool. The capture_screen,
-        speak, and stay_silent names below are an output JSON protocol, not callable Codex tools.
+        browsing, planning, delegating, or invoking any Codex built-in tool.
         """
 
     /// One stream-json user message carrying the whole conversation: text blocks coalesced,

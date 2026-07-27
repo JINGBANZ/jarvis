@@ -38,12 +38,6 @@ let package = Package(
             name: "JarvisMCPServer",
             dependencies: ["JarvisMCPBridge"]
         ),
-        // Developer-only, bounded A/B harness for issue #111. It runs the same synthetic
-        // evidence-dependent coaching turn through prompt JSON and private MCP.
-        .executableTarget(
-            name: "ActionTransportComparison",
-            dependencies: ["JarvisCore", "JarvisMCPBridge"]
-        ),
         // The dev-side CLI half of the agentic session audit (see AgenticEvaluation): renders a
         // session's traffic to a compact transcript and prints the agent task prompt. A separate,
         // Foundation-only executable so it builds/runs on any machine and scripts/eval-session.sh can

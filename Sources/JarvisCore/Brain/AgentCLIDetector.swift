@@ -170,9 +170,9 @@ public struct AgentCLIDetector: Sendable {
     }
 
     /// `--disable <feature>` rejects unknown names. Probe the installed binary's compiled feature
-    /// registry so Jarvis passes only names that installation advertises. Failure falls back to no
-    /// feature flags; the direct-response prompt, isolated project root, read-only sandbox, and short
-    /// timeout still bound the call without making an older or renamed CLI unusable.
+    /// registry so Jarvis passes only names that installation advertises. A failed probe returns no
+    /// flags, which makes Codex unavailable for coaching when the MCP safety set cannot be proven;
+    /// tool-less auxiliary calls can still use the bounded direct-response invocation.
     private func codexSupportedFeatures(executable: URL) -> Set<String> {
         guard let output = runProbe(executable: executable, arguments: ["features", "list"]),
               output.status == 0,
@@ -184,7 +184,7 @@ public struct AgentCLIDetector: Sendable {
     }
 
     /// Capability comes from the installed binary, never its version string. Missing or unfamiliar
-    /// help output selects the prompt-JSON compatibility path instead of guessing provider flags.
+    /// help output makes that installation unavailable for coaching instead of guessing flags.
     private func supportsMCP(
         _ provider: BrainProvider,
         executable: URL,

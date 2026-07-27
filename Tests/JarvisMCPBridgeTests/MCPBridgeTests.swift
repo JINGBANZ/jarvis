@@ -187,7 +187,7 @@ import Testing
         #expect(try UnixSocket.readMessage(from: descriptor).isEmpty)
     }
 
-    @Test func oneMCPProcessCanCaptureAndTerminateWhileJSONNeedsTwoRuns() async throws {
+    @Test func oneMCPProcessCanCaptureAndTerminate() async throws {
         let directory = try makeDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let shot = ScreenSnapshot(
@@ -256,43 +256,6 @@ import Testing
         #expect(try await mcpBroker.commit()
                 == .speak(callID: "speak", lines: ["Use the comparison token."]))
 
-        let jsonRuns = Counter()
-        let jsonBase = CLIBrainClient(
-            provider: .claudeCode,
-            executable: URL(fileURLWithPath: "/fake/claude"),
-            model: "comparison",
-            workDirectory: directory,
-            run: { _, _ in
-                let reply = jsonRuns.next() == 1
-                    ? #"{"tool":"capture_screen","arguments":{}}"#
-                    : #"{"tool":"speak","arguments":{"lines":["Use the comparison token."]}}"#
-                let envelopeData = try JSONSerialization.data(withJSONObject: [
-                    "type": "result",
-                    "is_error": false,
-                    "result": reply,
-                ])
-                let envelope = String(decoding: envelopeData, as: UTF8.self)
-                return AgentCLIOutput(stdout: envelope, stderr: "", exitCode: 0)
-            })
-        let jsonBroker = CoachingActionBroker(
-            identity: .init(configurationRevision: 1),
-            capture: { shot })
-        let captureResponse = try await jsonBase.respond(
-            messages: [.user("Use the screen evidence.")],
-            tools: coachTools,
-            toolChoice: .required)
-        _ = try await jsonBroker.submit(try #require(captureResponse.toolCalls.first))
-        let terminalResponse = try await jsonBase.respond(
-            messages: [.user("Use the screen evidence."), .userImage(shot.imageBase64)],
-            tools: coachTools,
-            toolChoice: .required)
-        _ = try await jsonBroker.submit(try #require(terminalResponse.toolCalls.first))
-
-        #expect(jsonRuns.value == 2)
-        #expect(try await jsonBroker.commit()
-                == .speak(
-                    callID: try #require(terminalResponse.rawToolCalls.first?.id),
-                    lines: ["Use the comparison token."]))
     }
 
     @Test func cleanMCPExitWithoutATerminalIsRejected() async throws {
@@ -329,7 +292,7 @@ import Testing
         }
     }
 
-    @Test func bridgeBootstrapIncompatibilityFallsBackBeforeProviderRun() async throws {
+    @Test func bridgeBootstrapFailureStopsBeforeProviderRun() async throws {
         let root = try makeDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
         let longDirectory = root.appendingPathComponent(String(repeating: "x", count: 100))
@@ -345,14 +308,8 @@ import Testing
             workDirectory: longDirectory,
             run: { _, _ in
                 _ = runs.next()
-                let result = #"{"tool":"speak","arguments":{"lines":["Compatibility path."]}}"#
-                let envelope = try JSONSerialization.data(withJSONObject: [
-                    "type": "result",
-                    "is_error": false,
-                    "result": result,
-                ])
                 return AgentCLIOutput(
-                    stdout: String(decoding: envelope, as: UTF8.self),
+                    stdout: #"{"type":"result","is_error":false,"result":""}"#,
                     stderr: "",
                     exitCode: 0)
             })
@@ -364,18 +321,17 @@ import Testing
             sessionDirectory: longDirectory,
             serverExecutable: URL(fileURLWithPath: "/fake/JarvisMCPServer"))
 
-        let response = try await client.respond(
-            messages: [.user("coach me")],
-            tools: coachTools,
-            toolChoice: .required,
-            actionBroker: broker)
-
-        #expect(runs.value == 1)
-        #expect(response.actionDelivery == .returnedCalls)
-        _ = try await broker.submit(try #require(response.toolCalls.first))
-        #expect(try await broker.commit()
-                == .speak(
-                    callID: try #require(response.rawToolCalls.first?.id),
-                    lines: ["Compatibility path."]))
+        do {
+            _ = try await client.respond(
+                messages: [.user("coach me")],
+                tools: coachTools,
+                toolChoice: .required,
+                actionBroker: broker)
+            Issue.record("bridge bootstrap failure was accepted")
+        } catch let failure as BrainFailure {
+            #expect(failure.disposition == .temporary)
+            #expect(failure.detail.contains("private MCP bridge unavailable"))
+        }
+        #expect(runs.value == 0)
     }
 }

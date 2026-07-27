@@ -2,9 +2,9 @@ import Foundation
 
 /// The transport-independent authority for one coaching attempt.
 ///
-/// Native function calls, prompt-JSON compatibility calls, and MCP calls all enter this actor.
-/// Captures may repeat serially while the attempt is open. `speak` / `stay_silent` stage exactly one
-/// terminal decision; only `commit()` turns that staged decision into a host-consumable effect.
+/// Native API function calls and MCP calls both enter this actor. Captures may repeat serially while
+/// the attempt is open. `speak` / `stay_silent` stage exactly one terminal decision; only `commit()`
+/// turns that staged decision into a host-consumable effect.
 public actor CoachingActionBroker {
     public struct Identity: Sendable, Equatable, Codable {
         public let attemptID: UUID

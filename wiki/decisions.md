@@ -812,5 +812,32 @@
   `Sources/JarvisCore/Coach/CoachingActionBroker.swift`,
   `Sources/JarvisMCPBridge/MCPBridgeHost.swift`,
   `Sources/JarvisMCPBridge/MCPBrainClient.swift`,
-  `Sources/JarvisMCPBridge/MCPStdioServer.swift`,
-  `scripts/compare-cli-actions.sh`.
+  `Sources/JarvisMCPBridge/MCPStdioServer.swift`.
+
+### 2026-07-27 — CLI coaching requires MCP; no compatibility action route
+
+- **Chose:** Remove the prompt-JSON coaching adapter, transport override, bootstrap fallback, and
+  comparison executable from the shipping tree. Claude Code and Codex are available for coaching
+  only when the bounded detector proves the required MCP/isolation profile and the bundled helper is
+  executable. A missing helper blocks preflight; failure to create the private per-attempt bridge is
+  a typed failed attempt before any provider process starts. Tool-less CLI calls such as history
+  summarization remain direct and action-free. OpenAI keeps native strict function calls through the
+  same broker.
+- **Why:** Jarvis is in active development and has no released compatibility promise to preserve.
+  Keeping a second action protocol adds prompt construction, tolerant parsing, manual-hint recovery,
+  selection policy, tests, and a silent downgrade path precisely where the design is meant to require
+  a real tool call. The earlier A/B already supplied its decision evidence: both transports used the
+  synthetic OCR evidence, while MCP kept capture→terminal in one process. Retaining the experiment as
+  production machinery no longer buys user value.
+- **Rejected:** (a) Keeping JSON only for older CLIs—unsupported installations can be updated or
+  marked unavailable during active development. (b) Falling back when bridge bootstrap fails—it can
+  mask a packaging, permissions, path-length, or IPC defect and weakens the fail-closed contract.
+  (c) Keeping a developer transport override—it preserves dead behavior and lets tests diverge from
+  the only production route.
+- **Supersedes in part:** 2026-07-27 — Private MCP is an action transport behind one broker. Its
+  broker, MCP isolation, liveness, and measured action-loop conclusions stand; its compatibility
+  choice and rejection of an MCP-only rollout are superseded.
+- **Detail:** [architecture.md → Local CLI brain providers](./architecture.md#local-cli-brain-providers),
+  `Sources/JarvisApp/App/AppDelegate.swift`,
+  `Sources/JarvisCore/Brain/CLIBrainClient.swift`,
+  `Sources/JarvisMCPBridge/MCPBrainClient.swift`.

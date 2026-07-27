@@ -156,18 +156,10 @@ the human-facing coaching record. The current validation priority lives in
 - In Activity, choose the stopped session and click **Evaluate**. Confirm the button shows
   **Evaluating…**, the report opens when the agent finishes, and the button then shows **Open report**.
 
-## CLI action-transport comparison
+## Local CLI MCP requirement
 
-For a synthetic, evidence-dependent comparison that does not need audio or the app UI:
-
-```sh
-./scripts/compare-cli-actions.sh claude
-./scripts/compare-cli-actions.sh codex
-```
-
-Each command gives prompt-JSON and MCP the same task: call `capture_screen`, recover a fixed OCR
-token, then speak that token. The report compares CLI process count, capture count, terminal
-validity, evidence use, and wall time. It is intentionally a transport/action-loop benchmark, not a
-general coaching-quality evaluation. For local diagnostics, set
-`JARVIS_CLI_ACTION_TRANSPORT=json|mcp|automatic` before building/running the app to select one path;
-release behavior is `automatic`.
+Claude Code and Codex coaching use only Jarvis's private MCP action surface. There is no environment
+override or prompt-JSON action route. Start refuses a selected CLI when the bounded capability probe
+cannot prove the required MCP/isolation profile or when the bundled `JarvisMCPServer` helper is
+missing. If the per-attempt private bridge cannot start, that coaching attempt fails before the
+provider process launches; normal route health and fresh-attempt scheduling then apply.

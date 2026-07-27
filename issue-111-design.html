@@ -465,7 +465,7 @@
 
     .e2e-providers {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 12px;
     }
 
@@ -481,11 +481,6 @@
     .e2e-lane.mcp {
       border-color: color-mix(in srgb, var(--blue) 42%, var(--line));
       background: color-mix(in srgb, var(--blue-soft) 48%, var(--panel));
-    }
-
-    .e2e-lane.compatibility {
-      border-color: color-mix(in srgb, var(--amber) 36%, var(--line));
-      background: color-mix(in srgb, var(--amber-soft) 45%, var(--panel));
     }
 
     .e2e-node {
@@ -554,7 +549,7 @@
 
     .e2e-converge {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 12px;
       margin-top: 10px;
       color: var(--blue);
@@ -900,7 +895,7 @@
         </div>
         <div class="hero-stat">
           <strong>Implementation status</strong>
-          <span>Implemented in the issue worktree; 555-test serialized gate is green.</span>
+          <span>Implemented in the issue worktree; 546-test serialized gate is green.</span>
         </div>
         <div class="hero-stat">
           <strong>Comparison conclusion</strong>
@@ -935,8 +930,8 @@
               <h2>Broker first. MCP second.</h2>
               <p class="section-summary">
                 Do not make the sidecar itself authoritative. Every action—OpenAI native tool call,
-                CLI compatibility result, or MCP request—must enter the same per-attempt state
-                machine before Jarvis captures, speaks, records silence, or commits history.
+                or CLI MCP request—must enter the same per-attempt state machine before Jarvis
+                captures, speaks, records silence, or commits history.
               </p>
             </div>
           </div>
@@ -1010,11 +1005,11 @@
             <article class="card">
               <span class="tag guaranteed">Guaranteed by design</span>
               <span class="metric">0 parsers</span>
-              <h3>Remove prompt-JSON parsing on supported CLIs</h3>
+              <h3>Remove prompt-JSON actions from CLI coaching</h3>
               <p>
                 Claude and Codex no longer need separate tolerance rules for prose, fences, flattened
-                arguments, or malformed action JSON. Compatibility parsing remains explicit and
-                brokered, not the normal path.
+                arguments, or malformed action JSON. A toolful direct CLI call is rejected before a
+                provider process starts.
               </p>
             </article>
             <article class="card">
@@ -1062,9 +1057,10 @@
             <div>
               <h2>The claim is supported only in the action loop.</h2>
               <p class="section-summary">
-                JSON and MCP received the same evidence-dependent task on the same installed
-                provider. Both produced a valid, evidence-specific terminal action. MCP did it
-                inside one CLI process; JSON needed a second process after capture.
+                Before the compatibility code was removed, JSON and MCP received the same
+                evidence-dependent task on the same installed provider. Both produced a valid,
+                evidence-specific terminal action. MCP did it inside one CLI process; JSON needed a
+                second process after capture.
               </p>
             </div>
           </div>
@@ -1145,6 +1141,13 @@
             nothing. Eagerly loading Claude’s private server and approving only Codex’s allowlisted
             Jarvis tools made the calls available; requiring a brokered terminal is what keeps a
             future non-call safe.
+          </div>
+
+          <div class="callout">
+            <strong>Experiment retained as evidence, not runtime surface</strong>
+            These are historical single-sample results. The comparison executable and transport
+            override were removed after the MCP-only decision; they are not compatibility features
+            in the shipping design.
           </div>
         </section>
 
@@ -1229,8 +1232,8 @@
               <h2>One broker, every action path.</h2>
               <p class="section-summary">
                 Local agents call through MCP. The OpenAI API continues using native function calls.
-                The JSON compatibility route remains a pre-launch fallback. Every path converges
-                before any Jarvis action is accepted.
+                Those two paths converge before any Jarvis action is accepted. An MCP-incompatible
+                CLI is unavailable rather than downgraded to another action protocol.
               </p>
             </div>
           </div>
@@ -1282,7 +1285,7 @@
                   <div class="e2e-lane mcp">
                     <div class="e2e-node">
                       <strong>Claude Code / Codex</strong>
-                      <small>Capability gate selects MCP only when isolation is proven.</small>
+                      <small>Capability gate requires MCP and proven isolation.</small>
                     </div>
                     <div class="e2e-down">↓</div>
                     <div class="e2e-node">
@@ -1295,29 +1298,11 @@
                       <small>stdio MCP → authenticated owner-only Unix socket; translation only.</small>
                     </div>
                   </div>
-
-                  <div class="e2e-lane compatibility">
-                    <div class="e2e-node">
-                      <strong>Compatibility route</strong>
-                      <small>Selected only before launch when MCP conformance/bootstrap is unavailable.</small>
-                    </div>
-                    <div class="e2e-down">↓</div>
-                    <div class="e2e-node">
-                      <strong>CLIBrainClient</strong>
-                      <small>One isolated Claude/Codex process.</small>
-                    </div>
-                    <div class="e2e-down">↓</div>
-                    <div class="e2e-node">
-                      <strong>Action-shaped JSON</strong>
-                      <small>Parsed and submitted; never accepted as a direct effect.</small>
-                    </div>
-                  </div>
                 </div>
 
                 <div class="e2e-converge" aria-hidden="true">
                   <span>native call ↘</span>
-                  <span>authenticated tool request ↓</span>
-                  <span>validated JSON ↙</span>
+                  <span>authenticated MCP request ↙</span>
                 </div>
                 <div class="e2e-broker">
                   <strong>CoachingActionBroker · JarvisCore</strong>
@@ -1354,8 +1339,7 @@
                     </div>
                     <div class="e2e-return">
                       <strong>↺ Evidence returns to the model, then its next action re-enters the broker.</strong>
-                      MCP keeps the same CLI process; OpenAI continues its native tool loop; JSON
-                      needs a second CLI process because the first process already exited.
+                      MCP keeps the same CLI process; OpenAI continues its native tool loop.
                     </div>
                   </div>
 
@@ -1703,8 +1687,8 @@
                 <li>Machine-readable clean completion</li>
               </ul>
               <div class="callout warning" style="margin-top: 18px">
-                Failure of any required item selects the safe one-shot compatibility path or marks
-                that target unavailable. It never silently widens the provider’s tools.
+                Failure of any required item marks that target unavailable. It never silently
+                widens the provider’s tools or changes action transport.
               </div>
             </div>
 
@@ -1771,10 +1755,10 @@
           </div>
 
           <div class="callout">
-            <strong>Manual-hint compatibility rule</strong>
-            Only a predeclared non-MCP compatibility run may turn valid final prose into one brokered
-            <code>speak</code>. A runtime MCP error, rejected action, stale attempt, or malformed MCP
-            call is not prose-fallback eligibility; masking it would reopen the bypass.
+            <strong>Manual hints use the same MCP contract</strong>
+            A local-CLI manual hint forces the <code>speak</code> MCP tool. Final prose is not
+            converted into a tip. A text-only exit, runtime MCP error, rejected action, stale
+            attempt, or malformed call fails closed with no overlay.
           </div>
         </section>
 
@@ -1961,7 +1945,7 @@
               <h3>Provider configuration</h3>
               <p>
                 Assert exact argv/config, no inherited servers, no token in argv/logs, supported
-                feature gates, compatibility selection, and action-free summarizer runs.
+                feature gates, unsupported-target rejection, and action-free summarizer runs.
               </p>
             </article>
             <article class="card">
@@ -1989,7 +1973,7 @@
                 </tr>
                 <tr>
                   <td>Every action brokered</td>
-                  <td>OpenAI, Claude, Codex, and manual fallback tests all observe broker transitions.</td>
+                  <td>OpenAI, Claude, Codex, and manual-hint tests all observe broker transitions.</td>
                 </tr>
                 <tr>
                   <td>Stale effects impossible</td>
@@ -2010,7 +1994,7 @@
                 <tr>
                   <td>Repository gate</td>
                   <td>
-                    <code>swift build &amp;&amp; ./scripts/run-tests.sh</code> passed 555 tests in
+                    <code>swift build &amp;&amp; ./scripts/run-tests.sh</code> passed 546 tests in
                     62 suites; direct in-app smoke remains the pre-merge manual check.
                   </td>
                 </tr>
@@ -2025,8 +2009,8 @@
             <div>
               <h2>Land safety before transport.</h2>
               <p class="section-summary">
-                Each phase is independently reviewable and preserves a safe fallback. No phase
-                requires adopting ACP or waiting for the warm pool.
+                Each phase is independently reviewable and fails closed. No phase requires adopting
+                ACP or waiting for the warm pool.
               </p>
             </div>
           </div>
@@ -2036,8 +2020,8 @@
               <div>
                 <h3>Broker current behavior</h3>
                 <p>
-                  Add Core broker and route existing OpenAI/native calls and current CLI parsed calls
-                  through it. Preserve visible behavior while adding missing transition/race tests.
+                  Add the Core broker, route OpenAI native calls through it, and cover every invalid
+                  transition and race before switching local agents to MCP.
                 </p>
               </div>
             </div>
@@ -2054,8 +2038,8 @@
               <div>
                 <h3>Enable Claude MCP behind conformance</h3>
                 <p>
-                  Replace normal prompt JSON parsing only after exact tool discovery, action flow,
-                  persistence, cancellation, and ghost-mode smokes pass.
+                  Require exact tool discovery, action flow, persistence suppression, cancellation,
+                  and ghost-mode smokes; delete prompt-shaped coaching actions.
                 </p>
               </div>
             </div>
@@ -2064,7 +2048,7 @@
                 <h3>Enable Codex MCP behind the stricter gate</h3>
                 <p>
                   Ship only for versions where unrelated tools are demonstrably absent. Otherwise
-                  retain the safe brokered one-shot path and record the capability reason in debug.
+                  mark that CLI target unavailable and record the capability reason in debug.
                 </p>
               </div>
             </div>
@@ -2081,10 +2065,10 @@
           </div>
 
           <div class="callout">
-            <strong>Fallback retirement rule</strong>
-            Keep compatibility parsing until the minimum supported Claude and Codex versions both
-            pass native MCP conformance in release builds. Remove it only in a separate, evidence-led
-            cleanup—not inside the first MCP change.
+            <strong>MCP-only decision</strong>
+            Jarvis is in active development, so there is no released CLI action compatibility
+            contract to preserve. Unsupported CLI versions are unavailable; helper/bootstrap defects
+            remain visible failures instead of selecting a second protocol.
           </div>
         </section>
 

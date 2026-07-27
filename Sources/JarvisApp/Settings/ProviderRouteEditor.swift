@@ -179,6 +179,9 @@ final class ProviderRouteEditor: NSObject {
         guard let cli = detectedCLIs[provider] else {
             return "\(provider.displayName) — not installed"
         }
+        guard cli.supportsMCP else {
+            return "\(provider.displayName) — MCP unavailable"
+        }
         switch cli.authenticationStatus {
         case .signedIn: return "\(provider.displayName) — signed in"
         case .signedOut: return "\(provider.displayName) — signed out"
@@ -211,7 +214,7 @@ final class ProviderRouteEditor: NSObject {
     private func isAvailableForNewSelection(_ provider: BrainProvider) -> Bool {
         guard provider.usesLocalCLI, let detectedCLIs else { return true }
         guard let cli = detectedCLIs[provider] else { return false }
-        return cli.authenticationStatus != .signedOut
+        return cli.authenticationStatus != .signedOut && cli.supportsMCP
     }
 
     private func availableModel(

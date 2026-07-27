@@ -4,9 +4,9 @@ import Foundation
 /// runs on the user's existing Claude / ChatGPT subscription instead of a metered API key. Each
 /// `respond` is one self-contained subprocess run — no CLI session is created, resumed, or left
 /// behind. The work is split by purpose: `+Conversation` flattens the client-managed messages,
-/// `+Invocation` builds each provider's command line + audit record, `+ReplyParsing` maps the CLI's
-/// reply back into the same tool-call contract the Responses client speaks. This file owns the
-/// configuration and the one `respond` control flow.
+/// `+Invocation` builds each provider's command line + audit record, and `+ReplyParsing` extracts
+/// the CLI's final text. Coaching actions use `MCPBrainClient`; this client directly handles only
+/// tool-less auxiliary calls. This file owns the configuration and request control flow.
 ///
 /// `@unchecked Sendable` for the same reason as `OpenAIBrainClient`: all stored properties are
 /// immutable, and `BrainTrafficLog` is internally synchronized.
@@ -25,8 +25,8 @@ public struct CLIBrainClient: BrainClient, @unchecked Sendable {
     /// starts at `low`), `-c model_reasoning_effort=…` on Codex (which accepts ours unchanged).
     let reasoningEffort: String
     let workDirectory: URL
-    /// Feature names advertised by this Codex installation. Empty is the compatible fallback: never
-    /// send a guessed `--disable` value that an older or renamed CLI would reject.
+    /// Feature names advertised by this Codex installation. Empty means no optional disable flag is
+    /// sent; coaching availability is decided separately by the MCP capability probe.
     let codexSupportedFeatures: Set<String>
     let timeout: TimeInterval
     let traffic: BrainTrafficLog?
@@ -67,16 +67,20 @@ public struct CLIBrainClient: BrainClient, @unchecked Sendable {
     public func respond(messages: [ChatMessage], tools: [ToolDef],
                         toolChoice: ToolChoice) async throws -> BrainResponse {
         do {
-            return try await performRequest(
-                messages: messages, tools: tools, toolChoice: toolChoice)
+            guard tools.isEmpty else {
+                throw BrainFailure(
+                    disposition: .permanent,
+                    detail: "local CLI coaching actions require MCP")
+            }
+            return try await performRequest(messages: messages)
         } catch {
             if Task.isCancelled || error is CancellationError { throw error }
             throw BrainFailure(error)
         }
     }
 
-    /// Run the CLI with Jarvis's private MCP server as its only action surface. The returned text is
-    /// diagnostic/fallback material only; the caller proves success from the shared attempt broker.
+    /// Run the CLI with Jarvis's private MCP server as its only action surface. Returned text is
+    /// diagnostic material only; the caller proves success from the shared attempt broker.
     public func respondUsingMCP(
         messages: [ChatMessage],
         tools: [ToolDef],
@@ -97,14 +101,13 @@ public struct CLIBrainClient: BrainClient, @unchecked Sendable {
 
     /// Keep classification at the provider boundary. CLI exit codes and stderr are diagnostics,
     /// not a recoverability taxonomy, so unclassified failures remain temporary by default.
-    private func performRequest(messages: [ChatMessage], tools: [ToolDef],
-                                toolChoice: ToolChoice) async throws -> BrainResponse {
+    private func performRequest(messages: [ChatMessage]) async throws -> BrainResponse {
         // Monotonic t0 for the phase timings. `respondEntered` is the boundary `queuedMs` measures
         // from — prompt prep below plus dispatch onto the runner thread — and also drives the
         // traffic line's top-level total so the two duration fields cannot disagree.
         let timings = AgentCLIPhaseTimings()
         let respondEntered = DispatchTime.now().uptimeNanoseconds
-        let prepared = try prepareInvocation(messages: messages, tools: tools, toolChoice: toolChoice)
+        let prepared = try prepareInvocation(messages: messages)
         defer { for url in prepared.transientFiles { try? FileManager.default.removeItem(at: url) } }
 
         let output: AgentCLIOutput
@@ -137,7 +140,8 @@ public struct CLIBrainClient: BrainClient, @unchecked Sendable {
                             error: error.localizedDescription, phases: phases)
             throw error
         }
-        let response = parse(reply: reply, tools: tools, toolChoice: toolChoice)
+        let text = reply.trimmingCharacters(in: .whitespacesAndNewlines)
+        let response = BrainResponse(toolCalls: [], outputText: text.isEmpty ? nil : text)
         timings.mark(.replyParsed)
         let phases = Self.phaseDurationsMs(timings, respondEntered: respondEntered)
         logPhases(phases, note: "ok")
