@@ -2,8 +2,14 @@ import Foundation
 import Testing
 @testable import JarvisCore
 @testable import JarvisMCPBridge
+#if canImport(Darwin)
+import Darwin
+#else
+import Glibc
+#endif
 
 @Suite(.serialized) struct MCPBridgeTests {
+    /// `@unchecked Sendable` is safe because `lock` guards the only mutable state.
     private final class Counter: @unchecked Sendable {
         private let lock = NSLock()
         private var storage = 0
@@ -23,7 +29,34 @@ import Testing
         }
     }
 
-    private func makeDirectory() throws -> URL {
+    private actor CaptureGate {
+        private var entered = false
+        private var entryWaiters: [CheckedContinuation<Void, Never>] = []
+        private var releaseWaiter: CheckedContinuation<Void, Never>?
+
+        func capture() async -> ScreenSnapshot? {
+            entered = true
+            let waiters = entryWaiters
+            entryWaiters.removeAll()
+            for waiter in waiters {
+                waiter.resume()
+            }
+            await withCheckedContinuation { releaseWaiter = $0 }
+            return nil
+        }
+
+        func waitUntilEntered() async {
+            if entered { return }
+            await withCheckedContinuation { entryWaiters.append($0) }
+        }
+
+        func release() {
+            releaseWaiter?.resume()
+            releaseWaiter = nil
+        }
+    }
+
+    private static func makeDirectory() throws -> URL {
         let url = URL(fileURLWithPath: "/private/tmp")
             .appendingPathComponent("jmcp-\(UUID().uuidString.prefix(8))")
         try FileManager.default.createDirectory(
@@ -33,7 +66,7 @@ import Testing
         return url
     }
 
-    private func exchange(
+    private static func exchange(
         _ request: MCPBridgeRequest,
         ticket: MCPBridgeTicket
     ) throws -> MCPBridgeResponse {
@@ -45,6 +78,29 @@ import Testing
             from: UnixSocket.readMessage(from: descriptor))
     }
 
+    private static func responseObject(_ data: Data?) throws -> [String: Any] {
+        let data = try #require(data)
+        return try #require(
+            try JSONSerialization.jsonObject(with: data) as? [String: Any])
+    }
+
+    private static func toolCallLine(
+        id: Any,
+        name: String,
+        arguments: Any
+    ) throws -> String {
+        let data = try JSONSerialization.data(withJSONObject: [
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": "tools/call",
+            "params": [
+                "name": name,
+                "arguments": arguments,
+            ],
+        ])
+        return String(decoding: data, as: UTF8.self)
+    }
+
     @Test func discoveryExposesExactlyTheThreeCoachingActions() throws {
         let tools = try MCPStdioServer.toolDescriptors()
         #expect(tools.compactMap { $0["name"] as? String }
@@ -52,7 +108,7 @@ import Testing
     }
 
     @Test func bridgeRejectsALooseSessionDirectory() throws {
-        let directory = try makeDirectory()
+        let directory = try Self.makeDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         try FileManager.default.setAttributes(
             [.posixPermissions: 0o755],
@@ -71,7 +127,7 @@ import Testing
     }
 
     @Test func authenticatedSocketForwardsActionsAndCleansUpAttemptFiles() async throws {
-        let directory = try makeDirectory()
+        let directory = try Self.makeDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let shot = ScreenSnapshot(
             imageBase64: Data("synthetic-jpeg".utf8).base64EncodedString(),
@@ -94,7 +150,7 @@ import Testing
         #expect(try FileManager.default.attributesOfItem(
             atPath: ticket.socketPath)[.posixPermissions] as? NSNumber == 0o600)
 
-        let capture = try exchange(
+        let capture = try Self.exchange(
             MCPBridgeRequest(
                 token: ticket.token,
                 attemptID: ticket.attemptID,
@@ -106,7 +162,7 @@ import Testing
         #expect(capture.imageBase64 == shot.imageBase64)
         #expect(capture.recognizedText == shot.recognizedText)
 
-        let terminal = try exchange(
+        let terminal = try Self.exchange(
             MCPBridgeRequest(
                 token: ticket.token,
                 attemptID: ticket.attemptID,
@@ -131,7 +187,7 @@ import Testing
     }
 
     @Test func wrongBearerTokenCannotReachTheBroker() async throws {
-        let directory = try makeDirectory()
+        let directory = try Self.makeDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let broker = CoachingActionBroker(
             identity: .init(configurationRevision: 2),
@@ -145,7 +201,7 @@ import Testing
         let ticket = try JSONDecoder().decode(
             MCPBridgeTicket.self,
             from: Data(contentsOf: configuration.ticketFile))
-        let response = try exchange(
+        let response = try Self.exchange(
             MCPBridgeRequest(
                 token: "wrong",
                 attemptID: ticket.attemptID,
@@ -165,7 +221,7 @@ import Testing
     }
 
     @Test func closingHostUnblocksAnActiveSidecarConnection() async throws {
-        let directory = try makeDirectory()
+        let directory = try Self.makeDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let broker = CoachingActionBroker(
             identity: .init(configurationRevision: 3),
@@ -187,8 +243,196 @@ import Testing
         #expect(try UnixSocket.readMessage(from: descriptor).isEmpty)
     }
 
+    @Test func closingHostCancelsAnInFlightBrokerCallBeforeCaptureReturns() async throws {
+        let directory = try Self.makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let gate = CaptureGate()
+        let broker = CoachingActionBroker(
+            identity: .init(configurationRevision: 4),
+            capture: { await gate.capture() })
+        let host = MCPBridgeHost(
+            sessionDirectory: directory,
+            serverExecutable: URL(fileURLWithPath: "/fake/JarvisMCPServer"),
+            broker: broker)
+        let configuration = try host.start()
+        let ticket = try JSONDecoder().decode(
+            MCPBridgeTicket.self,
+            from: Data(contentsOf: configuration.ticketFile))
+        let completed = Counter()
+        let request = MCPBridgeRequest(
+            token: ticket.token,
+            attemptID: ticket.attemptID,
+            configurationRevision: ticket.configurationRevision,
+            requestID: "stalled-capture",
+            name: captureScreenTool.name,
+            argumentsJSON: "{}")
+        let exchange = Task.detached {
+            defer { _ = completed.next() }
+            return Result { try Self.exchange(request, ticket: ticket) }
+        }
+
+        await gate.waitUntilEntered()
+        host.close()
+        for _ in 0..<50 where completed.value == 0 {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(completed.value == 1)
+
+        await gate.release()
+        _ = await exchange.value
+    }
+
+    @Test func socketPathsAreBoundedAndMessagesAreReadInChunks() async throws {
+        let overlongPath = String(repeating: "x", count: UnixSocket.maximumPathBytes)
+        #expect(throws: (any Error).self) {
+            _ = try UnixSocket.connect(path: overlongPath)
+        }
+        #expect(throws: (any Error).self) {
+            _ = try UnixSocket.makeListener(path: overlongPath)
+        }
+
+        var descriptors = [Int32](repeating: -1, count: 2)
+        #expect(socketpair(AF_UNIX, SOCK_STREAM, 0, &descriptors) == 0)
+        defer {
+            UnixSocket.closeConnection(descriptors[0])
+            UnixSocket.closeConnection(descriptors[1])
+        }
+        let writeDescriptor = descriptors[0]
+        let readDescriptor = descriptors[1]
+        let message = Data(repeating: 0x61, count: 2 * 1_024 * 1_024)
+        let writer = Task.detached {
+            try UnixSocket.writeMessage(message, to: writeDescriptor)
+        }
+        #expect(try UnixSocket.readMessage(from: readDescriptor) == message)
+        try await writer.value
+    }
+
+    @Test func malformedAndNonObjectJSONRPCRequestsReturnTypedErrors() throws {
+        let ticket = MCPBridgeTicket(
+            socketPath: "/unused",
+            token: "unused",
+            attemptID: UUID(),
+            configurationRevision: 1)
+        let malformed = try Self.responseObject(MCPStdioServer.responseData(
+            forLine: "{",
+            ticket: ticket,
+            actionSequence: 1))
+        let malformedError = try #require(malformed["error"] as? [String: Any])
+        #expect(malformedError["code"] as? Int == -32700)
+
+        let nonObject = try Self.responseObject(MCPStdioServer.responseData(
+            forLine: "[]",
+            ticket: ticket,
+            actionSequence: 2))
+        let nonObjectError = try #require(nonObject["error"] as? [String: Any])
+        #expect(nonObjectError["code"] as? Int == -32600)
+
+        let invalidArguments = try Self.responseObject(MCPStdioServer.responseData(
+            forLine: #"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"capture_screen","arguments":[]}}"#,
+            ticket: ticket,
+            actionSequence: 3))
+        let argumentsError = try #require(invalidArguments["error"] as? [String: Any])
+        #expect(argumentsError["code"] as? Int == -32602)
+
+        let ping = try Self.responseObject(MCPStdioServer.responseData(
+            forLine: #"{"jsonrpc":"2.0","id":4,"method":"ping"}"#,
+            ticket: ticket,
+            actionSequence: 4))
+        #expect(ping["result"] as? [String: Any] != nil)
+    }
+
+    @Test func reusedJSONRPCIDsRemainDistinctBrokerActions() async throws {
+        let directory = try Self.makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let broker = CoachingActionBroker(
+            identity: .init(configurationRevision: 5),
+            capture: { nil })
+        let host = MCPBridgeHost(
+            sessionDirectory: directory,
+            serverExecutable: URL(fileURLWithPath: "/fake/JarvisMCPServer"),
+            broker: broker)
+        defer { host.close() }
+        let configuration = try host.start()
+        let ticket = try JSONDecoder().decode(
+            MCPBridgeTicket.self,
+            from: Data(contentsOf: configuration.ticketFile))
+
+        let numeric = try Self.responseObject(MCPStdioServer.responseData(
+            forLine: try Self.toolCallLine(
+                id: 1,
+                name: captureScreenTool.name,
+                arguments: [String: Any]()),
+            ticket: ticket,
+            actionSequence: 1))
+        let string = try Self.responseObject(MCPStdioServer.responseData(
+            forLine: try Self.toolCallLine(
+                id: "1",
+                name: captureScreenTool.name,
+                arguments: [String: Any]()),
+            ticket: ticket,
+            actionSequence: 2))
+
+        #expect(numeric["error"] == nil)
+        #expect(string["error"] == nil)
+        #expect(await broker.events().count == 2)
+    }
+
+    @Test func pipelinedCaptureAndTerminalFailTheAttempt() async throws {
+        let directory = try Self.makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let gate = CaptureGate()
+        let broker = CoachingActionBroker(
+            identity: .init(configurationRevision: 6),
+            capture: { await gate.capture() })
+        let host = MCPBridgeHost(
+            sessionDirectory: directory,
+            serverExecutable: URL(fileURLWithPath: "/fake/JarvisMCPServer"),
+            broker: broker)
+        defer { host.close() }
+        let configuration = try host.start()
+        let ticket = try JSONDecoder().decode(
+            MCPBridgeTicket.self,
+            from: Data(contentsOf: configuration.ticketFile))
+        let captureLine = try Self.toolCallLine(
+            id: 1,
+            name: captureScreenTool.name,
+            arguments: [String: Any]())
+        let terminalLine = try Self.toolCallLine(
+            id: 2,
+            name: speakTool.name,
+            arguments: ["lines": ["Guessed before seeing the screen."]])
+
+        let capture = Task.detached {
+            try MCPStdioServer.responseData(
+                forLine: captureLine,
+                ticket: ticket,
+                actionSequence: 1)
+        }
+        await gate.waitUntilEntered()
+        let terminal = Task.detached {
+            try MCPStdioServer.responseData(
+                forLine: terminalLine,
+                ticket: ticket,
+                actionSequence: 2)
+        }
+        let terminalObject = try Self.responseObject(await terminal.value)
+        let result = try #require(terminalObject["result"] as? [String: Any])
+        #expect(result["isError"] as? Bool == true)
+
+        await gate.release()
+        let captureObject = try Self.responseObject(await capture.value)
+        let captureResult = try #require(captureObject["result"] as? [String: Any])
+        #expect(captureResult["isError"] as? Bool == true)
+        do {
+            _ = try await broker.requireTerminal()
+            Issue.record("pipelined actions left a valid terminal")
+        } catch let failure as CoachingActionBroker.Failure {
+            #expect(failure == .concurrentCall)
+        }
+    }
+
     @Test func oneMCPProcessCanCaptureAndTerminate() async throws {
-        let directory = try makeDirectory()
+        let directory = try Self.makeDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let shot = ScreenSnapshot(
             imageBase64: Data("comparison-jpeg".utf8).base64EncodedString(),
@@ -216,7 +460,7 @@ import Testing
                     MCPBridgeTicket.self,
                     from: Data(contentsOf: URL(fileURLWithPath: arguments[1])))
 
-                _ = try exchange(
+                _ = try Self.exchange(
                     MCPBridgeRequest(
                         token: ticket.token,
                         attemptID: ticket.attemptID,
@@ -225,7 +469,7 @@ import Testing
                         name: captureScreenTool.name,
                         argumentsJSON: "{}"),
                     ticket: ticket)
-                _ = try exchange(
+                _ = try Self.exchange(
                     MCPBridgeRequest(
                         token: ticket.token,
                         attemptID: ticket.attemptID,
@@ -259,7 +503,7 @@ import Testing
     }
 
     @Test func cleanMCPExitWithoutATerminalIsRejected() async throws {
-        let directory = try makeDirectory()
+        let directory = try Self.makeDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let base = CLIBrainClient(
             provider: .claudeCode,
@@ -293,7 +537,7 @@ import Testing
     }
 
     @Test func bridgeBootstrapFailureStopsBeforeProviderRun() async throws {
-        let root = try makeDirectory()
+        let root = try Self.makeDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
         let longDirectory = root.appendingPathComponent(String(repeating: "x", count: 100))
         try FileManager.default.createDirectory(

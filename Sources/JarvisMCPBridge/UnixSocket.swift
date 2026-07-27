@@ -7,12 +7,10 @@ import Glibc
 
 enum UnixSocket {
     static let maximumMessageBytes = 64 * 1_024 * 1_024
+    static let maximumPathBytes = MemoryLayout.size(ofValue: sockaddr_un().sun_path)
 
     static func makeListener(path: String) throws -> Int32 {
-        guard path.utf8CString.count <= MemoryLayout<sockaddr_un>.size
-                - MemoryLayout<sa_family_t>.size else {
-            throw error("private MCP socket path is too long")
-        }
+        try validatePath(path)
         let descriptor = socket(AF_UNIX, SOCK_STREAM, 0)
         guard descriptor >= 0 else { throw posixError("create private MCP socket") }
         do {
@@ -36,6 +34,7 @@ enum UnixSocket {
     }
 
     static func connect(path: String) throws -> Int32 {
+        try validatePath(path)
         let descriptor = socket(AF_UNIX, SOCK_STREAM, 0)
         guard descriptor >= 0 else { throw posixError("create MCP bridge connection") }
         do {
@@ -53,21 +52,25 @@ enum UnixSocket {
 
     static func readMessage(from descriptor: Int32) throws -> Data {
         var data = Data()
-        var byte: UInt8 = 0
-        while data.count < maximumMessageBytes {
-            let count = withUnsafeMutablePointer(to: &byte) {
-                read(descriptor, $0, 1)
+        var buffer = [UInt8](repeating: 0, count: 64 * 1_024)
+        while true {
+            let count = buffer.withUnsafeMutableBytes { rawBuffer in
+                read(descriptor, rawBuffer.baseAddress, rawBuffer.count)
             }
             if count == 0 { break }
             guard count > 0 else {
                 if errno == EINTR { continue }
                 throw posixError("read private MCP message")
             }
-            if byte == 0x0A { return data }
-            data.append(byte)
-        }
-        guard data.count < maximumMessageBytes else {
-            throw error("private MCP message exceeded the size limit")
+            let chunk = buffer[..<count]
+            let payload = chunk.prefix { $0 != 0x0A }
+            guard data.count + payload.count < maximumMessageBytes else {
+                throw error("private MCP message exceeded the size limit")
+            }
+            data.append(contentsOf: payload)
+            if payload.count < chunk.count {
+                return data
+            }
         }
         return data
     }
@@ -108,11 +111,12 @@ enum UnixSocket {
         path: String,
         _ body: (UnsafePointer<sockaddr>, socklen_t) throws -> T
     ) throws -> T {
+        try validatePath(path)
         var address = sockaddr_un()
         address.sun_family = sa_family_t(AF_UNIX)
         let pathBytes = path.utf8CString
         withUnsafeMutablePointer(to: &address.sun_path) { pointer in
-            pointer.withMemoryRebound(to: CChar.self, capacity: pathBytes.count) { destination in
+            pointer.withMemoryRebound(to: CChar.self, capacity: maximumPathBytes) { destination in
                 _ = pathBytes.withUnsafeBufferPointer { source in
                     memcpy(destination, source.baseAddress, pathBytes.count)
                 }
@@ -122,6 +126,13 @@ enum UnixSocket {
             try pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
                 try body($0, socklen_t(MemoryLayout<sockaddr_un>.size))
             }
+        }
+    }
+
+    private static func validatePath(_ path: String) throws {
+        guard !path.utf8.contains(0),
+              path.utf8CString.count <= maximumPathBytes else {
+            throw error("private MCP socket path is too long or invalid")
         }
     }
 

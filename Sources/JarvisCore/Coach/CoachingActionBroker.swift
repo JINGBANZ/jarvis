@@ -2,9 +2,9 @@ import Foundation
 
 /// The transport-independent authority for one coaching attempt.
 ///
-/// Native API function calls and MCP calls both enter this actor. Captures may repeat serially while
-/// the attempt is open. `speak` / `stay_silent` stage exactly one terminal decision; only `commit()`
-/// turns that staged decision into a host-consumable effect.
+/// Native API function calls and MCP calls both enter this actor. Captures may repeat serially within
+/// the attempt's action bound. `speak` / `stay_silent` stage exactly one terminal decision; only
+/// `commit()` turns that staged decision into a host-consumable effect.
 public actor CoachingActionBroker {
     public struct Identity: Sendable, Equatable, Codable {
         public let attemptID: UUID
@@ -64,6 +64,8 @@ public actor CoachingActionBroker {
         case malformedArguments(String)
         case duplicateTerminal
         case captureAfterTerminal
+        case forcedTerminalMismatch(expected: String, actual: String)
+        case actionLimitExceeded(Int)
         case multipleCallsInResponse
         case missingTerminal
         case duplicateCommit
@@ -86,6 +88,10 @@ public actor CoachingActionBroker {
                 return "coaching attempt produced more than one terminal action"
             case .captureAfterTerminal:
                 return "capture_screen was called after a terminal action"
+            case .forcedTerminalMismatch(let expected, let actual):
+                return "coaching attempt required '\(expected)' but received '\(actual)'"
+            case .actionLimitExceeded(let limit):
+                return "coaching attempt exceeded its \(limit)-action limit"
             case .multipleCallsInResponse:
                 return "provider returned multiple coaching actions in one response"
             case .missingTerminal:
@@ -135,21 +141,29 @@ public actor CoachingActionBroker {
     private let capture: Capture
     private let captureObserver: CaptureObserver
     private let isCurrentAttempt: @Sendable () -> Bool
+    private let requiredTerminalToolName: String?
+    private let maximumActionCalls: Int
     private let validity = Validity()
     private var phase: Phase = .open
     private var cache: [String: CachedResult] = [:]
     private var recordedEvents: [Event] = []
+    private var actionCallCount = 0
 
     public init(
         identity: Identity,
         capture: @escaping @Sendable () async -> ScreenSnapshot?,
         captureObserver: @escaping @Sendable (ScreenSnapshot?) -> Void = { _ in },
-        isCurrentAttempt: @escaping @Sendable () -> Bool = { true }
+        isCurrentAttempt: @escaping @Sendable () -> Bool = { true },
+        requiredTerminalToolName: String? = nil,
+        maximumActionCalls: Int = 4
     ) {
+        precondition(maximumActionCalls > 0)
         self.identity = identity
         self.capture = capture
         self.captureObserver = captureObserver
         self.isCurrentAttempt = isCurrentAttempt
+        self.requiredTerminalToolName = requiredTerminalToolName
+        self.maximumActionCalls = maximumActionCalls
     }
 
     /// Synchronous so Stop/configuration changes can revoke a bridge from cancellation handlers.
@@ -203,6 +217,7 @@ public actor CoachingActionBroker {
             guard case .open = phase else {
                 throw fail(.captureAfterTerminal)
             }
+            try reserveActionCall()
             phase = .capturing(requestID: requestID)
             let snapshot = await capture()
             try ensureCurrent()
@@ -320,14 +335,35 @@ public actor CoachingActionBroker {
         requestID: String,
         fingerprint: String
     ) throws -> ToolResult {
+        let actualToolName: String
+        switch decision {
+        case .speak:
+            actualToolName = speakTool.name
+        case .staySilent:
+            actualToolName = staySilentTool.name
+        }
+        if let requiredTerminalToolName,
+           requiredTerminalToolName != actualToolName {
+            throw fail(.forcedTerminalMismatch(
+                expected: requiredTerminalToolName,
+                actual: actualToolName))
+        }
         guard case .open = phase else {
             throw fail(.duplicateTerminal)
         }
+        try reserveActionCall()
         phase = .terminalStaged(decision)
         let result = ToolResult.terminalAccepted
         cache[requestID] = CachedResult(fingerprint: fingerprint, result: result)
         recordedEvents.append(.terminal(decision))
         return result
+    }
+
+    private func reserveActionCall() throws {
+        guard actionCallCount < maximumActionCalls else {
+            throw fail(.actionLimitExceeded(maximumActionCalls))
+        }
+        actionCallCount += 1
     }
 
     private func ensureCurrent() throws {
@@ -363,6 +399,12 @@ public actor CoachingActionBroker {
               let rawLines = object["lines"] as? [String] else {
             throw Failure.malformedArguments(toolName)
         }
-        return rawLines
+        let lines = rawLines.filter {
+            !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        guard !lines.isEmpty else {
+            throw Failure.malformedArguments(toolName)
+        }
+        return lines
     }
 }

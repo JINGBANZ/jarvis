@@ -782,6 +782,12 @@ public final class CoachDriver: @unchecked Sendable {
 
         let toolChoice: ToolChoice =
             reason == .manualHint ? .force(speakTool.name) : .required
+        let requiredTerminalToolName: String?
+        if case .force(let name) = toolChoice {
+            requiredTerminalToolName = name
+        } else {
+            requiredTerminalToolName = nil
+        }
         jlog("💭 thinking… [\(attempt.target.provider.displayName)]")
 
         let screen = self.screen
@@ -794,7 +800,9 @@ public final class CoachDriver: @unchecked Sendable {
             },
             captureObserver: { snapshot in
                 Self.recordCaptureActivity(snapshot)
-            })
+            },
+            requiredTerminalToolName: requiredTerminalToolName,
+            maximumActionCalls: maxToolIterations)
         defer { actionBroker.invalidate() }
 
         var iterations = 0
@@ -885,6 +893,10 @@ public final class CoachDriver: @unchecked Sendable {
                     return .cancelled
                 }
                 let decision = try await actionBroker.commit()
+                if Task.isCancelled {
+                    jlog("… attempt cancelled (stopped) after committing action")
+                    return .cancelled
+                }
 
                 switch decision {
                 case .speak(let callID, let lines):
@@ -909,10 +921,6 @@ public final class CoachDriver: @unchecked Sendable {
                     return .completed(.spoke)
 
                 case .staySilent:
-                    if Task.isCancelled {
-                        jlog("… attempt cancelled (stopped) before recording silence")
-                        return .cancelled
-                    }
                     jlog("… nothing useful to add, staying silent")
                     ActivityLog.shared.record(.stayedSilent)
                     commitIfWorthKeeping(turnMessages, deltaText: delta.text)
@@ -921,6 +929,10 @@ public final class CoachDriver: @unchecked Sendable {
                     return .completed(.silentByModel)
                 }
             } catch {
+                if Task.isCancelled || error is CancellationError {
+                    jlog("… attempt cancelled (stopped) while validating action")
+                    return .cancelled
+                }
                 await preserveBrokerObservation(actionBroker, in: &work)
                 let failure = BrainFailure(error)
                 jlog("Jarvis coach: invalid coaching action via "

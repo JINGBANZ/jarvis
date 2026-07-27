@@ -373,17 +373,16 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(brain.calls.count == 1)          // and never looped back to the brain with the image
     }
 
-    /// A `speak` with an empty `lines` array (the decode fallback, or a model returning []) is passed
-    /// straight through: the real overlay no-ops on it, but the turn still reports `.spoke`. Pin this
-    /// so the empty-speak contract stays intentional, not incidental.
-    @Test func emptySpeakLinesStillReportsSpoke() async {
+    /// Empty speech is an invalid terminal action: it never renders or commits a spoken turn.
+    @Test func emptySpeakLinesAreRejected() async {
         let clock = ManualClock(now: 0)
         let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s", lines: [])])])
         let overlay = FakeOverlay()
         let (driver, transcript) = makeDriver(brain: brain, overlay: overlay, clock: clock)
         transcript.append(.init(speaker: .me, text: "let me think this through", at: 0))
-        #expect(await driver.handleTrigger(.turnEnd) == .spoke)
-        #expect(overlay.rendered == [[]])
+        #expect(await driver.handleTrigger(.turnEnd) == .brainError)
+        #expect(overlay.rendered.isEmpty)
+        #expect(brain.calls.count == BrainRouteSession.failuresPerTarget)
     }
 
     /// The model's explicit stay-quiet decision is the `stay_silent` TOOL (tool_choice is `required`,

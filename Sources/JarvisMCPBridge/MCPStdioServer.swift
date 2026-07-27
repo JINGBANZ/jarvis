@@ -4,39 +4,100 @@ import JarvisCore
 /// Minimal stdio JSON-RPC MCP server. It owns no action policy: every `tools/call` is forwarded to
 /// the authenticated attempt host, which validates and stages it in `CoachingActionBroker`.
 public enum MCPStdioServer {
-    public static func run(arguments: [String] = CommandLine.arguments) throws {
+    private actor ResponseWriter {
+        func write(_ data: Data) throws {
+            var framed = data
+            framed.append(0x0A)
+            try FileHandle.standardOutput.write(contentsOf: framed)
+        }
+    }
+
+    private struct JSONRPCFailure: Error, LocalizedError {
+        let code: Int
+        let message: String
+        var errorDescription: String? { message }
+    }
+
+    public static func run(arguments: [String] = CommandLine.arguments) async throws {
         let ticketURL = try parseTicketURL(arguments)
         let ticket = try loadTicket(ticketURL)
+        let writer = ResponseWriter()
 
-        while let line = readLine(strippingNewline: true) {
-            guard !line.isEmpty,
-                  let request = try JSONSerialization.jsonObject(
-                    with: Data(line.utf8)) as? [String: Any],
-                  let method = request["method"] as? String else {
-                continue
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            var inputSequence = 0
+            while let line = readLine(strippingNewline: true) {
+                guard !line.isEmpty else { continue }
+                inputSequence += 1
+                let actionSequence = inputSequence
+                // MCP clients may pipeline a parallel tool batch. Start each request immediately so
+                // the broker can detect the overlap instead of falsely serializing model decisions.
+                group.addTask {
+                    if let response = try responseData(
+                        forLine: line,
+                        ticket: ticket,
+                        actionSequence: actionSequence
+                    ) {
+                        try await writer.write(response)
+                    }
+                }
             }
-            let id = request["id"]
-            if method.hasPrefix("notifications/") || id == nil {
-                continue
-            }
-            let response: [String: Any]
-            do {
-                response = [
-                    "jsonrpc": "2.0",
-                    "id": id!,
-                    "result": try result(for: method, request: request, ticket: ticket),
-                ]
-            } catch {
-                response = [
-                    "jsonrpc": "2.0",
-                    "id": id!,
-                    "error": [
-                        "code": -32603,
-                        "message": error.localizedDescription,
-                    ],
-                ]
-            }
-            try write(response)
+            try await group.waitForAll()
+        }
+    }
+
+    static func responseData(
+        forLine line: String,
+        ticket: MCPBridgeTicket,
+        actionSequence: Int
+    ) throws -> Data? {
+        let parsed: Any
+        do {
+            parsed = try JSONSerialization.jsonObject(with: Data(line.utf8))
+        } catch {
+            return try encodedResponse(
+                id: NSNull(),
+                errorCode: -32700,
+                message: "Parse error")
+        }
+        guard let request = parsed as? [String: Any] else {
+            return try encodedResponse(
+                id: NSNull(),
+                errorCode: -32600,
+                message: "Invalid Request")
+        }
+
+        let id = request["id"] ?? NSNull()
+        guard request["jsonrpc"] as? String == "2.0",
+              let method = request["method"] as? String else {
+            return try encodedResponse(
+                id: request.keys.contains("id") ? id : NSNull(),
+                errorCode: -32600,
+                message: "Invalid Request")
+        }
+        if method.hasPrefix("notifications/") || !request.keys.contains("id") {
+            return nil
+        }
+
+        do {
+            return try JSONSerialization.data(withJSONObject: [
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": try result(
+                    for: method,
+                    request: request,
+                    ticket: ticket,
+                    actionSequence: actionSequence),
+            ])
+        } catch let failure as JSONRPCFailure {
+            return try encodedResponse(
+                id: id,
+                errorCode: failure.code,
+                message: failure.message)
+        } catch {
+            return try encodedResponse(
+                id: id,
+                errorCode: -32603,
+                message: error.localizedDescription)
         }
     }
 
@@ -57,7 +118,8 @@ public enum MCPStdioServer {
     private static func result(
         for method: String,
         request: [String: Any],
-        ticket: MCPBridgeTicket
+        ticket: MCPBridgeTicket,
+        actionSequence: Int
     ) throws -> [String: Any] {
         switch method {
         case "initialize":
@@ -78,18 +140,29 @@ public enum MCPStdioServer {
         case "tools/call":
             guard let params = request["params"] as? [String: Any],
                   let name = params["name"] as? String else {
-                throw error("tools/call requires a tool name")
+                throw JSONRPCFailure(
+                    code: -32602,
+                    message: "tools/call requires a tool name")
             }
-            let arguments = params["arguments"] as? [String: Any] ?? [:]
+            let arguments: [String: Any]
+            if let suppliedArguments = params["arguments"] {
+                guard let object = suppliedArguments as? [String: Any] else {
+                    throw JSONRPCFailure(
+                        code: -32602,
+                        message: "tools/call arguments must be an object")
+                }
+                arguments = object
+            } else {
+                arguments = [:]
+            }
             let argumentsData = try JSONSerialization.data(
                 withJSONObject: arguments,
                 options: [.sortedKeys])
-            let id = request["id"].map { String(describing: $0) } ?? UUID().uuidString
             let bridgeRequest = MCPBridgeRequest(
                 token: ticket.token,
                 attemptID: ticket.attemptID,
                 configurationRevision: ticket.configurationRevision,
-                requestID: "mcp-\(id)",
+                requestID: "mcp-\(actionSequence)",
                 name: name,
                 argumentsJSON: String(decoding: argumentsData, as: UTF8.self))
             let bridgeResponse = try callHost(bridgeRequest, ticket: ticket)
@@ -128,7 +201,7 @@ public enum MCPStdioServer {
             }
 
         default:
-            throw error("method not found: \(method)")
+            throw JSONRPCFailure(code: -32601, message: "method not found: \(method)")
         }
     }
 
@@ -162,10 +235,19 @@ public enum MCPStdioServer {
             from: Data(contentsOf: url, options: [.mappedIfSafe]))
     }
 
-    private static func write(_ object: [String: Any]) throws {
-        var data = try JSONSerialization.data(withJSONObject: object)
-        data.append(0x0A)
-        try FileHandle.standardOutput.write(contentsOf: data)
+    private static func encodedResponse(
+        id: Any,
+        errorCode: Int,
+        message: String
+    ) throws -> Data {
+        try JSONSerialization.data(withJSONObject: [
+            "jsonrpc": "2.0",
+            "id": id,
+            "error": [
+                "code": errorCode,
+                "message": message,
+            ],
+        ])
     }
 
     private static func error(_ description: String) -> NSError {

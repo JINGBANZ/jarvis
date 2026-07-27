@@ -102,6 +102,24 @@ private final class FailingScreen: ScreenCapturing, @unchecked Sendable {
         #expect(overlay.rendered == [["Talk me through your current approach."]])
     }
 
+    @Test func manualHintRejectsStaySilentEvenWhenTheProviderIgnoresTheForce() async {
+        let brain = ScriptedBrain(script: [
+            .init(toolCalls: [.staySilent(callId: "ignored-force")]),
+        ])
+        let overlay = FakeOverlay()
+        let (driver, transcript) = makeDriver(
+            brain: brain,
+            screen: FakeScreen(),
+            overlay: overlay,
+            clock: ManualClock(now: 0))
+        transcript.append(.init(speaker: .me, text: "I need an explicit hint", at: 0))
+
+        #expect(await driver.handleTrigger(.manualHint) == .brainError)
+        #expect(overlay.rendered.isEmpty)
+        #expect(brain.toolChoices.count == BrainRouteSession.failuresPerTarget)
+        #expect(brain.toolChoices.allSatisfy { $0 == .force(speakTool.name) })
+    }
+
     /// Stop firing *while the manual-hint screenshot is in flight* must abort before emitting. The
     /// detached capture isn't cancellable, so without the post-capture guard the screenshot — and a
     /// stale tip — would leak into whatever session is current after a Stop→Start. Unlike the

@@ -3,6 +3,7 @@ import Testing
 @testable import JarvisCore
 
 @Suite struct CoachingActionBrokerTests {
+    /// `@unchecked Sendable` is safe because `lock` guards the only mutable state.
     private final class Counter: @unchecked Sendable {
         private let lock = NSLock()
         private var storage = 0
@@ -22,12 +23,16 @@ import Testing
 
     private func broker(
         capture: ScreenSnapshot? = nil,
-        current: @escaping @Sendable () -> Bool = { true }
+        current: @escaping @Sendable () -> Bool = { true },
+        requiredTerminalToolName: String? = nil,
+        maximumActionCalls: Int = 4
     ) -> CoachingActionBroker {
         CoachingActionBroker(
             identity: .init(configurationRevision: 7),
             capture: { capture },
-            isCurrentAttempt: current)
+            isCurrentAttempt: current,
+            requiredTerminalToolName: requiredTerminalToolName,
+            maximumActionCalls: maximumActionCalls)
     }
 
     private func failure(
@@ -150,6 +155,52 @@ import Testing
         #expect(await failure {
             try await multiple.rejectMultipleCallsInResponse()
         } == .multipleCallsInResponse)
+    }
+
+    @Test func forcedTerminalAndAttemptActionLimitAreEnforced() async throws {
+        let forced = broker(requiredTerminalToolName: speakTool.name)
+        #expect(await failure {
+            _ = try await forced.call(
+                requestID: "silent",
+                name: staySilentTool.name,
+                argumentsJSON: "{}")
+        } == .forcedTerminalMismatch(
+            expected: speakTool.name,
+            actual: staySilentTool.name))
+
+        let bounded = broker(maximumActionCalls: 2)
+        _ = try await bounded.call(
+            requestID: "capture-1",
+            name: captureScreenTool.name,
+            argumentsJSON: "{}")
+        _ = try await bounded.call(
+            requestID: "capture-2",
+            name: captureScreenTool.name,
+            argumentsJSON: "{}")
+        #expect(await failure {
+            _ = try await bounded.call(
+                requestID: "terminal",
+                name: staySilentTool.name,
+                argumentsJSON: "{}")
+        } == .actionLimitExceeded(2))
+    }
+
+    @Test func speakRequiresAtLeastOneNonblankLine() async throws {
+        let empty = broker()
+        #expect(await failure {
+            _ = try await empty.call(
+                requestID: "empty",
+                name: speakTool.name,
+                argumentsJSON: #"{"lines":[" ","\n"]}"#)
+        } == .malformedArguments(speakTool.name))
+
+        let filtered = broker()
+        _ = try await filtered.call(
+            requestID: "speak",
+            name: speakTool.name,
+            argumentsJSON: #"{"lines":[" ","Keep the invariant."]}"#)
+        #expect(try await filtered.commit()
+                == .speak(callID: "speak", lines: ["Keep the invariant."]))
     }
 
     @Test func staleAndInvalidatedAttemptsCannotStageActions() async {

@@ -49,10 +49,9 @@ post-terminal, cancelled, or missing-terminal work, and commits only after a cle
 The session-local owner-only bridge gives the sidecar no direct OS effect. CLI coaching is MCP-only:
 an installation that cannot prove the required MCP/isolation profile is unavailable, a missing
 bundled helper blocks preflight, and a per-attempt bridge bootstrap failure fails that attempt before
-the provider starts. There is no prompt-JSON action route or same-attempt replay. The historical live
-A/B on both installed CLIs recovered the same OCR evidence through both transports while MCP used one
-CLI process instead of JSON's two for the capture→terminal loop. It does not establish greater model
-intelligence; it establishes lower action-loop overhead and a fail-closed terminal contract.
+the provider starts. There is no prompt-JSON action route or same-attempt replay. MCP keeps
+capture→terminal work inside one CLI process and gives Jarvis a fail-closed terminal contract; it is
+an action-continuity and overhead improvement, not evidence of greater model intelligence.
 Saving an API key while running also preserves those live objects: existing Realtime sockets take
 the key on their next reconnect, and an OpenAI brain update remains transactional. Audio
 route rebuilds likewise retry before declaring capture unavailable, and stale capture callbacks
@@ -90,8 +89,8 @@ a stopped conversation. The standard release checklist remains in
 
 ## Built
 
-Tested `JarvisCore` + `JarvisOverlay` harness is green (546 tests in 62 suites through
-`./scripts/run-tests.sh`); `JarvisApp` is the thin OS shell, verified by the smoke run.
+The repository gate is `swift build && ./scripts/run-tests.sh`; `JarvisApp` is the thin OS shell,
+verified by the smoke run.
 
 - `Sources/JarvisCore/Audio/` — transactional PCM + utterance buffering, adaptive content-free activity detection, non-destructive AEC reference alignment, and system-audio timeline preservation (`PCMBuffer`, `UtteranceBuffer`, `PCM16Framer`, `AudioDownmix`, `AdaptiveAudioActivityDetector`, `EchoReferenceAlignment`, `SystemAudioTimeline`).
 - `Sources/JarvisCore/Transcription/` — realtime session wire contract, per-item event ledger, and rolling transcript (`RealtimeSession`, `RealtimeTranscriptionLedger`, `Transcript`, `NoiseReduction`).

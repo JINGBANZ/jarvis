@@ -13,17 +13,50 @@ import Glibc
 /// `@unchecked Sendable` is limited to this POSIX edge: immutable attempt state is Sendable and
 /// `lock` protects every mutable descriptor/file collection.
 public final class MCPBridgeHost: @unchecked Sendable {
-    /// The lock protects `result`; the semaphore establishes completion before `wait` reads it.
-    private final class ResultBox<T>: @unchecked Sendable {
+    /// `lock` protects the task and one-shot result; cancellation publishes a result before cancelling
+    /// the task so bridge teardown never waits for a stalled OS capture to return.
+    private final class BrokerCall<T>: @unchecked Sendable {
         private let lock = NSLock()
         private let ready = DispatchSemaphore(value: 0)
         private var result: Result<T, Error>?
+        private var task: Task<Void, Never>?
 
         func finish(_ result: Result<T, Error>) {
             lock.lock()
+            guard self.result == nil else {
+                lock.unlock()
+                return
+            }
             self.result = result
+            task = nil
             lock.unlock()
             ready.signal()
+        }
+
+        func install(_ task: Task<Void, Never>) {
+            lock.lock()
+            guard result == nil else {
+                lock.unlock()
+                task.cancel()
+                return
+            }
+            self.task = task
+            lock.unlock()
+        }
+
+        func cancel() {
+            lock.lock()
+            let task = self.task
+            self.task = nil
+            let shouldSignal = result == nil
+            if shouldSignal {
+                result = .failure(CancellationError())
+            }
+            lock.unlock()
+            task?.cancel()
+            if shouldSignal {
+                ready.signal()
+            }
         }
 
         func wait() throws -> T {
@@ -40,8 +73,12 @@ public final class MCPBridgeHost: @unchecked Sendable {
     private let broker: CoachingActionBroker
     private let identity: CoachingActionBroker.Identity
     private let lock = NSLock()
+    private var started = false
     private var listener: Int32 = -1
     private var activeConnections: Set<Int32> = []
+    private var activeCalls: [
+        Int32: BrokerCall<CoachingActionBroker.ToolResult>
+    ] = [:]
     private var files: [URL] = []
 
     public init(
@@ -62,9 +99,10 @@ public final class MCPBridgeHost: @unchecked Sendable {
     public func start() throws -> CLIMCPConfiguration {
         lock.lock()
         defer { lock.unlock() }
-        guard listener < 0 else {
+        guard !started else {
             throw Self.error("private MCP bridge was started twice")
         }
+        started = true
         try Self.requireOwnerOnlyDirectory(sessionDirectory)
 
         let suffix = identity.attemptID.uuidString.prefix(8).lowercased()
@@ -110,13 +148,21 @@ public final class MCPBridgeHost: @unchecked Sendable {
         listener = -1
         let files = self.files
         self.files = []
-        let connections = Array(activeConnections)
-        lock.unlock()
-        if descriptor >= 0 { UnixSocket.closeConnection(descriptor) }
+        if descriptor >= 0 {
+            // The accept loop owns the final close. Shutdown wakes `accept` without making this
+            // descriptor number available for unrelated process I/O before that loop exits.
+            UnixSocket.shutdownConnection(descriptor)
+        }
         // Do not close an fd while `handle` may still use its integer: shutdown unblocks the
-        // sidecar immediately, and the accept loop remains the sole owner that finally closes it.
-        for connection in connections {
+        // sidecar immediately, and its connection handler remains the sole final-close owner.
+        for connection in activeConnections {
             UnixSocket.shutdownConnection(connection)
+        }
+        let calls = Array(activeCalls.values)
+        activeCalls.removeAll()
+        lock.unlock()
+        for call in calls {
+            call.cancel()
         }
         for file in files {
             try? FileManager.default.removeItem(at: file)
@@ -124,6 +170,14 @@ public final class MCPBridgeHost: @unchecked Sendable {
     }
 
     private func acceptLoop(descriptor: Int32, token: String) {
+        defer {
+            lock.lock()
+            if listener == descriptor {
+                listener = -1
+            }
+            UnixSocket.closeConnection(descriptor)
+            lock.unlock()
+        }
         while true {
             let connection = accept(descriptor, nil, nil)
             if connection < 0 {
@@ -134,17 +188,26 @@ public final class MCPBridgeHost: @unchecked Sendable {
             let isCurrentListener = listener == descriptor
             if isCurrentListener {
                 activeConnections.insert(connection)
+            } else {
+                UnixSocket.closeConnection(connection)
             }
             lock.unlock()
             guard isCurrentListener else {
-                UnixSocket.closeConnection(connection)
                 return
             }
-            handle(connection: connection, token: token)
-            lock.lock()
-            activeConnections.remove(connection)
-            lock.unlock()
-            UnixSocket.closeConnection(connection)
+            // Parallel MCP calls must overlap at the broker. Serializing connections here would let a
+            // terminal generated alongside capture_screen masquerade as evidence-dependent advice.
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                guard let self else {
+                    UnixSocket.closeConnection(connection)
+                    return
+                }
+                self.handle(connection: connection, token: token)
+                self.lock.lock()
+                self.activeConnections.remove(connection)
+                UnixSocket.closeConnection(connection)
+                self.lock.unlock()
+            }
         }
     }
 
@@ -162,7 +225,7 @@ public final class MCPBridgeHost: @unchecked Sendable {
                 throw Self.error("private MCP bridge authentication failed")
             }
             let started = DispatchTime.now().uptimeNanoseconds
-            let result = try callBroker(request)
+            let result = try callBroker(request, connection: connection)
             let elapsed = (DispatchTime.now().uptimeNanoseconds - started) / 1_000_000
             jlog("Jarvis MCP: \(request.name) completed in \(elapsed)ms")
             switch result {
@@ -182,21 +245,37 @@ public final class MCPBridgeHost: @unchecked Sendable {
         }
     }
 
-    private func callBroker(_ request: MCPBridgeRequest) throws
+    private func callBroker(_ request: MCPBridgeRequest, connection: Int32) throws
         -> CoachingActionBroker.ToolResult {
-        let box = ResultBox<CoachingActionBroker.ToolResult>()
-        Task {
+        let call = BrokerCall<CoachingActionBroker.ToolResult>()
+        lock.lock()
+        guard listener >= 0, activeConnections.contains(connection) else {
+            lock.unlock()
+            throw CancellationError()
+        }
+        activeCalls[connection] = call
+        lock.unlock()
+        defer {
+            lock.lock()
+            if activeCalls[connection] === call {
+                activeCalls.removeValue(forKey: connection)
+            }
+            lock.unlock()
+        }
+
+        let task = Task { [broker] in
             do {
                 let result = try await broker.call(
                     requestID: request.requestID,
                     name: request.name,
                     argumentsJSON: request.argumentsJSON)
-                box.finish(.success(result))
+                call.finish(.success(result))
             } catch {
-                box.finish(.failure(error))
+                call.finish(.failure(error))
             }
         }
-        return try box.wait()
+        call.install(task)
+        return try call.wait()
     }
 
     private static func writeClaudeConfiguration(
