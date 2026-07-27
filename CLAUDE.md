@@ -182,10 +182,10 @@ The squash-merge subject carries the PR number (`type: summary (#N)`).
 - **Keep human activity separate from agent diagnostics.** `ActivityLog` is the human-facing coaching
   record: finalized interviewer/user speech, manual hint requests, every brain action (`capture_screen`
   success or failure, `speak`, and `stay_silent`), fixed typed brain-change notices, and fixed typed
-  notices for every runtime failure that stops or degrades coaching belong there. Lifecycle,
-  transport, retry, raw error, timing, and diagnosis details go through `jlog` to
-  `jarvis-debug.log`. Never mirror `jlog` into `ActivityLog`; record the corresponding typed activity
-  event explicitly.
+  notices for every live-session end and every runtime failure that degrades coaching belong there.
+  Lifecycle sequencing, transport, retry, raw error, timing, and diagnosis details go through `jlog`
+  to `jarvis-debug.log`. Never mirror `jlog` into `ActivityLog`; record the corresponding typed
+  activity event explicitly.
 - **The only screen-/audio-derived data persisted to disk is the per-session log directory** (the
   activity log — spoken tips, deliberate-silence and fixed failure notices, transcribed "heard:"
   lines, and the screenshots the model looked at — plus the wire-level brain traffic record and its

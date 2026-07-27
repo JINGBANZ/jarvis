@@ -15,7 +15,7 @@ import Foundation
         let activityJSONL = [
             #"{"t":"10:00:00","m":"heard question","k":"heard"}"#,
             #"{"t":"10:00:20","m":"coaching tip","k":"tip"}"#,
-            #"{"t":"10:00:30","m":"plain permanent failure","k":"coachingStopped"}"#,
+            #"{"t":"10:00:30","m":"session ended by error","k":"sessionEnded"}"#,
         ].joined(separator: "\n") + "\n"
         let activityURL = dir.appendingPathComponent(ActivityLog.filename)
         try Data(activityJSONL.utf8).write(to: activityURL)
@@ -28,7 +28,7 @@ import Foundation
         #expect(transcript.contains("=== call #1 · coach"))
         #expect(!transcript.contains("heard question"))
         #expect(!transcript.contains("coaching tip"))
-        #expect(!transcript.contains("plain permanent failure"))
+        #expect(!transcript.contains("session ended by error"))
         let perms = try FileManager.default.attributesOfItem(atPath: transcriptURL.path)[.posixPermissions] as? NSNumber
         #expect(perms?.int16Value == 0o600)
         // Preparation never rewrites or filters Activity; the agent receives the complete source file.
@@ -94,6 +94,9 @@ import Foundation
         #expect(prompt.contains("MUST be counted here"))
         #expect(prompt.contains("re-check every number"))
         #expect(prompt.contains("session-level UX failure"))
+        #expect(prompt.contains("`session ended by error`"))
+        #expect(!prompt.contains("coaching stopped"))
+        #expect(!prompt.contains("session failed"))
         #expect(prompt.contains("stable event kinds in `k`"))
     }
 

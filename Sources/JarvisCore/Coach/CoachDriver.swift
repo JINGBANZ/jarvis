@@ -901,6 +901,10 @@ public final class CoachDriver: @unchecked Sendable {
                 return .completed(.spoke)
 
             case .staySilent:
+                if Task.isCancelled {
+                    jlog("… attempt cancelled (stopped) before recording silence")
+                    return .cancelled
+                }
                 jlog("… nothing useful to add, staying silent")
                 ActivityLog.shared.record(.stayedSilent)
                 commitIfWorthKeeping(turnMessages, deltaText: delta.text)

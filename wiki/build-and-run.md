@@ -86,15 +86,16 @@ then just run the script) for packaging without CI. Distributed builds run on Ap
 Settings → **Activity** opens an **in-app `WKWebView`** into which `ActivityLog` pushes the typed,
 human-facing coaching exchange: finalized interviewer/user speech, manual hint requests, and every
 brain action — a successful or failed `capture_screen`, a displayed `speak` tip, or a deliberate
-`stay_silent`. It also shows fixed, non-sensitive notices for every runtime failure that stops or
-degrades coaching, as well as a settings preflight that was not applied and a failed live brain
-switch falling back to the previous provider. Provider names are allowed, while raw errors,
-authentication details, retries, and timing remain in `jarvis-debug.log`. Successful screen-view
-events carry their thumbnails as in-memory `data:` URIs. Chosen over a local HTTP server + SSE: for
-an app that already holds the entries in memory, pushing into an embedded WebView is less code, has
-zero network surface, and is the most testable (the production runtime *is* the test runtime). It
-also sidesteps the `file://` `fetch()` restriction that forced the original viewer's `<meta refresh>`
-reload.
+`stay_silent`. It also shows one fixed, non-sensitive reason whenever a live session ends — including
+user Stop, app quit, replacement by a new Start, and terminal runtime failures — plus fixed notices
+for failures that degrade coaching, a settings preflight that was not applied, and a failed live brain
+switch falling back to the previous provider. Provider names are allowed, while lifecycle sequencing,
+raw errors, authentication details, retries, and timing remain in `jarvis-debug.log`. Successful
+screen-view events carry their thumbnails as in-memory `data:` URIs. Chosen over a local HTTP server +
+SSE: for an app that already holds the entries in memory, pushing into an embedded WebView is less
+code, has zero network surface, and is the most testable (the production runtime *is* the test
+runtime). It also sidesteps the `file://` `fetch()` restriction that forced the original viewer's
+`<meta refresh>` reload.
 
 - New events stream in live (no reload, no flicker); thumbnails open in an in-page lightbox.
 - Each Start opens a fresh session (a Stop→Start gets a new log, never resuming the previous run),
@@ -140,6 +141,7 @@ the human-facing coaching record. The current validation priority lives in
   controls and preview follow the toggle, and confirm the choice survives relaunch.
 - If validating realtime recovery, disconnect the network, say a unique phrase, reconnect, and confirm
   the debug log reports buffered replay and the phrase appears exactly once after recovery.
-- Choose **Stop Jarvis** and confirm no later transcription or coaching events are produced.
+- Choose **Stop Jarvis** and confirm Activity ends with `session ended by user`, with no later
+  transcription or coaching events.
 - In Activity, choose the stopped session and click **Evaluate**. Confirm the button shows
   **Evaluating…**, the report opens when the agent finishes, and the button then shows **Open report**.

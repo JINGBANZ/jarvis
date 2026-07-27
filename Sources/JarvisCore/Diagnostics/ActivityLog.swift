@@ -2,10 +2,10 @@ import Foundation
 
 /// The model behind the human-facing activity viewer. It records the coaching exchange — heard
 /// speech, manual hint requests, every brain action (screen view, tip, or deliberate silence), and
-/// fixed non-sensitive notices when a brain change succeeds, a route advances, degrades, or stops. It
-/// pushes those entries into an in-app `WKWebView` window (see `ActivityViewer` in JarvisApp) and
-/// persists them so past sessions can be browsed later. Detailed diagnostics belong exclusively in
-/// `JarvisLog`.
+/// fixed non-sensitive notices when a brain change succeeds, a route advances, degrades, or stops,
+/// and one typed reason whenever the live session ends. It pushes those entries into an in-app
+/// `WKWebView` window (see `ActivityViewer` in JarvisApp) and persists them so past sessions can be
+/// browsed later. Detailed diagnostics belong exclusively in `JarvisLog`.
 ///
 /// This type is UI-free (Foundation only): it generates the page HTML and the per-row JS as plain
 /// strings; the WebView lives in JarvisApp. See wiki/build-and-run.md.
@@ -22,18 +22,13 @@ public final class ActivityLog: @unchecked Sendable {
         case screenViewFailed
         case tip
         case stayedSilent
-        case coachingStopped
+        case sessionEnded
         case coachingTurnFailed
-        case transcriptionStopped
-        case audioCaptureStopped
         case systemAudioStopped
         case settingsChangeNotApplied
         case brainChangeApplied
-        /// Retained so logs written by the superseded transactional-switch build remain decodable.
-        case brainFallback
         case brainRouteAdvanced
         case brainRouteTargetSkipped
-        case brainRouteExhausted
     }
 
     /// A human-visible event in the coaching exchange. Keeping this closed set typed prevents
@@ -53,19 +48,12 @@ public final class ActivityLog: @unchecked Sendable {
         case tip(lines: [String])
         /// The brain explicitly chose `stay_silent` for this turn.
         case stayedSilent
-        /// Coaching ended because the selected brain could not respond. Carries only the provider,
-        /// never the raw error, so the notice cannot expose provider diagnostics during screen
-        /// sharing.
-        case coachingStopped(provider: BrainProvider)
+        /// The single terminal lifecycle event for a live coaching session. The reason is a closed,
+        /// sanitized set so raw errors cannot leak into Activity.
+        case sessionEnded(reason: SessionEndReason)
         /// One coaching turn failed temporarily while capture and transcription remain live. The
         /// provider identity is enough for fixed recovery copy; raw error detail stays in debug.
         case coachingTurnFailed(provider: BrainProvider)
-        /// The session ended because transcription became unusable. Carries a fixed, typed reason;
-        /// raw provider and transport details remain exclusively in diagnostics.
-        case transcriptionStopped(reason: TranscriptionFailureReason)
-        /// Coaching ended because the running audio capture became unavailable. No device or route
-        /// detail is carried; the fixed copy points to diagnostics.
-        case audioCaptureStopped
         /// The secondary system-audio transcription stopped while microphone coaching continued.
         case systemAudioStopped
         /// An explicit Settings reapply failed its preflight while the existing session continued.
@@ -78,27 +66,67 @@ public final class ActivityLog: @unchecked Sendable {
         case brainRouteAdvanced(previous: BrainProvider, current: BrainProvider)
         /// A route target was proven unavailable before a provider request could be constructed.
         case brainRouteTargetSkipped(provider: BrainProvider)
-        /// Every user-authorized target was exhausted, so coaching stopped.
-        case brainRouteExhausted(lastProvider: BrainProvider)
 
-        var kind: EventKind {
+        /// Keep persisted identity, human copy, and the optional screenshot payload in one exhaustive
+        /// mapping so adding or editing an event cannot make its `k` disagree with what Activity shows.
+        var rendered: (kind: EventKind, message: String, imageBase64: String?) {
             switch self {
-            case .heard: .heard
-            case .manualHint: .manualHint
-            case .screenViewed: .screenViewed
-            case .screenViewFailed: .screenViewFailed
-            case .tip: .tip
-            case .stayedSilent: .stayedSilent
-            case .coachingStopped: .coachingStopped
-            case .coachingTurnFailed: .coachingTurnFailed
-            case .transcriptionStopped: .transcriptionStopped
-            case .audioCaptureStopped: .audioCaptureStopped
-            case .systemAudioStopped: .systemAudioStopped
-            case .settingsChangeNotApplied: .settingsChangeNotApplied
-            case .brainChangeApplied: .brainChangeApplied
-            case .brainRouteAdvanced: .brainRouteAdvanced
-            case .brainRouteTargetSkipped: .brainRouteTargetSkipped
-            case .brainRouteExhausted: .brainRouteExhausted
+            case .heard(let speaker, let text):
+                return (.heard, "🗣 heard (\(speaker.rawValue)): \"\(text)\"", nil)
+            case .manualHint(let prompt):
+                return (.manualHint, "⌨️ hint shortcut — \(prompt)", nil)
+            case .screenViewed(let imageBase64JPEG):
+                return (.screenViewed, "👁 looking at your screen", imageBase64JPEG)
+            case .screenViewFailed:
+                return (
+                    .screenViewFailed,
+                    "👁 couldn't view your screen — screen capture failed; check Screen Recording permission",
+                    nil
+                )
+            case .tip(let lines):
+                return (.tip, "💬 \(lines.joined(separator: " "))", nil)
+            case .stayedSilent:
+                return (.stayedSilent, "🤫 stayed silent — nothing useful to add", nil)
+            case .sessionEnded(let reason):
+                return (.sessionEnded, "⏹ \(reason.activityMessage)", nil)
+            case .coachingTurnFailed(let provider):
+                return (
+                    .coachingTurnFailed,
+                    "⚠️ \(provider.displayName) couldn't respond this turn — listening continues",
+                    nil
+                )
+            case .systemAudioStopped:
+                return (
+                    .systemAudioStopped,
+                    "⚠️ system audio stopped — microphone coaching continues; check jarvis-debug.log",
+                    nil
+                )
+            case .settingsChangeNotApplied:
+                return (
+                    .settingsChangeNotApplied,
+                    "⚠️ settings change wasn't applied — current coaching session continues; check Settings → Brain",
+                    nil
+                )
+            case .brainChangeApplied(let previous, let current):
+                let message = if previous == current {
+                    "🧠 brain change applied — \(current.displayName) setup is active"
+                } else {
+                    "🧠 brain switch applied — \(previous.displayName) → \(current.displayName)"
+                }
+                return (.brainChangeApplied, message, nil)
+            case .brainRouteAdvanced(let previous, let current):
+                let message = if previous == current {
+                    "⚠️ \(previous.displayName) target couldn't respond — continuing with the next \(current.displayName) model"
+                } else {
+                    "⚠️ \(previous.displayName) couldn't respond — continuing on \(current.displayName)"
+                }
+                return (.brainRouteAdvanced, message, nil)
+            case .brainRouteTargetSkipped(let provider):
+                return (
+                    .brainRouteTargetSkipped,
+                    "⚠️ \(provider.displayName) target is unavailable — skipping it",
+                    nil
+                )
             }
         }
     }
@@ -141,6 +169,7 @@ public final class ActivityLog: @unchecked Sendable {
     private var entries: [Entry] = []
     private var totalCount = 0    // everything recorded this session (survives the maxLines cap)
     private var shotSeq = 0       // monotonic id for saved screenshot files this session
+    private var sessionHasEnded = false
     private let df: DateFormatter
     private var dir: URL?         // nil ⇒ disabled (no observer pushes, no disk writes)
     private var onAppend: ((String) -> Void)?
@@ -161,7 +190,7 @@ public final class ActivityLog: @unchecked Sendable {
     public func enable(directory: URL) {
         queue.sync {
             dir = directory
-            entries.removeAll(); totalCount = 0; shotSeq = 0; onAppend = nil
+            entries.removeAll(); totalCount = 0; shotSeq = 0; sessionHasEnded = false; onAppend = nil
             let url = directory.appendingPathComponent(Self.filename)
             FileManager.default.createFile(atPath: url.path, contents: Data(),
                                            attributes: [.posixPermissions: 0o600])
@@ -170,7 +199,14 @@ public final class ActivityLog: @unchecked Sendable {
 
     /// Turn the viewer back off (no further pushes or disk writes).
     public func disable() {
-        queue.sync { dir = nil; entries.removeAll(); totalCount = 0; shotSeq = 0; onAppend = nil }
+        queue.sync {
+            dir = nil
+            entries.removeAll()
+            totalCount = 0
+            shotSeq = 0
+            sessionHasEnded = false
+            onAppend = nil
+        }
     }
 
     /// Append one human-facing coaching event: persist it, then push it to the observer. No-op when
@@ -180,77 +216,24 @@ public final class ActivityLog: @unchecked Sendable {
     /// and then the `.jsonl` line referencing it — so a persisted reference always points at a file
     /// that exists.
     public func record(_ event: Event, at date: Date = Date()) {
-        let kind = event.kind
-        let message: String
-        let imageBase64: String?
-        switch event {
-        case .heard(let speaker, let text):
-            message = "🗣 heard (\(speaker.rawValue)): \"\(text)\""
-            imageBase64 = nil
-        case .manualHint(let prompt):
-            message = "⌨️ hint shortcut — \(prompt)"
-            imageBase64 = nil
-        case .screenViewed(let imageBase64JPEG):
-            message = "👁 looking at your screen"
-            imageBase64 = imageBase64JPEG
-        case .screenViewFailed:
-            message = "👁 couldn't view your screen — screen capture failed; check Screen Recording permission"
-            imageBase64 = nil
-        case .tip(let lines):
-            message = "💬 \(lines.joined(separator: " "))"
-            imageBase64 = nil
-        case .stayedSilent:
-            message = "🤫 stayed silent — nothing useful to add"
-            imageBase64 = nil
-        case .coachingStopped(let provider):
-            message = "⏹ coaching stopped — \(provider.displayName) couldn't respond; check Settings → Brain"
-            imageBase64 = nil
-        case .coachingTurnFailed(let provider):
-            message = "⚠️ \(provider.displayName) couldn't respond this turn — listening continues"
-            imageBase64 = nil
-        case .transcriptionStopped(let reason):
-            message = "⏹ session failed — \(reason.activityDescription)"
-            imageBase64 = nil
-        case .audioCaptureStopped:
-            message = "⏹ coaching stopped — audio capture became unavailable; check jarvis-debug.log"
-            imageBase64 = nil
-        case .systemAudioStopped:
-            message = "⚠️ system audio stopped — microphone coaching continues; check jarvis-debug.log"
-            imageBase64 = nil
-        case .settingsChangeNotApplied:
-            message = "⚠️ settings change wasn't applied — current coaching session continues; check Settings → Brain"
-            imageBase64 = nil
-        case .brainChangeApplied(let previous, let current):
-            if previous == current {
-                message = "🧠 brain change applied — \(current.displayName) setup is active"
-            } else {
-                message = "🧠 brain switch applied — \(previous.displayName) → \(current.displayName)"
-            }
-            imageBase64 = nil
-        case .brainRouteAdvanced(let previous, let current):
-            if previous == current {
-                message = "⚠️ \(previous.displayName) target couldn't respond — continuing with the next \(current.displayName) model"
-            } else {
-                message = "⚠️ \(previous.displayName) couldn't respond — continuing on \(current.displayName)"
-            }
-            imageBase64 = nil
-        case .brainRouteTargetSkipped(let provider):
-            message = "⚠️ \(provider.displayName) target is unavailable — skipping it"
-            imageBase64 = nil
-        case .brainRouteExhausted(let provider):
-            message = "⏹ coaching stopped — all configured provider targets were exhausted; last target: \(provider.displayName)"
-            imageBase64 = nil
-        }
+        let rendered = event.rendered
         queue.async { [self] in
-            guard let dir else { return }
-            let shotName = imageBase64.flatMap { saveShot($0, in: dir) }
-            let entry = Entry(time: df.string(from: date), message: message, imageFile: shotName)
-            appendJSONL(entry, kind: kind, in: dir)
+            // Teardown can race a coaching task that is finishing cancellation. Once the typed end
+            // marker reaches this serial queue, it is the final event for this session by definition.
+            guard let dir, !sessionHasEnded else { return }
+            let shotName = rendered.imageBase64.flatMap { saveShot($0, in: dir) }
+            let entry = Entry(time: df.string(from: date), message: rendered.message,
+                              imageFile: shotName)
+            appendJSONL(entry, kind: rendered.kind, in: dir)
             entries.append(entry)
             totalCount += 1
+            if rendered.kind == .sessionEnded {
+                sessionHasEnded = true
+            }
             if entries.count > maxLines { entries.removeFirst(entries.count - maxLines) }
             // Push with the live bytes in hand (no disk read on the hot path).
-            onAppend?(Self.rowScript(time: entry.time, message: entry.message, imageBase64: imageBase64))
+            onAppend?(Self.rowScript(time: entry.time, message: entry.message,
+                                     imageBase64: rendered.imageBase64))
         }
     }
 
@@ -338,7 +321,8 @@ public final class ActivityLog: @unchecked Sendable {
         if m.hasPrefix("🗣") || m.hasPrefix("🤫 quiet") { return "hear" }
         if m.hasPrefix("🤫 stayed silent") || m.hasPrefix("💭") || m.hasPrefix("…") { return "think" }
         if m.hasPrefix("🧠") { return "think" }
-        if m.hasPrefix("⏹ coaching stopped") { return "think" }
+        if m.hasPrefix("⏹ session ended by error") { return "err" }
+        if m.hasPrefix("⏹ session ended") { return "think" }
         if m.hasPrefix("⚠️") { return "think" }
         let low = m.lowercased()
         if low.contains("error") || low.contains("failed") || low.contains("denied") { return "err" }
@@ -360,8 +344,7 @@ public final class ActivityLog: @unchecked Sendable {
         return m.hasPrefix("🗣 heard") || m.hasPrefix("⌨️ hint shortcut")
             || m.hasPrefix("👁 looking at your screen") || m.hasPrefix("👁 couldn't view your screen")
             || m.hasPrefix("💬") || m.hasPrefix("🤫 stayed silent")
-            || m.hasPrefix("⏹ coaching stopped")
-            || m.hasPrefix("⏹ session failed")
+            || m.hasPrefix("⏹ session ended")
             || (m.hasPrefix("⚠️") && m.contains("couldn't respond this turn")
                 && m.hasSuffix("listening continues"))
             || m.hasPrefix("⚠️ system audio stopped")

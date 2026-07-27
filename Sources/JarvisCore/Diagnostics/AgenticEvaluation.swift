@@ -155,8 +155,9 @@ public enum AgenticEvaluation {
         speech, manual hints, every brain action, and every fixed stop/degrade notice, with stable \
         event kinds in `k`. Read the file itself in full; it is deliberately NOT filtered, summarized, \
         or copied into `\(transcriptFilename)`. Use it whenever you need the user-visible sequence or \
-        lifecycle consequence. Treat `coaching stopped` / `session failed` as a session-level UX \
-        failure and distinguish it from a recoverable `listening continues` notice. A single call \
+        lifecycle consequence. Treat `session ended by error` as a session-level UX failure, but not \
+        an end caused by the user, app quit, or a new session; distinguish all of them from a \
+        recoverable `listening continues` notice. A single call \
         timeout that stopped the whole session is catastrophic even if the wire-level failure itself \
         looks ordinary.
 

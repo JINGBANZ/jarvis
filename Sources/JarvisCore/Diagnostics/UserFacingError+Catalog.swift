@@ -10,7 +10,8 @@ public extension UserFacingError {
         .init(
             title: "Choose a provider",
             message: "Open Settings → Brain and choose a Primary provider, then press Start.",
-            severity: .fatal)
+            severity: .fatal,
+            sessionEndReason: .brainProviderNotConfigured)
     }
 
     /// No API key on Start. Realtime voice transcription always runs on the OpenAI key — whichever
@@ -18,7 +19,8 @@ public extension UserFacingError {
     static var noAPIKey: UserFacingError {
         .init(title: "No OpenAI API key set",
               message: "Voice transcription needs an OpenAI API key even when the brain runs on a local CLI. Open \u{201C}Settings\u{2026}\u{201D} \u{2192} Brain, paste your key, then press Start.",
-              severity: .fatal)
+              severity: .fatal,
+              sessionEndReason: .openAIAPIKeyMissing)
     }
 
     /// The selected brain provider's CLI isn't installed (or was removed since it was selected).
@@ -50,22 +52,28 @@ public extension UserFacingError {
 
     /// The finite user-authorized brain route was exhausted. Individual target failures never use
     /// this terminal path; their raw detail stays diagnostic while pending work moves forward.
-    static func brainRouteExhausted(lastProvider: String, reason: String) -> UserFacingError {
+    static func brainRouteExhausted(
+        lastProvider: BrainProvider,
+        reason: String
+    ) -> UserFacingError {
         .init(title: "Brain fallback route exhausted",
-              message: "\(reason)\n\nCoaching stopped after every configured target was exhausted. The last target was \(lastProvider). Check Settings → Brain, then Start again.",
-              severity: .terminal)
+              message: "\(reason)\n\nCoaching stopped after every configured target was exhausted. The last target was \(lastProvider.displayName). Check Settings → Brain, then Start again.",
+              severity: .terminal,
+              sessionEndReason: .brainRouteExhausted(lastProvider: lastProvider))
     }
 
     /// Audio capture couldn't be built or started. `reason` is the human-readable cause from the capture
     /// layer (no input device, permission, unreadable rate, …). Fatal — there's nothing to coach from.
     static func captureFailed(reason: String) -> UserFacingError {
-        .init(title: "Couldn't start audio capture", message: reason, severity: .fatal)
+        .init(title: "Couldn't start audio capture", message: reason, severity: .fatal,
+              sessionEndReason: .audioCaptureUnavailable)
     }
 
     /// Audio capture started, then became unavailable after a route rebuild. Coaching cannot
     /// continue, but a runtime failure must stop without activating the app.
     static func captureStopped(reason: String) -> UserFacingError {
-        .init(title: "Audio capture stopped", message: reason, severity: .terminal)
+        .init(title: "Audio capture stopped", message: reason, severity: .terminal,
+              sessionEndReason: .audioCaptureUnavailable)
     }
 
     /// The mic ("me") transcription socket gave up (bad key / quota / network) — NOT a mic-hardware
@@ -73,7 +81,8 @@ public extension UserFacingError {
     static func transcriptionStopped(reason: TranscriptionFailureReason) -> UserFacingError {
         .init(title: "Transcription stopped",
               message: "Jarvis could not continue because \(reason.activityDescription).",
-              severity: .terminal)
+              severity: .terminal,
+              sessionEndReason: .transcriptionStopped(reason: reason))
     }
 
     /// The system-audio ("them") socket gave up. The mic still works, so this is a graceful degrade —
