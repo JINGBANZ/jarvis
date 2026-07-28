@@ -43,11 +43,16 @@ import Testing
             run: run)
     }
 
-    private func mcpConfiguration(in directory: URL) -> CLIMCPConfiguration {
+    private func mcpConfiguration(
+        for provider: BrainProvider,
+        in directory: URL
+    ) -> CLIMCPConfiguration {
         CLIMCPConfiguration(
             serverExecutable: URL(fileURLWithPath: "/bundle/JarvisMCPServer"),
             ticketFile: directory.appendingPathComponent("attempt.ticket.json"),
-            claudeConfigFile: directory.appendingPathComponent("attempt.claude.json"))
+            claudeConfigFile: provider == .claudeCode
+                ? directory.appendingPathComponent("attempt.claude.json")
+                : nil)
     }
 
     @Test func directToolCallIsRejectedBeforeTheCLIStarts() async throws {
@@ -86,7 +91,7 @@ import Testing
             messages: [.system("coach prompt"), .user("look first")],
             tools: coachTools,
             toolChoice: .required,
-            configuration: mcpConfiguration(in: workDir))
+            configuration: mcpConfiguration(for: .claudeCode, in: workDir))
 
         let run = try #require(captured.value)
         #expect(run.arguments.contains("-p"))
@@ -131,7 +136,7 @@ import Testing
             messages: [.system("coach prompt"), .user("look first")],
             tools: coachTools,
             toolChoice: .required,
-            configuration: mcpConfiguration(in: workDir))
+            configuration: mcpConfiguration(for: .codexCLI, in: workDir))
 
         let run = try #require(captured.value)
         #expect(run.arguments.contains {
@@ -175,7 +180,7 @@ import Testing
             messages: [.user("look"), .userImage(base64)],
             tools: coachTools,
             toolChoice: .required,
-            configuration: mcpConfiguration(in: workDir))
+            configuration: mcpConfiguration(for: .claudeCode, in: workDir))
 
         let seen = try #require(observed.value)
         #expect(seen.files.isEmpty)
@@ -209,7 +214,7 @@ import Testing
             messages: [.userImage(base64)],
             tools: coachTools,
             toolChoice: .required,
-            configuration: mcpConfiguration(in: workDir))
+            configuration: mcpConfiguration(for: .codexCLI, in: workDir))
 
         let run = try #require(captured.value)
         #expect(run.arguments.contains("exec"))
@@ -343,7 +348,7 @@ import Testing
             messages: [.system("coach prompt"), .user("look"), .userImage(base64)],
             tools: coachTools,
             toolChoice: .required,
-            configuration: mcpConfiguration(in: workDir))
+            configuration: mcpConfiguration(for: .claudeCode, in: workDir))
 
         let jsonl = try String(
             contentsOf: workDir.appendingPathComponent(BrainTrafficLog.filename),

@@ -101,11 +101,14 @@ public final class MCPBridgeHost: @unchecked Sendable {
         close()
     }
 
-    public func start() throws -> CLIMCPConfiguration {
+    public func start(provider: BrainProvider) throws -> CLIMCPConfiguration {
         lock.lock()
         defer { lock.unlock() }
         guard !started else {
             throw Self.error("private MCP bridge was started twice")
+        }
+        guard provider.usesLocalCLI else {
+            throw Self.error("private MCP bridge requires a local CLI provider")
         }
         started = true
         try Self.requireOwnerOnlyDirectory(sessionDirectory)
@@ -114,7 +117,9 @@ public final class MCPBridgeHost: @unchecked Sendable {
         let socketSuffix = identity.attemptID.uuidString.prefix(16).lowercased()
         let socketURL = try Self.socketURL(suffix: String(socketSuffix))
         let ticketURL = sessionDirectory.appendingPathComponent("mcp-\(suffix).ticket.json")
-        let claudeConfigURL = sessionDirectory.appendingPathComponent("mcp-\(suffix).claude.json")
+        let claudeConfigURL = provider == .claudeCode
+            ? sessionDirectory.appendingPathComponent("mcp-\(suffix).claude.json")
+            : nil
         let token = Self.randomToken()
         let ticket = MCPBridgeTicket(
             socketPath: socketURL.path,
@@ -125,12 +130,17 @@ public final class MCPBridgeHost: @unchecked Sendable {
         do {
             let descriptor = try UnixSocket.makeListener(path: socketURL.path)
             listener = descriptor
-            files = [socketURL, ticketURL, claudeConfigURL]
+            files = [socketURL, ticketURL]
+            if let claudeConfigURL {
+                files.append(claudeConfigURL)
+            }
             try Self.writeOwnerOnly(try JSONEncoder().encode(ticket), to: ticketURL)
-            try Self.writeClaudeConfiguration(
-                serverExecutable: serverExecutable,
-                ticketURL: ticketURL,
-                to: claudeConfigURL)
+            if let claudeConfigURL {
+                try Self.writeClaudeConfiguration(
+                    serverExecutable: serverExecutable,
+                    ticketURL: ticketURL,
+                    to: claudeConfigURL)
+            }
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                 // Deinitialization closes the listener when the host disappears before this block
                 // starts; never touch the captured fd number after that close because it may be

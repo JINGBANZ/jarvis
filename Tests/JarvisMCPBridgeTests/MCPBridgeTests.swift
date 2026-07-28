@@ -123,7 +123,7 @@ import Glibc
             broker: broker)
 
         #expect(throws: (any Error).self) {
-            _ = try host.start()
+            _ = try host.start(provider: .codexCLI)
         }
     }
 
@@ -140,7 +140,7 @@ import Glibc
             sessionDirectory: directory,
             serverExecutable: URL(fileURLWithPath: "/fake/JarvisMCPServer"),
             broker: broker)
-        let configuration = try host.start()
+        let configuration = try host.start(provider: .claudeCode)
         let ticketData = try Data(contentsOf: configuration.ticketFile)
         let ticket = try JSONDecoder().decode(MCPBridgeTicket.self, from: ticketData)
 
@@ -176,15 +176,35 @@ import Glibc
         #expect(try await broker.commit()
                 == .speak(callID: "speak", lines: ["Use the synthetic evidence."]))
 
+        let claudeConfigFile = try #require(configuration.claudeConfigFile)
         let protectedFiles = [
             URL(fileURLWithPath: ticket.socketPath),
             configuration.ticketFile,
-            configuration.claudeConfigFile,
+            claudeConfigFile,
         ]
         host.close()
         #expect(protectedFiles.allSatisfy {
             !FileManager.default.fileExists(atPath: $0.path)
         })
+    }
+
+    @Test func codexBridgeDoesNotCreateAClaudeConfiguration() throws {
+        let directory = try Self.makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let broker = CoachingActionBroker(
+            identity: .init(configurationRevision: 10),
+            capture: { nil })
+        let host = MCPBridgeHost(
+            sessionDirectory: directory,
+            serverExecutable: URL(fileURLWithPath: "/fake/JarvisMCPServer"),
+            broker: broker)
+        defer { host.close() }
+
+        let configuration = try host.start(provider: .codexCLI)
+
+        #expect(configuration.claudeConfigFile == nil)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path)
+                == [configuration.ticketFile.lastPathComponent])
     }
 
     @Test func wrongBearerTokenCannotReachTheBroker() async throws {
@@ -198,7 +218,7 @@ import Glibc
             serverExecutable: URL(fileURLWithPath: "/fake/JarvisMCPServer"),
             broker: broker)
         defer { host.close() }
-        let configuration = try host.start()
+        let configuration = try host.start(provider: .codexCLI)
         let ticket = try JSONDecoder().decode(
             MCPBridgeTicket.self,
             from: Data(contentsOf: configuration.ticketFile))
@@ -231,7 +251,7 @@ import Glibc
             sessionDirectory: directory,
             serverExecutable: URL(fileURLWithPath: "/fake/JarvisMCPServer"),
             broker: broker)
-        let configuration = try host.start()
+        let configuration = try host.start(provider: .codexCLI)
         let ticket = try JSONDecoder().decode(
             MCPBridgeTicket.self,
             from: Data(contentsOf: configuration.ticketFile))
@@ -254,7 +274,7 @@ import Glibc
             sessionDirectory: directory,
             serverExecutable: URL(fileURLWithPath: "/fake/JarvisMCPServer"),
             broker: broker)
-        let configuration = try host.start()
+        let configuration = try host.start(provider: .codexCLI)
         let ticket = try JSONDecoder().decode(
             MCPBridgeTicket.self,
             from: Data(contentsOf: configuration.ticketFile))
@@ -280,7 +300,7 @@ import Glibc
             sessionDirectory: directory,
             serverExecutable: URL(fileURLWithPath: "/fake/JarvisMCPServer"),
             broker: broker)
-        let configuration = try host.start()
+        let configuration = try host.start(provider: .codexCLI)
         let ticket = try JSONDecoder().decode(
             MCPBridgeTicket.self,
             from: Data(contentsOf: configuration.ticketFile))
@@ -323,7 +343,7 @@ import Glibc
             serverExecutable: URL(fileURLWithPath: "/fake/JarvisMCPServer"),
             broker: broker)
         defer { host.close() }
-        let configuration = try host.start()
+        let configuration = try host.start(provider: .codexCLI)
         let ticket = try JSONDecoder().decode(
             MCPBridgeTicket.self,
             from: Data(contentsOf: configuration.ticketFile))
@@ -520,7 +540,7 @@ import Glibc
             broker: broker)
         defer { host.close() }
 
-        let configuration = try host.start()
+        let configuration = try host.start(provider: .codexCLI)
         let ticket = try JSONDecoder().decode(
             MCPBridgeTicket.self,
             from: Data(contentsOf: configuration.ticketFile))

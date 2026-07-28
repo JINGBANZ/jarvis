@@ -143,6 +143,9 @@ extension CLIBrainClient {
 
         switch provider {
         case .claudeCode:
+            guard let claudeConfigFile = configuration.claudeConfigFile else {
+                throw Self.error("Claude MCP configuration is unavailable")
+            }
             var args = [
                 "-p", "--verbose",
                 "--input-format", "stream-json",
@@ -150,7 +153,7 @@ extension CLIBrainClient {
                 "--no-session-persistence",
                 "--setting-sources", "",
                 "--strict-mcp-config",
-                "--mcp-config", configuration.claudeConfigFile.path,
+                "--mcp-config", claudeConfigFile.path,
                 "--system-prompt", instructions,
                 "--effort", Self.claudeEffort(reasoningEffort),
                 "--permission-mode", "dontAsk",
@@ -178,6 +181,9 @@ extension CLIBrainClient {
                 codexReplyFile: nil)
 
         case .codexCLI:
+            guard configuration.claudeConfigFile == nil else {
+                throw Self.error("Codex MCP invocation received an unused Claude configuration")
+            }
             let replyFile = workDirectory
                 .appendingPathComponent("cli-reply-\(UUID().uuidString.prefix(8)).txt")
             var transientFiles = [replyFile]

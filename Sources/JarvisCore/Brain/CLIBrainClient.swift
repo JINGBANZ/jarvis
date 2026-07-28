@@ -17,7 +17,7 @@ public struct CLIBrainClient: BrainClient, @unchecked Sendable {
     /// the phase-recording path deterministically).
     public typealias Runner = @Sendable (AgentCLIRun, AgentCLIPhaseTimings) async throws -> AgentCLIOutput
 
-    let provider: BrainProvider
+    public let provider: BrainProvider
     let executable: URL
     /// A CLI model id; empty retains the low-level invocation's CLI-default compatibility behavior.
     let model: String

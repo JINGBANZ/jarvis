@@ -8,13 +8,15 @@ public struct CLIMCPConfiguration: Sendable, Equatable {
     public let serverName: String
     public let serverExecutable: URL
     public let ticketFile: URL
-    public let claudeConfigFile: URL
+    /// Claude requires a per-attempt JSON file; Codex receives the same allowlisted server through
+    /// ephemeral command-line configuration and keeps this nil.
+    public let claudeConfigFile: URL?
 
     public init(
         serverName: String = "jarvis",
         serverExecutable: URL,
         ticketFile: URL,
-        claudeConfigFile: URL
+        claudeConfigFile: URL?
     ) {
         self.serverName = serverName
         self.serverExecutable = serverExecutable

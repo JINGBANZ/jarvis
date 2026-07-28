@@ -45,7 +45,7 @@ public struct MCPBrainClient: BrainClient, Sendable {
             broker: actionBroker)
         let configuration: CLIMCPConfiguration
         do {
-            configuration = try host.start()
+            configuration = try host.start(provider: base.provider)
         } catch {
             throw BrainFailure(
                 disposition: .temporary,

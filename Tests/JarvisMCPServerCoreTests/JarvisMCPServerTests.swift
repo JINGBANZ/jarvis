@@ -84,7 +84,7 @@ import Testing
             serverExecutable: URL(fileURLWithPath: "/fake/JarvisMCPServer"),
             broker: broker)
         defer { host.close() }
-        let configuration = try host.start()
+        let configuration = try host.start(provider: .codexCLI)
         let (clientToServerRead, clientToServerWrite) = try FileDescriptor.pipe()
         let (serverToClientRead, serverToClientWrite) = try FileDescriptor.pipe()
         defer {
@@ -148,7 +148,7 @@ import Testing
             serverExecutable: URL(fileURLWithPath: "/fake/JarvisMCPServer"),
             broker: broker)
         defer { host.close() }
-        let configuration = try host.start()
+        let configuration = try host.start(provider: .codexCLI)
         let (server, client, _) = try await Self.connectedClient(
             ticketFile: configuration.ticketFile)
 
@@ -180,7 +180,7 @@ import Testing
             serverExecutable: URL(fileURLWithPath: "/fake/JarvisMCPServer"),
             broker: broker)
         defer { host.close() }
-        let configuration = try host.start()
+        let configuration = try host.start(provider: .codexCLI)
         let (server, client, _) = try await Self.connectedClient(
             ticketFile: configuration.ticketFile)
 
@@ -218,7 +218,7 @@ import Testing
             serverExecutable: URL(fileURLWithPath: "/fake/JarvisMCPServer"),
             broker: broker)
         defer { host.close() }
-        let configuration = try host.start()
+        let configuration = try host.start(provider: .codexCLI)
         let (server, client, _) = try await Self.connectedClient(
             ticketFile: configuration.ticketFile)
 
