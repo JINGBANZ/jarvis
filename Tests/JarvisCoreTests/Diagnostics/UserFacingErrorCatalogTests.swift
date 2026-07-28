@@ -80,6 +80,23 @@ import Testing
         #expect(!e.severity.stopsSession)
     }
 
+    @Test func brainCLIMCPUnsupportedAlertsWithoutStopping() {
+        let e = UserFacingError.brainCLIMCPUnsupported(provider: "Claude Code")
+        #expect(e.severity == .warning)
+        #expect(e.severity.showsAlert)
+        #expect(!e.severity.stopsSession)
+        #expect(e.title.contains("Claude Code"))
+        #expect(e.message.contains("MCP"))
+    }
+
+    @Test func missingMCPHelperAlertsWithoutStopping() {
+        let e = UserFacingError.brainMCPHelperMissing
+        #expect(e.severity == .warning)
+        #expect(e.severity.showsAlert)
+        #expect(!e.severity.stopsSession)
+        #expect(e.message.contains("bundled MCP helper"))
+    }
+
     @Test func exhaustedBrainRouteStopsQuietlyAndKeepsDiagnosticDetail() {
         let e = UserFacingError.brainRouteExhausted(
             lastProvider: .claudeCode,

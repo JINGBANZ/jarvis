@@ -50,6 +50,22 @@ public extension UserFacingError {
               severity: .degraded)
     }
 
+    /// Jarvis requires the installed local agent to expose its basic MCP configuration surface.
+    /// Unsupported installations are unavailable rather than receiving a second action transport.
+    static func brainCLIMCPUnsupported(provider: String) -> UserFacingError {
+        .init(title: "\(provider) needs MCP support",
+              message: "Update \(provider) to a version that supports Jarvis MCP actions, or choose another brain provider in Settings → Brain.",
+              severity: .warning)
+    }
+
+    /// The helper is part of the signed Jarvis bundle. Its absence is an installation failure, not a
+    /// reason to widen the agent contract to a weaker transport.
+    static var brainMCPHelperMissing: UserFacingError {
+        .init(title: "Jarvis MCP helper missing",
+              message: "Reinstall Jarvis, then press Start again. Local CLI coaching requires the bundled MCP helper.",
+              severity: .warning)
+    }
+
     /// The finite user-authorized brain route was exhausted. Individual target failures never use
     /// this terminal path; their raw detail stays diagnostic while pending work moves forward.
     static func brainRouteExhausted(

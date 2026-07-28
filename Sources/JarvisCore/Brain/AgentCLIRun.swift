@@ -9,13 +9,22 @@ public struct AgentCLIRun: Sendable {
     public let stdin: String?
     public let workingDirectory: URL
     public let timeout: TimeInterval
+    /// An optional, successful early-completion boundary owned by the caller. This is not
+    /// cancellation: the runner returns typed output after terminating the process.
+    public let completionSignal: AgentCLICompletionSignal?
+    /// Additional evidence required before the signal may terminate the process.
+    public let completionEvidence: AgentCLICompletionEvidence
 
     public init(executable: URL, arguments: [String], stdin: String?,
-                workingDirectory: URL, timeout: TimeInterval) {
+                workingDirectory: URL, timeout: TimeInterval,
+                completionSignal: AgentCLICompletionSignal? = nil,
+                completionEvidence: AgentCLICompletionEvidence = .signal) {
         self.executable = executable
         self.arguments = arguments
         self.stdin = stdin
         self.workingDirectory = workingDirectory
         self.timeout = timeout
+        self.completionSignal = completionSignal
+        self.completionEvidence = completionEvidence
     }
 }

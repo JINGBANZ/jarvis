@@ -132,6 +132,7 @@ plugins ship only with full Xcode, and Jarvis builds **CLT-only** (see
 | **ErrorReporter** | The single funnel for user-facing failures. Severity on a Foundation-only `UserFacingError` decides the lifecycle consequence; an explicit startup/runtime context decides presentation. Startup failures may alert, but runtime failures never activate Jarvis or present UI even when they stop the session. `BrainFailure` feeds attempt outcomes into the finite provider route; only route exhaustion enters terminal reporting. Fixed, typed Activity outcomes carry stable on-disk identities while raw detail stays in `JarvisLog`. | AppKit (`NSAlert`) for startup only. |
 | **Transcriber** | Maintain a rolling, speaker-labeled, **spoken-time timestamped** transcript; emit speech-activity, turn-end, and backing-off silence events (with quiet duration). Two instances run in parallel — one per side — tagging lines `me`/`them` into one shared transcript. A per-`item_id` ledger reconciles out-of-order delta/completed/failed/VAD events and salvages streamed text. An utterance-local failure with no usable words stays diagnostic and cannot trigger the brain; a permanent account or configuration rejection stops the unusable session with a fixed Activity reason. A privacy-preserving continuity witness records content-free capture/delivery/socket/server checkpoints and locally derived activity intervals, so the session log can locate a future gap without retaining PCM or adding pseudo-speech to model context. A socket is ready only after the server acknowledges its configuration; active ping/pong probes, send/receive errors, and startup timeouts all drive the same reconnect path. | `gpt-4o-transcribe` (Realtime API; tuned `server_vad`). |
 | **CoachDriver** | Coordinate one single-flighted coaching attempt from a natural trigger or pending-work wake-up: snapshot one route target plus the latest conversation, route its tool calls, commit only a complete terminal action, and report one outcome to the scheduler. No speaking cooldown/rate cap — restraint is the model's; the only client-side content skip is the filler-only turn-end gate (`TurnSubstance`). | The selected OpenAI Responses API, Claude Code, or Codex CLI route target (see [§4 Local CLI brain providers](#local-cli-brain-providers)); provider-specific summary tiers are defined in `BrainModelCatalog`. |
+| **CoachingActionBroker** | Enforce the action contract once for every provider transport: zero or one `capture_screen` followed by exactly one staged `speak` or `stay_silent`; reject a second capture, malformed, concurrent, post-terminal, missing-terminal, or cancelled work; and allow exactly one commit. It owns policy, while MCP and native API function calls are adapters. | Foundation-only actor in `JarvisCore`; attempt UUID + configuration revision capability. |
 | **ScreenTool** | Fulfill `capture_screen`: silently shoot the **active window** (default scope) — the window-server frontmost, on whichever display, clean even when partially covered — and attach an **on-device OCR** of the shot to the tool result so the model reads exact text instead of pixels. Falls back to a full-display capture (no OCR) — the Settings-chosen display in Entire-display scope, the main display when no window is eligible; the overlay window is excluded either way. See [settings-window.md](./settings-window.md#capture-scope). | macOS `screencapture` CLI + Apple Vision (`VNRecognizeTextRequest`). |
 | **Overlay Caption** | Render `speak` output: up to ~3 short lines (model-split), shown one at a time and queued so a newer tip never cuts off the current one; non-activating, always-on-top, excluded from capture. Switchable from Settings — **off by default**; when off, tips are suppressed. | AppKit NSPanel; `OverlayCaptionPanel`. |
 | **Overlay Box** | A persistent window logging every `speak` tip in full, timestamped — the scrollable history of what the caption flashed one line at a time. Movable, resizable, opaque, also excluded from capture; switched on/off from Settings (**on by default**), cleared on each Start. Fed by the same `speak` call as the caption via **`BroadcastOverlay`**, which fans one `OverlayRendering.render` out to both sinks (so `CoachDriver` is unchanged). | AppKit NSPanel; `OverlayBoxPanel`. |
@@ -324,56 +325,92 @@ billed to the user's existing Claude / ChatGPT **subscription** instead of the m
 `CLIBrainClient` implements the same `BrainClient` protocol, so `CoachDriver`, the client-managed
 memory, provider-route policy, and traffic recording are all unchanged — only the transport differs:
 
-- **One stateless subprocess per turn** (`claude -p` / `codex exec`, spawned by
-  `AgentCLIProcessRunner`) — no CLI session is created, resumed, or left behind: every call is
-  self-contained (client-managed memory, same as the API path), the CLIs run with session
-  persistence off (`--no-session-persistence` / `--ephemeral`, so no transcript copy lands in
-  `~/.claude` / `~/.codex`), and the process dies with the turn — at reply, at the SIGTERM→SIGKILL
-  timeout watchdog, or **immediately when Stop cancels the turn** (task cancellation kills the pid,
-  so a cancelled turn never keeps burning quota). Since the CLI has no native function calling, the
-  `ToolDef`s are rendered as a **JSON tool protocol** — the model ends its reply with
-  `{"tool":…,"arguments":{…}}`, parsed back into the same `ToolInvocation`s (with prose/code-fence
-  tolerance, and a forced `speak` degrading to speaking the raw reply so a hotkey press never
-  silently vanishes).
-- **Every turn is one model call.** Claude takes its input as a stream-json message, so screenshots
-  ride **inline as base64 image blocks** — same call, no disk copy, no Read-tool round trip — and
-  with `--tools ""` (every built-in disabled) a turn can't go agentic at all. Codex has no inline
-  image input, so for it screenshots become 0600 files in the per-session log directory (which
-  already persists every screenshot the model sees — same data posture), attached via `-i` and
-  deleted when the run finishes. A bounded local capability probe reads the installed Codex CLI's
-  advertised feature names; its supported shell, code-mode, delegation, browser/app, plugin, and
-  other agentic surfaces are disabled without guessing flags that an older or renamed CLI rejects.
-  Project-root/document discovery is suppressed, and the leading instruction explicitly treats the
-  three Jarvis tool names as an output protocol, not Codex tools. `--sandbox read-only` remains the
-  enforcement backstop for built-ins Codex does not expose a disable switch for. Claude runs with
-  its persona replaced (`--system-prompt`) and no settings sources, and the one reasoning-effort
-  setting maps onto each CLI's own scale.
+- **One stateless subprocess per coaching attempt** (`claude -p` / `codex exec`, spawned by
+  `AgentCLIProcessRunner`) — no CLI session is created, resumed, or left behind. The CLIs run with
+  session persistence off (`--no-session-persistence` / `--ephemeral`) and die with the attempt, at
+  reply, after the provider-specific terminal-delivery proof completes, under the SIGTERM→SIGKILL
+  watchdog, or immediately when Stop cancels it. A coaching-capable CLI receives one private Jarvis MCP server
+  implementing `capture_screen`, `speak`, and `stay_silent`; its provider configuration derives
+  enabled tool names from the attempt phase (`speak` only for manual hints, all coaching actions
+  initially). Capture results return to the same live model run, so the capture→terminal loop stays
+  within one CLI process. A bounded capability probe enables this path only when the
+  installed CLI advertises the needed MCP surface; an installation that cannot prove that surface
+  is unavailable for coaching.
+- **MCP is a transport, not the authority.** `JarvisMCPServerCore` uses the exact-pinned official
+  MCP Swift SDK for stdio framing, initialization and version negotiation, concurrent request
+  dispatch, and cancellation. Its small adapter exposes the Core-owned tool definitions and sends
+  calls through `MCPBridgeClient` over an authenticated Unix socket to the app's `MCPBridgeHost`. The
+  host authenticates the attempt identity, while the Foundation-only `CoachingActionBroker`
+  validates the request-derived allowed action set, arguments, the optional-single-capture ordering,
+  cancellation, a required terminal action, and exactly-once commit. Provider-side tool visibility
+  is defense in depth; the broker remains authoritative when a client calls a known but unlisted
+  action. A normal provider exit with no brokered terminal is therefore a typed failed attempt and
+  renders no overlay. Both local CLIs have a second successful completion boundary. Codex requires
+  the official SDK response write, matching helper request-ID acknowledgement, and current host
+  lease. Claude requires that same transport proof **and** a matching, non-error JSONL
+  `tool_result` containing the accepted-action receipt for the terminal `tool_use_id`; this proves
+  the Claude Code CLI decoded and emitted the successful result before Jarvis terminates it. It does
+  not require or claim another remote-model inference after the already-authoritative terminal
+  action. This is the liveness guarantee MCP itself does not supply: the provider can still decide
+  not to call a tool, but Jarvis will never mistake that for a successful coaching action.
+- **Provider containment is generated per attempt.** Claude receives a strict config containing only
+  Jarvis, eagerly loads that server, disables every built-in with `--tools ""`, and derives its
+  qualified allowed-tool names from the tools supplied for that request. Codex ignores user config
+  and project rules, runs ephemeral and read-only, clears inherited MCP servers, derives the Jarvis
+  server's enabled tools from the request, and auto-approves only that server's calls. Codex has no
+  stable global built-in-tool allowlist. At detection time Jarvis parses that exact installation's
+  bounded `features list` output and disables every enabled, non-removed feature by its advertised
+  name for MCP coaching; new feature flags therefore default off without a Jarvis-owned name list.
+  Tool-less summarization keeps Codex's normal feature profile because the optimization was measured
+  only for coaching. Probe or parse failure passes no guessed flags and keeps the prompt, read-only
+  sandbox, request-derived MCP tools, and early terminal boundary. This is a latency and
+  surface-reduction measure—not a tool inventory or structural MCP-only containment: unconditional
+  built-ins may remain model-visible, so the coaching prompt still tells Codex to ignore every
+  unrelated built-in, plugin, project, and MCP tool. Only brokered actions can trigger Jarvis-owned
+  capture or commit a tip; either local CLI fails the attempt without one delivered terminal Jarvis
+  action. Claude also receives `--max-turns 1` for terminal-only attempts and `--max-turns 2` when
+  `capture_screen` is supplied, limiting the run to one terminal tool-use round trip or one capture
+  plus one terminal round trip. Bounded, non-billing installed-binary probes separately verify the
+  flag's numeric parser and the MCP help surface instead of hardcoding a version. In the live benchmark,
+  terminal-only Claude emitted one distinct assistant request ID and capture→terminal emitted two;
+  those are observed assistant-generation counts, not a claim about undocumented provider internals.
+- **CLI coaching is MCP-only.** There is no prompt-shaped action compatibility route. If the
+  capability probe cannot prove the basic MCP configuration surface, that route target is
+  unavailable. A missing bundled helper blocks a selected CLI at preflight. Failure to create the
+  private session listener or bind its fresh attempt lease is a typed failed attempt before any
+  provider process starts. None of
+  these cases launches a weaker action protocol or replays provider work.
+- **The bridge stays private and bounded.** The bearer ticket and generated provider configuration
+  are fresh owner-only files in the session directory for each attempt. The app lazily creates one
+  private Unix listener for a Start session and reuses that listener across local-CLI attempts; every
+  lease rotates the bearer, attempt ID, configuration revision, broker, and ticket, so a stale helper
+  cannot act. Listener, client, and accepted descriptors are close-on-exec, so later provider
+  subprocesses cannot inherit the private channel. Stop closes the listener. Its socket node contains
+  no payload and lives in macOS's
+  short owner-only per-user temporary directory, avoiding `sockaddr_un` failures in deeply nested
+  workspaces. An OpenAI-only session creates no listener. Screenshot/OCR bytes remain transient
+  kernel stream data; only the normal session artifacts are persisted.
 - **Installed CLIs are auto-detected.** `AgentCLIDetector` discovers binaries through file probes
   over stable $PATH entries + known install dirs. Inherited $PATH entries under the system temporary
   directory are ignored for both selection and the child environment: terminal launchers may put
   short-lived wrappers there, but a long-running app must resolve the durable user/system install
   instead. Claude's actual sign-in state comes from its non-billing `auth status --json` command under
   a short timeout, because stale account metadata can survive an expired OAuth session; Codex uses
-  its auth-file marker and a bounded, non-model `features list` capability probe. Settings
+  its auth-file marker and a bounded, non-model `mcp --help` capability probe. Settings
   distinguishes signed in, signed out, and an unavailable auth probe, and Start refuses a confirmed
-  logout. Settings availability discovery probes every supported CLI; Start probes only the CLI
-  providers present in the configured route. Saving the transcription API key probes no CLI.
+  logout. Codex's same bounded detection pass also reads its enabled feature registry for
+  invocation-time quiescing; it runs once per detection, not per coaching attempt. Settings
+  availability discovery probes every supported CLI; Start probes only the CLI providers present in
+  the configured route. Saving the transcription API key probes no CLI.
 - **The OpenAI key stays required**: transcription always runs on the Realtime API. A CLI provider
   moves the brain/summarizer off the key, not the ears; the session evaluator independently runs
-  through a local agentic CLI over the completed session directory. **Latency is the tradeoff**,
-  though a modest one now that every turn is one model call: measured coach turns run ~2.6s (text)
-  / ~3.3s (with screenshot) on claude sonnet at low effort, ~5–8s on codex — versus the direct
-  API's sub-2s target. The invocation is kept deliberately slim (persona replaced, no settings
-  sources or personal codex config — `--ignore-user-config` — **zero MCP servers** via
-  `--strict-mcp-config` / `-c mcp_servers={}`, and no feature-gated Codex agent tools),
-  so what remains is irreducible from outside: claude's floor is ~0.7s of process overhead + model
-  time; codex's is ~4.7s even for a trivial prompt because its fixed coding-agent scaffold (a
-  built-in multi-thousand-token system prompt that `exec` offers no flag to replace) rides every
-  call. The pipeline absorbs it (single-in-flight turns coalesce; the overlay paces display). If
-  more is ever needed, the escalation is a long-lived interactive CLI process (stream-json in/out
-  with `/clear` between turns — verified to work) — worth its lifecycle complexity only for
-  claude's last ~0.7s, so it's deliberately not built; per-turn session *resume* is pointless (it
-  still pays startup per call).
+  through a local agentic CLI over the completed session directory. CLI latency remains above the
+  direct API target, but MCP removes the second top-level CLI process from screen-dependent turns and
+  returns capture evidence inside the same run. It does not inherently remove the post-capture
+  assistant generation: the validated Claude capture path emits one assistant request ID before
+  capture and one after it. That simplifies process shape and preserves action continuity; it is not
+  evidence of greater model intelligence or a guaranteed latency reduction. Any broader
+  coaching-quality claim needs representative session evaluation.
 
 ### Latency
 
@@ -430,10 +467,12 @@ The always-on legs are built to survive transient failure rather than die on it:
 - **The brain call** is single-flighted (a turn can't double-speak) and runs under a provider-aware
   request timeout. The API and Claude ceilings stay well above the reasoning-turn tail; Codex has a
   shorter bound because a healthy decision turn takes seconds and a silent agent-runtime stall would
-  otherwise batch every later transcript turn behind it. A failed provider request is never replayed
-  inside its coaching attempt. The attempt ends, sent-state and provider-neutral work remain
-  uncommitted, and the scheduler makes a new attempt after bounded backoff or an earlier coalesced
-  natural trigger. That new attempt rebuilds its input from the latest committed history, the failed
+  otherwise batch every later transcript turn behind it. Codex ends after the SDK/bridge delivery
+  handshake. Claude ends only after that handshake and its stream exposes the matching successful
+  accepted-action result; neither waits for trailing prose, and task cancellation still wins. A
+  failed provider request is never replayed inside its coaching attempt. The attempt ends, sent-state
+  and provider-neutral work remain uncommitted, and the scheduler makes a new attempt after bounded
+  backoff or an earlier coalesced natural trigger. That new attempt rebuilds its input from the latest committed history, the failed
   conversation, and every newer finalized transcript item; with no new speech, it simply re-attempts
   the pending work. Reaching the [ordered route's](#ordered-provider-route) code-owned consecutive
   failure budget exhausts the active target; a provider-boundary failure proven permanent exhausts
@@ -442,6 +481,13 @@ The always-on legs are built to survive transient failure rather than die on it:
   installed. No provider is probed concurrently, and no automatic recovery returns to the primary.
   Cancellation remains quiet. Memory **compaction** fails soft outside this route: a failed summary
   simply leaves the full history for the next attempt.
+- **Terminal effects are session-bound on the main actor.** Each Start creates one
+  `TerminalActionDelivery`. After the broker commits, the driver crosses that boundary to record the
+  terminal Activity event and synchronously update both overlay panels. Stop invalidates the
+  delivery before cancelling the turn and clears the caption's active timer and queue, so an old
+  driver cannot display after Stop or append into a replacement session. Every driver Activity write
+  also carries its immutable session directory; the serial Activity writer rejects it if Start has
+  already rotated to another directory.
 - **The audit edge** drains Activity's asynchronous writer as Stop completes. An explicit
   Activity → **Evaluate** click then runs the read-only agentic evaluator over the source checkout
   plus the completed session directory; it reads `jarvis-activity.jsonl` itself in full, so no

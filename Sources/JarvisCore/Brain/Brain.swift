@@ -78,8 +78,16 @@ public enum ToolInvocation: Sendable, Equatable {
 /// One brain response: parsed tool calls (possibly empty = stay silent), plus the raw calls
 /// needed to replay the assistant turn during the tool loop.
 public struct BrainResponse: Sendable {
+    public enum ActionDelivery: Sendable, Equatable {
+        /// Native provider tool calls are returned to `CoachDriver`, which submits them to the broker.
+        case returnedCalls
+        /// The provider called the attempt broker during its run (the local MCP path).
+        case broker
+    }
+
     public let toolCalls: [ToolInvocation]
     public let rawToolCalls: [RawToolCall]
+    public let actionDelivery: ActionDelivery
     /// The response's ENTIRE `output` array, verbatim (one JSON object per string, in output
     /// order — reasoning, function_call, everything, ids intact). OpenAI's function-calling
     /// guidance: when a tool call is fulfilled client-side, replay the model's output items whole
@@ -99,12 +107,14 @@ public struct BrainResponse: Sendable {
     public let outputText: String?
     public init(toolCalls: [ToolInvocation], rawToolCalls: [RawToolCall] = [],
                 incompleteReason: String? = nil, outputText: String? = nil,
-                outputItemsJSON: [String] = []) {
+                outputItemsJSON: [String] = [],
+                actionDelivery: ActionDelivery = .returnedCalls) {
         self.toolCalls = toolCalls
         self.rawToolCalls = rawToolCalls
         self.incompleteReason = incompleteReason
         self.outputText = outputText
         self.outputItemsJSON = outputItemsJSON
+        self.actionDelivery = actionDelivery
     }
 }
 
@@ -126,6 +136,25 @@ public enum ToolChoice: Sendable, Equatable {
 /// so there is no server-side conversation object to create, thread, or lock.
 public protocol BrainClient: Sendable {
     func respond(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice) async throws -> BrainResponse
+    func respond(
+        messages: [ChatMessage],
+        tools: [ToolDef],
+        toolChoice: ToolChoice,
+        actionBroker: CoachingActionBroker
+    ) async throws -> BrainResponse
+}
+
+public extension BrainClient {
+    /// Native APIs return calls for the driver to broker. MCP-aware clients override this overload
+    /// and call the supplied broker during their run.
+    func respond(
+        messages: [ChatMessage],
+        tools: [ToolDef],
+        toolChoice: ToolChoice,
+        actionBroker: CoachingActionBroker
+    ) async throws -> BrainResponse {
+        try await respond(messages: messages, tools: tools, toolChoice: toolChoice)
+    }
 }
 
 public extension BrainClient {

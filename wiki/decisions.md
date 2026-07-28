@@ -540,6 +540,9 @@
   coaching transport with Codex app-server/SDK — substantially more lifecycle and protocol surface
   when this call needs one final text object.
 - **Supersedes in part:** 2026-07-16 — Local Claude Code / Codex CLIs as alternative brain providers.
+- **Superseded in part by:** 2026-07-28 — One optional capture, reusable listener, and prompt-guided
+  Codex tools. The read-only, ephemeral, user/project-instruction suppression and shorter timeout
+  stand; feature-name discovery and disable lists do not.
 - **Detail:** [architecture.md → Local CLI brain providers](./architecture.md#local-cli-brain-providers),
   `Sources/JarvisCore/Brain/CLIBrainClient+Invocation.swift`, `AgentCLIProcessRunner.swift`.
 
@@ -776,6 +779,77 @@
   `Sources/JarvisApp/App/AppDelegate.swift`,
   `Sources/JarvisCore/Brain/AgentCLIDetector.swift`.
 
+### 2026-07-27 — Private MCP is an action transport behind one broker
+
+- **Chose:** Route every coaching action—OpenAI function call, local-CLI compatibility JSON, or
+  private MCP call—through one Foundation-only `CoachingActionBroker`. One attempt may make zero or
+  more serial `capture_screen` calls followed by exactly one staged `speak` or `stay_silent`;
+  malformed, unknown, concurrent, replayed, post-terminal, missing-terminal, stale, cancelled, or
+  duplicate-commit work fails the attempt. `CoachDriver` commits the terminal only after the provider
+  completes cleanly and the attempt remains current.
+- **Chose:** For installed CLI versions with the required MCP surface, give each coaching attempt
+  exactly one private Jarvis stdio server backed by an authenticated, owner-only, session-local Unix
+  socket. Claude eagerly loads only that server with built-ins disabled and an exact tool allowlist.
+  Codex ignores user/project configuration, stays ephemeral/read-only, receives only that server,
+  disables its advertised agent surfaces, and auto-approves only the three Jarvis calls. The helper
+  owns no OS effect or coaching policy. A pre-launch capability/bootstrap failure may use the same
+  broker through compatibility JSON; an MCP run is never replayed through JSON inside its attempt.
+- **Why:** MCP makes capture results callable inside one live local-agent process, but the protocol
+  does not force the agent to call anything. Live Claude and Codex comparison runs both reproduced a
+  no-observed-action failure before their generated provider configuration was corrected. Requiring
+  a brokered terminal made those failures safe: no overlay rendered and no history committed. With
+  the provider configuration corrected, both JSON and MCP recovered the same synthetic OCR evidence;
+  MCP used one CLI process where JSON needed two. That supports better action-loop continuity and
+  lower capture-loop overhead, not an intrinsic increase in model intelligence or general coaching
+  quality.
+- **Rejected:** (a) Letting the MCP sidecar invoke capture/overlay/Activity directly—the provider
+  process would bypass attempt cancellation and commit policy. (b) Treating clean CLI exit as success
+  without a terminal call—it turns model non-use into silent coaching loss. (c) MCP-only rollout
+  without capability/bootstrap fallback—older installed CLIs would become unusable. (d) Keeping
+  prompt JSON as the normal supported-CLI path—it needs an extra full process after capture and
+  cannot return observations into the same agent run. (e) Wrapping the Responses API in MCP—its
+  strict native function calls already enter the broker without another process or protocol.
+- **Supersedes in part:** 2026-07-16 — Local Claude Code / Codex CLIs as alternative brain
+  providers. Prompt JSON remains a brokered compatibility path rather than the normal path for a
+  supported CLI.
+- **Superseded in part by:** 2026-07-28 — One optional capture, reusable listener, and prompt-guided
+  Codex tools. The broker accepts at most one capture, has no request-result replay cache, and does
+  not enumerate Codex feature names.
+- **Detail:** [architecture.md → Local CLI brain providers](./architecture.md#local-cli-brain-providers),
+  [sandbox.md → Data Egress](./sandbox.md#data-egress),
+  `Sources/JarvisCore/Coach/CoachingActionBroker.swift`,
+  `Sources/JarvisMCPBridge/MCPBridgeHost.swift`,
+  `Sources/JarvisMCPBridge/MCPBrainClient.swift`,
+  `Sources/JarvisMCPServerCore/JarvisMCPServer.swift`.
+
+### 2026-07-27 — CLI coaching requires MCP; no compatibility action route
+
+- **Chose:** Remove the prompt-JSON coaching adapter, transport override, bootstrap fallback, and
+  comparison executable from the shipping tree. Claude Code and Codex are available for coaching
+  only when the bounded detector proves the required MCP/isolation profile and the bundled helper is
+  executable. A missing helper blocks preflight; failure to create the private per-attempt bridge is
+  a typed failed attempt before any provider process starts. Tool-less CLI calls such as history
+  summarization remain direct and action-free. OpenAI keeps native strict function calls through the
+  same broker.
+- **Why:** Jarvis is in active development and has no released compatibility promise to preserve.
+  Keeping a second action protocol adds prompt construction, tolerant parsing, manual-hint recovery,
+  selection policy, tests, and a silent downgrade path precisely where the design is meant to require
+  a real tool call. The earlier A/B already supplied its decision evidence: both transports used the
+  synthetic OCR evidence, while MCP kept capture→terminal in one top-level agent CLI process.
+  Retaining the experiment as production machinery no longer buys user value.
+- **Rejected:** (a) Keeping JSON only for older CLIs—unsupported installations can be updated or
+  marked unavailable during active development. (b) Falling back when bridge bootstrap fails—it can
+  mask a packaging, permissions, path-length, or IPC defect and weakens the fail-closed contract.
+  (c) Keeping a developer transport override—it preserves dead behavior and lets tests diverge from
+  the only production route.
+- **Supersedes in part:** 2026-07-27 — Private MCP is an action transport behind one broker. Its
+  broker, MCP isolation, liveness, and measured action-loop conclusions stand; its compatibility
+  choice and rejection of an MCP-only rollout are superseded.
+- **Detail:** [architecture.md → Local CLI brain providers](./architecture.md#local-cli-brain-providers),
+  `Sources/JarvisApp/App/AppDelegate.swift`,
+  `Sources/JarvisCore/Brain/CLIBrainClient.swift`,
+  `Sources/JarvisMCPBridge/MCPBrainClient.swift`.
+
 ### 2026-07-27 — Catalog order defines the unset model
 
 - **Chose:** Use the first entry in each provider's `BrainModelCatalog` list whenever no valid model
@@ -804,3 +878,157 @@
   internal compaction behavior, not a saved route selection.
 - **Detail:** [settings-window.md → Brain](./settings-window.md#brain),
   `Sources/JarvisCore/Brain/BrainModelCatalog.swift`.
+
+### 2026-07-28 — The official Swift SDK owns MCP protocol handling
+
+- **Chose:** Exact-pin the latest reviewed release of the official MCP Swift SDK and confine it to
+  the bundled helper. The SDK owns stdio transport, JSON-RPC lifecycle, protocol-version
+  negotiation, concurrent dispatch, and cancellation. Jarvis keeps its authenticated attempt bridge
+  and `CoachingActionBroker`; those are application authority and private IPC, not MCP protocol
+  reimplementations.
+- **Why:** The handwritten server duplicated evolving protocol machinery and had already accepted a
+  client-requested version without proving support. The released SDK covers that maintenance surface
+  and carries upstream lifecycle/cancellation tests, while the helper-only target prevents its
+  protocol and transitive networking dependencies from entering the main app.
+- **Rejected:** (a) Following the SDK's moving main branch or a release-candidate protocol—Jarvis
+  needs a reproducible stable dependency graph. (b) Linking the SDK into `JarvisApp`—the app only
+  hosts private broker IPC. (c) Replacing the private bridge with an MCP server that owns effects—it
+  would bypass attempt authentication, staging, and commit.
+- **Detail:** `Package.swift`, `Package.resolved`,
+  `Sources/JarvisMCPServerCore/JarvisMCPServer.swift`,
+  `Sources/JarvisMCPBridge/MCPBridgeClient.swift`.
+
+### 2026-07-28 — One optional capture, reusable listener, and prompt-guided Codex tools
+
+- **Chose:** Make the coaching action sequence structural: an attempt may call `capture_screen` zero
+  or one time, then must call exactly one `speak` or `stay_silent`. A failed capture still consumes
+  the single opportunity. The broker has no numeric action budget or request-result replay cache;
+  the current bridge creates a fresh request UUID for every call and invalidates delivery failures
+  instead of retrying them.
+- **Chose:** Derive Claude allowed tools and Codex server-enabled tools from the request's `ToolDef`
+  values. Codex availability requires its basic MCP surface, not a hardcoded set of advertised
+  feature names. Its prompt requires only the listed Jarvis MCP actions and tells it to ignore other
+  built-ins; read-only, ephemeral, ignored user/project configuration and cleared inherited MCP
+  servers remain the coarse enforcement boundary.
+- **Chose:** Lazily create one private Unix listener for a Start session and reuse it across local-CLI
+  attempts. Every attempt still rotates its broker, bearer, ticket, identity, configuration binding,
+  and provider process. Ending an attempt revokes only that lease; Stop closes the listener. An
+  OpenAI-only session never starts it.
+- **Why:** Jarvis cannot mutate the screen inside an attempt, so another capture adds latency,
+  vision exposure, and a moving observation without enabling a new action. A magic total of two
+  restates the sequence less clearly than the state machine. The replay cache protected no concrete
+  transport retry, while Codex feature-name blocklists drift whenever the CLI adds or renames a
+  surface and still cannot prove its complete model-visible inventory. Recreating an identical local
+  socket listener for every attempt adds lifecycle work without adding authority separation; the
+  rotating authenticated lease is the actual attempt boundary.
+- **Rejected:** (a) Three captures plus a terminal—the extra observations have no coaching use.
+  (b) Keeping a defensive replay cache without a retry contract. (c) Treating an enumerated Codex
+  feature list as a global tool allowlist. (d) Claiming the prompt hides Codex built-ins—it guides
+  behavior but does not provide confidentiality; only brokered Jarvis effects are fail-closed.
+  (e) Reusing an attempt broker or bearer with the listener—it would let stale work cross attempts.
+- **Superseded in part by:** 2026-07-28 — Dynamically quiesce Codex features and stop after proven
+  terminal delivery. The rejection of a Jarvis-owned feature-name list and of a global-containment
+  claim stands; the installed CLI's own registry now supplies best-effort disable flags.
+- **Supersedes in part:** 2026-07-18 — Codex coaching invocations are isolated and bounded;
+  2026-07-27 — Private MCP is an action transport behind one broker.
+- **Detail:** [architecture.md → Local CLI brain providers](./architecture.md#local-cli-brain-providers),
+  [sandbox.md → Data Egress](./sandbox.md#data-egress),
+  `Sources/JarvisCore/Coach/CoachingActionBroker.swift`,
+  `Sources/JarvisCore/Brain/CLIBrainClient+Invocation.swift`,
+  `Sources/JarvisCore/Brain/AgentCLIDetector.swift`,
+  `Sources/JarvisMCPBridge/MCPBridgeHost.swift`,
+  `Sources/JarvisApp/App/AppDelegate.swift`.
+
+### 2026-07-28 — Dynamically quiesce Codex features and stop after proven terminal delivery
+
+- **Chose:** Parse the bounded `codex features list` output during normal CLI detection and pass
+  `--disable` for every enabled, non-removed name reported by that exact installation on MCP coaching
+  calls. There is no Jarvis-owned feature-name list; a missing, malformed, oversized, timed-out, or
+  failed probe passes no guessed flags and keeps the isolated prompt/read-only/early-completion
+  profile. MCP availability continues to depend on the basic configuration surface, not on a
+  version-specific feature matrix. Tool-less summarization keeps Codex's normal feature profile
+  because the optimization was benchmarked only for coaching.
+- **Chose:** Treat a terminal Codex action as a typed successful completion only after the official
+  SDK writes its tool response, the helper returns a matching request-ID acknowledgement, and the
+  host confirms that connection still belongs to the active attempt generation. The process runner
+  then sends SIGTERM with a bounded SIGKILL fallback, preserves partial diagnostics, skips final-reply
+  parsing, and returns control to `CoachDriver`; task cancellation still wins and the broker remains
+  the only commit authority. Capture acknowledgement alone never completes the run.
+- **Chose:** Make the broker authoritative for the request-derived allowed Jarvis actions, not merely
+  for ordering; provider config visibility is defense in depth. Make socket descriptors close on
+  exec. After broker commit, cross a per-Start main-actor `TerminalActionDelivery` that records
+  Activity and renders both panels in one ordered turn. Stop invalidates that lease first and clears
+  caption timers/queues; all driver Activity writes are bound to their original session directory.
+- **Why:** Codex has no supported global built-in-tool allowlist, but optional feature flags add
+  planning/tool surface and a normal agent exit spends time producing trailing output after Jarvis
+  already owns the terminal decision. Two five-trial rotated live batches on Codex 0.145.0 isolated
+  both controls. The first measured medians of 17.452 s for prompt-only, 12.880 s with dynamic
+  quiescing, and 9.216 s with quiescing plus early completion. A fresh second batch measured
+  21.823 s for prompt-only, 14.970 s for early completion alone, and 10.977 s for both controls.
+  Every trial used one top-level Codex process, one capture, the supplied OCR token, and one valid
+  terminal action; no helper remained afterward. The result supports both controls as scoped latency
+  optimizations, not a fixed percentage promise or a claim that feature flags create MCP-only
+  containment.
+- **Rejected:** (a) Restore a static tool-feature blocklist—new and renamed flags would drift.
+  (b) Kill when the broker merely stages a terminal—the SDK response could still be cancelled or
+  fail to reach the provider transport. (c) Wait for Codex's final prose after delivery—it is not
+  authoritative and measured as avoidable tail latency. (d) Apply early completion to Claude—its
+  built-ins are structurally disabled and it already exits promptly, so the extra lifecycle path has
+  no demonstrated benefit. (e) Describe disabling every optional feature as a security boundary or
+  tool inventory—unconditional Codex built-ins can remain model-visible. (f) Apply the unbenchmarked
+  coaching quiescing profile to summarization.
+- **Supersedes in part:** 2026-07-28 — One optional capture, reusable listener, and prompt-guided
+  Codex tools.
+- **Superseded in part by:** 2026-07-28 — Provider-neutral acknowledged terminal completion. The
+  transport proof and process-runner contract stand; limiting them to Codex does not.
+- **Detail:** [architecture.md → Local CLI brain providers](./architecture.md#local-cli-brain-providers),
+  `Sources/JarvisCore/Brain/AgentCLIDetector.swift`,
+  `Sources/JarvisCore/Brain/AgentCLIProcessRunner.swift`,
+  `Sources/JarvisMCPBridge/MCPBridgeHost.swift`,
+  `Sources/JarvisMCPBridge/MCPBrainClient.swift`.
+
+### 2026-07-28 — Provider-neutral acknowledged terminal completion
+
+- **Chose:** Give Claude Code a stronger form of the typed terminal-delivery completion path. Codex
+  completes after the official SDK writes a successful terminal result, the helper returns the
+  matching request-ID acknowledgement, and the host verifies the active attempt generation. Claude
+  additionally requires its JSONL stream to contain the matching non-error accepted-action
+  `tool_result` for the terminal `tool_use_id`; only then does `AgentCLIProcessRunner` terminate it
+  and skip final-reply parsing. Capture acknowledgement never completes a run; task cancellation
+  still wins; the broker remains the only commit authority.
+- **Why:** Transport delivery alone did not prove the Claude Code CLI had decoded and emitted a
+  successful result: one audit trial terminated in the gap and the CLI surfaced a rejected tool
+  result. The CLI-emitted receipt closes that race without paying for later prose or claiming another
+  remote-model inference. A fresh paired live benchmark on Claude Code
+  2.1.220 with a valid 256×256 JPEG, one excluded warm-up, five measured pairs, alternating order,
+  and zero provider API-error events measured capture→terminal medians of 10.152 s for the historical
+  two-top-level-Claude-process JSON route and 9.424 s for MCP with one top-level Claude process
+  (arm-median −0.728 s / −7.2%; paired median −0.120 s; MCP faster in four of five pairs).
+  Terminal-only medians were 4.705 s for JSON and 6.020 s for MCP (arm-median +1.315 s / +28.0%;
+  paired median +1.344 s; MCP faster in one of five pairs). The JSON capture arm included a 23.138 s
+  outlier, so the final-current batch validates the completion boundary but does not establish a
+  stable broad latency win. Local MCP spawn remained 4–11 ms; the changing portion was the
+  provider/model phase before the terminal tool call, which does not distinguish normal cloud
+  variance from MCP tool-context inference cost. Every measured MCP arm had one accepted result, no
+  rejected result, no post-terminal prose, and typed completion.
+- **Chose:** Set Claude's maximum tool-use turns from the actual action surface: one for
+  terminal-only attempts and two when `capture_screen` is available. The installed-binary
+  capability probes separately verify the flag's numeric parser and MCP help surface without model
+  use, avoiding a version matrix. The benchmark observed one distinct assistant request ID for
+  terminal-only and two for capture→terminal; these are stream-observed assistant generations, not
+  an undocumented provider request-count contract.
+- **Rejected:** (a) Waiting for Claude's post-terminal prose—the brokered action is already the
+  coaching result and later prose adds latency without authority. (b) Killing after transport
+  acknowledgement alone—it can race before Claude Code emits the accepted result. (c) Hardcoding a
+  Claude version or guessing from help text—the required invocation is probed directly. (d) Killing
+  when the broker merely stages the action—the result may not have crossed the SDK transport and a
+  concurrent Stop must still revoke it. (e) Treating an interrupted or max-turn result envelope as
+  the successful response—it is teardown diagnostics, not the coaching decision.
+- **Supersedes in part:** 2026-07-28 — Dynamically quiesce Codex features and stop after proven
+  terminal delivery. Dynamic feature handling remains Codex-specific; acknowledged-terminal
+  completion is provider-neutral.
+- **Detail:** [architecture.md → Local CLI brain providers](./architecture.md#local-cli-brain-providers),
+  `Sources/JarvisCore/Brain/CLIBrainClient+Invocation.swift`,
+  `Sources/JarvisCore/Brain/AgentCLIProcessRunner.swift`,
+  `Sources/JarvisMCPBridge/MCPBridgeHost.swift`,
+  `Sources/JarvisMCPBridge/MCPBrainClient.swift`.

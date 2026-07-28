@@ -5,7 +5,7 @@ import Foundation
 // below is valid under strict (no properties, none required).
 public let captureScreenTool = ToolDef(
     name: "capture_screen",
-    description: "Capture a fresh screenshot and OCR of visible interview context. Use when the next useful response depends on current screen information not already available; one fresh result satisfies that request.",
+    description: "Capture one fresh screenshot and OCR of visible interview context. Use at most once per coaching attempt, before the terminal action, when the next useful response depends on current screen information not already available.",
     parametersJSON: #"{"type":"object","properties":{},"required":[],"additionalProperties":false}"#
 )
 
@@ -22,6 +22,9 @@ public let staySilentTool = ToolDef(
 )
 
 public let coachTools: [ToolDef] = [captureScreenTool, speakTool, staySilentTool]
+
+/// Stable terminal receipt shared by the MCP server response and Claude's stream evidence gate.
+public let terminalActionAcceptedText = "action accepted"
 
 
 /// The coach system prompt — the only place response behavior is governed (no code-side guardrail).
@@ -62,8 +65,8 @@ Choose exactly one action on each model response, in this priority order:
 5. "me" is stuck: call speak with the next concrete step. Build on earlier tips instead of repeating
    them.
 
-A fresh capture result satisfies the screen gate for that request. Use it; do not capture again for
-the same request.
+A capture attempt—successful or failed—uses the attempt's single capture opportunity. After its
+result, call speak or stay_silent; never call capture_screen again in the same attempt.
 
 # Tip style
 Lead with the most useful point. Be brief, concrete, encouraging, and easy to read under pressure.

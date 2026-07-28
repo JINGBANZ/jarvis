@@ -111,6 +111,11 @@ import AppKit
         await checkDisableDuringPreviewStaysOff()
     }
 
+    @Test
+    func endingSessionDropsActiveAndQueuedTips() async {
+        await checkEndSessionDropsTips()
+    }
+
     @MainActor @Test
     func disabledCaptionStillPreviews() {
         // The on/off switch gates real tips, not the Settings preview — size/opacity must stay
@@ -215,6 +220,25 @@ private func checkTipsQueue() async {
     // After "first"'s window (+ the inter-line gap) elapses, the queued tip must take over.
     #expect(await waitUntil(timeout: hold + 2) { overlay.currentText == "second" },
             "the queued tip must display after the first finishes")
+}
+
+@MainActor
+private func checkEndSessionDropsTips() async {
+    let overlay = OverlayCaptionPanel()
+    overlay.interLineGapSeconds = 0
+    overlay.render(["old active"], perLineSeconds: 0.2)
+    overlay.render(["old queued"], perLineSeconds: 0.2)
+    #expect(await waitUntil { overlay.currentText == "old active" })
+
+    overlay.endSession()
+    #expect(!overlay.isPanelVisible)
+    #expect(overlay.currentText.isEmpty)
+    try? await Task.sleep(for: .milliseconds(600))
+    #expect(!overlay.isPanelVisible)
+    #expect(overlay.currentText.isEmpty, "an old timer or queued tip must not resume")
+
+    overlay.render(["new session"], perLineSeconds: 1)
+    #expect(await waitUntil { overlay.currentText == "new session" })
 }
 
 // Once the queue fully drains, the panel must hide and reset so the next coaching turn can display.

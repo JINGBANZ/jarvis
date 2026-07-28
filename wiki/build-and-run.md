@@ -11,13 +11,17 @@ The Command Line Tools SDK (`/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk
 ScreenCaptureKit, AVFoundation, AppKit, SwiftUI, Vision, CoreAudio, and Security — everything Jarvis
 needs — so a SwiftUI + ScreenCaptureKit binary builds with plain `swift build`. No `.xcodeproj`.
 
-- **Three-target split (load-bearing for testability):** `JarvisCore` holds the pure, deterministic
+- **Target split (load-bearing for testability):** `JarvisCore` holds the pure, deterministic
   logic behind protocols (config, transcript, the coach loop, the OpenAI client, …) and is
   unit-tested with mocks on **any** machine — no Mac UI, key, or permissions needed. `JarvisOverlay`
   is a small library holding just the `NSPanel` overlay, split out so `JarvisOverlayTests` can import
   it to verify screen-capture invisibility headlessly. `JarvisApp` is the thin executable that wires
-  the other two to the side-effectful macOS frameworks (mic, ScreenCaptureKit, the realtime websocket,
-  the menu bar). That split is what lets most of the system be verified headless.
+  those libraries to the side-effectful macOS frameworks (mic, ScreenCaptureKit, the realtime
+  websocket, the menu bar). `JarvisMCPBridge` is the narrow private Unix-socket edge shared by the
+  app and helper. `JarvisMCPServerCore` keeps the exact-pinned official MCP Swift SDK and its small
+  Jarvis adapter helper-only, while `JarvisMCPServer` is the executable wrapper. The helper owns no
+  coaching policy or OS effect. That split keeps the protocol dependency out of `JarvisApp` and
+  lets the SDK-backed lifecycle and action loop be verified headless.
 - **Tests use swift-testing, not XCTest.** `import XCTest` fails with "no such module" under
   CLT-only. Run the suite via **`./scripts/run-tests.sh`**, which adds the swift-testing framework
   search/rpath flags that plain `swift test` lacks CLT-only. (One sharp edge: a direct
@@ -28,6 +32,13 @@ needs — so a SwiftUI + ScreenCaptureKit binary builds with plain `swift build`
 
 `scripts/build-app.sh` assembles the executable into a hand-built `.app` bundle (the bundle layout
 and the stable bundle id live in the script and `Resources/Info.plist`).
+
+The build also places `JarvisMCPServer` in `Jarvis.app/Contents/Helpers`. The helper is signed before
+the containing app—inside out, without relying on `codesign --deep`—so local and Developer ID builds
+carry the same nested-code shape. A checkout build may locate the sibling SwiftPM helper for
+development, but a bundled app always resolves it from `Bundle.main`.
+The bundle also carries `LICENSE` and `THIRD_PARTY_NOTICES.md`, including the MCP SDK and its pinned
+transitive dependencies.
 
 **Permission persistence is a signing problem.** macOS TCC keys a Screen-Recording/Microphone grant
 to **code signature + bundle id + bundle path**. An ad-hoc signature changes every build, so macOS
@@ -137,6 +148,14 @@ the human-facing coaching record. The current validation priority lives in
   entry, so a deliberate no-op cannot look like a stalled brain.
 - Press **⌥⌘J** with a question visible; confirm a shortcut entry, one screen view, and a tip appear in
   Activity.
+- With Claude Code selected, repeat the screen-dependent turn and confirm the same attempt records one
+  screen view followed by one terminal tip or deliberate silence. Repeat with Codex. A provider exit
+  without either terminal action must be a failed attempt with no overlay—not a successful empty turn.
+  For both providers, confirm the debug timing labels the acknowledged terminal completion and does
+  not wait for a trailing final reply. For Claude, also confirm the stream contains one matching,
+  non-error terminal `tool_result` with the accepted-action receipt. A successful capture→terminal
+  run should contain two distinct assistant request IDs and terminal-only one; an interrupted or
+  max-turn teardown envelope is diagnostic process output, not a successful final reply.
 - Confirm saved screenshots exclude both overlay surfaces. Toggle each overlay in Settings, verify its
   controls and preview follow the toggle, and confirm the choice survives relaunch.
 - If validating realtime recovery, disconnect the network, say a unique phrase, reconnect, and confirm
@@ -145,3 +164,26 @@ the human-facing coaching record. The current validation priority lives in
   transcription or coaching events.
 - In Activity, choose the stopped session and click **Evaluate**. Confirm the button shows
   **Evaluating…**, the report opens when the agent finishes, and the button then shows **Open report**.
+
+## Local CLI MCP requirement
+
+Claude Code and Codex coaching use only Jarvis's private MCP action surface. There is no environment
+override or prompt-JSON action route. Start refuses a selected CLI when the bounded capability probe
+cannot prove the required MCP surface or when the bundled `JarvisMCPServer` helper is
+missing. The app lazily creates one private listener for the Start session and binds each local-CLI
+attempt to a fresh broker, bearer ticket, and identity. If listener startup or attempt binding fails,
+that coaching attempt fails before the provider process launches; normal route health and
+fresh-attempt scheduling then apply. Stop closes the listener; an OpenAI-only session creates none.
+At Codex detection time Jarvis also reads every enabled, non-removed feature name reported by that
+exact installation and disables those names for MCP coaching calls. This is a best-effort
+latency/surface optimization—not a tool inventory or MCP-only security claim—and does not alter
+tool-less summarization. A failed or malformed feature probe supplies no guessed flags; coaching
+continues with the early terminal boundary and the isolated prompt/read-only profile. After a
+terminal Codex action crosses the SDK write, helper acknowledgement, and active-lease confirmation,
+Jarvis ends that process and proceeds through the normal cancellation check, broker commit, and
+session-bound main-actor effect delivery without waiting for trailing prose. Claude additionally
+requires its JSONL stream to expose the matching non-error accepted-action `tool_result`, proving
+the Claude Code CLI decoded and emitted that result before termination. This does not wait for or
+claim another remote-model inference. Its invocation sets one maximum tool-use turn for terminal-only
+work and two when capture is available; separate bounded, non-billing installed-binary probes require
+the numeric flag parser and the MCP configuration flags.

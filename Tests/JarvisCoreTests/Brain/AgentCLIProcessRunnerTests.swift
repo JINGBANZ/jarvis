@@ -3,6 +3,18 @@ import Foundation
 @testable import JarvisCore
 
 @Suite struct AgentCLIProcessRunnerTests {
+    private func waitForFirstStdout(
+        _ timings: AgentCLIPhaseTimings,
+        timeout: TimeInterval = 10
+    ) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if timings.instant(.firstStdoutByte) != nil { return true }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return timings.instant(.firstStdoutByte) != nil
+    }
+
     @Test func capturesStdinFedStdoutStderrAndExitCode() async throws {
         let run = AgentCLIRun(executable: URL(fileURLWithPath: "/bin/sh"),
                               arguments: ["-c", "cat; echo oops 1>&2; exit 3"],
@@ -13,6 +25,7 @@ import Foundation
         #expect(output.stdout == "hello")
         #expect(output.stderr.contains("oops"))
         #expect(output.exitCode == 3)
+        #expect(output.termination == .exited)
     }
 
     @Test func cancellingTheTaskKillsTheProcessPromptly() async {
@@ -32,6 +45,340 @@ import Foundation
             Issue.record("expected a throw, got \(result)"); return
         }
         #expect(error is CancellationError)
+    }
+
+    @Test func completionSignalTerminatesTheProcessAndReturnsTypedPartialOutput() async throws {
+        let completion = AgentCLICompletionSignal()
+        let run = AgentCLIRun(
+            executable: URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", "printf ready; exec /bin/sleep 30"],
+            stdin: nil,
+            workingDirectory: FileManager.default.temporaryDirectory,
+            timeout: 60,
+            completionSignal: completion)
+        let timings = AgentCLIPhaseTimings()
+        let started = Date()
+        let task = Task {
+            try await AgentCLIProcessRunner.run(run, timings: timings)
+        }
+
+        try #require(await waitForFirstStdout(timings))
+        #expect(completion.signal(.terminalActionDelivered))
+        let output = try await task.value
+
+        #expect(Date().timeIntervalSince(started) < 8)
+        #expect(output.stdout == "ready")
+        #expect(output.exitCode != 0)
+        #expect(output.termination == .completionSignal(.terminalActionDelivered))
+        #expect(timings.instant(.processExited) != nil)
+    }
+
+    @Test func completionWaitsForMatchingAcceptedJSONToolResult() async throws {
+        let completion = AgentCLICompletionSignal()
+        let assistant = """
+        {"type":"assistant","message":{"content":[{"type":"tool_use","id":"terminal-1","name":"mcp__jarvis__speak"}]}}
+        """
+        let wrongResult = """
+        {"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"other","content":[{"type":"text","text":"action accepted"}]}]}}
+        """
+        let acceptedResultPrefix =
+            #"{"type":"user","message":{"content":[{"type":"tool_result","#
+        let acceptedResultSuffix =
+            #""tool_use_id":"terminal-1","content":[{"type":"text","text":"action accepted"}]}]}}"#
+        let run = AgentCLIRun(
+            executable: URL(fileURLWithPath: "/bin/sh"),
+            arguments: [
+                "-c",
+                """
+                printf '%s\n' "$1"
+                sleep 0.1
+                printf '%s\n' "$2"
+                sleep 0.1
+                printf '%s' "$3"
+                sleep 0.1
+                printf '%s\n' "$4"
+                exec /bin/sleep 30
+                """,
+                "fixture",
+                assistant,
+                wrongResult,
+                acceptedResultPrefix,
+                acceptedResultSuffix,
+            ],
+            stdin: nil,
+            workingDirectory: FileManager.default.temporaryDirectory,
+            timeout: 60,
+            completionSignal: completion,
+            completionEvidence: .stdoutJSONToolResult(
+                toolNames: ["mcp__jarvis__speak", "mcp__jarvis__stay_silent"],
+                acceptedText: "action accepted"))
+        let timings = AgentCLIPhaseTimings()
+        let task = Task { try await AgentCLIProcessRunner.run(run, timings: timings) }
+
+        try #require(await waitForFirstStdout(timings))
+        #expect(completion.signal(.terminalActionDelivered))
+        let output = try await task.value
+
+        #expect(output.stdout.contains(#""tool_use_id":"other""#))
+        #expect(output.stdout.contains(#""tool_use_id":"terminal-1""#))
+        #expect(output.termination == .completionSignal(.terminalActionDelivered))
+    }
+
+    @Test func JSONToolResultEvidenceCanArriveBeforeTheCompletionSignal() async throws {
+        let completion = AgentCLICompletionSignal()
+        let assistant = """
+        {"type":"assistant","message":{"content":[{"type":"tool_use","id":"terminal-1","name":"mcp__jarvis__stay_silent"}]}}
+        """
+        let acceptedResult = """
+        {"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"terminal-1","content":"action accepted"}]}}
+        """
+        let run = AgentCLIRun(
+            executable: URL(fileURLWithPath: "/bin/sh"),
+            arguments: [
+                "-c",
+                """
+                printf '%s\n' "$1" "$2"
+                exec /bin/sleep 30
+                """,
+                "fixture",
+                assistant,
+                acceptedResult,
+            ],
+            stdin: nil,
+            workingDirectory: FileManager.default.temporaryDirectory,
+            timeout: 60,
+            completionSignal: completion,
+            completionEvidence: .stdoutJSONToolResult(
+                toolNames: ["mcp__jarvis__stay_silent"],
+                acceptedText: "action accepted"))
+        let timings = AgentCLIPhaseTimings()
+        let task = Task { try await AgentCLIProcessRunner.run(run, timings: timings) }
+
+        try #require(await waitForFirstStdout(timings))
+        // Let the readability handler consume both lines before publishing the independent
+        // transport signal. The two latches must be order-independent.
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(completion.signal(.terminalActionDelivered))
+        let output = try await task.value
+
+        #expect(output.stdout.contains("action accepted"))
+        #expect(output.termination == .completionSignal(.terminalActionDelivered))
+    }
+
+    @Test func rejectedJSONToolResultDoesNotSatisfyCompletionEvidence() async throws {
+        let completion = AgentCLICompletionSignal()
+        let assistant = """
+        {"type":"assistant","message":{"content":[{"type":"tool_use","id":"terminal-1","name":"mcp__jarvis__speak"}]}}
+        """
+        let rejectedResult = """
+        {"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"terminal-1","content":"action accepted","is_error":true}]}}
+        """
+        let run = AgentCLIRun(
+            executable: URL(fileURLWithPath: "/bin/sh"),
+            arguments: [
+                "-c",
+                """
+                printf '%s\n' "$1"
+                sleep 0.1
+                printf '%s\n' "$2"
+                exit 7
+                """,
+                "fixture",
+                assistant,
+                rejectedResult,
+            ],
+            stdin: nil,
+            workingDirectory: FileManager.default.temporaryDirectory,
+            timeout: 60,
+            completionSignal: completion,
+            completionEvidence: .stdoutJSONToolResult(
+                toolNames: ["mcp__jarvis__speak"],
+                acceptedText: "action accepted"))
+        let timings = AgentCLIPhaseTimings()
+        let task = Task { try await AgentCLIProcessRunner.run(run, timings: timings) }
+
+        try #require(await waitForFirstStdout(timings))
+        #expect(completion.signal(.terminalActionDelivered))
+        let output = try await task.value
+
+        #expect(output.exitCode == 7)
+        #expect(output.termination == .exited)
+        #expect(output.stdout.contains(#""is_error":true"#))
+    }
+
+    @Test func acceptedJSONToolResultDrainedAfterNaturalExitRemainsTypedCompletion() async throws {
+        let assistant = """
+        {"type":"assistant","message":{"content":[{"type":"tool_use","id":"terminal-1","name":"mcp__jarvis__speak"}]}}
+        """
+        let acceptedResult = """
+        {"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"terminal-1","content":"action accepted"}]}}
+        """
+
+        // A max-turn-limited Claude process can write both events and exit before FileHandle
+        // schedules its readability callback. Repeat the short-lived shape to exercise that race.
+        for _ in 0..<20 {
+            let completion = AgentCLICompletionSignal()
+            #expect(completion.signal(.terminalActionDelivered))
+            let run = AgentCLIRun(
+                executable: URL(fileURLWithPath: "/bin/sh"),
+                arguments: [
+                    "-c",
+                    "printf '%s\\n' \"$1\" \"$2\"",
+                    "fixture",
+                    assistant,
+                    acceptedResult,
+                ],
+                stdin: nil,
+                workingDirectory: FileManager.default.temporaryDirectory,
+                timeout: 60,
+                completionSignal: completion,
+                completionEvidence: .stdoutJSONToolResult(
+                    toolNames: ["mcp__jarvis__speak"],
+                    acceptedText: "action accepted"))
+
+            let output = try await AgentCLIProcessRunner.run(run)
+
+            #expect(output.exitCode == 0)
+            #expect(output.stdout.contains("action accepted"))
+            #expect(output.termination == .completionSignal(.terminalActionDelivered))
+        }
+    }
+
+    @Test func completionSignalledBeforeLaunchStopsTheProcessPromptly() async throws {
+        let completion = AgentCLICompletionSignal()
+        #expect(completion.signal(.terminalActionDelivered))
+        #expect(!completion.signal(.terminalActionDelivered))
+        let run = AgentCLIRun(
+            executable: URL(fileURLWithPath: "/bin/sleep"),
+            arguments: ["30"],
+            stdin: nil,
+            workingDirectory: FileManager.default.temporaryDirectory,
+            timeout: 60,
+            completionSignal: completion)
+        let started = Date()
+
+        let output = try await AgentCLIProcessRunner.run(run)
+
+        #expect(Date().timeIntervalSince(started) < 8)
+        #expect(output.termination == .completionSignal(.terminalActionDelivered))
+    }
+
+    @Test func gracefulSignalExitRemainsTypedCompletion() async throws {
+        let completion = AgentCLICompletionSignal()
+        let run = AgentCLIRun(
+            executable: URL(fileURLWithPath: "/bin/sh"),
+            arguments: [
+                "-c",
+                "trap 'exit 42' TERM; printf ready; while :; do sleep 1; done",
+            ],
+            stdin: nil,
+            workingDirectory: FileManager.default.temporaryDirectory,
+            timeout: 60,
+            completionSignal: completion)
+        let timings = AgentCLIPhaseTimings()
+        let task = Task { try await AgentCLIProcessRunner.run(run, timings: timings) }
+
+        try #require(await waitForFirstStdout(timings))
+        #expect(completion.signal(.terminalActionDelivered))
+        let output = try await task.value
+
+        #expect(output.stdout == "ready")
+        #expect(output.exitCode == 42)
+        #expect(output.termination == .completionSignal(.terminalActionDelivered))
+    }
+
+    @Test func completionBeforeTimeoutRemainsAuthoritativeWhenTermIsIgnored() async throws {
+        let completion = AgentCLICompletionSignal()
+        let run = AgentCLIRun(
+            executable: URL(fileURLWithPath: "/bin/sh"),
+            arguments: [
+                "-c",
+                "trap '' TERM; printf ready; while :; do :; done",
+            ],
+            stdin: nil,
+            workingDirectory: FileManager.default.temporaryDirectory,
+            timeout: 30,
+            completionSignal: completion)
+        let timings = AgentCLIPhaseTimings()
+        let task = Task { try await AgentCLIProcessRunner.run(run, timings: timings) }
+
+        try #require(await waitForFirstStdout(timings))
+        #expect(completion.signal(.terminalActionDelivered))
+        let output = try await task.value
+
+        #expect(output.stdout == "ready")
+        #expect(output.termination == .completionSignal(.terminalActionDelivered))
+    }
+
+    @Test func taskCancellationWinsOverACompletionSignal() async {
+        let completion = AgentCLICompletionSignal()
+        let run = AgentCLIRun(
+            executable: URL(fileURLWithPath: "/bin/sleep"),
+            arguments: ["30"],
+            stdin: nil,
+            workingDirectory: FileManager.default.temporaryDirectory,
+            timeout: 60,
+            completionSignal: completion)
+        let task = Task { try await AgentCLIProcessRunner.run(run) }
+        try? await Task.sleep(for: .milliseconds(100))
+
+        task.cancel()
+        _ = completion.signal(.terminalActionDelivered)
+        let result = await task.result
+
+        guard case .failure(let error) = result else {
+            Issue.record("task cancellation became successful early completion")
+            return
+        }
+        #expect(error is CancellationError)
+    }
+
+    @Test func taskCancellationAfterCompletionWinsDuringTerminationGrace() async throws {
+        let completion = AgentCLICompletionSignal()
+        let run = AgentCLIRun(
+            executable: URL(fileURLWithPath: "/bin/sh"),
+            arguments: [
+                "-c",
+                "trap '' TERM; printf ready; while :; do :; done",
+            ],
+            stdin: nil,
+            workingDirectory: FileManager.default.temporaryDirectory,
+            timeout: 60,
+            completionSignal: completion)
+        let timings = AgentCLIPhaseTimings()
+        let task = Task { try await AgentCLIProcessRunner.run(run, timings: timings) }
+
+        try #require(await waitForFirstStdout(timings))
+        #expect(completion.signal(.terminalActionDelivered))
+        try? await Task.sleep(for: .milliseconds(100))
+        task.cancel()
+        let result = await task.result
+
+        guard case .failure(let error) = result else {
+            Issue.record("task cancellation became successful early completion")
+            return
+        }
+        #expect(error is CancellationError)
+    }
+
+    @Test func lateCompletionCannotRetypeOrSignalAFinishedProcess() async throws {
+        let completion = AgentCLICompletionSignal()
+        let run = AgentCLIRun(
+            executable: URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", "exit 7"],
+            stdin: nil,
+            workingDirectory: FileManager.default.temporaryDirectory,
+            timeout: 10,
+            completionSignal: completion)
+
+        let output = try await AgentCLIProcessRunner.run(run)
+        #expect(output.exitCode == 7)
+        #expect(output.termination == .exited)
+
+        // The runner removed its observer before returning. This records the one-shot reason for a
+        // future observer but has no pid callback left to invoke.
+        #expect(completion.signal(.terminalActionDelivered))
+        #expect(completion.reason == .terminalActionDelivered)
     }
 
     @Test func stampsPhaseTimingsInMonotonicOrder() async throws {

@@ -1,6 +1,7 @@
 # Local review tooling — never part of the wiki (markdown is the source of truth)
 wiki/*.html
 wiki/build_html.py
+issue-111-design.html
 
 # Swift build artifacts
 .build/

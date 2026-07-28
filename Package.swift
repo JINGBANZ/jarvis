@@ -9,11 +9,31 @@ let packageRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().pa
 let package = Package(
     name: "Jarvis",
     platforms: [.macOS(.v14)],
+    dependencies: [
+        // Pre-1.0 protocol dependency: exact-pin the reviewed release and commit Package.resolved.
+        .package(
+            url: "https://github.com/modelcontextprotocol/swift-sdk.git",
+            exact: "0.12.1"
+        ),
+    ],
     targets: [
         .target(name: "JarvisCore"),
         // The AppKit overlay lives in its own library target (not the executable) so it can be
         // imported by tests — see Tests/JarvisOverlayTests for the screen-capture invisibility checks.
         .target(name: "JarvisOverlay", dependencies: ["JarvisCore"]),
+        // OS-bound private IPC. The action policy and validation stay in JarvisCore; this target only
+        // carries calls between a local CLI child and that broker.
+        .target(name: "JarvisMCPBridge", dependencies: ["JarvisCore"]),
+        // The official MCP SDK and protocol adapter stay helper-only so JarvisApp does not link the
+        // protocol stack. This library target exists because the executable and tests both use it.
+        .target(
+            name: "JarvisMCPServerCore",
+            dependencies: [
+                "JarvisCore",
+                "JarvisMCPBridge",
+                .product(name: "MCP", package: "swift-sdk"),
+            ]
+        ),
         // Acoustic echo cancellation (WebRTC AEC3), the OS/native-bound edge. The C++ implementation
         // is prebuilt + statically merged with abseil into Sources/CJarvisAEC/lib/libjarvis-aec.a by scripts/build-aec.sh
         // (zero runtime dylib deps), so `swift build` compiles only the pure-C shim header and links
@@ -29,7 +49,11 @@ let package = Package(
         ),
         .executableTarget(
             name: "JarvisApp",
-            dependencies: ["JarvisCore", "JarvisOverlay", "CJarvisAEC"]
+            dependencies: ["JarvisCore", "JarvisOverlay", "JarvisMCPBridge", "CJarvisAEC"]
+        ),
+        .executableTarget(
+            name: "JarvisMCPServer",
+            dependencies: ["JarvisMCPServerCore"]
         ),
         // The dev-side CLI half of the agentic session audit (see AgenticEvaluation): renders a
         // session's traffic to a compact transcript and prints the agent task prompt. A separate,
@@ -46,6 +70,19 @@ let package = Package(
         .testTarget(
             name: "JarvisOverlayTests",
             dependencies: ["JarvisOverlay"]
+        ),
+        .testTarget(
+            name: "JarvisMCPBridgeTests",
+            dependencies: ["JarvisCore", "JarvisMCPBridge"]
+        ),
+        .testTarget(
+            name: "JarvisMCPServerCoreTests",
+            dependencies: [
+                "JarvisCore",
+                "JarvisMCPBridge",
+                "JarvisMCPServerCore",
+                .product(name: "MCP", package: "swift-sdk"),
+            ]
         ),
         // WebKit-driven end-to-end tests for the activity viewer's shipped HTML/JS. Kept separate
         // from JarvisCoreTests so the core's own test target stays Foundation-only and the

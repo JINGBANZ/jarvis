@@ -185,27 +185,62 @@ import Glibc
     @Test func codexAuthDetectedViaAuthJSON() throws {
         let home = try makeHome()
         let bin = home.appendingPathComponent("fakebin")
-        try installBinary("codex", in: bin, script: """
-            #!/bin/sh
-            if [ "$1" = "features" ] && [ "$2" = "list" ]; then
-                printf '%s\\n' 'shell_tool stable true' 'code_mode_host stable true'
-                exit 0
-            fi
-            exit 2
-            """)
+        try installBinary("codex", in: bin)
         try write("{}", to: home.appendingPathComponent(".codex/auth.json"))
         let d = detector(home: home, pathVariable: bin.path, authStatusTimeout: 10)
         let cli = d.detect(.codexCLI)
         #expect(cli?.authenticationStatus == .signedIn)
-        #expect(cli?.supportedFeatures == ["shell_tool", "code_mode_host"])
     }
 
-    @Test func codexFeatureProbeFailureFallsBackToNoGuessedFlags() throws {
+    @Test func codexFeatureProbeSelectsEnabledNonRemovedSafeNames() throws {
         let home = try makeHome()
         let bin = home.appendingPathComponent("fakebin")
-        try installBinary("codex", in: bin)
-        let d = detector(home: home, pathVariable: bin.path)
-        #expect(d.detect(.codexCLI)?.supportedFeatures == [])
+        try installBinary("codex", in: bin, script: """
+            #!/bin/sh
+            if [ "$1" = "features" ] && [ "$2" = "list" ]; then
+                printf '%s\\n' \
+                    'shell_tool stable true' \
+                    'future-surface under development true' \
+                    'retired_surface removed true' \
+                    'disabled_surface stable false'
+                exit 0
+            fi
+            if [ "$1" = "mcp" ] && [ "$2" = "--help" ]; then
+                printf '%s\\n' 'Manage external MCP servers'
+                exit 0
+            fi
+            exit 2
+            """)
+        let d = detector(home: home, pathVariable: bin.path, authStatusTimeout: 10)
+
+        let cli = d.detect(.codexCLI)
+
+        #expect(cli?.codexFeaturesToDisable == ["shell_tool", "future-surface"])
+        #expect(cli?.supportsMCP == true)
+    }
+
+    @Test func malformedCodexFeatureOutputFallsBackToPromptOnly() throws {
+        let home = try makeHome()
+        let bin = home.appendingPathComponent("fakebin")
+        try installBinary("codex", in: bin, script: """
+            #!/bin/sh
+            if [ "$1" = "features" ] && [ "$2" = "list" ]; then
+                printf '%s\\n' 'shell_tool stable true' 'unsafe/name stable true'
+                exit 0
+            fi
+            if [ "$1" = "mcp" ] && [ "$2" = "--help" ]; then
+                printf '%s\\n' 'Manage external MCP servers'
+                exit 0
+            fi
+            exit 2
+            """)
+        let d = detector(home: home, pathVariable: bin.path, authStatusTimeout: 10)
+
+        let cli = d.detect(.codexCLI)
+
+        #expect(cli?.codexFeaturesToDisable == [])
+        // MCP capability is covered independently. This fixture deliberately gives every child
+        // probe the short watchdog, so loaded parallel runners may also time out the help process.
     }
 
     @Test func codexFeatureProbeIsBounded() throws {
@@ -213,10 +248,228 @@ import Glibc
         let bin = home.appendingPathComponent("fakebin")
         try installBinary("codex", in: bin, script: """
             #!/bin/sh
-            exec sleep 1
+            if [ "$1" = "features" ] && [ "$2" = "list" ]; then
+                exec /bin/sleep 5
+            fi
+            if [ "$1" = "mcp" ] && [ "$2" = "--help" ]; then
+                printf '%s\\n' 'Manage external MCP servers'
+                exit 0
+            fi
+            exit 2
             """)
-        let d = detector(home: home, pathVariable: bin.path, authStatusTimeout: 0.01)
-        #expect(d.detect(.codexCLI)?.supportedFeatures == [])
+        // Leave enough room for the independent MCP help process to start under a loaded test
+        // runner; only the deliberately stalled feature process should hit this watchdog.
+        let d = detector(home: home, pathVariable: bin.path, authStatusTimeout: 1)
+
+        let cli = d.detect(.codexCLI)
+
+        #expect(cli?.codexFeaturesToDisable == [])
+        #expect(cli?.supportsMCP == true)
+    }
+
+    @Test func oversizedCodexFeatureOutputFallsBackToPromptOnly() throws {
+        let home = try makeHome()
+        let bin = home.appendingPathComponent("fakebin")
+        try installBinary("codex", in: bin, script: """
+            #!/bin/sh
+            if [ "$1" = "features" ] && [ "$2" = "list" ]; then
+                i=0
+                while [ "$i" -lt 6000 ]; do
+                    printf 'feature_%s stable true\\n' "$i"
+                    i=$((i + 1))
+                done
+                exit 0
+            fi
+            if [ "$1" = "mcp" ] && [ "$2" = "--help" ]; then
+                printf '%s\\n' 'Manage external MCP servers'
+                exit 0
+            fi
+            exit 2
+            """)
+        let d = detector(home: home, pathVariable: bin.path, authStatusTimeout: 10)
+
+        #expect(d.detect(.codexCLI)?.codexFeaturesToDisable == [])
+    }
+
+    @Test func installedHelpOutputProvesBasicMCPAvailability() throws {
+        let home = try makeHome()
+        let bin = home.appendingPathComponent("fakebin")
+        try installBinary("claude", in: bin, script: """
+            #!/bin/sh
+            if [ "$1" = "--max-turns" ] && [ "$2" = "jarvis-invalid-turn-count" ]; then
+                printf '%s\\n' "error: option '--max-turns <turns>' argument 'jarvis-invalid-turn-count' is invalid. must be a number" >&2
+                exit 1
+            fi
+            if [ "$1" = "--help" ]; then
+                printf '%s\\n' '  --mcp-config <file>' '  --strict-mcp-config'
+                exit 0
+            fi
+            printf '%s\\n' '{"loggedIn":true}'
+            """)
+        try installBinary("codex", in: bin, script: """
+            #!/bin/sh
+            if [ "$1" = "mcp" ] && [ "$2" = "--help" ]; then
+                printf '%s\\n' 'Manage external MCP servers'
+                exit 0
+            fi
+            exit 2
+            """)
+        let d = detector(home: home, pathVariable: bin.path, authStatusTimeout: 10)
+
+        #expect(d.detect(.claudeCode)?.supportsMCP == true)
+        #expect(d.detect(.codexCLI)?.supportsMCP == true)
+    }
+
+    @Test func capabilityProbeDrainsOutputWhileTheCLIIsRunning() throws {
+        let home = try makeHome()
+        let bin = home.appendingPathComponent("fakebin")
+        try installBinary("claude", in: bin, script: """
+            #!/bin/sh
+            if [ "$1" = "--max-turns" ] && [ "$2" = "jarvis-invalid-turn-count" ]; then
+                printf '%s\\n' "error: option '--max-turns <turns>' argument 'jarvis-invalid-turn-count' is invalid. must be a number" >&2
+                exit 1
+            fi
+            if [ "$1" = "--help" ]; then
+                printf '%s\\n' '  --mcp-config <file>' '  --strict-mcp-config'
+                i=0
+                while [ "$i" -lt 6000 ]; do
+                    printf '%s\\n' 'bounded probe padding that must not fill and stall the pipe'
+                    i=$((i + 1))
+                done
+                exit 0
+            fi
+            printf '%s\\n' '{"loggedIn":true}'
+            """)
+        let d = detector(home: home, pathVariable: bin.path, authStatusTimeout: 5)
+
+        #expect(d.detect(.claudeCode)?.supportsMCP == true)
+    }
+
+    @Test func capabilityProbeStopsDrainingInheritedContinuousOutput() throws {
+        let home = try makeHome()
+        let bin = home.appendingPathComponent("fakebin")
+        let childPID = home.appendingPathComponent("probe-child.pid")
+        try installBinary("claude", in: bin, script: """
+            #!/bin/sh
+            if [ "$1" = "--max-turns" ] && [ "$2" = "jarvis-invalid-turn-count" ]; then
+                printf '%s\\n' "error: option '--max-turns <turns>' argument 'jarvis-invalid-turn-count' is invalid. must be a number" >&2
+                exit 1
+            fi
+            if [ "$1" = "--help" ]; then
+                printf '%s\\n' '  --mcp-config <file>' '  --strict-mcp-config'
+                trap '' HUP
+                yes 'inherited probe output must not keep detection alive' &
+                writer=$!
+                printf '%s\\n' "$writer" > "$HOME/probe-child.pid"
+                (sleep 10; kill "$writer" 2>/dev/null) >/dev/null 2>&1 &
+                exit 0
+            fi
+            printf '%s\\n' '{"loggedIn":true}'
+            """)
+        let d = detector(home: home, pathVariable: bin.path, authStatusTimeout: 20)
+
+        let started = Date()
+        let cli = d.detect(.claudeCode)
+        let elapsed = Date().timeIntervalSince(started)
+        defer {
+            if let contents = try? String(contentsOf: childPID, encoding: .utf8),
+               let pid = pid_t(contents.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                kill(pid, SIGKILL)
+            }
+        }
+
+        #expect(cli?.supportsMCP == true)
+        #expect(elapsed < 8,
+                "the capability probe must stop its drain when the parent CLI exits")
+    }
+
+    @Test func codexMCPAvailabilityDoesNotDependOnFeatureRegistry() throws {
+        let home = try makeHome()
+        let bin = home.appendingPathComponent("fakebin")
+        try installBinary("codex", in: bin, script: """
+            #!/bin/sh
+            if [ "$1" = "mcp" ] && [ "$2" = "--help" ]; then
+                printf '%s\\n' 'Manage external MCP servers'
+                exit 0
+            fi
+            exit 2
+            """)
+        let d = detector(home: home, pathVariable: bin.path, authStatusTimeout: 10)
+
+        let cli = d.detect(.codexCLI)
+        #expect(cli?.supportsMCP == true)
+        #expect(cli?.codexFeaturesToDisable == [])
+    }
+
+    @Test func unfamiliarHelpOutputDoesNotProveMCPAvailability() throws {
+        let home = try makeHome()
+        let bin = home.appendingPathComponent("fakebin")
+        try installBinary("claude", in: bin, script: """
+            #!/bin/sh
+            if [ "$1" = "--max-turns" ] && [ "$2" = "jarvis-invalid-turn-count" ]; then
+                printf '%s\\n' "error: option '--max-turns <turns>' argument 'jarvis-invalid-turn-count' is invalid. must be a number" >&2
+                exit 1
+            fi
+            if [ "$1" = "--help" ]; then
+                printf '%s\\n' 'old help'
+                exit 0
+            fi
+            printf '%s\\n' '{"loggedIn":true}'
+            """)
+        let d = detector(home: home, pathVariable: bin.path, authStatusTimeout: 10)
+        #expect(d.detect(.claudeCode)?.supportsMCP == false)
+    }
+
+    @Test func claudeMCPAvailabilityRequiresTheTurnCapFlag() throws {
+        let home = try makeHome()
+        let bin = home.appendingPathComponent("fakebin")
+        try installBinary("claude", in: bin, script: """
+            #!/bin/sh
+            if [ "$3" = "--help" ] || [ "$1" = "--help" ]; then
+                printf '%s\\n' '  --mcp-config <file>' '  --strict-mcp-config'
+                exit 0
+            fi
+            printf '%s\\n' '{"loggedIn":true}'
+            """)
+        let d = detector(home: home, pathVariable: bin.path, authStatusTimeout: 10)
+
+        #expect(d.detect(.claudeCode)?.supportsMCP == false)
+    }
+
+    @Test func claudeMCPAvailabilityRejectsAnUnknownTurnCapOptionError() throws {
+        let home = try makeHome()
+        let bin = home.appendingPathComponent("fakebin")
+        try installBinary("claude", in: bin, script: """
+            #!/bin/sh
+            if [ "$1" = "--max-turns" ]; then
+                printf '%s\\n' "error: unknown option '--max-turns' before 'jarvis-invalid-turn-count'" >&2
+                exit 1
+            fi
+            if [ "$1" = "--help" ]; then
+                printf '%s\\n' '  --mcp-config <file>' '  --strict-mcp-config'
+                exit 0
+            fi
+            printf '%s\\n' '{"loggedIn":true}'
+            """)
+        let d = detector(home: home, pathVariable: bin.path, authStatusTimeout: 10)
+
+        #expect(d.detect(.claudeCode)?.supportsMCP == false)
+    }
+
+    @Test func claudeMCPAvailabilityRejectsAParserProbeKilledByTheWatchdog() throws {
+        let home = try makeHome()
+        let bin = home.appendingPathComponent("fakebin")
+        try installBinary("claude", in: bin, script: """
+            #!/bin/sh
+            if [ "$1" = "--max-turns" ]; then
+                printf '%s\\n' "error: option '--max-turns <turns>' argument 'jarvis-invalid-turn-count' is invalid. must be a number" >&2
+                exec /bin/sleep 5
+            fi
+            printf '%s\\n' '{"loggedIn":true}'
+            """)
+        let d = detector(home: home, pathVariable: bin.path, authStatusTimeout: 0.05)
+
+        #expect(d.detect(.claudeCode)?.supportsMCP == false)
     }
 
     @Test func missingBinaryDetectsNothing() throws {
@@ -273,6 +526,6 @@ import Glibc
         #expect(result.map(\.provider) == [.codexCLI])
         #expect(fm.fileExists(atPath: codexProbe.path))
         #expect(!fm.fileExists(atPath: claudeProbe.path))
-        #expect(try String(contentsOf: codexProbe, encoding: .utf8) == "probe\n")
+        #expect(try String(contentsOf: codexProbe, encoding: .utf8) == "probe\nprobe\n")
     }
 }

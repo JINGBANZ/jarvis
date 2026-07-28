@@ -50,6 +50,7 @@ private final class FailingScreen: ScreenCapturing, @unchecked Sendable {
         #expect(screen.captureCount == 1)                              // the DRIVER captured, not the brain
         #expect(brain.calls.count == 1)                               // ONE trip — no capture_screen round trip
         #expect(brain.toolChoices.last == .force("speak"))            // forced to reply
+        #expect(brain.toolNames == [[speakTool.name]])                 // no unusable actions exposed
         #expect(brain.calls[0].contains { $0.imageBase64JPEG != nil })// the screenshot rode along in the first request
         #expect(overlay.rendered == [["Use a hash map to remember what you've seen."]])
         // The "simulate a message as the user" half: the manual-hint prompt AND the live transcript
@@ -100,6 +101,24 @@ private final class FailingScreen: ScreenCapturing, @unchecked Sendable {
         #expect(brain.toolChoices.last == .force("speak"))
         #expect(!brain.calls[0].contains { $0.imageBase64JPEG != nil })// no image, capture failed
         #expect(overlay.rendered == [["Talk me through your current approach."]])
+    }
+
+    @Test func manualHintRejectsStaySilentEvenWhenTheProviderIgnoresTheForce() async {
+        let brain = ScriptedBrain(script: [
+            .init(toolCalls: [.staySilent(callId: "ignored-force")]),
+        ])
+        let overlay = FakeOverlay()
+        let (driver, transcript) = makeDriver(
+            brain: brain,
+            screen: FakeScreen(),
+            overlay: overlay,
+            clock: ManualClock(now: 0))
+        transcript.append(.init(speaker: .me, text: "I need an explicit hint", at: 0))
+
+        #expect(await driver.handleTrigger(.manualHint) == .brainError)
+        #expect(overlay.rendered.isEmpty)
+        #expect(brain.toolChoices.count == BrainRouteSession.failuresPerTarget)
+        #expect(brain.toolChoices.allSatisfy { $0 == .force(speakTool.name) })
     }
 
     /// Stop firing *while the manual-hint screenshot is in flight* must abort before emitting. The

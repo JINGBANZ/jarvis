@@ -125,12 +125,30 @@ public final class OverlayCaptionPanel: NSObject, OverlayRendering, OverlayCapti
     /// The brain already split the tip into lines; we just trim and drop any empties (carrying each
     /// line's display time along with it so the two stay aligned) before showing.
     public nonisolated func render(_ lines: [String], perLineSeconds: [TimeInterval]) {
+        Task { @MainActor in self.renderImmediately(lines, perLineSeconds: perLineSeconds) }
+    }
+
+    /// Main-actor entrypoint used by the per-session terminal delivery boundary. Unlike the protocol
+    /// witness it does not enqueue another unowned task, so Stop and rendering have one total order.
+    public func renderImmediately(_ lines: [String], perLineSeconds: [TimeInterval]) {
         let cleaned = zip(lines, perLineSeconds)
             .map { ($0.0.trimmingCharacters(in: .whitespacesAndNewlines), $0.1) }
             .filter { !$0.0.isEmpty }
         guard !cleaned.isEmpty else { return }
         let tip = Tip(lines: cleaned.map(\.0), seconds: cleaned.map(\.1))
-        Task { @MainActor in self.show(tip) }
+        show(tip)
+    }
+
+    /// End a coaching session without disturbing a Settings preview. Any active or queued coaching
+    /// text is discarded, and no timer from the old session can resume after the next Start.
+    public func endSession() {
+        tickWorkItem?.cancel()
+        tickWorkItem = nil
+        queue.removeAll()
+        active = nil
+        guard !isPreviewing else { return }
+        label.stringValue = ""
+        hide()
     }
 
     private func show(_ tip: Tip) {

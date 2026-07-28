@@ -6,12 +6,19 @@ import Testing
 final class ScriptedBrain: BrainClient, @unchecked Sendable {
     private(set) var calls: [[ChatMessage]] = []
     private(set) var toolChoices: [ToolChoice] = []
+    private(set) var toolNames: [[String]] = []
     let script: [BrainResponse]
-    init(script: [BrainResponse]) { self.script = script }
+    let fillsMissingRawCalls: Bool
+    init(script: [BrainResponse], fillsMissingRawCalls: Bool = true) {
+        self.script = script
+        self.fillsMissingRawCalls = fillsMissingRawCalls
+    }
     func respond(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice) async throws -> BrainResponse {
         calls.append(messages)
         toolChoices.append(toolChoice)
-        return script[min(calls.count - 1, script.count - 1)]
+        toolNames.append(tools.map(\.name))
+        let response = script[min(calls.count - 1, script.count - 1)]
+        return fillsMissingRawCalls ? response.withFixtureRawCalls() : response
     }
 }
 
@@ -26,7 +33,48 @@ final class ScriptedThrowBrain: BrainClient, @unchecked Sendable {
         calls.append(messages)
         let r = script[min(idx, script.count - 1)]; idx += 1
         guard let r else { throw NSError(domain: "test", code: 500) }
-        return r
+        return r.withFixtureRawCalls()
+    }
+}
+
+private extension BrainResponse {
+    /// Most driver fixtures care about coaching behavior rather than provider decoding. Real native
+    /// clients always return both representations, so synthesize the matching wire form when a
+    /// fixture omits it; tests that supply a raw call can still exercise mismatch rejection.
+    func withFixtureRawCalls() -> BrainResponse {
+        guard rawToolCalls.isEmpty, !toolCalls.isEmpty else { return self }
+        return BrainResponse(
+            toolCalls: toolCalls,
+            rawToolCalls: toolCalls.map(\.fixtureRawCall),
+            incompleteReason: incompleteReason,
+            outputText: outputText,
+            outputItemsJSON: outputItemsJSON,
+            actionDelivery: actionDelivery)
+    }
+}
+
+private extension ToolInvocation {
+    var fixtureRawCall: RawToolCall {
+        switch self {
+        case .captureScreen(let callID):
+            return RawToolCall(
+                id: callID,
+                name: captureScreenTool.name,
+                argumentsJSON: "{}")
+        case .speak(let callID, let lines):
+            let data = try? JSONSerialization.data(
+                withJSONObject: ["lines": lines],
+                options: [.sortedKeys])
+            return RawToolCall(
+                id: callID,
+                name: speakTool.name,
+                argumentsJSON: data.map { String(decoding: $0, as: UTF8.self) } ?? "{}")
+        case .staySilent(let callID):
+            return RawToolCall(
+                id: callID,
+                name: staySilentTool.name,
+                argumentsJSON: "{}")
+        }
     }
 }
 
@@ -179,6 +227,10 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             for: "What's the complexity of that nested loop?", config: .default)
         #expect(overlay.renderedSeconds == [[expectedSeconds]])
         #expect(brain.calls.count == 2)
+        #expect(brain.toolNames == [
+            [captureScreenTool.name, speakTool.name, staySilentTool.name],
+            [speakTool.name, staySilentTool.name],
+        ])
         // Second brain call must replay the model's own capture call, the tool-result answering it,
         // and the screenshot image — the client-managed tool loop (no server-side conversation).
         #expect(brain.calls[1].contains { $0.role == .assistant && $0.toolCalls?.first?.name == "capture_screen" })
@@ -373,17 +425,57 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(brain.calls.count == 1)          // and never looped back to the brain with the image
     }
 
-    /// A `speak` with an empty `lines` array (the decode fallback, or a model returning []) is passed
-    /// straight through: the real overlay no-ops on it, but the turn still reports `.spoke`. Pin this
-    /// so the empty-speak contract stays intentional, not incidental.
-    @Test func emptySpeakLinesStillReportsSpoke() async {
+    /// Empty speech is an invalid terminal action: it never renders or commits a spoken turn.
+    @Test func emptySpeakLinesAreRejected() async {
         let clock = ManualClock(now: 0)
         let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s", lines: [])])])
         let overlay = FakeOverlay()
         let (driver, transcript) = makeDriver(brain: brain, overlay: overlay, clock: clock)
         transcript.append(.init(speaker: .me, text: "let me think this through", at: 0))
-        #expect(await driver.handleTrigger(.turnEnd) == .spoke)
-        #expect(overlay.rendered == [[]])
+        #expect(await driver.handleTrigger(.turnEnd) == .brainError)
+        #expect(overlay.rendered.isEmpty)
+        #expect(brain.calls.count == BrainRouteSession.failuresPerTarget)
+    }
+
+    @Test func mismatchedRawAndParsedCallsAreRejected() async {
+        let brain = ScriptedBrain(script: [
+            .init(
+                toolCalls: [.speak(callId: "parsed", lines: ["Never render this."])],
+                rawToolCalls: [
+                    RawToolCall(
+                        id: "raw",
+                        name: staySilentTool.name,
+                        argumentsJSON: "{}"),
+                ]),
+        ])
+        let overlay = FakeOverlay()
+        let (driver, transcript) = makeDriver(
+            brain: brain,
+            overlay: overlay,
+            clock: ManualClock())
+        transcript.append(.init(speaker: .me, text: "give me a hint", at: 0))
+
+        #expect(await driver.handleTrigger(.turnEnd) == .brainError)
+        #expect(brain.calls.count == BrainRouteSession.failuresPerTarget)
+        #expect(overlay.rendered.isEmpty)
+    }
+
+    @Test func parsedCallWithoutItsRawProviderCallIsRejected() async {
+        let brain = ScriptedBrain(
+            script: [
+                .init(toolCalls: [.speak(callId: "parsed", lines: ["Never render this."])]),
+            ],
+            fillsMissingRawCalls: false)
+        let overlay = FakeOverlay()
+        let (driver, transcript) = makeDriver(
+            brain: brain,
+            overlay: overlay,
+            clock: ManualClock())
+        transcript.append(.init(speaker: .me, text: "give me a hint", at: 0))
+
+        #expect(await driver.handleTrigger(.turnEnd) == .brainError)
+        #expect(brain.calls.count == BrainRouteSession.failuresPerTarget)
+        #expect(overlay.rendered.isEmpty)
     }
 
     /// The model's explicit stay-quiet decision is the `stay_silent` TOOL (tool_choice is `required`,
@@ -1563,7 +1655,10 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
                   rawToolCalls: [RawToolCall(id: "c1", name: "capture_screen", argumentsJSON: "{}")],
                   outputItemsJSON: outputItems),
             .init(toolCalls: [.speak(callId: "s1", lines: ["tip"])],
-                  rawToolCalls: [RawToolCall(id: "s1", name: "speak", argumentsJSON: "{}")]),
+                  rawToolCalls: [RawToolCall(
+                    id: "s1",
+                    name: "speak",
+                    argumentsJSON: #"{"lines":["tip"]}"#)]),
             .init(toolCalls: [.staySilent(callId: "quiet")]),
         ])
         let (driver, transcript) = makeDriver(brain: brain, clock: ManualClock(now: 0))
@@ -1597,11 +1692,17 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             .init(toolCalls: [.captureScreen(callId: "c1")],
                   rawToolCalls: [RawToolCall(id: "c1", name: "capture_screen", argumentsJSON: "{}")]),
             .init(toolCalls: [.speak(callId: "s1", lines: ["tip one"])],
-                  rawToolCalls: [RawToolCall(id: "s1", name: "speak", argumentsJSON: "{}")]),
+                  rawToolCalls: [RawToolCall(
+                    id: "s1",
+                    name: "speak",
+                    argumentsJSON: #"{"lines":["tip one"]}"#)]),
             .init(toolCalls: [.captureScreen(callId: "c2")],
                   rawToolCalls: [RawToolCall(id: "c2", name: "capture_screen", argumentsJSON: "{}")]),
             .init(toolCalls: [.speak(callId: "s2", lines: ["tip two"])],
-                  rawToolCalls: [RawToolCall(id: "s2", name: "speak", argumentsJSON: "{}")]),
+                  rawToolCalls: [RawToolCall(
+                    id: "s2",
+                    name: "speak",
+                    argumentsJSON: #"{"lines":["tip two"]}"#)]),
             .init(toolCalls: [.staySilent(callId: "quiet")]),
         ])
         let (driver, transcript) = makeDriver(brain: brain, clock: clock)
@@ -1705,33 +1806,45 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(overlay.rendered.isEmpty)
     }
 
-    /// A model that repeatedly exhausts its tool loop eventually exhausts the route target.
-    @Test func repeatedToolLoopExhaustionExhaustsTheOnlyTarget() async {
+    /// A second capture is a failed attempt. Repeating that violation eventually exhausts the route.
+    @Test func repeatedSecondCaptureViolationsExhaustTheOnlyTarget() async {
         let clock = ManualClock(now: 0)
         let brain = ScriptedBrain(script: [
             .init(toolCalls: [.captureScreen(callId: "c")],
                   rawToolCalls: [RawToolCall(id: "c", name: "capture_screen", argumentsJSON: "{}")]),
-        ])  // ScriptedBrain repeats the last response, so every iteration captures again
+        ])  // ScriptedBrain repeats the call, so each attempt asks for an invalid second capture.
+        let screen = FakeScreen()
         let overlay = FakeOverlay()
-        let (driver, transcript) = makeDriver(brain: brain, overlay: overlay, clock: clock)
+        let (driver, transcript) = makeDriver(
+            brain: brain,
+            screen: screen,
+            overlay: overlay,
+            clock: clock)
         transcript.append(.init(speaker: .me, text: "look at this code", at: 0))
         #expect(await driver.handleTrigger(.turnEnd) == .brainError)
-        #expect(brain.calls.count == 12)
+        #expect(brain.calls.count == 6)
+        #expect(screen.captureCount == 3)
         #expect(overlay.rendered.isEmpty)
     }
 
-    @Test func freshAttemptCarriesOnlyTheLatestScreenObservation() async {
-        let captures = (0..<8).map { index in
-            BrainResponse(
-                toolCalls: [.captureScreen(callId: "capture-\(index)")],
+    @Test func freshAttemptCarriesTheSingleCompletedScreenObservation() async {
+        let brain = ScriptedBrain(script: [
+            .init(
+                toolCalls: [.captureScreen(callId: "capture-1")],
                 rawToolCalls: [
                     RawToolCall(
-                        id: "capture-\(index)",
+                        id: "capture-1",
                         name: "capture_screen",
                         argumentsJSON: "{}"),
-                ])
-        }
-        let brain = ScriptedBrain(script: captures + [
+                ]),
+            .init(
+                toolCalls: [.captureScreen(callId: "capture-2")],
+                rawToolCalls: [
+                    RawToolCall(
+                        id: "capture-2",
+                        name: "capture_screen",
+                        argumentsJSON: "{}"),
+                ]),
             .init(toolCalls: [.speak(callId: "done", lines: ["bounded context"])]),
         ])
         let screen = FakeScreen(recognizedText: "latest visible code")
@@ -1744,9 +1857,10 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         transcript.append(.init(speaker: .me, text: "inspect this code", at: 0))
 
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
-        #expect(brain.calls.count == 9)
-        #expect(brain.calls[8].count(where: { $0.imageBase64JPEG != nil }) == 1)
-        #expect(brain.calls[8].count(where: {
+        #expect(brain.calls.count == 3)
+        #expect(screen.captureCount == 1)
+        #expect(brain.calls[2].count(where: { $0.imageBase64JPEG != nil }) == 1)
+        #expect(brain.calls[2].count(where: {
             ($0.text ?? "").contains("latest visible code")
         }) == 1)
         #expect(overlay.rendered == [["bounded context"]])
@@ -2065,6 +2179,7 @@ private final class TwoFailuresThenGatedSuccessBrain: BrainClient, @unchecked Se
         }
         await gate.enter()
         return BrainResponse(toolCalls: [.staySilent(callId: "success")])
+            .withFixtureRawCalls()
     }
 }
 
@@ -2159,7 +2274,7 @@ final class GatedBrain: BrainClient, @unchecked Sendable {
     func respond(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice) async throws -> BrainResponse {
         let index = record()
         await gate.enter()
-        return script[min(index, script.count - 1)]
+        return script[min(index, script.count - 1)].withFixtureRawCalls()
     }
 }
 

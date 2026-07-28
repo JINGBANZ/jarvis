@@ -215,12 +215,21 @@ public final class ActivityLog: @unchecked Sendable {
     /// When a screen-view event carries a base64 JPEG, the `.jpg` is written **first** (owner-only)
     /// and then the `.jsonl` line referencing it — so a persisted reference always points at a file
     /// that exists.
-    public func record(_ event: Event, at date: Date = Date()) {
+    public func record(
+        _ event: Event,
+        at date: Date = Date(),
+        sessionDirectory expectedDirectory: URL? = nil
+    ) {
         let rendered = event.rendered
         queue.async { [self] in
             // Teardown can race a coaching task that is finishing cancellation. Once the typed end
             // marker reaches this serial queue, it is the final event for this session by definition.
-            guard let dir, !sessionHasEnded else { return }
+            // A per-Start expected directory also prevents an old task whose enqueue itself lost the
+            // Stop → Start race from writing into the replacement session.
+            guard let dir, !sessionHasEnded,
+                  expectedDirectory == nil || expectedDirectory == dir else {
+                return
+            }
             let shotName = rendered.imageBase64.flatMap { saveShot($0, in: dir) }
             let entry = Entry(time: df.string(from: date), message: rendered.message,
                               imageFile: shotName)

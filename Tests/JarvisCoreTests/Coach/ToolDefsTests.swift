@@ -21,7 +21,7 @@ import Testing
 
     @Test func coachToolsDescribeCaptureAndOverlayContracts() {
         #expect(coachSystemPrompt.contains("capture_screen"))
-        #expect(captureScreenTool.description.contains("one fresh result satisfies that request"))
+        #expect(captureScreenTool.description.contains("at most once per coaching attempt"))
         #expect(speakTool.description.contains("up to 3 short standalone overlay lines"))
         #expect(staySilentTool.description.contains("default for unsolicited turns"))
     }
@@ -45,9 +45,9 @@ import Testing
 
     @Test func coachPromptTreatsFreshCaptureAsSatisfyingScreenGate() {
         #expect(coachSystemPrompt.contains("A fresh screenshot or OCR in the current input"))
-        #expect(coachSystemPrompt.contains("A fresh capture result satisfies the screen gate"))
-        #expect(coachSystemPrompt.contains("do not capture again"))
-        #expect(coachSystemPrompt.contains("the same request"))
+        #expect(coachSystemPrompt.contains("single capture opportunity"))
+        #expect(coachSystemPrompt.contains("never call capture_screen again"))
+        #expect(coachSystemPrompt.contains("successful or failed"))
     }
 
     @Test func coachPromptRequiresOneActionPerModelResponse() {

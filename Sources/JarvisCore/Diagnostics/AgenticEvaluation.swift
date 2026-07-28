@@ -200,7 +200,7 @@ public enum AgenticEvaluation {
 
         ## Issues and errors
         Transport errors, non-2xx responses, truncated runs (status=incomplete), tool-loop anomalies \
-        (repeated capture_screen, exhausted loops), and any contradiction between the code/instructions \
+        (a second capture_screen in one attempt), and any contradiction between the code/instructions \
         and the model's behavior.
 
         ## Coaching quality

@@ -7,8 +7,8 @@ import Glibc
 
 /// Finds installed `claude` / `codex` CLIs and checks the local facts Jarvis needs before invoking
 /// them. Binary discovery stays a pure filesystem probe. Bounded, non-billing local commands read
-/// Claude's authoritative auth status and Codex's advertised feature names; Codex's auth file marker
-/// remains authoritative.
+/// Claude's authoritative auth status, each CLI's basic MCP help, and Codex's enabled feature
+/// registry; Codex's auth file marker remains authoritative.
 public struct AgentCLIDetector: Sendable {
     private let home: URL
     private let pathVariable: String?
@@ -70,11 +70,15 @@ public struct AgentCLIDetector: Sendable {
     public func detect(_ provider: BrainProvider) -> DetectedAgentCLI? {
         guard let name = provider.cliExecutableName else { return nil }
         guard let url = firstExecutable(named: name) else { return nil }
+        let codexFeaturesToDisable = provider == .codexCLI
+            ? codexFeaturesToDisable(executable: url)
+            : []
         return DetectedAgentCLI(
             provider: provider,
             executableURL: url,
             authenticationStatus: authenticationStatus(provider, executable: url),
-            supportedFeatures: provider == .codexCLI ? codexSupportedFeatures(executable: url) : []
+            codexFeaturesToDisable: codexFeaturesToDisable,
+            supportsMCP: supportsMCP(provider, executable: url)
         )
     }
 
@@ -162,35 +166,209 @@ public struct AgentCLIDetector: Sendable {
         return status.loggedIn ? .signedIn : .signedOut
     }
 
-    /// `--disable <feature>` rejects unknown names. Probe the installed binary's compiled feature
-    /// registry so Jarvis passes only names that installation advertises. Failure falls back to no
-    /// feature flags; the direct-response prompt, isolated project root, read-only sandbox, and short
-    /// timeout still bound the call without making an older or renamed CLI unusable.
-    private func codexSupportedFeatures(executable: URL) -> Set<String> {
+    /// Codex has no global built-in-tool allowlist. Quiesce every feature this exact installation
+    /// reports as enabled unless the registry marks it removed; this makes newly advertised surfaces
+    /// default off without maintaining a version-specific feature-name list. Any probe or parse
+    /// failure returns an empty set, retaining the prompt/read-only/ephemeral restrictions and
+    /// acknowledged-terminal completion rather than guessing.
+    private func codexFeaturesToDisable(executable: URL) -> Set<String> {
         guard let output = runProbe(executable: executable, arguments: ["features", "list"]),
               output.status == 0,
+              output.data.count < Self.maxProbeOutputBytes,
               let text = String(data: output.data, encoding: .utf8)
         else { return [] }
-        return Set(text.split(separator: "\n").compactMap { line in
-            line.split(whereSeparator: \.isWhitespace).first.map(String.init)
-        })
+
+        var result = Set<String>()
+        for line in text.split(whereSeparator: \.isNewline) {
+            let fields = line.split(whereSeparator: \.isWhitespace)
+            guard fields.count >= 3,
+                  Self.isSafeCodexFeatureName(fields[0]),
+                  let enabled = Self.codexFeatureState(fields.last!)
+            else { return [] }
+
+            let stage = fields.dropFirst().dropLast().joined(separator: " ")
+            guard !stage.isEmpty else { return [] }
+            if enabled && stage != "removed" {
+                result.insert(String(fields[0]))
+            }
+        }
+        return result
+    }
+
+    private static func codexFeatureState(_ value: Substring) -> Bool? {
+        switch value {
+        case "true": true
+        case "false": false
+        default: nil
+        }
+    }
+
+    /// Feature names are passed as a separate argv value, but accepting only the CLI's current ASCII
+    /// identifier shape also prevents malformed help text from becoming invocation configuration.
+    private static func isSafeCodexFeatureName(_ value: Substring) -> Bool {
+        let bytes = value.utf8
+        guard let first = bytes.first, isASCIIAlphanumeric(first) else { return false }
+        return bytes.dropFirst().allSatisfy {
+            isASCIIAlphanumeric($0) || $0 == 95 || $0 == 45
+        }
+    }
+
+    private static func isASCIIAlphanumeric(_ byte: UInt8) -> Bool {
+        (97...122).contains(byte) || (65...90).contains(byte) || (48...57).contains(byte)
+    }
+
+    /// Capability comes from the installed binary, never its version string. Claude's help path
+    /// ignores unknown options, so a separate invalid-value probe proves that its max-turn parser
+    /// owns the required flag without making a model request.
+    private func supportsMCP(
+        _ provider: BrainProvider,
+        executable: URL
+    ) -> Bool {
+        let arguments: [String]
+        switch provider {
+        case .claudeCode:
+            guard supportsClaudeMaxTurns(executable: executable) else { return false }
+            arguments = ["--help"]
+        case .codexCLI:
+            arguments = ["mcp", "--help"]
+        case .openAI:
+            return false
+        }
+        guard let output = runProbe(executable: executable, arguments: arguments),
+              output.status == 0,
+              let text = String(data: output.data, encoding: .utf8) else {
+            return false
+        }
+        switch provider {
+        case .claudeCode:
+            return text.contains("--mcp-config") && text.contains("--strict-mcp-config")
+        case .codexCLI:
+            return text.localizedCaseInsensitiveContains("mcp")
+        case .openAI:
+            return false
+        }
+    }
+
+    private func supportsClaudeMaxTurns(executable: URL) -> Bool {
+        let invalidValue = "jarvis-invalid-turn-count"
+        guard let output = runProbe(
+            executable: executable,
+            arguments: ["--max-turns", invalidValue, "--help"],
+            includeStderr: true
+        ),
+        output.terminationReason == .exit,
+        output.status != 0,
+        let text = String(data: output.data, encoding: .utf8) else {
+            return false
+        }
+        let normalized = text.lowercased()
+        return text.contains(invalidValue)
+            && normalized.contains("--max-turns")
+            && normalized.contains("invalid")
+            && normalized.contains("number")
+            && !normalized.contains("unknown option")
+            && !normalized.contains("unrecognized option")
     }
 
     private struct ProbeOutput {
         let data: Data
         let status: Int32
+        let terminationReason: Process.TerminationReason
+    }
+
+    /// The lock protects the stop flag and bounded retained prefix; the background reader is the
+    /// only descriptor consumer, so this POSIX edge can safely cross the reader-thread boundary.
+    private final class ProbeOutputDrain: @unchecked Sendable {
+        private let lock = NSLock()
+        private let maxBytes: Int
+        private var stopped = false
+        private var storage = Data()
+
+        init(maxBytes: Int) {
+            self.maxBytes = maxBytes
+        }
+
+        func stop() {
+            lock.lock()
+            stopped = true
+            lock.unlock()
+        }
+
+        var data: Data {
+            lock.lock()
+            defer { lock.unlock() }
+            return storage
+        }
+
+        func run(descriptor: Int32) {
+            let flags = fcntl(descriptor, F_GETFL)
+            guard flags >= 0,
+                  fcntl(descriptor, F_SETFL, flags | O_NONBLOCK) >= 0 else {
+                return
+            }
+            var buffer = [UInt8](repeating: 0, count: 4_096)
+            while true {
+                lock.lock()
+                let isStopped = stopped
+                lock.unlock()
+
+                var state = pollfd(
+                    fd: descriptor,
+                    events: Int16(POLLIN | POLLHUP | POLLERR),
+                    revents: 0)
+                let result = poll(&state, 1, isStopped ? 0 : 25)
+                if result == 0 {
+                    if isStopped { return }
+                    continue
+                }
+                if result < 0 {
+                    if errno == EINTR { continue }
+                    return
+                }
+                guard state.revents & Int16(POLLIN | POLLHUP | POLLERR | POLLNVAL) != 0
+                else { continue }
+
+                let count = read(descriptor, &buffer, buffer.count)
+                if count == 0 { return }
+                guard count > 0 else {
+                    if errno == EINTR {
+                        continue
+                    }
+                    if errno == EAGAIN || errno == EWOULDBLOCK {
+                        if isStopped { return }
+                        continue
+                    }
+                    return
+                }
+
+                lock.lock()
+                let retained = min(Int(count), max(0, maxBytes - storage.count))
+                if retained > 0 {
+                    storage.append(contentsOf: buffer.prefix(retained))
+                }
+                // Once the parent exits, drain only the bounded prefix. This preserves output that
+                // was already split across pipe reads without following an inherited writer forever.
+                let shouldStop = stopped && storage.count >= maxBytes
+                lock.unlock()
+                if shouldStop { return }
+            }
+        }
     }
 
     /// Run one local, non-model status/capability command under the same bounded process policy for
-    /// both CLIs. No API key is inherited, and stderr is irrelevant to the machine-readable probe.
-    private func runProbe(executable: URL, arguments: [String]) -> ProbeOutput? {
+    /// both CLIs. No API key is inherited. Parser probes may opt into the same bounded stderr pipe.
+    private func runProbe(
+        executable: URL,
+        arguments: [String],
+        includeStderr: Bool = false
+    ) -> ProbeOutput? {
         let process = Process()
         process.executableURL = executable
         process.arguments = arguments
         process.standardInput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
         let stdout = Pipe()
         process.standardOutput = stdout
+        process.standardError = includeStderr ? stdout : FileHandle.nullDevice
 
         var environment = ProcessInfo.processInfo.environment
         environment["HOME"] = home.path
@@ -210,6 +388,19 @@ public struct AgentCLIDetector: Sendable {
             return nil
         }
 
+        // Drain while the child runs, retaining only the bounded prefix. Waiting for exit before
+        // reading can deadlock a valid CLI whose help output fills the pipe buffer.
+        let readHandle = stdout.fileHandleForReading
+        let drain = ProbeOutputDrain(maxBytes: Self.maxProbeOutputBytes)
+        let drainFinished = DispatchSemaphore(value: 0)
+        let drainThread = Thread {
+            drain.run(descriptor: readHandle.fileDescriptor)
+            drainFinished.signal()
+        }
+        drainThread.name = "Jarvis CLI probe output"
+        drainThread.start()
+        try? stdout.fileHandleForWriting.close()
+
         // `Process` termination callbacks can be delayed while the test runner or app is busy.
         // Wait for the child directly and bound that wait with pid-only watchdogs, matching the
         // production CLI runner without capturing the non-Sendable Process in GCD closures.
@@ -222,37 +413,12 @@ public struct AgentCLIDetector: Sendable {
         process.waitUntilExit()
         terminator.cancel()
         killer.cancel()
-        let data = Self.readAvailableOutput(stdout.fileHandleForReading,
-                                            maxBytes: Self.maxProbeOutputBytes)
-        return ProbeOutput(data: data, status: process.terminationStatus)
-    }
-
-    /// Drain only bytes already available after the wrapper exits. A wrapper may leave a child
-    /// holding the inherited stdout pipe open; a blocking `readDataToEndOfFile()` would then defeat
-    /// the process watchdog while waiting for that unrelated child to close its writer.
-    private static func readAvailableOutput(_ handle: FileHandle, maxBytes: Int) -> Data {
-        let descriptor = handle.fileDescriptor
-        let flags = fcntl(descriptor, F_GETFL)
-        guard flags >= 0, fcntl(descriptor, F_SETFL, flags | O_NONBLOCK) >= 0 else {
-            try? handle.close()
-            return Data()
-        }
-        defer { try? handle.close() }
-
-        var output = Data()
-        var buffer = [UInt8](repeating: 0, count: 4_096)
-        while output.count < maxBytes {
-            let capacity = min(buffer.count, maxBytes - output.count)
-            let count = read(descriptor, &buffer, capacity)
-            if count > 0 {
-                output.append(contentsOf: buffer.prefix(Int(count)))
-                continue
-            }
-            if count == 0 { break }
-            if errno == EINTR { continue }
-            if errno == EAGAIN || errno == EWOULDBLOCK { break }
-            return Data()
-        }
-        return output
+        drain.stop()
+        drainFinished.wait()
+        try? readHandle.close()
+        return ProbeOutput(
+            data: drain.data,
+            status: process.terminationStatus,
+            terminationReason: process.terminationReason)
     }
 }

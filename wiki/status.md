@@ -38,10 +38,46 @@ Provider editor with one uninterrupted Primary/fallback route, a separate right-
 effort row, and an explicit Transcription provider/key group. A first-open install remains
 unconfigured until Primary is chosen; the old immediate request retry, scalar fallback,
 same-attempt failover, and primary recovery
-probing are removed. Codex coaching calls
-suppress project instructions and its feature-gated agent tools, run as direct-response decisions, inherit only stable
-executable-search paths, and stop under a provider-specific stall bound instead of leaving later
-speech batched indefinitely.
+probing are removed. Codex coaching calls suppress project instructions, run as ephemeral read-only
+direct-response decisions, inherit only stable executable-search paths, and stop under a
+provider-specific stall bound instead of leaving later speech batched indefinitely. Their prompt
+requires only the supplied Jarvis MCP actions and ignores unrelated Codex tools. Detection also
+disables every enabled, non-removed feature reported by that exact Codex installation for MCP
+coaching, so newly advertised feature flags default off without a Jarvis-owned name list. Tool-less
+summarization is unchanged. This is a latency and surface-reduction profile rather than a tool
+inventory or global allowlist; unconditional Codex tools can remain visible. Supported Claude Code and Codex
+coaching attempts receive only the private Jarvis MCP server, whose request-derived actions all enter
+the same Foundation-only `CoachingActionBroker` used by API-native calls. The broker permits at most
+one capture followed by exactly one staged terminal action, enforces the request-derived allowed
+action set, rejects a second capture, malformed, post-terminal, cancelled, or missing-terminal work,
+and commits only after a clean current attempt.
+The session-local owner-only bridge gives the sidecar no direct OS effect. CLI coaching is MCP-only:
+an installation that cannot prove the required MCP surface is unavailable, a missing
+bundled helper blocks preflight, and failure to start the lazy session listener or bind a fresh
+attempt lease fails that attempt before the provider starts. Local-CLI attempts reuse the listener
+within one Start session but rotate broker identity, bearer, ticket, and configuration; Stop closes
+it, and OpenAI-only sessions never create it. Codex terminal completion requires the SDK write,
+matching helper acknowledgement, and current host lease. Claude requires those transport proofs plus
+the matching non-error accepted-action `tool_result` in its JSONL stream before a typed completion
+ends the process; task cancellation still wins before commit. Claude receives a one-turn tool-use cap
+for terminal-only attempts and a two-turn cap when capture is available. A fresh five-pair Claude
+Code 2.1.220 benchmark used a valid 256×256 image and measured capture→terminal medians of 10.152 s
+for the historical two-CLI-process JSON route and 9.424 s for MCP with one top-level Claude CLI
+process (arm-median −0.728 s / −7.2%; paired median −0.120 s; MCP faster in four of five pairs).
+Terminal-only medians were 4.705 s
+for JSON and 6.020 s for MCP (arm-median +1.315 s / +28.0%; paired median +1.344 s; MCP faster in one
+of five pairs). The JSON capture arm included a 23.138 s outlier, so this final-current sample does
+not establish a stable latency win. Every measured MCP arm contained one matching accepted result,
+no rejected result, no post-terminal prose, and typed terminal completion; capture emitted two
+distinct assistant request IDs and terminal-only one. A per-Start main-actor terminal delivery lease
+then orders Activity/overlay effects against Stop, while session-bound Activity writes cannot cross
+into a replacement Start. There is no prompt-JSON action route or same-attempt provider replay. MCP
+keeps capture→terminal work inside one top-level Claude CLI process and gives Jarvis a fail-closed
+terminal contract; it improves process shape and action continuity, not model intelligence, and any
+latency benefit remains workload- and provider-dependent.
+The exact-pinned official MCP Swift SDK owns helper-side stdio framing, protocol lifecycle and
+version negotiation, concurrent request dispatch, and cancellation. Jarvis retains the private
+attempt bridge and broker policy; SDK code remains helper-only and is not linked into `JarvisApp`.
 Saving an API key while running also preserves those live objects: existing Realtime sockets take
 the key on their next reconnect, and an OpenAI brain update remains transactional. Audio
 route rebuilds likewise retry before declaring capture unavailable, and stale capture callbacks
@@ -57,19 +93,25 @@ fixed notices remain available in Activity. The gate statically rejects unreview
 
 ## Next action
 
-Run the live prompt smoke on a fresh session: show an interview question without speaking its
-details, ask “Jarvis, how can I solve this in one pass?”, and confirm the first action is
-exactly one `capture_screen` followed by a screen-specific reply. Then ask a fully stated behavioral
-question and confirm it can answer without an unnecessary capture. Finish the in-app Claude Code
-provider smoke: confirm Settings shows it signed in, then confirm a coaching turn and screen request.
+Run the in-app MCP smoke on a fresh session: show an interview question without speaking its
+details, ask “Jarvis, how can I solve this in one pass?”, and confirm the selected CLI performs
+exactly one `capture_screen` followed by a screen-specific terminal action in one attempt. Repeat
+with Claude Code and Codex, then force a clean provider exit without a tool call and confirm the
+attempt renders no overlay. Ask a fully stated behavioral question and confirm it can answer without
+an unnecessary capture. Force a second capture and confirm the attempt fails without another screen
+view or overlay. For both Claude and Codex, confirm debug timing reports acknowledged terminal
+completion without waiting for a final reply. For Claude, confirm a successful capture→terminal
+attempt contains two distinct assistant request IDs and terminal-only contains one, with exactly one
+matching accepted terminal result, no rejected result, and no post-terminal prose. Confirm Settings
+shows Claude signed in and the bundled helper is selected.
 While that session runs, switch providers and confirm the next completed turn preserves context and
 adds the provider-only success notice to Activity; then exercise a failed replacement and confirm
 the pending conversation is preserved. Verify the first-open Brain state (no Primary selection,
 disabled model/Add fallback, and Add API key), then configure multiple fallbacks and force a temporary
 failure-budget transition, a proven-permanent one-attempt transition, an unavailable-target skip, and
 final route exhaustion. Confirm no provider-specific tool state crosses attempts and verify a
-successful fallback remains active without changing preferences. Finish the in-app Codex smoke through
-audio and the overlay. Exercise one audio-route switch: Activity should say listening continues, the
+successful fallback remains active without changing preferences. Exercise one audio-route switch:
+Activity should say listening continues, the
 next turn should include any unsent speech, and capture should recover
 without rotating the session. Stop that session, click **Evaluate**, and confirm the agentic report
 opens and identifies the temporary miss from the complete Activity log without misclassifying it as
@@ -78,13 +120,13 @@ a stopped conversation. The standard release checklist remains in
 
 ## Built
 
-Tested `JarvisCore` + `JarvisOverlay` harness is green (`./scripts/run-tests.sh`); `JarvisApp` is the
-thin OS shell, verified by the smoke run.
+The repository gate is `swift build && ./scripts/run-tests.sh`; `JarvisApp` is the thin OS shell,
+verified by the smoke run.
 
 - `Sources/JarvisCore/Audio/` — transactional PCM + utterance buffering, adaptive content-free activity detection, non-destructive AEC reference alignment, and system-audio timeline preservation (`PCMBuffer`, `UtteranceBuffer`, `PCM16Framer`, `AudioDownmix`, `AdaptiveAudioActivityDetector`, `EchoReferenceAlignment`, `SystemAudioTimeline`).
 - `Sources/JarvisCore/Transcription/` — realtime session wire contract, per-item event ledger, and rolling transcript (`RealtimeSession`, `RealtimeTranscriptionLedger`, `Transcript`, `NoiseReduction`).
-- `Sources/JarvisCore/Brain/` — the LLM integration: the `BrainClient` contract (`Brain`), `OpenAIBrainClient`, `CLIBrainClient` + `AgentCLIProcessRunner` + `AgentCLIDetector`/`AgentCLIAuthenticationStatus` (the local Claude Code / Codex brain providers and sign-in state), provider-boundary failure classification (`BrainFailure`), immutable `BrainTarget`/`BrainRoute`, `BrainProvider`, `BrainModelCatalog` (first per-provider entry is the default), `ReasoningEffort`.
-- `Sources/JarvisCore/Coach/` — the event loop: `CoachDriver` (fresh-attempt scheduling and one-target tool-loop orchestration), the pure forward-only `BrainRouteSession`, `SpeechActivityGate`, `CoachHistory` (client-managed session memory), `ToolDefs` (coach tools + system prompt).
+- `Sources/JarvisCore/Brain/` — the LLM integration: the `BrainClient` contract (`Brain`), `OpenAIBrainClient`, `CLIBrainClient` + `AgentCLIProcessRunner` + `AgentCLICompletionSignal`/`AgentCLICompletionEvidence` + MCP invocation/capability configuration + `AgentCLIDetector`/`AgentCLIAuthenticationStatus` (the local Claude Code / Codex brain providers, sign-in state, dynamic Codex feature quiescing, and acknowledged-terminal process completion), provider-boundary failure classification (`BrainFailure`), immutable `BrainTarget`/`BrainRoute`, `BrainProvider`, `BrainModelCatalog` (first per-provider entry is the default), `ReasoningEffort`.
+- `Sources/JarvisCore/Coach/` — the event loop: `CoachDriver` (fresh-attempt scheduling and one-target tool-loop orchestration), `CoachingActionBroker` (transport-neutral action validation, staging, cancellation, and exactly-once commit), the pure forward-only `BrainRouteSession`, `SpeechActivityGate`, `CoachHistory` (client-managed session memory), `ToolDefs` (coach tools + system prompt).
 - `Sources/JarvisCore/Triggers/` — turn/silence trigger detection, substance classification, and silence backoff (`Trigger`, `TurnSubstance`, `SilenceBackoff`).
 - `Sources/JarvisCore/Screen/` — the model-triggered screen-capture tool contract + window-scoped capture logic (`ScreenCapture`, `ScreenSnapshot`, `FrontWindowSelector`, `RecognizedTextLayout`).
 - `Sources/JarvisCore/Overlay/` — overlay text model + length-proportional timing + fan-out (`OverlayRendering`, `OverlayTiming`, `OverlayAppearance`, `BroadcastOverlay`).
@@ -92,6 +134,7 @@ thin OS shell, verified by the smoke run.
 - `Sources/JarvisCore/Support/` — small shared runtime primitives (`Clock`, `TurnTaskBox`, `RetrySchedule`, `RetryIncident`).
 - `Sources/JarvisCore/Diagnostics/` — logging, always-on activity log with stable persisted event kinds and fixed typed brain-change/failure notices, privacy-preserving audio continuity evidence, session-history store, wire-level brain traffic capture + the read-only agentic audit over the complete session directory, user-facing errors (`ActivityLog`, `AudioContinuityWitness`, `SessionStore`, `BrainTrafficLog`, `EvaluationTranscript`, `AgenticEvaluation`, `AgenticEvaluator`, `UserFacingError`).
 - `Sources/JarvisOverlay/` — the capture-invisible `NSPanel` surfaces: `OverlayCaptionPanel` (transient), `OverlayBoxPanel` (persistent), `NSPanel+CaptureExclusion`.
+- `Sources/JarvisMCPBridge/` + `Sources/JarvisMCPServerCore/` + `Sources/JarvisMCPServer/` — the authenticated attempt bridge plus the helper-only official-SDK MCP adapter and executable; they expose exactly the three Jarvis coaching actions without owning effects.
 - `Sources/JarvisApp/App/` + `MenuBar/` — entry point, connection-aware menu status, Start/Stop, `ErrorReporter` (startup alerts plus an unconditional no-presentation runtime policy).
 - `Sources/JarvisApp/Capture/` — one-clock aggregate mic + sample-preserving system-audio capture with AEC3 echo cancellation + resampling (`AggregateEchoCapture`, `WebRTCEchoCanceller`, `Resampler`), Realtime item/readiness/liveness/transactional-reconnect/witness handling (`RealtimeTranscriber`, `NetworkPathDiagnostics`), permissions, plus the window-scoped screenshot + OCR edge (`WindowScopedScreenCapture`, `ScreenTextRecognizer`).
 - `Sources/JarvisApp/Settings/` — the unified Settings window (`SettingsWindow` hosting Brain (minimal Provider route / Reasoning effort / Transcription groups) / Overlay / Screen / Activity sections).
