@@ -20,34 +20,29 @@ public enum AgentCLIProcessRunner {
     public static func run(_ invocation: AgentCLIRun,
                            timings: AgentCLIPhaseTimings = AgentCLIPhaseTimings()) async throws -> AgentCLIOutput {
         try Task.checkCancellation()   // don't even spawn for an already-cancelled turn
-        let pidBox = Box<Int32?>(nil)
-        let cancelled = Box(false)
-        let output = try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { continuation in
-                DispatchQueue.global(qos: .userInitiated).async {
-                    continuation.resume(with: Result {
-                        try runBlocking(invocation, timings: timings,
-                                        pidBox: pidBox, cancelled: cancelled)
-                    })
+        let control = RunControl()
+        do {
+            let output = try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { continuation in
+                    DispatchQueue.global(qos: .userInitiated).async {
+                        continuation.resume(with: Result {
+                            try runBlocking(invocation, timings: timings, control: control)
+                        })
+                    }
                 }
+            } onCancel: {
+                control.requestCancellation()
             }
-        } onCancel: {
-            cancelled.set(true)
-            if let pid = pidBox.get() { terminate(pid) }
-            // else: the process hasn't launched yet — runBlocking re-checks `cancelled` right
-            // after launch, closing the race.
+            // A killed run unwinds through the normal exit path; surface Stop as CancellationError
+            // rather than a successful completion-signal result or a bogus exit-code result.
+            try Task.checkCancellation()
+            return output
+        } catch {
+            if Task.isCancelled {
+                throw CancellationError()
+            }
+            throw error
         }
-        // A killed run unwinds through the normal exit path; surface Stop as CancellationError
-        // rather than a bogus exit-code result.
-        try Task.checkCancellation()
-        return output
-    }
-
-    /// SIGTERM now, SIGKILL shortly after for a CLI that ignores SIGTERM. A stale pid is harmless
-    /// (ESRCH); 2s is far too short for pid reuse.
-    private static func terminate(_ pid: Int32) {
-        kill(pid, SIGTERM)
-        DispatchQueue.global().asyncAfter(deadline: .now() + 2) { kill(pid, SIGKILL) }
     }
 
     /// An NSLock-guarded cell so the pipe-drain handlers and the watchdog can share state with the
@@ -60,9 +55,65 @@ public enum AgentCLIProcessRunner {
         func set(_ newValue: T) { lock.lock(); value = newValue; lock.unlock() }
     }
 
+    /// Cross-thread requests only wake the blocking process-lifecycle thread; that single owner checks
+    /// `Process.isRunning` and sends every signal. No delayed closure retains a numeric pid, so a late
+    /// completion signal can never target a different process that reused it.
+    private final class RunControl: @unchecked Sendable {
+        struct Snapshot {
+            let isCancelled: Bool
+            let completion: Completion?
+        }
+
+        struct Completion {
+            let reason: AgentCLICompletionSignal.Reason
+            let observedAt: UInt64
+        }
+
+        private let lock = NSLock()
+        private let wakeup = DispatchSemaphore(value: 0)
+        private var isCancelled = false
+        private var completion: Completion?
+
+        func requestCancellation() {
+            lock.lock()
+            isCancelled = true
+            lock.unlock()
+            wakeup.signal()
+        }
+
+        func requestCompletion(_ reason: AgentCLICompletionSignal.Reason) {
+            lock.lock()
+            if completion == nil {
+                completion = Completion(
+                    reason: reason,
+                    observedAt: DispatchTime.now().uptimeNanoseconds)
+            }
+            lock.unlock()
+            wakeup.signal()
+        }
+
+        func processDidExit() {
+            wakeup.signal()
+        }
+
+        func snapshot() -> Snapshot {
+            lock.lock()
+            defer { lock.unlock() }
+            return Snapshot(
+                isCancelled: isCancelled,
+                completion: completion)
+        }
+
+        func wait(until deadline: UInt64) {
+            let now = DispatchTime.now().uptimeNanoseconds
+            guard deadline > now else { return }
+            let remaining = min(deadline - now, UInt64(Int.max))
+            _ = wakeup.wait(timeout: .now() + .nanoseconds(Int(remaining)))
+        }
+    }
+
     private static func runBlocking(_ run: AgentCLIRun, timings: AgentCLIPhaseTimings,
-                                    pidBox: Box<Int32?>,
-                                    cancelled: Box<Bool>) throws -> AgentCLIOutput {
+                                    control: RunControl) throws -> AgentCLIOutput {
         timings.mark(.runnerEntered)
         let process = Process()
         process.executableURL = run.executable
@@ -90,6 +141,9 @@ public enum AgentCLIProcessRunner {
         process.standardInput = stdinPipe
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
+        process.terminationHandler = { _ in
+            control.processDidExit()
+        }
 
         // Drain stdout/stderr via readability handlers (they run on FileHandle's own queue) so
         // neither pipe can fill its buffer and stall the child while we block elsewhere — the
@@ -113,28 +167,21 @@ public enum AgentCLIProcessRunner {
               onFirstByte: { timings.mark(.firstStdoutByte) })
         drain(stderrPipe.fileHandleForReading, into: stderrBox, done: stderrDone)
 
+        let completionObservation = run.completionSignal?.observe {
+            control.requestCompletion($0)
+        }
+        defer { completionObservation?.cancel() }
+
         try process.run()
         timings.mark(.processLaunched)
 
-        // Watchdogs by pid (an Int32, so the Sendable closures needn't capture the Process object):
-        // SIGTERM at the timeout, SIGKILL shortly after for a CLI that ignores SIGTERM — otherwise
-        // `waitUntilExit` below would hang forever despite the timeout.
-        let timedOut = Box(false)
         let pid = process.processIdentifier
-        // Publish the pid for the caller's cancellation handler, then close the race with a
-        // cancel that fired between spawn and publish.
-        pidBox.set(pid)
-        if cancelled.get() { terminate(pid) }
-        let watchdog = DispatchWorkItem {
-            timedOut.set(true)
-            kill(pid, SIGTERM)
-        }
-        let killer = DispatchWorkItem { kill(pid, SIGKILL) }
-        DispatchQueue.global().asyncAfter(deadline: .now() + run.timeout, execute: watchdog)
-        DispatchQueue.global().asyncAfter(deadline: .now() + run.timeout + 5, execute: killer)
+        let launchedAt = DispatchTime.now().uptimeNanoseconds
+        let timeoutNanoseconds = UInt64(max(0, run.timeout) * 1_000_000_000)
+        let timeoutDeadline = launchedAt &+ timeoutNanoseconds
 
-        // Feeding stdin inline is safe: the output pipes are already draining concurrently, so a
-        // prompt larger than the pipe buffer just blocks here until the child consumes it.
+        // Feed stdin on its own blocking thread. This keeps the lifecycle owner free to act on Stop
+        // or an acknowledged completion even when a child has stopped consuming a pipe-sized prompt.
         #if canImport(Darwin)
         // A provider that exits before reading the prompt must become a normal EPIPE write error,
         // not SIGPIPE terminating the Jarvis process before Swift can preserve the failure timing.
@@ -144,22 +191,104 @@ public enum AgentCLIProcessRunner {
         // EPIPE from the write instead; CLI invocations never use SIGPIPE as application control.
         _ = signal(SIGPIPE, SIG_IGN)
         #endif
-        var stdinDelivered = true
-        do {
-            if let stdin = run.stdin {
-                try stdinPipe.fileHandleForWriting.write(contentsOf: Data(stdin.utf8))
+        let stdinDone = DispatchSemaphore(value: 0)
+        let stdinHandle = stdinPipe.fileHandleForWriting
+        let stdin = run.stdin
+        DispatchQueue.global(qos: .userInitiated).async {
+            var delivered = true
+            do {
+                if let stdin {
+                    try stdinHandle.write(contentsOf: Data(stdin.utf8))
+                }
+                try stdinHandle.close()
+            } catch {
+                delivered = false
+                try? stdinHandle.close()
             }
-            try stdinPipe.fileHandleForWriting.close()
-        } catch {
-            stdinDelivered = false
-            try? stdinPipe.fileHandleForWriting.close()
+            if delivered {
+                timings.mark(.stdinDelivered)
+            }
+            stdinDone.signal()
         }
-        if stdinDelivered { timings.mark(.stdinDelivered) }
 
+        enum LifecycleCause {
+            case completion(AgentCLICompletionSignal.Reason)
+            case timeout
+        }
+        var lifecycleCause: LifecycleCause?
+        var terminationWasRequested = false
+        var forceKillDeadline: UInt64?
+
+        func requestTermination(graceNanoseconds: UInt64) {
+            let now = DispatchTime.now().uptimeNanoseconds
+            if !terminationWasRequested, process.isRunning, kill(pid, SIGTERM) == 0 {
+                terminationWasRequested = true
+            }
+            let deadline = now &+ graceNanoseconds
+            if let existing = forceKillDeadline {
+                forceKillDeadline = min(existing, deadline)
+            } else {
+                forceKillDeadline = deadline
+            }
+        }
+
+        // The lifecycle thread is the only code that signals the pid. Completion/cancellation
+        // callbacks merely wake it, and the termination handler wakes it on natural exit.
+        while process.isRunning {
+            let state = control.snapshot()
+            let now = DispatchTime.now().uptimeNanoseconds
+
+            if state.isCancelled {
+                requestTermination(graceNanoseconds: 2_000_000_000)
+            }
+            if !state.isCancelled, lifecycleCause == nil {
+                // The transport records when the terminal acknowledgement was observed. Check that
+                // timestamp before the watchdog's current time so an acknowledgement just before
+                // the deadline cannot be reclassified as a timeout merely because this owner woke
+                // a little later.
+                if let completion = state.completion,
+                   completion.observedAt <= timeoutDeadline {
+                    lifecycleCause = .completion(completion.reason)
+                    requestTermination(graceNanoseconds: 2_000_000_000)
+                } else if now >= timeoutDeadline {
+                    lifecycleCause = .timeout
+                    requestTermination(graceNanoseconds: 5_000_000_000)
+                }
+            }
+
+            if let deadline = forceKillDeadline, now >= deadline {
+                if process.isRunning {
+                    _ = kill(pid, SIGKILL)
+                }
+                forceKillDeadline = nil
+            }
+            guard process.isRunning else { break }
+
+            var nextWake = lifecycleCause == nil
+                ? timeoutDeadline
+                : now &+ 1_000_000_000
+            if let forceKillDeadline {
+                nextWake = min(nextWake, forceKillDeadline)
+            }
+            control.wait(until: nextWake)
+        }
         process.waitUntilExit()
         let processExited = DispatchTime.now().uptimeNanoseconds
-        watchdog.cancel()
-        killer.cancel()
+        completionObservation?.cancel()
+        if lifecycleCause == nil {
+            // Preserve a terminal acknowledgement that raced the child's natural exit. Cancelling
+            // the observation first prevents a signal that arrives after this boundary from
+            // retyping an already-finished run.
+            let state = control.snapshot()
+            if let completion = state.completion,
+               completion.observedAt <= timeoutDeadline,
+               completion.observedAt <= processExited {
+                lifecycleCause = .completion(completion.reason)
+            }
+        }
+        // A killed child closes its stdin reader. Give an in-progress large write a bounded chance to
+        // observe EPIPE and finish before releasing the pipe object.
+        _ = stdinDone.wait(timeout: .now() + 2)
         // EOF normally lands with the exit, but a stray grandchild that inherited the pipes' write
         // ends would hold EOF open until IT dies — bound the wait and take what's been captured
         // (the CLI's own output was written before it exited).
@@ -172,9 +301,7 @@ public enum AgentCLIProcessRunner {
         // pre-exit byte to this captured exit instant instead of dropping the reversed interval.
         timings.mark(.processExited, at: processExited)
 
-        // Only a SIGTERM exit counts as our timeout — the flag alone could race a normal exit that
-        // lands just as the watchdog fires.
-        if timedOut.get() && process.terminationReason == .uncaughtSignal {
+        if case .timeout = lifecycleCause {
             let stderr = String(decoding: stderrBox.get(), as: UTF8.self)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             let detail = stderr.isEmpty ? "" : "; stderr: \(String(stderr.suffix(2_000)))"
@@ -183,8 +310,15 @@ public enum AgentCLIProcessRunner {
                     "\(run.executable.lastPathComponent) timed out after \(Int(run.timeout))s\(detail)",
             ])
         }
+        let termination: AgentCLIOutput.Termination
+        if case .completion(let reason) = lifecycleCause {
+            termination = .completionSignal(reason)
+        } else {
+            termination = .exited
+        }
         return AgentCLIOutput(stdout: String(decoding: stdoutBox.get(), as: UTF8.self),
                               stderr: String(decoding: stderrBox.get(), as: UTF8.self),
-                              exitCode: process.terminationStatus)
+                              exitCode: process.terminationStatus,
+                              termination: termination)
     }
 }

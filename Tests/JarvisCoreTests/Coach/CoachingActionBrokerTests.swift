@@ -23,16 +23,12 @@ import Testing
 
     private func broker(
         capture: ScreenSnapshot? = nil,
-        current: @escaping @Sendable () -> Bool = { true },
-        requiredTerminalToolName: String? = nil,
-        maximumActionCalls: Int = 4
+        requiredTerminalToolName: String? = nil
     ) -> CoachingActionBroker {
         CoachingActionBroker(
             identity: .init(configurationRevision: 7),
             capture: { capture },
-            isCurrentAttempt: current,
-            requiredTerminalToolName: requiredTerminalToolName,
-            maximumActionCalls: maximumActionCalls)
+            requiredTerminalToolName: requiredTerminalToolName)
     }
 
     private func failure(
@@ -49,7 +45,7 @@ import Testing
         }
     }
 
-    @Test func serialCapturesThenOneTerminalCommit() async throws {
+    @Test func oneCaptureThenOneTerminalCommit() async throws {
         let shot = ScreenSnapshot(
             imageBase64: Data("jpeg".utf8).base64EncodedString(),
             recognizedText: "let answer = 42")
@@ -59,12 +55,7 @@ import Testing
             requestID: "capture-1",
             name: captureScreenTool.name,
             argumentsJSON: "{}") == .capture(shot))
-        #expect(try await broker.call(
-            requestID: "capture-2",
-            name: captureScreenTool.name,
-            argumentsJSON: "{}") == .capture(shot))
         #expect(try await broker.acknowledgeCaptureDelivery(requestID: "capture-1"))
-        #expect(try await broker.acknowledgeCaptureDelivery(requestID: "capture-2"))
         #expect(try await broker.call(
             requestID: "terminal",
             name: speakTool.name,
@@ -74,7 +65,8 @@ import Testing
                 == .speak(callID: "terminal", lines: ["Use a map.", "State the invariant."]))
         #expect(try await broker.commit()
                 == .speak(callID: "terminal", lines: ["Use a map.", "State the invariant."]))
-        #expect(await broker.events().count == 3)
+        #expect(await broker.captureObservation()
+                == .init(callID: "capture-1", snapshot: shot))
     }
 
     @Test func captureIsObservedOnlyAfterDeliveryAcknowledgement() async throws {
@@ -89,15 +81,32 @@ import Testing
             name: captureScreenTool.name,
             argumentsJSON: "{}")
         #expect(observer.value == 0)
-        #expect(await broker.events().isEmpty)
+        #expect(await broker.captureObservation() == nil)
 
         #expect(try await broker.acknowledgeCaptureDelivery(requestID: "capture"))
         #expect(try await broker.acknowledgeCaptureDelivery(requestID: "capture"))
         #expect(observer.value == 1)
-        #expect(await broker.events() == [.captured(callID: "capture", snapshot: nil)])
+        #expect(await broker.captureObservation()
+                == .init(callID: "capture", snapshot: nil))
+
+        let racedTerminal = CoachingActionBroker(
+            identity: .init(configurationRevision: 2),
+            capture: { nil },
+            captureObserver: { _ in observer.increment() })
+        _ = try await racedTerminal.call(
+            requestID: "capture-race",
+            name: captureScreenTool.name,
+            argumentsJSON: "{}")
+        #expect(await failure {
+            _ = try await racedTerminal.call(
+                requestID: "speak-race",
+                name: speakTool.name,
+                argumentsJSON: #"{"lines":["I did not receive the capture."]}"#)
+        } == .concurrentCall)
+        #expect(await racedTerminal.captureObservation() == nil)
     }
 
-    @Test func retriesOfTheSameRequestAreIdempotentButChangedReplaysFail() async throws {
+    @Test func failedCaptureStillConsumesTheSingleCaptureOpportunity() async throws {
         let counter = Counter()
         let broker = CoachingActionBroker(
             identity: .init(configurationRevision: 1),
@@ -107,22 +116,18 @@ import Testing
             })
 
         _ = try await broker.call(
-            requestID: "same",
+            requestID: "first",
             name: captureScreenTool.name,
             argumentsJSON: "{}")
-        _ = try await broker.call(
-            requestID: "same",
-            name: captureScreenTool.name,
-            argumentsJSON: "{}")
-        #expect(counter.value == 1)
 
-        let replay = await failure {
+        let duplicate = await failure {
             _ = try await broker.call(
-                requestID: "same",
-                name: staySilentTool.name,
+                requestID: "second",
+                name: captureScreenTool.name,
                 argumentsJSON: "{}")
         }
-        #expect(replay == .replayedRequest("same"))
+        #expect(duplicate == .duplicateCapture)
+        #expect(counter.value == 1)
     }
 
     @Test func malformedUnknownAndMissingTerminalAreTypedFailures() async {
@@ -154,6 +159,24 @@ import Testing
         } == .missingTerminal)
     }
 
+    @Test func brokerRejectsKnownToolsNotAllowedForTheAttempt() async {
+        let manualHint = CoachingActionBroker(
+            identity: .init(configurationRevision: 7),
+            capture: {
+                Issue.record("an unlisted capture reached the host")
+                return nil
+            },
+            allowedToolNames: [speakTool.name],
+            requiredTerminalToolName: speakTool.name)
+
+        #expect(await failure {
+            _ = try await manualHint.call(
+                requestID: "capture",
+                name: captureScreenTool.name,
+                argumentsJSON: "{}")
+        } == .toolNotAllowed(captureScreenTool.name))
+    }
+
     @Test func terminalExclusivityAndOrderingAreEnforced() async throws {
         let duplicate = broker()
         _ = try await duplicate.call(
@@ -183,9 +206,14 @@ import Testing
         #expect(await failure {
             try await multiple.rejectMultipleCallsInResponse()
         } == .multipleCallsInResponse)
+
+        let mismatched = broker()
+        #expect(await failure {
+            try await mismatched.rejectReturnedCallMismatch()
+        } == .returnedCallMismatch)
     }
 
-    @Test func forcedTerminalAndAttemptActionLimitAreEnforced() async throws {
+    @Test func forcedTerminalIsEnforced() async throws {
         let forced = broker(requiredTerminalToolName: speakTool.name)
         #expect(await failure {
             _ = try await forced.call(
@@ -195,22 +223,6 @@ import Testing
         } == .forcedTerminalMismatch(
             expected: speakTool.name,
             actual: staySilentTool.name))
-
-        let bounded = broker(maximumActionCalls: 2)
-        _ = try await bounded.call(
-            requestID: "capture-1",
-            name: captureScreenTool.name,
-            argumentsJSON: "{}")
-        _ = try await bounded.call(
-            requestID: "capture-2",
-            name: captureScreenTool.name,
-            argumentsJSON: "{}")
-        #expect(await failure {
-            _ = try await bounded.call(
-                requestID: "terminal",
-                name: staySilentTool.name,
-                argumentsJSON: "{}")
-        } == .actionLimitExceeded(2))
     }
 
     @Test func speakRequiresAtLeastOneNonblankLine() async throws {
@@ -231,15 +243,7 @@ import Testing
                 == .speak(callID: "speak", lines: ["Keep the invariant."]))
     }
 
-    @Test func staleAndInvalidatedAttemptsCannotStageActions() async {
-        let stale = broker(current: { false })
-        #expect(await failure {
-            _ = try await stale.call(
-                requestID: "silent",
-                name: staySilentTool.name,
-                argumentsJSON: "{}")
-        } == .staleAttempt)
-
+    @Test func invalidatedAttemptsCannotStageActions() async {
         let invalidated = broker()
         invalidated.invalidate()
         #expect(await failure {

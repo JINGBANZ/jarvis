@@ -10,8 +10,13 @@ import MCP
 public enum JarvisMCPServer {
     public static func run(arguments: [String] = CommandLine.arguments) async throws {
         let bridge = try MCPBridgeClient(arguments: arguments)
-        let server = try await makeServer(bridge: bridge)
-        let transport = StdioTransport()
+        let deliveryTracker = MCPActionDeliveryTracker()
+        let server = try await makeServer(
+            bridge: bridge,
+            deliveryTracker: deliveryTracker)
+        let transport = MCPActionTrackingTransport(
+            base: StdioTransport(),
+            deliveryTracker: deliveryTracker)
         try await server.start(transport: transport)
         await server.waitUntilCompleted()
         await server.stop()
@@ -51,7 +56,10 @@ public enum JarvisMCPServer {
         }
     }
 
-    static func makeServer(bridge: MCPBridgeClient) async throws -> Server {
+    static func makeServer(
+        bridge: MCPBridgeClient,
+        deliveryTracker: MCPActionDeliveryTracker
+    ) async throws -> Server {
         let server = Server(
             name: "jarvis-actions",
             version: "1.0.0",
@@ -77,7 +85,8 @@ public enum JarvisMCPServer {
                     content: [.text(text: message, annotations: nil, _meta: nil)],
                     isError: true)
 
-            case .capture(let imageBase64, let recognizedText):
+            case .capture(let imageBase64, let recognizedText, let delivery):
+                try await deliveryTracker.register(delivery)
                 let text = recognizedText.map {
                     "screenshot captured\n\nOn-device OCR (the image is ground truth):\n\($0)"
                 } ?? (imageBase64 == nil ? "screenshot failed" : "screenshot captured")
@@ -93,7 +102,8 @@ public enum JarvisMCPServer {
                 }
                 return CallTool.Result(content: content)
 
-            case .terminal:
+            case .terminal(let delivery):
+                try await deliveryTracker.register(delivery)
                 return CallTool.Result(content: [
                     .text(text: "action accepted", annotations: nil, _meta: nil),
                 ])

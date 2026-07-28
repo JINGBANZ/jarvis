@@ -6,15 +6,27 @@ import Darwin
 import Glibc
 #endif
 
-/// Authenticated, attempt-scoped Unix-socket host for one CLI process.
+/// One authenticated Unix-socket host for a live Jarvis coaching session.
 ///
-/// The sidecar receives only an owner-only ticket path in argv. The ticket contains the bearer
-/// token and exact attempt identity. Config files live beside the session log; the transient socket
-/// node uses macOS's short per-user temporary directory so deep workspace paths cannot exceed
-/// `sockaddr_un.sun_path`.
-/// `@unchecked Sendable` is limited to this POSIX edge: immutable attempt state is Sendable and
-/// `lock` protects every mutable descriptor/file collection.
+/// The listener is reused across coaching attempts. Each attempt leases the host with a fresh bearer
+/// token, exact attempt identity, broker, and unique ticket/config paths; ending that lease removes
+/// those files and revokes its connections without closing the session listener. The sidecar
+/// receives only the owner-only ticket path in argv, keeping the bearer itself out of process
+/// listings and traffic records.
+///
+/// The socket node uses macOS's short per-user temporary directory so deep workspace paths cannot
+/// exceed `sockaddr_un.sun_path`. `@unchecked Sendable` is limited to this POSIX edge: `lock`
+/// protects every mutable lease, descriptor, and file-lifecycle field.
 public final class MCPBridgeHost: @unchecked Sendable {
+    public struct Attempt: Sendable {
+        public let configuration: CLIMCPConfiguration
+        /// Completes only after this attempt's terminal MCP result crossed the SDK transport and
+        /// the helper's request-ID acknowledgement was confirmed by the host.
+        let completionSignal: AgentCLICompletionSignal
+        fileprivate let hostID: UUID
+        fileprivate let generation: UInt64
+    }
+
     /// `lock` protects the task and one-shot result; cancellation publishes a result before cancelling
     /// the task so bridge teardown never waits for a stalled OS capture to return.
     private final class BrokerCall<T>: @unchecked Sendable {
@@ -73,124 +85,226 @@ public final class MCPBridgeHost: @unchecked Sendable {
         }
     }
 
+    private struct Lease {
+        let generation: UInt64
+        let token: String
+        let identity: CoachingActionBroker.Identity
+        let broker: CoachingActionBroker
+        let configuration: CLIMCPConfiguration
+        let completionSignal: AgentCLICompletionSignal
+    }
+
+    private struct LeaseContext {
+        let generation: UInt64
+        let broker: CoachingActionBroker
+    }
+
+    private struct ActiveBrokerCall {
+        let generation: UInt64
+        let call: BrokerCall<CoachingActionBroker.ToolResult>
+    }
+
     private let sessionDirectory: URL
     private let serverExecutable: URL
-    private let broker: CoachingActionBroker
-    private let identity: CoachingActionBroker.Identity
+    private let hostID = UUID()
+    private let socketSuffix = String(UUID().uuidString.prefix(16)).lowercased()
     private let lock = NSLock()
-    private var started = false
+    private var listenerWasStarted = false
+    private var closed = false
     private var listener: Int32 = -1
+    private var socketURL: URL?
+    private var nextGeneration: UInt64 = 0
+    private var activeLease: Lease?
     private var activeConnections: Set<Int32> = []
-    private var activeCalls: [
-        Int32: BrokerCall<CoachingActionBroker.ToolResult>
-    ] = [:]
-    private var files: [URL] = []
+    private var connectionGenerations: [Int32: UInt64] = [:]
+    private var completedConnections: Set<Int32> = []
+    private var activeCalls: [Int32: ActiveBrokerCall] = [:]
 
     public init(
         sessionDirectory: URL,
-        serverExecutable: URL,
-        broker: CoachingActionBroker
+        serverExecutable: URL
     ) {
         self.sessionDirectory = sessionDirectory
         self.serverExecutable = serverExecutable
-        self.broker = broker
-        self.identity = broker.identity
     }
 
     deinit {
         close()
     }
 
-    public func start(provider: BrainProvider) throws -> CLIMCPConfiguration {
+    /// Installs one attempt's broker and rotates its bearer ticket. Exactly one coaching attempt may
+    /// lease a session host at a time; `CoachDriver` already serializes attempts.
+    public func beginAttempt(
+        provider: BrainProvider,
+        broker: CoachingActionBroker
+    ) throws -> Attempt {
         lock.lock()
         defer { lock.unlock() }
-        guard !started else {
-            throw Self.error("private MCP bridge was started twice")
+        guard !closed else {
+            throw Self.error("private MCP session bridge is closed")
         }
         guard provider.usesLocalCLI else {
             throw Self.error("private MCP bridge requires a local CLI provider")
         }
-        started = true
-        try Self.requireOwnerOnlyDirectory(sessionDirectory)
+        guard activeLease == nil else {
+            throw Self.error("private MCP bridge already has an active coaching attempt")
+        }
+        try startListenerIfNeededLocked()
 
-        let suffix = identity.attemptID.uuidString.prefix(8).lowercased()
-        let socketSuffix = identity.attemptID.uuidString.prefix(16).lowercased()
-        let socketURL = try Self.socketURL(suffix: String(socketSuffix))
-        let ticketURL = sessionDirectory.appendingPathComponent("mcp-\(suffix).ticket.json")
-        let claudeConfigURL = provider == .claudeCode
-            ? sessionDirectory.appendingPathComponent("mcp-\(suffix).claude.json")
-            : nil
+        nextGeneration &+= 1
+        let generation = nextGeneration
         let token = Self.randomToken()
+        let identity = broker.identity
+        let completionSignal = AgentCLICompletionSignal()
+        // The filename is independent of the broker identity so even a mistakenly reused attempt UUID
+        // cannot let an orphaned helper's old argv path resolve to a newer bearer.
+        let attemptSuffix = UUID().uuidString.lowercased()
+        let ticketURL = sessionDirectory.appendingPathComponent(
+            "mcp-\(attemptSuffix).ticket.json")
+        let claudeConfigURL = provider == .claudeCode
+            ? sessionDirectory.appendingPathComponent("mcp-\(attemptSuffix).claude.json")
+            : nil
+        let files = [ticketURL, claudeConfigURL].compactMap { $0 }
         let ticket = MCPBridgeTicket(
-            socketPath: socketURL.path,
+            socketPath: socketURL!.path,
             token: token,
             attemptID: identity.attemptID,
             configurationRevision: identity.configurationRevision)
+        let configuration = CLIMCPConfiguration(
+            serverExecutable: serverExecutable,
+            ticketFile: ticketURL,
+            claudeConfigFile: claudeConfigURL)
 
         do {
-            let descriptor = try UnixSocket.makeListener(path: socketURL.path)
-            listener = descriptor
-            files = [socketURL, ticketURL]
-            if let claudeConfigURL {
-                files.append(claudeConfigURL)
-            }
-            try Self.writeOwnerOnly(try JSONEncoder().encode(ticket), to: ticketURL)
+            try Self.replaceOwnerOnly(try JSONEncoder().encode(ticket), at: ticketURL)
             if let claudeConfigURL {
                 try Self.writeClaudeConfiguration(
                     serverExecutable: serverExecutable,
                     ticketURL: ticketURL,
                     to: claudeConfigURL)
             }
+        } catch {
+            for file in files {
+                try? FileManager.default.removeItem(at: file)
+            }
+            throw error
+        }
+
+        activeLease = Lease(
+            generation: generation,
+            token: token,
+            identity: identity,
+            broker: broker,
+            configuration: configuration,
+            completionSignal: completionSignal)
+        return Attempt(
+            configuration: configuration,
+            completionSignal: completionSignal,
+            hostID: hostID,
+            generation: generation)
+    }
+
+    /// Revokes one attempt while leaving the session listener alive. A later attempt must call
+    /// `beginAttempt`, which installs a new broker, bearer, and ticket/config paths.
+    public func endAttempt(_ attempt: Attempt) {
+        lock.lock()
+        guard attempt.hostID == hostID,
+              let lease = activeLease,
+              lease.generation == attempt.generation else {
+            lock.unlock()
+            return
+        }
+        activeLease = nil
+        let callDescriptors = activeCalls.compactMap { descriptor, active in
+            active.generation == attempt.generation ? descriptor : nil
+        }
+        let calls = callDescriptors.compactMap {
+            activeCalls.removeValue(forKey: $0)?.call
+        }
+        let unfinishedAuthenticatedConnection = connectionGenerations.contains {
+            $0.value == attempt.generation && !completedConnections.contains($0.key)
+        }
+        for connection in activeConnections {
+            // `shutdown` unblocks any sidecar still using the old ticket. Its connection handler
+            // remains the sole final-close owner, avoiding descriptor-reuse races.
+            UnixSocket.shutdownConnection(connection)
+        }
+        for file in Self.files(for: lease.configuration) {
+            try? FileManager.default.removeItem(at: file)
+        }
+        lock.unlock()
+
+        for call in calls {
+            call.cancel()
+        }
+        if !calls.isEmpty || unfinishedAuthenticatedConnection {
+            lease.broker.invalidate()
+        }
+    }
+
+    /// Tears down the whole session transport. A closed host is never reopened; a new Start creates a
+    /// new host, listener, and socket path.
+    public func close() {
+        lock.lock()
+        guard !closed else {
+            lock.unlock()
+            return
+        }
+        closed = true
+        let lease = activeLease
+        activeLease = nil
+        let descriptor = listener
+        listener = -1
+        let socketURL = self.socketURL
+        if descriptor >= 0 {
+            // `shutdown` does not wake `accept` on a listening Darwin socket. Close while holding
+            // the ownership lock; the accept-loop defer checks ownership before touching this fd
+            // number again, so reuse cannot close unrelated process I/O.
+            UnixSocket.closeConnection(descriptor)
+        }
+        for connection in activeConnections {
+            UnixSocket.shutdownConnection(connection)
+        }
+        let calls = activeCalls.values.map(\.call)
+        activeCalls.removeAll()
+        lock.unlock()
+
+        lease?.broker.invalidate()
+        for call in calls {
+            call.cancel()
+        }
+        let leaseFiles = lease.map { Self.files(for: $0.configuration) } ?? []
+        for file in [socketURL].compactMap({ $0 }) + leaseFiles {
+            try? FileManager.default.removeItem(at: file)
+        }
+    }
+
+    private func startListenerIfNeededLocked() throws {
+        if listener >= 0 { return }
+        guard !listenerWasStarted else {
+            throw Self.error("private MCP session listener is unavailable")
+        }
+        try Self.requireOwnerOnlyDirectory(sessionDirectory)
+        let socketURL = try Self.socketURL(suffix: socketSuffix)
+        do {
+            let descriptor = try UnixSocket.makeListener(path: socketURL.path)
+            listenerWasStarted = true
+            listener = descriptor
+            self.socketURL = socketURL
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                 // Deinitialization closes the listener when the host disappears before this block
                 // starts; never touch the captured fd number after that close because it may be
                 // reused by unrelated process I/O.
                 guard let self else { return }
-                self.acceptLoop(descriptor: descriptor, token: token)
+                self.acceptLoop(descriptor: descriptor)
             }
-            return CLIMCPConfiguration(
-                serverExecutable: serverExecutable,
-                ticketFile: ticketURL,
-                claudeConfigFile: claudeConfigURL)
         } catch {
-            let descriptor = listener
-            listener = -1
-            if descriptor >= 0 { UnixSocket.closeConnection(descriptor) }
-            for file in files { try? FileManager.default.removeItem(at: file) }
-            files = []
+            try? FileManager.default.removeItem(at: socketURL)
             throw error
         }
     }
 
-    public func close() {
-        lock.lock()
-        let descriptor = listener
-        listener = -1
-        let files = self.files
-        self.files = []
-        if descriptor >= 0 {
-            // `shutdown` does not wake `accept` on a listening Darwin socket. Close while holding
-            // the ownership lock; the accept-loop defer checks ownership before touching this fd
-            // number again, so reuse cannot turn its cleanup into a close of unrelated process I/O.
-            UnixSocket.closeConnection(descriptor)
-        }
-        // Do not close an fd while `handle` may still use its integer: shutdown unblocks the
-        // sidecar immediately, and its connection handler remains the sole final-close owner.
-        for connection in activeConnections {
-            UnixSocket.shutdownConnection(connection)
-        }
-        let calls = Array(activeCalls.values)
-        activeCalls.removeAll()
-        lock.unlock()
-        for call in calls {
-            call.cancel()
-        }
-        for file in files {
-            try? FileManager.default.removeItem(at: file)
-        }
-    }
-
-    private func acceptLoop(descriptor: Int32, token: String) {
+    private func acceptLoop(descriptor: Int32) {
         defer {
             lock.lock()
             let ownsListener = listener == descriptor
@@ -201,9 +315,10 @@ public final class MCPBridgeHost: @unchecked Sendable {
             lock.unlock()
         }
         while true {
-            let connection = accept(descriptor, nil, nil)
-            if connection < 0 {
-                if errno == EINTR { continue }
+            let connection: Int32
+            do {
+                connection = try UnixSocket.acceptConnection(from: descriptor)
+            } catch {
                 return
             }
             lock.lock()
@@ -224,42 +339,43 @@ public final class MCPBridgeHost: @unchecked Sendable {
                     UnixSocket.closeConnection(connection)
                     return
                 }
-                self.handle(connection: connection, token: token)
+                self.handle(connection: connection)
                 self.lock.lock()
                 self.activeConnections.remove(connection)
+                self.connectionGenerations.removeValue(forKey: connection)
+                self.completedConnections.remove(connection)
                 UnixSocket.closeConnection(connection)
                 self.lock.unlock()
             }
         }
     }
 
-    private func handle(connection: Int32, token: String) {
+    private func handle(connection: Int32) {
         let response: MCPBridgeResponse
+        var context: LeaseContext?
         var deliveryRequestID: String?
         var captureRequestID: String?
+        var terminalWasAccepted = false
         do {
             let data = try UnixSocket.readMessage(from: connection)
             guard !data.isEmpty else {
                 return
             }
             let request = try JSONDecoder().decode(MCPBridgeRequest.self, from: data)
-            guard request.token == token,
-                  request.attemptID == identity.attemptID,
-                  request.configurationRevision == identity.configurationRevision else {
-                throw Self.error("private MCP bridge authentication failed")
-            }
             let started = DispatchTime.now().uptimeNanoseconds
-            let result = try callBroker(request, connection: connection)
+            let authorized = try callBroker(request, connection: connection)
+            context = authorized.context
             let elapsed = (DispatchTime.now().uptimeNanoseconds - started) / 1_000_000
             jlog("Jarvis MCP: \(request.name) completed in \(elapsed)ms")
             deliveryRequestID = request.requestID
-            switch result {
+            switch authorized.result {
             case .capture(let snapshot):
                 captureRequestID = request.requestID
                 response = .capture(
                     imageBase64: snapshot?.imageBase64,
                     recognizedText: snapshot?.recognizedText)
             case .terminalAccepted:
+                terminalWasAccepted = true
                 response = .terminal
             }
         } catch {
@@ -270,7 +386,7 @@ public final class MCPBridgeHost: @unchecked Sendable {
             try UnixSocket.writeMessage(
                 JSONEncoder().encode(response),
                 to: connection)
-            if let deliveryRequestID {
+            if let deliveryRequestID, let context {
                 let data = try UnixSocket.readMessage(from: connection)
                 guard !data.isEmpty else {
                     throw Self.error("private MCP result was not acknowledged")
@@ -282,59 +398,60 @@ public final class MCPBridgeHost: @unchecked Sendable {
                     throw Self.error("private MCP acknowledgement did not match its request")
                 }
                 if let captureRequestID {
-                    try acknowledgeCaptureDelivery(requestID: captureRequestID)
+                    try acknowledgeCaptureDelivery(
+                        requestID: captureRequestID,
+                        context: context)
                 }
                 try UnixSocket.writeMessage(
                     JSONEncoder().encode(acknowledgement),
                     to: connection)
+                markConnectionCompleted(
+                    connection,
+                    context: context,
+                    terminalWasDelivered: terminalWasAccepted)
             }
         } catch {
             // An accepted action is useful only if its result reaches the agent. In particular, a
             // capture whose reply is lost must not authorize a later screen-grounded terminal.
             if response.ok {
-                broker.invalidate()
+                context?.broker.invalidate()
             }
             jlog("Jarvis MCP: response delivery failed — \(error.localizedDescription)")
-            return
         }
     }
 
-    private func acknowledgeCaptureDelivery(requestID: String) throws {
-        let call = BrokerCall<Bool>()
-        let task = Task { [broker] in
-            do {
-                call.finish(.success(
-                    try await broker.acknowledgeCaptureDelivery(requestID: requestID)))
-            } catch {
-                call.finish(.failure(error))
-            }
-        }
-        call.install(task)
-        while !call.wait(for: .milliseconds(25)) {}
-        guard try call.value() else {
-            throw Self.error("capture delivery did not match a brokered request")
-        }
-    }
-
-    private func callBroker(_ request: MCPBridgeRequest, connection: Int32) throws
-        -> CoachingActionBroker.ToolResult {
+    private func callBroker(
+        _ request: MCPBridgeRequest,
+        connection: Int32
+    ) throws -> (result: CoachingActionBroker.ToolResult, context: LeaseContext) {
         let call = BrokerCall<CoachingActionBroker.ToolResult>()
         lock.lock()
-        guard listener >= 0, activeConnections.contains(connection) else {
+        guard listener >= 0,
+              activeConnections.contains(connection),
+              let lease = activeLease,
+              request.token == lease.token,
+              request.attemptID == lease.identity.attemptID,
+              request.configurationRevision == lease.identity.configurationRevision else {
             lock.unlock()
-            throw CancellationError()
+            throw Self.error("private MCP bridge authentication failed")
         }
-        activeCalls[connection] = call
+        let context = LeaseContext(
+            generation: lease.generation,
+            broker: lease.broker)
+        connectionGenerations[connection] = lease.generation
+        activeCalls[connection] = ActiveBrokerCall(
+            generation: lease.generation,
+            call: call)
         lock.unlock()
         defer {
             lock.lock()
-            if activeCalls[connection] === call {
+            if activeCalls[connection]?.call === call {
                 activeCalls.removeValue(forKey: connection)
             }
             lock.unlock()
         }
 
-        let task = Task { [broker] in
+        let task = Task { [broker = context.broker] in
             do {
                 let result = try await broker.call(
                     requestID: request.requestID,
@@ -351,12 +468,57 @@ public final class MCPBridgeHost: @unchecked Sendable {
                 // A cancelled MCP request must not finish capturing or stage an action after the
                 // SDK has discarded its response. Invalidate the whole attempt before cancelling
                 // the blocked broker task; the next scheduler attempt starts with fresh state.
-                broker.invalidate()
+                context.broker.invalidate()
                 call.cancel()
                 throw CancellationError()
             }
         }
-        return try call.value()
+        return (try call.value(), context)
+    }
+
+    private func acknowledgeCaptureDelivery(
+        requestID: String,
+        context: LeaseContext
+    ) throws {
+        lock.lock()
+        let isActive = activeLease?.generation == context.generation
+        lock.unlock()
+        guard isActive else { throw CancellationError() }
+
+        let call = BrokerCall<Bool>()
+        let task = Task { [broker = context.broker] in
+            do {
+                call.finish(.success(
+                    try await broker.acknowledgeCaptureDelivery(requestID: requestID)))
+            } catch {
+                call.finish(.failure(error))
+            }
+        }
+        call.install(task)
+        while !call.wait(for: .milliseconds(25)) {}
+        guard try call.value() else {
+            throw Self.error("capture delivery did not match a brokered request")
+        }
+    }
+
+    private func markConnectionCompleted(
+        _ connection: Int32,
+        context: LeaseContext,
+        terminalWasDelivered: Bool = false
+    ) {
+        var completionSignal: AgentCLICompletionSignal?
+        lock.lock()
+        if connectionGenerations[connection] == context.generation,
+           activeLease?.generation == context.generation {
+            completedConnections.insert(connection)
+            if terminalWasDelivered {
+                completionSignal = activeLease?.completionSignal
+            }
+        }
+        lock.unlock()
+        // Signal outside the host lock. The process runner callback can synchronously wake and
+        // terminate Codex; it must never re-enter bridge lifecycle while this lock is held.
+        completionSignal?.signal(.terminalActionDelivered)
     }
 
     private static func writeClaudeConfiguration(
@@ -370,22 +532,33 @@ public final class MCPBridgeHost: @unchecked Sendable {
                     "command": serverExecutable.path,
                     "args": ["--ticket", ticketURL.path],
                     // Claude Code otherwise defers MCP schemas behind its built-in tool-search
-                    // surface. Jarvis deliberately disables built-ins, and has only three tiny
-                    // actions, so they must be loaded directly.
+                    // surface. Jarvis deliberately disables built-ins, so the supplied coaching
+                    // actions must be loaded directly.
                     "alwaysLoad": true,
                 ],
             ],
         ]
         let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
-        try writeOwnerOnly(data, to: url)
+        try replaceOwnerOnly(data, at: url)
     }
 
-    private static func writeOwnerOnly(_ data: Data, to url: URL) throws {
+    private static func files(for configuration: CLIMCPConfiguration) -> [URL] {
+        [configuration.ticketFile, configuration.claudeConfigFile].compactMap { $0 }
+    }
+
+    /// Atomically installs a fresh owner-only inode so readers never see a partial ticket or config.
+    private static func replaceOwnerOnly(_ data: Data, at url: URL) throws {
+        let temporary = url.deletingLastPathComponent().appendingPathComponent(
+            ".\(url.lastPathComponent).\(UUID().uuidString).tmp")
+        defer { try? FileManager.default.removeItem(at: temporary) }
         guard FileManager.default.createFile(
-            atPath: url.path,
+            atPath: temporary.path,
             contents: data,
             attributes: [.posixPermissions: 0o600]) else {
             throw error("couldn't create owner-only private MCP file")
+        }
+        guard rename(temporary.path, url.path) == 0 else {
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
         }
     }
 

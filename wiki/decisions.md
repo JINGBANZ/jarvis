@@ -540,6 +540,9 @@
   coaching transport with Codex app-server/SDK — substantially more lifecycle and protocol surface
   when this call needs one final text object.
 - **Supersedes in part:** 2026-07-16 — Local Claude Code / Codex CLIs as alternative brain providers.
+- **Superseded in part by:** 2026-07-28 — One optional capture, reusable listener, and prompt-guided
+  Codex tools. The read-only, ephemeral, user/project-instruction suppression and shorter timeout
+  stand; feature-name discovery and disable lists do not.
 - **Detail:** [architecture.md → Local CLI brain providers](./architecture.md#local-cli-brain-providers),
   `Sources/JarvisCore/Brain/CLIBrainClient+Invocation.swift`, `AgentCLIProcessRunner.swift`.
 
@@ -809,6 +812,9 @@
 - **Supersedes in part:** 2026-07-16 — Local Claude Code / Codex CLIs as alternative brain
   providers. Prompt JSON remains a brokered compatibility path rather than the normal path for a
   supported CLI.
+- **Superseded in part by:** 2026-07-28 — One optional capture, reusable listener, and prompt-guided
+  Codex tools. The broker accepts at most one capture, has no request-result replay cache, and does
+  not enumerate Codex feature names.
 - **Detail:** [architecture.md → Local CLI brain providers](./architecture.md#local-cli-brain-providers),
   [sandbox.md → Data Egress](./sandbox.md#data-egress),
   `Sources/JarvisCore/Coach/CoachingActionBroker.swift`,
@@ -891,3 +897,89 @@
 - **Detail:** `Package.swift`, `Package.resolved`,
   `Sources/JarvisMCPServerCore/JarvisMCPServer.swift`,
   `Sources/JarvisMCPBridge/MCPBridgeClient.swift`.
+
+### 2026-07-28 — One optional capture, reusable listener, and prompt-guided Codex tools
+
+- **Chose:** Make the coaching action sequence structural: an attempt may call `capture_screen` zero
+  or one time, then must call exactly one `speak` or `stay_silent`. A failed capture still consumes
+  the single opportunity. The broker has no numeric action budget or request-result replay cache;
+  the current bridge creates a fresh request UUID for every call and invalidates delivery failures
+  instead of retrying them.
+- **Chose:** Derive Claude allowed tools and Codex server-enabled tools from the request's `ToolDef`
+  values. Codex availability requires its basic MCP surface, not a hardcoded set of advertised
+  feature names. Its prompt requires only the listed Jarvis MCP actions and tells it to ignore other
+  built-ins; read-only, ephemeral, ignored user/project configuration and cleared inherited MCP
+  servers remain the coarse enforcement boundary.
+- **Chose:** Lazily create one private Unix listener for a Start session and reuse it across local-CLI
+  attempts. Every attempt still rotates its broker, bearer, ticket, identity, configuration binding,
+  and provider process. Ending an attempt revokes only that lease; Stop closes the listener. An
+  OpenAI-only session never starts it.
+- **Why:** Jarvis cannot mutate the screen inside an attempt, so another capture adds latency,
+  vision exposure, and a moving observation without enabling a new action. A magic total of two
+  restates the sequence less clearly than the state machine. The replay cache protected no concrete
+  transport retry, while Codex feature-name blocklists drift whenever the CLI adds or renames a
+  surface and still cannot prove its complete model-visible inventory. Recreating an identical local
+  socket listener for every attempt adds lifecycle work without adding authority separation; the
+  rotating authenticated lease is the actual attempt boundary.
+- **Rejected:** (a) Three captures plus a terminal—the extra observations have no coaching use.
+  (b) Keeping a defensive replay cache without a retry contract. (c) Treating an enumerated Codex
+  feature list as a global tool allowlist. (d) Claiming the prompt hides Codex built-ins—it guides
+  behavior but does not provide confidentiality; only brokered Jarvis effects are fail-closed.
+  (e) Reusing an attempt broker or bearer with the listener—it would let stale work cross attempts.
+- **Superseded in part by:** 2026-07-28 — Dynamically quiesce Codex features and stop after proven
+  terminal delivery. The rejection of a Jarvis-owned feature-name list and of a global-containment
+  claim stands; the installed CLI's own registry now supplies best-effort disable flags.
+- **Supersedes in part:** 2026-07-18 — Codex coaching invocations are isolated and bounded;
+  2026-07-27 — Private MCP is an action transport behind one broker.
+- **Detail:** [architecture.md → Local CLI brain providers](./architecture.md#local-cli-brain-providers),
+  [sandbox.md → Data Egress](./sandbox.md#data-egress),
+  `Sources/JarvisCore/Coach/CoachingActionBroker.swift`,
+  `Sources/JarvisCore/Brain/CLIBrainClient+Invocation.swift`,
+  `Sources/JarvisCore/Brain/AgentCLIDetector.swift`,
+  `Sources/JarvisMCPBridge/MCPBridgeHost.swift`,
+  `Sources/JarvisApp/App/AppDelegate.swift`.
+
+### 2026-07-28 — Dynamically quiesce Codex features and stop after proven terminal delivery
+
+- **Chose:** Parse the bounded `codex features list` output during normal CLI detection and pass
+  `--disable` for every enabled, non-removed name reported by that exact installation on MCP coaching
+  calls. There is no Jarvis-owned feature-name list; a missing, malformed, oversized, timed-out, or
+  failed probe passes no guessed flags and keeps the isolated prompt/read-only/early-completion
+  profile. MCP availability continues to depend on the basic configuration surface, not on a
+  version-specific feature matrix. Tool-less summarization keeps Codex's normal feature profile
+  because the optimization was benchmarked only for coaching.
+- **Chose:** Treat a terminal Codex action as a typed successful completion only after the official
+  SDK writes its tool response, the helper returns a matching request-ID acknowledgement, and the
+  host confirms that connection still belongs to the active attempt generation. The process runner
+  then sends SIGTERM with a bounded SIGKILL fallback, preserves partial diagnostics, skips final-reply
+  parsing, and returns control to `CoachDriver`; task cancellation still wins and the broker remains
+  the only commit authority. Capture acknowledgement alone never completes the run.
+- **Chose:** Make the broker authoritative for the request-derived allowed Jarvis actions, not merely
+  for ordering; provider config visibility is defense in depth. Make socket descriptors close on
+  exec. After broker commit, cross a per-Start main-actor `TerminalActionDelivery` that records
+  Activity and renders both panels in one ordered turn. Stop invalidates that lease first and clears
+  caption timers/queues; all driver Activity writes are bound to their original session directory.
+- **Why:** Codex has no supported global built-in-tool allowlist, but optional feature flags add
+  planning/tool surface and a normal agent exit spends time producing trailing output after Jarvis
+  already owns the terminal decision. Two five-trial rotated live batches on Codex 0.145.0 isolated
+  both controls. The first measured medians of 17.452 s for prompt-only, 12.880 s with dynamic
+  quiescing, and 9.216 s with quiescing plus early completion. A fresh second batch measured
+  21.823 s for prompt-only, 14.970 s for early completion alone, and 10.977 s for both controls.
+  Every trial used one process, one capture, the supplied OCR token, and one valid terminal action;
+  no helper remained afterward. The result supports both controls as scoped latency optimizations,
+  not a fixed percentage promise or a claim that feature flags create MCP-only containment.
+- **Rejected:** (a) Restore a static tool-feature blocklist—new and renamed flags would drift.
+  (b) Kill when the broker merely stages a terminal—the SDK response could still be cancelled or
+  fail to reach the provider transport. (c) Wait for Codex's final prose after delivery—it is not
+  authoritative and measured as avoidable tail latency. (d) Apply early completion to Claude—its
+  built-ins are structurally disabled and it already exits promptly, so the extra lifecycle path has
+  no demonstrated benefit. (e) Describe disabling every optional feature as a security boundary or
+  tool inventory—unconditional Codex built-ins can remain model-visible. (f) Apply the unbenchmarked
+  coaching quiescing profile to summarization.
+- **Supersedes in part:** 2026-07-28 — One optional capture, reusable listener, and prompt-guided
+  Codex tools.
+- **Detail:** [architecture.md → Local CLI brain providers](./architecture.md#local-cli-brain-providers),
+  `Sources/JarvisCore/Brain/AgentCLIDetector.swift`,
+  `Sources/JarvisCore/Brain/AgentCLIProcessRunner.swift`,
+  `Sources/JarvisMCPBridge/MCPBridgeHost.swift`,
+  `Sources/JarvisMCPBridge/MCPBrainClient.swift`.

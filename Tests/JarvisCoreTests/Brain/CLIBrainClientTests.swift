@@ -29,7 +29,7 @@ import Testing
         workDir: URL,
         model: String = "claude-sonnet-5",
         effort: String = "low",
-        codexSupportedFeatures: Set<String>? = nil,
+        codexFeaturesToDisable: Set<String> = [],
         run: @escaping CLIBrainClient.Runner
     ) -> CLIBrainClient {
         CLIBrainClient(
@@ -38,8 +38,7 @@ import Testing
             model: model,
             reasoningEffort: effort,
             workDirectory: workDir,
-            codexSupportedFeatures: codexSupportedFeatures
-                ?? (provider == .codexCLI ? Set(CLIBrainClient.codexDisabledAgentFeatures) : []),
+            codexFeaturesToDisable: codexFeaturesToDisable,
             run: run)
     }
 
@@ -89,8 +88,8 @@ import Testing
 
         let response = try await c.respondUsingMCP(
             messages: [.system("coach prompt"), .user("look first")],
-            tools: coachTools,
-            toolChoice: .required,
+            tools: [speakTool],
+            toolChoice: .force(speakTool.name),
             configuration: mcpConfiguration(for: .claudeCode, in: workDir))
 
         let run = try #require(captured.value)
@@ -102,12 +101,16 @@ import Testing
         let configIndex = try #require(run.arguments.firstIndex(of: "--mcp-config"))
         #expect(run.arguments[configIndex + 1].hasSuffix("attempt.claude.json"))
         #expect(run.arguments.contains("--strict-mcp-config"))
-        #expect(run.arguments.contains("mcp__jarvis__capture_screen"))
         #expect(run.arguments.contains("mcp__jarvis__speak"))
-        #expect(run.arguments.contains("mcp__jarvis__stay_silent"))
+        #expect(!run.arguments.contains("mcp__jarvis__capture_screen"))
+        #expect(!run.arguments.contains("mcp__jarvis__stay_silent"))
         let promptIndex = try #require(run.arguments.firstIndex(of: "--system-prompt"))
         let instructions = run.arguments[promptIndex + 1]
         #expect(instructions.contains("callable tools"))
+        #expect(instructions.contains("Ignore every built-in"))
+        #expect(instructions.contains("Do not call any action that is not listed above."))
+        #expect(!instructions.contains("capture_screen at most once"))
+        #expect(instructions.contains("exactly one `speak` action"))
         #expect(!instructions.contains(#"{"tool":"<tool name>""#))
         let effortIndex = try #require(run.arguments.firstIndex(of: "--effort"))
         #expect(run.arguments[effortIndex + 1] == "low")
@@ -118,10 +121,15 @@ import Testing
         #expect(response.toolCalls.isEmpty)
     }
 
-    @Test func codexMCPRunReplacesInheritedServersWithOneAllowlistedServer() async throws {
+    @Test func codexMCPRunReplacesInheritedServersAndDerivesEnabledTools() async throws {
         let workDir = try makeWorkDir()
         let captured = Captured<AgentCLIRun>()
-        let c = client(.codexCLI, workDir: workDir, model: "gpt-5.6-sol") { run, _ in
+        let c = client(
+            .codexCLI,
+            workDir: workDir,
+            model: "gpt-5.6-sol",
+            codexFeaturesToDisable: ["shell_tool", "future-surface"]
+        ) { run, _ in
             captured.value = run
             if let index = run.arguments.firstIndex(of: "--output-last-message") {
                 try "tool calls completed".write(
@@ -134,30 +142,29 @@ import Testing
 
         let response = try await c.respondUsingMCP(
             messages: [.system("coach prompt"), .user("look first")],
-            tools: coachTools,
-            toolChoice: .required,
+            tools: [captureScreenTool, staySilentTool],
+            toolChoice: .force(staySilentTool.name),
             configuration: mcpConfiguration(for: .codexCLI, in: workDir))
 
         let run = try #require(captured.value)
         #expect(run.arguments.contains {
             $0 == #"mcp_servers.jarvis.command="/bundle/JarvisMCPServer""#
         })
-        #expect(run.arguments.contains {
-            $0.contains("mcp_servers.jarvis.enabled_tools=")
-                && $0.contains("capture_screen")
-                && $0.contains("speak")
-                && $0.contains("stay_silent")
-        })
+        #expect(run.arguments.contains(
+            #"mcp_servers.jarvis.enabled_tools=["capture_screen","stay_silent"]"#))
         #expect(run.arguments.contains(
             #"mcp_servers.jarvis.default_tools_approval_mode="approve""#))
         #expect(run.arguments.contains("mcp_servers={}"))
         let modelIndex = try #require(run.arguments.firstIndex(of: "-m"))
         #expect(run.arguments[modelIndex + 1] == "gpt-5.6-sol")
-        let disabled = Set(zip(run.arguments, run.arguments.dropFirst()).compactMap {
+        let disabledFeatures = zip(run.arguments, run.arguments.dropFirst()).compactMap {
             flag, value in flag == "--disable" ? value : nil
-        })
-        #expect(disabled == Set(CLIBrainClient.codexDisabledAgentFeatures))
+        }
+        #expect(disabledFeatures == ["future-surface", "shell_tool"])
         #expect(run.stdin?.contains("callable tools") == true)
+        #expect(run.stdin?.contains("Ignore every built-in") == true)
+        #expect(run.stdin?.contains("capture_screen at most once") == true)
+        #expect(run.stdin?.contains("exactly one terminal tool") == true)
         #expect(!run.stdin!.contains(#"{"tool":"<tool name>""#))
         #expect(response.actionDelivery == .broker)
     }
@@ -230,6 +237,66 @@ import Testing
         #expect(try FileManager.default.contentsOfDirectory(atPath: workDir.path).isEmpty)
     }
 
+    @Test func codexToolLessRunDoesNotApplyTheCoachingFeatureProfile() async throws {
+        let workDir = try makeWorkDir()
+        let captured = Captured<AgentCLIRun>()
+        let c = client(
+            .codexCLI,
+            workDir: workDir,
+            model: "",
+            codexFeaturesToDisable: ["z_future_surface", "apps"]
+        ) { run, _ in
+            captured.value = run
+            if let index = run.arguments.firstIndex(of: "--output-last-message") {
+                try "summary".write(
+                    toFile: run.arguments[index + 1],
+                    atomically: true,
+                    encoding: .utf8)
+            }
+            return AgentCLIOutput(stdout: "", stderr: "", exitCode: 0)
+        }
+
+        _ = try await c.respond(messages: [.user("summarize")], tools: [], toolChoice: .auto)
+
+        let run = try #require(captured.value)
+        let disabledFeatures = zip(run.arguments, run.arguments.dropFirst()).compactMap {
+            flag, value in flag == "--disable" ? value : nil
+        }
+        #expect(disabledFeatures.isEmpty)
+    }
+
+    @Test func codexEmptyDetectedFeatureSetKeepsTheMCPRestrictionsAndFastPath() async throws {
+        let workDir = try makeWorkDir()
+        let captured = Captured<AgentCLIRun>()
+        let completion = AgentCLICompletionSignal()
+        let c = client(.codexCLI, workDir: workDir, model: "") { run, _ in
+            captured.value = run
+            if let index = run.arguments.firstIndex(of: "--output-last-message") {
+                try "tool calls completed".write(
+                    toFile: run.arguments[index + 1],
+                    atomically: true,
+                    encoding: .utf8)
+            }
+            return AgentCLIOutput(stdout: "", stderr: "", exitCode: 0)
+        }
+
+        _ = try await c.respondUsingMCP(
+            messages: [.user("coach me")],
+            tools: [speakTool],
+            toolChoice: .force(speakTool.name),
+            configuration: mcpConfiguration(for: .codexCLI, in: workDir),
+            completionSignal: completion)
+
+        let run = try #require(captured.value)
+        #expect(!run.arguments.contains("--disable"))
+        #expect(run.arguments.contains("--sandbox"))
+        #expect(run.arguments.contains("read-only"))
+        #expect(run.arguments.contains("--ephemeral"))
+        #expect(run.arguments.contains("mcp_servers.jarvis.enabled_tools=[\"speak\"]"))
+        #expect(run.stdin?.contains("Ignore every non-Jarvis tool") == true)
+        #expect(run.completionSignal === completion)
+    }
+
     @Test func everyCodexModelReusesTheSharedEffortAndDisablesMCP() async throws {
         let efforts = [
             (ReasoningEffort.none, ReasoningEffort.low),
@@ -255,29 +322,6 @@ import Testing
                 #expect(arguments[modelIndex + 1] == model.id)
             }
         }
-    }
-
-    @Test func codexDisablesOnlyFeaturesAdvertisedByTheInstalledCLI() async throws {
-        let workDir = try makeWorkDir()
-        let captured = Captured<AgentCLIRun>()
-        let c = client(
-            .codexCLI,
-            workDir: workDir,
-            model: "gpt-5.6-sol",
-            codexSupportedFeatures: ["shell_tool", "renamed_future_feature"]
-        ) { run, _ in
-            captured.value = run
-            return AgentCLIOutput(stdout: "", stderr: "", exitCode: 0)
-        }
-
-        _ = try await c.respond(messages: [.user("x")], tools: [], toolChoice: .auto)
-        let arguments = try #require(captured.value).arguments
-        let disabled = zip(arguments, arguments.dropFirst()).compactMap {
-            flag, value in flag == "--disable" ? value : nil
-        }
-        #expect(disabled == ["shell_tool"])
-        #expect(!arguments.contains("code_mode_host"))
-        #expect(!arguments.contains("renamed_future_feature"))
     }
 
     @Test func everyClaudeModelReusesTheSharedEffort() async throws {
@@ -362,6 +406,43 @@ import Testing
         #expect((request["instructions"] as? String)?.hasPrefix("coach prompt") == true)
         let input = try #require(request["input"] as? [[String: Any]])
         #expect(input.contains { ($0["image"] as? String)?.contains("redacted") == true })
+    }
+
+    @Test func acknowledgedCodexTerminalStopSkipsReplyParsingAndRecordsCompletion() async throws {
+        let workDir = try makeWorkDir()
+        let completion = AgentCLICompletionSignal()
+        let c = clientWithTraffic(.codexCLI, workDir: workDir) { run, timings in
+            #expect(run.completionSignal === completion)
+            timings.mark(.runnerEntered)
+            timings.mark(.processLaunched)
+            timings.mark(.stdinDelivered)
+            timings.mark(.firstStdoutByte)
+            timings.mark(.processExited)
+            #expect(completion.signal(.terminalActionDelivered))
+            return AgentCLIOutput(
+                stdout: "partial codex diagnostics",
+                stderr: "",
+                exitCode: 15,
+                termination: .completionSignal(.terminalActionDelivered))
+        }
+
+        let response = try await c.respondUsingMCP(
+            messages: [.user("coach me")],
+            tools: [speakTool],
+            toolChoice: .force(speakTool.name),
+            configuration: mcpConfiguration(for: .codexCLI, in: workDir),
+            completionSignal: completion)
+
+        #expect(response.actionDelivery == .broker)
+        #expect(response.outputText == nil)
+        let entry = try onlyTrafficEntry(in: workDir)
+        #expect(entry["status"] as? Int == 200)
+        let recorded = try #require(entry["response"] as? [String: Any])
+        #expect(recorded["completion"] as? String == "terminalActionDelivered")
+        #expect(recorded["exitCode"] as? Int == 15)
+        #expect(recorded["reply"] == nil)
+        let phases = try #require(entry["phases"] as? [String: Any])
+        #expect(phases["parseMs"] == nil)
     }
 
     private func onlyTrafficEntry(in workDir: URL) throws -> [String: Any] {

@@ -12,19 +12,19 @@ import Foundation
 public final class CoachDriver: @unchecked Sendable {
     public typealias AutomaticAttemptDelay =
         @Sendable (_ consecutiveAutomaticAttempt: Int) async throws -> Void
+    public typealias ActivityRecorder = @Sendable (ActivityLog.Event) -> Void
 
     private let config: Config
     private let transcript: RollingTranscript
     private let screen: ScreenCapturing
     private let overlay: OverlayRendering
+    private let activityRecorder: ActivityRecorder
+    private let terminalActionDelivery: TerminalActionDelivery?
     private let clock: Clock
     private let sessionStart: TimeInterval
     private let history = CoachHistory()
     private let speechActivity = SpeechActivityGate()
     private let automaticAttemptDelay: AutomaticAttemptDelay
-
-    /// Safety backstop against a pathological model that loops on capture_screen forever.
-    private let maxToolIterations = 4
 
     private let stateLock = NSLock()
     private var routeRevision: UInt = 0
@@ -126,6 +126,8 @@ public final class CoachDriver: @unchecked Sendable {
         screen: ScreenCapturing,
         overlay: OverlayRendering,
         clock: Clock,
+        activityRecorder: ActivityRecorder? = nil,
+        terminalActionDelivery: TerminalActionDelivery? = nil,
         automaticAttemptDelay: AutomaticAttemptDelay? = nil
     ) {
         self.config = config
@@ -134,6 +136,10 @@ public final class CoachDriver: @unchecked Sendable {
         self.routeSession = BrainRouteSession(targetCount: route.targets.count)
         self.screen = screen
         self.overlay = overlay
+        self.activityRecorder = activityRecorder ?? {
+            ActivityLog.shared.record($0)
+        }
+        self.terminalActionDelivery = terminalActionDelivery
         self.clock = clock
         self.sessionStart = clock.now()
         self.automaticAttemptDelay = automaticAttemptDelay ?? Self.defaultAutomaticAttemptDelay
@@ -645,7 +651,7 @@ public final class CoachDriver: @unchecked Sendable {
                 case .retry(let failureCount, let advanced):
                     routeChanged = false
                     if !advanced {
-                        ActivityLog.shared.record(
+                        activityRecorder(
                             .coachingTurnFailed(provider: attempt.target.provider))
                     }
                     let policy = failure.disposition == .permanent
@@ -748,7 +754,7 @@ public final class CoachDriver: @unchecked Sendable {
         if reason == .manualHint && !work.manualHintPrepared {
             if let prompt = context.promptLine {
                 jlog("⌨️ hint shortcut — \(prompt)")
-                ActivityLog.shared.record(.manualHint(prompt: prompt))
+                activityRecorder(.manualHint(prompt: prompt))
             }
             let screen = self.screen
             let shot = await Task.detached(
@@ -760,7 +766,7 @@ public final class CoachDriver: @unchecked Sendable {
             }
             if let shot {
                 jlog("👁 looking at your screen")
-                ActivityLog.shared.record(.screenViewed(imageBase64JPEG: shot.imageBase64))
+                activityRecorder(.screenViewed(imageBase64JPEG: shot.imageBase64))
                 var observations: [ChatMessage] = [.userImage(shot.imageBase64)]
                 turnMessages.append(.userImage(shot.imageBase64))
                 if let text = shot.recognizedText {
@@ -772,7 +778,7 @@ public final class CoachDriver: @unchecked Sendable {
                 work.observations = observations
             } else {
                 jlog("👁 screenshot failed")
-                ActivityLog.shared.record(.screenViewFailed)
+                activityRecorder(.screenViewFailed)
                 work.observations = [
                     .user("The screen capture requested for the manual hint failed."),
                 ]
@@ -789,6 +795,9 @@ public final class CoachDriver: @unchecked Sendable {
             requiredTerminalToolName = nil
         }
         jlog("💭 thinking… [\(attempt.target.provider.displayName)]")
+        var availableTools = reason == .manualHint
+            ? [speakTool]
+            : coachTools
 
         let screen = self.screen
         let actionBroker = CoachingActionBroker(
@@ -798,22 +807,23 @@ public final class CoachDriver: @unchecked Sendable {
                     priority: .userInitiated,
                     operation: { screen.capture() }).value
             },
-            captureObserver: { snapshot in
-                Self.recordCaptureActivity(snapshot)
+            captureObserver: { [activityRecorder] snapshot in
+                Self.recordCaptureActivity(snapshot, recordActivity: activityRecorder)
             },
-            requiredTerminalToolName: requiredTerminalToolName,
-            maximumActionCalls: maxToolIterations)
+            allowedToolNames: Set(availableTools.map(\.name)),
+            requiredTerminalToolName: requiredTerminalToolName)
         defer { actionBroker.invalidate() }
 
-        var iterations = 0
-        while iterations < maxToolIterations {
-            iterations += 1
+        // The broker's state machine makes this loop finite: a native provider may either return a
+        // terminal immediately or make one capture and then return a terminal. Any second capture,
+        // missing terminal, or malformed action fails the attempt.
+        while true {
             let response: BrainResponse
             do {
                 response = try await withTaskCancellationHandler {
                     try await attempt.brain.respond(
                         messages: historyBase + turnMessages,
-                        tools: coachTools,
+                        tools: availableTools,
                         toolChoice: toolChoice,
                         actionBroker: actionBroker)
                 } onCancel: {
@@ -852,42 +862,60 @@ public final class CoachDriver: @unchecked Sendable {
             do {
                 switch response.actionDelivery {
                 case .returnedCalls:
-                    guard response.toolCalls.count <= 1 else {
+                    guard response.toolCalls.count <= 1,
+                          response.rawToolCalls.count <= 1 else {
                         try await actionBroker.rejectMultipleCallsInResponse()
                         preconditionFailure("rejectMultipleCallsInResponse always throws")
+                    }
+                    guard response.toolCalls.count == response.rawToolCalls.count else {
+                        try await actionBroker.rejectReturnedCallMismatch()
+                        preconditionFailure("rejectReturnedCallMismatch always throws")
                     }
                     guard let call = response.toolCalls.first else {
                         _ = try await actionBroker.requireTerminal()
                         preconditionFailure("requireTerminal throws when no action was returned")
                     }
+                    guard let rawCall = response.rawToolCalls.first,
+                          ToolInvocation.parse(
+                            callId: rawCall.id,
+                            name: rawCall.name,
+                            argumentsJSON: rawCall.argumentsJSON) == call else {
+                        try await actionBroker.rejectReturnedCallMismatch()
+                        preconditionFailure("rejectReturnedCallMismatch always throws")
+                    }
                     let result = try await withTaskCancellationHandler {
-                        try await actionBroker.submit(call)
+                        try await actionBroker.call(
+                            requestID: rawCall.id,
+                            name: rawCall.name,
+                            argumentsJSON: rawCall.argumentsJSON)
                     } onCancel: {
                         actionBroker.invalidate()
                     }
                     if case .capture(let snapshot) = result {
                         try Task.checkCancellation()
                         let acknowledged = try await actionBroker
-                            .acknowledgeCaptureDelivery(requestID: call.callID)
+                            .acknowledgeCaptureDelivery(requestID: rawCall.id)
                         precondition(
                             acknowledged,
                             "submitted capture must remain available for delivery acknowledgement")
                         Self.appendCapture(
-                            callID: call.callID,
+                            callID: rawCall.id,
                             snapshot: snapshot,
                             response: response,
                             to: &turnMessages,
                             work: &work)
+                        availableTools = [speakTool, staySilentTool]
                         continue
                     }
 
                 case .broker:
-                    guard response.toolCalls.isEmpty else {
-                        try await actionBroker.rejectMultipleCallsInResponse()
-                        preconditionFailure("rejectMultipleCallsInResponse always throws")
+                    guard response.toolCalls.isEmpty,
+                          response.rawToolCalls.isEmpty else {
+                        try await actionBroker.rejectReturnedCallMismatch()
+                        preconditionFailure("rejectReturnedCallMismatch always throws")
                     }
-                    Self.appendBrokerCaptures(
-                        await actionBroker.events(),
+                    Self.appendBrokerCapture(
+                        await actionBroker.captureObservation(),
                         to: &turnMessages,
                         work: &work)
                 }
@@ -905,13 +933,24 @@ public final class CoachDriver: @unchecked Sendable {
 
                 switch decision {
                 case .speak(let callID, let lines):
+                    let displaySeconds = lines.map {
+                        OverlayTiming.displaySeconds(for: $0, config: config)
+                    }
+                    let delivered: Bool
+                    if let terminalActionDelivery {
+                        delivered = await terminalActionDelivery.deliver(
+                            decision,
+                            perLineSeconds: displaySeconds)
+                    } else {
+                        activityRecorder(.tip(lines: lines))
+                        overlay.render(lines, perLineSeconds: displaySeconds)
+                        delivered = true
+                    }
+                    guard delivered else {
+                        jlog("… attempt cancelled (stopped) at terminal delivery")
+                        return .cancelled
+                    }
                     jlog("💬 \(lines.joined(separator: " "))")
-                    ActivityLog.shared.record(.tip(lines: lines))
-                    overlay.render(
-                        lines,
-                        perLineSeconds: lines.map {
-                            OverlayTiming.displaySeconds(for: $0, config: config)
-                        })
                     let rawCalls = response.actionDelivery == .returnedCalls
                         ? response.rawToolCalls
                         : [decision.rawToolCall]
@@ -926,8 +965,18 @@ public final class CoachDriver: @unchecked Sendable {
                     return .completed(.spoke)
 
                 case .staySilent:
+                    let delivered: Bool
+                    if let terminalActionDelivery {
+                        delivered = await terminalActionDelivery.deliver(decision)
+                    } else {
+                        activityRecorder(.stayedSilent)
+                        delivered = true
+                    }
+                    guard delivered else {
+                        jlog("… attempt cancelled (stopped) at terminal delivery")
+                        return .cancelled
+                    }
                     jlog("… nothing useful to add, staying silent")
-                    ActivityLog.shared.record(.stayedSilent)
                     commitIfWorthKeeping(turnMessages, deltaText: delta.text)
                     commitTranscript(through: delta.upTo)
                     await compactIfNeeded(using: attempt)
@@ -945,47 +994,40 @@ public final class CoachDriver: @unchecked Sendable {
                 return .failed(outcome: .brainError, failure: failure, work: work)
             }
         }
-
-        jlog("⚠️ tool loop exhausted — scheduling fresh attempt")
-        return .failed(
-            outcome: .exhausted,
-            failure: BrainFailure(
-                disposition: .temporary,
-                detail: "coaching tool loop exhausted"),
-            work: work)
     }
 
-    private static func recordCaptureActivity(_ snapshot: ScreenSnapshot?) {
+    private static func recordCaptureActivity(
+        _ snapshot: ScreenSnapshot?,
+        recordActivity: ActivityRecorder
+    ) {
         if let snapshot {
             jlog("👁 looking at your screen")
-            ActivityLog.shared.record(.screenViewed(imageBase64JPEG: snapshot.imageBase64))
+            recordActivity(.screenViewed(imageBase64JPEG: snapshot.imageBase64))
             if let text = snapshot.recognizedText {
                 jlog("🔤 read \(text.count(where: { $0 == "\n" }) + 1) lines of on-screen text")
             }
         } else {
             jlog("👁 screenshot failed")
-            ActivityLog.shared.record(.screenViewFailed)
+            recordActivity(.screenViewFailed)
         }
     }
 
-    private static func appendBrokerCaptures(
-        _ events: [CoachingActionBroker.Event],
+    private static func appendBrokerCapture(
+        _ observation: CoachingActionBroker.CaptureObservation?,
         to turnMessages: inout [ChatMessage],
         work: inout PendingCoachingWork
     ) {
-        for event in events {
-            guard case .captured(let callID, let snapshot) = event else { continue }
-            let raw = RawToolCall(
-                id: callID,
-                name: captureScreenTool.name,
-                argumentsJSON: "{}")
-            appendCapture(
-                callID: callID,
-                snapshot: snapshot,
-                rawAssistantMessage: .assistantToolCalls([raw]),
-                to: &turnMessages,
-                work: &work)
-        }
+        guard let observation else { return }
+        let raw = RawToolCall(
+            id: observation.callID,
+            name: captureScreenTool.name,
+            argumentsJSON: "{}")
+        appendCapture(
+            callID: observation.callID,
+            snapshot: observation.snapshot,
+            rawAssistantMessage: .assistantToolCalls([raw]),
+            to: &turnMessages,
+            work: &work)
     }
 
     private static func appendCapture(
@@ -1039,8 +1081,8 @@ public final class CoachDriver: @unchecked Sendable {
         _ broker: CoachingActionBroker,
         in work: inout PendingCoachingWork
     ) async {
-        guard await broker.hasCaptureAttempt() else { return }
-        if let snapshot = await broker.latestCapture() {
+        guard let observation = await broker.captureObservation() else { return }
+        if let snapshot = observation.snapshot {
             work.observations = [
                 .user(Self.captureResultText(snapshot)),
                 .userImage(snapshot.imageBase64),
@@ -1118,14 +1160,4 @@ public enum TurnOutcome: Sendable, Equatable {
     case busy
     case cancelled
     case brainError
-    case exhausted
-}
-
-private extension ToolInvocation {
-    var callID: String {
-        switch self {
-        case .captureScreen(let callID), .speak(let callID, _), .staySilent(let callID):
-            return callID
-        }
-    }
 }

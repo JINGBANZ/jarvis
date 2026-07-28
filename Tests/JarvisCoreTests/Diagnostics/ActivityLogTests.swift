@@ -93,6 +93,28 @@ import Foundation
         #expect(!snapshot.rows.joined().contains("stayed silent"))
     }
 
+    @Test func sessionBoundRecordCannotWriteIntoReplacementSession() throws {
+        let old = Self.tmp()
+        let replacement = Self.tmp()
+        defer {
+            try? FileManager.default.removeItem(at: old)
+            try? FileManager.default.removeItem(at: replacement)
+        }
+        let log = ActivityLog()
+        log.enable(directory: old)
+        log.record(.tip(lines: ["old before rotation"]), sessionDirectory: old)
+        log.enable(directory: replacement)
+
+        log.record(.tip(lines: ["late old tip"]), sessionDirectory: old)
+        log.record(.tip(lines: ["new tip"]), sessionDirectory: replacement)
+        log.flush()
+
+        let rows = log.attach { _ in }.rows
+        #expect(rows.count == 1)
+        #expect(rows[0].contains("new tip"))
+        #expect(!rows[0].contains("late old tip"))
+    }
+
     @Test func attachSnapshotReplaysExistingEntriesWithImageBytes() throws {
         let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         let log = ActivityLog(); log.enable(directory: dir)

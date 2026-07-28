@@ -50,6 +50,7 @@ private final class FailingScreen: ScreenCapturing, @unchecked Sendable {
         #expect(screen.captureCount == 1)                              // the DRIVER captured, not the brain
         #expect(brain.calls.count == 1)                               // ONE trip — no capture_screen round trip
         #expect(brain.toolChoices.last == .force("speak"))            // forced to reply
+        #expect(brain.toolNames == [[speakTool.name]])                 // no unusable actions exposed
         #expect(brain.calls[0].contains { $0.imageBase64JPEG != nil })// the screenshot rode along in the first request
         #expect(overlay.rendered == [["Use a hash map to remember what you've seen."]])
         // The "simulate a message as the user" half: the manual-hint prompt AND the live transcript

@@ -7,8 +7,8 @@ import Glibc
 
 /// Finds installed `claude` / `codex` CLIs and checks the local facts Jarvis needs before invoking
 /// them. Binary discovery stays a pure filesystem probe. Bounded, non-billing local commands read
-/// Claude's authoritative auth status and Codex's advertised feature names; Codex's auth file marker
-/// remains authoritative.
+/// Claude's authoritative auth status, each CLI's basic MCP help, and Codex's enabled feature
+/// registry; Codex's auth file marker remains authoritative.
 public struct AgentCLIDetector: Sendable {
     private let home: URL
     private let pathVariable: String?
@@ -70,18 +70,15 @@ public struct AgentCLIDetector: Sendable {
     public func detect(_ provider: BrainProvider) -> DetectedAgentCLI? {
         guard let name = provider.cliExecutableName else { return nil }
         guard let url = firstExecutable(named: name) else { return nil }
-        let supportedFeatures = provider == .codexCLI
-            ? codexSupportedFeatures(executable: url)
+        let codexFeaturesToDisable = provider == .codexCLI
+            ? codexFeaturesToDisable(executable: url)
             : []
         return DetectedAgentCLI(
             provider: provider,
             executableURL: url,
             authenticationStatus: authenticationStatus(provider, executable: url),
-            supportedFeatures: supportedFeatures,
-            supportsMCP: supportsMCP(
-                provider,
-                executable: url,
-                supportedFeatures: supportedFeatures)
+            codexFeaturesToDisable: codexFeaturesToDisable,
+            supportsMCP: supportsMCP(provider, executable: url)
         )
     }
 
@@ -169,26 +166,62 @@ public struct AgentCLIDetector: Sendable {
         return status.loggedIn ? .signedIn : .signedOut
     }
 
-    /// `--disable <feature>` rejects unknown names. Probe the installed binary's compiled feature
-    /// registry so Jarvis passes only names that installation advertises. A failed probe returns no
-    /// flags, which makes Codex unavailable for coaching when the MCP safety set cannot be proven;
-    /// tool-less auxiliary calls can still use the bounded direct-response invocation.
-    private func codexSupportedFeatures(executable: URL) -> Set<String> {
+    /// Codex has no global built-in-tool allowlist. Quiesce every feature this exact installation
+    /// reports as enabled unless the registry marks it removed; this makes newly advertised surfaces
+    /// default off without maintaining a version-specific feature-name list. Any probe or parse
+    /// failure returns an empty set, retaining the prompt/read-only/ephemeral restrictions and
+    /// acknowledged-terminal completion rather than guessing.
+    private func codexFeaturesToDisable(executable: URL) -> Set<String> {
         guard let output = runProbe(executable: executable, arguments: ["features", "list"]),
               output.status == 0,
+              output.data.count < Self.maxProbeOutputBytes,
               let text = String(data: output.data, encoding: .utf8)
         else { return [] }
-        return Set(text.split(separator: "\n").compactMap { line in
-            line.split(whereSeparator: \.isWhitespace).first.map(String.init)
-        })
+
+        var result = Set<String>()
+        for line in text.split(whereSeparator: \.isNewline) {
+            let fields = line.split(whereSeparator: \.isWhitespace)
+            guard fields.count >= 3,
+                  Self.isSafeCodexFeatureName(fields[0]),
+                  let enabled = Self.codexFeatureState(fields.last!)
+            else { return [] }
+
+            let stage = fields.dropFirst().dropLast().joined(separator: " ")
+            guard !stage.isEmpty else { return [] }
+            if enabled && stage != "removed" {
+                result.insert(String(fields[0]))
+            }
+        }
+        return result
+    }
+
+    private static func codexFeatureState(_ value: Substring) -> Bool? {
+        switch value {
+        case "true": true
+        case "false": false
+        default: nil
+        }
+    }
+
+    /// Feature names are passed as a separate argv value, but accepting only the CLI's current ASCII
+    /// identifier shape also prevents malformed help text from becoming invocation configuration.
+    private static func isSafeCodexFeatureName(_ value: Substring) -> Bool {
+        let bytes = value.utf8
+        guard let first = bytes.first, isASCIIAlphanumeric(first) else { return false }
+        return bytes.dropFirst().allSatisfy {
+            isASCIIAlphanumeric($0) || $0 == 95 || $0 == 45
+        }
+    }
+
+    private static func isASCIIAlphanumeric(_ byte: UInt8) -> Bool {
+        (97...122).contains(byte) || (65...90).contains(byte) || (48...57).contains(byte)
     }
 
     /// Capability comes from the installed binary, never its version string. Missing or unfamiliar
     /// help output makes that installation unavailable for coaching instead of guessing flags.
     private func supportsMCP(
         _ provider: BrainProvider,
-        executable: URL,
-        supportedFeatures: Set<String>
+        executable: URL
     ) -> Bool {
         let arguments: [String]
         switch provider {
@@ -209,8 +242,6 @@ public struct AgentCLIDetector: Sendable {
             return text.contains("--mcp-config") && text.contains("--strict-mcp-config")
         case .codexCLI:
             return text.localizedCaseInsensitiveContains("mcp")
-                && CLIBrainClient.codexMCPRequiredDisableFeatures
-                    .isSubset(of: supportedFeatures)
         case .openAI:
             return false
         }

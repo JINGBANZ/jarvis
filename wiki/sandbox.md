@@ -95,24 +95,41 @@ Narrow and explicit. Data leaves the machine only via:
   Anthropic / OpenAI under the *user's own signed-in account* and that vendor's consumer retention
   terms. The subprocess runs with the CLI's own privileges (Codex is invoked `--sandbox read-only`;
   Claude with every built-in tool disabled, cwd pinned to the session dir). A supported coaching
-  invocation receives **exactly one private Jarvis MCP server** exposing only
-  `capture_screen`, `speak`, and `stay_silent`; strict generated configuration suppresses every
-  user-configured MCP server and unrelated built-in. The sidecar has no direct screen, Activity,
-  overlay, shell, or persistence authority. It forwards authenticated action requests to the app,
-  where `CoachingActionBroker` enforces attempt identity, ordering, cancellation, and exactly-once
-  commit. This trusts a CLI the user already runs on this machine without widening the actions
-  Jarvis authorizes. The CLIs run with
+  invocation receives **exactly one private Jarvis MCP server** implementing the three coaching
+  actions; generated provider configuration enables or authorizes only the actions supplied for that
+  request and suppresses user-configured MCP servers. Claude's built-ins are disabled; Codex may
+  still expose its own built-ins because it has
+  no stable global tool allowlist. Jarvis dynamically disables every enabled, non-removed feature
+  name reported by that exact installation for MCP coaching, but that registry is not a tool
+  inventory and unconditional built-ins may still remain, so the prompt directs Codex to ignore
+  them. The dynamic flags reduce the optional agent surface and latency; neither they nor the prompt
+  are a confidentiality boundary. Tool-less summarization does not receive this coaching profile.
+  The current personal posture
+  trusts the locally installed Codex CLI and its read-only sandbox with anything that process can
+  read. The sidecar itself has no direct screen,
+  Activity, overlay, shell, or persistence authority. It forwards authenticated action requests to
+  the app, where `CoachingActionBroker` enforces at most one capture, terminal ordering,
+  cancellation, and exactly-once commit. This trusts a CLI the user already runs on this machine
+  without widening the Jarvis effects it can authorize. The CLIs run with
   **session persistence off** (`--no-session-persistence` / `--ephemeral`), so they keep no local
   transcript of the coaching conversation in `~/.claude` / `~/.codex` — the owner-only session dir
   stays the only on-disk copy. Transcription audio still goes to the OpenAI Realtime API regardless.
-  For an MCP attempt, the ticket and generated CLI config live only in that owner-only session
+  For an MCP attempt, the fresh ticket and generated CLI config live only in that owner-only session
   directory. The ticket contains a random bearer capability bound to one attempt UUID and
-  configuration revision; the bearer is never placed in argv or model context. The socket node
-  contains no payload and lives for the attempt in macOS's short owner-only per-user temporary
+  configuration revision; the bearer is never placed in argv or model context. The app reuses one
+  lazy listener within the Start session, but rotates its accepted attempt binding, broker, bearer,
+  and ticket for every local-CLI attempt; stale bindings are rejected and Stop closes the listener.
+  Every listener/client/accepted socket descriptor is close-on-exec, so a later provider subprocess
+  cannot inherit the private channel.
+  The socket node contains no payload and lives in macOS's short owner-only per-user temporary
   directory so a deep workspace path cannot exceed the Unix-socket address limit. Screenshot/OCR
-  bytes cross only the kernel stream; the host removes the node and session files when the attempt
-  ends. Raw MCP frames and bearer values never enter Activity or brain traffic; debug records only
-  redacted method/tool/timing summaries.
+  bytes cross only the kernel stream; attempt files are removed at attempt end and the socket node at
+  session end. Raw MCP frames and bearer values never enter Activity or brain traffic; debug records
+  only redacted method/tool/timing summaries. For Codex, the host emits an early-completion signal
+  only after the SDK response write, matching helper acknowledgement, and current-lease confirmation;
+  Stop/cancellation still invalidates the broker and wins over that success signal. After broker
+  commit, a per-Start main-actor delivery lease orders terminal Activity/overlay effects against
+  Stop; Activity writes are additionally bound to their immutable session directory.
 - **An explicit Activity → Evaluate click** sends the selected completed session to a read-only,
   non-persisted Claude Code / Codex agent under that CLI account. Unlike a coaching turn, this agent
   may inspect the complete `jarvis-activity.jsonl`, brain traffic, saved screenshots, and source

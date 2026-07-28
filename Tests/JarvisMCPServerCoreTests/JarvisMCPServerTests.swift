@@ -2,11 +2,92 @@ import Foundation
 import JarvisCore
 import JarvisMCPBridge
 @testable import JarvisMCPServerCore
+import Logging
 import MCP
 import System
 import Testing
 
 @Suite(.serialized) struct JarvisMCPServerTests {
+    private actor SendGate {
+        private var armed = false
+        private var entered = false
+        private var entryWaiters: [CheckedContinuation<Void, Never>] = []
+        private var releaseWaiter: CheckedContinuation<Void, Never>?
+
+        func arm() {
+            armed = true
+        }
+
+        func pauseIfArmed() async {
+            guard armed else { return }
+            armed = false
+            entered = true
+            let waiters = entryWaiters
+            entryWaiters.removeAll()
+            for waiter in waiters {
+                waiter.resume()
+            }
+            await withCheckedContinuation { releaseWaiter = $0 }
+        }
+
+        func waitUntilEntered() async {
+            if entered { return }
+            await withCheckedContinuation { entryWaiters.append($0) }
+        }
+
+        func release() {
+            releaseWaiter?.resume()
+            releaseWaiter = nil
+        }
+    }
+
+    /// Test-only transport seam. The SDK still owns all message encoding and dispatch; this wrapper
+    /// pauses one send to put cancellation exactly between handler return and transport delivery.
+    private actor GatedSendTransport<Base: Transport>: Transport {
+        nonisolated let logger = Logger(
+            label: "jarvis.tests.gated-mcp-transport",
+            factory: { _ in SwiftLogNoOpLogHandler() })
+
+        private let base: Base
+        private let gate: SendGate
+
+        init(base: Base, gate: SendGate) {
+            self.base = base
+            self.gate = gate
+        }
+
+        func connect() async throws {
+            try await base.connect()
+        }
+
+        func disconnect() async {
+            await base.disconnect()
+        }
+
+        func send(_ data: Data) async throws {
+            await gate.pauseIfArmed()
+            try await base.send(data)
+        }
+
+        func receive() -> AsyncThrowingStream<Data, Error> {
+            let base = self.base
+            return AsyncThrowingStream { continuation in
+                let reader = Task {
+                    do {
+                        let stream = await base.receive()
+                        for try await data in stream {
+                            continuation.yield(data)
+                        }
+                        continuation.finish()
+                    } catch {
+                        continuation.finish(throwing: error)
+                    }
+                }
+                continuation.onTermination = { _ in reader.cancel() }
+            }
+        }
+    }
+
     private actor CaptureGate {
         private var entered = false
         private var entryWaiters: [CheckedContinuation<Void, Never>] = []
@@ -49,9 +130,15 @@ import Testing
     ) async throws -> (Server, Client, Initialize.Result) {
         let (clientTransport, serverTransport) = await InMemoryTransport.createConnectedPair()
         let bridge = try MCPBridgeClient(ticketFile: ticketFile)
-        let server = try await JarvisMCPServer.makeServer(bridge: bridge)
+        let deliveryTracker = MCPActionDeliveryTracker()
+        let server = try await JarvisMCPServer.makeServer(
+            bridge: bridge,
+            deliveryTracker: deliveryTracker)
+        let trackedServerTransport = MCPActionTrackingTransport(
+            base: serverTransport,
+            deliveryTracker: deliveryTracker)
         let client = Client(name: "JarvisTests", version: "1.0.0")
-        try await server.start(transport: serverTransport)
+        try await server.start(transport: trackedServerTransport)
         let initialized = try await client.connect(transport: clientTransport)
         return (server, client, initialized)
     }
@@ -81,10 +168,11 @@ import Testing
             capture: { shot })
         let host = MCPBridgeHost(
             sessionDirectory: directory,
-            serverExecutable: URL(fileURLWithPath: "/fake/JarvisMCPServer"),
-            broker: broker)
+            serverExecutable: URL(fileURLWithPath: "/fake/JarvisMCPServer"))
         defer { host.close() }
-        let configuration = try host.start(provider: .codexCLI)
+        let attempt = try host.beginAttempt(provider: .codexCLI, broker: broker)
+        defer { host.endAttempt(attempt) }
+        let configuration = attempt.configuration
         let (clientToServerRead, clientToServerWrite) = try FileDescriptor.pipe()
         let (serverToClientRead, serverToClientWrite) = try FileDescriptor.pipe()
         defer {
@@ -93,14 +181,20 @@ import Testing
             try? serverToClientRead.close()
             try? serverToClientWrite.close()
         }
-        let serverTransport = StdioTransport(
+        let baseServerTransport = StdioTransport(
             input: clientToServerRead,
             output: serverToClientWrite)
         let clientTransport = StdioTransport(
             input: serverToClientRead,
             output: clientToServerWrite)
         let bridge = try MCPBridgeClient(ticketFile: configuration.ticketFile)
-        let server = try await JarvisMCPServer.makeServer(bridge: bridge)
+        let deliveryTracker = MCPActionDeliveryTracker()
+        let server = try await JarvisMCPServer.makeServer(
+            bridge: bridge,
+            deliveryTracker: deliveryTracker)
+        let serverTransport = MCPActionTrackingTransport(
+            base: baseServerTransport,
+            deliveryTracker: deliveryTracker)
         let client = Client(name: "JarvisTests", version: "1.0.0")
         try await server.start(transport: serverTransport)
         let initialized = try await client.connect(transport: clientTransport)
@@ -145,10 +239,11 @@ import Testing
             capture: { nil })
         let host = MCPBridgeHost(
             sessionDirectory: directory,
-            serverExecutable: URL(fileURLWithPath: "/fake/JarvisMCPServer"),
-            broker: broker)
+            serverExecutable: URL(fileURLWithPath: "/fake/JarvisMCPServer"))
         defer { host.close() }
-        let configuration = try host.start(provider: .codexCLI)
+        let attempt = try host.beginAttempt(provider: .codexCLI, broker: broker)
+        defer { host.endAttempt(attempt) }
+        let configuration = attempt.configuration
         let (server, client, _) = try await Self.connectedClient(
             ticketFile: configuration.ticketFile)
 
@@ -177,10 +272,11 @@ import Testing
             capture: { await gate.capture() })
         let host = MCPBridgeHost(
             sessionDirectory: directory,
-            serverExecutable: URL(fileURLWithPath: "/fake/JarvisMCPServer"),
-            broker: broker)
+            serverExecutable: URL(fileURLWithPath: "/fake/JarvisMCPServer"))
         defer { host.close() }
-        let configuration = try host.start(provider: .codexCLI)
+        let attempt = try host.beginAttempt(provider: .codexCLI, broker: broker)
+        defer { host.endAttempt(attempt) }
+        let configuration = attempt.configuration
         let (server, client, _) = try await Self.connectedClient(
             ticketFile: configuration.ticketFile)
 
@@ -215,10 +311,11 @@ import Testing
             capture: { await gate.capture() })
         let host = MCPBridgeHost(
             sessionDirectory: directory,
-            serverExecutable: URL(fileURLWithPath: "/fake/JarvisMCPServer"),
-            broker: broker)
+            serverExecutable: URL(fileURLWithPath: "/fake/JarvisMCPServer"))
         defer { host.close() }
-        let configuration = try host.start(provider: .codexCLI)
+        let attempt = try host.beginAttempt(provider: .codexCLI, broker: broker)
+        defer { host.endAttempt(attempt) }
+        let configuration = attempt.configuration
         let (server, client, _) = try await Self.connectedClient(
             ticketFile: configuration.ticketFile)
 
@@ -243,7 +340,75 @@ import Testing
         } catch let failure as CoachingActionBroker.Failure {
             #expect(failure == .invalidated)
         }
-        #expect(await broker.events().isEmpty)
+        #expect(await broker.captureObservation() == nil)
+
+        await client.disconnect()
+        await server.stop()
+    }
+
+    @Test func cancellationBeforeToolResponseDeliveryInvalidatesTheBrokerAttempt() async throws {
+        let directory = try Self.makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let broker = CoachingActionBroker(
+            identity: .init(configurationRevision: 15),
+            capture: { nil })
+        let host = MCPBridgeHost(
+            sessionDirectory: directory,
+            serverExecutable: URL(fileURLWithPath: "/fake/JarvisMCPServer"))
+        defer { host.close() }
+        let attempt = try host.beginAttempt(provider: .codexCLI, broker: broker)
+        defer { host.endAttempt(attempt) }
+
+        let (clientTransport, baseServerTransport) =
+            await InMemoryTransport.createConnectedPair()
+        let gate = SendGate()
+        let deliveryTracker = MCPActionDeliveryTracker()
+        let bridge = try MCPBridgeClient(ticketFile: attempt.configuration.ticketFile)
+        let server = try await JarvisMCPServer.makeServer(
+            bridge: bridge,
+            deliveryTracker: deliveryTracker)
+        let gatedServerTransport = GatedSendTransport(
+            base: baseServerTransport,
+            gate: gate)
+        let serverTransport = MCPActionTrackingTransport(
+            base: gatedServerTransport,
+            deliveryTracker: deliveryTracker)
+        let client = Client(name: "JarvisTests", version: "1.0.0")
+        try await server.start(transport: serverTransport)
+        _ = try await client.connect(transport: clientTransport)
+
+        await gate.arm()
+        let context: RequestContext<CallTool.Result> = try await client.callTool(
+            name: speakTool.name,
+            arguments: ["lines": ["This response has not crossed MCP yet."]])
+        await gate.waitUntilEntered()
+        try await client.cancelRequest(
+            context.requestID,
+            reason: "cancel before transport delivery")
+
+        // Keep the response write paused until the server has consumed the cancellation. This
+        // proves revocation happens at the MCP boundary, not because a later send happened to fail.
+        var wasInvalidated = false
+        for _ in 0..<100 {
+            do {
+                _ = try await broker.requireTerminal()
+            } catch let failure as CoachingActionBroker.Failure {
+                if failure == .invalidated {
+                    wasInvalidated = true
+                    break
+                }
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        await gate.release()
+        #expect(wasInvalidated)
+
+        do {
+            _ = try await context.value
+            Issue.record("cancelled SDK tool call returned a result")
+        } catch is CancellationError {
+            // Expected: the SDK discarded the response before the gated transport delivered it.
+        }
 
         await client.disconnect()
         await server.stop()

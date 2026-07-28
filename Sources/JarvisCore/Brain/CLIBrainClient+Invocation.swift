@@ -70,10 +70,11 @@ extension CLIBrainClient {
             // a human-formatted log). --ephemeral mirrors claude's --no-session-persistence: no
             // rollout transcript in ~/.codex/sessions/. --ignore-user-config removes config.toml,
             // but NOT AGENTS.md or project discovery; explicit root/doc overrides keep the coding
-            // harness out of this decision-only call. Codex has no general disable-all-tools flag,
-            // so turn off only agentic feature names advertised by this installation's bounded
-            // `features list` probe. The prompt below covers remaining/non-advertised built-ins,
-            // while read-only stays the enforcement backstop. Auth still comes from CODEX_HOME.
+            // harness out of this decision-only call. Codex has no general disable-all-tools flag;
+            // the prompt below governs remaining built-ins and read-only stays the enforcement
+            // backstop. Dynamic feature quiescing is deliberately limited to MCP coaching, where it
+            // was benchmarked, rather than changing tool-less summarization behavior.
+            // Auth still comes from CODEX_HOME.
             // "CLI default" means the built-in default. Verified against codex-cli 0.144.5.
             let replyFile = workDirectory.appendingPathComponent("cli-reply-\(UUID().uuidString.prefix(8)).txt")
             var transientFiles = [replyFile]
@@ -84,9 +85,6 @@ extension CLIBrainClient {
                         "-c", "project_root_markers=[]",
                         "-c", "project_doc_max_bytes=0",
                         "-c", "model_reasoning_effort=\(Self.codexEffort(reasoningEffort))"]
-            for feature in Self.codexDisabledAgentFeatures where codexSupportedFeatures.contains(feature) {
-                args += ["--disable", feature]
-            }
             if !model.isEmpty { args += ["-m", model] }
             var blocks: [String] = []
             var auditInput: [[String: Any]] = []
@@ -118,14 +116,16 @@ extension CLIBrainClient {
         }
     }
 
-    /// Build a one-process agentic turn whose only callable surface is Jarvis's private MCP server.
-    /// The CLI must call a real tool, and the attempt broker independently rejects a clean exit
-    /// without a terminal action.
+    /// Build a one-process agentic turn connected to Jarvis's private MCP server.
+    /// Claude is restricted to the supplied Jarvis tools. Codex's advertised features are quiesced
+    /// and its prompt covers any remaining built-ins; the attempt broker independently restricts
+    /// every Jarvis effect and rejects a clean exit without a terminal action.
     func prepareMCPInvocation(
         messages: [ChatMessage],
         tools: [ToolDef],
         toolChoice: ToolChoice,
-        configuration: CLIMCPConfiguration
+        configuration: CLIMCPConfiguration,
+        completionSignal: AgentCLICompletionSignal?
     ) throws -> PreparedInvocation {
         let rendered = renderConversation(messages)
         let instructions = composeMCPInstructions(
@@ -159,10 +159,10 @@ extension CLIBrainClient {
                 "--permission-mode", "dontAsk",
                 "--tools", "",
                 "--allowedTools",
-                "mcp__\(configuration.serverName)__\(captureScreenTool.name)",
-                "mcp__\(configuration.serverName)__\(speakTool.name)",
-                "mcp__\(configuration.serverName)__\(staySilentTool.name)",
             ]
+            args.append(contentsOf: tools.map {
+                "mcp__\(configuration.serverName)__\($0.name)"
+            })
             if !model.isEmpty { args += ["--model", model] }
             let message = try Self.claudeStreamMessage(
                 segments: rendered.segments,
@@ -190,7 +190,7 @@ extension CLIBrainClient {
             let name = configuration.serverName
             let command = Self.tomlString(configuration.serverExecutable.path)
             let ticket = Self.tomlString(configuration.ticketFile.path)
-            let enabledTools = [captureScreenTool, speakTool, staySilentTool]
+            let enabledTools = tools
                 .map { Self.tomlString($0.name) }
                 .joined(separator: ",")
             var args = [
@@ -204,16 +204,14 @@ extension CLIBrainClient {
                 "-c", "mcp_servers.\(name).command=\(command)",
                 "-c", "mcp_servers.\(name).args=[\"--ticket\",\(ticket)]",
                 "-c", "mcp_servers.\(name).enabled_tools=[\(enabledTools)]",
-                // `codex exec` cannot prompt for MCP approval. Approve only this authenticated
-                // attempt server; its enabled-tools allowlist is the same closed three-action set.
+                // `codex exec` cannot prompt for MCP approval. Approve this authenticated Jarvis
+                // server while enabling only the tools supplied for this phase.
                 "-c", "mcp_servers.\(name).default_tools_approval_mode=\"approve\"",
                 "-c", "mcp_servers.\(name).startup_timeout_sec=10",
                 "-c", "mcp_servers.\(name).tool_timeout_sec=\(Int(timeout))",
             ]
-            for feature in Self.codexDisabledAgentFeatures
-                where codexSupportedFeatures.contains(feature) {
-                args += ["--disable", feature]
-            }
+            appendCodexFeatureDisables(to: &args)
+            auditRequest["codexDisabledFeatures"] = codexFeaturesToDisable.sorted()
             if !model.isEmpty { args += ["-m", model] }
 
             var blocks: [String] = []
@@ -234,7 +232,8 @@ extension CLIBrainClient {
             var document = instructions
                 + "\n\n## Conversation\n\n"
                 + blocks.joined(separator: "\n\n")
-                + "\n\nAct now by calling a Jarvis MCP tool."
+                + "\n\nIgnore every non-Jarvis tool even if it is visible. Use only the listed "
+                + "Jarvis MCP tools. Act now by calling a Jarvis MCP tool."
             if let forced = Self.forcedToolDirective(toolChoice) {
                 document += " \(forced)"
             }
@@ -245,7 +244,8 @@ extension CLIBrainClient {
                     arguments: args,
                     stdin: document,
                     workingDirectory: workDirectory,
-                    timeout: timeout),
+                    timeout: timeout,
+                    completionSignal: completionSignal),
                 auditRequest: auditRequest,
                 transientFiles: transientFiles,
                 codexReplyFile: replyFile)
@@ -264,17 +264,22 @@ extension CLIBrainClient {
         var lines = [
             "## Jarvis actions",
             "",
-            "You are inside an automated coaching harness. Use the callable tools from the `jarvis` "
-                + "MCP server; do not describe or print a tool call.",
+            "You are inside an automated coaching harness. Use only the callable tools listed below "
+                + "from the `jarvis` MCP server. Ignore every built-in, user, project, plugin, and "
+                + "other MCP tool even if it is visible. Do not describe or print a tool call.",
         ]
         for tool in tools {
             lines.append("- \(tool.name) — \(tool.description)")
         }
-        lines += [
-            "",
-            "You may call capture_screen serially when visual context is needed. After any capture, "
-                + "continue in this same run and inspect its result.",
-        ]
+        lines.append("")
+        if tools.contains(where: { $0.name == captureScreenTool.name }) {
+            lines.append(
+                "You may call capture_screen at most once, and only before the terminal action, when "
+                    + "visual context is needed. After that capture, continue in this same run, "
+                    + "inspect its result, and then call exactly one terminal tool.")
+        } else {
+            lines.append("Do not call any action that is not listed above.")
+        }
         switch toolChoice {
         case .force(let name):
             lines.append("End by calling exactly one `\(name)` action. Do not call another terminal action.")
@@ -296,73 +301,13 @@ extension CLIBrainClient {
         return "\"\(escaped)\""
     }
 
-    /// Codex is a coding agent even under `exec`; these feature gates remove built-in surfaces that
-    /// can turn a three-way text decision into an agentic run. The invocation intersects this list
-    /// with the installed CLI's advertised features, so renamed or unavailable names are omitted.
-    static let codexDisabledAgentFeatures = [
-        "apps",
-        "auth_elicitation",
-        "browser_use",
-        "browser_use_external",
-        "browser_use_full_cdp_access",
-        "code_mode",
-        "code_mode_buffered_exec",
-        "code_mode_host",
-        "code_mode_only",
-        "computer_use",
-        "deferred_executor",
-        "enable_mcp_apps",
-        "goals",
-        "hooks",
-        "in_app_browser",
-        "image_generation",
-        "memories",
-        "multi_agent",
-        "multi_agent_v2",
-        "network_proxy",
-        "plugin_sharing",
-        "plugins",
-        "remote_plugin",
-        "request_permissions_tool",
-        "shell_snapshot",
-        "shell_tool",
-        "shell_zsh_fork",
-        "skill_mcp_dependency_install",
-        "skill_search",
-        "standalone_web_search",
-        "tool_call_mcp_elicitation",
-        "tool_suggest",
-        "unified_exec",
-        "unified_exec_zsh_fork",
-        "workspace_dependencies",
-    ]
-
-    /// Codex coaching is available only when the installed build advertises disable switches for
-    /// every stable surface that could inspect data, invoke another agent/tool host, or widen the
-    /// three-action contract.
-    static let codexMCPRequiredDisableFeatures: Set<String> = [
-        "apps",
-        "browser_use",
-        "browser_use_external",
-        "browser_use_full_cdp_access",
-        "code_mode_host",
-        "computer_use",
-        "goals",
-        "hooks",
-        "image_generation",
-        "in_app_browser",
-        "memories",
-        "multi_agent",
-        "plugins",
-        "remote_plugin",
-        "shell_snapshot",
-        "shell_tool",
-        "skill_mcp_dependency_install",
-        "skill_search",
-        "tool_suggest",
-        "unified_exec",
-        "workspace_dependencies",
-    ]
+    /// Values come from this executable's bounded `features list` probe. Sorting makes argv and its
+    /// audit/tests deterministic without encoding any feature names in Jarvis.
+    private func appendCodexFeatureDisables(to arguments: inout [String]) {
+        for feature in codexFeaturesToDisable.sorted() {
+            arguments += ["--disable", feature]
+        }
+    }
 
     static let codexDirectResponseInstruction = """
         Answer this decision request immediately without inspecting files, running commands,

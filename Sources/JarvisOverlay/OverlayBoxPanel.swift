@@ -113,12 +113,18 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     /// to satisfy the protocol; hops to the main actor. Empty/whitespace-only lines are dropped,
     /// matching the overlay, so a no-text tip never adds a blank entry.
     public nonisolated func render(_ lines: [String], perLineSeconds: [TimeInterval]) {
+        Task { @MainActor in self.renderImmediately(lines, perLineSeconds: perLineSeconds) }
+    }
+
+    /// Main-actor entrypoint used by the per-session terminal delivery boundary. Keeping the
+    /// append in the caller's actor turn prevents a stopped session from enqueueing into a new one.
+    public func renderImmediately(_ lines: [String], perLineSeconds: [TimeInterval]) {
         let text = lines
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
             .joined(separator: " ")
         guard !text.isEmpty else { return }
-        Task { @MainActor in self.append(text) }
+        append(text)
     }
 
     private func append(_ text: String) {

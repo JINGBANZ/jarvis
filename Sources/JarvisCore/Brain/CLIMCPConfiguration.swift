@@ -1,15 +1,16 @@
 import Foundation
 
-/// Public, secret-free description of the private MCP sidecar for one CLI coaching attempt.
+/// Public, secret-free description of one attempt's lease on the private MCP session bridge.
 ///
-/// The ticket file contains the bearer secret and is owner-only. Only its path travels in argv or
-/// provider config, keeping the secret itself out of process listings and traffic records.
+/// The ticket path and its contents are unique to one attempt; the file is owner-only and removed
+/// when the lease ends. Only its path travels in argv or provider config, keeping the bearer itself
+/// out of process listings and traffic records.
 public struct CLIMCPConfiguration: Sendable, Equatable {
     public let serverName: String
     public let serverExecutable: URL
     public let ticketFile: URL
-    /// Claude requires a per-attempt JSON file; Codex receives the same allowlisted server through
-    /// ephemeral command-line configuration and keeps this nil.
+    /// Claude receives a per-attempt JSON file pointing to that attempt's ticket. Codex receives the
+    /// same request-derived server configuration through command-line overrides and keeps this nil.
     public let claudeConfigFile: URL?
 
     public init(

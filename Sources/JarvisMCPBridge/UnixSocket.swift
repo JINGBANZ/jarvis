@@ -14,6 +14,7 @@ enum UnixSocket {
         let descriptor = socket(AF_UNIX, SOCK_STREAM, 0)
         guard descriptor >= 0 else { throw posixError("create private MCP socket") }
         do {
+            try setCloseOnExec(descriptor)
             try withAddress(path: path) { address, length in
                 guard bind(descriptor, address, length) == 0 else {
                     throw posixError("bind private MCP socket")
@@ -38,6 +39,7 @@ enum UnixSocket {
         let descriptor = socket(AF_UNIX, SOCK_STREAM, 0)
         guard descriptor >= 0 else { throw posixError("create MCP bridge connection") }
         do {
+            try setCloseOnExec(descriptor)
             try withAddress(path: path) { address, length in
                 guard Darwin.connect(descriptor, address, length) == 0 else {
                     throw posixError("connect to Jarvis action broker")
@@ -47,6 +49,33 @@ enum UnixSocket {
         } catch {
             close(descriptor)
             throw error
+        }
+    }
+
+    static func acceptConnection(from listener: Int32) throws -> Int32 {
+        while true {
+            let descriptor = accept(listener, nil, nil)
+            if descriptor >= 0 {
+                do {
+                    try setCloseOnExec(descriptor)
+                    return descriptor
+                } catch {
+                    closeConnection(descriptor)
+                    throw error
+                }
+            }
+            if errno == EINTR { continue }
+            throw posixError("accept private MCP connection")
+        }
+    }
+
+    static func setCloseOnExec(_ descriptor: Int32) throws {
+        let flags = fcntl(descriptor, F_GETFD)
+        guard flags >= 0 else {
+            throw posixError("read private MCP descriptor flags")
+        }
+        guard fcntl(descriptor, F_SETFD, flags | FD_CLOEXEC) == 0 else {
+            throw posixError("protect private MCP descriptor")
         }
     }
 

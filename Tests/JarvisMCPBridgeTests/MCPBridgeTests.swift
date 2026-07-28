@@ -71,6 +71,20 @@ import Glibc
         return url
     }
 
+    private static func makeHost(directory: URL) -> MCPBridgeHost {
+        MCPBridgeHost(
+            sessionDirectory: directory,
+            serverExecutable: URL(fileURLWithPath: "/fake/JarvisMCPServer"))
+    }
+
+    private static func beginAttempt(
+        _ host: MCPBridgeHost,
+        provider: BrainProvider = .codexCLI,
+        broker: CoachingActionBroker
+    ) throws -> MCPBridgeHost.Attempt {
+        try host.beginAttempt(provider: provider, broker: broker)
+    }
+
     private static func exchange(
         _ request: MCPBridgeRequest,
         ticket: MCPBridgeTicket
@@ -127,17 +141,14 @@ import Glibc
         let broker = CoachingActionBroker(
             identity: .init(configurationRevision: 1),
             capture: { nil })
-        let host = MCPBridgeHost(
-            sessionDirectory: directory,
-            serverExecutable: URL(fileURLWithPath: "/fake/JarvisMCPServer"),
-            broker: broker)
+        let host = Self.makeHost(directory: directory)
 
         #expect(throws: (any Error).self) {
-            _ = try host.start(provider: .codexCLI)
+            _ = try Self.beginAttempt(host, broker: broker)
         }
     }
 
-    @Test func authenticatedSocketForwardsActionsAndCleansUpAttemptFiles() async throws {
+    @Test func authenticatedSocketForwardsActionsAndSeparatesAttemptFromSessionCleanup() async throws {
         let directory = try Self.makeDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let shot = ScreenSnapshot(
@@ -146,11 +157,9 @@ import Glibc
         let broker = CoachingActionBroker(
             identity: .init(configurationRevision: 9),
             capture: { shot })
-        let host = MCPBridgeHost(
-            sessionDirectory: directory,
-            serverExecutable: URL(fileURLWithPath: "/fake/JarvisMCPServer"),
-            broker: broker)
-        let configuration = try host.start(provider: .claudeCode)
+        let host = Self.makeHost(directory: directory)
+        let attempt = try Self.beginAttempt(host, provider: .claudeCode, broker: broker)
+        let configuration = attempt.configuration
         let ticketData = try Data(contentsOf: configuration.ticketFile)
         let ticket = try JSONDecoder().decode(MCPBridgeTicket.self, from: ticketData)
 
@@ -172,6 +181,7 @@ import Glibc
             ticket: ticket)
         #expect(capture.imageBase64 == shot.imageBase64)
         #expect(capture.recognizedText == shot.recognizedText)
+        #expect(attempt.completionSignal.reason == nil)
 
         let terminal = try Self.exchange(
             MCPBridgeRequest(
@@ -183,19 +193,152 @@ import Glibc
                 argumentsJSON: #"{"lines":["Use the synthetic evidence."]}"#),
             ticket: ticket)
         #expect(terminal.ok)
+        #expect(attempt.completionSignal.reason == .terminalActionDelivered)
         #expect(try await broker.commit()
                 == .speak(callID: "speak", lines: ["Use the synthetic evidence."]))
 
         let claudeConfigFile = try #require(configuration.claudeConfigFile)
-        let protectedFiles = [
-            URL(fileURLWithPath: ticket.socketPath),
-            configuration.ticketFile,
-            claudeConfigFile,
-        ]
+        let socketFile = URL(fileURLWithPath: ticket.socketPath)
+        host.endAttempt(attempt)
+        #expect(FileManager.default.fileExists(atPath: socketFile.path))
+        #expect(!FileManager.default.fileExists(atPath: configuration.ticketFile.path))
+        #expect(!FileManager.default.fileExists(atPath: claudeConfigFile.path))
+
         host.close()
-        #expect(protectedFiles.allSatisfy {
+        #expect([socketFile, configuration.ticketFile, claudeConfigFile].allSatisfy {
             !FileManager.default.fileExists(atPath: $0.path)
         })
+    }
+
+    @Test func sequentialAttemptsReuseTheSessionTransportButRotateAuthorization() async throws {
+        let directory = try Self.makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let host = Self.makeHost(directory: directory)
+        defer { host.close() }
+
+        let firstBroker = CoachingActionBroker(
+            identity: .init(configurationRevision: 1),
+            capture: { nil })
+        let firstAttempt = try Self.beginAttempt(
+            host,
+            provider: .claudeCode,
+            broker: firstBroker)
+        let firstConfiguration = firstAttempt.configuration
+        let firstTicket = try JSONDecoder().decode(
+            MCPBridgeTicket.self,
+            from: Data(contentsOf: firstConfiguration.ticketFile))
+        let listener = try #require(Self.listenerDescriptor(path: firstTicket.socketPath))
+        host.endAttempt(firstAttempt)
+        #expect(firstAttempt.completionSignal.reason == nil)
+
+        let secondBroker = CoachingActionBroker(
+            identity: .init(configurationRevision: 2),
+            capture: { nil })
+        let secondAttempt = try Self.beginAttempt(
+            host,
+            provider: .claudeCode,
+            broker: secondBroker)
+        defer { host.endAttempt(secondAttempt) }
+        let secondConfiguration = secondAttempt.configuration
+        let secondTicket = try JSONDecoder().decode(
+            MCPBridgeTicket.self,
+            from: Data(contentsOf: secondConfiguration.ticketFile))
+
+        #expect(secondTicket.socketPath == firstTicket.socketPath)
+        #expect(secondConfiguration.ticketFile != firstConfiguration.ticketFile)
+        #expect(secondConfiguration.claudeConfigFile != firstConfiguration.claudeConfigFile)
+        #expect(Self.listenerDescriptor(path: secondTicket.socketPath) == listener)
+        #expect(secondTicket.token != firstTicket.token)
+        #expect(secondTicket.attemptID != firstTicket.attemptID)
+        #expect(secondTicket.configurationRevision == 2)
+        #expect(!FileManager.default.fileExists(atPath: firstConfiguration.ticketFile.path))
+        #expect(!FileManager.default.fileExists(
+            atPath: try #require(firstConfiguration.claudeConfigFile).path))
+        #expect(FileManager.default.fileExists(atPath: secondConfiguration.ticketFile.path))
+        #expect(FileManager.default.fileExists(
+            atPath: try #require(secondConfiguration.claudeConfigFile).path))
+
+        // This models an orphaned helper that already decoded the previous ticket before rotation.
+        let stale = try Self.exchange(
+            MCPBridgeRequest(
+                token: firstTicket.token,
+                attemptID: firstTicket.attemptID,
+                configurationRevision: firstTicket.configurationRevision,
+                requestID: "stale-speak",
+                name: speakTool.name,
+                argumentsJSON: #"{"lines":["This belongs to the old attempt."]}"#),
+            ticket: firstTicket)
+        #expect(!stale.ok)
+        #expect(secondAttempt.completionSignal.reason == nil)
+
+        let current = try Self.exchange(
+            MCPBridgeRequest(
+                token: secondTicket.token,
+                attemptID: secondTicket.attemptID,
+                configurationRevision: secondTicket.configurationRevision,
+                requestID: "current-speak",
+                name: speakTool.name,
+                argumentsJSON: #"{"lines":["This belongs to the new attempt."]}"#),
+            ticket: secondTicket)
+        #expect(current.ok)
+        #expect(secondAttempt.completionSignal.reason == .terminalActionDelivered)
+        #expect(try await secondBroker.commit()
+                == .speak(callID: "current-speak", lines: ["This belongs to the new attempt."]))
+        do {
+            _ = try await firstBroker.requireTerminal()
+            Issue.record("the new attempt reached the old broker")
+        } catch let failure as CoachingActionBroker.Failure {
+            #expect(failure == .missingTerminal)
+        }
+    }
+
+    @Test func attemptHandleCannotEndAnotherSessionHostLease() async throws {
+        let firstDirectory = try Self.makeDirectory()
+        let secondDirectory = try Self.makeDirectory()
+        defer {
+            try? FileManager.default.removeItem(at: firstDirectory)
+            try? FileManager.default.removeItem(at: secondDirectory)
+        }
+        let firstHost = Self.makeHost(directory: firstDirectory)
+        let secondHost = Self.makeHost(directory: secondDirectory)
+        defer {
+            firstHost.close()
+            secondHost.close()
+        }
+        let firstBroker = CoachingActionBroker(
+            identity: .init(configurationRevision: 1),
+            capture: { nil })
+        let secondBroker = CoachingActionBroker(
+            identity: .init(configurationRevision: 1),
+            capture: { nil })
+        let firstAttempt = try Self.beginAttempt(firstHost, broker: firstBroker)
+        let secondAttempt = try Self.beginAttempt(secondHost, broker: secondBroker)
+        defer {
+            firstHost.endAttempt(firstAttempt)
+            secondHost.endAttempt(secondAttempt)
+        }
+
+        // Both are generation one, so the opaque host binding—not the counter alone—must reject it.
+        secondHost.endAttempt(firstAttempt)
+        #expect(FileManager.default.fileExists(
+            atPath: secondAttempt.configuration.ticketFile.path))
+        let ticket = try JSONDecoder().decode(
+            MCPBridgeTicket.self,
+            from: Data(contentsOf: secondAttempt.configuration.ticketFile))
+        let response = try Self.exchange(
+            MCPBridgeRequest(
+                token: ticket.token,
+                attemptID: ticket.attemptID,
+                configurationRevision: ticket.configurationRevision,
+                requestID: "second-host-speak",
+                name: speakTool.name,
+                argumentsJSON: #"{"lines":["The second host remains active."]}"#),
+            ticket: ticket)
+        #expect(response.ok)
+        #expect(try await secondBroker.commit()
+                == .speak(
+                    callID: "second-host-speak",
+                    lines: ["The second host remains active."]))
     }
 
     @Test func codexBridgeDoesNotCreateAClaudeConfiguration() throws {
@@ -204,13 +347,12 @@ import Glibc
         let broker = CoachingActionBroker(
             identity: .init(configurationRevision: 10),
             capture: { nil })
-        let host = MCPBridgeHost(
-            sessionDirectory: directory,
-            serverExecutable: URL(fileURLWithPath: "/fake/JarvisMCPServer"),
-            broker: broker)
+        let host = Self.makeHost(directory: directory)
         defer { host.close() }
 
-        let configuration = try host.start(provider: .codexCLI)
+        let attempt = try Self.beginAttempt(host, broker: broker)
+        defer { host.endAttempt(attempt) }
+        let configuration = attempt.configuration
 
         #expect(configuration.claudeConfigFile == nil)
         #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path)
@@ -223,12 +365,11 @@ import Glibc
         let broker = CoachingActionBroker(
             identity: .init(configurationRevision: 2),
             capture: { nil })
-        let host = MCPBridgeHost(
-            sessionDirectory: directory,
-            serverExecutable: URL(fileURLWithPath: "/fake/JarvisMCPServer"),
-            broker: broker)
+        let host = Self.makeHost(directory: directory)
         defer { host.close() }
-        let configuration = try host.start(provider: .codexCLI)
+        let attempt = try Self.beginAttempt(host, broker: broker)
+        defer { host.endAttempt(attempt) }
+        let configuration = attempt.configuration
         let ticket = try JSONDecoder().decode(
             MCPBridgeTicket.self,
             from: Data(contentsOf: configuration.ticketFile))
@@ -251,17 +392,15 @@ import Glibc
         }
     }
 
-    @Test func closingHostUnblocksAnActiveSidecarConnection() async throws {
+    @Test func closingSessionHostUnblocksAnActiveSidecarConnection() async throws {
         let directory = try Self.makeDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let broker = CoachingActionBroker(
             identity: .init(configurationRevision: 3),
             capture: { nil })
-        let host = MCPBridgeHost(
-            sessionDirectory: directory,
-            serverExecutable: URL(fileURLWithPath: "/fake/JarvisMCPServer"),
-            broker: broker)
-        let configuration = try host.start(provider: .codexCLI)
+        let host = Self.makeHost(directory: directory)
+        let attempt = try Self.beginAttempt(host, broker: broker)
+        let configuration = attempt.configuration
         let ticket = try JSONDecoder().decode(
             MCPBridgeTicket.self,
             from: Data(contentsOf: configuration.ticketFile))
@@ -280,11 +419,9 @@ import Glibc
         let broker = CoachingActionBroker(
             identity: .init(configurationRevision: 31),
             capture: { nil })
-        let host = MCPBridgeHost(
-            sessionDirectory: directory,
-            serverExecutable: URL(fileURLWithPath: "/fake/JarvisMCPServer"),
-            broker: broker)
-        let configuration = try host.start(provider: .codexCLI)
+        let host = Self.makeHost(directory: directory)
+        let attempt = try Self.beginAttempt(host, broker: broker)
+        let configuration = attempt.configuration
         let ticket = try JSONDecoder().decode(
             MCPBridgeTicket.self,
             from: Data(contentsOf: configuration.ticketFile))
@@ -299,18 +436,17 @@ import Glibc
         #expect(error == EBADF)
     }
 
-    @Test func closingHostCancelsAnInFlightBrokerCallBeforeCaptureReturns() async throws {
+    @Test func endingAttemptCancelsAnInFlightBrokerCallButKeepsTheListener() async throws {
         let directory = try Self.makeDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let gate = CaptureGate()
         let broker = CoachingActionBroker(
             identity: .init(configurationRevision: 4),
             capture: { await gate.capture() })
-        let host = MCPBridgeHost(
-            sessionDirectory: directory,
-            serverExecutable: URL(fileURLWithPath: "/fake/JarvisMCPServer"),
-            broker: broker)
-        let configuration = try host.start(provider: .codexCLI)
+        let host = Self.makeHost(directory: directory)
+        defer { host.close() }
+        let attempt = try Self.beginAttempt(host, broker: broker)
+        let configuration = attempt.configuration
         let ticket = try JSONDecoder().decode(
             MCPBridgeTicket.self,
             from: Data(contentsOf: configuration.ticketFile))
@@ -328,7 +464,7 @@ import Glibc
         }
 
         await gate.waitUntilEntered()
-        host.close()
+        host.endAttempt(attempt)
         for _ in 0..<50 where completed.value == 0 {
             try await Task.sleep(for: .milliseconds(10))
         }
@@ -336,6 +472,16 @@ import Glibc
 
         await gate.release()
         _ = await exchange.value
+
+        let nextBroker = CoachingActionBroker(
+            identity: .init(configurationRevision: 5),
+            capture: { nil })
+        let nextAttempt = try Self.beginAttempt(host, broker: nextBroker)
+        defer { host.endAttempt(nextAttempt) }
+        let nextTicket = try JSONDecoder().decode(
+            MCPBridgeTicket.self,
+            from: Data(contentsOf: nextAttempt.configuration.ticketFile))
+        #expect(nextTicket.socketPath == ticket.socketPath)
     }
 
     @Test func undeliverableCaptureReplyInvalidatesTheAttempt() async throws {
@@ -350,12 +496,11 @@ import Glibc
             identity: .init(configurationRevision: 5),
             capture: { await gate.capture() },
             captureObserver: { _ in _ = observed.next() })
-        let host = MCPBridgeHost(
-            sessionDirectory: directory,
-            serverExecutable: URL(fileURLWithPath: "/fake/JarvisMCPServer"),
-            broker: broker)
+        let host = Self.makeHost(directory: directory)
         defer { host.close() }
-        let configuration = try host.start(provider: .codexCLI)
+        let attempt = try Self.beginAttempt(host, broker: broker)
+        defer { host.endAttempt(attempt) }
+        let configuration = attempt.configuration
         let ticket = try JSONDecoder().decode(
             MCPBridgeTicket.self,
             from: Data(contentsOf: configuration.ticketFile))
@@ -403,8 +548,9 @@ import Glibc
             try await Task.sleep(for: .milliseconds(10))
         }
         #expect(wasInvalidated)
+        #expect(attempt.completionSignal.reason == nil)
         #expect(observed.value == 0)
-        #expect(await broker.events().isEmpty)
+        #expect(await broker.captureObservation() == nil)
     }
 
     @Test func unacknowledgedTerminalReplyInvalidatesTheAttempt() async throws {
@@ -413,12 +559,11 @@ import Glibc
         let broker = CoachingActionBroker(
             identity: .init(configurationRevision: 6),
             capture: { nil })
-        let host = MCPBridgeHost(
-            sessionDirectory: directory,
-            serverExecutable: URL(fileURLWithPath: "/fake/JarvisMCPServer"),
-            broker: broker)
+        let host = Self.makeHost(directory: directory)
         defer { host.close() }
-        let configuration = try host.start(provider: .codexCLI)
+        let attempt = try Self.beginAttempt(host, broker: broker)
+        defer { host.endAttempt(attempt) }
+        let configuration = attempt.configuration
         let ticket = try JSONDecoder().decode(
             MCPBridgeTicket.self,
             from: Data(contentsOf: configuration.ticketFile))
@@ -450,6 +595,7 @@ import Glibc
             try await Task.sleep(for: .milliseconds(10))
         }
         #expect(wasInvalidated)
+        #expect(attempt.completionSignal.reason == nil)
     }
 
     @Test func socketPathsAreBoundedAndMessagesAreReadInChunks() async throws {
@@ -475,6 +621,44 @@ import Glibc
         }
         #expect(try UnixSocket.readMessage(from: readDescriptor) == message)
         try await writer.value
+    }
+
+    @Test func socketDescriptorsCloseAcrossExec() throws {
+        let directory = try Self.makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let socketPath = directory.appendingPathComponent("close-on-exec.sock").path
+
+        let listener = try UnixSocket.makeListener(path: socketPath)
+        defer { UnixSocket.closeConnection(listener) }
+        let client = try UnixSocket.connect(path: socketPath)
+        defer { UnixSocket.closeConnection(client) }
+        let accepted = try UnixSocket.acceptConnection(from: listener)
+        defer { UnixSocket.closeConnection(accepted) }
+
+        let descriptors = [listener, client, accepted]
+        for descriptor in descriptors {
+            let flags = fcntl(descriptor, F_GETFD)
+            #expect(flags >= 0)
+            #expect(flags & FD_CLOEXEC == FD_CLOEXEC)
+        }
+
+        let child = Process()
+        child.executableURL = URL(fileURLWithPath: "/bin/sh")
+        let descriptorList = descriptors.map(String.init).joined(separator: " ")
+        child.arguments = [
+            "-c",
+            "for descriptor in \(descriptorList); do "
+                + "if test -S /dev/fd/$descriptor; then exit 42; fi; "
+                + "done",
+        ]
+        child.standardInput = FileHandle.nullDevice
+        child.standardOutput = FileHandle.nullDevice
+        child.standardError = FileHandle.nullDevice
+        try child.run()
+        child.waitUntilExit()
+
+        #expect(child.terminationReason == .exit)
+        #expect(child.terminationStatus == 0)
     }
 
     @Test func oneMCPProcessCanCaptureAndTerminate() async throws {
@@ -530,10 +714,11 @@ import Glibc
         let mcpBroker = CoachingActionBroker(
             identity: .init(configurationRevision: 1),
             capture: { shot })
+        let bridge = Self.makeHost(directory: directory)
+        defer { bridge.close() }
         let mcpClient = MCPBrainClient(
             base: mcpBase,
-            sessionDirectory: directory,
-            serverExecutable: URL(fileURLWithPath: "/fake/JarvisMCPServer"))
+            bridge: bridge)
         let mcpResponse = try await mcpClient.respond(
             messages: [.user("Use the screen evidence.")],
             tools: coachTools,
@@ -542,10 +727,70 @@ import Glibc
 
         #expect(mcpRuns.value == 1)
         #expect(mcpResponse.actionDelivery == .broker)
-        #expect(await mcpBroker.events().count == 2)
+        #expect(await mcpBroker.captureObservation()?.snapshot == shot)
         #expect(try await mcpBroker.commit()
                 == .speak(callID: "speak", lines: ["Use the comparison token."]))
 
+    }
+
+    @Test func acknowledgedCodexTerminalStopsBeforeAReplyFileAndStillCommits() async throws {
+        let directory = try Self.makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let base = CLIBrainClient(
+            provider: .codexCLI,
+            executable: URL(fileURLWithPath: "/fake/codex"),
+            model: "comparison",
+            workDirectory: directory,
+            run: { invocation, timings in
+                let assignment = try #require(invocation.arguments.first {
+                    $0.hasPrefix(#"mcp_servers.jarvis.args=["--ticket",""#)
+                })
+                let prefix = #"mcp_servers.jarvis.args=["--ticket",""#
+                let suffix = "\"]"
+                #expect(assignment.hasSuffix(suffix))
+                let path = String(
+                    assignment.dropFirst(prefix.count).dropLast(suffix.count))
+                let ticket = try JSONDecoder().decode(
+                    MCPBridgeTicket.self,
+                    from: Data(contentsOf: URL(fileURLWithPath: path)))
+
+                timings.mark(.runnerEntered)
+                timings.mark(.processLaunched)
+                _ = try Self.exchange(
+                    MCPBridgeRequest(
+                        token: ticket.token,
+                        attemptID: ticket.attemptID,
+                        configurationRevision: ticket.configurationRevision,
+                        requestID: "codex-speak",
+                        name: speakTool.name,
+                        argumentsJSON: #"{"lines":["Stop at the acknowledged action."]}"#),
+                    ticket: ticket)
+                #expect(invocation.completionSignal?.reason == .terminalActionDelivered)
+                timings.mark(.processExited)
+                return AgentCLIOutput(
+                    stdout: "partial codex diagnostics",
+                    stderr: "",
+                    exitCode: 15,
+                    termination: .completionSignal(.terminalActionDelivered))
+            })
+        let broker = CoachingActionBroker(
+            identity: .init(configurationRevision: 1),
+            capture: { nil })
+        let bridge = Self.makeHost(directory: directory)
+        defer { bridge.close() }
+        let client = MCPBrainClient(base: base, bridge: bridge)
+
+        let response = try await client.respond(
+            messages: [.user("coach me")],
+            tools: [speakTool],
+            toolChoice: .force(speakTool.name),
+            actionBroker: broker)
+
+        #expect(response.actionDelivery == .broker)
+        #expect(response.outputText == nil)
+        #expect(try await broker.commit() == .speak(
+            callID: "codex-speak",
+            lines: ["Stop at the acknowledged action."]))
     }
 
     @Test func cleanMCPExitWithoutATerminalIsRejected() async throws {
@@ -565,10 +810,11 @@ import Glibc
         let broker = CoachingActionBroker(
             identity: .init(configurationRevision: 1),
             capture: { nil })
+        let bridge = Self.makeHost(directory: directory)
+        defer { bridge.close() }
         let client = MCPBrainClient(
             base: base,
-            sessionDirectory: directory,
-            serverExecutable: URL(fileURLWithPath: "/fake/JarvisMCPServer"))
+            bridge: bridge)
 
         do {
             _ = try await client.respond(
@@ -593,13 +839,12 @@ import Glibc
         let broker = CoachingActionBroker(
             identity: .init(configurationRevision: 1),
             capture: { nil })
-        let host = MCPBridgeHost(
-            sessionDirectory: longDirectory,
-            serverExecutable: URL(fileURLWithPath: "/fake/JarvisMCPServer"),
-            broker: broker)
+        let host = Self.makeHost(directory: longDirectory)
         defer { host.close() }
 
-        let configuration = try host.start(provider: .codexCLI)
+        let attempt = try Self.beginAttempt(host, broker: broker)
+        defer { host.endAttempt(attempt) }
+        let configuration = attempt.configuration
         let ticket = try JSONDecoder().decode(
             MCPBridgeTicket.self,
             from: Data(contentsOf: configuration.ticketFile))

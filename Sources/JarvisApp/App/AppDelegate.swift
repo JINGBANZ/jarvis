@@ -68,6 +68,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The current session's log directory (set by `beginNewSession`) — also where `CLIBrainClient`
     /// materializes screenshots for a CLI brain, keeping all screen-derived bytes in one owner-only place.
     private var currentSessionDir: URL?
+    /// One lazily started private MCP listener for the current Start. Every local-CLI coaching
+    /// attempt rotates its broker, identity, and bearer lease on this host; Stop closes it.
+    private var sessionMCPBridge: MCPBridgeHost?
+    /// Main-actor terminal-effect lease for this Start. Stop invalidates it before turn cancellation
+    /// so an old driver cannot enqueue Activity or overlay work into a replacement session.
+    private var terminalActionDelivery: TerminalActionDelivery?
     /// Stops whose cancelled turns haven't finished unwinding yet. Cancellation only *requests* the
     /// stop — an in-flight brain request unwinds asynchronously and records its final traffic line on
     /// the way out — so a just-stopped session isn't evaluable until its drain completes, or a quick
@@ -257,22 +263,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 model: target.modelID,
                 reasoningEffort: effort.rawValue,
                 workDirectory: sessionDir,
-                codexSupportedFeatures: cli.supportedFeatures,
+                codexFeaturesToDisable: cli.codexFeaturesToDisable,
                 traffic: sessionTraffic,
                 trafficTag: "coach")
             guard cli.supportsMCP, let server = mcpServerExecutable() else {
                 preconditionFailure("unavailable CLI target reached runtime construction")
             }
+            let bridge: MCPBridgeHost
+            if let sessionMCPBridge {
+                bridge = sessionMCPBridge
+            } else {
+                bridge = MCPBridgeHost(
+                    sessionDirectory: sessionDir,
+                    serverExecutable: server)
+                sessionMCPBridge = bridge
+            }
             coachBase = MCPBrainClient(
                 base: cliCoach,
-                sessionDirectory: sessionDir,
-                serverExecutable: server)
+                bridge: bridge)
             jlog("Jarvis coach: \(target.provider.displayName) action transport = MCP")
+            if target.provider == .codexCLI {
+                if cli.codexFeaturesToDisable.isEmpty {
+                    jlog("Jarvis coach: Codex feature quiescing unavailable; "
+                         + "continuing with the early terminal-ack boundary")
+                } else {
+                    jlog("Jarvis coach: quiescing "
+                         + "\(cli.codexFeaturesToDisable.count) dynamically detected Codex features")
+                }
+            }
             summarizer = CLIBrainClient(provider: target.provider, executable: cli.executableURL,
                                         model: BrainModelCatalog.summarizerModelID(for: target.provider),
                                         reasoningEffort: ReasoningEffort.low.rawValue,
                                         workDirectory: sessionDir,
-                                        codexSupportedFeatures: cli.supportedFeatures,
                                         traffic: sessionTraffic, trafficTag: "summarizer")
         } else {
             coachBase = OpenAIBrainClient(
@@ -359,7 +381,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if let previous = self.pendingBrainChangeFrom {
                     ActivityLog.shared.record(.brainChangeApplied(
                         previous: previous.provider,
-                        current: target.provider))
+                        current: target.provider),
+                        sessionDirectory: sessionDirectory)
                     self.pendingBrainChangeFrom = nil
                 }
                 self.activeBrainTarget = target
@@ -372,7 +395,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     return
                 }
                 ActivityLog.shared.record(.brainRouteAdvanced(
-                    previous: previous.provider, current: current.provider))
+                    previous: previous.provider, current: current.provider),
+                    sessionDirectory: sessionDirectory)
             },
             onSkipped: { [weak self] target in
                 guard let self, self.coachDriver != nil,
@@ -381,7 +405,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     return
                 }
                 ActivityLog.shared.record(
-                    .brainRouteTargetSkipped(provider: target.provider))
+                    .brainRouteTargetSkipped(provider: target.provider),
+                    sessionDirectory: sessionDirectory)
             },
             onExhausted: { [weak self, errorReporter] target, failure in
                 guard let self, self.coachDriver != nil,
@@ -594,13 +619,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             sessionDirectory: sessionDirectory)
         // Fan each spoken tip out to both the Overlay Caption and the persistent Overlay Box.
         let overlaySink = BroadcastOverlay([overlayCaption, overlayBox])
+        let activityRecorder: CoachDriver.ActivityRecorder = { event in
+            ActivityLog.shared.record(event, sessionDirectory: sessionDirectory)
+        }
+        let caption = overlayCaption!
+        let box = overlayBox!
+        let terminalDelivery = TerminalActionDelivery(
+            recordActivity: { event in
+                ActivityLog.shared.record(event, sessionDirectory: sessionDirectory)
+            },
+            renderOverlay: { lines, perLineSeconds in
+                caption.renderImmediately(lines, perLineSeconds: perLineSeconds)
+                box.renderImmediately(lines, perLineSeconds: perLineSeconds)
+            },
+            endSession: {
+                caption.endSession()
+            })
         let driver = CoachDriver(
             config: config,
             transcript: transcript,
             route: configuredRoute,
             screen: WindowScopedScreenCapture(preferences: screenPreferences),
             overlay: overlaySink,
-            clock: clock)
+            clock: clock,
+            activityRecorder: activityRecorder,
+            terminalActionDelivery: terminalDelivery)
 
         // CoachDriver is @unchecked Sendable; capture it (not @MainActor self) in the callbacks.
         // Route turns through TurnTaskBox so Stop can cancel an in-flight one. Concurrent triggers are
@@ -716,6 +759,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.aggregateCapture = capture
         self.turns = turns
         self.coachDriver = driver
+        self.terminalActionDelivery = terminalDelivery
         activeBrainTarget = brainRoute.primary
         pendingBrainChangeFrom = nil
         brainSection.setActiveTarget(brainRoute.primary)
@@ -769,7 +813,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let endedLiveSession = sessionIsLive
         sessionIsLive = false
         requestManualHint = nil              // hotkey beeps again once there's no live session
+        terminalActionDelivery?.invalidate()
+        terminalActionDelivery = nil
         let cancelled = turns?.cancelAll() ?? []; turns = nil   // cancel any in-flight coaching turn
+        sessionMCPBridge?.close()
+        sessionMCPBridge = nil
         coachDriver = nil
         activeBrainTarget = nil
         pendingBrainChangeFrom = nil

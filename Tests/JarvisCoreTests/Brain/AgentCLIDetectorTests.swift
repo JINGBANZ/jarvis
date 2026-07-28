@@ -185,36 +185,115 @@ import Glibc
     @Test func codexAuthDetectedViaAuthJSON() throws {
         let home = try makeHome()
         let bin = home.appendingPathComponent("fakebin")
-        try installBinary("codex", in: bin, script: """
-            #!/bin/sh
-            if [ "$1" = "features" ] && [ "$2" = "list" ]; then
-                printf '%s\\n' 'shell_tool stable true' 'code_mode_host stable true'
-                exit 0
-            fi
-            exit 2
-            """)
+        try installBinary("codex", in: bin)
         try write("{}", to: home.appendingPathComponent(".codex/auth.json"))
         let d = detector(home: home, pathVariable: bin.path, authStatusTimeout: 10)
         let cli = d.detect(.codexCLI)
         #expect(cli?.authenticationStatus == .signedIn)
-        #expect(cli?.supportedFeatures == ["shell_tool", "code_mode_host"])
     }
 
-    @Test func codexFeatureProbeFailureFallsBackToNoGuessedFlags() throws {
+    @Test func codexFeatureProbeSelectsEnabledNonRemovedSafeNames() throws {
         let home = try makeHome()
         let bin = home.appendingPathComponent("fakebin")
-        try installBinary("codex", in: bin)
-        let d = detector(home: home, pathVariable: bin.path)
-        #expect(d.detect(.codexCLI)?.supportedFeatures == [])
+        try installBinary("codex", in: bin, script: """
+            #!/bin/sh
+            if [ "$1" = "features" ] && [ "$2" = "list" ]; then
+                printf '%s\\n' \
+                    'shell_tool stable true' \
+                    'future-surface under development true' \
+                    'retired_surface removed true' \
+                    'disabled_surface stable false'
+                exit 0
+            fi
+            if [ "$1" = "mcp" ] && [ "$2" = "--help" ]; then
+                printf '%s\\n' 'Manage external MCP servers'
+                exit 0
+            fi
+            exit 2
+            """)
+        let d = detector(home: home, pathVariable: bin.path, authStatusTimeout: 10)
+
+        let cli = d.detect(.codexCLI)
+
+        #expect(cli?.codexFeaturesToDisable == ["shell_tool", "future-surface"])
+        #expect(cli?.supportsMCP == true)
     }
 
-    @Test func installedHelpOutputProvesTheMCPConformanceProfile() throws {
+    @Test func malformedCodexFeatureOutputFallsBackToPromptOnly() throws {
         let home = try makeHome()
         let bin = home.appendingPathComponent("fakebin")
-        let codexFeatureArguments = CLIBrainClient.codexMCPRequiredDisableFeatures
-            .sorted()
-            .map { "'\($0) stable true'" }
-            .joined(separator: " ")
+        try installBinary("codex", in: bin, script: """
+            #!/bin/sh
+            if [ "$1" = "features" ] && [ "$2" = "list" ]; then
+                printf '%s\\n' 'shell_tool stable true' 'unsafe/name stable true'
+                exit 0
+            fi
+            if [ "$1" = "mcp" ] && [ "$2" = "--help" ]; then
+                printf '%s\\n' 'Manage external MCP servers'
+                exit 0
+            fi
+            exit 2
+            """)
+        let d = detector(home: home, pathVariable: bin.path, authStatusTimeout: 10)
+
+        let cli = d.detect(.codexCLI)
+
+        #expect(cli?.codexFeaturesToDisable == [])
+        // MCP capability is covered independently. This fixture deliberately gives every child
+        // probe the short watchdog, so loaded parallel runners may also time out the help process.
+    }
+
+    @Test func codexFeatureProbeIsBounded() throws {
+        let home = try makeHome()
+        let bin = home.appendingPathComponent("fakebin")
+        try installBinary("codex", in: bin, script: """
+            #!/bin/sh
+            if [ "$1" = "features" ] && [ "$2" = "list" ]; then
+                exec /bin/sleep 5
+            fi
+            if [ "$1" = "mcp" ] && [ "$2" = "--help" ]; then
+                printf '%s\\n' 'Manage external MCP servers'
+                exit 0
+            fi
+            exit 2
+            """)
+        // Leave enough room for the independent MCP help process to start under a loaded test
+        // runner; only the deliberately stalled feature process should hit this watchdog.
+        let d = detector(home: home, pathVariable: bin.path, authStatusTimeout: 1)
+
+        let cli = d.detect(.codexCLI)
+
+        #expect(cli?.codexFeaturesToDisable == [])
+        #expect(cli?.supportsMCP == true)
+    }
+
+    @Test func oversizedCodexFeatureOutputFallsBackToPromptOnly() throws {
+        let home = try makeHome()
+        let bin = home.appendingPathComponent("fakebin")
+        try installBinary("codex", in: bin, script: """
+            #!/bin/sh
+            if [ "$1" = "features" ] && [ "$2" = "list" ]; then
+                i=0
+                while [ "$i" -lt 6000 ]; do
+                    printf 'feature_%s stable true\\n' "$i"
+                    i=$((i + 1))
+                done
+                exit 0
+            fi
+            if [ "$1" = "mcp" ] && [ "$2" = "--help" ]; then
+                printf '%s\\n' 'Manage external MCP servers'
+                exit 0
+            fi
+            exit 2
+            """)
+        let d = detector(home: home, pathVariable: bin.path, authStatusTimeout: 10)
+
+        #expect(d.detect(.codexCLI)?.codexFeaturesToDisable == [])
+    }
+
+    @Test func installedHelpOutputProvesBasicMCPAvailability() throws {
+        let home = try makeHome()
+        let bin = home.appendingPathComponent("fakebin")
         try installBinary("claude", in: bin, script: """
             #!/bin/sh
             if [ "$1" = "--help" ]; then
@@ -225,10 +304,6 @@ import Glibc
             """)
         try installBinary("codex", in: bin, script: """
             #!/bin/sh
-            if [ "$1" = "features" ] && [ "$2" = "list" ]; then
-                printf '%s\\n' \(codexFeatureArguments)
-                exit 0
-            fi
             if [ "$1" = "mcp" ] && [ "$2" = "--help" ]; then
                 printf '%s\\n' 'Manage external MCP servers'
                 exit 0
@@ -296,15 +371,11 @@ import Glibc
                 "the capability probe must stop its drain when the parent CLI exits")
     }
 
-    @Test func codexMCPIsUnavailableWhenBuiltInsCannotAllBeDisabled() throws {
+    @Test func codexMCPAvailabilityDoesNotDependOnFeatureRegistry() throws {
         let home = try makeHome()
         let bin = home.appendingPathComponent("fakebin")
         try installBinary("codex", in: bin, script: """
             #!/bin/sh
-            if [ "$1" = "features" ] && [ "$2" = "list" ]; then
-                printf '%s\\n' 'shell_tool stable true'
-                exit 0
-            fi
             if [ "$1" = "mcp" ] && [ "$2" = "--help" ]; then
                 printf '%s\\n' 'Manage external MCP servers'
                 exit 0
@@ -313,7 +384,9 @@ import Glibc
             """)
         let d = detector(home: home, pathVariable: bin.path, authStatusTimeout: 10)
 
-        #expect(d.detect(.codexCLI)?.supportsMCP == false)
+        let cli = d.detect(.codexCLI)
+        #expect(cli?.supportsMCP == true)
+        #expect(cli?.codexFeaturesToDisable == [])
     }
 
     @Test func unfamiliarHelpOutputDoesNotProveMCPAvailability() throws {
@@ -329,17 +402,6 @@ import Glibc
             """)
         let d = detector(home: home, pathVariable: bin.path, authStatusTimeout: 10)
         #expect(d.detect(.claudeCode)?.supportsMCP == false)
-    }
-
-    @Test func codexFeatureProbeIsBounded() throws {
-        let home = try makeHome()
-        let bin = home.appendingPathComponent("fakebin")
-        try installBinary("codex", in: bin, script: """
-            #!/bin/sh
-            exec sleep 1
-            """)
-        let d = detector(home: home, pathVariable: bin.path, authStatusTimeout: 0.01)
-        #expect(d.detect(.codexCLI)?.supportedFeatures == [])
     }
 
     @Test func missingBinaryDetectsNothing() throws {

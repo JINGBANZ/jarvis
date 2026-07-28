@@ -50,8 +50,8 @@ public extension UserFacingError {
               severity: .degraded)
     }
 
-    /// Jarvis requires the local agent to expose a constrained MCP surface. A CLI that cannot prove
-    /// the required flags/features is unavailable rather than silently receiving prompt-shaped JSON.
+    /// Jarvis requires the installed local agent to expose its basic MCP configuration surface.
+    /// Unsupported installations are unavailable rather than receiving a second action transport.
     static func brainCLIMCPUnsupported(provider: String) -> UserFacingError {
         .init(title: "\(provider) needs MCP support",
               message: "Update \(provider) to a version that supports Jarvis MCP actions, or choose another brain provider in Settings → Brain.",

@@ -151,6 +151,8 @@ the human-facing coaching record. The current validation priority lives in
 - With Claude Code selected, repeat the screen-dependent turn and confirm the same attempt records one
   screen view followed by one terminal tip or deliberate silence. Repeat with Codex. A provider exit
   without either terminal action must be a failed attempt with no overlay—not a successful empty turn.
+  For Codex, confirm the debug timing labels the acknowledged terminal completion and does not wait
+  for a trailing final reply.
 - Confirm saved screenshots exclude both overlay surfaces. Toggle each overlay in Settings, verify its
   controls and preview follow the toggle, and confirm the choice survives relaunch.
 - If validating realtime recovery, disconnect the network, say a unique phrase, reconnect, and confirm
@@ -164,6 +166,16 @@ the human-facing coaching record. The current validation priority lives in
 
 Claude Code and Codex coaching use only Jarvis's private MCP action surface. There is no environment
 override or prompt-JSON action route. Start refuses a selected CLI when the bounded capability probe
-cannot prove the required MCP/isolation profile or when the bundled `JarvisMCPServer` helper is
-missing. If the per-attempt private bridge cannot start, that coaching attempt fails before the
-provider process launches; normal route health and fresh-attempt scheduling then apply.
+cannot prove the required MCP surface or when the bundled `JarvisMCPServer` helper is
+missing. The app lazily creates one private listener for the Start session and binds each local-CLI
+attempt to a fresh broker, bearer ticket, and identity. If listener startup or attempt binding fails,
+that coaching attempt fails before the provider process launches; normal route health and
+fresh-attempt scheduling then apply. Stop closes the listener; an OpenAI-only session creates none.
+At Codex detection time Jarvis also reads every enabled, non-removed feature name reported by that
+exact installation and disables those names for MCP coaching calls. This is a best-effort
+latency/surface optimization—not a tool inventory or MCP-only security claim—and does not alter
+tool-less summarization. A failed or malformed feature probe supplies no guessed flags; coaching
+continues with the early terminal boundary and the isolated prompt/read-only profile. After a
+terminal Codex action crosses the SDK write, helper acknowledgement, and active-lease confirmation,
+Jarvis ends that process and proceeds through the normal cancellation check, broker commit, and
+session-bound main-actor effect delivery without waiting for trailing prose.

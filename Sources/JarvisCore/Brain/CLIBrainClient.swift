@@ -26,9 +26,11 @@ public struct CLIBrainClient: BrainClient, @unchecked Sendable {
     /// that floor while the shared `low` / `medium` / `high` levels pass through.
     let reasoningEffort: String
     let workDirectory: URL
-    /// Feature names advertised by this Codex installation. Empty means no optional disable flag is
-    /// sent; coaching availability is decided separately by the MCP capability probe.
-    let codexSupportedFeatures: Set<String>
+    /// Enabled, non-removed feature names reported by this Codex installation. These are quiesced
+    /// only for latency-sensitive MCP coaching runs; tool-less summarization keeps Codex's normal
+    /// non-agentic feature profile. Empty keeps the prompt-only coaching restriction when the
+    /// bounded capability probe was unavailable or malformed.
+    let codexFeaturesToDisable: Set<String>
     let timeout: TimeInterval
     let traffic: BrainTrafficLog?
     let trafficTag: String
@@ -46,7 +48,7 @@ public struct CLIBrainClient: BrainClient, @unchecked Sendable {
                 model: String,
                 reasoningEffort: String = ReasoningEffort.default.rawValue,
                 workDirectory: URL,
-                codexSupportedFeatures: Set<String> = [],
+                codexFeaturesToDisable: Set<String> = [],
                 timeout: TimeInterval? = nil,
                 traffic: BrainTrafficLog? = nil,
                 trafficTag: String = "coach",
@@ -57,7 +59,7 @@ public struct CLIBrainClient: BrainClient, @unchecked Sendable {
         self.model = model
         self.reasoningEffort = reasoningEffort
         self.workDirectory = workDirectory
-        self.codexSupportedFeatures = codexSupportedFeatures
+        self.codexFeaturesToDisable = codexFeaturesToDisable
         self.timeout = timeout ?? (provider == .codexCLI
                                    ? Self.codexDefaultTimeout : Self.defaultTimeout)
         self.traffic = traffic
@@ -80,20 +82,22 @@ public struct CLIBrainClient: BrainClient, @unchecked Sendable {
         }
     }
 
-    /// Run the CLI with Jarvis's private MCP server as its only action surface. Returned text is
-    /// diagnostic material only; the caller proves success from the shared attempt broker.
+    /// Run the CLI with Jarvis's private MCP server as its only Jarvis-host effect surface. Returned
+    /// text is diagnostic material only; the caller proves success from the shared attempt broker.
     public func respondUsingMCP(
         messages: [ChatMessage],
         tools: [ToolDef],
         toolChoice: ToolChoice,
-        configuration: CLIMCPConfiguration
+        configuration: CLIMCPConfiguration,
+        completionSignal: AgentCLICompletionSignal? = nil
     ) async throws -> BrainResponse {
         do {
             return try await performMCPRequest(
                 messages: messages,
                 tools: tools,
                 toolChoice: toolChoice,
-                configuration: configuration)
+                configuration: configuration,
+                completionSignal: completionSignal)
         } catch {
             if Task.isCancelled || error is CancellationError { throw error }
             throw BrainFailure(error)
@@ -158,7 +162,8 @@ public struct CLIBrainClient: BrainClient, @unchecked Sendable {
         messages: [ChatMessage],
         tools: [ToolDef],
         toolChoice: ToolChoice,
-        configuration: CLIMCPConfiguration
+        configuration: CLIMCPConfiguration,
+        completionSignal: AgentCLICompletionSignal?
     ) async throws -> BrainResponse {
         let timings = AgentCLIPhaseTimings()
         let respondEntered = DispatchTime.now().uptimeNanoseconds
@@ -166,7 +171,8 @@ public struct CLIBrainClient: BrainClient, @unchecked Sendable {
             messages: messages,
             tools: tools,
             toolChoice: toolChoice,
-            configuration: configuration)
+            configuration: configuration,
+            completionSignal: completionSignal)
         defer {
             for url in prepared.transientFiles {
                 try? FileManager.default.removeItem(at: url)
@@ -188,6 +194,25 @@ public struct CLIBrainClient: BrainClient, @unchecked Sendable {
                 error: error.localizedDescription,
                 phases: phases)
             throw error
+        }
+
+        if output.termination == .completionSignal(.terminalActionDelivered) {
+            // The brokered terminal action—not Codex's trailing prose—is the authoritative result.
+            // Keep parseMs absent because no reply file was parsed, but retain the actual signal exit
+            // code and partial diagnostics in the traffic record.
+            let phases = Self.phaseDurationsMs(timings, respondEntered: respondEntered)
+            logPhases(phases, note: "mcp terminal delivered")
+            traffic?.record(
+                tag: trafficTag,
+                request: Self.recordData(prepared.auditRequest),
+                response: responseRecord(output, reply: nil),
+                status: 200,
+                latencyMs: Self.totalLatencyMs(in: phases),
+                phases: phases)
+            return BrainResponse(
+                toolCalls: [],
+                outputText: nil,
+                actionDelivery: .broker)
         }
 
         let reply: String
@@ -236,6 +261,9 @@ public struct CLIBrainClient: BrainClient, @unchecked Sendable {
     func responseRecord(_ output: AgentCLIOutput, reply: String?) -> Data {
         var record: [String: Any] = ["exitCode": Int(output.exitCode)]
         if let reply { record["reply"] = reply }
+        if case .completionSignal(let reason) = output.termination {
+            record["completion"] = reason.rawValue
+        }
         let stderr = Self.tail(output.stderr)
         if !stderr.isEmpty { record["stderr"] = stderr }
         if provider == .claudeCode, var envelope = Self.claudeResultEnvelope(in: output.stdout) {
