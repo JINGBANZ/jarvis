@@ -221,6 +221,81 @@ public struct AgentCLIDetector: Sendable {
         let status: Int32
     }
 
+    /// The lock protects the stop flag and bounded retained prefix; the background reader is the
+    /// only descriptor consumer, so this POSIX edge can safely cross the reader-thread boundary.
+    private final class ProbeOutputDrain: @unchecked Sendable {
+        private let lock = NSLock()
+        private let maxBytes: Int
+        private var stopped = false
+        private var storage = Data()
+
+        init(maxBytes: Int) {
+            self.maxBytes = maxBytes
+        }
+
+        func stop() {
+            lock.lock()
+            stopped = true
+            lock.unlock()
+        }
+
+        var data: Data {
+            lock.lock()
+            defer { lock.unlock() }
+            return storage
+        }
+
+        func run(descriptor: Int32) {
+            let flags = fcntl(descriptor, F_GETFL)
+            guard flags >= 0,
+                  fcntl(descriptor, F_SETFL, flags | O_NONBLOCK) >= 0 else {
+                return
+            }
+            var buffer = [UInt8](repeating: 0, count: 4_096)
+            while true {
+                lock.lock()
+                let isStopped = stopped
+                lock.unlock()
+
+                var state = pollfd(
+                    fd: descriptor,
+                    events: Int16(POLLIN | POLLHUP | POLLERR),
+                    revents: 0)
+                let result = poll(&state, 1, isStopped ? 0 : 25)
+                if result == 0 {
+                    if isStopped { return }
+                    continue
+                }
+                if result < 0 {
+                    if errno == EINTR { continue }
+                    return
+                }
+                guard state.revents & Int16(POLLIN | POLLHUP | POLLERR | POLLNVAL) != 0
+                else { continue }
+
+                let count = read(descriptor, &buffer, buffer.count)
+                if count == 0 { return }
+                guard count > 0 else {
+                    if errno == EINTR {
+                        continue
+                    }
+                    if errno == EAGAIN || errno == EWOULDBLOCK {
+                        if isStopped { return }
+                        continue
+                    }
+                    return
+                }
+
+                lock.lock()
+                let retained = min(Int(count), max(0, maxBytes - storage.count))
+                if retained > 0 {
+                    storage.append(contentsOf: buffer.prefix(retained))
+                }
+                lock.unlock()
+            }
+        }
+    }
+
     /// Run one local, non-model status/capability command under the same bounded process policy for
     /// both CLIs. No API key is inherited, and stderr is irrelevant to the machine-readable probe.
     private func runProbe(executable: URL, arguments: [String]) -> ProbeOutput? {
@@ -250,6 +325,19 @@ public struct AgentCLIDetector: Sendable {
             return nil
         }
 
+        // Drain while the child runs, retaining only the bounded prefix. Waiting for exit before
+        // reading can deadlock a valid CLI whose help output fills the pipe buffer.
+        let readHandle = stdout.fileHandleForReading
+        let drain = ProbeOutputDrain(maxBytes: Self.maxProbeOutputBytes)
+        let drainFinished = DispatchSemaphore(value: 0)
+        let drainThread = Thread {
+            drain.run(descriptor: readHandle.fileDescriptor)
+            drainFinished.signal()
+        }
+        drainThread.name = "Jarvis CLI probe output"
+        drainThread.start()
+        try? stdout.fileHandleForWriting.close()
+
         // `Process` termination callbacks can be delayed while the test runner or app is busy.
         // Wait for the child directly and bound that wait with pid-only watchdogs, matching the
         // production CLI runner without capturing the non-Sendable Process in GCD closures.
@@ -262,37 +350,9 @@ public struct AgentCLIDetector: Sendable {
         process.waitUntilExit()
         terminator.cancel()
         killer.cancel()
-        let data = Self.readAvailableOutput(stdout.fileHandleForReading,
-                                            maxBytes: Self.maxProbeOutputBytes)
-        return ProbeOutput(data: data, status: process.terminationStatus)
-    }
-
-    /// Drain only bytes already available after the wrapper exits. A wrapper may leave a child
-    /// holding the inherited stdout pipe open; a blocking `readDataToEndOfFile()` would then defeat
-    /// the process watchdog while waiting for that unrelated child to close its writer.
-    private static func readAvailableOutput(_ handle: FileHandle, maxBytes: Int) -> Data {
-        let descriptor = handle.fileDescriptor
-        let flags = fcntl(descriptor, F_GETFL)
-        guard flags >= 0, fcntl(descriptor, F_SETFL, flags | O_NONBLOCK) >= 0 else {
-            try? handle.close()
-            return Data()
-        }
-        defer { try? handle.close() }
-
-        var output = Data()
-        var buffer = [UInt8](repeating: 0, count: 4_096)
-        while output.count < maxBytes {
-            let capacity = min(buffer.count, maxBytes - output.count)
-            let count = read(descriptor, &buffer, capacity)
-            if count > 0 {
-                output.append(contentsOf: buffer.prefix(Int(count)))
-                continue
-            }
-            if count == 0 { break }
-            if errno == EINTR { continue }
-            if errno == EAGAIN || errno == EWOULDBLOCK { break }
-            return Data()
-        }
-        return output
+        drain.stop()
+        drainFinished.wait()
+        try? readHandle.close()
+        return ProbeOutput(data: drain.data, status: process.terminationStatus)
     }
 }

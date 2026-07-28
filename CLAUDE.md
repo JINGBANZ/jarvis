@@ -12,7 +12,7 @@ demand, and proactively offers short coaching tips via a capture-invisible overl
 
 - **Stack:** Swift 6 (strict concurrency), SwiftPM, macOS 14+. **No Xcode project** — builds with the
   Command Line Tools.
-- **Architecture:** six production targets, split on one principle — **keep the logic Foundation-only and
+- **Architecture:** seven production targets, split on one principle — **keep the logic Foundation-only and
   testable, and keep anything OS-bound thin and on the outside.**
 - **Entry points:** `Sources/JarvisApp/App/` (the macOS shell); the event loop lives in
   `Sources/JarvisCore/Coach/CoachDriver.swift`.
@@ -22,8 +22,9 @@ demand, and proactively offers short coaching tips via a capture-invisible overl
 | `JarvisCore` | library | All the logic. **Foundation-only** — no AppKit / AVFoundation / ScreenCaptureKit / WebKit. Runs and is unit-tested on any machine. |
 | `JarvisOverlay` | library | The AppKit overlay (`NSPanel`, capture-invisibility). Its own target *so its behavior can be unit-tested* (`JarvisOverlayTests`) without dragging UIKit into Core. |
 | `JarvisMCPBridge` | library | The narrow Foundation/POSIX transport edge shared by the app and bundled MCP helper: authenticated session-local Unix-socket messages, with no action policy or AppKit effects. |
+| `JarvisMCPServerCore` | library | The helper-only official-SDK adapter: MCP lifecycle, the three tool descriptors, and translation to `JarvisMCPBridge`. It is isolated so protocol behavior can be integration-tested without linking the SDK into the app. |
 | `CJarvisAEC` | C target | The acoustic-echo-cancellation edge: a pure-C facade over WebRTC AEC3. The C++ impl is prebuilt + statically merged (abseil included, zero runtime dylibs) into `Sources/CJarvisAEC/lib/libjarvis-aec.a` by `scripts/build-aec.sh`, so `swift build` only links the archive — no C++ toolchain or vendored headers. Regenerate the `.a` only when bumping the webrtc version. |
-| `JarvisMCPServer` | executable | The bundled stdio MCP helper. It exposes only Jarvis's three coaching tools and translates them to the private bridge; it owns no effects. |
+| `JarvisMCPServer` | executable | The thin bundled stdio helper entry point for `JarvisMCPServerCore`; it owns no effects. |
 | `JarvisApp` | executable | The thin macOS shell: menu bar, capture, permissions, the activity viewer window. Wires Core + Overlay + AEC to the OS. Verified by a live run. |
 
 > **Put logic in `JarvisCore`.** If something can be written without an OS framework, it goes in Core
@@ -45,7 +46,7 @@ demand, and proactively offers short coaching tips via a capture-invisible overl
 | Task | Command | Notes |
 |---|---|---|
 | Compile | `swift build` | Builds all targets. |
-| Test | `./scripts/run-tests.sh` | **Always use this, not raw `swift test`** — it fixes the swift-testing search path on CLT-only machines. Runs all four test targets. |
+| Test | `./scripts/run-tests.sh` | **Always use this, not raw `swift test`** — it fixes the swift-testing search path on CLT-only machines. Runs all five test targets. |
 | Build the app | `./scripts/build-app.sh [release\|debug]` | Bundles + signs `Jarvis.app` with the stable `Jarvis Dev` identity (so TCC grants persist). |
 | Run it | `./scripts/build-app.sh --run` | Build, then launch. Launch via `open`, never the bare binary. Per-session logs land in the workspace `.jarvis/`. |
 | **Gate** | `swift build && ./scripts/run-tests.sh` | The single pre-push check — run it and read the output before claiming work is done. |
@@ -105,7 +106,8 @@ into one module, so moving a file between subfolders never changes access contro
 | `Sources/JarvisCore/Diagnostics/` | Logging, the activity log, session-history store |
 | `Sources/JarvisCore/Support/` | Small primitives (`Clock`, `TurnTaskBox`) |
 | `Sources/JarvisOverlay/` | The on-screen `NSPanel` overlay surfaces (caption + box; no subfolders) |
-| `Sources/JarvisMCPBridge/` | The private Unix-socket protocol, app-side host, and stdio MCP translation |
+| `Sources/JarvisMCPBridge/` | The private Unix-socket protocol and app-/helper-side IPC |
+| `Sources/JarvisMCPServerCore/` | The official-SDK MCP adapter and tool/result translation |
 | `Sources/JarvisMCPServer/` | The bundled MCP helper executable entry point |
 | `Sources/JarvisApp/App/` | Entry point, `AppDelegate` |
 | `Sources/JarvisApp/MenuBar/` | Menu-bar item, Start/Stop, key entry |
@@ -113,14 +115,15 @@ into one module, so moving a file between subfolders never changes access contro
 | `Sources/JarvisApp/Viewer/` | The `WKWebView` activity-viewer window |
 | `Tests/JarvisCoreTests/` | Mirrors the Core subfolders; `TestFixtures.swift` stays at the root |
 | `Tests/JarvisOverlayTests/` | Overlay screen-capture-invisibility checks |
-| `Tests/JarvisMCPBridgeTests/` | Unix-socket, bridge-host, and MCP protocol integration tests |
+| `Tests/JarvisMCPBridgeTests/` | Unix-socket and bridge-host tests |
+| `Tests/JarvisMCPServerCoreTests/` | Official-SDK lifecycle, stdio, action, concurrency, and cancellation integration tests |
 | `Tests/JarvisViewerTests/` | WebKit end-to-end tests of the viewer's shipped HTML/JS |
 
 **Where does a new file go?** Find the subsystem it belongs to and drop it in that folder. If it's
 logic, it's a Core subsystem. If it's OS glue, it's a `JarvisApp` subfolder. If it's overlay window
-behavior, it's `JarvisOverlay`. Private MCP/IPC transport belongs in `JarvisMCPBridge`; the helper
-entry point belongs in `JarvisMCPServer`. If no subsystem fits and it's a generic helper,
-`Core/Support/`.
+behavior, it's `JarvisOverlay`. Private MCP/IPC transport belongs in `JarvisMCPBridge`; SDK-facing
+protocol translation belongs in `JarvisMCPServerCore`; the helper entry point belongs in
+`JarvisMCPServer`. If no subsystem fits and it's a generic helper, `Core/Support/`.
 
 ## Code style
 
@@ -149,8 +152,9 @@ entry point belongs in `JarvisMCPServer`. If no subsystem fits and it's a generi
 
 - **Framework:** **swift-testing** (`@Test` / `@Suite`, `#expect`), not XCTest.
 - **Where tests live:** next to the right target — Core logic → `Tests/JarvisCoreTests/` under the
-  matching subsystem folder; overlay behavior → `Tests/JarvisOverlayTests/`; viewer HTML/JS →
-  `Tests/JarvisViewerTests/`.
+  matching subsystem folder; overlay behavior → `Tests/JarvisOverlayTests/`; private IPC →
+  `Tests/JarvisMCPBridgeTests/`; SDK adapter behavior → `Tests/JarvisMCPServerCoreTests/`; viewer
+  HTML/JS → `Tests/JarvisViewerTests/`.
 - **Expectations:** add/extend tests for behavior changes. Don't add production seams or hooks just to
   enable a test — make the test adapt instead.
 - `JarvisApp` is intentionally **not** unit-tested — its behavior needs live TCC permissions, a mic,

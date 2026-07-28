@@ -41,7 +41,7 @@ same-attempt failover, and primary recovery
 probing are removed. Codex coaching calls
 suppress project instructions and its feature-gated agent tools, run as direct-response decisions, inherit only stable
 executable-search paths, and stop under a provider-specific stall bound instead of leaving later
-speech batched indefinitely. Supported Claude Code and Codex coaching attempts now receive only the
+speech batched indefinitely. Supported Claude Code and Codex coaching attempts receive only the
 private Jarvis MCP server, whose three actions all enter the same Foundation-only
 `CoachingActionBroker` used by API-native calls. The broker permits serial
 captures followed by exactly one staged terminal action, rejects stale, replayed, malformed,

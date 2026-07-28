@@ -30,9 +30,14 @@ import Glibc
     }
 
     private actor CaptureGate {
+        private let snapshot: ScreenSnapshot?
         private var entered = false
         private var entryWaiters: [CheckedContinuation<Void, Never>] = []
         private var releaseWaiter: CheckedContinuation<Void, Never>?
+
+        init(snapshot: ScreenSnapshot? = nil) {
+            self.snapshot = snapshot
+        }
 
         func capture() async -> ScreenSnapshot? {
             entered = true
@@ -42,7 +47,7 @@ import Glibc
                 waiter.resume()
             }
             await withCheckedContinuation { releaseWaiter = $0 }
-            return nil
+            return snapshot
         }
 
         func waitUntilEntered() async {
@@ -251,6 +256,71 @@ import Glibc
 
         await gate.release()
         _ = await exchange.value
+    }
+
+    @Test func undeliverableCaptureReplyInvalidatesTheAttempt() async throws {
+        let directory = try Self.makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let shot = ScreenSnapshot(
+            imageBase64: Data(repeating: 0x61, count: 4 * 1_024 * 1_024).base64EncodedString(),
+            recognizedText: "must reach the agent")
+        let gate = CaptureGate(snapshot: shot)
+        let broker = CoachingActionBroker(
+            identity: .init(configurationRevision: 5),
+            capture: { await gate.capture() })
+        let host = MCPBridgeHost(
+            sessionDirectory: directory,
+            serverExecutable: URL(fileURLWithPath: "/fake/JarvisMCPServer"),
+            broker: broker)
+        defer { host.close() }
+        let configuration = try host.start()
+        let ticket = try JSONDecoder().decode(
+            MCPBridgeTicket.self,
+            from: Data(contentsOf: configuration.ticketFile))
+        var descriptor = try UnixSocket.connect(path: ticket.socketPath)
+        defer {
+            if descriptor >= 0 {
+                UnixSocket.closeConnection(descriptor)
+            }
+        }
+        let request = MCPBridgeRequest(
+            token: ticket.token,
+            attemptID: ticket.attemptID,
+            configurationRevision: ticket.configurationRevision,
+            requestID: "undeliverable-capture",
+            name: captureScreenTool.name,
+            argumentsJSON: "{}")
+        try UnixSocket.writeMessage(try JSONEncoder().encode(request), to: descriptor)
+
+        await gate.waitUntilEntered()
+        await gate.release()
+        // Let the broker finish and the multi-megabyte reply fill the socket before resetting it.
+        try await Task.sleep(for: .milliseconds(10))
+        var reset = linger(l_onoff: 1, l_linger: 0)
+        _ = withUnsafePointer(to: &reset) {
+            setsockopt(
+                descriptor,
+                SOL_SOCKET,
+                SO_LINGER,
+                $0,
+                socklen_t(MemoryLayout<linger>.size))
+        }
+        UnixSocket.closeConnection(descriptor)
+        descriptor = -1
+
+        var wasInvalidated = false
+        for _ in 0..<100 {
+            do {
+                _ = try await broker.requireTerminal()
+            } catch let failure as CoachingActionBroker.Failure {
+                if failure == .invalidated {
+                    wasInvalidated = true
+                    break
+                }
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(wasInvalidated)
     }
 
     @Test func socketPathsAreBoundedAndMessagesAreReadInChunks() async throws {

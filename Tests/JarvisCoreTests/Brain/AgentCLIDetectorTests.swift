@@ -241,6 +241,27 @@ import Glibc
         #expect(d.detect(.codexCLI)?.supportsMCP == true)
     }
 
+    @Test func capabilityProbeDrainsOutputWhileTheCLIIsRunning() throws {
+        let home = try makeHome()
+        let bin = home.appendingPathComponent("fakebin")
+        try installBinary("claude", in: bin, script: """
+            #!/bin/sh
+            if [ "$1" = "--help" ]; then
+                printf '%s\\n' '  --mcp-config <file>' '  --strict-mcp-config'
+                i=0
+                while [ "$i" -lt 6000 ]; do
+                    printf '%s\\n' 'bounded probe padding that must not fill and stall the pipe'
+                    i=$((i + 1))
+                done
+                exit 0
+            fi
+            printf '%s\\n' '{"loggedIn":true}'
+            """)
+        let d = detector(home: home, pathVariable: bin.path, authStatusTimeout: 5)
+
+        #expect(d.detect(.claudeCode)?.supportsMCP == true)
+    }
+
     @Test func codexMCPIsUnavailableWhenBuiltInsCannotAllBeDisabled() throws {
         let home = try makeHome()
         let bin = home.appendingPathComponent("fakebin")

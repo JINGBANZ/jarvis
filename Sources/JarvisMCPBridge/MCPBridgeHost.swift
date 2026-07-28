@@ -132,7 +132,14 @@ public final class MCPBridgeHost: @unchecked Sendable {
                 ticketURL: ticketURL,
                 to: claudeConfigURL)
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-                self?.acceptLoop(descriptor: descriptor, token: token)
+                guard let self else {
+                    // `close()` only shuts the listener down because the accept loop normally owns
+                    // its final close. If the host disappears before this block starts, ownership
+                    // transfers here instead.
+                    UnixSocket.closeConnection(descriptor)
+                    return
+                }
+                self.acceptLoop(descriptor: descriptor, token: token)
             }
             return CLIMCPConfiguration(
                 serverExecutable: serverExecutable,
@@ -246,8 +253,17 @@ public final class MCPBridgeHost: @unchecked Sendable {
             jlog("Jarvis MCP: action rejected — \(error.localizedDescription)")
             response = .failure(error.localizedDescription)
         }
-        if let data = try? JSONEncoder().encode(response) {
-            try? UnixSocket.writeMessage(data, to: connection)
+        do {
+            try UnixSocket.writeMessage(
+                JSONEncoder().encode(response),
+                to: connection)
+        } catch {
+            // An accepted action is useful only if its result reaches the agent. In particular, a
+            // capture whose reply is lost must not authorize a later screen-grounded terminal.
+            if response.ok {
+                broker.invalidate()
+            }
+            jlog("Jarvis MCP: response delivery failed — \(error.localizedDescription)")
         }
     }
 
