@@ -233,7 +233,12 @@ public actor CoachingActionBroker {
             return result
 
         case speakTool.name:
-            let lines = try Self.speakLines(decoded, toolName: name)
+            let lines: [String]
+            do {
+                lines = try Self.speakLines(decoded, toolName: name)
+            } catch {
+                throw fail(.malformedArguments(name))
+            }
             return try stage(
                 .speak(callID: requestID, lines: lines),
                 requestID: requestID,

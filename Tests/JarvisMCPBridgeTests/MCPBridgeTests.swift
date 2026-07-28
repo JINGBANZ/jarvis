@@ -83,6 +83,31 @@ import Glibc
             from: UnixSocket.readMessage(from: descriptor))
     }
 
+    private static func listenerDescriptor(path: String) -> Int32? {
+        let limit = min(Int(getdtablesize()), 4_096)
+        for candidate in 0..<limit {
+            var address = sockaddr_un()
+            var length = socklen_t(MemoryLayout<sockaddr_un>.size)
+            let result = withUnsafeMutablePointer(to: &address) { pointer in
+                pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                    getsockname(Int32(candidate), $0, &length)
+                }
+            }
+            guard result == 0, address.sun_family == sa_family_t(AF_UNIX) else {
+                continue
+            }
+            let candidatePath = withUnsafePointer(to: &address.sun_path) {
+                $0.withMemoryRebound(to: CChar.self, capacity: UnixSocket.maximumPathBytes) {
+                    String(cString: $0)
+                }
+            }
+            if candidatePath == path {
+                return Int32(candidate)
+            }
+        }
+        return nil
+    }
+
     @Test func bridgeRejectsALooseSessionDirectory() throws {
         let directory = try Self.makeDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -217,6 +242,31 @@ import Glibc
         host.close()
 
         #expect(try UnixSocket.readMessage(from: descriptor).isEmpty)
+    }
+
+    @Test func closingIdleHostClosesTheListeningDescriptor() throws {
+        let directory = try Self.makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let broker = CoachingActionBroker(
+            identity: .init(configurationRevision: 31),
+            capture: { nil })
+        let host = MCPBridgeHost(
+            sessionDirectory: directory,
+            serverExecutable: URL(fileURLWithPath: "/fake/JarvisMCPServer"),
+            broker: broker)
+        let configuration = try host.start()
+        let ticket = try JSONDecoder().decode(
+            MCPBridgeTicket.self,
+            from: Data(contentsOf: configuration.ticketFile))
+        let descriptor = try #require(Self.listenerDescriptor(path: ticket.socketPath))
+
+        host.close()
+
+        errno = 0
+        let status = fcntl(descriptor, F_GETFD)
+        let error = errno
+        #expect(status == -1)
+        #expect(error == EBADF)
     }
 
     @Test func closingHostCancelsAnInFlightBrokerCallBeforeCaptureReturns() async throws {

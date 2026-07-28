@@ -111,6 +111,12 @@ import Testing
                 name: speakTool.name,
                 argumentsJSON: #"{"line":"missing plural"}"#)
         } == .malformedArguments(speakTool.name))
+        #expect(await failure {
+            _ = try await malformed.call(
+                requestID: "retry",
+                name: speakTool.name,
+                argumentsJSON: #"{"lines":["A retry must not revive the attempt."]}"#)
+        } == .malformedArguments(speakTool.name))
 
         let unknown = broker()
         #expect(await failure {

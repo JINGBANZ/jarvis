@@ -37,18 +37,19 @@ public struct MCPBridgeClient: Sendable {
             if self.descriptor == descriptor {
                 self.descriptor = -1
             }
-            lock.unlock()
+            // Close before releasing the lock so a concurrent cancel cannot retain this numeric fd
+            // past its lifetime and shut down an unrelated socket that reuses the same number.
             UnixSocket.closeConnection(descriptor)
+            lock.unlock()
         }
 
         func cancel() {
             lock.lock()
             cancelled = true
-            let descriptor = self.descriptor
-            lock.unlock()
             if descriptor >= 0 {
                 UnixSocket.shutdownConnection(descriptor)
             }
+            lock.unlock()
         }
 
         func checkCancellation() throws {

@@ -132,13 +132,10 @@ public final class MCPBridgeHost: @unchecked Sendable {
                 ticketURL: ticketURL,
                 to: claudeConfigURL)
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-                guard let self else {
-                    // `close()` only shuts the listener down because the accept loop normally owns
-                    // its final close. If the host disappears before this block starts, ownership
-                    // transfers here instead.
-                    UnixSocket.closeConnection(descriptor)
-                    return
-                }
+                // Deinitialization closes the listener when the host disappears before this block
+                // starts; never touch the captured fd number after that close because it may be
+                // reused by unrelated process I/O.
+                guard let self else { return }
                 self.acceptLoop(descriptor: descriptor, token: token)
             }
             return CLIMCPConfiguration(
@@ -162,9 +159,10 @@ public final class MCPBridgeHost: @unchecked Sendable {
         let files = self.files
         self.files = []
         if descriptor >= 0 {
-            // The accept loop owns the final close. Shutdown wakes `accept` without making this
-            // descriptor number available for unrelated process I/O before that loop exits.
-            UnixSocket.shutdownConnection(descriptor)
+            // `shutdown` does not wake `accept` on a listening Darwin socket. Close while holding
+            // the ownership lock; the accept-loop defer checks ownership before touching this fd
+            // number again, so reuse cannot turn its cleanup into a close of unrelated process I/O.
+            UnixSocket.closeConnection(descriptor)
         }
         // Do not close an fd while `handle` may still use its integer: shutdown unblocks the
         // sidecar immediately, and its connection handler remains the sole final-close owner.
@@ -185,10 +183,11 @@ public final class MCPBridgeHost: @unchecked Sendable {
     private func acceptLoop(descriptor: Int32, token: String) {
         defer {
             lock.lock()
-            if listener == descriptor {
+            let ownsListener = listener == descriptor
+            if ownsListener {
                 listener = -1
+                UnixSocket.closeConnection(descriptor)
             }
-            UnixSocket.closeConnection(descriptor)
             lock.unlock()
         }
         while true {
