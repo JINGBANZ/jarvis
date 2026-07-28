@@ -262,6 +262,40 @@ import Glibc
         #expect(d.detect(.claudeCode)?.supportsMCP == true)
     }
 
+    @Test func capabilityProbeStopsDrainingInheritedContinuousOutput() throws {
+        let home = try makeHome()
+        let bin = home.appendingPathComponent("fakebin")
+        let childPID = home.appendingPathComponent("probe-child.pid")
+        try installBinary("claude", in: bin, script: """
+            #!/bin/sh
+            if [ "$1" = "--help" ]; then
+                printf '%s\\n' '  --mcp-config <file>' '  --strict-mcp-config'
+                trap '' HUP
+                yes 'inherited probe output must not keep detection alive' &
+                writer=$!
+                printf '%s\\n' "$writer" > "$HOME/probe-child.pid"
+                (sleep 10; kill "$writer" 2>/dev/null) >/dev/null 2>&1 &
+                exit 0
+            fi
+            printf '%s\\n' '{"loggedIn":true}'
+            """)
+        let d = detector(home: home, pathVariable: bin.path, authStatusTimeout: 20)
+
+        let started = Date()
+        let cli = d.detect(.claudeCode)
+        let elapsed = Date().timeIntervalSince(started)
+        defer {
+            if let contents = try? String(contentsOf: childPID, encoding: .utf8),
+               let pid = pid_t(contents.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                kill(pid, SIGKILL)
+            }
+        }
+
+        #expect(cli?.supportsMCP == true)
+        #expect(elapsed < 8,
+                "the capability probe must stop its drain when the parent CLI exits")
+    }
+
     @Test func codexMCPIsUnavailableWhenBuiltInsCannotAllBeDisabled() throws {
         let home = try makeHome()
         let bin = home.appendingPathComponent("fakebin")

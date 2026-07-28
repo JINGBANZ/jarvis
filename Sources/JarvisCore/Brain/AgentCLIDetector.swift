@@ -291,7 +291,11 @@ public struct AgentCLIDetector: Sendable {
                 if retained > 0 {
                     storage.append(contentsOf: buffer.prefix(retained))
                 }
+                // Once the parent exits, drain only the bounded prefix. This preserves output that
+                // was already split across pipe reads without following an inherited writer forever.
+                let shouldStop = stopped && storage.count >= maxBytes
                 lock.unlock()
+                if shouldStop { return }
             }
         }
     }
