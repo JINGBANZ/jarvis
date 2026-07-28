@@ -9,7 +9,9 @@ import Glibc
 /// Authenticated, attempt-scoped Unix-socket host for one CLI process.
 ///
 /// The sidecar receives only an owner-only ticket path in argv. The ticket contains the bearer
-/// token and exact attempt identity; the socket and both config files live beside the session log.
+/// token and exact attempt identity. Config files live beside the session log; the transient socket
+/// node uses macOS's short per-user temporary directory so deep workspace paths cannot exceed
+/// `sockaddr_un.sun_path`.
 /// `@unchecked Sendable` is limited to this POSIX edge: immutable attempt state is Sendable and
 /// `lock` protects every mutable descriptor/file collection.
 public final class MCPBridgeHost: @unchecked Sendable {
@@ -59,8 +61,11 @@ public final class MCPBridgeHost: @unchecked Sendable {
             }
         }
 
-        func wait() throws -> T {
-            ready.wait()
+        func wait(for interval: DispatchTimeInterval) -> Bool {
+            ready.wait(timeout: .now() + interval) == .success
+        }
+
+        func value() throws -> T {
             lock.lock()
             let result = self.result
             lock.unlock()
@@ -106,7 +111,8 @@ public final class MCPBridgeHost: @unchecked Sendable {
         try Self.requireOwnerOnlyDirectory(sessionDirectory)
 
         let suffix = identity.attemptID.uuidString.prefix(8).lowercased()
-        let socketURL = sessionDirectory.appendingPathComponent("mcp-\(suffix).sock")
+        let socketSuffix = identity.attemptID.uuidString.prefix(16).lowercased()
+        let socketURL = try Self.socketURL(suffix: String(socketSuffix))
         let ticketURL = sessionDirectory.appendingPathComponent("mcp-\(suffix).ticket.json")
         let claudeConfigURL = sessionDirectory.appendingPathComponent("mcp-\(suffix).claude.json")
         let token = Self.randomToken()
@@ -275,7 +281,17 @@ public final class MCPBridgeHost: @unchecked Sendable {
             }
         }
         call.install(task)
-        return try call.wait()
+        while !call.wait(for: .milliseconds(25)) {
+            if UnixSocket.peerHasClosed(connection) {
+                // A cancelled MCP request must not finish capturing or stage an action after the
+                // SDK has discarded its response. Invalidate the whole attempt before cancelling
+                // the blocked broker task; the next scheduler attempt starts with fresh state.
+                broker.invalidate()
+                call.cancel()
+                throw CancellationError()
+            }
+        }
+        return try call.value()
     }
 
     private static func writeClaudeConfiguration(
@@ -308,12 +324,25 @@ public final class MCPBridgeHost: @unchecked Sendable {
         }
     }
 
+    private static func socketURL(suffix: String) throws -> URL {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("jarvis-mcp-\(getuid())", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700])
+        try requireOwnerOnlyDirectory(directory)
+        return directory.appendingPathComponent("m-\(suffix).sock")
+    }
+
     private static func requireOwnerOnlyDirectory(_ url: URL) throws {
         let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
         guard attributes[.type] as? FileAttributeType == .typeDirectory,
               let permissions = attributes[.posixPermissions] as? NSNumber,
-              permissions.intValue & 0o077 == 0 else {
-            throw error("private MCP bridge requires an owner-only session directory")
+              permissions.intValue & 0o077 == 0,
+              let owner = attributes[.ownerAccountID] as? NSNumber,
+              owner.uint32Value == getuid() else {
+            throw error("private MCP bridge requires an owner-only directory")
         }
     }
 

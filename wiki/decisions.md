@@ -814,7 +814,7 @@
   `Sources/JarvisCore/Coach/CoachingActionBroker.swift`,
   `Sources/JarvisMCPBridge/MCPBridgeHost.swift`,
   `Sources/JarvisMCPBridge/MCPBrainClient.swift`,
-  `Sources/JarvisMCPBridge/MCPStdioServer.swift`.
+  `Sources/JarvisMCPServerCore/JarvisMCPServer.swift`.
 
 ### 2026-07-27 — CLI coaching requires MCP; no compatibility action route
 
@@ -872,3 +872,22 @@
   internal compaction behavior, not a saved route selection.
 - **Detail:** [settings-window.md → Brain](./settings-window.md#brain),
   `Sources/JarvisCore/Brain/BrainModelCatalog.swift`.
+
+### 2026-07-28 — The official Swift SDK owns MCP protocol handling
+
+- **Chose:** Exact-pin the latest reviewed release of the official MCP Swift SDK and confine it to
+  the bundled helper. The SDK owns stdio transport, JSON-RPC lifecycle, protocol-version
+  negotiation, concurrent dispatch, and cancellation. Jarvis keeps its authenticated attempt bridge
+  and `CoachingActionBroker`; those are application authority and private IPC, not MCP protocol
+  reimplementations.
+- **Why:** The handwritten server duplicated evolving protocol machinery and had already accepted a
+  client-requested version without proving support. The released SDK covers that maintenance surface
+  and carries upstream lifecycle/cancellation tests, while the helper-only target prevents its
+  protocol and transitive networking dependencies from entering the main app.
+- **Rejected:** (a) Following the SDK's moving main branch or a release-candidate protocol—Jarvis
+  needs a reproducible stable dependency graph. (b) Linking the SDK into `JarvisApp`—the app only
+  hosts private broker IPC. (c) Replacing the private bridge with an MCP server that owns effects—it
+  would bypass attempt authentication, staging, and commit.
+- **Detail:** `Package.swift`, `Package.resolved`,
+  `Sources/JarvisMCPServerCore/JarvisMCPServer.swift`,
+  `Sources/JarvisMCPBridge/MCPBridgeClient.swift`.

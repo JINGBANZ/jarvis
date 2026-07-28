@@ -75,6 +75,7 @@ cp "$BIN_PATH" "$APP/Contents/MacOS/$BIN_NAME"
 cp "$BIN_DIR/$MCP_BIN_NAME" "$APP/Contents/Helpers/$MCP_BIN_NAME"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 cp Resources/Jarvis.icns "$APP/Contents/Resources/Jarvis.icns"
+cp LICENSE THIRD_PARTY_NOTICES.md "$APP/Contents/Resources/"
 
 echo "▶ signing with '$IDENTITY'"
 codesign --force --sign "$IDENTITY" "$APP/Contents/Helpers/$MCP_BIN_NAME"

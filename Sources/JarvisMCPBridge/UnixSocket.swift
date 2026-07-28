@@ -107,6 +107,24 @@ enum UnixSocket {
         _ = shutdown(descriptor, SHUT_RDWR)
     }
 
+    static func peerHasClosed(_ descriptor: Int32) -> Bool {
+        var state = pollfd(
+            fd: descriptor,
+            events: Int16(POLLIN | POLLHUP | POLLERR),
+            revents: 0)
+        let result = poll(&state, 1, 0)
+        guard result > 0 else { return result < 0 && errno != EINTR }
+        if state.revents & Int16(POLLHUP | POLLERR | POLLNVAL) != 0 {
+            return true
+        }
+        guard state.revents & Int16(POLLIN) != 0 else { return false }
+
+        var byte: UInt8 = 0
+        let count = recv(descriptor, &byte, 1, MSG_PEEK | MSG_DONTWAIT)
+        if count == 0 { return true }
+        return count < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR
+    }
+
     private static func withAddress<T>(
         path: String,
         _ body: (UnsafePointer<sockaddr>, socklen_t) throws -> T

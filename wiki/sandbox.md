@@ -105,11 +105,14 @@ Narrow and explicit. Data leaves the machine only via:
   **session persistence off** (`--no-session-persistence` / `--ephemeral`), so they keep no local
   transcript of the coaching conversation in `~/.claude` / `~/.codex` — the owner-only session dir
   stays the only on-disk copy. Transcription audio still goes to the OpenAI Realtime API regardless.
-  For an MCP attempt, the socket, ticket, and generated CLI config also live only in that owner-only
-  session directory. The ticket contains a random bearer capability bound to one attempt UUID and
-  configuration revision; the bearer is never placed in argv or model context, files and socket are
-  owner-only, and the host removes them when the attempt ends. Raw MCP frames and bearer values
-  never enter Activity or brain traffic; debug records only redacted method/tool/timing summaries.
+  For an MCP attempt, the ticket and generated CLI config live only in that owner-only session
+  directory. The ticket contains a random bearer capability bound to one attempt UUID and
+  configuration revision; the bearer is never placed in argv or model context. The socket node
+  contains no payload and lives for the attempt in macOS's short owner-only per-user temporary
+  directory so a deep workspace path cannot exceed the Unix-socket address limit. Screenshot/OCR
+  bytes cross only the kernel stream; the host removes the node and session files when the attempt
+  ends. Raw MCP frames and bearer values never enter Activity or brain traffic; debug records only
+  redacted method/tool/timing summaries.
 - **An explicit Activity → Evaluate click** sends the selected completed session to a read-only,
   non-persisted Claude Code / Codex agent under that CLI account. Unlike a coaching turn, this agent
   may inspect the complete `jarvis-activity.jsonl`, brain traffic, saved screenshots, and source

@@ -52,6 +52,9 @@ bundled helper blocks preflight, and a per-attempt bridge bootstrap failure fail
 the provider starts. There is no prompt-JSON action route or same-attempt replay. MCP keeps
 capture→terminal work inside one CLI process and gives Jarvis a fail-closed terminal contract; it is
 an action-continuity and overhead improvement, not evidence of greater model intelligence.
+The exact-pinned official MCP Swift SDK owns helper-side stdio framing, protocol lifecycle and
+version negotiation, concurrent request dispatch, and cancellation. Jarvis retains the private
+attempt bridge and broker policy; SDK code remains helper-only and is not linked into `JarvisApp`.
 Saving an API key while running also preserves those live objects: existing Realtime sockets take
 the key on their next reconnect, and an OpenAI brain update remains transactional. Audio
 route rebuilds likewise retry before declaring capture unavailable, and stale capture callbacks
@@ -103,7 +106,7 @@ verified by the smoke run.
 - `Sources/JarvisCore/Support/` — small shared runtime primitives (`Clock`, `TurnTaskBox`, `RetrySchedule`, `RetryIncident`).
 - `Sources/JarvisCore/Diagnostics/` — logging, always-on activity log with stable persisted event kinds and fixed typed brain-change/failure notices, privacy-preserving audio continuity evidence, session-history store, wire-level brain traffic capture + the read-only agentic audit over the complete session directory, user-facing errors (`ActivityLog`, `AudioContinuityWitness`, `SessionStore`, `BrainTrafficLog`, `EvaluationTranscript`, `AgenticEvaluation`, `AgenticEvaluator`, `UserFacingError`).
 - `Sources/JarvisOverlay/` — the capture-invisible `NSPanel` surfaces: `OverlayCaptionPanel` (transient), `OverlayBoxPanel` (persistent), `NSPanel+CaptureExclusion`.
-- `Sources/JarvisMCPBridge/` + `Sources/JarvisMCPServer/` — the session-local authenticated Unix-socket host and minimal stdio helper that exposes exactly the three Jarvis coaching actions without owning effects.
+- `Sources/JarvisMCPBridge/` + `Sources/JarvisMCPServerCore/` + `Sources/JarvisMCPServer/` — the authenticated attempt bridge plus the helper-only official-SDK MCP adapter and executable; they expose exactly the three Jarvis coaching actions without owning effects.
 - `Sources/JarvisApp/App/` + `MenuBar/` — entry point, connection-aware menu status, Start/Stop, `ErrorReporter` (startup alerts plus an unconditional no-presentation runtime policy).
 - `Sources/JarvisApp/Capture/` — one-clock aggregate mic + sample-preserving system-audio capture with AEC3 echo cancellation + resampling (`AggregateEchoCapture`, `WebRTCEchoCanceller`, `Resampler`), Realtime item/readiness/liveness/transactional-reconnect/witness handling (`RealtimeTranscriber`, `NetworkPathDiagnostics`), permissions, plus the window-scoped screenshot + OCR edge (`WindowScopedScreenCapture`, `ScreenTextRecognizer`).
 - `Sources/JarvisApp/Settings/` — the unified Settings window (`SettingsWindow` hosting Brain (minimal Provider route / Reasoning effort / Transcription groups) / Overlay / Screen / Activity sections).

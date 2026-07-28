@@ -57,6 +57,7 @@ cp "$BIN_PATH" "$APP/Contents/MacOS/$BIN_NAME"
 cp "$BIN_DIR/$MCP_BIN_NAME" "$APP/Contents/Helpers/$MCP_BIN_NAME"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 cp Resources/Jarvis.icns "$APP/Contents/Resources/Jarvis.icns"
+cp LICENSE THIRD_PARTY_NOTICES.md "$APP/Contents/Resources/"
 
 echo "▶ signing (hardened runtime + timestamp)"
 # Sign nested code first, then seal the containing app. No --deep: every executable is intentional.

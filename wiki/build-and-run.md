@@ -17,9 +17,11 @@ needs — so a SwiftUI + ScreenCaptureKit binary builds with plain `swift build`
   is a small library holding just the `NSPanel` overlay, split out so `JarvisOverlayTests` can import
   it to verify screen-capture invisibility headlessly. `JarvisApp` is the thin executable that wires
   those libraries to the side-effectful macOS frameworks (mic, ScreenCaptureKit, the realtime
-  websocket, the menu bar). `JarvisMCPBridge` is the narrow Unix-socket/stdio protocol edge shared
-  by the app and `JarvisMCPServer`; the helper owns no coaching policy or OS effect. That split is
-  what lets most of the system be verified headless.
+  websocket, the menu bar). `JarvisMCPBridge` is the narrow private Unix-socket edge shared by the
+  app and helper. `JarvisMCPServerCore` keeps the exact-pinned official MCP Swift SDK and its small
+  Jarvis adapter helper-only, while `JarvisMCPServer` is the executable wrapper. The helper owns no
+  coaching policy or OS effect. That split keeps the protocol dependency out of `JarvisApp` and
+  lets the SDK-backed lifecycle and action loop be verified headless.
 - **Tests use swift-testing, not XCTest.** `import XCTest` fails with "no such module" under
   CLT-only. Run the suite via **`./scripts/run-tests.sh`**, which adds the swift-testing framework
   search/rpath flags that plain `swift test` lacks CLT-only. (One sharp edge: a direct
@@ -35,6 +37,8 @@ The build also places `JarvisMCPServer` in `Jarvis.app/Contents/Helpers`. The he
 the containing app—inside out, without relying on `codesign --deep`—so local and Developer ID builds
 carry the same nested-code shape. A checkout build may locate the sibling SwiftPM helper for
 development, but a bundled app always resolves it from `Bundle.main`.
+The bundle also carries `LICENSE` and `THIRD_PARTY_NOTICES.md`, including the MCP SDK and its pinned
+transitive dependencies.
 
 **Permission persistence is a signing problem.** macOS TCC keys a Screen-Recording/Microphone grant
 to **code signature + bundle id + bundle path**. An ad-hoc signature changes every build, so macOS

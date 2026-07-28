@@ -54,3 +54,94 @@ Version 2.0. You may obtain a copy of the License at http://www.apache.org/licen
 Apache-2.0 §4 requires retaining this attribution and the upstream NOTICE (if any) in distributions;
 abseil ships no separate NOTICE file. (`scripts/build-aec.sh` also copies the upstream `LICENSE`/
 `AUTHORS` into the local git-ignored `third_party/abseil-cpp/` on rebuild, for reference.)
+
+---
+
+## MCP Swift SDK and helper dependencies
+
+`JarvisMCPServer` links the following SwiftPM packages at the versions pinned in
+`Package.resolved`. The complete Apache License 2.0 text is distributed as `LICENSE` beside this
+notice in the app bundle.
+
+| Component | Version | License |
+|---|---:|---|
+| [MCP Swift SDK](https://github.com/modelcontextprotocol/swift-sdk) | 0.12.1 | Apache-2.0 and MIT during the project's licensing transition |
+| [EventSource](https://github.com/mattt/EventSource) | 1.4.1 | MIT |
+| [Swift System](https://github.com/apple/swift-system) | 1.7.5 | Apache-2.0 |
+| [SwiftLog](https://github.com/apple/swift-log) | 1.14.0 | Apache-2.0 |
+| [SwiftNIO](https://github.com/apple/swift-nio) | 2.101.3 | Apache-2.0 |
+| [Swift Atomics](https://github.com/apple/swift-atomics) | 1.3.1 | Apache-2.0 |
+| [Swift Collections](https://github.com/apple/swift-collections) | 1.6.0 | Apache-2.0 |
+
+### MIT-licensed MCP Swift SDK contributions
+
+Copyright (c) 2024-2025 Model Context Protocol a Series of LF Projects, LLC.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
+associated documentation files (the "Software"), to deal in the Software without restriction,
+including without limitation the rights to use, copy, modify, merge, publish, distribute,
+sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial
+portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT
+NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT
+OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+### EventSource
+
+Copyright 2025 Mattt (https://mat.tt)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
+associated documentation files (the "Software"), to deal in the Software without restriction,
+including without limitation the rights to use, copy, modify, merge, publish, distribute,
+sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial
+portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT
+NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT
+OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+### SwiftLog NOTICE
+
+The SwiftLog Project — https://github.com/apple/swift-log
+
+Copyright 2018, 2019 The SwiftLog Project.
+
+This product contains a derivation of the lock implementation and various scripts from SwiftNIO,
+licensed under Apache-2.0.
+
+### SwiftNIO NOTICE
+
+The SwiftNIO Project — https://github.com/apple/swift-nio
+
+Copyright 2017, 2018 The SwiftNIO Project.
+
+SwiftNIO is heavily influenced by Netty and contains or derives portions from llhttp, uSHET,
+FreeBSD, Swift Base64, AsyncHTTPClient, Swift Certificates, Swift System, and Swift Package Manager:
+
+- Netty — Apache-2.0; https://netty.io
+- NodeJS llhttp — MIT; https://github.com/nodejs/llhttp
+- `cpp_magic.h` from Thomas Nixon and Jonathan Heathcote's uSHET — MIT;
+  https://github.com/18sg/uSHET
+- `sha1.c` and `sha1.h` from FreeBSD, copyright 1995-1998 WIDE Project — BSD-3-Clause;
+  https://github.com/freebsd/freebsd-src
+- Fabian Fett's Swift Base64 — Apache-2.0;
+  https://github.com/fabianfett/swift-base64-kit
+- AsyncHTTPClient's async XCTest and structured-concurrency helpers — Apache-2.0;
+  https://github.com/swift-server/async-http-client
+- Swift Certificates' `_TinyArray.swift` — Apache-2.0;
+  https://github.com/apple/swift-certificates
+- Swift System's mocking infrastructure — Apache-2.0;
+  https://github.com/apple/swift-system
+- Swift Package Manager's `TokenBucket.swift` — Apache-2.0;
+  https://github.com/swiftlang/swift-package-manager

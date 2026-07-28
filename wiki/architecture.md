@@ -334,8 +334,10 @@ memory, provider-route policy, and traffic recording are all unchanged — only 
   stays within one CLI process. A bounded capability probe enables this path only when the
   installed CLI advertises the needed MCP surface; an installation that cannot prove that surface
   is unavailable for coaching.
-- **MCP is a transport, not the authority.** `JarvisMCPServer` speaks stdio MCP and translates tool
-  calls over a session-local authenticated Unix socket to the app's `MCPBridgeHost`. The
+- **MCP is a transport, not the authority.** `JarvisMCPServerCore` uses the exact-pinned official
+  MCP Swift SDK for stdio framing, initialization and version negotiation, concurrent request
+  dispatch, and cancellation. Its small adapter exposes the Core-owned tool definitions and sends
+  calls through `MCPBridgeClient` over an authenticated Unix socket to the app's `MCPBridgeHost`. The
   Foundation-only `CoachingActionBroker` validates attempt identity, arguments, ordering, replay,
   cancellation, a required terminal action, and exactly-once commit. A clean provider exit with no
   brokered terminal is therefore a typed failed attempt and renders no overlay. This is the
@@ -352,6 +354,11 @@ memory, provider-route policy, and traffic recording are all unchanged — only 
   unavailable. A missing bundled helper blocks a selected CLI at preflight. Failure to create the
   private per-attempt bridge is a typed failed attempt before any provider process starts. None of
   these cases launches a weaker action protocol or replays provider work.
+- **The bridge stays private and bounded.** The bearer ticket and generated provider configuration
+  are owner-only files in the session directory. The socket node contains no payload and lives only
+  for the attempt in macOS's short owner-only per-user temporary directory, avoiding
+  `sockaddr_un` failures in deeply nested workspaces. Screenshot/OCR bytes remain transient kernel
+  stream data; only the normal session artifacts are persisted.
 - **Installed CLIs are auto-detected.** `AgentCLIDetector` discovers binaries through file probes
   over stable $PATH entries + known install dirs. Inherited $PATH entries under the system temporary
   directory are ignored for both selection and the child environment: terminal launchers may put
