@@ -18,6 +18,7 @@ public struct MCPBridgeClient: Sendable {
         private let lock = NSLock()
         private var descriptor: Int32 = -1
         private var cancelled = false
+        private var acknowledged = false
 
         func connect(path: String) throws -> Int32 {
             let descriptor = try UnixSocket.connect(path: path)
@@ -46,10 +47,22 @@ public struct MCPBridgeClient: Sendable {
         func cancel() {
             lock.lock()
             cancelled = true
-            if descriptor >= 0 {
+            if !acknowledged, descriptor >= 0 {
                 UnixSocket.shutdownConnection(descriptor)
             }
             lock.unlock()
+        }
+
+        /// The acknowledgement is the action's point of no return. Holding the cancellation lock
+        /// makes cancellation happen wholly before the write or wholly after Jarvis may retain it.
+        func acknowledge(_ data: Data, on descriptor: Int32) throws {
+            lock.lock()
+            defer { lock.unlock() }
+            guard !cancelled, self.descriptor == descriptor else {
+                throw CancellationError()
+            }
+            try UnixSocket.writeMessage(data, to: descriptor)
+            acknowledged = true
         }
 
         func checkCancellation() throws {
@@ -109,16 +122,28 @@ public struct MCPBridgeClient: Sendable {
                     return .rejected(
                         response.error ?? "Jarvis rejected the coaching action")
                 }
+                let result: ActionResult
                 switch response.kind {
                 case .capture:
-                    return .capture(
+                    result = .capture(
                         imageBase64: response.imageBase64,
                         recognizedText: response.recognizedText)
                 case .terminal:
-                    return .terminal
+                    result = .terminal
                 case nil:
                     throw Self.error("Jarvis returned an invalid action result")
                 }
+                let acknowledgement = MCPBridgeAcknowledgement(requestID: request.requestID)
+                try connection.acknowledge(
+                    try JSONEncoder().encode(acknowledgement),
+                    on: descriptor)
+                let confirmationData = try UnixSocket.readMessage(from: descriptor)
+                guard try JSONDecoder().decode(
+                    MCPBridgeAcknowledgement.self,
+                    from: confirmationData) == acknowledgement else {
+                    throw Self.error("Jarvis did not confirm action delivery")
+                }
+                return result
             }.value
         } onCancel: {
             connection.cancel()

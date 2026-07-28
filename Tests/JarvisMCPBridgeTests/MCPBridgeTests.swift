@@ -78,9 +78,19 @@ import Glibc
         let descriptor = try UnixSocket.connect(path: ticket.socketPath)
         defer { UnixSocket.closeConnection(descriptor) }
         try UnixSocket.writeMessage(try JSONEncoder().encode(request), to: descriptor)
-        return try JSONDecoder().decode(
+        let response = try JSONDecoder().decode(
             MCPBridgeResponse.self,
             from: UnixSocket.readMessage(from: descriptor))
+        if response.ok {
+            let acknowledgement = MCPBridgeAcknowledgement(requestID: request.requestID)
+            try UnixSocket.writeMessage(
+                try JSONEncoder().encode(acknowledgement),
+                to: descriptor)
+            #expect(try JSONDecoder().decode(
+                MCPBridgeAcknowledgement.self,
+                from: UnixSocket.readMessage(from: descriptor)) == acknowledgement)
+        }
+        return response
     }
 
     private static func listenerDescriptor(path: String) -> Int32? {
@@ -395,6 +405,51 @@ import Glibc
         #expect(wasInvalidated)
         #expect(observed.value == 0)
         #expect(await broker.events().isEmpty)
+    }
+
+    @Test func unacknowledgedTerminalReplyInvalidatesTheAttempt() async throws {
+        let directory = try Self.makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let broker = CoachingActionBroker(
+            identity: .init(configurationRevision: 6),
+            capture: { nil })
+        let host = MCPBridgeHost(
+            sessionDirectory: directory,
+            serverExecutable: URL(fileURLWithPath: "/fake/JarvisMCPServer"),
+            broker: broker)
+        defer { host.close() }
+        let configuration = try host.start(provider: .codexCLI)
+        let ticket = try JSONDecoder().decode(
+            MCPBridgeTicket.self,
+            from: Data(contentsOf: configuration.ticketFile))
+        let descriptor = try UnixSocket.connect(path: ticket.socketPath)
+        let request = MCPBridgeRequest(
+            token: ticket.token,
+            attemptID: ticket.attemptID,
+            configurationRevision: ticket.configurationRevision,
+            requestID: "discarded-terminal",
+            name: speakTool.name,
+            argumentsJSON: #"{"lines":["This must not survive cancellation."]}"#)
+        try UnixSocket.writeMessage(try JSONEncoder().encode(request), to: descriptor)
+        let response = try JSONDecoder().decode(
+            MCPBridgeResponse.self,
+            from: UnixSocket.readMessage(from: descriptor))
+        #expect(response.ok)
+        UnixSocket.closeConnection(descriptor)
+
+        var wasInvalidated = false
+        for _ in 0..<100 {
+            do {
+                _ = try await broker.requireTerminal()
+            } catch let failure as CoachingActionBroker.Failure {
+                if failure == .invalidated {
+                    wasInvalidated = true
+                    break
+                }
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(wasInvalidated)
     }
 
     @Test func socketPathsAreBoundedAndMessagesAreReadInChunks() async throws {

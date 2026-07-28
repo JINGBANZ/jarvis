@@ -235,6 +235,7 @@ public final class MCPBridgeHost: @unchecked Sendable {
 
     private func handle(connection: Int32, token: String) {
         let response: MCPBridgeResponse
+        var deliveryRequestID: String?
         var captureRequestID: String?
         do {
             let data = try UnixSocket.readMessage(from: connection)
@@ -251,6 +252,7 @@ public final class MCPBridgeHost: @unchecked Sendable {
             let result = try callBroker(request, connection: connection)
             let elapsed = (DispatchTime.now().uptimeNanoseconds - started) / 1_000_000
             jlog("Jarvis MCP: \(request.name) completed in \(elapsed)ms")
+            deliveryRequestID = request.requestID
             switch result {
             case .capture(let snapshot):
                 captureRequestID = request.requestID
@@ -268,6 +270,24 @@ public final class MCPBridgeHost: @unchecked Sendable {
             try UnixSocket.writeMessage(
                 JSONEncoder().encode(response),
                 to: connection)
+            if let deliveryRequestID {
+                let data = try UnixSocket.readMessage(from: connection)
+                guard !data.isEmpty else {
+                    throw Self.error("private MCP result was not acknowledged")
+                }
+                let acknowledgement = try JSONDecoder().decode(
+                    MCPBridgeAcknowledgement.self,
+                    from: data)
+                guard acknowledgement.requestID == deliveryRequestID else {
+                    throw Self.error("private MCP acknowledgement did not match its request")
+                }
+                if let captureRequestID {
+                    try acknowledgeCaptureDelivery(requestID: captureRequestID)
+                }
+                try UnixSocket.writeMessage(
+                    JSONEncoder().encode(acknowledgement),
+                    to: connection)
+            }
         } catch {
             // An accepted action is useful only if its result reaches the agent. In particular, a
             // capture whose reply is lost must not authorize a later screen-grounded terminal.
@@ -276,15 +296,6 @@ public final class MCPBridgeHost: @unchecked Sendable {
             }
             jlog("Jarvis MCP: response delivery failed — \(error.localizedDescription)")
             return
-        }
-        if let captureRequestID {
-            do {
-                try acknowledgeCaptureDelivery(requestID: captureRequestID)
-            } catch {
-                broker.invalidate()
-                jlog("Jarvis MCP: capture delivery acknowledgement failed — "
-                     + error.localizedDescription)
-            }
         }
     }
 
