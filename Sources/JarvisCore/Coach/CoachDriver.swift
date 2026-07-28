@@ -867,6 +867,11 @@ public final class CoachDriver: @unchecked Sendable {
                     }
                     if case .capture(let snapshot) = result {
                         try Task.checkCancellation()
+                        let acknowledged = try await actionBroker
+                            .acknowledgeCaptureDelivery(requestID: call.callID)
+                        precondition(
+                            acknowledged,
+                            "submitted capture must remain available for delivery acknowledgement")
                         Self.appendCapture(
                             callID: call.callID,
                             snapshot: snapshot,

@@ -235,6 +235,7 @@ public final class MCPBridgeHost: @unchecked Sendable {
 
     private func handle(connection: Int32, token: String) {
         let response: MCPBridgeResponse
+        var captureRequestID: String?
         do {
             let data = try UnixSocket.readMessage(from: connection)
             guard !data.isEmpty else {
@@ -252,6 +253,7 @@ public final class MCPBridgeHost: @unchecked Sendable {
             jlog("Jarvis MCP: \(request.name) completed in \(elapsed)ms")
             switch result {
             case .capture(let snapshot):
+                captureRequestID = request.requestID
                 response = .capture(
                     imageBase64: snapshot?.imageBase64,
                     recognizedText: snapshot?.recognizedText)
@@ -273,6 +275,33 @@ public final class MCPBridgeHost: @unchecked Sendable {
                 broker.invalidate()
             }
             jlog("Jarvis MCP: response delivery failed — \(error.localizedDescription)")
+            return
+        }
+        if let captureRequestID {
+            do {
+                try acknowledgeCaptureDelivery(requestID: captureRequestID)
+            } catch {
+                broker.invalidate()
+                jlog("Jarvis MCP: capture delivery acknowledgement failed — "
+                     + error.localizedDescription)
+            }
+        }
+    }
+
+    private func acknowledgeCaptureDelivery(requestID: String) throws {
+        let call = BrokerCall<Bool>()
+        let task = Task { [broker] in
+            do {
+                call.finish(.success(
+                    try await broker.acknowledgeCaptureDelivery(requestID: requestID)))
+            } catch {
+                call.finish(.failure(error))
+            }
+        }
+        call.install(task)
+        while !call.wait(for: .milliseconds(25)) {}
+        guard try call.value() else {
+            throw Self.error("capture delivery did not match a brokered request")
         }
     }
 

@@ -63,6 +63,8 @@ import Testing
             requestID: "capture-2",
             name: captureScreenTool.name,
             argumentsJSON: "{}") == .capture(shot))
+        #expect(try await broker.acknowledgeCaptureDelivery(requestID: "capture-1"))
+        #expect(try await broker.acknowledgeCaptureDelivery(requestID: "capture-2"))
         #expect(try await broker.call(
             requestID: "terminal",
             name: speakTool.name,
@@ -73,6 +75,26 @@ import Testing
         #expect(try await broker.commit()
                 == .speak(callID: "terminal", lines: ["Use a map.", "State the invariant."]))
         #expect(await broker.events().count == 3)
+    }
+
+    @Test func captureIsObservedOnlyAfterDeliveryAcknowledgement() async throws {
+        let observer = Counter()
+        let broker = CoachingActionBroker(
+            identity: .init(configurationRevision: 1),
+            capture: { nil },
+            captureObserver: { _ in observer.increment() })
+
+        _ = try await broker.call(
+            requestID: "capture",
+            name: captureScreenTool.name,
+            argumentsJSON: "{}")
+        #expect(observer.value == 0)
+        #expect(await broker.events().isEmpty)
+
+        #expect(try await broker.acknowledgeCaptureDelivery(requestID: "capture"))
+        #expect(try await broker.acknowledgeCaptureDelivery(requestID: "capture"))
+        #expect(observer.value == 1)
+        #expect(await broker.events() == [.captured(callID: "capture", snapshot: nil)])
     }
 
     @Test func retriesOfTheSameRequestAreIdempotentButChangedReplaysFail() async throws {

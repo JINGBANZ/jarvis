@@ -335,9 +335,11 @@ import Glibc
             imageBase64: Data(repeating: 0x61, count: 4 * 1_024 * 1_024).base64EncodedString(),
             recognizedText: "must reach the agent")
         let gate = CaptureGate(snapshot: shot)
+        let observed = Counter()
         let broker = CoachingActionBroker(
             identity: .init(configurationRevision: 5),
-            capture: { await gate.capture() })
+            capture: { await gate.capture() },
+            captureObserver: { _ in _ = observed.next() })
         let host = MCPBridgeHost(
             sessionDirectory: directory,
             serverExecutable: URL(fileURLWithPath: "/fake/JarvisMCPServer"),
@@ -391,6 +393,8 @@ import Glibc
             try await Task.sleep(for: .milliseconds(10))
         }
         #expect(wasInvalidated)
+        #expect(observed.value == 0)
+        #expect(await broker.events().isEmpty)
     }
 
     @Test func socketPathsAreBoundedAndMessagesAreReadInChunks() async throws {

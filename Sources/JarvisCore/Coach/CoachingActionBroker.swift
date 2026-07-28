@@ -146,6 +146,7 @@ public actor CoachingActionBroker {
     private let validity = Validity()
     private var phase: Phase = .open
     private var cache: [String: CachedResult] = [:]
+    private var deliveredCaptureRequestIDs: Set<String> = []
     private var recordedEvents: [Event] = []
     private var actionCallCount = 0
 
@@ -226,10 +227,8 @@ public actor CoachingActionBroker {
                 throw fail(.concurrentCall)
             }
             phase = .open
-            captureObserver(snapshot)
             let result = ToolResult.capture(snapshot)
             cache[requestID] = CachedResult(fingerprint: fingerprint, result: result)
-            recordedEvents.append(.captured(callID: requestID, snapshot: snapshot))
             return result
 
         case speakTool.name:
@@ -284,6 +283,23 @@ public actor CoachingActionBroker {
     public func rejectMultipleCallsInResponse() throws {
         try ensureCurrent()
         throw fail(.multipleCallsInResponse)
+    }
+
+    /// Records a capture only after its transport has accepted the result for delivery. Repeated
+    /// acknowledgements are harmless, matching the idempotent request cache.
+    @discardableResult
+    public func acknowledgeCaptureDelivery(requestID: String) throws -> Bool {
+        try ensureCurrent()
+        guard let cached = cache[requestID],
+              case .capture(let snapshot) = cached.result else {
+            return false
+        }
+        guard deliveredCaptureRequestIDs.insert(requestID).inserted else {
+            return true
+        }
+        captureObserver(snapshot)
+        recordedEvents.append(.captured(callID: requestID, snapshot: snapshot))
+        return true
     }
 
     /// Called after an MCP agent process exits cleanly. It verifies liveness without committing an
