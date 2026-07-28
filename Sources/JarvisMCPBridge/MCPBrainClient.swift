@@ -52,11 +52,10 @@ public struct MCPBrainClient: BrainClient, Sendable {
             tools: tools,
             toolChoice: toolChoice,
             configuration: attempt.configuration,
-            // Claude already has a structural built-in-tool switch and exits promptly. Codex has
-            // neither, so stop only that CLI after the terminal action is transport-acknowledged.
-            completionSignal: base.provider == .codexCLI
-                ? attempt.completionSignal
-                : nil)
+            // The brokered terminal action is the authoritative result. The signal proves its MCP
+            // response crossed the SDK transport; Claude additionally waits until its JSONL stream
+            // emits the matching accepted tool result before the runner terminates it.
+            completionSignal: attempt.completionSignal)
         _ = try await actionBroker.requireTerminal()
         return response
     }

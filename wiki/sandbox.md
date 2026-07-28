@@ -126,10 +126,13 @@ Narrow and explicit. Data leaves the machine only via:
   bytes cross only the kernel stream; attempt files are removed at attempt end and the socket node at
   session end. Raw MCP frames and bearer values never enter Activity or brain traffic; debug records
   only redacted method/tool/timing summaries. For Codex, the host emits an early-completion signal
-  only after the SDK response write, matching helper acknowledgement, and current-lease confirmation;
-  Stop/cancellation still invalidates the broker and wins over that success signal. After broker
-  commit, a per-Start main-actor delivery lease orders terminal Activity/overlay effects against
-  Stop; Activity writes are additionally bound to their immutable session directory.
+  only after the SDK response write, matching helper acknowledgement, and current-lease confirmation.
+  Claude requires the same transport proof plus a matching non-error accepted-action `tool_result`
+  in its own JSONL stream, so transport delivery alone cannot terminate it. Stop/cancellation still
+  invalidates the broker and wins over either success path. The provider process is then terminated
+  without waiting for non-authoritative prose. After broker commit, a per-Start main-actor delivery
+  lease orders terminal Activity/overlay effects against Stop; Activity writes are additionally
+  bound to their immutable session directory.
 - **An explicit Activity → Evaluate click** sends the selected completed session to a read-only,
   non-persisted Claude Code / Codex agent under that CLI account. Unlike a coaching turn, this agent
   may inspect the complete `jarvis-activity.jsonl`, brain traffic, saved screenshots, and source

@@ -20,8 +20,9 @@ import Glibc
 public final class MCPBridgeHost: @unchecked Sendable {
     public struct Attempt: Sendable {
         public let configuration: CLIMCPConfiguration
-        /// Completes only after this attempt's terminal MCP result crossed the SDK transport and
-        /// the helper's request-ID acknowledgement was confirmed by the host.
+        /// Completes after this attempt's terminal MCP result crossed the SDK transport and the
+        /// helper's bridge request-ID acknowledgement was confirmed by the host. A provider may
+        /// require additional client-observed evidence before the process runner acts on it.
         let completionSignal: AgentCLICompletionSignal
         fileprivate let hostID: UUID
         fileprivate let generation: UInt64
@@ -517,7 +518,7 @@ public final class MCPBridgeHost: @unchecked Sendable {
         }
         lock.unlock()
         // Signal outside the host lock. The process runner callback can synchronously wake and
-        // terminate Codex; it must never re-enter bridge lifecycle while this lock is held.
+        // terminate the agent CLI; it must never re-enter bridge lifecycle while this lock is held.
         completionSignal?.signal(.terminalActionDelivered)
     }
 

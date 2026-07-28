@@ -151,8 +151,11 @@ the human-facing coaching record. The current validation priority lives in
 - With Claude Code selected, repeat the screen-dependent turn and confirm the same attempt records one
   screen view followed by one terminal tip or deliberate silence. Repeat with Codex. A provider exit
   without either terminal action must be a failed attempt with no overlay—not a successful empty turn.
-  For Codex, confirm the debug timing labels the acknowledged terminal completion and does not wait
-  for a trailing final reply.
+  For both providers, confirm the debug timing labels the acknowledged terminal completion and does
+  not wait for a trailing final reply. For Claude, also confirm the stream contains one matching,
+  non-error terminal `tool_result` with the accepted-action receipt. A successful capture→terminal
+  run should contain two distinct assistant request IDs and terminal-only one; an interrupted or
+  max-turn teardown envelope is diagnostic process output, not a successful final reply.
 - Confirm saved screenshots exclude both overlay surfaces. Toggle each overlay in Settings, verify its
   controls and preview follow the toggle, and confirm the choice survives relaunch.
 - If validating realtime recovery, disconnect the network, say a unique phrase, reconnect, and confirm
@@ -178,4 +181,9 @@ tool-less summarization. A failed or malformed feature probe supplies no guessed
 continues with the early terminal boundary and the isolated prompt/read-only profile. After a
 terminal Codex action crosses the SDK write, helper acknowledgement, and active-lease confirmation,
 Jarvis ends that process and proceeds through the normal cancellation check, broker commit, and
-session-bound main-actor effect delivery without waiting for trailing prose.
+session-bound main-actor effect delivery without waiting for trailing prose. Claude additionally
+requires its JSONL stream to expose the matching non-error accepted-action `tool_result`, proving
+the Claude Code CLI decoded and emitted that result before termination. This does not wait for or
+claim another remote-model inference. Its invocation sets one maximum tool-use turn for terminal-only
+work and two when capture is available; separate bounded, non-billing installed-binary probes require
+the numeric flag parser and the MCP configuration flags.

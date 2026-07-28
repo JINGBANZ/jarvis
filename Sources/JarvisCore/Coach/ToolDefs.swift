@@ -23,6 +23,9 @@ public let staySilentTool = ToolDef(
 
 public let coachTools: [ToolDef] = [captureScreenTool, speakTool, staySilentTool]
 
+/// Stable terminal receipt shared by the MCP server response and Claude's stream evidence gate.
+public let terminalActionAcceptedText = "action accepted"
+
 
 /// The coach system prompt — the only place response behavior is governed (no code-side guardrail).
 public let coachSystemPrompt = """

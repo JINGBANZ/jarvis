@@ -32,15 +32,14 @@ extension CLIBrainClient {
             // --system-prompt REPLACES Claude Code's coding-agent persona with our instructions
             // (embedding them in the user prompt leaves the persona in charge — verified to make it
             // refuse the harness role); --setting-sources "" keeps user/project CLAUDE.md and
-            // plugins out of the context; --tools "" disables every built-in tool, so a turn is
-            // structurally ONE model call — screenshots ride INLINE as base64 image blocks via
-            // --input-format stream-json (verified num_turns:1 on claude 2.1.211) instead of
-            // costing a second model round trip through the Read tool.
+            // plugins out of the context; --tools "" disables every built-in tool, so screenshots
+            // ride INLINE as base64 image blocks via --input-format stream-json instead of costing
+            // an assistant tool round-trip through the Read tool.
             // --no-session-persistence: without it every turn leaves a session transcript (our
             // coach prompt + the user's speech) in ~/.claude/projects/ — outside the owner-only
             // session dir, violating the data posture. Memory is client-managed anyway; the CLI
-            // session has no value to us. (No --max-turns in 2.1.211 — the runner's timeout is the
-            // runaway guard; stream-json output requires --verbose.)
+            // session has no value to us. The runner's timeout is the runaway guard; stream-json
+            // output requires --verbose.
             // --strict-mcp-config with no --mcp-config = zero MCP servers: the coach must never
             // see (or bill for) the user's MCP tool surface, and a decision turn must not spin up
             // side-effecting servers. Keep the Jarvis invocation slim.
@@ -146,6 +145,9 @@ extension CLIBrainClient {
             guard let claudeConfigFile = configuration.claudeConfigFile else {
                 throw Self.error("Claude MCP configuration is unavailable")
             }
+            let maxToolTurns = tools.contains {
+                $0.name == captureScreenTool.name
+            } ? 2 : 1
             var args = [
                 "-p", "--verbose",
                 "--input-format", "stream-json",
@@ -156,6 +158,9 @@ extension CLIBrainClient {
                 "--mcp-config", claudeConfigFile.path,
                 "--system-prompt", instructions,
                 "--effort", Self.claudeEffort(reasoningEffort),
+                // Allow one terminal tool round-trip, plus one preceding capture round-trip only
+                // when capture_screen is actually available.
+                "--max-turns", String(maxToolTurns),
                 "--permission-mode", "dontAsk",
                 "--tools", "",
                 "--allowedTools",
@@ -168,6 +173,12 @@ extension CLIBrainClient {
                 segments: rendered.segments,
                 hasTools: true,
                 forcedTool: Self.forcedToolDirective(toolChoice))
+            let terminalToolNames = Set(tools.compactMap { tool -> String? in
+                guard tool.name == speakTool.name || tool.name == staySilentTool.name else {
+                    return nil
+                }
+                return "mcp__\(configuration.serverName)__\(tool.name)"
+            })
             auditRequest["input"] = message.auditInput
             return PreparedInvocation(
                 run: AgentCLIRun(
@@ -175,7 +186,11 @@ extension CLIBrainClient {
                     arguments: args,
                     stdin: message.stdin,
                     workingDirectory: workDirectory,
-                    timeout: timeout),
+                    timeout: timeout,
+                    completionSignal: completionSignal,
+                    completionEvidence: .stdoutJSONToolResult(
+                        toolNames: terminalToolNames,
+                        acceptedText: terminalActionAcceptedText)),
                 auditRequest: auditRequest,
                 transientFiles: [],
                 codexReplyFile: nil)

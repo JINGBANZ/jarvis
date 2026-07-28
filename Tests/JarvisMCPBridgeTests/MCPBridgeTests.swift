@@ -661,7 +661,7 @@ import Glibc
         #expect(child.terminationStatus == 0)
     }
 
-    @Test func oneMCPProcessCanCaptureAndTerminate() async throws {
+    @Test func acknowledgedClaudeTerminalStopsAfterCaptureAndStillCommits() async throws {
         let directory = try Self.makeDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let shot = ScreenSnapshot(
@@ -708,8 +708,18 @@ import Glibc
                         name: speakTool.name,
                         argumentsJSON: #"{"lines":["Use the comparison token."]}"#),
                     ticket: ticket)
-                let envelope = #"{"type":"result","is_error":false,"result":""}"#
-                return AgentCLIOutput(stdout: envelope, stderr: "", exitCode: 0)
+                #expect(invocation.completionSignal?.reason == .terminalActionDelivered)
+                #expect(invocation.completionEvidence == .stdoutJSONToolResult(
+                    toolNames: [
+                        "mcp__jarvis__speak",
+                        "mcp__jarvis__stay_silent",
+                    ],
+                    acceptedText: terminalActionAcceptedText))
+                return AgentCLIOutput(
+                    stdout: "partial claude stream before final prose",
+                    stderr: "",
+                    exitCode: 15,
+                    termination: .completionSignal(.terminalActionDelivered))
             })
         let mcpBroker = CoachingActionBroker(
             identity: .init(configurationRevision: 1),
@@ -727,6 +737,7 @@ import Glibc
 
         #expect(mcpRuns.value == 1)
         #expect(mcpResponse.actionDelivery == .broker)
+        #expect(mcpResponse.outputText == nil)
         #expect(await mcpBroker.captureObservation()?.snapshot == shot)
         #expect(try await mcpBroker.commit()
                 == .speak(callID: "speak", lines: ["Use the comparison token."]))
@@ -766,6 +777,7 @@ import Glibc
                         argumentsJSON: #"{"lines":["Stop at the acknowledged action."]}"#),
                     ticket: ticket)
                 #expect(invocation.completionSignal?.reason == .terminalActionDelivered)
+                #expect(invocation.completionEvidence == .signal)
                 timings.mark(.processExited)
                 return AgentCLIOutput(
                     stdout: "partial codex diagnostics",

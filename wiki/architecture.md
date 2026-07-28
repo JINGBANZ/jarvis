@@ -328,8 +328,8 @@ memory, provider-route policy, and traffic recording are all unchanged — only 
 - **One stateless subprocess per coaching attempt** (`claude -p` / `codex exec`, spawned by
   `AgentCLIProcessRunner`) — no CLI session is created, resumed, or left behind. The CLIs run with
   session persistence off (`--no-session-persistence` / `--ephemeral`) and die with the attempt, at
-  reply, after Codex's terminal action is transport-confirmed, under the SIGTERM→SIGKILL watchdog,
-  or immediately when Stop cancels it. A coaching-capable CLI receives one private Jarvis MCP server
+  reply, after the provider-specific terminal-delivery proof completes, under the SIGTERM→SIGKILL
+  watchdog, or immediately when Stop cancels it. A coaching-capable CLI receives one private Jarvis MCP server
   implementing `capture_screen`, `speak`, and `stay_silent`; its provider configuration derives
   enabled tool names from the attempt phase (`speak` only for manual hints, all coaching actions
   initially). Capture results return to the same live model run, so the capture→terminal loop stays
@@ -345,12 +345,14 @@ memory, provider-route policy, and traffic recording are all unchanged — only 
   cancellation, a required terminal action, and exactly-once commit. Provider-side tool visibility
   is defense in depth; the broker remains authoritative when a client calls a known but unlisted
   action. A normal provider exit with no brokered terminal is therefore a typed failed attempt and
-  renders no overlay. Codex has a second successful completion boundary:
-  only after the official SDK writes the terminal tool response, the helper acknowledges that
-  request ID, and the current host lease confirms it does Jarvis terminate the otherwise healthy
-  Codex process and accept the brokered result. This is the liveness guarantee MCP itself does not
-  supply: the provider can still decide not to call a tool, but Jarvis will never mistake that for a
-  successful coaching action.
+  renders no overlay. Both local CLIs have a second successful completion boundary. Codex requires
+  the official SDK response write, matching helper request-ID acknowledgement, and current host
+  lease. Claude requires that same transport proof **and** a matching, non-error JSONL
+  `tool_result` containing the accepted-action receipt for the terminal `tool_use_id`; this proves
+  the Claude Code CLI decoded and emitted the successful result before Jarvis terminates it. It does
+  not require or claim another remote-model inference after the already-authoritative terminal
+  action. This is the liveness guarantee MCP itself does not supply: the provider can still decide
+  not to call a tool, but Jarvis will never mistake that for a successful coaching action.
 - **Provider containment is generated per attempt.** Claude receives a strict config containing only
   Jarvis, eagerly loads that server, disables every built-in with `--tools ""`, and derives its
   qualified allowed-tool names from the tools supplied for that request. Codex ignores user config
@@ -365,7 +367,13 @@ memory, provider-route policy, and traffic recording are all unchanged — only 
   surface-reduction measure—not a tool inventory or structural MCP-only containment: unconditional
   built-ins may remain model-visible, so the coaching prompt still tells Codex to ignore every
   unrelated built-in, plugin, project, and MCP tool. Only brokered actions can trigger Jarvis-owned
-  capture or commit a tip; a Codex run without one delivered terminal Jarvis action fails the attempt.
+  capture or commit a tip; either local CLI fails the attempt without one delivered terminal Jarvis
+  action. Claude also receives `--max-turns 1` for terminal-only attempts and `--max-turns 2` when
+  `capture_screen` is supplied, limiting the run to one terminal tool-use round trip or one capture
+  plus one terminal round trip. Bounded, non-billing installed-binary probes separately verify the
+  flag's numeric parser and the MCP help surface instead of hardcoding a version. In the live benchmark,
+  terminal-only Claude emitted one distinct assistant request ID and capture→terminal emitted two;
+  those are observed assistant-generation counts, not a claim about undocumented provider internals.
 - **CLI coaching is MCP-only.** There is no prompt-shaped action compatibility route. If the
   capability probe cannot prove the basic MCP configuration surface, that route target is
   unavailable. A missing bundled helper blocks a selected CLI at preflight. Failure to create the
@@ -397,9 +405,12 @@ memory, provider-route policy, and traffic recording are all unchanged — only 
 - **The OpenAI key stays required**: transcription always runs on the Realtime API. A CLI provider
   moves the brain/summarizer off the key, not the ears; the session evaluator independently runs
   through a local agentic CLI over the completed session directory. CLI latency remains above the
-  direct API target, but MCP removes one complete process/model invocation from screen-dependent
-  turns. That is an action-continuity and overhead benefit, not evidence of greater model
-  intelligence; any broader coaching-quality claim needs representative session evaluation.
+  direct API target, but MCP removes the second top-level CLI process from screen-dependent turns and
+  returns capture evidence inside the same run. It does not inherently remove the post-capture
+  assistant generation: the validated Claude capture path emits one assistant request ID before
+  capture and one after it. That simplifies process shape and preserves action continuity; it is not
+  evidence of greater model intelligence or a guaranteed latency reduction. Any broader
+  coaching-quality claim needs representative session evaluation.
 
 ### Latency
 
@@ -456,12 +467,12 @@ The always-on legs are built to survive transient failure rather than die on it:
 - **The brain call** is single-flighted (a turn can't double-speak) and runs under a provider-aware
   request timeout. The API and Claude ceilings stay well above the reasoning-turn tail; Codex has a
   shorter bound because a healthy decision turn takes seconds and a silent agent-runtime stall would
-  otherwise batch every later transcript turn behind it. Once Codex's terminal action crosses the
-  SDK/bridge delivery handshake, a typed completion signal ends that process without waiting for
-  trailing prose; task cancellation still wins. A failed provider request is never replayed inside
-  its coaching attempt. The attempt ends, sent-state and provider-neutral work remain uncommitted,
-  and the scheduler makes a new attempt after bounded backoff or an earlier coalesced natural
-  trigger. That new attempt rebuilds its input from the latest committed history, the failed
+  otherwise batch every later transcript turn behind it. Codex ends after the SDK/bridge delivery
+  handshake. Claude ends only after that handshake and its stream exposes the matching successful
+  accepted-action result; neither waits for trailing prose, and task cancellation still wins. A
+  failed provider request is never replayed inside its coaching attempt. The attempt ends, sent-state
+  and provider-neutral work remain uncommitted, and the scheduler makes a new attempt after bounded
+  backoff or an earlier coalesced natural trigger. That new attempt rebuilds its input from the latest committed history, the failed
   conversation, and every newer finalized transcript item; with no new speech, it simply re-attempts
   the pending work. Reaching the [ordered route's](#ordered-provider-route) code-owned consecutive
   failure budget exhausts the active target; a provider-boundary failure proven permanent exhausts

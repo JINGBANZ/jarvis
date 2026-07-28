@@ -835,8 +835,8 @@
   Keeping a second action protocol adds prompt construction, tolerant parsing, manual-hint recovery,
   selection policy, tests, and a silent downgrade path precisely where the design is meant to require
   a real tool call. The earlier A/B already supplied its decision evidence: both transports used the
-  synthetic OCR evidence, while MCP kept capture→terminal in one process. Retaining the experiment as
-  production machinery no longer buys user value.
+  synthetic OCR evidence, while MCP kept capture→terminal in one top-level agent CLI process.
+  Retaining the experiment as production machinery no longer buys user value.
 - **Rejected:** (a) Keeping JSON only for older CLIs—unsupported installations can be updated or
   marked unavailable during active development. (b) Falling back when bridge bootstrap fails—it can
   mask a packaging, permissions, path-length, or IPC defect and weakens the fail-closed contract.
@@ -965,9 +965,10 @@
   both controls. The first measured medians of 17.452 s for prompt-only, 12.880 s with dynamic
   quiescing, and 9.216 s with quiescing plus early completion. A fresh second batch measured
   21.823 s for prompt-only, 14.970 s for early completion alone, and 10.977 s for both controls.
-  Every trial used one process, one capture, the supplied OCR token, and one valid terminal action;
-  no helper remained afterward. The result supports both controls as scoped latency optimizations,
-  not a fixed percentage promise or a claim that feature flags create MCP-only containment.
+  Every trial used one top-level Codex process, one capture, the supplied OCR token, and one valid
+  terminal action; no helper remained afterward. The result supports both controls as scoped latency
+  optimizations, not a fixed percentage promise or a claim that feature flags create MCP-only
+  containment.
 - **Rejected:** (a) Restore a static tool-feature blocklist—new and renamed flags would drift.
   (b) Kill when the broker merely stages a terminal—the SDK response could still be cancelled or
   fail to reach the provider transport. (c) Wait for Codex's final prose after delivery—it is not
@@ -978,8 +979,56 @@
   coaching quiescing profile to summarization.
 - **Supersedes in part:** 2026-07-28 — One optional capture, reusable listener, and prompt-guided
   Codex tools.
+- **Superseded in part by:** 2026-07-28 — Provider-neutral acknowledged terminal completion. The
+  transport proof and process-runner contract stand; limiting them to Codex does not.
 - **Detail:** [architecture.md → Local CLI brain providers](./architecture.md#local-cli-brain-providers),
   `Sources/JarvisCore/Brain/AgentCLIDetector.swift`,
+  `Sources/JarvisCore/Brain/AgentCLIProcessRunner.swift`,
+  `Sources/JarvisMCPBridge/MCPBridgeHost.swift`,
+  `Sources/JarvisMCPBridge/MCPBrainClient.swift`.
+
+### 2026-07-28 — Provider-neutral acknowledged terminal completion
+
+- **Chose:** Give Claude Code a stronger form of the typed terminal-delivery completion path. Codex
+  completes after the official SDK writes a successful terminal result, the helper returns the
+  matching request-ID acknowledgement, and the host verifies the active attempt generation. Claude
+  additionally requires its JSONL stream to contain the matching non-error accepted-action
+  `tool_result` for the terminal `tool_use_id`; only then does `AgentCLIProcessRunner` terminate it
+  and skip final-reply parsing. Capture acknowledgement never completes a run; task cancellation
+  still wins; the broker remains the only commit authority.
+- **Why:** Transport delivery alone did not prove the Claude Code CLI had decoded and emitted a
+  successful result: one audit trial terminated in the gap and the CLI surfaced a rejected tool
+  result. The CLI-emitted receipt closes that race without paying for later prose or claiming another
+  remote-model inference. A fresh paired live benchmark on Claude Code
+  2.1.220 with a valid 256×256 JPEG, one excluded warm-up, five measured pairs, alternating order,
+  and zero provider API-error events measured capture→terminal medians of 10.152 s for the historical
+  two-top-level-Claude-process JSON route and 9.424 s for MCP with one top-level Claude process
+  (arm-median −0.728 s / −7.2%; paired median −0.120 s; MCP faster in four of five pairs).
+  Terminal-only medians were 4.705 s for JSON and 6.020 s for MCP (arm-median +1.315 s / +28.0%;
+  paired median +1.344 s; MCP faster in one of five pairs). The JSON capture arm included a 23.138 s
+  outlier, so the final-current batch validates the completion boundary but does not establish a
+  stable broad latency win. Local MCP spawn remained 4–11 ms; the changing portion was the
+  provider/model phase before the terminal tool call, which does not distinguish normal cloud
+  variance from MCP tool-context inference cost. Every measured MCP arm had one accepted result, no
+  rejected result, no post-terminal prose, and typed completion.
+- **Chose:** Set Claude's maximum tool-use turns from the actual action surface: one for
+  terminal-only attempts and two when `capture_screen` is available. The installed-binary
+  capability probes separately verify the flag's numeric parser and MCP help surface without model
+  use, avoiding a version matrix. The benchmark observed one distinct assistant request ID for
+  terminal-only and two for capture→terminal; these are stream-observed assistant generations, not
+  an undocumented provider request-count contract.
+- **Rejected:** (a) Waiting for Claude's post-terminal prose—the brokered action is already the
+  coaching result and later prose adds latency without authority. (b) Killing after transport
+  acknowledgement alone—it can race before Claude Code emits the accepted result. (c) Hardcoding a
+  Claude version or guessing from help text—the required invocation is probed directly. (d) Killing
+  when the broker merely stages the action—the result may not have crossed the SDK transport and a
+  concurrent Stop must still revoke it. (e) Treating an interrupted or max-turn result envelope as
+  the successful response—it is teardown diagnostics, not the coaching decision.
+- **Supersedes in part:** 2026-07-28 — Dynamically quiesce Codex features and stop after proven
+  terminal delivery. Dynamic feature handling remains Codex-specific; acknowledged-terminal
+  completion is provider-neutral.
+- **Detail:** [architecture.md → Local CLI brain providers](./architecture.md#local-cli-brain-providers),
+  `Sources/JarvisCore/Brain/CLIBrainClient+Invocation.swift`,
   `Sources/JarvisCore/Brain/AgentCLIProcessRunner.swift`,
   `Sources/JarvisMCPBridge/MCPBridgeHost.swift`,
   `Sources/JarvisMCPBridge/MCPBrainClient.swift`.

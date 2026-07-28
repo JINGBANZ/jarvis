@@ -78,6 +78,7 @@ import Testing
     @Test func claudeMCPRunLoadsOnlyThePrivateServerAndDoesNotRequestOutputJSON() async throws {
         let workDir = try makeWorkDir()
         let captured = Captured<AgentCLIRun>()
+        let completion = AgentCLICompletionSignal()
         let c = client(.claudeCode, workDir: workDir) { run, _ in
             captured.value = run
             return AgentCLIOutput(
@@ -90,9 +91,14 @@ import Testing
             messages: [.system("coach prompt"), .user("look first")],
             tools: [speakTool],
             toolChoice: .force(speakTool.name),
-            configuration: mcpConfiguration(for: .claudeCode, in: workDir))
+            configuration: mcpConfiguration(for: .claudeCode, in: workDir),
+            completionSignal: completion)
 
         let run = try #require(captured.value)
+        #expect(run.completionSignal === completion)
+        #expect(run.completionEvidence == .stdoutJSONToolResult(
+            toolNames: ["mcp__jarvis__speak"],
+            acceptedText: terminalActionAcceptedText))
         #expect(run.arguments.contains("-p"))
         #expect(run.arguments.contains("stream-json"))
         #expect(run.arguments.contains("claude-sonnet-5"))
@@ -104,6 +110,8 @@ import Testing
         #expect(run.arguments.contains("mcp__jarvis__speak"))
         #expect(!run.arguments.contains("mcp__jarvis__capture_screen"))
         #expect(!run.arguments.contains("mcp__jarvis__stay_silent"))
+        let maxTurnsIndex = try #require(run.arguments.firstIndex(of: "--max-turns"))
+        #expect(run.arguments[maxTurnsIndex + 1] == "1")
         let promptIndex = try #require(run.arguments.firstIndex(of: "--system-prompt"))
         let instructions = run.arguments[promptIndex + 1]
         #expect(instructions.contains("callable tools"))
@@ -191,6 +199,8 @@ import Testing
 
         let seen = try #require(observed.value)
         #expect(seen.files.isEmpty)
+        let maxTurnsIndex = try #require(seen.run.arguments.firstIndex(of: "--max-turns"))
+        #expect(seen.run.arguments[maxTurnsIndex + 1] == "2")
         let message = try #require(try JSONSerialization.jsonObject(
             with: Data((seen.run.stdin ?? "").utf8)) as? [String: Any])
         let content = try #require(
@@ -295,6 +305,7 @@ import Testing
         #expect(run.arguments.contains("mcp_servers.jarvis.enabled_tools=[\"speak\"]"))
         #expect(run.stdin?.contains("Ignore every non-Jarvis tool") == true)
         #expect(run.completionSignal === completion)
+        #expect(run.completionEvidence == .signal)
     }
 
     @Test func everyCodexModelReusesTheSharedEffortAndDisablesMCP() async throws {
@@ -413,6 +424,7 @@ import Testing
         let completion = AgentCLICompletionSignal()
         let c = clientWithTraffic(.codexCLI, workDir: workDir) { run, timings in
             #expect(run.completionSignal === completion)
+            #expect(run.completionEvidence == .signal)
             timings.mark(.runnerEntered)
             timings.mark(.processLaunched)
             timings.mark(.stdinDelivered)
@@ -441,6 +453,47 @@ import Testing
         #expect(recorded["completion"] as? String == "terminalActionDelivered")
         #expect(recorded["exitCode"] as? Int == 15)
         #expect(recorded["reply"] == nil)
+        let phases = try #require(entry["phases"] as? [String: Any])
+        #expect(phases["parseMs"] == nil)
+    }
+
+    @Test func acknowledgedClaudeTerminalStopSkipsFinalEnvelopeAndRecordsCompletion() async throws {
+        let workDir = try makeWorkDir()
+        let completion = AgentCLICompletionSignal()
+        let c = clientWithTraffic(.claudeCode, workDir: workDir) { run, timings in
+            #expect(run.completionSignal === completion)
+            #expect(run.completionEvidence == .stdoutJSONToolResult(
+                toolNames: ["mcp__jarvis__speak"],
+                acceptedText: terminalActionAcceptedText))
+            timings.mark(.runnerEntered)
+            timings.mark(.processLaunched)
+            timings.mark(.stdinDelivered)
+            timings.mark(.firstStdoutByte)
+            timings.mark(.processExited)
+            #expect(completion.signal(.terminalActionDelivered))
+            return AgentCLIOutput(
+                stdout: #"{"type":"assistant","message":{"content":[{"type":"tool_use"}]}}"#,
+                stderr: "",
+                exitCode: 15,
+                termination: .completionSignal(.terminalActionDelivered))
+        }
+
+        let response = try await c.respondUsingMCP(
+            messages: [.user("coach me")],
+            tools: [speakTool],
+            toolChoice: .force(speakTool.name),
+            configuration: mcpConfiguration(for: .claudeCode, in: workDir),
+            completionSignal: completion)
+
+        #expect(response.actionDelivery == .broker)
+        #expect(response.outputText == nil)
+        let entry = try onlyTrafficEntry(in: workDir)
+        #expect(entry["status"] as? Int == 200)
+        let recorded = try #require(entry["response"] as? [String: Any])
+        #expect(recorded["completion"] as? String == "terminalActionDelivered")
+        #expect(recorded["exitCode"] as? Int == 15)
+        #expect(recorded["reply"] == nil)
+        #expect(recorded["cli"] == nil)
         let phases = try #require(entry["phases"] as? [String: Any])
         #expect(phases["parseMs"] == nil)
     }

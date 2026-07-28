@@ -105,7 +105,10 @@ public enum JarvisMCPServer {
             case .terminal(let delivery):
                 try await deliveryTracker.register(delivery)
                 return CallTool.Result(content: [
-                    .text(text: "action accepted", annotations: nil, _meta: nil),
+                    .text(
+                        text: terminalActionAcceptedText,
+                        annotations: nil,
+                        _meta: nil),
                 ])
             }
         }

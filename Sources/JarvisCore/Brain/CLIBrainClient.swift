@@ -197,7 +197,7 @@ public struct CLIBrainClient: BrainClient, @unchecked Sendable {
         }
 
         if output.termination == .completionSignal(.terminalActionDelivered) {
-            // The brokered terminal action—not Codex's trailing prose—is the authoritative result.
+            // The brokered terminal action—not the provider's trailing prose—is authoritative.
             // Keep parseMs absent because no reply file was parsed, but retain the actual signal exit
             // code and partial diagnostics in the traffic record.
             let phases = Self.phaseDurationsMs(timings, respondEntered: respondEntered)

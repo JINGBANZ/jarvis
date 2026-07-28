@@ -296,6 +296,10 @@ import Glibc
         let bin = home.appendingPathComponent("fakebin")
         try installBinary("claude", in: bin, script: """
             #!/bin/sh
+            if [ "$1" = "--max-turns" ] && [ "$2" = "jarvis-invalid-turn-count" ]; then
+                printf '%s\\n' "error: option '--max-turns <turns>' argument 'jarvis-invalid-turn-count' is invalid. must be a number" >&2
+                exit 1
+            fi
             if [ "$1" = "--help" ]; then
                 printf '%s\\n' '  --mcp-config <file>' '  --strict-mcp-config'
                 exit 0
@@ -321,6 +325,10 @@ import Glibc
         let bin = home.appendingPathComponent("fakebin")
         try installBinary("claude", in: bin, script: """
             #!/bin/sh
+            if [ "$1" = "--max-turns" ] && [ "$2" = "jarvis-invalid-turn-count" ]; then
+                printf '%s\\n' "error: option '--max-turns <turns>' argument 'jarvis-invalid-turn-count' is invalid. must be a number" >&2
+                exit 1
+            fi
             if [ "$1" = "--help" ]; then
                 printf '%s\\n' '  --mcp-config <file>' '  --strict-mcp-config'
                 i=0
@@ -343,6 +351,10 @@ import Glibc
         let childPID = home.appendingPathComponent("probe-child.pid")
         try installBinary("claude", in: bin, script: """
             #!/bin/sh
+            if [ "$1" = "--max-turns" ] && [ "$2" = "jarvis-invalid-turn-count" ]; then
+                printf '%s\\n' "error: option '--max-turns <turns>' argument 'jarvis-invalid-turn-count' is invalid. must be a number" >&2
+                exit 1
+            fi
             if [ "$1" = "--help" ]; then
                 printf '%s\\n' '  --mcp-config <file>' '  --strict-mcp-config'
                 trap '' HUP
@@ -394,6 +406,10 @@ import Glibc
         let bin = home.appendingPathComponent("fakebin")
         try installBinary("claude", in: bin, script: """
             #!/bin/sh
+            if [ "$1" = "--max-turns" ] && [ "$2" = "jarvis-invalid-turn-count" ]; then
+                printf '%s\\n' "error: option '--max-turns <turns>' argument 'jarvis-invalid-turn-count' is invalid. must be a number" >&2
+                exit 1
+            fi
             if [ "$1" = "--help" ]; then
                 printf '%s\\n' 'old help'
                 exit 0
@@ -401,6 +417,58 @@ import Glibc
             printf '%s\\n' '{"loggedIn":true}'
             """)
         let d = detector(home: home, pathVariable: bin.path, authStatusTimeout: 10)
+        #expect(d.detect(.claudeCode)?.supportsMCP == false)
+    }
+
+    @Test func claudeMCPAvailabilityRequiresTheTurnCapFlag() throws {
+        let home = try makeHome()
+        let bin = home.appendingPathComponent("fakebin")
+        try installBinary("claude", in: bin, script: """
+            #!/bin/sh
+            if [ "$3" = "--help" ] || [ "$1" = "--help" ]; then
+                printf '%s\\n' '  --mcp-config <file>' '  --strict-mcp-config'
+                exit 0
+            fi
+            printf '%s\\n' '{"loggedIn":true}'
+            """)
+        let d = detector(home: home, pathVariable: bin.path, authStatusTimeout: 10)
+
+        #expect(d.detect(.claudeCode)?.supportsMCP == false)
+    }
+
+    @Test func claudeMCPAvailabilityRejectsAnUnknownTurnCapOptionError() throws {
+        let home = try makeHome()
+        let bin = home.appendingPathComponent("fakebin")
+        try installBinary("claude", in: bin, script: """
+            #!/bin/sh
+            if [ "$1" = "--max-turns" ]; then
+                printf '%s\\n' "error: unknown option '--max-turns' before 'jarvis-invalid-turn-count'" >&2
+                exit 1
+            fi
+            if [ "$1" = "--help" ]; then
+                printf '%s\\n' '  --mcp-config <file>' '  --strict-mcp-config'
+                exit 0
+            fi
+            printf '%s\\n' '{"loggedIn":true}'
+            """)
+        let d = detector(home: home, pathVariable: bin.path, authStatusTimeout: 10)
+
+        #expect(d.detect(.claudeCode)?.supportsMCP == false)
+    }
+
+    @Test func claudeMCPAvailabilityRejectsAParserProbeKilledByTheWatchdog() throws {
+        let home = try makeHome()
+        let bin = home.appendingPathComponent("fakebin")
+        try installBinary("claude", in: bin, script: """
+            #!/bin/sh
+            if [ "$1" = "--max-turns" ]; then
+                printf '%s\\n' "error: option '--max-turns <turns>' argument 'jarvis-invalid-turn-count' is invalid. must be a number" >&2
+                exec /bin/sleep 5
+            fi
+            printf '%s\\n' '{"loggedIn":true}'
+            """)
+        let d = detector(home: home, pathVariable: bin.path, authStatusTimeout: 0.05)
+
         #expect(d.detect(.claudeCode)?.supportsMCP == false)
     }
 

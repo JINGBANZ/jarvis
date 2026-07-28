@@ -20,7 +20,7 @@ public enum AgentCLIProcessRunner {
     public static func run(_ invocation: AgentCLIRun,
                            timings: AgentCLIPhaseTimings = AgentCLIPhaseTimings()) async throws -> AgentCLIOutput {
         try Task.checkCancellation()   // don't even spawn for an already-cancelled turn
-        let control = RunControl()
+        let control = RunControl(completionEvidence: invocation.completionEvidence)
         do {
             let output = try await withTaskCancellationHandler {
                 try await withCheckedThrowingContinuation { continuation in
@@ -71,8 +71,16 @@ public enum AgentCLIProcessRunner {
 
         private let lock = NSLock()
         private let wakeup = DispatchSemaphore(value: 0)
+        private let completionEvidence: AgentCLICompletionEvidence
         private var isCancelled = false
-        private var completion: Completion?
+        private var signalledCompletion: Completion?
+        private var stdoutRemainder = Data()
+        private var terminalToolUseIDs = Set<String>()
+        private var stdoutEvidenceObservedAt: UInt64?
+
+        init(completionEvidence: AgentCLICompletionEvidence) {
+            self.completionEvidence = completionEvidence
+        }
 
         func requestCancellation() {
             lock.lock()
@@ -83,13 +91,50 @@ public enum AgentCLIProcessRunner {
 
         func requestCompletion(_ reason: AgentCLICompletionSignal.Reason) {
             lock.lock()
-            if completion == nil {
-                completion = Completion(
+            if signalledCompletion == nil {
+                signalledCompletion = Completion(
                     reason: reason,
                     observedAt: DispatchTime.now().uptimeNanoseconds)
             }
             lock.unlock()
             wakeup.signal()
+        }
+
+        /// Feed complete Claude-style JSONL events into the stronger client-observed evidence gate.
+        /// The transport signal and stream event can arrive in either order; termination starts only
+        /// after both have been recorded.
+        func observeStdout(_ chunk: Data) {
+            guard case .stdoutJSONToolResult(let toolNames, let acceptedText) =
+                    completionEvidence else {
+                return
+            }
+
+            var shouldWake = false
+            lock.lock()
+            if stdoutEvidenceObservedAt == nil {
+                stdoutRemainder.append(chunk)
+                while let newline = stdoutRemainder.firstIndex(of: 0x0A) {
+                    let line = Data(stdoutRemainder[..<newline])
+                    stdoutRemainder.removeSubrange(...newline)
+                    if recordJSONLineLocked(
+                        line,
+                        toolNames: toolNames,
+                        acceptedText: acceptedText
+                    ) {
+                        shouldWake = true
+                        stdoutRemainder.removeAll(keepingCapacity: false)
+                        break
+                    }
+                }
+            }
+            lock.unlock()
+            if shouldWake {
+                wakeup.signal()
+            }
+        }
+
+        func finishStdout() {
+            observeStdout(Data([0x0A]))
         }
 
         func processDidExit() {
@@ -101,7 +146,28 @@ public enum AgentCLIProcessRunner {
             defer { lock.unlock() }
             return Snapshot(
                 isCancelled: isCancelled,
-                completion: completion)
+                completion: effectiveCompletionLocked())
+        }
+
+        /// Reconstruct completion after a child has already exited and stdout has been drained.
+        ///
+        /// FileHandle may deliver bytes that the child wrote before exit only after Process reports
+        /// that exit. The independent signal must still have arrived while the child was alive, but
+        /// matching stdout evidence merely needs to be present in the child's captured output.
+        func completionAfterProcessExit(at processExited: UInt64) -> Completion? {
+            lock.lock()
+            defer { lock.unlock() }
+            guard let signalledCompletion,
+                  signalledCompletion.observedAt <= processExited else {
+                return nil
+            }
+            switch completionEvidence {
+            case .signal:
+                return signalledCompletion
+            case .stdoutJSONToolResult:
+                guard stdoutEvidenceObservedAt != nil else { return nil }
+                return signalledCompletion
+            }
         }
 
         func wait(until deadline: UInt64) {
@@ -109,6 +175,86 @@ public enum AgentCLIProcessRunner {
             guard deadline > now else { return }
             let remaining = min(deadline - now, UInt64(Int.max))
             _ = wakeup.wait(timeout: .now() + .nanoseconds(Int(remaining)))
+        }
+
+        private func effectiveCompletionLocked() -> Completion? {
+            guard let signalledCompletion else { return nil }
+            switch completionEvidence {
+            case .signal:
+                return signalledCompletion
+            case .stdoutJSONToolResult:
+                guard let stdoutEvidenceObservedAt else { return nil }
+                return Completion(
+                    reason: signalledCompletion.reason,
+                    observedAt: max(
+                        signalledCompletion.observedAt,
+                        stdoutEvidenceObservedAt))
+            }
+        }
+
+        private func recordJSONLineLocked(
+            _ line: Data,
+            toolNames: Set<String>,
+            acceptedText: String
+        ) -> Bool {
+            // A capture result can carry a multi-megabyte base64 image in one JSONL line. Avoid
+            // decoding that payload for this tiny completion gate; structural validation below
+            // still decides every line that contains a terminal tool name or its receipt text.
+            let mightContainCompletionEvidence =
+                line.range(of: Data(acceptedText.utf8)) != nil
+                || toolNames.contains {
+                    line.range(of: Data($0.utf8)) != nil
+                }
+            guard mightContainCompletionEvidence else { return false }
+
+            guard let event = try? JSONSerialization.jsonObject(with: line)
+                    as? [String: Any],
+                  let type = event["type"] as? String,
+                  let message = event["message"] as? [String: Any],
+                  let content = message["content"] as? [[String: Any]] else {
+                return false
+            }
+
+            if type == "assistant" {
+                for block in content
+                where block["type"] as? String == "tool_use" {
+                    guard let name = block["name"] as? String,
+                          toolNames.contains(name),
+                          let id = block["id"] as? String else {
+                        continue
+                    }
+                    terminalToolUseIDs.insert(id)
+                }
+                return false
+            }
+
+            guard type == "user" else { return false }
+            for block in content
+            where block["type"] as? String == "tool_result" {
+                guard block["is_error"] as? Bool != true,
+                      let id = block["tool_use_id"] as? String,
+                      terminalToolUseIDs.contains(id),
+                      Self.toolResultText(block["content"]) == acceptedText else {
+                    continue
+                }
+                stdoutEvidenceObservedAt = DispatchTime.now().uptimeNanoseconds
+                return true
+            }
+            return false
+        }
+
+        private static func toolResultText(_ value: Any?) -> String? {
+            if let text = value as? String {
+                return text
+            }
+            guard let blocks = value as? [[String: Any]] else {
+                return nil
+            }
+            let texts = blocks.compactMap { block -> String? in
+                guard block["type"] as? String == "text" else { return nil }
+                return block["text"] as? String
+            }
+            return texts.count == 1 ? texts[0] : nil
         }
     }
 
@@ -148,15 +294,23 @@ public enum AgentCLIProcessRunner {
         // Drain stdout/stderr via readability handlers (they run on FileHandle's own queue) so
         // neither pipe can fill its buffer and stall the child while we block elsewhere — the
         // classic subprocess deadlock. Each signals its semaphore on EOF.
-        func drain(_ handle: FileHandle, into box: Box<Data>, done: DispatchSemaphore,
-                   onFirstByte: (@Sendable () -> Void)? = nil) {
+        func drain(
+            _ handle: FileHandle,
+            into box: Box<Data>,
+            done: DispatchSemaphore,
+            onFirstByte: (@Sendable () -> Void)? = nil,
+            onChunk: (@Sendable (Data) -> Void)? = nil,
+            onEOF: (@Sendable () -> Void)? = nil
+        ) {
             handle.readabilityHandler = { h in
                 let chunk = h.availableData
                 if chunk.isEmpty {
                     h.readabilityHandler = nil
+                    onEOF?()
                     done.signal()
                 } else {
                     onFirstByte?()   // no-op after the first stamp; the recorder keeps the earliest
+                    onChunk?(chunk)
                     box.set(box.get() + chunk)
                 }
             }
@@ -164,7 +318,9 @@ public enum AgentCLIProcessRunner {
         let stdoutBox = Box(Data()), stderrBox = Box(Data())
         let stdoutDone = DispatchSemaphore(value: 0), stderrDone = DispatchSemaphore(value: 0)
         drain(stdoutPipe.fileHandleForReading, into: stdoutBox, done: stdoutDone,
-              onFirstByte: { timings.mark(.firstStdoutByte) })
+              onFirstByte: { timings.mark(.firstStdoutByte) },
+              onChunk: { control.observeStdout($0) },
+              onEOF: { control.finishStdout() })
         drain(stderrPipe.fileHandleForReading, into: stderrBox, done: stderrDone)
 
         let completionObservation = run.completionSignal?.observe {
@@ -275,17 +431,6 @@ public enum AgentCLIProcessRunner {
         process.waitUntilExit()
         let processExited = DispatchTime.now().uptimeNanoseconds
         completionObservation?.cancel()
-        if lifecycleCause == nil {
-            // Preserve a terminal acknowledgement that raced the child's natural exit. Cancelling
-            // the observation first prevents a signal that arrives after this boundary from
-            // retyping an already-finished run.
-            let state = control.snapshot()
-            if let completion = state.completion,
-               completion.observedAt <= timeoutDeadline,
-               completion.observedAt <= processExited {
-                lifecycleCause = .completion(completion.reason)
-            }
-        }
         // A killed child closes its stdin reader. Give an in-progress large write a bounded chance to
         // observe EPIPE and finish before releasing the pipe object.
         _ = stdinDone.wait(timeout: .now() + 2)
@@ -296,6 +441,16 @@ public enum AgentCLIProcessRunner {
         _ = stderrDone.wait(timeout: .now() + 2)
         stdoutPipe.fileHandleForReading.readabilityHandler = nil
         stderrPipe.fileHandleForReading.readabilityHandler = nil
+        if lifecycleCause == nil {
+            // Preserve an acknowledgement that raced natural exit. The observation is cancelled
+            // before the drain so a genuinely late host signal cannot retype a finished process.
+            // Stdout parsed during this drain was necessarily written by the child before exit.
+            if processExited <= timeoutDeadline,
+               let completion = control.completionAfterProcessExit(at: processExited),
+               completion.observedAt <= timeoutDeadline {
+                lifecycleCause = .completion(completion.reason)
+            }
+        }
         // Finalize exit only after the stdout handler has drained. A very short-lived process can
         // exit before its readability callback is scheduled; the recorder clamps that necessarily
         // pre-exit byte to this captured exit instant instead of dropping the reversed interval.

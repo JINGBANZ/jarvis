@@ -217,8 +217,9 @@ public struct AgentCLIDetector: Sendable {
         (97...122).contains(byte) || (65...90).contains(byte) || (48...57).contains(byte)
     }
 
-    /// Capability comes from the installed binary, never its version string. Missing or unfamiliar
-    /// help output makes that installation unavailable for coaching instead of guessing flags.
+    /// Capability comes from the installed binary, never its version string. Claude's help path
+    /// ignores unknown options, so a separate invalid-value probe proves that its max-turn parser
+    /// owns the required flag without making a model request.
     private func supportsMCP(
         _ provider: BrainProvider,
         executable: URL
@@ -226,6 +227,7 @@ public struct AgentCLIDetector: Sendable {
         let arguments: [String]
         switch provider {
         case .claudeCode:
+            guard supportsClaudeMaxTurns(executable: executable) else { return false }
             arguments = ["--help"]
         case .codexCLI:
             arguments = ["mcp", "--help"]
@@ -247,9 +249,31 @@ public struct AgentCLIDetector: Sendable {
         }
     }
 
+    private func supportsClaudeMaxTurns(executable: URL) -> Bool {
+        let invalidValue = "jarvis-invalid-turn-count"
+        guard let output = runProbe(
+            executable: executable,
+            arguments: ["--max-turns", invalidValue, "--help"],
+            includeStderr: true
+        ),
+        output.terminationReason == .exit,
+        output.status != 0,
+        let text = String(data: output.data, encoding: .utf8) else {
+            return false
+        }
+        let normalized = text.lowercased()
+        return text.contains(invalidValue)
+            && normalized.contains("--max-turns")
+            && normalized.contains("invalid")
+            && normalized.contains("number")
+            && !normalized.contains("unknown option")
+            && !normalized.contains("unrecognized option")
+    }
+
     private struct ProbeOutput {
         let data: Data
         let status: Int32
+        let terminationReason: Process.TerminationReason
     }
 
     /// The lock protects the stop flag and bounded retained prefix; the background reader is the
@@ -332,15 +356,19 @@ public struct AgentCLIDetector: Sendable {
     }
 
     /// Run one local, non-model status/capability command under the same bounded process policy for
-    /// both CLIs. No API key is inherited, and stderr is irrelevant to the machine-readable probe.
-    private func runProbe(executable: URL, arguments: [String]) -> ProbeOutput? {
+    /// both CLIs. No API key is inherited. Parser probes may opt into the same bounded stderr pipe.
+    private func runProbe(
+        executable: URL,
+        arguments: [String],
+        includeStderr: Bool = false
+    ) -> ProbeOutput? {
         let process = Process()
         process.executableURL = executable
         process.arguments = arguments
         process.standardInput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
         let stdout = Pipe()
         process.standardOutput = stdout
+        process.standardError = includeStderr ? stdout : FileHandle.nullDevice
 
         var environment = ProcessInfo.processInfo.environment
         environment["HOME"] = home.path
@@ -388,6 +416,9 @@ public struct AgentCLIDetector: Sendable {
         drain.stop()
         drainFinished.wait()
         try? readHandle.close()
-        return ProbeOutput(data: drain.data, status: process.terminationStatus)
+        return ProbeOutput(
+            data: drain.data,
+            status: process.terminationStatus,
+            terminationReason: process.terminationReason)
     }
 }

@@ -275,9 +275,9 @@ public actor CoachingActionBroker {
         return true
     }
 
-    /// Called after the provider reaches its successful completion boundary. That is an ordinary
-    /// complete response for native/Claude paths or a host-proven terminal delivery for Codex.
-    /// This verifies liveness without committing an effect; `CoachDriver` remains the only commit
+    /// Called after the provider reaches its successful completion boundary: an ordinary complete
+    /// response for the native path or host-proven terminal delivery for either local CLI. This
+    /// verifies liveness without committing an effect; `CoachDriver` remains the only commit
     /// authority.
     public func requireTerminal() throws -> TerminalDecision {
         try ensureCurrent()
