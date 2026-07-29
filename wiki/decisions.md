@@ -320,7 +320,7 @@
 - **Chose:** Replay the brain's **entire `output` array verbatim** (reasoning and `function_call` items whole — ids and any payload untouched, in order, the canonical `input.push(...response.output)` loop) on the tool loop's follow-up request. At commit, `CoachHistory` converts the passthrough: the `function_call` survives as the proven id-less synthetic call (so the committed `function_call_output` never orphans) and the reasoning is dropped — it lives only inside the turn that produced it, like screenshots.
 - **Why:** OpenAI's function-calling and reasoning guides require reasoning items to accompany a client-fulfilled tool call's output; dropping them (our old behavior, and a known ecosystem anti-pattern — the Agents SDK, Vercel AI SDK, and LangChain all round-trip them) discards the chain of thought mid-turn, so the model re-reasons over the screenshot from scratch: worse answers, more reasoning tokens, and OpenAI's own cookbook measured a 40%→80% cache-utilization gain from replaying them.
 - **Rejected:** (a) `previous_response_id` server threading — reintroduces the server-side conversation the 2026-07-07 decision removed. (b) `store:false` + `include: reasoning.encrypted_content` — the fully stateless variant; deferred with the existing `store:true` debuggability choice, and it's the same replay path when flipped. (c) Keeping reasoning items across turns — OpenAI ignores stale ones, they'd bloat every later request, and a mid-session brain-model switch invalidates them. (d) A generic SDK/agent-framework dependency to manage the loop — none exists for Swift, and owning the message list is where the harness's cost machinery lives.
-- **Detail:** `Sources/JarvisCore/Brain/OpenAIBrainClient.swift` (verbatim extract/re-emit), `CoachDriver.swift` (whole-output threading), `CoachHistory.swift` (commit-time conversion), `Brain.swift` (`ChatMessage.rawItems`).
+- **Detail:** `Sources/JarvisCore/Brain/Adapters/OpenAI/OpenAIBrainClient.swift` (verbatim extract/re-emit), `CoachDriver.swift` (whole-output threading), `CoachHistory.swift` (commit-time conversion), `Brain.swift` (`ChatMessage.rawItems`).
 
 ### 2026-07-16 — Local Claude Code / Codex CLIs as alternative brain providers
 
@@ -490,7 +490,7 @@
   sharing and breaks the app's ghost behavior.
 - **Supersedes in part:** 2026-07-16 — Local Claude Code / Codex CLIs as alternative brain providers.
 - **Detail:** [settings-window.md → Brain](./settings-window.md#brain),
-  `Sources/JarvisCore/Brain/AgentCLIDetector.swift`.
+  `Sources/JarvisCore/Brain/Adapters/LocalAgent/AgentCLIDetector.swift`.
 
 ### 2026-07-18 — Runtime failures preserve ghost mode
 
@@ -541,7 +541,8 @@
   when this call needs one final text object.
 - **Supersedes in part:** 2026-07-16 — Local Claude Code / Codex CLIs as alternative brain providers.
 - **Detail:** [architecture.md → Local CLI brain providers](./architecture.md#local-cli-brain-providers),
-  `Sources/JarvisCore/Brain/CLIBrainClient+Invocation.swift`, `AgentCLIProcessRunner.swift`.
+  `Sources/JarvisCore/Brain/Adapters/LocalAgent/CLIBrainClient+Invocation.swift`,
+  `AgentCLIProcessRunner.swift`.
 
 ### 2026-07-22 — Brain settings hot-switch between coaching turns
 
@@ -578,7 +579,7 @@
   the latency-sensitive presentation path.
 - **Detail:** [settings-window.md](./settings-window.md),
   `Sources/JarvisApp/Settings/SettingsWindow.swift`,
-  `Sources/JarvisCore/Brain/AgentCLIDetector.swift`.
+  `Sources/JarvisCore/Brain/Adapters/LocalAgent/AgentCLIDetector.swift`.
 
 ### 2026-07-24 — Temporary runtime failures preserve the live conversation
 
@@ -774,7 +775,58 @@
 - **Detail:** [architecture.md → Ordered provider route](./architecture.md#ordered-provider-route),
   `Sources/JarvisCore/Coach/CoachDriver.swift`,
   `Sources/JarvisApp/App/AppDelegate.swift`,
-  `Sources/JarvisCore/Brain/AgentCLIDetector.swift`.
+  `Sources/JarvisCore/Brain/Adapters/LocalAgent/AgentCLIDetector.swift`.
+
+### 2026-07-27 — Local coaching uses persistent provider runtimes without one-shot fallback
+
+- **Chose:** Add an attempt-scoped `BrainConversation` lease while keeping committed
+  `CoachHistory` client-managed. Claude Code maintains one initialized stream-json query ready for
+  the active coach; leasing it starts a replacement immediately, and the leased query owns every
+  turn in that coaching attempt. Codex maintains one stdio app-server for the Jarvis session; every
+  attempt gets a fresh ephemeral/pathless thread, keeps it across capture follow-ups, and
+  unsubscribes when the attempt ends. All Codex targets and its summarizer share that server, while
+  Claude coach and summarizer runtimes remain separate because their model and system prompt are
+  fixed at query startup.
+- **Chose:** Remove the per-turn Claude process and `codex exec` coaching transports completely.
+  Claude's long-lived stream-json query still uses the CLI's print-mode flag as required by that
+  protocol; it is initialized before its lease and survives every turn in the attempt. If
+  preparation, protocol conformance, a turn, timeout, or runtime process fails, that provider
+  attempt fails. The existing ordered route may retry or advance only in a later fresh attempt; it
+  never drops to a one-shot command before or during the attempt. Stop and route replacement
+  synchronously terminate ready, leased, and preparing process trees.
+- **Chose:** Isolate the Codex app-server with a private owner-only `CODEX_HOME` that links the
+  existing login file but loads no user config or global instructions. Thread startup additionally
+  disables project discovery and requires `ephemeral:true`, a null persistence path, and empty
+  `instructionSources` before dispatch. Claude continues with no session persistence, no settings
+  sources, no built-in tools, and strict empty MCP config. The completed-session agentic evaluator
+  remains a deliberately separate one-shot workflow; it is not on the coaching latency path.
+- **Why:** Both provider-native interfaces are built for a live client boundary, and the benefit is
+  measurable where Jarvis needs continuation. In six paired Claude runs, a ready query improved
+  first assistant output from 4,186.0 ms to 3,675.7 ms p50 (12.2%). In six paired two-turn Codex
+  runs, the same-thread second turn completed in 1,720.4 ms versus 3,924.5 ms (56.2% faster, six of
+  six wins), improving the complete semantic attempt by 26.2%. A production-path signed-in smoke
+  then completed `capture_screen` → `stay_silent` on one Claude query in 3,726/1,694 ms and one
+  Codex thread in 4,104/1,602 ms. The measurements do not isolate process reuse, connection reuse,
+  context reuse, and provider caching, so they justify the end-to-end design rather than a narrower
+  causal claim.
+- **Rejected:** (a) A two-slot provider-neutral pool — Codex thread creation measured 6.6 ms p50,
+  so slots waste memory; Claude needs only one ready replacement because attempts are single-flight.
+  (b) A cold command when no ready lease exists — it creates two behavior/security envelopes and
+  makes latency depend on a race. (c) Falling back after dispatch — it replays provider-owned work
+  inside an attempt and violates the route contract. (d) Reusing one native conversation across
+  attempts — it would make provider history authoritative and prevent clean provider changes.
+- **Supersedes:** 2026-07-18 — Codex coaching invocations are isolated and bounded. Its
+  direct-response, no-tools, read-only, timeout, and instruction-isolation requirements stand; the
+  `codex exec` transport and rejection of app-server do not. It also supersedes the per-turn process
+  lifecycle in 2026-07-16 — Local Claude Code / Codex CLIs as alternative brain providers.
+- **Superseded in part by:** 2026-07-28 — Codex coaching fails closed without a tool-free provider
+  surface. Claude's persistent runtime, attempt lease, process ownership, and lack of one-shot
+  fallback stand; the Codex coaching runtime does not launch.
+- **Detail:** [architecture.md → Local CLI brain providers](./architecture.md#local-cli-brain-providers),
+  [sandbox.md → Data Egress](./sandbox.md#data-egress),
+  `Sources/JarvisCore/Brain/Adapters/LocalAgent/ClaudeCode/ClaudeCodeRuntime.swift`,
+  `Sources/JarvisCore/Brain/Adapters/LocalAgent/Codex/CodexAppServerRuntime.swift`,
+  `Sources/JarvisCore/Brain/Adapters/LocalAgent/CLIBrainClient.swift`.
 
 ### 2026-07-27 — Catalog order defines the unset model
 
@@ -804,3 +856,129 @@
   internal compaction behavior, not a saved route selection.
 - **Detail:** [settings-window.md → Brain](./settings-window.md#brain),
   `Sources/JarvisCore/Brain/BrainModelCatalog.swift`.
+
+### 2026-07-28 — Keep the persistent local-agent process edge in Core
+
+- **Chose:** Keep Jarvis's small `AgentRuntimeProcess` and `AgentRuntimeLifetime` boundary under the
+  local-agent adapter instead of adding Swift Subprocess 0.5. Keep Claude Code and Codex lifecycle
+  code in separate provider sub-adapters; `LocalAgentRuntimeSet` owns their one composition
+  difference. Process-group membership is recorded only while a known PID/start-time identity proves
+  the original group is still alive. The exit monitor observes the exact leader with
+  `waitid(..., WNOWAIT)`, snapshots descendant PID/start-time identities before reaping it, and
+  teardown revalidates and signals those individual identities rather than the reusable numeric
+  group.
+- **Why:** Jarvis needs a long-lived newline channel used across separate calls, synchronous
+  termination from final-owner release and actor teardown, bounded unread output, and escalation
+  that identity-checks descendants even when the leader exits immediately. Observing before reaping
+  preserves group provenance long enough to capture those helpers without ever signaling a recycled
+  PID. Swift Subprocess's execution handle cannot escape its async run closure, and its stable
+  teardown stops when that leader is gone. Wrapping it would leave the safety-critical lifetime code
+  in place while adding a pre-1.0 dependency.
+- **Rejected:** (a) Swift Subprocess 0.5 plus a command/channel bridge — more code and dependency
+  surface without the required teardown semantics. (b) Moving the provider runtimes to
+  `JarvisApp` — their state machines are Foundation-only and belong in testable Core. (c) Merging
+  Codex credential-home management into the generic client — it is a focused provider security
+  policy, not shared Brain configuration.
+- **Detail:** [architecture.md → Local CLI brain providers](./architecture.md#local-cli-brain-providers),
+  `Sources/JarvisCore/Brain/Adapters/LocalAgent/Runtime/AgentRuntimeProcess.swift`,
+  `Sources/JarvisCore/Brain/Adapters/LocalAgent/Runtime/AgentRuntimeLifetime.swift`,
+  `Sources/JarvisCore/Brain/Adapters/LocalAgent/LocalAgentRuntimeSet.swift`.
+
+### 2026-07-28 — Screen-capture cancellation owns helper and file cleanup
+
+- **Chose:** Give `ScreenCapturing` an explicit cancellation boundary. `ScreenCaptureRunner` owns
+  the active `screencapture` process and its transient JPEG under the owner-only live session
+  directory. Stop requests TERM, escalates after a bounded grace period only while the helper's
+  PID/start-time identity still matches, and waits for the process to exit and the JPEG's absence to
+  be verified before releasing the coaching attempt. Success and ordinary failure use the same
+  verified cleanup boundary; a deletion failure poisons the session-local runner so a window/display
+  fallback or later capture cannot create another file.
+- **Why:** Abandoning a detached synchronous capture released the provider lease quickly but left a
+  stuck helper and screen-derived file alive after the session was considered stopped. A temporary
+  path also violated the rule that screen-derived disk data stays inside the retained session
+  boundary.
+- **Rejected:** (a) Finishing the async bridge immediately and ignoring the helper — teardown would
+  still be incomplete. (b) Writing to `/tmp` and relying on `defer` after an unbounded wait — a
+  wedged helper postpones deletion indefinitely. (c) Best-effort deletion without checking the
+  resulting path — it can report completion while screen-derived data remains.
+- **Detail:** [architecture.md → Core Loop](./architecture.md#2-core-loop),
+  `Sources/JarvisCore/Screen/ScreenCaptureRunner.swift`,
+  `Sources/JarvisCore/Coach/CoachDriver.swift`.
+
+### 2026-07-28 — Codex coaching fails closed without a tool-free provider surface
+
+- **Chose:** Treat tool-free coaching as an explicit provider capability independent of Codex's
+  advertised feature catalog. App preflight rejects a Codex primary and marks a Codex fallback
+  unavailable; direct `CodexAppServerRuntime` use returns a typed permanent failure before creating
+  `CODEX_HOME` or spawning a process. Keep the existing ephemeral-thread, private-home, read-only,
+  empty-MCP, feature-disable, and event-rejection checks behind a future explicit tool-free launch
+  capability as defense in depth, not as evidence that launch is safe.
+- **Chose:** Launch Claude's persistent stream-json query with `--safe-mode` as well as an explicit
+  empty built-in tool set, no settings sources, no session persistence, and strict explicit empty
+  MCP config. Safe mode excludes inherited CLAUDE.md, skills, plugins, hooks, MCP, agents, and other
+  customizations without replacing the user's OAuth authentication path.
+- **Why:** Codex app-server 0.145 has no stable empty-tools field. A deny list derived from a local
+  feature probe can be empty, fail, or drift while built-in planner, shell, delegation, browser, or
+  future tool families remain callable. Read-only sandboxing limits mutations but does not remove
+  those tools, and rejecting a tool event happens after the unsafe surface was already offered.
+  Claude exposes a provider-supported customization-isolation mode, so its coaching boundary can be
+  established before launch while preserving subscription authentication.
+- **Rejected:** (a) Treating known feature disables as a complete tool inventory — unknown and
+  renamed surfaces fail open. (b) Relying on read-only sandboxing, prompt instructions, or
+  post-event rejection — none removes built-in tools before inference. (c) Quietly substituting the
+  metered Responses API — it changes the selected provider and billing path. (d) Removing Codex from
+  saved routes or the evaluator — preferences should remain repairable, and completed-session
+  evaluation is explicitly agentic.
+- **Supersedes in part:** 2026-07-27 — Local coaching uses persistent provider runtimes without
+  one-shot fallback, and 2026-07-18 — Codex coaching invocations are isolated and bounded. Their
+  isolation requirements remain defenses in depth; Codex coaching is unavailable until the provider
+  exposes a stable tool-free launch surface.
+- **Detail:** [architecture.md → Local CLI brain providers](./architecture.md#local-cli-brain-providers),
+  [sandbox.md → Data Egress](./sandbox.md#data-egress),
+  `Sources/JarvisCore/Brain/Adapters/LocalAgent/DetectedAgentCLI.swift`,
+  `Sources/JarvisCore/Brain/Adapters/LocalAgent/ClaudeCode/ClaudeCodeRuntime.swift`,
+  `Sources/JarvisCore/Brain/Adapters/LocalAgent/Codex/CodexAppServerRuntime.swift`.
+- **Superseded by:** 2026-07-29 — Codex coaching runs at parity with the `codex exec` risk posture.
+
+### 2026-07-29 — Codex coaching runs at parity with the `codex exec` risk posture
+
+- **Chose:** Enable Codex coaching on the persistent app-server runtime, accepting the same residual
+  risk `codex exec` coaching already shipped with. There is no coaching-capability gate: preflight,
+  route availability, and runtime construction treat Codex like any other detected, signed-in CLI.
+- **Chose:** Deliver the agentic-feature disable set through the per-thread `thread/start` config
+  (`features.<name> = false`) as well as the launch `--disable` flags, while treating neither as
+  load-bearing. Measured on codex-cli 0.145.0 by capturing the outgoing Responses request, both
+  transports offer the model the same four built-in tools — `exec`, `wait`, `request_user_input`,
+  `collaboration` — with the disable set applied and with it absent. They arrive as an
+  `additional_tools` input item rather than the request's `tools` array, which is why a
+  `features.<name>` gate does not remove them (openai/codex#21952, open). The deny list therefore
+  narrows nothing today on either path; the runtime item-event allowlist is the control that bites.
+- **Why:** This is an owner risk acceptance, not a refutation of the analysis above. The absence
+  proof the previous entry demanded was never available on `main` either — the shipped `codex exec`
+  path conceded that Codex has no disable-all-tools flag and relied on the same layered envelope.
+  Holding the app-server path to a stricter bar than the transport it replaces blocked a real
+  latency win for no change in exposure. Verified against codex-cli 0.145.0: `codex app-server
+  --help` and the generated `ThreadStartParams` schema still expose no field that removes built-in
+  tools, so no such control was invented, and a captured-request comparison confirms `codex exec`
+  and the app-server offer the model an identical built-in tool set. Parity is therefore measured,
+  not assumed — and the shared residual surface includes a JavaScript `exec` tool, which is the
+  exposure `main` already carries. Every control `codex exec` enforced is present, and three
+  are strengthened — the ephemeral thread's `ephemeral`/`path`/`instructionSources` are verified in
+  the `thread/start` response rather than assumed, `--ignore-user-config`/`--ignore-rules` become
+  structural (a private `CODEX_HOME` holding only an `auth.json` symlink, so no config, profile,
+  plugin, prompt, or `.rules` file exists to load), and any server request or item event outside the
+  message/reasoning allowlist aborts the turn, which catches built-in families the deny list never
+  named.
+- **Rejected:** (a) Shipping the runtime dormant — ~730 lines of untested-in-production code and a
+  latency claim for a disabled path. (b) Inventing a launch flag to satisfy the old gate — the flag
+  does not exist. (c) Weakening any isolation control to simplify the app-server path.
+- **Changes this decision:** Codex publishing a real disable-all-tools control (adopt it and drop
+  the layered reliance); openai/codex#21952 being fixed such that the disable set provably reaches
+  the tool builder on either transport (re-measure, then drop the duplicate config delivery); or
+  evidence that a built-in tool executes before the item-event allowlist can abort the turn.
+- **Supersedes:** 2026-07-28 — Codex coaching fails closed without a tool-free provider surface. Its
+  Claude `--safe-mode` decision stands unchanged; its Codex capability gate does not.
+- **Detail:** [architecture.md → Local CLI brain providers](./architecture.md#local-cli-brain-providers),
+  [sandbox.md → Data Egress](./sandbox.md#data-egress),
+  `Sources/JarvisCore/Brain/Adapters/LocalAgent/Codex/CodexAppServerRuntime.swift`,
+  `Sources/JarvisCore/Brain/Adapters/LocalAgent/Codex/CodexRuntimeHome.swift`.

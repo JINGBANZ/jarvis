@@ -231,24 +231,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         apiKey key: String,
         target: BrainTarget,
         effort: ReasoningEffort,
-        cli: DetectedAgentCLI?
+        cli: DetectedAgentCLI?,
+        sharedCLIRuntime: CLIBrainRuntime? = nil,
+        prewarm: Bool = true
     ) -> BrainRuntime {
         let coachBase: BrainClient
         let summarizer: BrainClient
         if let cli {
             let sessionDir = currentSessionDir ?? logDirectory()
+            let runtimes = LocalAgentRuntimeSet(
+                provider: target.provider,
+                codexSupportedFeatures: cli.supportedFeatures,
+                sharedCoach: sharedCLIRuntime)
             coachBase = CLIBrainClient(provider: target.provider, executable: cli.executableURL,
                                        model: target.modelID,
                                        reasoningEffort: effort.rawValue,
                                        workDirectory: sessionDir,
-                                       codexSupportedFeatures: cli.supportedFeatures,
-                                       traffic: sessionTraffic, trafficTag: "coach")
+                                       traffic: sessionTraffic, trafficTag: "coach",
+                                       systemPrompt: coachSystemPrompt,
+                                       tools: coachTools,
+                                       toolChoice: .required,
+                                       runtime: runtimes.coach,
+                                       prewarm: prewarm)
             summarizer = CLIBrainClient(provider: target.provider, executable: cli.executableURL,
                                         model: BrainModelCatalog.summarizerModelID(for: target.provider),
                                         reasoningEffort: ReasoningEffort.low.rawValue,
                                         workDirectory: sessionDir,
-                                        codexSupportedFeatures: cli.supportedFeatures,
-                                        traffic: sessionTraffic, trafficTag: "summarizer")
+                                        traffic: sessionTraffic, trafficTag: "summarizer",
+                                        systemPrompt: CoachDriver.summaryInstructions,
+                                        tools: [],
+                                        toolChoice: .auto,
+                                        runtime: runtimes.summarizer,
+                                        prewarm: false)
         } else {
             coachBase = OpenAIBrainClient(
                 apiKey: key, model: target.modelID,
@@ -284,15 +298,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         detectedCLIs: [BrainProvider: DetectedAgentCLI],
         apiKey key: String,
         effort: ReasoningEffort,
-        sessionDirectory: URL
+        sessionDirectory: URL,
+        prewarmPrimary: Bool = true
     ) -> ConfiguredBrainRoute {
-        let targets = route.targets.map { target -> ConfiguredBrainTarget in
+        let sharedCodexRuntime = route.targets.contains {
+            $0.provider == .codexCLI && detectedCLIs[$0.provider] != nil
+        } ? CLIBrainRuntime(
+            provider: .codexCLI,
+            codexSupportedFeatures: detectedCLIs[.codexCLI]?.supportedFeatures ?? []) : nil
+        let targets = route.targets.enumerated().map { index, target -> ConfiguredBrainTarget in
             let cli = detectedCLIs[target.provider]
             if let detail = fallbackUnavailability(for: target, detectedCLI: cli) {
                 return ConfiguredBrainTarget(unavailable: target, detail: detail)
             }
             let runtime = makeBrainRuntime(
-                apiKey: key, target: target, effort: effort, cli: cli)
+                apiKey: key,
+                target: target,
+                effort: effort,
+                cli: cli,
+                sharedCLIRuntime: target.provider == .codexCLI ? sharedCodexRuntime : nil,
+                prewarm: prewarmPrimary && index == 0)
             return ConfiguredBrainTarget(
                 target: target, brain: runtime.coach, summarizer: runtime.summarizer)
         }
@@ -388,7 +413,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             detectedCLIs: readyCLIs,
             apiKey: key,
             effort: brainPreferences.effort,
-            sessionDirectory: sessionDirectory)
+            sessionDirectory: sessionDirectory,
+            prewarmPrimary: update == .topologyEdit)
         switch update {
         case .topologyEdit:
             if pendingBrainChangeFrom == nil {

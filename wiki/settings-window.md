@@ -116,16 +116,18 @@ outer document instead of hiding inside a second scroll area. While coaching run
 use** marker exposes the runtime cursor without moving or rewriting any saved target.
 
 **Primary.** The first row selects a provider and model: the **OpenAI API** (metered by the key), or a
-locally installed **Claude Code** / **Codex CLI** — in which case coaching attempts are spawned as CLI
-subprocesses and billed to the user's existing Claude / ChatGPT *subscription* instead of the key
-(`CLIBrainClient`; see [architecture.md](./architecture.md#local-cli-brain-providers)). Installed
-CLIs are auto-detected by `AgentCLIDetector`: binary discovery is a pure file probe over $PATH + the
-known install dirs, while Claude sign-in uses its non-billing `auth status --json` command under a
-short timeout because account metadata can outlive an expired OAuth session. Codex keeps using its
-auth-file marker. Settings runs these probes asynchronously and keeps local-provider controls
-selectable while the first result is pending. The provider menus then show **signed in**, **signed out**, or
-**sign-in unknown**; a confirmed logout refuses Start, while an unavailable probe warns but does not
-falsely claim logout. An actual CLI request can still fail after preflight.
+locally installed **Claude Code** / **Codex CLI**. Claude uses a session-scoped local runtime for
+coaching on the user's existing Claude *subscription* instead of the key, and Codex likewise coaches
+through a session-scoped app-server on the user's ChatGPT subscription (`CLIBrainClient`; see
+[architecture.md](./architecture.md#local-cli-brain-providers)). Installed CLIs are auto-detected by `AgentCLIDetector`: binary
+discovery is a pure file probe over $PATH + the known install dirs, while Claude sign-in uses its
+non-billing `auth status --json` command under a short timeout because account metadata can outlive
+an expired OAuth session. Codex keeps using its auth-file marker and a bounded capability probe.
+Settings runs these probes asynchronously and keeps local-provider controls selectable while the
+first result is pending. The provider menus then show **signed in**, **signed out**, or **sign-in
+unknown**; a confirmed logout refuses Start, while an unavailable auth probe does not falsely claim
+logout. An empty, failed, or changed Codex feature catalog only narrows the disable flags that are
+passed; it never widens what a coaching thread may do.
 
 Before first-time setup, Primary shows **Choose provider…**, its model menu is disabled, and **Add
 fallback** is disabled. Selecting Primary creates the first valid route. Older installations that
@@ -165,8 +167,8 @@ release in each supported family. Each provider remembers its own model; without
 the first entry in that provider's catalog is selected. The **Reasoning effort** picker
 (`ReasoningEffort`: None / Low / Medium / High, default Low) is stored once and applies uniformly to
 whichever provider is active. `CLIBrainClient` maps it onto Claude Code's `--effort` and Codex's
-`model_reasoning_effort`; both CLI scales start at `low`, so None clamps to Low while the three shared
-levels pass through.
+per-thread `model_reasoning_effort`; both CLI scales start at `low`, so None clamps to Low while the
+three shared levels pass through.
 
 **Transcription.** This group names the separate speech-to-text role explicitly so future
 transcription providers can be added without conflating them with the brain route. It currently
@@ -182,21 +184,27 @@ reaching the API. The transcription model is deliberately **not** here — it's 
 code path (`Config.transcriptionModel`). A running `CoachDriver` applies valid edits atomically at
 the coaching-attempt boundary while transcript, client-managed history, audio pipeline, and session
 logs continue unchanged. A provider, model, or route-order edit replaces the route for the next
-attempt and resets the session-local cursor to the newly selected primary; this topology edit is the
-only way to revisit a target that automatic failover left behind. The old active provider is not
-retained as a hidden fallback; it remains available only when the user includes it in the new list.
+attempt and resets the session-local cursor to the newly selected primary. The new active local
+runtime begins preparing immediately; ready or in-flight processes owned only by the superseded
+route are terminated. This topology edit is the only way to revisit a target that
+automatic failover left behind. The old active provider is not retained as a hidden fallback; it
+remains available only when the user includes it in the new list.
 
 A reasoning-effort edit instead rebuilds the clients at the current forward-only cursor and preserves
 its failure counts. An attempt already in flight keeps its snapshotted client and remains
 authoritative: its success or failure updates route health normally, and the new effort begins with
-the next attempt. Saving the transcription API key likewise preserves route health, but refreshes
-only OpenAI clients and never probes or replaces a CLI client.
+the next attempt. The replacement at the preserved active cursor—whether primary or fallback—starts
+preparing immediately; replacements behind that cursor are terminated without being prepared. Saving
+the transcription API key likewise preserves route health, but refreshes only OpenAI clients and
+never probes or replaces a CLI client.
 
 A local-CLI target is preflighted first. A confirmed missing binary or signed-out account cannot
 activate; the running route stays intact and Activity records fixed settings-not-applied copy.
 Provider-specific partial tool-loop state from a failed attempt is discarded, while provider-neutral
 pending conversation follows the newly installed route on its next attempt. While stopped, persisted
-changes apply on the **next Start**.
+changes apply on the **next Start**. Runtime readiness is not a routing signal: if Claude's ready
+query or Codex's app-server is unavailable, that provider attempt fails and follows the normal
+fresh-attempt route policy. Neither CLI ever falls back to a one-shot command.
 
 All Brain choices persist via `BrainPreferences` —
 `Sources/JarvisCore/Config/BrainPreferences.swift` is the single source for the UserDefaults keys,
@@ -233,7 +241,9 @@ stored scope falls back to the default, a stored index < 1 clamps to the main di
 chosen display no longer exists (the monitor was unplugged since it was chosen) `screencapture -D`
 fails and `ScreenCaptureCLI` reshoots the main display rather than dropping the screenshot.
 Fallbacks from active-window scope always capture the main display — a display index left over
-from an old entire-display selection never steers them.
+from an old entire-display selection never steers them. A transient-file cleanup failure is not an
+ordinary capture failure: it poisons the session-local runner and returns without a window/display
+fallback or a later capture.
 
 | Setting | Default | UserDefaults key |
 |---|---|---|
@@ -256,7 +266,7 @@ from an old entire-display selection never steers them.
 | `Sources/JarvisApp/Settings/NSScreen+DisplayTitles.swift` | Display naming for the dropdown's entire-display entries |
 | `Sources/JarvisApp/Settings/ActivitySection.swift` | Activity tab |
 | `Sources/JarvisCore/Brain/BrainProvider.swift` | The three providers |
-| `Sources/JarvisCore/Brain/AgentCLIDetector.swift` | CLI binary discovery + bounded authentication-status detection |
+| `Sources/JarvisCore/Brain/Adapters/LocalAgent/AgentCLIDetector.swift` | CLI binary discovery + bounded authentication-status detection |
 | `Sources/JarvisCore/Brain/BrainModelCatalog.swift` | Curated per-provider model lists (`BrainModel`) |
 | `Sources/JarvisCore/Brain/ReasoningEffort.swift` | The four effort levels |
 | `Sources/JarvisCore/Diagnostics/AgenticEvaluator.swift` | Read-only Claude Code / Codex session audit invoked by Activity and `EvalPrep` |

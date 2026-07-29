@@ -1,10 +1,8 @@
 import Foundation
 
-/// Monotonic phase timestamps for one local-CLI brain turn (`claude -p` / `codex exec`), stamped by
-/// `AgentCLIProcessRunner` and `CLIBrainClient` as the turn progresses. It exists so the wire-level
-/// audit can separate process startup, prompt delivery, time to first output, model completion, and
-/// parsing/teardown — the sub-phases of the total `respond` latency — instead of only the total. That
-/// is what lets a later warm-runtime change compare cold vs warm at the *same* boundaries.
+/// Monotonic phase timestamps for one explicit agentic-evaluation CLI invocation, stamped by
+/// `AgentCLIProcessRunner` as it progresses. Coaching no longer uses this one-shot runner; its
+/// persistent runtimes record their own semantic turn boundaries.
 ///
 /// Instants are `DispatchTime` uptime nanoseconds — a process-wide monotonic clock, so stamps taken
 /// in the runner and in the client are directly comparable and immune to wall-clock adjustments.
@@ -19,8 +17,7 @@ import Foundation
 /// thread, and the client, and every access goes through the lock.
 public final class AgentCLIPhaseTimings: @unchecked Sendable {
     /// The observable boundaries of a local-CLI turn, in the order they occur. Their pairwise
-    /// intervals are the named phases recorded to `brain-traffic.jsonl` (see
-    /// `CLIBrainClient.phaseDurationsMs`):
+    /// intervals describe the evaluator invocation:
     ///
     /// - `runnerEntered` → `processLaunched`  = `spawnMs`  (process startup)
     /// - `processLaunched` → `stdinDelivered` = `stdinMs`  (prompt written to the child + stdin closed)
@@ -29,8 +26,7 @@ public final class AgentCLIPhaseTimings: @unchecked Sendable {
     /// - `firstStdoutByte` → `processExited`  = `outputMs` (remaining CLI output through process exit)
     /// - `processExited` → `replyParsed`      = `parseMs`  (final reply extraction + protocol parse)
     ///
-    /// `runnerEntered` is stamped by the runner the instant it is reached (its interval from the
-    /// client's `respond` entry is `queuedMs` — prompt prep + dispatch onto the runner thread).
+    /// `runnerEntered` is stamped by the runner the instant it is reached.
     public enum Phase: String, CaseIterable, Sendable {
         case runnerEntered
         case processLaunched

@@ -1,8 +1,9 @@
 import Foundation
 
 /// Where the brain (coach/summarizer/evaluator) runs. `openAI` calls the Responses API with the
-/// user's API key; the CLI providers spawn a locally installed coding-agent CLI per turn, so the
-/// user's existing Claude / ChatGPT *subscription* pays for the brain instead of API metering.
+/// user's API key; the CLI providers keep a locally installed coding-agent runtime alive for the
+/// Jarvis session, so the user's existing Claude / ChatGPT *subscription* pays for the brain instead
+/// of API metering.
 /// Voice transcription is a separate concern and always needs the OpenAI key (Realtime API) —
 /// selecting a CLI provider changes only who answers the coaching turns.
 public enum BrainProvider: String, CaseIterable, Sendable {

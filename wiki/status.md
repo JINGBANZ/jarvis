@@ -24,8 +24,9 @@ not acknowledge audio appends; server audio-clock progress retires only a safe p
 replacement socket replays the rest after a half-open failure. A live Wi-Fi reconnect run confirms
 that speech captured during the outage returns after recovery. The brain can also run through a
 locally installed Claude Code or Codex CLI on the user's subscription; Settings → Brain auto-detects
-those providers, reports Claude's current sign-in state from its bounded status command, and keeps
-the OpenAI API-key path available. The ordered provider-route contract is now settled: one primary
+both, reports Claude's current sign-in state from its bounded status command, and keeps the
+OpenAI API-key path available. Codex also remains available to the explicit agentic session
+evaluator. The ordered provider route uses one primary
 plus a user-editable ordered fallback list, one target per coaching attempt, no failed-request replay
 inside the attempt, automatic pending-work attempts with the newest finalized transcript, the
 code-owned temporary/unknown failure threshold in
@@ -36,12 +37,17 @@ typed Activity event. That route is implemented as immutable provider/model valu
 Foundation-only session cursor, a single-flight fresh-attempt scheduler, and the ordered Settings
 Provider editor with one uninterrupted Primary/fallback route, a separate right-aligned Reasoning
 effort row, and an explicit Transcription provider/key group. A first-open install remains
-unconfigured until Primary is chosen; the old immediate request retry, scalar fallback,
-same-attempt failover, and primary recovery
-probing are removed. Codex coaching calls
-suppress project instructions and its feature-gated agent tools, run as direct-response decisions, inherit only stable
-executable-search paths, and stop under a provider-specific stall bound instead of leaving later
-speech batched indefinitely.
+unconfigured until Primary is chosen. Local coaching uses persistent runtimes rather than launching
+one process per model turn. Claude Code keeps
+one initialized safe-mode query ready for the active target and leases it across an attempt's
+complete tool loop while preparing its replacement. It disables built-in tools, settings sources,
+session persistence, and MCP servers while preserving the user's OAuth session. Its runtime miss or
+crash fails the provider attempt; there is no one-shot CLI fallback. Stop kills ready, leased, and
+preparing process trees. Codex keeps one session-scoped app-server under a private `CODEX_HOME` and
+opens a fresh ephemeral thread per attempt, so its coach and summarizer share one runtime. Its
+read-only, never-approval, empty-MCP, feature-disable envelope matches what `codex exec` coaching
+enforced, plus verified thread ephemerality and a message/reasoning event allowlist that aborts a
+turn on any other item.
 Saving an API key while running also preserves those live objects: existing Realtime sockets take
 the key on their next reconnect, and an OpenAI brain update remains transactional. Audio
 route rebuilds likewise retry before declaring capture unavailable, and stale capture callbacks
@@ -50,8 +56,8 @@ budget. Activity persists stable event kinds and flushes at Stop. The sole evalu
 receives the complete session directory and reads the full, unfiltered `jarvis-activity.jsonl`
 whenever it needs the user-visible sequence, alongside raw brain traffic, screenshots, and live
 source code. Activity's one-click **Evaluate** action launches that evaluator and opens its saved
-report; the standalone script calls the same Core implementation. The same runtime ghost-mode rule
-now covers microphone transcription, audio-route loss, in-place CLI preflight, and Activity-audit
+report; the standalone script calls the same Core implementation. The runtime ghost-mode rule
+covers microphone transcription, audio-route loss, in-place CLI preflight, and Activity-audit
 completion: no runtime error autonomously activates Jarvis, opens a browser, or presents a modal;
 fixed notices remain available in Activity. The gate statically rejects unreviewed presentation APIs.
 
@@ -68,8 +74,12 @@ the pending conversation is preserved. Verify the first-open Brain state (no Pri
 disabled model/Add fallback, and Add API key), then configure multiple fallbacks and force a temporary
 failure-budget transition, a proven-permanent one-attempt transition, an unavailable-target skip, and
 final route exhaustion. Confirm no provider-specific tool state crosses attempts and verify a
-successful fallback remains active without changing preferences. Finish the in-app Codex smoke through
-audio and the overlay. Exercise one audio-route switch: Activity should say listening continues, the
+successful fallback remains active without changing preferences. Configure Codex as Primary and
+confirm a coaching turn completes on its app-server; then Stop and confirm neither the app-server nor
+its private runtime home survives. Then Stop the Claude smoke and confirm no query child remains. The signed-in
+Foundation-level Claude POC already verifies two turns on one native conversation; this remaining
+smoke covers app wiring, TCC, audio, and overlay presentation. Exercise one
+audio-route switch: Activity should say listening continues, the
 next turn should include any unsent speech, and capture should recover
 without rotating the session. Stop that session, click **Evaluate**, and confirm the agentic report
 opens and identifies the temporary miss from the complete Activity log without misclassifying it as
@@ -83,7 +93,7 @@ thin OS shell, verified by the smoke run.
 
 - `Sources/JarvisCore/Audio/` — transactional PCM + utterance buffering, adaptive content-free activity detection, non-destructive AEC reference alignment, and system-audio timeline preservation (`PCMBuffer`, `UtteranceBuffer`, `PCM16Framer`, `AudioDownmix`, `AdaptiveAudioActivityDetector`, `EchoReferenceAlignment`, `SystemAudioTimeline`).
 - `Sources/JarvisCore/Transcription/` — realtime session wire contract, per-item event ledger, and rolling transcript (`RealtimeSession`, `RealtimeTranscriptionLedger`, `Transcript`, `NoiseReduction`).
-- `Sources/JarvisCore/Brain/` — the LLM integration: the `BrainClient` contract (`Brain`), `OpenAIBrainClient`, `CLIBrainClient` + `AgentCLIProcessRunner` + `AgentCLIDetector`/`AgentCLIAuthenticationStatus` (the local Claude Code / Codex brain providers and sign-in state), provider-boundary failure classification (`BrainFailure`), immutable `BrainTarget`/`BrainRoute`, `BrainProvider`, `BrainModelCatalog` (first per-provider entry is the default), `ReasoningEffort`.
+- `Sources/JarvisCore/Brain/` — provider-neutral `BrainClient`/attempt-scoped `BrainConversation` contracts and models stay at the root. `Adapters/OpenAI/` owns the Responses transport; `Adapters/LocalAgent/` owns CLI detection, `CLIBrainClient`, the Claude Code and Codex runtimes, and the bounded shared process edge. `LocalAgentRuntimeSet` encapsulates provider-specific coach/summarizer ownership. `AgentCLIProcessRunner` remains only for the explicit completed-session evaluator. The subsystem also owns provider-boundary failure classification (`BrainFailure`), immutable `BrainTarget`/`BrainRoute`, `BrainProvider`, `BrainModelCatalog` (first per-provider entry is the default), and `ReasoningEffort`.
 - `Sources/JarvisCore/Coach/` — the event loop: `CoachDriver` (fresh-attempt scheduling and one-target tool-loop orchestration), the pure forward-only `BrainRouteSession`, `SpeechActivityGate`, `CoachHistory` (client-managed session memory), `ToolDefs` (coach tools + system prompt).
 - `Sources/JarvisCore/Triggers/` — turn/silence trigger detection, substance classification, and silence backoff (`Trigger`, `TurnSubstance`, `SilenceBackoff`).
 - `Sources/JarvisCore/Screen/` — the model-triggered screen-capture tool contract + window-scoped capture logic, plus `ScreenCaptureRunner`, which owns each cancellable `screencapture` helper and the transient JPEG it writes into the owner-only session directory: it verifies that file is gone before returning, and a capture whose cleanup can't be proven latches the runner so no later capture (or display fallback) starts while a screen-derived file is unaccounted for (`ScreenCapture`, `ScreenCaptureRunner`, `ScreenSnapshot`, `FrontWindowSelector`, `RecognizedTextLayout`).

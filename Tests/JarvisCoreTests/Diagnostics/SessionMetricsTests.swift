@@ -60,7 +60,7 @@ import Foundation
         #expect(out.contains("| gpt-5.5 | 1 | — | — | — | — | — |"))
     }
 
-    /// Local CLI (`claude -p`) envelope: cost from `total_cost_usd`, the Anthropic cache
+    /// Claude warm-query envelope: cost from `total_cost_usd`, the Anthropic cache
     /// creation/read split from `cli.usage`, and per-model rows from `modelUsage` — including the
     /// internal sidecar (haiku) pass the call-level usage alone would hide.
     @Test func rendersCLIEnvelopeCostCacheSplitAndSidecarModels() throws {

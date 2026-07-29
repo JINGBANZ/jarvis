@@ -19,9 +19,19 @@ import Foundation
         ].joined(separator: "\n") + "\n"
         let activityURL = dir.appendingPathComponent(ActivityLog.filename)
         try Data(activityJSONL.utf8).write(to: activityURL)
+        let legacyRuntimeHome = dir.appendingPathComponent(
+            ".codex-runtime-abandoned",
+            isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: legacyRuntimeHome,
+            withIntermediateDirectories: false)
+        try FileManager.default.createSymbolicLink(
+            at: legacyRuntimeHome.appendingPathComponent("auth.json"),
+            withDestinationURL: URL(fileURLWithPath: "/private/credential"))
 
         let prompt = try AgenticEvaluation.prepare(sessionDir: dir)
 
+        #expect(!FileManager.default.fileExists(atPath: legacyRuntimeHome.path))
         // The compact transcript is written beside the traffic, owner-only, with the rendered content.
         let transcriptURL = dir.appendingPathComponent(AgenticEvaluation.transcriptFilename)
         let transcript = try String(contentsOf: transcriptURL, encoding: .utf8)
@@ -75,8 +85,8 @@ import Foundation
         #expect(permissions?.int16Value == 0o600)
     }
 
-    /// The prompt teaches each provider record and cache model, preserves unavailable metrics,
-    /// requires cardinal counts from the un-elided record, and asks for a self-check.
+    /// The prompt teaches each provider record and conversation boundary, preserves unavailable
+    /// metrics, requires cardinal counts from the un-elided record, and asks for a self-check.
     @Test func promptTeachesEnvelopesCacheModelsCountingAndSelfCheck() {
         let prompt = AgenticEvaluation.prompt(sessionDirPath: "/tmp/session")
         #expect(prompt.contains("deterministic metrics"))
@@ -84,11 +94,15 @@ import Foundation
         #expect(prompt.contains("cache_write_tokens"))
         #expect(prompt.contains("total_cost_usd"))
         #expect(prompt.contains("modelUsage"))
-        #expect(prompt.contains("Codex CLI"))
+        #expect(prompt.contains("Claude Code warm query"))
+        #expect(prompt.contains("Codex app-server"))
+        #expect(prompt.contains("response.runtime"))
         #expect(prompt.contains("unavailable, not zero"))
         #expect(prompt.contains("known (N unavailable)"))
-        #expect(prompt.contains("BLOCK-level"))
-        #expect(prompt.contains("--system-prompt"))
+        #expect(prompt.contains("preinitialized query"))
+        #expect(prompt.contains("incremental input"))
+        #expect(prompt.contains("ClaudeCodeRuntime.swift"))
+        #expect(prompt.contains("CodexAppServerRuntime.swift"))
         // Cardinal counts must come from the un-elided jsonl, not the elided transcript.
         #expect(prompt.contains(BrainTrafficLog.filename))
         #expect(prompt.contains("MUST be counted here"))

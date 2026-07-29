@@ -94,7 +94,7 @@ into one module, so moving a file between subfolders never changes access contro
 |---|---|
 | `Sources/JarvisCore/Audio/` | PCM + utterance buffering |
 | `Sources/JarvisCore/Transcription/` | Realtime session wire contract, rolling transcript |
-| `Sources/JarvisCore/Brain/` | The LLM integration: the `BrainClient` contract + provider clients (OpenAI API, Claude Code / Codex CLI), model catalog, CLI detection |
+| `Sources/JarvisCore/Brain/` | The LLM integration: provider-neutral `BrainClient` contracts/models at the root; OpenAI and local-agent provider adapters under `Adapters/` |
 | `Sources/JarvisCore/Coach/` | The event loop: `CoachDriver`, session memory, tool defs |
 | `Sources/JarvisCore/Triggers/` | Turn / silence trigger detection + silence backoff |
 | `Sources/JarvisCore/Screen/` | Screen-capture tool contract |

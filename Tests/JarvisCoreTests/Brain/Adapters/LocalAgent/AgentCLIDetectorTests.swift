@@ -200,12 +200,27 @@ import Glibc
         #expect(cli?.supportedFeatures == ["shell_tool", "code_mode_host"])
     }
 
+    @Test func emptyCodexFeatureCatalogYieldsNoDisableFlags() throws {
+        let home = try makeHome()
+        let bin = home.appendingPathComponent("fakebin")
+        try installBinary("codex", in: bin, script: """
+            #!/bin/sh
+            if [ "$1" = "features" ] && [ "$2" = "list" ]; then
+                exit 0
+            fi
+            exit 2
+            """)
+        let cli = detector(home: home, pathVariable: bin.path).detect(.codexCLI)
+        #expect(cli?.supportedFeatures == [])
+    }
+
     @Test func codexFeatureProbeFailureFallsBackToNoGuessedFlags() throws {
         let home = try makeHome()
         let bin = home.appendingPathComponent("fakebin")
         try installBinary("codex", in: bin)
         let d = detector(home: home, pathVariable: bin.path)
-        #expect(d.detect(.codexCLI)?.supportedFeatures == [])
+        let cli = d.detect(.codexCLI)
+        #expect(cli?.supportedFeatures == [])
     }
 
     @Test func codexFeatureProbeIsBounded() throws {
@@ -216,7 +231,8 @@ import Glibc
             exec sleep 1
             """)
         let d = detector(home: home, pathVariable: bin.path, authStatusTimeout: 0.01)
-        #expect(d.detect(.codexCLI)?.supportedFeatures == [])
+        let cli = d.detect(.codexCLI)
+        #expect(cli?.supportedFeatures == [])
     }
 
     @Test func missingBinaryDetectsNothing() throws {

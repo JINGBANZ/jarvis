@@ -4,7 +4,7 @@ import Foundation
 /// screenshots), the instruction block, and the prompt-embedded tool protocol.
 extension CLIBrainClient {
     /// One ordered piece of the flattened conversation: a labeled text block, or a screenshot in
-    /// place. How a screenshot travels is the provider's business (inline block vs `-i` file).
+    /// place. How a screenshot travels is the provider's business (inline block vs local image).
     enum Segment {
         case text(String)
         case imageJPEG(base64: String)
@@ -45,12 +45,14 @@ extension CLIBrainClient {
         return out
     }
 
-    /// The instruction block: the system text plus the tool protocol. Passed as `--system-prompt`
-    /// on Claude Code; prepended to the stdin document on Codex.
-    func composeInstructions(system: [String], tools: [ToolDef],
-                             toolChoice: ToolChoice) -> String {
+    /// The instruction block: the system text plus the tool protocol. Fixed at Claude query startup
+    /// and at Codex ephemeral-thread startup so later turns can carry only incremental input.
+    static func composeInstructions(system: [String], tools: [ToolDef],
+                                    toolChoice: ToolChoice) -> String {
         var sections = system
-        if !tools.isEmpty { sections.append(composeToolProtocol(tools: tools, toolChoice: toolChoice)) }
+        if !tools.isEmpty {
+            sections.append(composeToolProtocol(tools: tools, toolChoice: toolChoice))
+        }
         return sections.joined(separator: "\n\n")
     }
 
@@ -64,7 +66,7 @@ extension CLIBrainClient {
     /// The CLI-side stand-in for the Responses API's native function calling: the model is told to
     /// end its reply with one JSON object naming the tool. Generated from the same `ToolDef`s the
     /// API client sends, so the two providers stay behaviorally interchangeable.
-    private func composeToolProtocol(tools: [ToolDef], toolChoice: ToolChoice) -> String {
+    private static func composeToolProtocol(tools: [ToolDef], toolChoice: ToolChoice) -> String {
         var lines = ["## Tool protocol",
                      "",
                      "You are the decision engine inside an automated harness — your reply is parsed "

@@ -1,6 +1,6 @@
 import Foundation
 
-/// A locally installed coding-agent CLI usable as a brain provider — what `AgentCLIDetector` finds.
+/// A locally installed coding-agent CLI and the capabilities `AgentCLIDetector` can establish.
 public struct DetectedAgentCLI: Sendable, Equatable {
     public let provider: BrainProvider
     public let executableURL: URL

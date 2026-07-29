@@ -172,8 +172,8 @@ public final class CoachDriver: @unchecked Sendable {
         for providers: Set<BrainProvider>? = nil
     ) -> Bool {
         stateLock.lock()
-        defer { stateLock.unlock() }
         guard configuredRoute.targets.map(\.target) == route.targets.map(\.target) else {
+            stateLock.unlock()
             return false
         }
         let refreshesActiveTarget = providers.map {
@@ -182,13 +182,22 @@ public final class CoachDriver: @unchecked Sendable {
         if refreshesActiveTarget {
             routeRevision &+= 1
         }
-        let targets: [ConfiguredBrainTarget]
-        if let providers {
-            targets = zip(configuredRoute.targets, route.targets).map { current, replacement in
-                providers.contains(replacement.target.provider) ? replacement : current
+        var retiredReplacements: [ConfiguredBrainTarget] = []
+        let targets = zip(configuredRoute.targets, route.targets).enumerated().map {
+            index, pair in
+            let (current, replacement) = pair
+            let shouldReplace = providers.map {
+                $0.contains(replacement.target.provider)
+            } ?? true
+            guard shouldReplace else {
+                return current
             }
-        } else {
-            targets = route.targets
+            let isReachable = !routeIsExhausted && index >= routeSession.activeIndex
+            guard isReachable else {
+                retiredReplacements.append(replacement)
+                return current
+            }
+            return replacement
         }
         configuredRoute = ConfiguredBrainRoute(
             targets: targets,
@@ -196,6 +205,12 @@ public final class CoachDriver: @unchecked Sendable {
             onAdvanced: route.onAdvanced,
             onSkipped: route.onSkipped,
             onExhausted: route.onExhausted)
+        let activeReplacement = refreshesActiveTarget && !routeIsExhausted
+            ? configuredRoute.targets[routeSession.activeIndex]
+            : nil
+        stateLock.unlock()
+        retiredReplacements.forEach { $0.terminate() }
+        activeReplacement?.prepare()
         return true
     }
 
@@ -208,11 +223,33 @@ public final class CoachDriver: @unchecked Sendable {
     @discardableResult
     public func reconfigureBrainRouteClients(_ route: ConfiguredBrainRoute) -> Bool {
         stateLock.lock()
-        defer { stateLock.unlock() }
         guard configuredRoute.targets.map(\.target) == route.targets.map(\.target) else {
+            stateLock.unlock()
             return false
         }
-        configuredRoute = route
+        var retiredReplacements: [ConfiguredBrainTarget] = []
+        let targets = zip(configuredRoute.targets, route.targets).enumerated().map {
+            index, pair in
+            let (current, replacement) = pair
+            let isReachable = !routeIsExhausted && index >= routeSession.activeIndex
+            guard isReachable else {
+                retiredReplacements.append(replacement)
+                return current
+            }
+            return replacement
+        }
+        configuredRoute = ConfiguredBrainRoute(
+            targets: targets,
+            onSelected: route.onSelected,
+            onAdvanced: route.onAdvanced,
+            onSkipped: route.onSkipped,
+            onExhausted: route.onExhausted)
+        let activeReplacement = routeIsExhausted
+            ? nil
+            : configuredRoute.targets[routeSession.activeIndex]
+        stateLock.unlock()
+        retiredReplacements.forEach { $0.terminate() }
+        activeReplacement?.prepare()
         return true
     }
 
@@ -458,6 +495,7 @@ public final class CoachDriver: @unchecked Sendable {
         on attempt: AttemptBrain
     ) async -> RouteFailureAction {
         let record = applyAttemptFailure(failure, on: attempt)
+        record.retiredTarget?.terminate()
         if let exhaustion = record.exhaustion {
             return await deliverRouteExhaustion(exhaustion)
                 ? record.action
@@ -469,24 +507,29 @@ public final class CoachDriver: @unchecked Sendable {
     private func applyAttemptFailure(
         _ failure: BrainFailure,
         on attempt: AttemptBrain
-    ) -> (action: RouteFailureAction, exhaustion: RouteExhaustionDelivery?) {
+    ) -> (
+        action: RouteFailureAction,
+        exhaustion: RouteExhaustionDelivery?,
+        retiredTarget: ConfiguredBrainTarget?
+    ) {
         stateLock.lock()
         defer { stateLock.unlock() }
         if routeRevision != attempt.routeRevision
             || routeSession.activeIndex != attempt.routeIndex {
-            return (.staleRevision, nil)
+            return (.staleRevision, nil, nil)
         }
 
         switch routeSession.recordFailure(failure.disposition) {
         case .stay(let count):
-            return (.retry(failureCount: count, advanced: false), nil)
+            return (.retry(failureCount: count, advanced: false), nil, nil)
         case .advanced:
             pendingTransitionOrigin = attempt.target
             return (
                 .retry(
                     failureCount: BrainRouteSession.failuresPerTarget,
                     advanced: true),
-                nil)
+                nil,
+                configuredRoute.targets[attempt.routeIndex])
         case .exhausted:
             routeIsExhausted = true
             pendingTrigger = nil
@@ -499,7 +542,8 @@ public final class CoachDriver: @unchecked Sendable {
                     topologyRevision: routeTopologyRevision,
                     target: attempt.target,
                     failure: failure,
-                    callback: configuredRoute.onExhausted))
+                    callback: configuredRoute.onExhausted),
+                configuredRoute.targets[attempt.routeIndex])
         }
     }
 
@@ -782,141 +826,161 @@ public final class CoachDriver: @unchecked Sendable {
             reason == .manualHint ? .force(speakTool.name) : .required
         jlog("💭 thinking… [\(attempt.target.provider.displayName)]")
 
-        var iterations = 0
-        while iterations < maxToolIterations {
-            iterations += 1
-            let response: BrainResponse
-            do {
-                response = try await attempt.brain.respond(
-                    messages: historyBase + turnMessages,
-                    tools: coachTools,
-                    toolChoice: toolChoice)
-            } catch {
-                if Task.isCancelled || error is CancellationError {
-                    jlog("… attempt cancelled (interrupted)")
-                    return .cancelled
-                }
-                let failure = BrainFailure(error)
-                jlog("Jarvis coach: brain request failed on \(reason) via "
-                     + "\(attempt.target.provider.displayName): \(failure.detail)")
-                return .failed(outcome: .brainError, failure: failure, work: work)
-            }
-
-            if Task.isCancelled {
-                jlog("… attempt cancelled (stopped) mid-think")
+        let conversation: any BrainConversation
+        do {
+            conversation = try await attempt.brain.makeConversation()
+        } catch {
+            if Task.isCancelled || error is CancellationError {
+                jlog("… attempt cancelled (interrupted)")
                 return .cancelled
             }
-
-            // Incomplete output cannot prove a terminal action, even if it happens to contain one.
-            // Do not render a partial tip or execute a partial tool decision.
-            if let incompleteReason = response.incompleteReason {
-                jlog("⚠️ response incomplete (\(incompleteReason)) — scheduling fresh attempt")
-                return .failed(
-                    outcome: .truncated,
-                    failure: BrainFailure(
-                        disposition: .temporary,
-                        detail: "incomplete response: \(incompleteReason)"),
-                    work: work)
-            }
-
-            guard let call = response.toolCalls.first else {
-                jlog("⚠️ required coaching action missing — scheduling fresh attempt")
-                return .failed(
-                    outcome: .brainError,
-                    failure: BrainFailure(
-                        disposition: .temporary,
-                        detail: "provider returned no required coaching tool call"),
-                    work: work)
-            }
-
-            switch call {
-            case .captureScreen(let callID):
-                let screen = self.screen
-                let shot = await Self.captureScreen(using: screen)
-                if Task.isCancelled {
-                    jlog("… attempt cancelled (stopped) after capture")
-                    return .cancelled
-                }
-                if let shot {
-                    jlog("👁 looking at your screen")
-                    ActivityLog.shared.record(.screenViewed(imageBase64JPEG: shot.imageBase64))
-                    if let text = shot.recognizedText {
-                        jlog("🔤 read \(text.count(where: { $0 == "\n" }) + 1) lines of on-screen text")
-                    }
-                    work.observations = [
-                        .user(Self.captureResultText(shot)),
-                        .userImage(shot.imageBase64),
-                    ]
-                } else {
-                    jlog("👁 screenshot failed")
-                    ActivityLog.shared.record(.screenViewFailed)
-                    work.observations = [
-                        .user("A screen capture requested earlier in this turn failed."),
-                    ]
-                }
-
-                // Provider-specific linkage remains inside this attempt only.
-                if !response.outputItemsJSON.isEmpty {
-                    turnMessages.append(.rawItems(response.outputItemsJSON))
-                } else {
-                    turnMessages.append(.assistantToolCalls(response.rawToolCalls))
-                }
-                if let shot {
-                    turnMessages.append(.init(
-                        role: .tool,
-                        text: Self.captureResultText(shot),
-                        toolCallId: callID))
-                    turnMessages.append(.userImage(shot.imageBase64))
-                } else {
-                    turnMessages.append(.init(
-                        role: .tool,
-                        text: "screenshot failed",
-                        toolCallId: callID))
-                }
-
-            case .speak(let callID, let lines):
-                if Task.isCancelled {
-                    jlog("… attempt cancelled (stopped) before speaking")
-                    return .cancelled
-                }
-                jlog("💬 \(lines.joined(separator: " "))")
-                ActivityLog.shared.record(.tip(lines: lines))
-                overlay.render(
-                    lines,
-                    perLineSeconds: lines.map {
-                        OverlayTiming.displaySeconds(for: $0, config: config)
-                    })
-                turnMessages.append(.assistantToolCalls(response.rawToolCalls))
-                turnMessages.append(.init(
-                    role: .tool,
-                    text: "shown to the user",
-                    toolCallId: callID))
-                history.commit(turnMessages)
-                commitTranscript(through: delta.upTo)
-                await compactIfNeeded(using: attempt)
-                return .completed(.spoke)
-
-            case .staySilent:
-                if Task.isCancelled {
-                    jlog("… attempt cancelled (stopped) before recording silence")
-                    return .cancelled
-                }
-                jlog("… nothing useful to add, staying silent")
-                ActivityLog.shared.record(.stayedSilent)
-                commitIfWorthKeeping(turnMessages, deltaText: delta.text)
-                commitTranscript(through: delta.upTo)
-                await compactIfNeeded(using: attempt)
-                return .completed(.silentByModel)
-            }
+            let failure = BrainFailure(error)
+            jlog("Jarvis coach: brain conversation failed on \(reason) via "
+                 + "\(attempt.target.provider.displayName): \(failure.detail)")
+            return .failed(outcome: .brainError, failure: failure, work: work)
         }
 
-        jlog("⚠️ tool loop exhausted — scheduling fresh attempt")
-        return .failed(
-            outcome: .exhausted,
-            failure: BrainFailure(
-                disposition: .temporary,
-                detail: "coaching tool loop exhausted"),
-            work: work)
+        let result: AttemptResult = await { () async -> AttemptResult in
+            var iterations = 0
+            while iterations < maxToolIterations {
+                iterations += 1
+                let response: BrainResponse
+                do {
+                    response = try await conversation.respond(
+                        messages: historyBase + turnMessages,
+                        tools: coachTools,
+                        toolChoice: toolChoice)
+                } catch {
+                    if Task.isCancelled || error is CancellationError {
+                        jlog("… attempt cancelled (interrupted)")
+                        return .cancelled
+                    }
+                    let failure = BrainFailure(error)
+                    jlog("Jarvis coach: brain request failed on \(reason) via "
+                         + "\(attempt.target.provider.displayName): \(failure.detail)")
+                    return .failed(outcome: .brainError, failure: failure, work: work)
+                }
+
+                if Task.isCancelled {
+                    jlog("… attempt cancelled (stopped) mid-think")
+                    return .cancelled
+                }
+
+                // Incomplete output cannot prove a terminal action, even if it happens to contain one.
+                // Do not render a partial tip or execute a partial tool decision.
+                if let incompleteReason = response.incompleteReason {
+                    jlog("⚠️ response incomplete (\(incompleteReason)) — scheduling fresh attempt")
+                    return .failed(
+                        outcome: .truncated,
+                        failure: BrainFailure(
+                            disposition: .temporary,
+                            detail: "incomplete response: \(incompleteReason)"),
+                        work: work)
+                }
+
+                guard let call = response.toolCalls.first else {
+                    jlog("⚠️ required coaching action missing — scheduling fresh attempt")
+                    return .failed(
+                        outcome: .brainError,
+                        failure: BrainFailure(
+                            disposition: .temporary,
+                            detail: "provider returned no required coaching tool call"),
+                        work: work)
+                }
+
+                switch call {
+                case .captureScreen(let callID):
+                    let screen = self.screen
+                    let shot = await Self.captureScreen(using: screen)
+                    if Task.isCancelled {
+                        jlog("… attempt cancelled (stopped) after capture")
+                        return .cancelled
+                    }
+                    if let shot {
+                        jlog("👁 looking at your screen")
+                        ActivityLog.shared.record(.screenViewed(imageBase64JPEG: shot.imageBase64))
+                        if let text = shot.recognizedText {
+                            jlog("🔤 read \(text.count(where: { $0 == "\n" }) + 1) lines of on-screen text")
+                        }
+                        work.observations = [
+                            .user(Self.captureResultText(shot)),
+                            .userImage(shot.imageBase64),
+                        ]
+                    } else {
+                        jlog("👁 screenshot failed")
+                        ActivityLog.shared.record(.screenViewFailed)
+                        work.observations = [
+                            .user("A screen capture requested earlier in this turn failed."),
+                        ]
+                    }
+
+                    // Provider-specific linkage remains inside this attempt only.
+                    if !response.outputItemsJSON.isEmpty {
+                        turnMessages.append(.rawItems(response.outputItemsJSON))
+                    } else {
+                        turnMessages.append(.assistantToolCalls(response.rawToolCalls))
+                    }
+                    if let shot {
+                        turnMessages.append(.init(
+                            role: .tool,
+                            text: Self.captureResultText(shot),
+                            toolCallId: callID))
+                        turnMessages.append(.userImage(shot.imageBase64))
+                    } else {
+                        turnMessages.append(.init(
+                            role: .tool,
+                            text: "screenshot failed",
+                            toolCallId: callID))
+                    }
+
+                case .speak(let callID, let lines):
+                    if Task.isCancelled {
+                        jlog("… attempt cancelled (stopped) before speaking")
+                        return .cancelled
+                    }
+                    jlog("💬 \(lines.joined(separator: " "))")
+                    ActivityLog.shared.record(.tip(lines: lines))
+                    overlay.render(
+                        lines,
+                        perLineSeconds: lines.map {
+                            OverlayTiming.displaySeconds(for: $0, config: config)
+                        })
+                    turnMessages.append(.assistantToolCalls(response.rawToolCalls))
+                    turnMessages.append(.init(
+                        role: .tool,
+                        text: "shown to the user",
+                        toolCallId: callID))
+                    history.commit(turnMessages)
+                    commitTranscript(through: delta.upTo)
+                    return .completed(.spoke)
+
+                case .staySilent:
+                    if Task.isCancelled {
+                        jlog("… attempt cancelled (stopped) before recording silence")
+                        return .cancelled
+                    }
+                    jlog("… nothing useful to add, staying silent")
+                    ActivityLog.shared.record(.stayedSilent)
+                    commitIfWorthKeeping(turnMessages, deltaText: delta.text)
+                    commitTranscript(through: delta.upTo)
+                    return .completed(.silentByModel)
+                }
+            }
+
+            jlog("⚠️ tool loop exhausted — scheduling fresh attempt")
+            return .failed(
+                outcome: .exhausted,
+                failure: BrainFailure(
+                    disposition: .temporary,
+                    detail: "coaching tool loop exhausted"),
+                work: work)
+        }()
+
+        await conversation.finish()
+        if case .completed = result {
+            await compactIfNeeded(using: attempt)
+        }
+        return result
     }
 
     private func commitIfWorthKeeping(_ turn: [ChatMessage], deltaText: String) {
@@ -938,8 +1002,8 @@ public final class CoachDriver: @unchecked Sendable {
             return screen.capture()
         }
         return await withTaskCancellationHandler {
-            // Await the producer itself. A cancelled consumer would return immediately and let the
-            // attempt's teardown race the helper's exit and the transient JPEG's deletion.
+            // Await the producer itself. A cancelled AsyncStream consumer returns immediately and
+            // would let conversation/session drain race the helper's exit and JPEG cleanup.
             await capture.value
         } onCancel: {
             capture.cancel()
@@ -973,7 +1037,7 @@ public final class CoachDriver: @unchecked Sendable {
         }
     }
 
-    private static let summaryInstructions = """
+    public static let summaryInstructions = """
     You condense a live coding-interview coaching session's history into a briefing the coach will \
     rely on for the rest of the session. Keep, in this order: the interview problem statement (all \
     load-bearing details); the user's current approach and how far they've got; every tip the coach \

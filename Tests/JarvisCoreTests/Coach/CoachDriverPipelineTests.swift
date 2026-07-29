@@ -6,6 +6,7 @@ import Testing
 final class ScriptedBrain: BrainClient, @unchecked Sendable {
     private(set) var calls: [[ChatMessage]] = []
     private(set) var toolChoices: [ToolChoice] = []
+    private(set) var preparationCount = 0
     let script: [BrainResponse]
     init(script: [BrainResponse]) { self.script = script }
     func respond(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice) async throws -> BrainResponse {
@@ -13,6 +14,7 @@ final class ScriptedBrain: BrainClient, @unchecked Sendable {
         toolChoices.append(toolChoice)
         return script[min(calls.count - 1, script.count - 1)]
     }
+    func prepare() { preparationCount += 1 }
 }
 
 /// A brain whose per-call script can be a response OR a throw (nil), recording the messages it saw —
@@ -49,9 +51,8 @@ final class UnavailableScreen: ScreenCapturing, @unchecked Sendable {
     func cancelCapture() {}
 }
 
-/// A screen whose `capture()` parks until released, so a test can cancel the turn while the
-/// screenshot is in flight. Cancellation releases it through the same adapter boundary production
-/// uses to terminate `screencapture`. `entered` signals capture has begun.
+/// A screen whose `capture()` parks until released. Cancellation releases it through the same
+/// adapter boundary production uses to terminate `screencapture`.
 final class GatedScreen: ScreenCapturing, @unchecked Sendable {
     let entered = DispatchSemaphore(value: 0)
     let release = DispatchSemaphore(value: 0)
@@ -68,6 +69,90 @@ final class GatedScreen: ScreenCapturing, @unchecked Sendable {
     func cancelCapture() {
         cancelCount += 1
         release.signal()
+    }
+}
+
+/// A cancelled capture acknowledges the stop request but holds its final helper/file cleanup until
+/// the test releases it. This distinguishes requesting cancellation from awaiting cleanup.
+final class HeldCleanupScreen: ScreenCapturing, @unchecked Sendable {
+    let entered = DispatchSemaphore(value: 0)
+    let cancellationRequested = DispatchSemaphore(value: 0)
+    let allowCleanup = DispatchSemaphore(value: 0)
+    private let lock = NSLock()
+    private var storedCaptureCount = 0
+    private var storedCancelCount = 0
+
+    var captureCount: Int {
+        lock.withLock { storedCaptureCount }
+    }
+
+    var cancelCount: Int {
+        lock.withLock { storedCancelCount }
+    }
+
+    func capture() -> ScreenSnapshot? {
+        lock.withLock { storedCaptureCount += 1 }
+        entered.signal()
+        allowCleanup.wait()
+        return nil
+    }
+
+    func cancelCapture() {
+        lock.withLock { storedCancelCount += 1 }
+        cancellationRequested.signal()
+    }
+}
+
+private struct FinishTrackingBrain: BrainClient {
+    let conversation: FinishTrackingConversation
+
+    init(finished: DispatchSemaphore, script: [BrainResponse]) {
+        self.conversation = FinishTrackingConversation(finished: finished, script: script)
+    }
+
+    func respond(
+        messages: [ChatMessage],
+        tools: [ToolDef],
+        toolChoice: ToolChoice
+    ) async throws -> BrainResponse {
+        try await conversation.respond(
+            messages: messages, tools: tools, toolChoice: toolChoice)
+    }
+
+    func makeConversation() async throws -> any BrainConversation {
+        conversation
+    }
+
+    func recordedCallCount() async -> Int {
+        await conversation.callCount
+    }
+}
+
+private actor FinishTrackingConversation: BrainConversation {
+    let finished: DispatchSemaphore
+    let script: [BrainResponse]
+    private(set) var callCount = 0
+
+    init(finished: DispatchSemaphore, script: [BrainResponse]) {
+        self.finished = finished
+        self.script = script
+    }
+
+    func respond(
+        messages: [ChatMessage],
+        tools: [ToolDef],
+        toolChoice: ToolChoice
+    ) async throws -> BrainResponse {
+        _ = messages
+        _ = tools
+        _ = toolChoice
+        let response = script[min(callCount, script.count - 1)]
+        callCount += 1
+        return response
+    }
+
+    func finish() async {
+        finished.signal()
     }
 }
 
@@ -351,18 +436,17 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(!snapshot.rows.joined().contains("test"))
     }
 
-    /// Stop cancelling a turn *while the screenshot is being captured* must cancel the capture
-    /// adapter, wait for it to return, then abort before emitting: no "👁" line, no follow-up
-    /// reasoning, no `speak`. Without both halves the screenshot (and a stale tip) would leak into
-    /// the NEW session once a Start has rotated the dev log mid-turn.
+    /// Stop cancelling a turn while the screenshot is being captured must cancel the capture edge,
+    /// wait for its cleanup, then release the provider conversation without emitting or following up.
     @Test func cancelDuringCaptureAbortsBeforeEmitting() async {
         let clock = ManualClock(now: 0)
-        let brain = ScriptedBrain(script: [
+        let finished = DispatchSemaphore(value: 0)
+        let brain = FinishTrackingBrain(finished: finished, script: [
             .init(toolCalls: [.captureScreen(callId: "c")],
                   rawToolCalls: [RawToolCall(id: "c", name: "capture_screen", argumentsJSON: "{}")]),
             .init(toolCalls: [.speak(callId: "s", lines: ["stale tip from the stopped run"])]),
         ])
-        let screen = GatedScreen()
+        let screen = HeldCleanupScreen()
         let overlay = FakeOverlay()
         let (driver, transcript) = makeDriver(brain: brain, screen: screen, overlay: overlay, clock: clock)
         transcript.append(.init(speaker: .me, text: "here is my code", at: 0))
@@ -371,13 +455,36 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
             DispatchQueue.global().async { screen.entered.wait(); cont.resume() }   // capture in flight
         }
-        task.cancel()                                         // Stop fires mid-capture
+        task.cancel()                                         // Stop requests capture cancellation
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            DispatchQueue.global().async {
+                screen.cancellationRequested.wait()
+                cont.resume()
+            }
+        }
+        let releasedBeforeCleanup = await withCheckedContinuation {
+            (continuation: CheckedContinuation<Bool, Never>) in
+            DispatchQueue.global().async {
+                continuation.resume(
+                    returning: finished.wait(timeout: .now() + 0.1) == .success)
+            }
+        }
+        #expect(!releasedBeforeCleanup)
+
+        screen.allowCleanup.signal()
+        let releasedAfterCaptureCleanup = await withCheckedContinuation {
+            (continuation: CheckedContinuation<Bool, Never>) in
+            DispatchQueue.global().async {
+                continuation.resume(returning: finished.wait(timeout: .now() + 1) == .success)
+            }
+        }
+        #expect(releasedAfterCaptureCleanup)
 
         #expect(await task.value == .cancelled)
         #expect(screen.captureCount == 1)        // captured once...
         #expect(screen.cancelCount == 1)         // ...and cancelled through the capture adapter
         #expect(overlay.rendered.isEmpty)        // ...but never rendered a tip after Stop
-        #expect(brain.calls.count == 1)          // and never looped back to the brain with the image
+        #expect(await brain.recordedCallCount() == 1) // and never looped back with the image
     }
 
     /// A `speak` with an empty `lines` array (the decode fallback, or a model returning []) is passed
@@ -802,9 +909,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         transcript.append(.init(speaker: .me, text: "move to fallback", at: 0))
         #expect(await driver.handleTrigger(.turnEnd) == .silentByModel)
 
-        let refreshedPrimary = ScriptedBrain(script: [
-            .init(toolCalls: [.speak(callId: "wrong-target", lines: ["went backward"])]),
-        ])
+        let refreshedPrimary = ThrowingBrain()
         let refreshedFallback = ScriptedBrain(script: [
             .init(toolCalls: [.speak(callId: "refreshed", lines: ["new key works"])]),
         ])
@@ -815,7 +920,8 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
         transcript.append(.init(speaker: .me, text: "continue on fallback", at: 1))
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
-        #expect(refreshedPrimary.calls.isEmpty)
+        #expect(refreshedPrimary.callCount == 0)
+        #expect(refreshedPrimary.terminationCount == 1)
         #expect(refreshedFallback.calls.count == 1)
     }
 
@@ -835,9 +941,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         transcript.append(.init(speaker: .me, text: "move to fallback", at: 0))
         #expect(await driver.handleTrigger(.turnEnd) == .silentByModel)
 
-        let reconfiguredPrimary = ScriptedBrain(script: [
-            .init(toolCalls: [.speak(callId: "wrong-target", lines: ["went backward"])]),
-        ])
+        let reconfiguredPrimary = ThrowingBrain()
         let reconfiguredFallback = ScriptedBrain(script: [
             .init(toolCalls: [.speak(callId: "effort", lines: ["new effort"])]),
         ])
@@ -848,8 +952,11 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
         transcript.append(.init(speaker: .me, text: "continue on fallback", at: 1))
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
-        #expect(reconfiguredPrimary.calls.isEmpty)
+        #expect(reconfiguredPrimary.callCount == 0)
+        #expect(reconfiguredPrimary.preparationCount == 0)
+        #expect(reconfiguredPrimary.terminationCount == 1)
         #expect(reconfiguredFallback.calls.count == 1)
+        #expect(reconfiguredFallback.preparationCount == 1)
     }
 
     @Test func scopedCredentialRefreshKeepsOtherProviderClients() async {
@@ -1268,9 +1375,47 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(await driver.handleTrigger(.turnEnd) == .brainError)
         #expect(first.callCount == 3)
         #expect(second.callCount == 3)
+        #expect(first.terminationCount == 1)
+        #expect(second.terminationCount == 1)
         #expect(exhausted.targets.map(\.provider) == [.claudeCode])
         #expect(await driver.handleTrigger(.turnEnd) == .brainError)
         #expect(exhausted.targets.count == 1)
+        #expect(first.terminationCount == 1)
+        #expect(second.terminationCount == 1)
+    }
+
+    @Test func advancingTheRouteTerminatesTheExhaustedCoachAndSummarizer() async {
+        let primaryTarget = BrainTarget(provider: .claudeCode, modelID: "claude-sonnet-5")
+        let fallbackTarget = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
+        let permanent = BrainFailure(
+            disposition: .permanent,
+            detail: "provider boundary is permanently unavailable")
+        let primary = ThrowingBrain(error: permanent)
+        let summarizer = ThrowingBrain()
+        let fallback = ScriptedBrain(script: [
+            .init(toolCalls: [.speak(callId: "fallback", lines: ["recovered"])]),
+        ])
+        let transcript = RollingTranscript()
+        let driver = CoachDriver(
+            config: .default,
+            transcript: transcript,
+            route: ConfiguredBrainRoute(targets: [
+                ConfiguredBrainTarget(
+                    target: primaryTarget,
+                    brain: primary,
+                    summarizer: summarizer),
+                ConfiguredBrainTarget(target: fallbackTarget, brain: fallback),
+            ]),
+            screen: FakeScreen(),
+            overlay: FakeOverlay(),
+            clock: ManualClock(),
+            automaticAttemptDelay: { _ in })
+        transcript.append(.init(speaker: .me, text: "advance cleanly", at: 0))
+
+        #expect(await driver.handleTrigger(.turnEnd) == .spoke)
+        #expect(primary.terminationCount == 1)
+        #expect(summarizer.terminationCount == 1)
+        #expect(fallback.calls.count == 1)
     }
 
     @Test func settingsRevisionDuringFinalFailureKeepsPendingWorkAlive() async {
@@ -1999,7 +2144,11 @@ final class ThrowingBrain: BrainClient, @unchecked Sendable {
     private let lock = NSLock()
     private let error: Error
     private var calls = 0
+    private var preparations = 0
+    private var terminations = 0
     var callCount: Int { lock.withLock { calls } }
+    var preparationCount: Int { lock.withLock { preparations } }
+    var terminationCount: Int { lock.withLock { terminations } }
 
     init(error: Error = NSError(
         domain: "test", code: 401,
@@ -2010,6 +2159,14 @@ final class ThrowingBrain: BrainClient, @unchecked Sendable {
     func respond(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice) async throws -> BrainResponse {
         lock.withLock { calls += 1 }
         throw error
+    }
+
+    func prepare() {
+        lock.withLock { preparations += 1 }
+    }
+
+    func terminate() {
+        lock.withLock { terminations += 1 }
     }
 }
 
