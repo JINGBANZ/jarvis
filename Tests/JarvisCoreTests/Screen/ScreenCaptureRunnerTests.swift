@@ -144,6 +144,112 @@ import Testing
         #expect(kill(pid, 0) == -1)
     }
 
+    /// Regression: a cancellation that loses the race with the helper's exit must be answered by the
+    /// capture it was issued against, never held over. `Command.cancel()` used to report "already
+    /// finished" as "still pending", so a request landing in the window between the helper exiting
+    /// and `capture(arguments:)` deregistering — the transient JPEG's read and deletion sit in it —
+    /// silently cancelled the *next* screenshot instead.
+    @Test func cancellationLosingTheRaceWithTheHelperCancelsOnlyItsOwnCapture() async throws {
+        let directory = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let exitedFile = directory.appendingPathComponent("exited")
+        // A payload big enough that reading and deleting it keeps `capture(arguments:)` busy well
+        // after the helper is gone, so the request below lands in that window rather than after the
+        // call has already returned.
+        let executable = try makeExecutable(
+            in: directory,
+            script: """
+                #!/bin/sh
+                for output in "$@"; do :; done
+                dd if=/dev/zero of="$output" bs=1048576 count=64 2>/dev/null
+                printf 'exited\\n' > '\(shellQuoted(exitedFile.path))'
+                """)
+        let runner = ScreenCaptureRunner(
+            captureDirectory: directory,
+            executable: executable)
+
+        let capture = Task.detached { runner.capture(arguments: []) }
+        try await waitForFile(exitedFile, pollNanoseconds: 500_000)
+        // Repeat across the window: with no pending-request latch, a request that arrives once the
+        // call has returned is a no-op, so over-asking cannot itself poison the runner.
+        for _ in 0..<200 {
+            runner.cancelCapture()
+            try await Task.sleep(nanoseconds: 500_000)
+        }
+        switch await capture.value {
+        case .cancelled:
+            break
+        case .captured, .failed, .cleanupFailed:
+            Issue.record("expected the in-flight capture to answer the cancellation itself")
+        }
+
+        // The request belonged to that capture. An unrelated later one must still shoot.
+        switch runner.capture(arguments: []) {
+        case .captured:
+            break
+        case .failed, .cleanupFailed, .cancelled:
+            Issue.record("a later capture must not inherit a spent cancellation request")
+        }
+        #expect(try transientJPEGs(in: directory).isEmpty)
+    }
+
+    /// Regression: `cancelCapture()` with nothing in flight must be a no-op. `CoachDriver`'s
+    /// `onCancel` fires whenever a cancelled attempt is sitting in `captureScreen`, including when
+    /// its detached producer short-circuits and never calls `capture()` — that used to arm a request
+    /// no one would consume, so the next attempt's first screenshot silently returned `.cancelled`.
+    @Test func cancellingWithNothingInFlightDoesNotCancelALaterCapture() throws {
+        let directory = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let executable = try makeExecutable(
+            in: directory,
+            script: """
+                #!/bin/sh
+                for output in "$@"; do :; done
+                printf 'jpeg' > "$output"
+                """)
+        let runner = ScreenCaptureRunner(
+            captureDirectory: directory,
+            executable: executable)
+
+        runner.cancelCapture()
+
+        switch runner.capture(arguments: []) {
+        case .captured(let data):
+            #expect(data == Data("jpeg".utf8))
+        case .failed, .cleanupFailed, .cancelled:
+            Issue.record("a capture that was never cancelled must not report `.cancelled`")
+        }
+        #expect(try transientJPEGs(in: directory).isEmpty)
+    }
+
+    /// The helper must create the transient JPEG owner-only from its first write, not only once
+    /// cleanup chmods it — a crash mid-capture must not leave a readable screenshot behind.
+    @Test func transientJPEGIsOwnerOnlyWhileTheHelperIsStillRunning() async throws {
+        let directory = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let executable = try makeExecutable(
+            in: directory,
+            script: """
+                #!/bin/sh
+                for output in "$@"; do :; done
+                printf 'jpeg' > "$output"
+                while :; do sleep 1; done
+                """)
+        let runner = ScreenCaptureRunner(
+            captureDirectory: directory,
+            executable: executable)
+        let capture = Task.detached { runner.capture(arguments: []) }
+        try await waitForTransientJPEG(in: directory)
+
+        let jpeg = try #require(try transientJPEGs(in: directory).first)
+        let mode = try #require(
+            FileManager.default.attributesOfItem(atPath: jpeg.path)[.posixPermissions] as? NSNumber)
+        #expect(mode.int16Value == 0o600)
+
+        runner.cancelCapture()
+        _ = await capture.value
+    }
+
     private func makeDirectory() throws -> URL {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("ScreenCaptureRunnerTests-\(UUID().uuidString)")
@@ -162,10 +268,10 @@ import Testing
         return executable
     }
 
-    private func waitForFile(_ file: URL) async throws {
+    private func waitForFile(_ file: URL, pollNanoseconds: UInt64 = 20_000_000) async throws {
         let deadline = Date().addingTimeInterval(2)
         while !FileManager.default.fileExists(atPath: file.path), Date() < deadline {
-            try await Task.sleep(nanoseconds: 20_000_000)
+            try await Task.sleep(nanoseconds: pollNanoseconds)
         }
         _ = try #require(FileManager.default.fileExists(atPath: file.path))
     }

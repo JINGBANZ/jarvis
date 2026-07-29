@@ -7,9 +7,8 @@ import Glibc
 
 /// Owns one cancellable `screencapture` helper and its transient session-local JPEG.
 ///
-/// `@unchecked Sendable` is justified because `lock` guards `activeCommand`,
-/// `cancellationRequested`, and `cleanupFailed`; each command separately guards its process
-/// lifecycle.
+/// `@unchecked Sendable` is justified because `lock` guards `activeCommand` and `cleanupFailed`;
+/// each command separately guards its process lifecycle.
 public final class ScreenCaptureRunner: @unchecked Sendable {
     public enum Outcome: Sendable {
         case captured(Data)
@@ -19,6 +18,8 @@ public final class ScreenCaptureRunner: @unchecked Sendable {
         case cancelled
     }
 
+    /// `@unchecked Sendable` is justified because `lock` guards `started`, `finished`, `cancelled`,
+    /// and `identity` — the whole mutable process lifecycle this command owns.
     private final class Command: @unchecked Sendable {
         enum Result {
             case exited(Int32)
@@ -37,8 +38,20 @@ public final class ScreenCaptureRunner: @unchecked Sendable {
 
         init(executable: URL, arguments: [String], output: URL) {
             let process = Process()
-            process.executableURL = executable
-            process.arguments = arguments + [output.path]
+            // Launch through `sh -c 'umask 077; exec "$0" "$@"'` so the JPEG is owner-only from its
+            // first write rather than only from cleanup — a crash mid-capture must not leave a
+            // screenshot readable by anyone but the owner. Pre-creating the path `0600` does not
+            // work: `screencapture` unlinks and recreates its output file, so the new inode takes
+            // the umask (measured on macOS 26.5). The umask has to be the child's, and setting it
+            // process-wide would leak into every other thread for the helper's lifetime.
+            // Arguments ride as argv via "$0"/"$@" — never interpolated into the script text — so
+            // no path can be reinterpreted as shell syntax, and `exec` keeps the pid the
+            // cancellation identity checks below rely on.
+            process.executableURL = URL(fileURLWithPath: "/bin/sh")
+            process.arguments =
+                ["-c", "umask 077; exec \"$0\" \"$@\"", executable.path]
+                + arguments
+                + [output.path]
             self.process = process
         }
 
@@ -70,18 +83,24 @@ public final class ScreenCaptureRunner: @unchecked Sendable {
             return wasCancelled ? .cancelled : .exited(status)
         }
 
-        /// Returns true when this command consumed the request. A request that loses the race with
-        /// command completion remains pending on the runner so a fallback capture cannot start.
-        func cancel() -> Bool {
+        /// True once cancellation has been requested, whether or not there was still a helper to
+        /// signal. The `capture(arguments:)` call that registered this command reads it on the way
+        /// out, so a request that loses the race with the helper's exit is still reported by the
+        /// capture it belongs to.
+        var wasCancelled: Bool {
             lock.lock()
-            guard !finished else {
-                lock.unlock()
-                return false
-            }
+            defer { lock.unlock() }
+            return cancelled
+        }
+
+        func cancel() {
+            lock.lock()
             cancelled = true
-            guard started else {
+            // Nothing to signal: the helper either has not launched yet — `run()` checks
+            // `cancelled` before spawning — or has already exited.
+            guard started, !finished else {
                 lock.unlock()
-                return true
+                return
             }
             let processIdentifier = process.processIdentifier
             #if canImport(Darwin)
@@ -111,7 +130,6 @@ public final class ScreenCaptureRunner: @unchecked Sendable {
                 self.forceKillIfNeeded(processIdentifier: processIdentifier)
                 #endif
             }
-            return true
         }
 
         #if canImport(Darwin)
@@ -176,7 +194,6 @@ public final class ScreenCaptureRunner: @unchecked Sendable {
     private let executable: URL
     private let lock = NSLock()
     private var activeCommand: Command?
-    private var cancellationRequested = false
     private var cleanupFailed = false
 
     public init(captureDirectory: URL) {
@@ -203,11 +220,6 @@ public final class ScreenCaptureRunner: @unchecked Sendable {
             lock.unlock()
             return .failed
         }
-        guard !cancellationRequested else {
-            cancellationRequested = false
-            lock.unlock()
-            return .cancelled
-        }
         activeCommand = command
         lock.unlock()
 
@@ -227,27 +239,32 @@ public final class ScreenCaptureRunner: @unchecked Sendable {
 
         let removedOutput = removeTransientOutput(output)
         lock.lock()
+        // Deregister and read the cancellation flag under one lock hold, so a concurrent
+        // `cancelCapture()` either lands first — and is reported here — or finds no active command
+        // and is a no-op. It can never survive as a request against some later capture.
         if activeCommand === command {
             activeCommand = nil
         }
+        let wasCancelled = command.wasCancelled
         if !removedOutput {
             // Keep this session-local runner poisoned. Even if permissions later change, no future
             // caller may create another screen file while an earlier one remains unaccounted for.
             cleanupFailed = true
         }
         lock.unlock()
-        return removedOutput ? outcome : .cleanupFailed
+        guard removedOutput else { return .cleanupFailed }
+        // A request that arrived after the helper had already exited still belongs to this capture:
+        // reporting it here is what stops a caller's fallback shot from starting after a Stop.
+        return wasCancelled ? .cancelled : outcome
     }
 
-    /// Requests cancellation of the active helper. If cancellation wins the race before
-    /// `capture(arguments:)` registers it, the next registration consumes the request and exits.
+    /// Requests cancellation of the capture that is currently registered. There is deliberately no
+    /// pending-request latch: a request can only ever be consumed by the capture it was issued
+    /// against, so a request that arrives with nothing in flight is a no-op rather than something a
+    /// later, unrelated capture would silently answer with `.cancelled`.
     public func cancelCapture() {
         lock.lock()
-        if let activeCommand {
-            cancellationRequested = !activeCommand.cancel()
-        } else {
-            cancellationRequested = true
-        }
+        activeCommand?.cancel()
         lock.unlock()
     }
 
