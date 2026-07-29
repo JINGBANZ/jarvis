@@ -7,6 +7,7 @@ import Testing
 private final class FailingScreen: ScreenCapturing, @unchecked Sendable {
     private(set) var captureCount = 0
     func capture() -> ScreenSnapshot? { captureCount += 1; return nil }
+    func cancelCapture() {}
 }
 
 /// The on-demand hint shortcut (`.manualHint`): the driver itself captures the screenshot and
@@ -102,11 +103,11 @@ private final class FailingScreen: ScreenCapturing, @unchecked Sendable {
         #expect(overlay.rendered == [["Talk me through your current approach."]])
     }
 
-    /// Stop firing *while the manual-hint screenshot is in flight* must abort before emitting. The
-    /// detached capture isn't cancellable, so without the post-capture guard the screenshot — and a
-    /// stale tip — would leak into whatever session is current after a Stop→Start. Unlike the
-    /// `capture_screen` tool branch (which has already made one brain call), the manual-hint guard
-    /// fires BEFORE any `brain.respond`, so no request is sent at all. Reuses `GatedScreen`.
+    /// Stop firing *while the manual-hint screenshot is in flight* cancels the capture adapter and
+    /// aborts before emitting, so neither the screenshot nor a stale tip leaks into whatever session
+    /// is current after a Stop→Start. Unlike the `capture_screen` tool branch (which has already
+    /// made one brain call), the manual-hint guard fires BEFORE any `brain.respond`, so no request
+    /// is sent at all. Reuses `GatedScreen`.
     @Test func manualHintCancelDuringCaptureAbortsBeforeAnyBrainCall() async {
         let clock = ManualClock(now: 0)
         let brain = ScriptedBrain(script: [
@@ -122,10 +123,10 @@ private final class FailingScreen: ScreenCapturing, @unchecked Sendable {
             DispatchQueue.global().async { screen.entered.wait(); cont.resume() }   // capture in flight
         }
         task.cancel()                                         // Stop fires mid-capture
-        screen.release.signal()                               // let the screenshot finish
 
         #expect(await task.value == .cancelled)
         #expect(screen.captureCount == 1)        // captured once...
+        #expect(screen.cancelCount == 1)         // ...and cancelled through the capture adapter
         #expect(overlay.rendered.isEmpty)        // ...but never rendered a tip after Stop
         #expect(brain.calls.isEmpty)             // and the guard fires before any brain.respond call
     }

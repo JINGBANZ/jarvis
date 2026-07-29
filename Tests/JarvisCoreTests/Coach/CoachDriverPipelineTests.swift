@@ -41,19 +41,22 @@ final class FakeScreen: ScreenCapturing, @unchecked Sendable {
         captureCount += 1
         return ScreenSnapshot(imageBase64: payload, recognizedText: recognizedText)
     }
+    func cancelCapture() {}
 }
 
 final class UnavailableScreen: ScreenCapturing, @unchecked Sendable {
     func capture() -> ScreenSnapshot? { nil }
+    func cancelCapture() {}
 }
 
-/// A screen whose `capture()` parks until released, so a test can cancel the turn *while the
-/// (detached, un-cancellable) screenshot is in flight* — the exact window the cancellation guard
-/// closes. `entered` signals capture has begun; `release` lets it return.
+/// A screen whose `capture()` parks until released, so a test can cancel the turn while the
+/// screenshot is in flight. Cancellation releases it through the same adapter boundary production
+/// uses to terminate `screencapture`. `entered` signals capture has begun.
 final class GatedScreen: ScreenCapturing, @unchecked Sendable {
     let entered = DispatchSemaphore(value: 0)
     let release = DispatchSemaphore(value: 0)
     private(set) var captureCount = 0
+    private(set) var cancelCount = 0
     let payload: String
     init(payload: String = "ZmFrZS1qcGVn") { self.payload = payload }
     func capture() -> ScreenSnapshot? {
@@ -61,6 +64,10 @@ final class GatedScreen: ScreenCapturing, @unchecked Sendable {
         entered.signal()
         release.wait()
         return ScreenSnapshot(imageBase64: payload)
+    }
+    func cancelCapture() {
+        cancelCount += 1
+        release.signal()
     }
 }
 
@@ -344,10 +351,10 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(!snapshot.rows.joined().contains("test"))
     }
 
-    /// Stop cancelling a turn *while the screenshot is being captured* must abort before emitting:
-    /// no "👁" line, no follow-up reasoning, no `speak`. The detached capture doesn't inherit
-    /// cancellation, so without the post-capture guard the screenshot (and a stale tip) would leak —
-    /// into the NEW session once a Start has rotated the dev log mid-turn.
+    /// Stop cancelling a turn *while the screenshot is being captured* must cancel the capture
+    /// adapter, wait for it to return, then abort before emitting: no "👁" line, no follow-up
+    /// reasoning, no `speak`. Without both halves the screenshot (and a stale tip) would leak into
+    /// the NEW session once a Start has rotated the dev log mid-turn.
     @Test func cancelDuringCaptureAbortsBeforeEmitting() async {
         let clock = ManualClock(now: 0)
         let brain = ScriptedBrain(script: [
@@ -365,10 +372,10 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             DispatchQueue.global().async { screen.entered.wait(); cont.resume() }   // capture in flight
         }
         task.cancel()                                         // Stop fires mid-capture
-        screen.release.signal()                               // let the screenshot finish
 
         #expect(await task.value == .cancelled)
         #expect(screen.captureCount == 1)        // captured once...
+        #expect(screen.cancelCount == 1)         // ...and cancelled through the capture adapter
         #expect(overlay.rendered.isEmpty)        // ...but never rendered a tip after Stop
         #expect(brain.calls.count == 1)          // and never looped back to the brain with the image
     }
