@@ -285,7 +285,7 @@ private final class ClaudeCodeQuery: @unchecked Sendable {
                 throw Self.error("Claude response timed out")
             }
             let line = try await process.nextLine(timeout: remaining)
-            guard let payload = try JSONSerialization.jsonObject(
+            guard let payload = try? JSONSerialization.jsonObject(
                 with: Data(line.text.utf8)) as? [String: Any] else {
                 continue
             }

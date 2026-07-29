@@ -283,6 +283,57 @@ import Testing
         #expect(processState(child) != "running")
     }
 
+    @Test func escalationReachesAHelperForkedDuringTermination() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AgentRuntimeProcessTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let childFile = directory.appendingPathComponent("child")
+        let ignoresTermination = directory.appendingPathComponent("ignores-termination")
+        try Data("""
+            #!/bin/sh
+            trap '' TERM
+            exec /bin/sleep 30
+            """.utf8).write(to: ignoresTermination)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: ignoresTermination.path)
+        let process = try AgentRuntimeProcess(
+            executable: URL(fileURLWithPath: "/bin/sh"),
+            arguments: [
+                "-c",
+                """
+                (
+                  trap '' TERM
+                  sleep 0.2
+                  \(ignoresTermination.path) &
+                  printf '%s\\n' "$!" > '\(childFile.path)'
+                  wait
+                ) &
+                printf 'ready\\n'
+                wait
+                """,
+            ],
+            workingDirectory: directory)
+        _ = try await process.nextLine(timeout: 2)
+
+        process.terminateNow()
+        let childDeadline = Date().addingTimeInterval(3)
+        while !FileManager.default.fileExists(atPath: childFile.path),
+              Date() < childDeadline {
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        let child = try #require(pid_t(
+            String(contentsOf: childFile, encoding: .utf8)
+                .trimmingCharacters(in: .whitespacesAndNewlines)))
+
+        let terminationDeadline = Date().addingTimeInterval(4)
+        while processState(child) == "running", Date() < terminationDeadline {
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        #expect(processState(child) != "running")
+    }
+
     private func processState(_ processIdentifier: pid_t) -> String {
         let process = Process()
         let output = Pipe()

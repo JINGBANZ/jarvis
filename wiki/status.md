@@ -26,8 +26,7 @@ that speech captured during the outage returns after recovery. The brain can als
 locally installed Claude Code or Codex CLI on the user's subscription; Settings → Brain auto-detects
 both, reports Claude's current sign-in state from its bounded status command, and keeps the
 OpenAI API-key path available. Codex also remains available to the explicit agentic session
-evaluator. The ordered provider-route contract
-is now settled: one primary
+evaluator. The ordered provider route uses one primary
 plus a user-editable ordered fallback list, one target per coaching attempt, no failed-request replay
 inside the attempt, automatic pending-work attempts with the newest finalized transcript, the
 code-owned temporary/unknown failure threshold in
@@ -38,9 +37,8 @@ typed Activity event. That route is implemented as immutable provider/model valu
 Foundation-only session cursor, a single-flight fresh-attempt scheduler, and the ordered Settings
 Provider editor with one uninterrupted Primary/fallback route, a separate right-aligned Reasoning
 effort row, and an explicit Transcription provider/key group. A first-open install remains
-unconfigured until Primary is chosen; the old immediate request retry, scalar fallback,
-same-attempt failover, and primary recovery
-probing are removed. Local coaching no longer launches one process per model turn. Claude Code keeps
+unconfigured until Primary is chosen. Local coaching uses persistent runtimes rather than launching
+one process per model turn. Claude Code keeps
 one initialized safe-mode query ready for the active target and leases it across an attempt's
 complete tool loop while preparing its replacement. It disables built-in tools, settings sources,
 session persistence, and MCP servers while preserving the user's OAuth session. Its runtime miss or
@@ -58,8 +56,8 @@ budget. Activity persists stable event kinds and flushes at Stop. The sole evalu
 receives the complete session directory and reads the full, unfiltered `jarvis-activity.jsonl`
 whenever it needs the user-visible sequence, alongside raw brain traffic, screenshots, and live
 source code. Activity's one-click **Evaluate** action launches that evaluator and opens its saved
-report; the standalone script calls the same Core implementation. The same runtime ghost-mode rule
-now covers microphone transcription, audio-route loss, in-place CLI preflight, and Activity-audit
+report; the standalone script calls the same Core implementation. The runtime ghost-mode rule
+covers microphone transcription, audio-route loss, in-place CLI preflight, and Activity-audit
 completion: no runtime error autonomously activates Jarvis, opens a browser, or presents a modal;
 fixed notices remain available in Activity. The gate statically rejects unreviewed presentation APIs.
 

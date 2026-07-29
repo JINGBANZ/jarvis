@@ -22,6 +22,75 @@ import Testing
         try await assertCancellingPreparationStopsProcess(provider: .codexCLI)
     }
 
+    @Test func claudeInitializationSkipsMalformedOutput() async throws {
+        let directory = try makeWorkDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let executable = try makeExecutable(
+            in: directory,
+            named: "fake-claude",
+            script: """
+                #!/bin/sh
+                while IFS= read -r line; do
+                  case "$line" in
+                    *'"type":"control_request"'*)
+                      request_id=$(printf '%s' "$line" | sed -n 's/.*"request_id":"\\([^"]*\\)".*/\\1/p')
+                      printf 'not-json\\n'
+                      printf '{"type":"control_response","response":{"request_id":"%s","subtype":"success"}}\\n' "$request_id"
+                      ;;
+                  esac
+                done
+                """)
+        let runtime = CLIBrainRuntime(provider: .claudeCode)
+        let client = makeClient(
+            provider: .claudeCode,
+            executable: executable,
+            directory: directory,
+            runtime: runtime,
+            prewarm: false)
+
+        let conversation = try await client.makeConversation()
+        await conversation.finish()
+        runtime.terminateNow()
+    }
+
+    @Test func codexInitializationSkipsMalformedOutput() async throws {
+        let directory = try makeWorkDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let executable = try makeExecutable(
+            in: directory,
+            named: "fake-codex",
+            script: """
+                #!/bin/sh
+                while IFS= read -r line; do
+                  request_id=$(printf '%s' "$line" | sed -n 's/.*"id":\\([0-9][0-9]*\\).*/\\1/p')
+                  method=$(printf '%s' "$line" | sed -n 's/.*"method":"\\([^"]*\\)".*/\\1/p' | tr -d '\\\\')
+                  case "$method" in
+                    initialize)
+                      printf 'not-json\\n'
+                      printf '{"id":%s,"result":{}}\\n' "$request_id"
+                      ;;
+                    thread/start)
+                      printf '{"id":%s,"result":{"thread":{"id":"thread-1","ephemeral":true,"path":null},"instructionSources":[]}}\\n' "$request_id"
+                      ;;
+                    thread/unsubscribe)
+                      printf '{"id":%s,"result":{}}\\n' "$request_id"
+                      ;;
+                  esac
+                done
+                """)
+        let runtime = makeRuntime(provider: .codexCLI, directory: directory)
+        let client = makeClient(
+            provider: .codexCLI,
+            executable: executable,
+            directory: directory,
+            runtime: runtime,
+            prewarm: false)
+
+        let conversation = try await client.makeConversation()
+        await conversation.finish()
+        runtime.terminateNow()
+    }
+
     @Test func claudeLaunchUsesOAuthCompatibleCustomizationAndToolIsolation() async throws {
         let directory = try makeWorkDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }

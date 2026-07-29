@@ -336,8 +336,9 @@ provider-route policy, and traffic recording are unchanged — only the transpor
 - **One conversation lease per coaching attempt.** `BrainClient.makeConversation()` gives
   `CoachDriver` a provider-native continuation boundary. The first model turn receives the complete
   client-managed context; later `capture_screen` turns send only their new tool result and image over
-  the same lease. The lease ends before the attempt commits or memory compaction starts. A malformed
-  reply, runtime crash, timeout, or cancellation ends the lease and fails that provider attempt.
+  the same lease. A complete terminal action commits while the lease is still owned; the lease is
+  then explicitly finished before memory compaction starts. A malformed reply, runtime crash,
+  timeout, or cancellation ends the lease and fails that provider attempt.
   There is deliberately **no per-turn Claude process or `codex exec` coaching fallback**: the
   existing [ordered provider route](#ordered-provider-route) decides what a later fresh attempt may
   do.
@@ -354,9 +355,10 @@ provider-route policy, and traffic recording are unchanged — only the transpor
   newline channel, bounded buffering, process-group creation, and launch-proven PID/start-time
   membership. Its exit monitor observes the exact leader without reaping it, snapshots descendant
   identities while the original group is still provable, and only then reaps the leader. Teardown
-  therefore still reaches a helper after an immediate leader exit, signals only current
-  PID/start-time identities for both termination and escalation, and never signals a bare
-  process-group number that could have been recycled.
+  sends graceful termination to the whole group only while a launch-observed identity proves
+  ownership, then refreshes membership before escalation while that proof remains valid. This
+  reaches helpers forked during teardown; escalation otherwise stays limited to current
+  launch-observed PID/start-time identities rather than trusting a potentially recycled group.
   `AgentRuntimeLifetime` is only the lock-guarded synchronous ownership seam needed
   because actor `deinit` cannot await. The stable Swift Subprocess API's execution handle is scoped
   to one async closure and its teardown stops tracking a group when the leader is gone, so adopting

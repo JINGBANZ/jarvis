@@ -262,23 +262,40 @@ final class AgentRuntimeProcess: @unchecked Sendable {
             }
         }
         let terminationTargets = Array(knownProcessIdentities.values)
+        let signaledProcessGroup: Bool
         #else
         let target = processIdentifier
         #endif
         isTerminating = true
         condition.broadcast()
+        #if canImport(Darwin)
+        // The ownership proof and group signal stay under the same lock, so the exit monitor cannot
+        // reap the launch leader and make its PGID reusable between those operations. Signaling the
+        // verified group closes the enumeration-to-SIGTERM race for a helper forked by the CLI.
+        signaledProcessGroup = (provesOriginalGroup || provesUnreapedLeaderExit)
+            && killpg(processGroup, SIGTERM) == 0
+        #endif
         condition.unlock()
 
         #if canImport(Darwin)
-        // Never signal the bare group number: after the original group disappears, macOS may reuse
-        // its leader PID as an unrelated PGID. Signal only launch-observed identities that are still
-        // the same processes in the original group.
-        for identity in terminationTargets
-        where Self.isCurrent(identity, inGroup: processGroup) {
-            kill(identity.processIdentifier, SIGTERM)
+        if !signaledProcessGroup {
+            for identity in terminationTargets
+            where Self.isCurrent(identity, inGroup: processGroup) {
+                kill(identity.processIdentifier, SIGTERM)
+            }
         }
         DispatchQueue.global().asyncAfter(deadline: .now() + 2) {
-            for identity in terminationTargets
+            let currentIdentities = Self.processIdentities(inGroup: processGroup)
+            let stillProvesOriginalGroup = currentIdentities.contains { identity in
+                terminationTargets.contains(identity)
+            }
+            // A still-current launch identity lets escalation adopt helpers forked during graceful
+            // teardown. Without that proof, retain the frozen launch-observed set so a recycled PGID
+            // can never widen the targets.
+            let escalationTargets = stillProvesOriginalGroup
+                ? currentIdentities
+                : terminationTargets
+            for identity in escalationTargets
             where Self.isCurrent(identity, inGroup: processGroup) {
                 kill(identity.processIdentifier, SIGKILL)
             }

@@ -145,24 +145,20 @@ transcribed "heard:" lines so a session can be reviewed afterward — plus the *
 base64 screenshots redacted to stubs since the pixels are already the shot files) and, once the user
 runs the agentic session evaluator from Activity or `scripts/eval-session.sh`, its `eval-report.md` and the browsable
 `eval-report.html` rendered from it. The evaluator receives this complete owner-only session
-directory; `jarvis-activity.jsonl` is not copied or prefiltered into another prompt artifact. All of
-it is written on **every**
-launch — the activity log was previously gated to a
-`--dev` flag (now removed), an explicit decision to make session review a default affordance. The
-hardening that made the old dev affordance safe still applies in full: the files go to a per-session
+directory; `jarvis-activity.jsonl` is not copied or prefiltered into another prompt artifact. Every
+launch writes this record as the default session-review affordance. The files go to a per-session
 directory in the **gitignored, workspace-local `.jarvis/`** (passed to the `open`-launched app via
 `--log-dir` by `build-app.sh --run`) — or, when the bundle is opened directly with no `--log-dir`, a
 per-user **`~/Library/Application Support/Jarvis/sessions/`** alongside the API key — at **`0600`**
 owner-only permissions inside a **`0700`** dir, **fresh each session**, and **never `/tmp`**
-(world-readable, shared across user accounts). Because
-it now records on every launch, growth is bounded: each Start prunes to the **10 most recent** session
+(world-readable, shared across user accounts). Growth is bounded: each Start prunes to the **10 most recent** session
 dirs, and the viewer's clear-history removes all but the current. So the persisted record is small, owner-only, and
 readable by this user account and by nothing else. See [build-and-run.md](./build-and-run.md).
 
 ## Behavioral Restraint (anti-annoyance = anti-misbehavior)
 
-- **Model-governed restraint.** There is **no cooldown, rate cap, or mute** in code (the
-  `Guardrails` type was removed). Every utterance reaches the brain, which decides whether it has
+- **Model-governed restraint.** There is **no cooldown, rate cap, or mute** in code. Every utterance
+  reaches the brain, which decides whether it has
   anything worth saying — that restraint lives in the system prompt. This keeps conversation natural
   (a follow-up question is never stranded behind a timer). See [architecture.md §5](./architecture.md#5-safety-model).
 - **Manual Start/Stop** in the menu bar — the only hard gate. Coaching never runs until started, and

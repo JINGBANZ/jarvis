@@ -556,7 +556,7 @@ private final class CodexAppServer: @unchecked Sendable {
                 timeout: max(0.01, deadline.timeIntervalSinceNow))
             while true {
                 let line = try await server.nextLine(deadline: deadline)
-                guard let payload = try JSONSerialization.jsonObject(
+                guard let payload = try? JSONSerialization.jsonObject(
                     with: Data(line.text.utf8)) as? [String: Any] else {
                     continue
                 }
