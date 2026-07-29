@@ -64,6 +64,7 @@ public enum AgenticEvaluation {
     /// agent knows where its inputs live). Throws `EvaluationError.noTraffic` when there is nothing
     /// to audit.
     public static func prepare(sessionDir: URL) throws -> String {
+        try CodexRuntimeHome.removeLegacyHomes(from: sessionDir)
         let trafficURL = sessionDir.appendingPathComponent(BrainTrafficLog.filename)
         let jsonl = (try? String(contentsOf: trafficURL, encoding: .utf8)) ?? ""
         let transcript = EvaluationTranscript.render(jsonl: jsonl)
@@ -167,15 +168,16 @@ public enum AgenticEvaluation {
         `cache_write_tokens`, and `output_tokens`; a truncated run shows `status:"incomplete"`. No \
         per-call dollar cost. OpenAI `input_tokens` includes cached input, so mixed-provider token \
         totals are kept separate.
-          - Local CLI (`claude -p`): `response.cli` with `total_cost_usd`, a call-level `usage` \
+          - Claude Code warm query: `response.cli` with `total_cost_usd`, a call-level `usage` \
         carrying Anthropic's `cache_creation_input_tokens` / `cache_read_input_tokens` split, and a \
         `modelUsage` map (per-model usage + cost, including internal sidecar models like a haiku \
-        pass). Anthropic caching is BLOCK-level: a fresh, non-persisted `claude -p` turn sends the \
-        whole conversation as one block, so it can only cache-hit the reused `--system-prompt` — a \
-        small, flat cross-turn cache-read is that serialization (verify against \
-        `Sources/JarvisCore/Brain/CLIBrainClient+Invocation.swift`), NOT history rewriting.
-          - Codex CLI: the recorded response currently has the reply and exit status but no token, \
-        cache, or cost usage. Those cells must stay unavailable; never interpret them as zero.
+        pass). One coaching attempt leases one preinitialized query; a capture follow-up sends only \
+        incremental input over that same query. Verify the turn boundary in \
+        `Sources/JarvisCore/Brain/Adapters/LocalAgent/ClaudeCode/ClaudeCodeRuntime.swift`.
+          - Codex app-server: `response.runtime` carries completed-turn metadata but currently no \
+        token, cache, or cost usage. Those cells must stay unavailable; never interpret them as zero. \
+        One coaching attempt owns one fresh ephemeral thread and sends capture follow-ups \
+        incrementally; verify `CodexAppServerRuntime.swift`.
           - `shot-N.jpg` — the screenshots the model actually saw (base64 was redacted from the traffic).
           - a prior `\(reportFilename)`, if this session was audited before.
 

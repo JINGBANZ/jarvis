@@ -157,6 +157,7 @@ enum EvaluationTranscript {
         // (usage/duration for claude) instead of a Responses `output` array.
         if let reply = dict["reply"] as? String, !reply.isEmpty { lines.append("  → text: \(reply)") }
         if let cli = dict["cli"] { lines.append("  cli: \(compact(cli))") }
+        if let runtime = dict["runtime"] { lines.append("  runtime: \(compact(runtime))") }
         if let stderr = dict["stderr"] as? String, !stderr.isEmpty { lines.append("  stderr: \(stderr)") }
         // Usage is the quantitative core of the audit: `input_tokens_details.cached_tokens` vs
         // `input_tokens` is the prompt-cache hit rate, per call.

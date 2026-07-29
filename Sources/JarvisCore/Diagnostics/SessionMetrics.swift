@@ -14,12 +14,12 @@ import Foundation
 ///   - **OpenAI Responses** — `response.usage`: `input_tokens`, `input_tokens_details.cached_tokens`
 ///     (the automatic prefix-cache hit), optional `cache_write_tokens`, and `output_tokens`
 ///     (reasoning tokens included). No per-call dollar cost is recorded, so cost renders as "—".
-///   - **Local CLI** (`claude -p`, `CLIBrainClient`) — `response.cli`: `total_cost_usd`, a call-level
+///   - **Claude Code warm query** (`CLIBrainClient`) — `response.cli`: `total_cost_usd`, a call-level
 ///     `usage` with Anthropic's `cache_creation_input_tokens` / `cache_read_input_tokens` split, and
 ///     a `modelUsage` map that breaks usage + cost out per model — including the CLI's own internal
 ///     sidecar models (e.g. its haiku pass), which the call-level `usage` alone would hide.
-///   - **Codex CLI** — the response record has no token, cache, or cost usage, so those values remain
-///     unavailable rather than becoming zero.
+///   - **Codex app-server** — the response record has no token, cache, or cost usage, so those
+///     values remain unavailable rather than becoming zero.
 enum SessionMetrics {
     /// One row of the per-call table. `perModel` attributes this call's usage to the concrete
     /// model(s) that served it (a CLI turn can touch a main model plus a sidecar).

@@ -42,6 +42,16 @@ public extension UserFacingError {
               severity: .warning)
     }
 
+    /// The CLI is usable as an agent, but cannot remove every provider-native tool from Jarvis's
+    /// decision-only coaching request. Refuse Start before any provider process can launch.
+    static func brainCLIToolFreeModeUnavailable(provider: String) -> UserFacingError {
+        .init(
+            title: "\(provider) coaching unavailable",
+            message: "\(provider) doesn't currently expose a tool-free mode required for safe "
+                + "coaching. Choose Claude Code or the OpenAI API in Settings \u{2192} Brain.",
+            severity: .warning)
+    }
+
     /// The selected CLI is installed but its status probe failed or timed out. That is not proof of
     /// being signed out, so this is a degraded notice rather than a Start blocker.
     static func brainCLISignInUnconfirmed(provider: String) -> UserFacingError {

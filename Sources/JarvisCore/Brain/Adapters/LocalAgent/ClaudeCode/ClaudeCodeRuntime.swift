@@ -1,0 +1,309 @@
+import Foundation
+
+/// One-ready-query Claude runtime. A lease is single-use at the coaching-attempt boundary, but the
+/// leased query stays alive for every model turn in that attempt. Taking it immediately starts the
+/// replacement so initialization overlaps remote inference.
+actor ClaudeCodeRuntime: LocalAgentRuntimeBackend {
+    private struct Preparation: Sendable {
+        let id: UUID
+        let task: Task<ClaudeCodeQuery, Error>
+    }
+
+    private let lifetime = AgentRuntimeLifetime()
+    private var configuration: LocalAgentConversationConfiguration?
+    private var ready: ClaudeCodeQuery?
+    private var preparing: Preparation?
+
+    func prepare(for configuration: LocalAgentConversationConfiguration) async throws {
+        guard configuration.provider == .claudeCode else {
+            preconditionFailure("ClaudeCodeRuntime received \(configuration.provider)")
+        }
+        if let existing = self.configuration, existing != configuration {
+            throw Self.error("a Claude warm-query runtime cannot change configuration")
+        }
+        self.configuration = configuration
+        if let ready, ready.isRunning {
+            return
+        }
+        ready = nil
+        startPreparationIfNeeded(configuration)
+        guard let preparation = preparing else {
+            throw Self.error("Claude warm-query preparation was unavailable")
+        }
+        do {
+            let query = try await awaitPreparation(preparation)
+            // Background prewarm and an attempt may await the same task. Only the first resumed
+            // waiter may install it; a stale waiter must not overwrite a leased query/replacement.
+            if preparing?.id == preparation.id {
+                ready = query
+                preparing = nil
+            }
+        } catch {
+            if preparing?.id == preparation.id {
+                preparing = nil
+            }
+            throw error
+        }
+    }
+
+    func openConversation(for configuration: LocalAgentConversationConfiguration)
+        async throws -> any LocalAgentConversation {
+        try await prepare(for: configuration)
+        guard let query = ready else {
+            throw Self.error("Claude warm query was not ready")
+        }
+        ready = nil
+        startPreparationIfNeeded(configuration)
+        return ClaudeCodeConversation(query: query)
+    }
+
+    nonisolated func terminateNow() {
+        lifetime.terminateAll()
+    }
+
+    private func startPreparationIfNeeded(_ configuration: LocalAgentConversationConfiguration) {
+        guard preparing == nil, ready == nil else { return }
+        let lifetime = self.lifetime
+        preparing = Preparation(
+            id: UUID(),
+            task: Task.detached(priority: .utility) {
+                try await ClaudeCodeQuery.start(
+                    configuration: configuration,
+                    lifetime: lifetime)
+            })
+    }
+
+    private func awaitPreparation(_ preparation: Preparation) async throws -> ClaudeCodeQuery {
+        let lifetime = self.lifetime
+        return try await withTaskCancellationHandler {
+            try await preparation.task.value
+        } onCancel: {
+            preparation.task.cancel()
+            lifetime.terminateAll()
+        }
+    }
+
+    private static func error(_ detail: String) -> NSError {
+        NSError(domain: "ClaudeCodeRuntime", code: 1,
+                userInfo: [NSLocalizedDescriptionKey: detail])
+    }
+}
+
+private final class ClaudeCodeConversation: LocalAgentConversation, Sendable {
+    private let query: ClaudeCodeQuery
+
+    init(query: ClaudeCodeQuery) {
+        self.query = query
+    }
+
+    func respond(to turn: LocalAgentTurn) async throws -> LocalAgentTurnResult {
+        try await query.respond(to: turn)
+    }
+
+    func finish() async {
+        query.finish()
+    }
+}
+
+/// `@unchecked Sendable` is justified because `finishLock` guards the only mutable property,
+/// `finished`; the process and lifetime references provide their own synchronization.
+private final class ClaudeCodeQuery: @unchecked Sendable {
+    private let process: AgentRuntimeProcess
+    private let lifetime: AgentRuntimeLifetime
+    private let finishLock = NSLock()
+    private var finished = false
+
+    private init(process: AgentRuntimeProcess, lifetime: AgentRuntimeLifetime) {
+        self.process = process
+        self.lifetime = lifetime
+    }
+
+    deinit {
+        finish()
+    }
+
+    var isRunning: Bool { process.isRunning }
+
+    static func start(configuration: LocalAgentConversationConfiguration,
+                      lifetime: AgentRuntimeLifetime) async throws -> ClaudeCodeQuery {
+        var arguments = [
+            "-p", "--verbose",
+            "--input-format", "stream-json",
+            "--output-format", "stream-json",
+            "--no-session-persistence",
+            "--safe-mode",
+            "--setting-sources", "",
+            "--strict-mcp-config",
+            "--mcp-config", #"{"mcpServers":{}}"#,
+            "--system-prompt", configuration.instructions,
+            "--effort", CLIBrainClient.claudeEffort(configuration.reasoningEffort),
+            "--tools", "",
+        ]
+        if !configuration.model.isEmpty {
+            arguments += ["--model", configuration.model]
+        }
+
+        let process = try AgentRuntimeProcess(
+            executable: configuration.executable,
+            arguments: arguments,
+            workingDirectory: configuration.workDirectory,
+            removingEnvironmentVariables: ["ANTHROPIC_API_KEY", "CLAUDECODE"])
+        do {
+            try lifetime.register(process)
+            let query = ClaudeCodeQuery(process: process, lifetime: lifetime)
+            let requestID = "jarvis_initialize_\(UUID().uuidString)"
+            let deadline = Date().addingTimeInterval(configuration.timeout)
+            try await process.sendJSONObject([
+                "type": "control_request",
+                "request_id": requestID,
+                "request": [
+                    "subtype": "initialize",
+                    "hooks": NSNull(),
+                ],
+            ], timeout: max(0.01, deadline.timeIntervalSinceNow))
+
+            while true {
+                let payload = try await query.nextPayload(deadline: deadline)
+                guard payload["type"] as? String == "control_response",
+                      let response = payload["response"] as? [String: Any],
+                      response["request_id"] as? String == requestID else {
+                    continue
+                }
+                guard response["subtype"] as? String == "success" else {
+                    throw error("Claude initialize failed: \(Self.jsonDescription(response))")
+                }
+                let readyMs = Self.milliseconds(
+                    from: process.launchedAt,
+                    to: DispatchTime.now().uptimeNanoseconds)
+                jlog("Jarvis: Claude Code warm query ready in \(readyMs)ms")
+                return query
+            }
+        } catch {
+            lifetime.unregister(process)
+            process.terminateNow()
+            throw error
+        }
+    }
+
+    func respond(to turn: LocalAgentTurn) async throws -> LocalAgentTurnResult {
+        try Task.checkCancellation()
+        let content: [[String: Any]] = turn.input.map { item in
+            switch item {
+            case .text(let text):
+                return ["type": "text", "text": text]
+            case .imageJPEG(let base64):
+                return [
+                    "type": "image",
+                    "source": [
+                        "type": "base64",
+                        "media_type": "image/jpeg",
+                        "data": base64,
+                    ],
+                ]
+            }
+        }
+        let dispatchedAt = DispatchTime.now().uptimeNanoseconds
+        let deadline = Date().addingTimeInterval(turn.timeout)
+        try await process.sendJSONObject([
+            "type": "user",
+            "message": [
+                "role": "user",
+                "content": content,
+            ],
+        ], timeout: max(0.01, deadline.timeIntervalSinceNow))
+
+        var firstAssistantAt: UInt64?
+        var assistantText: String?
+        while true {
+            let (line, payload) = try await nextPayloadWithLine(deadline: deadline)
+            switch payload["type"] as? String {
+            case "assistant":
+                if firstAssistantAt == nil {
+                    firstAssistantAt = line.observedAt
+                }
+                guard let message = payload["message"] as? [String: Any],
+                      let blocks = message["content"] as? [[String: Any]] else {
+                    continue
+                }
+                if blocks.contains(where: { $0["type"] as? String == "tool_use" }) {
+                    throw Self.error("Claude emitted a built-in tool call in a tools-disabled turn")
+                }
+                let fragments = blocks.compactMap { block -> String? in
+                    guard block["type"] as? String == "text" else { return nil }
+                    return block["text"] as? String
+                }
+                if !fragments.isEmpty {
+                    assistantText = fragments.joined()
+                }
+            case "result":
+                let completedAt = line.observedAt
+                if payload["is_error"] as? Bool == true
+                    || (payload["subtype"] as? String).map({ $0 != "success" }) == true {
+                    let detail = payload["result"] as? String
+                        ?? Self.jsonDescription(payload)
+                    throw Self.error(detail)
+                }
+                let reply = (payload["result"] as? String) ?? assistantText ?? ""
+                var metadata = payload
+                metadata.removeValue(forKey: "result")
+                return LocalAgentTurnResult(
+                    reply: reply,
+                    metadata: try? JSONSerialization.data(withJSONObject: metadata),
+                    dispatchedAt: dispatchedAt,
+                    firstAssistantAt: firstAssistantAt,
+                    completedAt: completedAt)
+            case "control_request":
+                throw Self.error("Claude requested unexpected control input")
+            default:
+                continue
+            }
+        }
+    }
+
+    func finish() {
+        finishLock.lock()
+        guard !finished else {
+            finishLock.unlock()
+            return
+        }
+        finished = true
+        finishLock.unlock()
+        process.terminateNow()
+        lifetime.unregister(process)
+    }
+
+    private func nextPayload(deadline: Date) async throws -> [String: Any] {
+        try await nextPayloadWithLine(deadline: deadline).payload
+    }
+
+    private func nextPayloadWithLine(deadline: Date)
+        async throws -> (line: AgentRuntimeProcess.Line, payload: [String: Any]) {
+        while true {
+            let remaining = deadline.timeIntervalSinceNow
+            guard remaining > 0 else {
+                process.terminateNow()
+                throw Self.error("Claude response timed out")
+            }
+            let line = try await process.nextLine(timeout: remaining)
+            guard let payload = try JSONSerialization.jsonObject(
+                with: Data(line.text.utf8)) as? [String: Any] else {
+                continue
+            }
+            return (line, payload)
+        }
+    }
+
+    private static func milliseconds(from start: UInt64, to end: UInt64) -> Int {
+        Int((end - start) / 1_000_000)
+    }
+
+    private static func jsonDescription(_ object: Any) -> String {
+        (try? JSONSerialization.data(withJSONObject: object))
+            .map { String(decoding: $0, as: UTF8.self) } ?? String(describing: object)
+    }
+
+    private static func error(_ detail: String) -> NSError {
+        NSError(domain: "ClaudeCodeRuntime", code: 1,
+                userInfo: [NSLocalizedDescriptionKey: detail])
+    }
+}

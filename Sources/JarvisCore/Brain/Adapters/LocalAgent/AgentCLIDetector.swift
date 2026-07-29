@@ -79,10 +79,11 @@ public struct AgentCLIDetector: Sendable {
     }
 
     /// The common install locations consulted after $PATH — the single source of truth, also used
-    /// by `AgentCLIProcessRunner` to seed the subprocess PATH: a CLI *found* in one of these dirs
+    /// by the coaching runtimes and `AgentCLIProcessRunner` to seed the subprocess PATH: a CLI
+    /// *found* in one of these dirs
     /// may need its interpreter or helpers from another (an npm-shim `claude` whose
     /// `/usr/bin/env node` lives in `/opt/homebrew/bin`), so detection and execution must see the
-    /// same directories or Settings says "detected" while every spawned turn fails.
+    /// same directories or Settings says "detected" while every runtime launch fails.
     static func fallbackDirectories(home: URL) -> [String] {
         [
             home.appendingPathComponent(".claude/local").path,   // claude's self-managed install

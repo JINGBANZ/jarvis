@@ -29,4 +29,13 @@ public struct ConfiguredBrainTarget: Sendable {
         self.summarizer = nil
         self.unavailabilityDetail = detail
     }
+
+    func prepare() {
+        brain?.prepare()
+    }
+
+    func terminate() {
+        brain?.terminate()
+        summarizer?.terminate()
+    }
 }

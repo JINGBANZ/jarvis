@@ -121,11 +121,28 @@ public enum ToolChoice: Sendable, Equatable {
     case force(String)
 }
 
-/// Abstraction over the brain model so CoachDriver is testable with a mock. Every call is
-/// self-contained: the session's memory is CLIENT-managed (`CoachHistory`) and sent in `messages`,
-/// so there is no server-side conversation object to create, thread, or lock.
+/// One provider conversation owned by exactly one coaching attempt.
+///
+/// The attempt may contain more than one model turn when the model requests `capture_screen`.
+/// Provider-native state is allowed inside this boundary, but it is never reused by another
+/// coaching attempt. `finish()` is explicit so Stop and provider changes can release a leased local
+/// runtime immediately.
+public protocol BrainConversation: Sendable {
+    func respond(messages: [ChatMessage], tools: [ToolDef],
+                 toolChoice: ToolChoice) async throws -> BrainResponse
+    func finish() async
+}
+
+/// Abstraction over the brain model so CoachDriver is testable with a mock. Session memory remains
+/// client-managed (`CoachHistory`) and is sent in `messages`; `makeConversation()` only gives one
+/// coaching attempt a provider-native continuation boundary for its within-attempt tool loop.
 public protocol BrainClient: Sendable {
     func respond(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice) async throws -> BrainResponse
+    func makeConversation() async throws -> any BrainConversation
+    /// Begin preparing provider resources for the currently reachable route target.
+    func prepare()
+    /// Release provider resources when a route target can no longer be selected this session.
+    func terminate()
 }
 
 public extension BrainClient {
@@ -133,4 +150,27 @@ public extension BrainClient {
     func respond(messages: [ChatMessage], tools: [ToolDef]) async throws -> BrainResponse {
         try await respond(messages: messages, tools: tools, toolChoice: .auto)
     }
+
+    /// Stateless clients and existing test doubles need no provider session: the default lease
+    /// simply forwards every call to the client and has nothing to tear down.
+    func makeConversation() async throws -> any BrainConversation {
+        ForwardingBrainConversation(client: self)
+    }
+
+    /// Stateless clients have no provider runtime to prepare.
+    func prepare() {}
+
+    /// Stateless clients have no provider runtime to release.
+    func terminate() {}
+}
+
+private struct ForwardingBrainConversation: BrainConversation {
+    let client: any BrainClient
+
+    func respond(messages: [ChatMessage], tools: [ToolDef],
+                 toolChoice: ToolChoice) async throws -> BrainResponse {
+        try await client.respond(messages: messages, tools: tools, toolChoice: toolChoice)
+    }
+
+    func finish() async {}
 }

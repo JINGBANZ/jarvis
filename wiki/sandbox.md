@@ -90,17 +90,25 @@ Narrow and explicit. Data leaves the machine only via:
 - **Screenshot + transcript window → the selected brain provider/model** — and *only* when the
   model triggers a `capture_screen` and/or a coaching turn. No screen content leaves the machine on
   idle turns.
-- **With a local CLI brain provider selected** ([architecture.md §4](./architecture.md#local-cli-brain-providers)),
-  the same brain payload instead goes to the `claude` / `codex` subprocess, which sends it to
-  Anthropic / OpenAI under the *user's own signed-in account* and that vendor's consumer retention
-  terms. The subprocess runs with the CLI's own privileges (Codex is invoked `--sandbox read-only`;
-  Claude with every built-in tool disabled, cwd pinned to the session dir), and **no user-configured
-  MCP server is loaded** in a Jarvis turn (`--strict-mcp-config` / `-c mcp_servers={}`) — the coach
-  must never see or trigger that tool surface. This trusts a CLI the user already runs on this
-  machine, not widening what Jarvis itself may touch. The CLIs run with
-  **session persistence off** (`--no-session-persistence` / `--ephemeral`), so they keep no local
-  transcript of the coaching conversation in `~/.claude` / `~/.codex` — the owner-only session dir
-  stays the only on-disk copy. Transcription audio still goes to the OpenAI Realtime API regardless.
+- **With Claude Code selected for coaching**
+  ([architecture.md §4](./architecture.md#local-cli-brain-providers)), the same brain payload instead
+  goes to the `claude` subprocess, which sends it to Anthropic under the *user's own signed-in
+  account* and Anthropic's consumer retention terms. Claude runs one non-persisted stream-json query
+  per coaching-attempt lease. `--safe-mode` excludes CLAUDE.md, skills, plugins, hooks, MCP, agents,
+  and other customizations while preserving OAuth; an explicit empty built-in tool set, no settings
+  sources, and strict explicit empty MCP config narrow the surface further. Images remain inline.
+  There is no one-shot coaching fallback. Runtime failure remains inside the existing fresh-attempt
+  provider-route policy, and Stop kills every ready, leased, or preparing process. This trusts a CLI
+  the user already runs on this machine without widening what Jarvis itself may touch. Transcription
+  audio still goes to the OpenAI Realtime API regardless.
+- **Codex sends no coaching payload today.** The CLI can be detected, authenticated, selected, and
+  retained in a route, but its current app-server has no stable launch surface that removes every
+  built-in agent tool. Empty MCP config, read-only sandboxing, known-feature disables, and rejection
+  of observed tool events cannot prove that a future or renamed built-in is absent. A Codex primary
+  therefore fails explicit Start preflight, a Codex fallback is skipped as unavailable, and the
+  runtime returns a permanent provider failure before creating a private `CODEX_HOME` or spawning a
+  process. The separate completed-session evaluator remains intentionally agentic and may still use
+  Codex under the explicit Evaluate boundary below.
 - **An explicit Activity → Evaluate click** sends the selected completed session to a read-only,
   non-persisted Claude Code / Codex agent under that CLI account. Unlike a coaching turn, this agent
   may inspect the complete `jarvis-activity.jsonl`, brain traffic, saved screenshots, and source

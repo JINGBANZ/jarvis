@@ -45,10 +45,10 @@ public final class CoachHistory: @unchecked Sendable {
     ///   near-identical screens re-billed forever, and a session-audit caught the model
     ///   "correcting" code the user had already fixed by reading a stale dump. Unlike the two
     ///   tail-local rewrites above, this one re-diverges the prompt-cache prefix at the oldest
-    ///   collapsed block. That is deliberate: a bounded one-request re-read per capture (and free
-    ///   on the CLI providers, which serialize history into a single block no prefix cache can hit
-    ///   anyway) buys back ~1k stale tokens per dump on every later request plus the stale-context
-    ///   failure mode above.
+    ///   collapsed block. That is deliberate: a bounded one-request re-read per capture buys back
+    ///   ~1k stale tokens per dump on every later request plus the stale-context failure mode above.
+    ///   A local provider receives the complete committed history once at the start of an attempt;
+    ///   any capture continuation on that attempt carries only incremental input.
     /// - **Raw passthrough items** (a response's verbatim `output` array, replayed whole within the
     ///   turn's tool loop) are CONVERTED, not kept: the `function_call` items survive as one
     ///   synthetic id-less call message — so the committed `function_call_output` never orphans —

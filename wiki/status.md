@@ -23,9 +23,14 @@ Locally accepted WebSocket sends remain in a bounded memory-only recovery tail b
 not acknowledge audio appends; server audio-clock progress retires only a safe prefix, and a
 replacement socket replays the rest after a half-open failure. A live Wi-Fi reconnect run confirms
 that speech captured during the outage returns after recovery. The brain can also run through a
-locally installed Claude Code or Codex CLI on the user's subscription; Settings → Brain auto-detects
-those providers, reports Claude's current sign-in state from its bounded status command, and keeps
-the OpenAI API-key path available. The ordered provider-route contract is now settled: one primary
+locally installed Claude Code CLI on the user's subscription; Settings → Brain auto-detects Claude
+Code and Codex, reports Claude's current sign-in state from its bounded status command, and keeps the
+OpenAI API-key path available. Codex remains available to the explicit agentic session evaluator,
+but coaching fails closed before launch because the current app-server has no stable mode that
+removes every built-in agent tool. A Codex primary is rejected at Start, a Codex fallback is marked
+unavailable for the route to skip, and direct runtime construction returns a permanent provider
+failure without spawning a process or creating a runtime home. The ordered provider-route contract
+is now settled: one primary
 plus a user-editable ordered fallback list, one target per coaching attempt, no failed-request replay
 inside the attempt, automatic pending-work attempts with the newest finalized transcript, the
 code-owned temporary/unknown failure threshold in
@@ -38,10 +43,14 @@ Provider editor with one uninterrupted Primary/fallback route, a separate right-
 effort row, and an explicit Transcription provider/key group. A first-open install remains
 unconfigured until Primary is chosen; the old immediate request retry, scalar fallback,
 same-attempt failover, and primary recovery
-probing are removed. Codex coaching calls
-suppress project instructions and its feature-gated agent tools, run as direct-response decisions, inherit only stable
-executable-search paths, and stop under a provider-specific stall bound instead of leaving later
-speech batched indefinitely.
+probing are removed. Local coaching no longer launches one process per model turn. Claude Code keeps
+one initialized safe-mode query ready for the active target and leases it across an attempt's
+complete tool loop while preparing its replacement. It disables built-in tools, settings sources,
+session persistence, and MCP servers while preserving the user's OAuth session. Its runtime miss or
+crash fails the provider attempt; there is no one-shot CLI fallback. Stop kills ready, leased, and
+preparing process trees. Codex's retained app-server adapter stays behind the explicit tool-free
+capability gate: read-only sandboxing, a feature deny list, and post-event rejection are defenses in
+depth, not permission to launch.
 Saving an API key while running also preserves those live objects: existing Realtime sockets take
 the key on their next reconnect, and an OpenAI brain update remains transactional. Audio
 route rebuilds likewise retry before declaring capture unavailable, and stale capture callbacks
@@ -68,8 +77,13 @@ the pending conversation is preserved. Verify the first-open Brain state (no Pri
 disabled model/Add fallback, and Add API key), then configure multiple fallbacks and force a temporary
 failure-budget transition, a proven-permanent one-attempt transition, an unavailable-target skip, and
 final route exhaustion. Confirm no provider-specific tool state crosses attempts and verify a
-successful fallback remains active without changing preferences. Finish the in-app Codex smoke through
-audio and the overlay. Exercise one audio-route switch: Activity should say listening continues, the
+successful fallback remains active without changing preferences. Configure Codex as Primary and
+confirm Start reports that no tool-free coaching mode is available before any app-server or private
+runtime home is created. Put Codex later in a route, force the cursor to reach it, and confirm it is
+skipped as unavailable. Then Stop the Claude smoke and confirm no query child remains. The signed-in
+Foundation-level Claude POC already verifies two turns on one native conversation; this remaining
+smoke covers app wiring, TCC, audio, and overlay presentation. Exercise one
+audio-route switch: Activity should say listening continues, the
 next turn should include any unsent speech, and capture should recover
 without rotating the session. Stop that session, click **Evaluate**, and confirm the agentic report
 opens and identifies the temporary miss from the complete Activity log without misclassifying it as
@@ -83,7 +97,7 @@ thin OS shell, verified by the smoke run.
 
 - `Sources/JarvisCore/Audio/` — transactional PCM + utterance buffering, adaptive content-free activity detection, non-destructive AEC reference alignment, and system-audio timeline preservation (`PCMBuffer`, `UtteranceBuffer`, `PCM16Framer`, `AudioDownmix`, `AdaptiveAudioActivityDetector`, `EchoReferenceAlignment`, `SystemAudioTimeline`).
 - `Sources/JarvisCore/Transcription/` — realtime session wire contract, per-item event ledger, and rolling transcript (`RealtimeSession`, `RealtimeTranscriptionLedger`, `Transcript`, `NoiseReduction`).
-- `Sources/JarvisCore/Brain/` — the LLM integration: the `BrainClient` contract (`Brain`), `OpenAIBrainClient`, `CLIBrainClient` + `AgentCLIProcessRunner` + `AgentCLIDetector`/`AgentCLIAuthenticationStatus` (the local Claude Code / Codex brain providers and sign-in state), provider-boundary failure classification (`BrainFailure`), immutable `BrainTarget`/`BrainRoute`, `BrainProvider`, `BrainModelCatalog` (first per-provider entry is the default), `ReasoningEffort`.
+- `Sources/JarvisCore/Brain/` — provider-neutral `BrainClient`/attempt-scoped `BrainConversation` contracts and models stay at the root. `Adapters/OpenAI/` owns the Responses transport; `Adapters/LocalAgent/` owns CLI detection, `CLIBrainClient`, the active Claude Code runtime, the capability-gated Codex adapter, and the bounded shared process edge. `LocalAgentRuntimeSet` encapsulates provider-specific coach/summarizer ownership. `AgentCLIProcessRunner` remains only for the explicit completed-session evaluator. The subsystem also owns provider-boundary failure classification (`BrainFailure`), immutable `BrainTarget`/`BrainRoute`, `BrainProvider`, `BrainModelCatalog` (first per-provider entry is the default), and `ReasoningEffort`.
 - `Sources/JarvisCore/Coach/` — the event loop: `CoachDriver` (fresh-attempt scheduling and one-target tool-loop orchestration), the pure forward-only `BrainRouteSession`, `SpeechActivityGate`, `CoachHistory` (client-managed session memory), `ToolDefs` (coach tools + system prompt).
 - `Sources/JarvisCore/Triggers/` — turn/silence trigger detection, substance classification, and silence backoff (`Trigger`, `TurnSubstance`, `SilenceBackoff`).
 - `Sources/JarvisCore/Screen/` — the model-triggered screen-capture tool contract + window-scoped capture logic, plus `ScreenCaptureRunner`, which owns each cancellable `screencapture` helper and the transient JPEG it writes into the owner-only session directory: it verifies that file is gone before returning, and a capture whose cleanup can't be proven latches the runner so no later capture (or display fallback) starts while a screen-derived file is unaccounted for (`ScreenCapture`, `ScreenCaptureRunner`, `ScreenSnapshot`, `FrontWindowSelector`, `RecognizedTextLayout`).

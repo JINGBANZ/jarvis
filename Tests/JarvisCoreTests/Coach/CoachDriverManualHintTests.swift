@@ -103,11 +103,8 @@ private final class FailingScreen: ScreenCapturing, @unchecked Sendable {
         #expect(overlay.rendered == [["Talk me through your current approach."]])
     }
 
-    /// Stop firing *while the manual-hint screenshot is in flight* cancels the capture adapter and
-    /// aborts before emitting, so neither the screenshot nor a stale tip leaks into whatever session
-    /// is current after a Stop→Start. Unlike the `capture_screen` tool branch (which has already
-    /// made one brain call), the manual-hint guard fires BEFORE any `brain.respond`, so no request
-    /// is sent at all. Reuses `GatedScreen`.
+    /// Stop firing while the manual-hint screenshot is in flight cancels the capture adapter and
+    /// aborts before any brain request or stale tip. Reuses `GatedScreen`.
     @Test func manualHintCancelDuringCaptureAbortsBeforeAnyBrainCall() async {
         let clock = ManualClock(now: 0)
         let brain = ScriptedBrain(script: [
