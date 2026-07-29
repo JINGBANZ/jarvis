@@ -368,14 +368,13 @@ provider-route policy, and traffic recording are unchanged — only the transpor
   config, profile, plugin, prompt, or `.rules` file can be loaded. Each coaching attempt opens a
   fresh ephemeral thread and closes it when the lease ends, which is why coach and summarizer can
   share one runtime: model, prompt, and effort travel per `thread/start`, not in the launch identity.
-  Isolation is the same layered envelope `codex exec` coaching used — read-only sandbox,
-  never-approval, empty MCP config, no project-root markers, zero project-doc bytes, the
-  advertised-feature disable set (delivered both as `--disable` launch flags and as
-  `features.<name> = false` per-thread config), and a prompt forbidding built-in tool use. Codex
-  publishes no control that removes built-in tools, so two runtime checks back that envelope: the
-  `thread/start` response must confirm the thread is ephemeral, pathless, and loaded no instruction
-  sources, and any server request or item event outside the message/reasoning allowlist aborts the
-  turn. The completed-session evaluator remains separate and intentionally agentic.
+  The isolation goal is to exclude user/project customization, constrain side effects, and reject
+  provider-native actions outside Jarvis's coaching contract; the concrete launch and per-thread
+  settings live in
+  [`CodexAppServerRuntime.swift`](../Sources/JarvisCore/Brain/Adapters/LocalAgent/Codex/CodexAppServerRuntime.swift).
+  Codex publishes no control that removes built-in tools, so the runtime also verifies the thread
+  boundary and aborts on server requests or item events outside the message/reasoning contract. The
+  completed-session evaluator remains separate and intentionally agentic.
 - **The JSON action contract remains provider-neutral.** The CLIs do not expose Jarvis's native
   function calls, so the same `ToolDef`s are rendered as a JSON output protocol and parsed back into
   `ToolInvocation`. `BrainConversation` changes transport ownership, not `CoachHistory`: completed
