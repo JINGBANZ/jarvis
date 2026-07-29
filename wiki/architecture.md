@@ -133,7 +133,7 @@ plugins ship only with full Xcode, and Jarvis builds **CLT-only** (see
 | **ErrorReporter** | The single funnel for user-facing failures. Severity on a Foundation-only `UserFacingError` decides the lifecycle consequence; an explicit startup/runtime context decides presentation. Startup failures may alert, but runtime failures never activate Jarvis or present UI even when they stop the session. `BrainFailure` feeds attempt outcomes into the finite provider route; only route exhaustion enters terminal reporting. Fixed, typed Activity outcomes carry stable on-disk identities while raw detail stays in `JarvisLog`. | AppKit (`NSAlert`) for startup only. |
 | **Transcriber** | Maintain a rolling, speaker-labeled, **spoken-time timestamped** transcript; emit speech-activity, turn-end, and backing-off silence events (with quiet duration). Two instances run in parallel — one per side — tagging lines `me`/`them` into one shared transcript. A per-`item_id` ledger reconciles out-of-order delta/completed/failed/VAD events and salvages streamed text. An utterance-local failure with no usable words stays diagnostic and cannot trigger the brain; a permanent account or configuration rejection stops the unusable session with a fixed Activity reason. A privacy-preserving continuity witness records content-free capture/delivery/socket/server checkpoints and locally derived activity intervals, so the session log can locate a future gap without retaining PCM or adding pseudo-speech to model context. A socket is ready only after the server acknowledges its configuration; active ping/pong probes, send/receive errors, and startup timeouts all drive the same reconnect path. | `gpt-4o-transcribe` (Realtime API; tuned `server_vad`). |
 | **CoachDriver** | Coordinate one single-flighted coaching attempt from a natural trigger or pending-work wake-up: snapshot one route target plus the latest conversation, route its tool calls, commit only a complete terminal action, and report one outcome to the scheduler. No speaking cooldown/rate cap — restraint is the model's; the only client-side content skip is the filler-only turn-end gate (`TurnSubstance`). | The selected OpenAI Responses API, Claude Code, or Codex route target; See [§4 Local CLI brain providers](#local-cli-brain-providers). Provider-specific summary tiers are defined in `BrainModelCatalog`. |
-| **Local agent runtime** | Keep provider startup outside the coaching latency path while preserving the attempt boundary: a `BrainConversation` lease owns every model turn in one attempt, including a `capture_screen` continuation, then is explicitly finished. Claude leases one initialized safe-mode query; Codex opens a fresh ephemeral thread on one session-scoped app-server. A runtime failure fails the attempt; it never switches to a one-shot transport. | Claude Code stream-json control protocol; Codex app-server JSON-RPC over stdio. |
+| **Local agent runtime** | Keep provider startup outside the coaching latency path while preserving the attempt boundary: a `BrainConversation` lease owns every model turn in one attempt, including a `capture_screen` continuation, then is explicitly finished. Claude leases one initialized safe-mode query; Codex prepares the first target-specific ephemeral thread at Session Start and opens a fresh thread for each later attempt on one session-scoped app-server. A runtime failure fails the attempt; it never switches to a one-shot transport. | Claude Code stream-json control protocol; Codex app-server JSON-RPC over stdio. |
 | **ScreenTool** | Fulfill `capture_screen`: silently shoot the **active window** (default scope) — the window-server frontmost, on whichever display, clean even when partially covered — and attach an **on-device OCR** of the shot to the tool result so the model reads exact text instead of pixels. Falls back to a full-display capture (no OCR) — the Settings-chosen display in Entire-display scope, the main display when no window is eligible; the overlay window is excluded either way. See [settings-window.md](./settings-window.md#capture-scope). | macOS `screencapture` CLI + Apple Vision (`VNRecognizeTextRequest`). |
 | **Overlay Caption** | Render `speak` output: up to ~3 short lines (model-split), shown one at a time and queued so a newer tip never cuts off the current one; non-activating, always-on-top, excluded from capture. Switchable from Settings — **off by default**; when off, tips are suppressed. | AppKit NSPanel; `OverlayCaptionPanel`. |
 | **Overlay Box** | A persistent window logging every `speak` tip in full, timestamped — the scrollable history of what the caption flashed one line at a time. Movable, resizable, opaque, also excluded from capture; switched on/off from Settings (**on by default**), cleared on each Start. Fed by the same `speak` call as the caption via **`BroadcastOverlay`**, which fans one `OverlayRendering.render` out to both sinks (so `CoachDriver` is unchanged). | AppKit NSPanel; `OverlayBoxPanel`. |
@@ -364,10 +364,13 @@ provider-route policy, and traffic recording are unchanged — only the transpor
   to one async closure and its teardown stops tracking a group when the leader is gone, so adopting
   it would retain these wrappers while adding a dependency.
 - **Codex keeps one app-server for the session.** Session Start launches a single `codex app-server`
-  under a private owner-only `CODEX_HOME` containing nothing but an `auth.json` symlink, so no user
-  config, profile, plugin, prompt, or `.rules` file can be loaded. Each coaching attempt opens a
-  fresh ephemeral thread and closes it when the lease ends, which is why coach and summarizer can
-  share one runtime: model, prompt, and effort travel per `thread/start`, not in the launch identity.
+  under a private owner-only `CODEX_HOME` containing nothing but an `auth.json` symlink, then prepares
+  the first target-specific ephemeral thread while transcription connects. The first coaching
+  attempt leases that verified thread; each later attempt opens a fresh one and closes it when the
+  lease ends. Coach and summarizer can share one runtime because model, prompt, and effort travel per
+  `thread/start`, not in the launch identity. A changed target configuration replaces any unused
+  prepared thread before opening its own, and releasing the session or route runtime terminates the
+  app-server and every prepared, active, or preparing thread.
   The isolation goal is to exclude user/project customization, constrain side effects, and reject
   provider-native actions outside Jarvis's coaching contract; the concrete launch and per-thread
   settings live in
@@ -413,14 +416,29 @@ provider-route policy, and traffic recording are unchanged — only the transpor
   guarantee. The durable invariant is that provider startup is removed from the attempt path and a
   capture continuation does not replay the full client-managed history.
 
+  A target-thread-prewarm A/B against the merged persistent-runtime implementation used the same
+  production `CLIBrainClient`, real signed-in Codex model, deterministic instructions, low effort,
+  and a 1.5-second Session Start prewarm window. All 16 attempts (22 model turns) completed with the
+  expected action:
+
+  | Codex attempt | App-server-only p50 (range) | Target-thread prewarm p50 (range) | p50 saved | Improvement |
+  |---|---:|---:|---:|---:|
+  | Text-only, one turn (`n=5`) | 7,970 ms (7,225–9,091) | 7,121 ms (5,527–10,275) | 849 ms | 10.7% |
+  | Capture continuation, two turns (`n=3`) | 11,148 ms (9,946–13,190) | 7,382 ms (7,071–9,837) | 3,766 ms | 33.8% |
+
+  Across all eight attempts per revision, median conversation-open latency fell from 2,269 ms to
+  713 ms (68.6%). The first target-thread preparation itself varied from 1,950–5,070 ms, so a trigger
+  after the controlled 1.5-second window sometimes still waited for completion; the overlapping
+  text-only ranges remain the appropriate caution against treating the p50 as a guarantee.
+
 ### Latency
 
 Target for the direct API path: **turn-end → first overlay line < 2s.** Transcription is continuous
 (no STT latency at trigger time) and most turns are text-only. Local subscription latency depends on
-the provider, model, and network. Claude keeps query startup off the attempt path; Codex keeps
-app-server startup off it. Both make a capture follow-up incremental, but neither promises the
-direct API target. The overlay reveals the already-returned lines one at a time (paced by `Config`);
-the brain response itself is not streamed to the overlay.
+the provider, model, and network. Claude keeps query startup off the attempt path; Codex begins both
+app-server and first target-thread preparation at Session Start. Both make a capture follow-up
+incremental, but neither promises the direct API target. The overlay reveals the already-returned
+lines one at a time (paced by `Config`); the brain response itself is not streamed to the overlay.
 
 ### Resilience
 

@@ -22,6 +22,52 @@ import Testing
         try await assertCancellingPreparationStopsProcess(provider: .codexCLI)
     }
 
+    @Test func cancellingCodexThreadPreparationStopsTheAppServer() async throws {
+        let directory = try makeWorkDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let pidFile = directory.appendingPathComponent("pid")
+        let trace = directory.appendingPathComponent("trace")
+        let executable = try makeExecutable(
+            in: directory,
+            named: "blocked-codex-thread",
+            script: """
+                #!/bin/sh
+                printf '%s\\n' "$$" > '\(shellQuoted(pidFile.path))'
+                while IFS= read -r line; do
+                  printf 'input: %s\\n' "$line" >> '\(shellQuoted(trace.path))'
+                  request_id=$(printf '%s' "$line" | sed -n 's/.*"id":\\([0-9][0-9]*\\).*/\\1/p')
+                  method=$(printf '%s' "$line" | sed -n 's/.*"method":"\\([^"]*\\)".*/\\1/p' | tr -d '\\\\')
+                  if [ "$method" = "initialize" ]; then
+                    printf '{"id":%s,"result":{}}\\n' "$request_id"
+                  fi
+                done
+                """)
+        let runtime = makeRuntime(provider: .codexCLI, directory: directory)
+        let client = makeClient(
+            provider: .codexCLI,
+            executable: executable,
+            directory: directory,
+            runtime: runtime,
+            prewarm: false)
+        let task = Task {
+            try await client.makeConversation()
+        }
+        try await waitForRequestCount(1, method: "thread/start", in: trace)
+        let pid = try #require(
+            pid_t(String(contentsOf: pidFile, encoding: .utf8)
+                .trimmingCharacters(in: .whitespacesAndNewlines)))
+
+        task.cancel()
+        let result = await task.result
+        guard case .failure(let error) = result else {
+            Issue.record("expected cancelled Codex thread preparation")
+            return
+        }
+        #expect(error is CancellationError)
+        try await waitForProcessExit(pid)
+        #expect(kill(pid, 0) == -1)
+    }
+
     @Test func claudeInitializationSkipsMalformedOutput() async throws {
         let directory = try makeWorkDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -89,6 +135,101 @@ import Testing
         let conversation = try await client.makeConversation()
         await conversation.finish()
         runtime.terminateNow()
+    }
+
+    @Test func codexPrewarmsAndLeasesTheFirstTargetThread() async throws {
+        let directory = try makeWorkDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let trace = directory.appendingPathComponent("trace")
+        let executable = try makeExecutable(
+            in: directory,
+            named: "fake-codex",
+            script: codexScript(trace: trace, threadResult: Self.ephemeralThreadResult))
+        let runtime = makeRuntime(provider: .codexCLI, directory: directory)
+        let client = makeClient(
+            provider: .codexCLI,
+            executable: executable,
+            directory: directory,
+            runtime: runtime,
+            prewarm: true)
+
+        try await waitForRequestCount(1, method: "thread/start", in: trace)
+        #expect(requests(method: "turn/start", in: trace).isEmpty)
+
+        let first = try await client.makeConversation()
+        #expect(requests(method: "thread/start", in: trace).count == 1)
+        await first.finish()
+
+        let second = try await client.makeConversation()
+        #expect(requests(method: "thread/start", in: trace).count == 2)
+        await second.finish()
+        runtime.terminateNow()
+    }
+
+    @Test func codexReplacesAPrewarmedThreadForAnotherTargetConfiguration() async throws {
+        let directory = try makeWorkDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let trace = directory.appendingPathComponent("trace")
+        let executable = try makeExecutable(
+            in: directory,
+            named: "fake-codex",
+            script: codexScript(trace: trace, threadResult: Self.ephemeralThreadResult))
+        let runtime = makeRuntime(provider: .codexCLI, directory: directory)
+        let firstTarget = makeClient(
+            provider: .codexCLI,
+            executable: executable,
+            directory: directory,
+            runtime: runtime,
+            prewarm: true)
+        _ = firstTarget
+        let replacementTarget = makeClient(
+            provider: .codexCLI,
+            executable: executable,
+            directory: directory,
+            runtime: runtime,
+            prewarm: false,
+            systemPrompt: "replacement coach prompt")
+
+        try await waitForRequestCount(1, method: "thread/start", in: trace)
+        let replacement = try await replacementTarget.makeConversation()
+        #expect(requests(method: "thread/start", in: trace).count == 2)
+        #expect(requests(method: "thread/unsubscribe", in: trace).count == 1)
+        await replacement.finish()
+        runtime.terminateNow()
+    }
+
+    @Test func releasingPreparedCodexRuntimeStopsItsSessionProcess() async throws {
+        let directory = try makeWorkDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let pidFile = directory.appendingPathComponent("pid")
+        let trace = directory.appendingPathComponent("trace")
+        let executable = try makeExecutable(
+            in: directory,
+            named: "fake-codex",
+            script: codexScript(
+                pidFile: pidFile,
+                trace: trace,
+                threadResult: Self.ephemeralThreadResult))
+        var runtime: CLIBrainRuntime? = makeRuntime(
+            provider: .codexCLI,
+            directory: directory)
+        var client: CLIBrainClient? = makeClient(
+            provider: .codexCLI,
+            executable: executable,
+            directory: directory,
+            runtime: try #require(runtime),
+            prewarm: true)
+        _ = client
+
+        try await waitForRequestCount(1, method: "thread/start", in: trace)
+        let pid = try #require(
+            pid_t(String(contentsOf: pidFile, encoding: .utf8)
+                .trimmingCharacters(in: .whitespacesAndNewlines)))
+
+        client = nil
+        runtime = nil
+        try await waitForProcessExit(pid)
+        #expect(kill(pid, 0) == -1)
     }
 
     @Test func claudeLaunchUsesOAuthCompatibleCustomizationAndToolIsolation() async throws {
@@ -505,15 +646,19 @@ import Testing
     /// with a single `stay_silent` agent message.
     private func codexScript(
         argumentsFile: URL? = nil,
+        pidFile: URL? = nil,
         trace: URL,
         threadResult: String
     ) -> String {
         let recordArguments = argumentsFile.map {
             "printf 'arg=<%s>\\n' \"$@\" > '\(shellQuoted($0.path))'\n"
         } ?? ""
+        let recordPID = pidFile.map {
+            "printf '%s\\n' \"$$\" > '\(shellQuoted($0.path))'\n"
+        } ?? ""
         return """
             #!/bin/sh
-            \(recordArguments)while IFS= read -r line; do
+            \(recordPID)\(recordArguments)while IFS= read -r line; do
               printf 'input: %s\\n' "$line" >> '\(shellQuoted(trace.path))'
               request_id=$(printf '%s' "$line" | sed -n 's/.*"id":\\([0-9][0-9]*\\).*/\\1/p')
               method=$(printf '%s' "$line" | sed -n 's/.*"method":"\\([^"]*\\)".*/\\1/p' | tr -d '\\\\')
@@ -613,6 +758,21 @@ import Testing
             try await Task.sleep(nanoseconds: 20_000_000)
         }
         Issue.record("timed out waiting for \(expected) launches")
+    }
+
+    private func waitForRequestCount(
+        _ expected: Int,
+        method: String,
+        in trace: URL
+    ) async throws {
+        let deadline = Date().addingTimeInterval(3)
+        while Date() < deadline {
+            if requests(method: method, in: trace).count >= expected {
+                return
+            }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        Issue.record("timed out waiting for \(expected) \(method) requests")
     }
 
     private func waitForProcessExit(_ pid: pid_t) async throws {
