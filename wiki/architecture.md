@@ -132,7 +132,7 @@ plugins ship only with full Xcode, and Jarvis builds **CLT-only** (see
 | **WebRTCEchoCanceller** | AEC3 echo canceller driven at 48 kHz on 10 ms frames inside the capture IOProc; far reference first, then the mic cleaned in place. | WebRTC **AEC3** (`webrtc-audio-processing`), vendored static + zero-dylib via `scripts/build-aec.sh`. |
 | **ErrorReporter** | The single funnel for user-facing failures. Severity on a Foundation-only `UserFacingError` decides the lifecycle consequence; an explicit startup/runtime context decides presentation. Startup failures may alert, but runtime failures never activate Jarvis or present UI even when they stop the session. `BrainFailure` feeds attempt outcomes into the finite provider route; only route exhaustion enters terminal reporting. Fixed, typed Activity outcomes carry stable on-disk identities while raw detail stays in `JarvisLog`. | AppKit (`NSAlert`) for startup only. |
 | **Transcriber** | Maintain a rolling, speaker-labeled, **spoken-time timestamped** transcript; emit speech-activity, turn-end, and backing-off silence events (with quiet duration). Two instances run in parallel — one per side — tagging lines `me`/`them` into one shared transcript. A per-`item_id` ledger reconciles out-of-order delta/completed/failed/VAD events and salvages streamed text. An utterance-local failure with no usable words stays diagnostic and cannot trigger the brain; a permanent account or configuration rejection stops the unusable session with a fixed Activity reason. A privacy-preserving continuity witness records content-free capture/delivery/socket/server checkpoints and locally derived activity intervals, so the session log can locate a future gap without retaining PCM or adding pseudo-speech to model context. A socket is ready only after the server acknowledges its configuration; active ping/pong probes, send/receive errors, and startup timeouts all drive the same reconnect path. | `gpt-4o-transcribe` (Realtime API; tuned `server_vad`). |
-| **CoachDriver** | Coordinate one single-flighted coaching attempt from a natural trigger or pending-work wake-up: snapshot one route target plus the latest conversation, route its tool calls, commit only a complete terminal action, and report one outcome to the scheduler. No speaking cooldown/rate cap — restraint is the model's; the only client-side content skip is the filler-only turn-end gate (`TurnSubstance`). | The selected OpenAI Responses API or Claude Code route target; See [§4 Local CLI brain providers](#local-cli-brain-providers). Provider-specific summary tiers are defined in `BrainModelCatalog`. |
+| **CoachDriver** | Coordinate one single-flighted coaching attempt from a natural trigger or pending-work wake-up: snapshot one route target plus the latest conversation, route its tool calls, commit only a complete terminal action, and report one outcome to the scheduler. No speaking cooldown/rate cap — restraint is the model's; the only client-side content skip is the filler-only turn-end gate (`TurnSubstance`). | The selected OpenAI Responses API, Claude Code, or Codex route target; See [§4 Local CLI brain providers](#local-cli-brain-providers). Provider-specific summary tiers are defined in `BrainModelCatalog`. |
 | **Local agent runtime** | Keep provider startup outside the coaching latency path while preserving the attempt boundary: a `BrainConversation` lease owns every model turn in one attempt, including a `capture_screen` continuation, then is explicitly finished. Claude leases one initialized safe-mode query; Codex opens a fresh ephemeral thread on one session-scoped app-server. A runtime failure fails the attempt; it never switches to a one-shot transport. | Claude Code stream-json control protocol; Codex app-server JSON-RPC over stdio. |
 | **ScreenTool** | Fulfill `capture_screen`: silently shoot the **active window** (default scope) — the window-server frontmost, on whichever display, clean even when partially covered — and attach an **on-device OCR** of the shot to the tool result so the model reads exact text instead of pixels. Falls back to a full-display capture (no OCR) — the Settings-chosen display in Entire-display scope, the main display when no window is eligible; the overlay window is excluded either way. See [settings-window.md](./settings-window.md#capture-scope). | macOS `screencapture` CLI + Apple Vision (`VNRecognizeTextRequest`). |
 | **Overlay Caption** | Render `speak` output: up to ~3 short lines (model-split), shown one at a time and queued so a newer tip never cuts off the current one; non-activating, always-on-top, excluded from capture. Switchable from Settings — **off by default**; when off, tips are suppressed. | AppKit NSPanel; `OverlayCaptionPanel`. |
@@ -393,22 +393,33 @@ provider-route policy, and traffic recording are unchanged — only the transpor
 - **The OpenAI key stays required**: transcription always runs on the Realtime API. A CLI provider
   moves the brain/summarizer off the key, not the ears; the session evaluator independently runs
   through a separate, explicit one-shot agentic audit over the completed session directory.
-  Paired POC measurements justify keeping Claude coaching persistent: its ready query reduced first
-  assistant output from 4,186.0 ms to 3,675.7 ms p50 (12.2%, six pairs), and a signed-in
-  production-path smoke completed its two turns in 3,726/1,694 ms. These are
-  provider/model/network observations, not latency guarantees; the durable invariant is that startup
-  and full-history replay are absent from later turns. Historical Codex measurements remain in the
-  superseded design entry in [decisions.md](./decisions.md), not as a claim that Codex coaching is
-  currently runnable.
+  A controlled signed-in benchmark through each revision's production `CLIBrainClient` measured the
+  complete model portion of a coaching attempt:
+
+  | Provider | Attempt | `main` p50 | Persistent runtime p50 | Saved | Improvement |
+  |---|---|---:|---:|---:|---:|
+  | Claude Code | text-only, one turn (`n=5`) | 4,617 ms | 2,654 ms | 1,963 ms | 42.5% |
+  | Claude Code | capture continuation, two turns (`n=3`) | 9,316 ms | 4,785 ms | 4,531 ms | 48.6% |
+  | Codex | text-only, one turn (`n=5`) | 8,097 ms | 5,898 ms | 2,199 ms | 27.2% |
+  | Codex | capture continuation, two turns (`n=3`) | 18,880 ms | 7,380 ms | 11,500 ms | 60.9% |
+
+  These are real Claude Code 2.1.220 (`claude-opus-5`) and Codex 0.145.0
+  (`gpt-5.6-sol`) invocations at low effort, with identical deterministic instructions and Jarvis's
+  real coaching tool protocol. The capture case makes two real model calls but substitutes a
+  successful capture result, so screen-capture I/O and image inference are outside the timing.
+  Provider/model/network variance remains substantial—especially the overlapping Codex text-only
+  samples—so the measurements demonstrate the end-to-end behavior on this machine, not a latency
+  guarantee. The durable invariant is that provider startup is removed from the attempt path and a
+  capture continuation does not replay the full client-managed history.
 
 ### Latency
 
 Target for the direct API path: **turn-end → first overlay line < 2s.** Transcription is continuous
-(no STT latency at trigger time) and most turns are text-only. The supported local subscription
-provider has provider/model/network-dependent latency; its session runtime removes repeat startup
-and makes a capture follow-up incremental, but does not promise the direct API target. The overlay reveals the
-already-returned lines one at a time (paced by `Config`); the brain response itself is not streamed
-to the overlay.
+(no STT latency at trigger time) and most turns are text-only. Local subscription latency depends on
+the provider, model, and network. Claude keeps query startup off the attempt path; Codex keeps
+app-server startup off it. Both make a capture follow-up incremental, but neither promises the
+direct API target. The overlay reveals the already-returned lines one at a time (paced by `Config`);
+the brain response itself is not streamed to the overlay.
 
 ### Resilience
 
@@ -455,11 +466,11 @@ The always-on legs are built to survive transient failure rather than die on it:
   or gap that the replay would duplicate. Stale speech state therefore cannot suppress silence
   coaching after reconnect. Reconnect uses capped exponential backoff.
 - **The brain call** is single-flighted (a turn can't double-speak) and runs under a provider-aware
-  request timeout. The API and Claude ceilings stay well above the reasoning-turn tail; Codex
-  coaching fails before process launch. Stop terminates every ready, leased, and preparing local
-  process. Termination and escalation target only process identities observed while the original
-  group was proven alive, including descendants snapshotted before an immediately exited leader is
-  reaped, and persistent stdout buffering is bounded while no turn is consuming it.
+  request timeout. The API, Claude, and Codex ceilings stay well above the reasoning-turn tail.
+  Stop terminates every ready, leased, and preparing local process. Termination and escalation
+  target only process identities observed while the original group was proven alive, including
+  descendants snapshotted before an immediately exited leader is reaped, and persistent stdout
+  buffering is bounded while no turn is consuming it.
   A persistent-runtime failure has no one-shot fallback and is never replayed inside its coaching
   attempt. The attempt ends, sent-state and provider-neutral work remain uncommitted, and the
   scheduler makes a new attempt after bounded backoff or an earlier coalesced natural trigger. That
