@@ -1,7 +1,8 @@
 import Foundation
 
-/// One Codex app-server for the live Jarvis session. Each coaching attempt gets a fresh ephemeral
-/// thread; every model turn in that attempt stays on the thread and receives only incremental input.
+/// One Codex app-server for the live Jarvis session. Session Start prepares the first target-specific
+/// ephemeral thread; each later coaching attempt gets another fresh thread. Every model turn in an
+/// attempt stays on its thread and receives only incremental input.
 ///
 /// Codex exposes no control that removes every built-in tool (`codex app-server --help` and the
 /// generated `ThreadStartParams` schema on 0.145.0 have no such flag or field), so isolation is the
@@ -26,9 +27,19 @@ actor CodexAppServerRuntime: LocalAgentRuntimeBackend {
         "reasoning",
     ]
 
-    private struct Preparation: Sendable {
+    private struct ServerPreparation: Sendable {
         let id: UUID
         let task: Task<CodexAppServer, Error>
+    }
+
+    private struct PreparedThread: Sendable {
+        let id: String
+        let configuration: LocalAgentConversationConfiguration
+    }
+
+    private struct ThreadPreparation: Sendable {
+        let id: UUID
+        let task: Task<PreparedThread, Error>
     }
 
     fileprivate struct LaunchIdentity: Equatable {
@@ -42,7 +53,9 @@ actor CodexAppServerRuntime: LocalAgentRuntimeBackend {
     private let lifetime = AgentRuntimeLifetime()
     private var identity: LaunchIdentity?
     private var server: CodexAppServer?
-    private var preparing: Preparation?
+    private var preparingServer: ServerPreparation?
+    private var preparedThread: PreparedThread?
+    private var preparingThread: ThreadPreparation?
     private var nextRequestID = 0
     private var activeThreadID: String?
 
@@ -55,6 +68,13 @@ actor CodexAppServerRuntime: LocalAgentRuntimeBackend {
     }
 
     func prepare(for configuration: LocalAgentConversationConfiguration) async throws {
+        let preparedServer = try await prepareServer(for: configuration)
+        try await prepareThread(for: configuration, server: preparedServer)
+    }
+
+    private func prepareServer(
+        for configuration: LocalAgentConversationConfiguration
+    ) async throws -> CodexAppServer {
         guard configuration.provider == .codexCLI else {
             preconditionFailure("CodexAppServerRuntime received \(configuration.provider)")
         }
@@ -67,13 +87,16 @@ actor CodexAppServerRuntime: LocalAgentRuntimeBackend {
         }
         identity = requested
         if let server, server.isRunning {
-            return
+            return server
         }
         server = nil
-        if preparing == nil {
+        preparedThread = nil
+        preparingThread = nil
+        activeThreadID = nil
+        if preparingServer == nil {
             let lifetime = self.lifetime
             let runtimeBaseDirectory = self.runtimeBaseDirectory
-            preparing = Preparation(
+            preparingServer = ServerPreparation(
                 id: UUID(),
                 task: Task.detached(priority: .utility) {
                     try await CodexAppServer.start(
@@ -83,96 +106,104 @@ actor CodexAppServerRuntime: LocalAgentRuntimeBackend {
                         lifetime: lifetime)
                 })
         }
-        guard let preparation = preparing else {
+        guard let preparation = preparingServer else {
             throw Self.error("Codex app-server preparation was unavailable")
         }
         do {
-            let preparedServer = try await awaitPreparation(preparation)
-            if preparing?.id == preparation.id {
+            let preparedServer = try await awaitServerPreparation(preparation)
+            if preparingServer?.id == preparation.id {
                 server = preparedServer
-                preparing = nil
+                preparingServer = nil
             }
+            return preparedServer
         } catch {
-            if preparing?.id == preparation.id {
-                preparing = nil
+            if preparingServer?.id == preparation.id {
+                preparingServer = nil
             }
             throw error
+        }
+    }
+
+    private func prepareThread(
+        for configuration: LocalAgentConversationConfiguration,
+        server: CodexAppServer
+    ) async throws {
+        while true {
+            guard activeThreadID == nil else { return }
+            if let preparedThread, preparedThread.configuration == configuration {
+                return
+            }
+
+            if let preparation = preparingThread {
+                do {
+                    let thread = try await awaitThreadPreparation(preparation)
+                    // Background prewarm and the first attempt may await the same task. Only the
+                    // first resumed waiter may install it.
+                    if preparingThread?.id == preparation.id {
+                        preparedThread = thread
+                        preparingThread = nil
+                    }
+                } catch {
+                    if preparingThread?.id == preparation.id {
+                        preparingThread = nil
+                    }
+                    invalidate(server)
+                    throw error
+                }
+                continue
+            }
+
+            let staleThread = preparedThread
+            preparedThread = nil
+            let cleanupRequestID = staleThread.map { _ in takeRequestID() }
+            let startRequestID = takeRequestID()
+            let supportedFeatures = self.supportedFeatures
+            preparingThread = ThreadPreparation(
+                id: UUID(),
+                task: Task.detached(priority: .utility) {
+                    if let staleThread, let cleanupRequestID {
+                        try await Self.unsubscribe(
+                            threadID: staleThread.id,
+                            server: server,
+                            requestID: cleanupRequestID)
+                    }
+                    return try await Self.startThread(
+                        for: configuration,
+                        server: server,
+                        requestID: startRequestID,
+                        supportedFeatures: supportedFeatures)
+                })
         }
     }
 
     func openConversation(for configuration: LocalAgentConversationConfiguration)
         async throws -> any LocalAgentConversation {
         try await prepare(for: configuration)
-        guard let server else { throw Self.error("Codex app-server was not ready") }
+        guard let server, server.isRunning else {
+            throw Self.error("Codex app-server was not ready")
+        }
         guard activeThreadID == nil else {
             throw Self.error("Codex app-server already has an active coaching conversation")
         }
-        do {
-            let requestID = takeRequestID()
-            let deadline = Date().addingTimeInterval(configuration.timeout)
-            var config: [String: Any] = [
-                "mcp_servers": [:],
-                "project_root_markers": [],
-                "project_doc_max_bytes": 0,
-                "model_reasoning_effort":
-                    CLIBrainClient.codexEffort(configuration.reasoningEffort),
-            ]
-            // `--disable <name>` is documented as equivalent to `-c features.<name>=false`, and
-            // openai/codex#21952 reports the launch flag not reaching the app-server's tool builder.
-            // Deliver the same disable set through the per-thread config override as well, so the
-            // deny-list `codex exec` coaching relied on is not silently inert here.
-            if !Self.disabledFeatures(advertised: supportedFeatures).isEmpty {
-                config["features"] = Self.disabledFeatures(advertised: supportedFeatures)
-            }
-            var parameters: [String: Any] = [
-                "cwd": configuration.workDirectory.path,
-                "approvalPolicy": "never",
-                "sandbox": "read-only",
-                "ephemeral": true,
-                "baseInstructions": CLIBrainClient.codexDirectResponseInstruction
-                    + "\n\n" + configuration.instructions,
-                "config": config,
-            ]
-            if !configuration.model.isEmpty {
-                parameters["model"] = configuration.model
-            }
-            try await server.send(
-                method: "thread/start",
-                parameters: parameters,
-                id: requestID,
-                timeout: max(0.01, deadline.timeIntervalSinceNow))
-            let result = try await waitForResponse(
-                id: requestID,
-                server: server,
-                deadline: deadline)
-            guard let thread = result["thread"] as? [String: Any],
-                  let threadID = thread["id"] as? String else {
-                throw Self.error("Codex thread/start returned no thread")
-            }
-            let instructionSources = result["instructionSources"] as? [Any] ?? []
-            guard thread["ephemeral"] as? Bool == true,
-                  thread["path"] == nil || thread["path"] is NSNull,
-                  instructionSources.isEmpty else {
-                throw Self.error(
-                    "Codex returned a non-ephemeral or instruction-loaded thread: "
-                    + Self.jsonDescription(result))
-            }
-            activeThreadID = threadID
-            return CodexAppServerConversation(
-                runtime: self,
-                threadID: threadID,
-                configuration: configuration)
-        } catch {
+        guard let thread = preparedThread, thread.configuration == configuration else {
             invalidate(server)
-            throw error
+            throw Self.error("Codex target thread was not ready")
         }
+        preparedThread = nil
+        activeThreadID = thread.id
+        return CodexAppServerConversation(
+            runtime: self,
+            threadID: thread.id,
+            configuration: configuration)
     }
 
     nonisolated func terminateNow() {
         lifetime.terminateAll()
     }
 
-    private func awaitPreparation(_ preparation: Preparation) async throws -> CodexAppServer {
+    private func awaitServerPreparation(
+        _ preparation: ServerPreparation
+    ) async throws -> CodexAppServer {
         let lifetime = self.lifetime
         return try await withTaskCancellationHandler {
             try await preparation.task.value
@@ -180,6 +211,97 @@ actor CodexAppServerRuntime: LocalAgentRuntimeBackend {
             preparation.task.cancel()
             lifetime.terminateAll()
         }
+    }
+
+    private func awaitThreadPreparation(
+        _ preparation: ThreadPreparation
+    ) async throws -> PreparedThread {
+        let lifetime = self.lifetime
+        return try await withTaskCancellationHandler {
+            try await preparation.task.value
+        } onCancel: {
+            preparation.task.cancel()
+            lifetime.terminateAll()
+        }
+    }
+
+    private static func startThread(
+        for configuration: LocalAgentConversationConfiguration,
+        server: CodexAppServer,
+        requestID: Int,
+        supportedFeatures: Set<String>
+    ) async throws -> PreparedThread {
+        let startedAt = DispatchTime.now().uptimeNanoseconds
+        let deadline = Date().addingTimeInterval(configuration.timeout)
+        var config: [String: Any] = [
+            "mcp_servers": [:],
+            "project_root_markers": [],
+            "project_doc_max_bytes": 0,
+            "model_reasoning_effort":
+                CLIBrainClient.codexEffort(configuration.reasoningEffort),
+        ]
+        // `--disable <name>` is documented as equivalent to `-c features.<name>=false`, and
+        // openai/codex#21952 reports the launch flag not reaching the app-server's tool builder.
+        // Deliver the same disable set through the per-thread config override as well, so the
+        // deny-list `codex exec` coaching relied on is not silently inert here.
+        let disabledFeatures = disabledFeatures(advertised: supportedFeatures)
+        if !disabledFeatures.isEmpty {
+            config["features"] = disabledFeatures
+        }
+        var parameters: [String: Any] = [
+            "cwd": configuration.workDirectory.path,
+            "approvalPolicy": "never",
+            "sandbox": "read-only",
+            "ephemeral": true,
+            "baseInstructions": CLIBrainClient.codexDirectResponseInstruction
+                + "\n\n" + configuration.instructions,
+            "config": config,
+        ]
+        if !configuration.model.isEmpty {
+            parameters["model"] = configuration.model
+        }
+        try await server.send(
+            method: "thread/start",
+            parameters: parameters,
+            id: requestID,
+            timeout: max(0.01, deadline.timeIntervalSinceNow))
+        let result = try await waitForResponse(
+            id: requestID,
+            server: server,
+            deadline: deadline)
+        guard let thread = result["thread"] as? [String: Any],
+              let threadID = thread["id"] as? String else {
+            throw error("Codex thread/start returned no thread")
+        }
+        let instructionSources = result["instructionSources"] as? [Any] ?? []
+        guard thread["ephemeral"] as? Bool == true,
+              thread["path"] == nil || thread["path"] is NSNull,
+              instructionSources.isEmpty else {
+            throw error(
+                "Codex returned a non-ephemeral or instruction-loaded thread: "
+                + jsonDescription(result))
+        }
+        let readyMs = Int(
+            (DispatchTime.now().uptimeNanoseconds - startedAt) / 1_000_000)
+        jlog("Jarvis: Codex target thread ready in \(readyMs)ms")
+        return PreparedThread(id: threadID, configuration: configuration)
+    }
+
+    private static func unsubscribe(
+        threadID: String,
+        server: CodexAppServer,
+        requestID: Int
+    ) async throws {
+        let deadline = Date().addingTimeInterval(threadCleanupTimeout)
+        try await server.send(
+            method: "thread/unsubscribe",
+            parameters: ["threadId": threadID],
+            id: requestID,
+            timeout: max(0.01, deadline.timeIntervalSinceNow))
+        _ = try await waitForResponse(
+            id: requestID,
+            server: server,
+            deadline: deadline)
     }
 
     fileprivate func respond(
@@ -303,23 +425,17 @@ actor CodexAppServerRuntime: LocalAgentRuntimeBackend {
         guard let server, server.isRunning else { return }
         do {
             let requestID = takeRequestID()
-            let deadline = Date().addingTimeInterval(Self.threadCleanupTimeout)
-            try await server.send(
-                method: "thread/unsubscribe",
-                parameters: ["threadId": threadID],
-                id: requestID,
-                timeout: max(0.01, deadline.timeIntervalSinceNow))
-            _ = try await waitForResponse(
-                id: requestID,
+            try await Self.unsubscribe(
+                threadID: threadID,
                 server: server,
-                deadline: deadline)
+                requestID: requestID)
         } catch {
             jlog("Jarvis: Codex thread unsubscribe failed: \(error.localizedDescription)")
             invalidate(server)
         }
     }
 
-    private func waitForResponse(
+    private static func waitForResponse(
         id: Int,
         server: CodexAppServer,
         deadline: Date
@@ -350,8 +466,11 @@ actor CodexAppServerRuntime: LocalAgentRuntimeBackend {
 
     private func invalidate(_ server: CodexAppServer) {
         guard self.server === server else { return }
+        preparingThread?.task.cancel()
         server.finish()
         self.server = nil
+        preparedThread = nil
+        preparingThread = nil
         activeThreadID = nil
     }
 

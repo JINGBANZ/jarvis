@@ -3,9 +3,9 @@ import Foundation
 /// Subscription-backed brain client over a provider-native persistent local-agent runtime.
 ///
 /// Claude uses a preinitialized, single-use query lease with one replacement kept ready. Codex uses
-/// one session-scoped app-server and a fresh ephemeral thread per coaching attempt. Neither provider
-/// has a one-shot coaching fallback: runtime failure is a failed provider attempt and is handled by
-/// the ordered route.
+/// one session-scoped app-server, prewarms its first target-specific ephemeral thread, and opens a
+/// fresh thread for each later coaching attempt. Neither provider has a one-shot coaching fallback:
+/// runtime failure is a failed provider attempt and is handled by the ordered route.
 public struct CLIBrainClient: BrainClient, Sendable {
     let provider: BrainProvider
     let traffic: BrainTrafficLog?

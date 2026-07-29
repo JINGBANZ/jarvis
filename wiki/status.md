@@ -44,10 +44,11 @@ complete tool loop while preparing its replacement. It disables built-in tools, 
 session persistence, and MCP servers while preserving the user's OAuth session. Its runtime miss or
 crash fails the provider attempt; there is no one-shot CLI fallback. Stop kills ready, leased, and
 preparing process trees. Codex keeps one session-scoped app-server under a private `CODEX_HOME` and
-opens a fresh ephemeral thread per attempt, so its coach and summarizer share one runtime. Its
-read-only, never-approval, empty-MCP, feature-disable envelope matches what `codex exec` coaching
-enforced, plus verified thread ephemerality and a message/reasoning event allowlist that aborts a
-turn on any other item.
+prepares the first target-specific ephemeral thread at Session Start while transcription connects.
+The first attempt leases it; later attempts open fresh threads, so coach and summarizer share one
+runtime without crossing target configuration. Its read-only, never-approval, empty-MCP,
+feature-disable envelope matches what `codex exec` coaching enforced, plus verified thread
+ephemerality and a message/reasoning event allowlist that aborts a turn on any other item.
 Saving an API key while running also preserves those live objects: existing Realtime sockets take
 the key on their next reconnect, and an OpenAI brain update remains transactional. Audio
 route rebuilds likewise retry before declaring capture unavailable, and stale capture callbacks
@@ -75,8 +76,9 @@ disabled model/Add fallback, and Add API key), then configure multiple fallbacks
 failure-budget transition, a proven-permanent one-attempt transition, an unavailable-target skip, and
 final route exhaustion. Confirm no provider-specific tool state crosses attempts and verify a
 successful fallback remains active without changing preferences. Configure Codex as Primary and
-confirm a coaching turn completes on its app-server; then Stop and confirm neither the app-server nor
-its private runtime home survives. Then Stop the Claude smoke and confirm no query child remains. The signed-in
+confirm `jarvis-debug.log` reports the target thread ready before the first coaching request and that
+the turn completes on its app-server; then Stop and confirm neither the app-server nor its private
+runtime home survives. Then Stop the Claude smoke and confirm no query child remains. The signed-in
 Foundation-level Claude POC already verifies two turns on one native conversation; this remaining
 smoke covers app wiring, TCC, audio, and overlay presentation. Exercise one
 audio-route switch: Activity should say listening continues, the
