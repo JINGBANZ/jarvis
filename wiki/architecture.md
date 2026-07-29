@@ -356,8 +356,8 @@ provider-route policy, and traffic recording are unchanged — only the transpor
   membership. Its exit monitor observes the exact leader without reaping it, snapshots descendant
   identities while the original group is still provable, and only then reaps the leader. Teardown
   sends graceful termination to the whole group only while a launch-observed identity proves
-  ownership, then refreshes membership before escalation while that proof remains valid. This
-  reaches helpers forked during teardown; escalation otherwise stays limited to current
+  ownership. It retains an exited launch leader as the ownership proof until group-wide escalation,
+  reaching helpers forked during teardown; without that proof, escalation stays limited to current
   launch-observed PID/start-time identities rather than trusting a potentially recycled group.
   `AgentRuntimeLifetime` is only the lock-guarded synchronous ownership seam needed
   because actor `deinit` cannot await. The stable Swift Subprocess API's execution handle is scoped

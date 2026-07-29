@@ -27,6 +27,7 @@ final class AgentRuntimeProcess: @unchecked Sendable {
 
     static let errorDomain = "AgentRuntimeProcess"
     private static let exitDrainSeconds: TimeInterval = 0.1
+    private static let terminationGraceSeconds: TimeInterval = 1
     private static let maxBufferedStdoutBytes = 1_048_576
     private static let maxBufferedStdoutLines = 4_096
 
@@ -72,6 +73,7 @@ final class AgentRuntimeProcess: @unchecked Sendable {
     /// Identities observed while an already-known member still proved that this was the process
     /// group created for this launch. Never populate this from a bare, potentially reused PGID.
     private var knownProcessIdentities: [pid_t: ProcessIdentity] = [:]
+    private var hasEscalatedTermination = false
     #endif
 
     let launchedAt: UInt64
@@ -284,26 +286,39 @@ final class AgentRuntimeProcess: @unchecked Sendable {
                 kill(identity.processIdentifier, SIGTERM)
             }
         }
-        DispatchQueue.global().asyncAfter(deadline: .now() + 2) {
+        DispatchQueue.global().asyncAfter(
+            deadline: .now() + Self.terminationGraceSeconds
+        ) { [self] in
+            condition.lock()
             let currentIdentities = Self.processIdentities(inGroup: processGroup)
-            let stillProvesOriginalGroup = currentIdentities.contains { identity in
+            let provesOriginalGroup = currentIdentities.contains { identity in
                 terminationTargets.contains(identity)
             }
-            // A still-current launch identity lets escalation adopt helpers forked during graceful
-            // teardown. Without that proof, retain the frozen launch-observed set so a recycled PGID
-            // can never widen the targets.
-            let escalationTargets = stillProvesOriginalGroup
-                ? currentIdentities
-                : terminationTargets
-            for identity in escalationTargets
-            where Self.isCurrent(identity, inGroup: processGroup) {
-                kill(identity.processIdentifier, SIGKILL)
+            let provesUnreapedLeaderExit = !provesOriginalGroup
+                && Self.hasExitedWithoutReaping(processIdentifier)
+            if provesOriginalGroup || provesUnreapedLeaderExit {
+                for identity in currentIdentities {
+                    knownProcessIdentities[identity.processIdentifier] = identity
+                }
+            }
+            let escalationTargets = Array(knownProcessIdentities.values)
+            let signaledProcessGroup = (provesOriginalGroup || provesUnreapedLeaderExit)
+                && killpg(processGroup, SIGKILL) == 0
+            hasEscalatedTermination = true
+            condition.broadcast()
+            condition.unlock()
+
+            if !signaledProcessGroup {
+                for identity in escalationTargets
+                where Self.isCurrent(identity, inGroup: processGroup) {
+                    kill(identity.processIdentifier, SIGKILL)
+                }
             }
         }
         #else
         kill(target, SIGTERM)
         let platformProcess = self.platformProcess
-        DispatchQueue.global().asyncAfter(deadline: .now() + 2) {
+        DispatchQueue.global().asyncAfter(deadline: .now() + Self.terminationGraceSeconds) {
             if platformProcess?.isRunning == true {
                 kill(target, SIGKILL)
             }
@@ -724,8 +739,18 @@ final class AgentRuntimeProcess: @unchecked Sendable {
     /// launch's PGID. Snapshot member PID/start-time identities before reaping and exposing the exit.
     private func recordObservedLeaderExit() {
         condition.lock()
-        for identity in Self.processIdentities(inGroup: processIdentifier) {
+        let currentIdentities = Self.processIdentities(inGroup: processIdentifier)
+        for identity in currentIdentities {
             knownProcessIdentities[identity.processIdentifier] = identity
+        }
+        // During teardown the unreaped launch leader keeps its PID/PGID unavailable for reuse,
+        // preserving group ownership until escalation when a helper could still fork. With no
+        // remaining helper, reaping immediately is safe and keeps simple cancellation prompt.
+        let hasRemainingHelper = currentIdentities.contains {
+            $0.processIdentifier != processIdentifier
+        }
+        while isTerminating && hasRemainingHelper && !hasEscalatedTermination {
+            condition.wait()
         }
         if let status = Self.reapExitedProcess(processIdentifier) {
             recordExitLocked(status)

@@ -308,7 +308,6 @@ import Testing
                   sleep 0.2
                   \(ignoresTermination.path) &
                   printf '%s\\n' "$!" > '\(childFile.path)'
-                  wait
                 ) &
                 printf 'ready\\n'
                 wait
