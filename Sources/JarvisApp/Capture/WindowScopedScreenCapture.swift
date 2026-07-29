@@ -6,8 +6,8 @@ import JarvisCore
 /// `.activeWindow`, with an on-device OCR of the shot riding along as `recognizedText`. Falls back
 /// to a full-display capture (`ScreenCaptureCLI` — the Settings-chosen display in `.entireDisplay`
 /// scope, the main display otherwise) when no eligible window is on screen or the window capture
-/// fails — full-display captures skip OCR deliberately (a whole display's text would feed the
-/// clutter back as tokens).
+/// command fails. A cleanup-integrity failure returns without fallback. Full-display captures skip
+/// OCR deliberately (a whole display's text would feed the clutter back as tokens).
 ///
 /// Window choice reads the window server's single front-to-back z-order
 /// (`CGWindowListCopyWindowInfo`), which spans all displays — so the pick is the window the user
@@ -17,22 +17,38 @@ import JarvisCore
 /// when the window is partially covered; `-o` omits the window shadow.
 struct WindowScopedScreenCapture: ScreenCapturing {
     private let preferences: ScreenCapturePreferences
+    private let runner: ScreenCaptureRunner
     private let fallback: ScreenCaptureCLI
     private let recognizer = ScreenTextRecognizer()
 
-    init(preferences: ScreenCapturePreferences) {
+    init(preferences: ScreenCapturePreferences, captureDirectory: URL) {
         self.preferences = preferences
-        self.fallback = ScreenCaptureCLI(preferences: preferences)
+        let runner = ScreenCaptureRunner(captureDirectory: captureDirectory)
+        self.runner = runner
+        self.fallback = ScreenCaptureCLI(preferences: preferences, runner: runner)
     }
 
     func capture() -> ScreenSnapshot? {
-        guard preferences.scope == .activeWindow,   // read at capture time, like the display index
-              let windowID = Self.frontWindowID(),
-              let jpeg = ScreenCaptureCLI.runScreencapture(
-                  arguments: ["-x", "-o", "-t", "jpg", "-l", "\(windowID)"])
-        else { return fallback.capture() }
-        return ScreenSnapshot(imageBase64: jpeg.base64EncodedString(),
-                              recognizedText: recognizer.recognizedText(inJPEG: jpeg))
+        if preferences.scope == .activeWindow,   // read at capture time, like the display index
+           let windowID = Self.frontWindowID() {
+            let outcome = runner.capture(
+                arguments: ["-x", "-o", "-t", "jpg", "-l", "\(windowID)"])
+            switch outcome {
+            case let .captured(jpeg):
+                return ScreenSnapshot(
+                    imageBase64: jpeg.base64EncodedString(),
+                    recognizedText: recognizer.recognizedText(inJPEG: jpeg))
+            case .cleanupFailed, .cancelled:
+                return nil
+            case .failed:
+                break
+            }
+        }
+        return fallback.capture()
+    }
+
+    func cancelCapture() {
+        runner.cancelCapture()
     }
 
     /// Dumps the on-screen window list (front-to-back, all displays) into Core's selector.

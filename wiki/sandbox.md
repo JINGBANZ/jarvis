@@ -109,9 +109,10 @@ Narrow and explicit. Data leaves the machine only via:
 
 There is **no rolling screen/audio archive and no "recall" database** — Jarvis keeps no continuous
 recording of what it sees or hears. The **raw captured streams stay transient**: mic audio streams to
-the API and is dropped, the live transcript lives in memory, and the temp screenshot files used to
-hand a frame to `screencapture` are deleted immediately after use. The one thing persisted *on this
-machine* is the **per-session log directory** — owner-only and bounded; see below.
+the API and is dropped, the live transcript lives in memory, and the transient file `screencapture`
+writes a frame into is created inside the owner-only session directory (never `/tmp`) and deleted —
+with its absence verified — before the capture returns. The one thing persisted *on this machine* is
+the **per-session log directory** — owner-only and bounded; see below.
 
 > **Server-side retention for debuggability (current behavior).** Session memory is client-managed
 > (`CoachHistory` — nothing at OpenAI is needed for continuity), but requests are still sent

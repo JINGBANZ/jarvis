@@ -547,7 +547,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             config: config,
             transcript: transcript,
             route: configuredRoute,
-            screen: WindowScopedScreenCapture(preferences: screenPreferences),
+            screen: WindowScopedScreenCapture(
+                preferences: screenPreferences,
+                captureDirectory: sessionDirectory),
             overlay: overlaySink,
             clock: clock)
 

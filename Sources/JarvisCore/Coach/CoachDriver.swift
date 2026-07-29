@@ -751,9 +751,7 @@ public final class CoachDriver: @unchecked Sendable {
                 ActivityLog.shared.record(.manualHint(prompt: prompt))
             }
             let screen = self.screen
-            let shot = await Task.detached(
-                priority: .userInitiated,
-                operation: { screen.capture() }).value
+            let shot = await Self.captureScreen(using: screen)
             if Task.isCancelled {
                 jlog("… attempt cancelled (stopped) after capture")
                 return .cancelled
@@ -834,9 +832,7 @@ public final class CoachDriver: @unchecked Sendable {
             switch call {
             case .captureScreen(let callID):
                 let screen = self.screen
-                let shot = await Task.detached(
-                    priority: .userInitiated,
-                    operation: { screen.capture() }).value
+                let shot = await Self.captureScreen(using: screen)
                 if Task.isCancelled {
                     jlog("… attempt cancelled (stopped) after capture")
                     return .cancelled
@@ -931,6 +927,24 @@ public final class CoachDriver: @unchecked Sendable {
     private static func captureResultText(_ shot: ScreenSnapshot) -> String {
         guard let text = shot.recognizedText else { return "screenshot captured" }
         return "screenshot captured\n\n\(recognizedTextBlock(text))"
+    }
+
+    /// Screen capture is an OS-bound synchronous edge, so run it off the cooperative executor.
+    /// Cancellation asks the capture adapter to terminate its helper, then waits for `capture()` to
+    /// return so the attempt cannot outlive cleanup of screen-derived files.
+    private static func captureScreen(using screen: ScreenCapturing) async -> ScreenSnapshot? {
+        let capture = Task.detached(priority: .userInitiated) { () -> ScreenSnapshot? in
+            guard !Task.isCancelled else { return nil }
+            return screen.capture()
+        }
+        return await withTaskCancellationHandler {
+            // Await the producer itself. A cancelled consumer would return immediately and let the
+            // attempt's teardown race the helper's exit and the transient JPEG's deletion.
+            await capture.value
+        } onCancel: {
+            capture.cancel()
+            screen.cancelCapture()
+        }
     }
 
     private static func recognizedTextBlock(_ text: String) -> String {
