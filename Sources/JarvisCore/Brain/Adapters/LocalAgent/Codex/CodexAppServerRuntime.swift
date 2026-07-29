@@ -1,17 +1,15 @@
 import Foundation
 
-/// Evidence required before the app-server implementation may launch. Feature discovery is
-/// deliberately not evidence: it can only name the current catalog and therefore fails open when
-/// the probe fails or a future built-in family appears.
-enum CodexBuiltInToolIsolation: Sendable, Equatable {
-    case unavailable
-    /// Reserved for a future stable provider control whose documented semantics remove every
-    /// built-in tool. Keeping its arguments here couples that proof to the launched process.
-    case toolFree(launchArguments: [String])
-}
-
 /// One Codex app-server for the live Jarvis session. Each coaching attempt gets a fresh ephemeral
 /// thread; every model turn in that attempt stays on the thread and receives only incremental input.
+///
+/// Codex exposes no control that removes every built-in tool (`codex app-server --help` and the
+/// generated `ThreadStartParams` schema on 0.145.0 have no such flag or field), so isolation is the
+/// same layered envelope `codex exec` coaching used: read-only sandbox, never-approval, an ephemeral
+/// thread verified to have loaded no instruction sources, empty MCP config, zero project-doc bytes,
+/// a private `CODEX_HOME`, the advertised-feature disable set, and a prompt forbidding built-in tool
+/// use. On top of that this runtime rejects any server request or item event outside the
+/// message/reasoning allowlist, which catches built-in families the disable list never named.
 actor CodexAppServerRuntime: LocalAgentRuntimeBackend {
     /// Thread teardown is best-effort cleanup, not model inference. A wedged unsubscribe must not
     /// hold the attempt open for the turn's much longer response deadline.
@@ -37,12 +35,10 @@ actor CodexAppServerRuntime: LocalAgentRuntimeBackend {
         let executable: URL
         let workDirectory: URL
         let supportedFeatures: Set<String>
-        let toolIsolationArguments: [String]
     }
 
     private let runtimeBaseDirectory: URL
     private let supportedFeatures: Set<String>
-    private let builtInToolIsolation: CodexBuiltInToolIsolation
     private let lifetime = AgentRuntimeLifetime()
     private var identity: LaunchIdentity?
     private var server: CodexAppServer?
@@ -52,28 +48,20 @@ actor CodexAppServerRuntime: LocalAgentRuntimeBackend {
 
     init(
         runtimeBaseDirectory: URL = CodexRuntimeHome.defaultBaseDirectory,
-        supportedFeatures: Set<String> = [],
-        builtInToolIsolation: CodexBuiltInToolIsolation = .unavailable
+        supportedFeatures: Set<String> = []
     ) {
         self.runtimeBaseDirectory = runtimeBaseDirectory
         self.supportedFeatures = supportedFeatures
-        self.builtInToolIsolation = builtInToolIsolation
     }
 
     func prepare(for configuration: LocalAgentConversationConfiguration) async throws {
         guard configuration.provider == .codexCLI else {
             preconditionFailure("CodexAppServerRuntime received \(configuration.provider)")
         }
-        guard case .toolFree(let toolIsolationArguments) = builtInToolIsolation else {
-            throw BrainFailure(
-                disposition: .permanent,
-                detail: DetectedAgentCLI.codexToolFreeModeUnavailableDetail)
-        }
         let requested = LaunchIdentity(
             executable: configuration.executable,
             workDirectory: configuration.workDirectory,
-            supportedFeatures: supportedFeatures,
-            toolIsolationArguments: toolIsolationArguments)
+            supportedFeatures: supportedFeatures)
         if let identity, identity != requested {
             throw Self.error("a session-scoped Codex app-server cannot change its launch identity")
         }
@@ -122,6 +110,20 @@ actor CodexAppServerRuntime: LocalAgentRuntimeBackend {
         do {
             let requestID = takeRequestID()
             let deadline = Date().addingTimeInterval(configuration.timeout)
+            var config: [String: Any] = [
+                "mcp_servers": [:],
+                "project_root_markers": [],
+                "project_doc_max_bytes": 0,
+                "model_reasoning_effort":
+                    CLIBrainClient.codexEffort(configuration.reasoningEffort),
+            ]
+            // `--disable <name>` is documented as equivalent to `-c features.<name>=false`, and
+            // openai/codex#21952 reports the launch flag not reaching the app-server's tool builder.
+            // Deliver the same disable set through the per-thread config override as well, so the
+            // deny-list `codex exec` coaching relied on is not silently inert here.
+            if !Self.disabledFeatures(advertised: supportedFeatures).isEmpty {
+                config["features"] = Self.disabledFeatures(advertised: supportedFeatures)
+            }
             var parameters: [String: Any] = [
                 "cwd": configuration.workDirectory.path,
                 "approvalPolicy": "never",
@@ -129,13 +131,7 @@ actor CodexAppServerRuntime: LocalAgentRuntimeBackend {
                 "ephemeral": true,
                 "baseInstructions": CLIBrainClient.codexDirectResponseInstruction
                     + "\n\n" + configuration.instructions,
-                "config": [
-                    "mcp_servers": [:],
-                    "project_root_markers": [],
-                    "project_doc_max_bytes": 0,
-                    "model_reasoning_effort":
-                        CLIBrainClient.codexEffort(configuration.reasoningEffort),
-                ],
+                "config": config,
             ]
             if !configuration.model.isEmpty {
                 parameters["model"] = configuration.model
@@ -378,6 +374,17 @@ actor CodexAppServerRuntime: LocalAgentRuntimeBackend {
         try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any]
     }
 
+    /// The agentic feature names to switch off, intersected with what this installation advertises
+    /// so a renamed or absent name is never passed. Shared by the launch argv and the per-thread
+    /// config override, which are the two delivery paths for the same `features.<name>=false` knob.
+    static func disabledFeatures(advertised: Set<String>) -> [String: Bool] {
+        var disabled: [String: Bool] = [:]
+        for feature in CLIBrainClient.codexDisabledAgentFeatures where advertised.contains(feature) {
+            disabled[feature] = false
+        }
+        return disabled
+    }
+
     fileprivate static func isServerRequest(_ payload: [String: Any]) -> Bool {
         payload["method"] != nil
             && payload["id"] != nil
@@ -518,7 +525,7 @@ private final class CodexAppServer: @unchecked Sendable {
             "-c", "mcp_servers={}",
             "-c", "project_root_markers=[]",
             "-c", "project_doc_max_bytes=0",
-        ] + identity.toolIsolationArguments
+        ]
         for feature in CLIBrainClient.codexDisabledAgentFeatures
         where identity.supportedFeatures.contains(feature) {
             arguments += ["--disable", feature]

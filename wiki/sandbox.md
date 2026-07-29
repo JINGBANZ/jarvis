@@ -101,14 +101,20 @@ Narrow and explicit. Data leaves the machine only via:
   provider-route policy, and Stop kills every ready, leased, or preparing process. This trusts a CLI
   the user already runs on this machine without widening what Jarvis itself may touch. Transcription
   audio still goes to the OpenAI Realtime API regardless.
-- **Codex sends no coaching payload today.** The CLI can be detected, authenticated, selected, and
-  retained in a route, but its current app-server has no stable launch surface that removes every
-  built-in agent tool. Empty MCP config, read-only sandboxing, known-feature disables, and rejection
-  of observed tool events cannot prove that a future or renamed built-in is absent. A Codex primary
-  therefore fails explicit Start preflight, a Codex fallback is skipped as unavailable, and the
-  runtime returns a permanent provider failure before creating a private `CODEX_HOME` or spawning a
-  process. The separate completed-session evaluator remains intentionally agentic and may still use
-  Codex under the explicit Evaluate boundary below.
+- **With Codex selected for coaching**, the payload goes to one session-scoped `codex app-server`
+  under the user's own ChatGPT account and OpenAI's consumer retention terms. It runs under a private
+  owner-only `CODEX_HOME` whose only content is an `auth.json` symlink, so no user config, profile,
+  plugin, prompt, or execpolicy `.rules` file is loadable — structurally covering what
+  `--ignore-user-config` and `--ignore-rules` did. Each attempt opens a fresh thread that is required
+  to come back ephemeral, pathless, and free of instruction sources, so no rollout transcript reaches
+  `~/.codex`. The thread runs read-only with approvals never, empty MCP config, no project-root
+  markers, and zero project-doc bytes; the advertised agentic features are disabled on both the
+  launch argv and the per-thread config; and a prompt forbids built-in tool use. Codex publishes no
+  control that removes built-in tools, so this envelope is layered rather than a proof of absence —
+  an accepted residual risk, backed by a runtime allowlist that aborts the turn on any server request
+  or item event outside agent messages and reasoning. See
+  [decisions.md](./decisions.md) → 2026-07-29. The separate completed-session evaluator remains
+  intentionally agentic under the explicit Evaluate boundary below.
 - **An explicit Activity → Evaluate click** sends the selected completed session to a read-only,
   non-persisted Claude Code / Codex agent under that CLI account. Unlike a coaching turn, this agent
   may inspect the complete `jarvis-activity.jsonl`, brain traffic, saved screenshots, and source

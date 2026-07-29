@@ -72,14 +72,6 @@ import Testing
         #expect(!e.severity.stopsSession)
     }
 
-    @Test func missingToolFreeCLIModeAlertsWithoutStartingOrStopping() {
-        let e = UserFacingError.brainCLIToolFreeModeUnavailable(provider: "Codex CLI")
-        #expect(e.severity == .warning)
-        #expect(e.severity.showsAlert)
-        #expect(!e.severity.stopsSession)
-        #expect(e.message.contains("tool-free"))
-    }
-
     @Test func brainCLISignInUnconfirmedStaysQuiet() {
         // A failed/timed-out probe is unknown rather than proof of logout, so warn without blocking.
         let e = UserFacingError.brainCLISignInUnconfirmed(provider: "Claude Code")

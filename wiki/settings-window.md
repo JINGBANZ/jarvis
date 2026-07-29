@@ -117,19 +117,17 @@ use** marker exposes the runtime cursor without moving or rewriting any saved ta
 
 **Primary.** The first row selects a provider and model: the **OpenAI API** (metered by the key), or a
 locally installed **Claude Code** / **Codex CLI**. Claude uses a session-scoped local runtime for
-coaching on the user's existing Claude *subscription* instead of the key (`CLIBrainClient`; see
-[architecture.md](./architecture.md#local-cli-brain-providers)). Codex remains selectable so an
-existing route and model preference stay explicit, but its current app-server has no stable
-tool-free launch mode; selecting it as Primary produces a Start-time warning before any Codex
-process or runtime home is created. Installed CLIs are auto-detected by `AgentCLIDetector`: binary
+coaching on the user's existing Claude *subscription* instead of the key, and Codex likewise coaches
+through a session-scoped app-server on the user's ChatGPT subscription (`CLIBrainClient`; see
+[architecture.md](./architecture.md#local-cli-brain-providers)). Installed CLIs are auto-detected by `AgentCLIDetector`: binary
 discovery is a pure file probe over $PATH + the known install dirs, while Claude sign-in uses its
 non-billing `auth status --json` command under a short timeout because account metadata can outlive
 an expired OAuth session. Codex keeps using its auth-file marker and a bounded capability probe.
 Settings runs these probes asynchronously and keeps local-provider controls selectable while the
 first result is pending. The provider menus then show **signed in**, **signed out**, or **sign-in
 unknown**; a confirmed logout refuses Start, while an unavailable auth probe does not falsely claim
-logout. Coaching capability is checked separately from authentication, so Codex remains unavailable
-when its feature probe is empty, failed, or reports a changed catalog.
+logout. An empty, failed, or changed Codex feature catalog only narrows the disable flags that are
+passed; it never widens what a coaching thread may do.
 
 Before first-time setup, Primary shows **Choose provider…**, its model menu is disabled, and **Add
 fallback** is disabled. Selecting Primary creates the first valid route. Older installations that
@@ -168,10 +166,9 @@ OpenAI API and Codex CLI share one concrete model list; Claude Code exposes the 
 release in each supported family. Each provider remembers its own model; without a valid preference,
 the first entry in that provider's catalog is selected. The **Reasoning effort** picker
 (`ReasoningEffort`: None / Low / Medium / High, default Low) is stored once and applies uniformly to
-whichever provider is active. `CLIBrainClient` maps it onto Claude Code's `--effort`; that CLI scale
-starts at `low`, so None clamps to Low while the three shared levels pass through. The Codex model
-and effort preference remain persisted, but coaching never reaches their app-server mapping until a
-stable tool-free provider surface exists.
+whichever provider is active. `CLIBrainClient` maps it onto Claude Code's `--effort` and Codex's
+per-thread `model_reasoning_effort`; both CLI scales start at `low`, so None clamps to Low while the
+three shared levels pass through.
 
 **Transcription.** This group names the separate speech-to-text role explicitly so future
 transcription providers can be added without conflating them with the brain route. It currently
@@ -201,16 +198,13 @@ preparing immediately; replacements behind that cursor are terminated without be
 the transcription API key likewise preserves route health, but refreshes only OpenAI clients and
 never probes or replaces a CLI client.
 
-A local-CLI target is preflighted first. A confirmed missing binary, signed-out account, or absent
-tool-free coaching capability cannot activate; the running route stays intact and Activity records
-fixed settings-not-applied copy. A Codex fallback remains in the configured route as an unavailable
-target so the session cursor skips it without launching a process or consuming synthetic attempts.
+A local-CLI target is preflighted first. A confirmed missing binary or signed-out account cannot
+activate; the running route stays intact and Activity records fixed settings-not-applied copy.
 Provider-specific partial tool-loop state from a failed attempt is discarded, while provider-neutral
 pending conversation follows the newly installed route on its next attempt. While stopped, persisted
 changes apply on the **next Start**. Runtime readiness is not a routing signal: if Claude's ready
-query is unavailable, that provider attempt fails and follows the normal fresh-attempt route policy.
-Claude never falls back to a one-shot CLI command; Codex fails before either persistent or one-shot
-coaching launch.
+query or Codex's app-server is unavailable, that provider attempt fails and follows the normal
+fresh-attempt route policy. Neither CLI ever falls back to a one-shot command.
 
 All Brain choices persist via `BrainPreferences` —
 `Sources/JarvisCore/Config/BrainPreferences.swift` is the single source for the UserDefaults keys,

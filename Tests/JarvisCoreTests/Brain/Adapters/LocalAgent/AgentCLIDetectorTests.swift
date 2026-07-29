@@ -67,7 +67,6 @@ import Glibc
         let cli = d.detect(.claudeCode)
         #expect(cli?.executableURL.path == bin.appendingPathComponent("claude").path)
         #expect(cli?.authenticationStatus == .unknown)
-        #expect(cli?.coachingIsolation == .toolFree)
     }
 
     @Test func fallsBackToKnownInstallDirsWhenPATHIsMinimal() throws {
@@ -199,10 +198,9 @@ import Glibc
         let cli = d.detect(.codexCLI)
         #expect(cli?.authenticationStatus == .signedIn)
         #expect(cli?.supportedFeatures == ["shell_tool", "code_mode_host"])
-        #expect(cli?.coachingIsolation == .toolFreeModeUnavailable)
     }
 
-    @Test func emptyCodexFeatureCatalogDoesNotBecomeToolFreeEvidence() throws {
+    @Test func emptyCodexFeatureCatalogYieldsNoDisableFlags() throws {
         let home = try makeHome()
         let bin = home.appendingPathComponent("fakebin")
         try installBinary("codex", in: bin, script: """
@@ -214,7 +212,6 @@ import Glibc
             """)
         let cli = detector(home: home, pathVariable: bin.path).detect(.codexCLI)
         #expect(cli?.supportedFeatures == [])
-        #expect(cli?.coachingIsolation == .toolFreeModeUnavailable)
     }
 
     @Test func codexFeatureProbeFailureFallsBackToNoGuessedFlags() throws {
@@ -224,7 +221,6 @@ import Glibc
         let d = detector(home: home, pathVariable: bin.path)
         let cli = d.detect(.codexCLI)
         #expect(cli?.supportedFeatures == [])
-        #expect(cli?.coachingIsolation == .toolFreeModeUnavailable)
     }
 
     @Test func codexFeatureProbeIsBounded() throws {
@@ -237,7 +233,6 @@ import Glibc
         let d = detector(home: home, pathVariable: bin.path, authStatusTimeout: 0.01)
         let cli = d.detect(.codexCLI)
         #expect(cli?.supportedFeatures == [])
-        #expect(cli?.coachingIsolation == .toolFreeModeUnavailable)
     }
 
     @Test func missingBinaryDetectsNothing() throws {

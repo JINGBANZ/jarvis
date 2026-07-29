@@ -209,15 +209,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 .brainCLIMissing(provider: provider.displayName), context: context)
             return (false, nil)
         }
-        guard cli.coachingIsolation == .toolFree else {
-            jlog("Jarvis: can't \(action) — "
-                 + DetectedAgentCLI.codexToolFreeModeUnavailableDetail + ".")
-            if recordSettingsFailure { ActivityLog.shared.record(.settingsChangeNotApplied) }
-            errorReporter.reportImmediately(
-                .brainCLIToolFreeModeUnavailable(provider: provider.displayName),
-                context: context)
-            return (false, nil)
-        }
         switch cli.authenticationStatus {
         case .signedIn:
             break
@@ -296,9 +287,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let detectedCLI else {
             return "\(target.provider.displayName) CLI was not found"
         }
-        if detectedCLI.coachingIsolation != .toolFree {
-            return "\(target.provider.displayName) has no tool-free coaching mode"
-        }
         if detectedCLI.authenticationStatus == .signedOut {
             return "\(target.provider.displayName) is signed out"
         }
@@ -314,8 +302,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         prewarmPrimary: Bool = true
     ) -> ConfiguredBrainRoute {
         let sharedCodexRuntime = route.targets.contains {
-            $0.provider == .codexCLI
-                && detectedCLIs[$0.provider]?.coachingIsolation == .toolFree
+            $0.provider == .codexCLI && detectedCLIs[$0.provider] != nil
         } ? CLIBrainRuntime(
             provider: .codexCLI,
             codexSupportedFeatures: detectedCLIs[.codexCLI]?.supportedFeatures ?? []) : nil

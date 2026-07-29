@@ -4,10 +4,9 @@ import Testing
 
 /// Opt-in signed-in smoke test for the real provider runtimes.
 ///
-/// The normal gate leaves this test inert. Run it with
-/// `JARVIS_LIVE_AGENT_PROVIDER=claude-code` or `all` to make a billed/subscription-backed model
-/// request. Codex remains in `all` only to verify its installed CLI is marked unavailable before
-/// launch until app-server exposes a stable tool-free request mode.
+/// The normal gate leaves this test inert. Run it with `JARVIS_LIVE_AGENT_PROVIDER` set to
+/// `claude-code`, `codex-cli`, or `all` to make a billed/subscription-backed model request against
+/// the real persistent runtime.
 @Suite(.serialized) struct CLIBrainRuntimeLiveTests {
     private static let prompt = """
     You are a deterministic transport test. Follow these two rules exactly:
@@ -40,11 +39,6 @@ import Testing
     private func verify(_ provider: BrainProvider) async throws {
         let detected = try #require(AgentCLIDetector().detect(provider))
         #expect(detected.authenticationStatus != .signedOut)
-        if provider == .codexCLI {
-            #expect(detected.coachingIsolation == .toolFreeModeUnavailable)
-            return
-        }
-
         let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
             .appendingPathComponent(".jarvis", isDirectory: true)
         try FileManager.default.createDirectory(

@@ -67,47 +67,127 @@ import Testing
         #expect(arguments.contains("--no-session-persistence"))
     }
 
-    @Test func codexFailsClosedBeforeLaunchDespiteEmptyOrDriftedFeatureDiscovery() async throws {
-        for supportedFeatures: Set<String> in [
-            [],
-            ["shell_tool", "unified_exec"],
-            ["future_tool_family_unknown_to_jarvis"],
-        ] {
-            let directory = try makeWorkDirectory()
-            defer { try? FileManager.default.removeItem(at: directory) }
-            let launched = directory.appendingPathComponent("launched")
-            let executable = try makeExecutable(
-                in: directory,
-                named: "fake-codex",
-                script: """
-                    #!/bin/sh
-                    printf 'launched\\n' > '\(shellQuoted(launched.path))'
-                    sleep 30
-                    """)
-            let runtimeBaseDirectory = directory.appendingPathComponent("agent-runtimes")
-            let runtime = CLIBrainRuntime(
-                provider: .codexCLI,
-                codexRuntimeBaseDirectory: runtimeBaseDirectory,
-                codexSupportedFeatures: supportedFeatures)
-            let client = makeClient(
-                provider: .codexCLI,
-                executable: executable,
-                directory: directory,
-                runtime: runtime,
-                prewarm: false)
+    /// Codex coaching is enabled at parity with the `codex exec` envelope it replaces, so both
+    /// delivery surfaces — the app-server argv and the per-thread `thread/start` parameters — have
+    /// to carry every isolation control. Feature disables ride both paths because `--disable <name>`
+    /// is only documented as equivalent to `-c features.<name>=false`, and openai/codex#21952
+    /// reports the launch flag not reaching the app-server's tool builder.
+    @Test func codexLaunchAndThreadStartCarryTheIsolationEnvelope() async throws {
+        let directory = try makeWorkDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let argumentsFile = directory.appendingPathComponent("arguments")
+        let trace = directory.appendingPathComponent("trace")
+        let executable = try makeExecutable(
+            in: directory,
+            named: "fake-codex",
+            script: codexScript(
+                argumentsFile: argumentsFile,
+                trace: trace,
+                threadResult: Self.ephemeralThreadResult))
+        let runtime = CLIBrainRuntime(
+            provider: .codexCLI,
+            codexRuntimeBaseDirectory: directory.appendingPathComponent("agent-runtimes"),
+            // "unified_exec" is advertised; "goals" is not, and must never be passed.
+            codexSupportedFeatures: ["shell_tool", "unified_exec", "browser_use"])
+        let client = makeClient(
+            provider: .codexCLI,
+            executable: executable,
+            directory: directory,
+            runtime: runtime,
+            prewarm: false)
 
-            do {
-                _ = try await client.makeConversation()
-                Issue.record("expected Codex tool-isolation refusal")
-            } catch {
-                let failure = try #require(error as? BrainFailure)
-                #expect(failure.disposition == .permanent)
-                #expect(failure.detail.contains("does not expose a stable mode"))
-            }
-            #expect(!FileManager.default.fileExists(atPath: launched.path))
-            #expect(!FileManager.default.fileExists(atPath: runtimeBaseDirectory.path))
-            runtime.terminateNow()
+        _ = try await client.respond(
+            messages: [.system("coach prompt"), .user("help")],
+            tools: coachTools,
+            toolChoice: .required)
+        runtime.terminateNow()
+
+        let arguments = try readArguments(argumentsFile)
+        #expect(arguments.contains("app-server"))
+        #expect(arguments.contains("--stdio"))
+        #expect(containsPair("-c", "mcp_servers={}", in: arguments))
+        #expect(containsPair("-c", "project_root_markers=[]", in: arguments))
+        #expect(containsPair("-c", "project_doc_max_bytes=0", in: arguments))
+        for feature in ["shell_tool", "unified_exec", "browser_use"] {
+            #expect(containsPair("--disable", feature, in: arguments))
         }
+        #expect(!arguments.contains("goals"))
+        // Nothing may relax the envelope the way an approval or write flag would.
+        #expect(!arguments.contains { $0.hasPrefix("--dangerously") })
+
+        let start = try #require(request(method: "thread/start", in: trace))
+        #expect(start["approvalPolicy"] as? String == "never")
+        #expect(start["sandbox"] as? String == "read-only")
+        #expect(start["ephemeral"] as? Bool == true)
+        #expect((start["baseInstructions"] as? String)?
+            .hasPrefix(CLIBrainClient.codexDirectResponseInstruction) == true)
+        let config = try #require(start["config"] as? [String: Any])
+        #expect((config["mcp_servers"] as? [String: Any])?.isEmpty == true)
+        #expect((config["project_root_markers"] as? [Any])?.isEmpty == true)
+        #expect(config["project_doc_max_bytes"] as? Int == 0)
+        let features = try #require(config["features"] as? [String: Bool])
+        #expect(features == ["shell_tool": false, "unified_exec": false, "browser_use": false])
+    }
+
+    @Test func codexRejectsANonEphemeralThread() async throws {
+        try await assertCodexRejectsThread(
+            result: """
+                {"thread":{"id":"thread-1","ephemeral":false,"path":"/tmp/rollout.jsonl"},"instructionSources":[]}
+                """)
+    }
+
+    @Test func codexRejectsAnInstructionLoadedThread() async throws {
+        try await assertCodexRejectsThread(
+            result: """
+                {"thread":{"id":"thread-1","ephemeral":true,"path":null},"instructionSources":["/Users/someone/AGENTS.md"]}
+                """)
+    }
+
+    /// Codex gives coach and summarizer one shared app-server, and `openConversation` refuses a
+    /// second thread while one is active. `CoachDriver` finishes the coaching lease before memory
+    /// compaction starts; this pins that ordering so compaction cannot start on a still-open thread.
+    @Test func sharedCodexRuntimeServesCoachingThenCompaction() async throws {
+        let directory = try makeWorkDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let trace = directory.appendingPathComponent("trace")
+        let executable = try makeExecutable(
+            in: directory,
+            named: "fake-codex",
+            script: codexScript(trace: trace, threadResult: Self.ephemeralThreadResult))
+        let runtime = CLIBrainRuntime(
+            provider: .codexCLI,
+            codexRuntimeBaseDirectory: directory.appendingPathComponent("agent-runtimes"))
+        let runtimes = LocalAgentRuntimeSet(provider: .codexCLI, sharedCoach: runtime)
+        #expect(runtimes.coach === runtimes.summarizer)
+        let coach = makeClient(
+            provider: .codexCLI, executable: executable, directory: directory,
+            runtime: runtimes.coach, prewarm: false)
+        // The summarizer has its own prompt, tools, and model — sharing is safe for Codex only
+        // because those travel per `thread/start`, not in the app-server's launch identity.
+        let summarizer = makeClient(
+            provider: .codexCLI, executable: executable, directory: directory,
+            runtime: runtimes.summarizer, prewarm: false,
+            systemPrompt: "summarize", tools: [], toolChoice: .auto)
+
+        // The coaching attempt: a lease held across a turn, then explicitly finished.
+        let conversation = try await coach.makeConversation()
+        _ = try await conversation.respond(
+            messages: [.system("coach prompt"), .user("help")],
+            tools: coachTools,
+            toolChoice: .required)
+        await conversation.finish()
+
+        // Compaction immediately afterwards must find the shared runtime free for a new thread.
+        let summary = try await summarizer.respond(
+            messages: [.system("summarize"), .user("older turns")],
+            tools: [],
+            toolChoice: .auto)
+        _ = summary
+        runtime.terminateNow()
+
+        // One app-server, two sequential threads.
+        #expect(requests(method: "thread/start", in: trace).count == 2)
+        #expect(requests(method: "initialize", in: trace).count == 1)
     }
 
     @Test func overlappingClaudePrewarmInstallsOneQueryAndKeepsItsReplacement() async throws {
@@ -316,7 +396,10 @@ import Testing
         executable: URL,
         directory: URL,
         runtime: CLIBrainRuntime,
-        prewarm: Bool
+        prewarm: Bool,
+        systemPrompt: String = "coach prompt",
+        tools: [ToolDef] = coachTools,
+        toolChoice: ToolChoice = .required
     ) -> CLIBrainClient {
         CLIBrainClient(
             provider: provider,
@@ -324,9 +407,9 @@ import Testing
             model: "",
             workDirectory: directory,
             timeout: 10,
-            systemPrompt: "coach prompt",
-            tools: coachTools,
-            toolChoice: .required,
+            systemPrompt: systemPrompt,
+            tools: tools,
+            toolChoice: toolChoice,
             runtime: runtime,
             prewarm: prewarm)
     }
@@ -341,18 +424,97 @@ import Testing
     }
 
     private func makeRuntime(provider: BrainProvider, directory: URL) -> CLIBrainRuntime {
-        if provider == .codexCLI {
-            // Exercise the dormant app-server protocol guards with a fake future provider control.
-            // Normal product construction never supplies this evidence and therefore never launches.
-            return CLIBrainRuntime(
-                backend: CodexAppServerRuntime(
-                    runtimeBaseDirectory: directory.appendingPathComponent("agent-runtimes"),
-                    builtInToolIsolation: .toolFree(
-                        launchArguments: ["--fake-test-only-no-built-in-tools"])))
-        }
-        return CLIBrainRuntime(
+        CLIBrainRuntime(
             provider: provider,
             codexRuntimeBaseDirectory: directory.appendingPathComponent("agent-runtimes"))
+    }
+
+    private static let ephemeralThreadResult =
+        #"{"thread":{"id":"thread-1","ephemeral":true,"path":null},"instructionSources":[]}"#
+
+    /// A fake `codex app-server` that records its argv and every request it is sent, then answers
+    /// with a single `stay_silent` agent message.
+    private func codexScript(
+        argumentsFile: URL? = nil,
+        trace: URL,
+        threadResult: String
+    ) -> String {
+        let recordArguments = argumentsFile.map {
+            "printf 'arg=<%s>\\n' \"$@\" > '\(shellQuoted($0.path))'\n"
+        } ?? ""
+        return """
+            #!/bin/sh
+            \(recordArguments)while IFS= read -r line; do
+              printf 'input: %s\\n' "$line" >> '\(shellQuoted(trace.path))'
+              request_id=$(printf '%s' "$line" | sed -n 's/.*"id":\\([0-9][0-9]*\\).*/\\1/p')
+              method=$(printf '%s' "$line" | sed -n 's/.*"method":"\\([^"]*\\)".*/\\1/p' | tr -d '\\\\')
+              case "$method" in
+                initialize)
+                  printf '{"id":%s,"result":{}}\\n' "$request_id"
+                  ;;
+                thread/start)
+                  printf '{"id":%s,"result":%s}\\n' "$request_id" '\(shellQuoted(threadResult))'
+                  ;;
+                thread/unsubscribe)
+                  printf '{"id":%s,"result":{}}\\n' "$request_id"
+                  ;;
+                turn/start)
+                  printf '%s\\n' '{"method":"item/completed","params":{"threadId":"thread-1","item":{"type":"agentMessage","text":"{\\"tool\\":\\"stay_silent\\",\\"arguments\\":{}}"}}}'
+                  printf '%s\\n' '{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"status":"completed","items":[{"type":"agentMessage"}]}}}'
+                  ;;
+              esac
+            done
+            """
+    }
+
+    private func assertCodexRejectsThread(result: String) async throws {
+        let directory = try makeWorkDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let trace = directory.appendingPathComponent("trace")
+        let executable = try makeExecutable(
+            in: directory,
+            named: "fake-codex",
+            script: codexScript(trace: trace, threadResult: result))
+        let runtime = makeRuntime(provider: .codexCLI, directory: directory)
+        let client = makeClient(
+            provider: .codexCLI,
+            executable: executable,
+            directory: directory,
+            runtime: runtime,
+            prewarm: false)
+        do {
+            _ = try await client.makeConversation()
+            Issue.record("expected a rejected thread")
+        } catch {
+            #expect(error.localizedDescription
+                .contains("non-ephemeral or instruction-loaded thread"))
+        }
+        runtime.terminateNow()
+    }
+
+    private func readArguments(_ file: URL) throws -> [String] {
+        try String(contentsOf: file, encoding: .utf8)
+            .split(separator: "\n")
+            .map(String.init)
+            .map { String($0.dropFirst("arg=<".count).dropLast()) }
+    }
+
+    /// The `params` of every recorded request with the given method, in order.
+    private func requests(method: String, in trace: URL) -> [[String: Any]] {
+        guard let text = try? String(contentsOf: trace, encoding: .utf8) else { return [] }
+        return text.split(separator: "\n").compactMap { line -> [String: Any]? in
+            guard line.hasPrefix("input: ") else { return nil }
+            let json = Data(line.dropFirst("input: ".count).utf8)
+            guard let payload = try? JSONSerialization.jsonObject(with: json) as? [String: Any],
+                  payload["method"] as? String == method else {
+                return nil
+            }
+            return payload["params"] as? [String: Any] ?? [:]
+        }
+    }
+
+    private func request(method: String, in trace: URL) -> [String: Any]? {
+        requests(method: method, in: trace).first
     }
 
     private func makeExecutable(in directory: URL, named name: String, script: String) throws -> URL {

@@ -132,8 +132,8 @@ plugins ship only with full Xcode, and Jarvis builds **CLT-only** (see
 | **WebRTCEchoCanceller** | AEC3 echo canceller driven at 48 kHz on 10 ms frames inside the capture IOProc; far reference first, then the mic cleaned in place. | WebRTC **AEC3** (`webrtc-audio-processing`), vendored static + zero-dylib via `scripts/build-aec.sh`. |
 | **ErrorReporter** | The single funnel for user-facing failures. Severity on a Foundation-only `UserFacingError` decides the lifecycle consequence; an explicit startup/runtime context decides presentation. Startup failures may alert, but runtime failures never activate Jarvis or present UI even when they stop the session. `BrainFailure` feeds attempt outcomes into the finite provider route; only route exhaustion enters terminal reporting. Fixed, typed Activity outcomes carry stable on-disk identities while raw detail stays in `JarvisLog`. | AppKit (`NSAlert`) for startup only. |
 | **Transcriber** | Maintain a rolling, speaker-labeled, **spoken-time timestamped** transcript; emit speech-activity, turn-end, and backing-off silence events (with quiet duration). Two instances run in parallel — one per side — tagging lines `me`/`them` into one shared transcript. A per-`item_id` ledger reconciles out-of-order delta/completed/failed/VAD events and salvages streamed text. An utterance-local failure with no usable words stays diagnostic and cannot trigger the brain; a permanent account or configuration rejection stops the unusable session with a fixed Activity reason. A privacy-preserving continuity witness records content-free capture/delivery/socket/server checkpoints and locally derived activity intervals, so the session log can locate a future gap without retaining PCM or adding pseudo-speech to model context. A socket is ready only after the server acknowledges its configuration; active ping/pong probes, send/receive errors, and startup timeouts all drive the same reconnect path. | `gpt-4o-transcribe` (Realtime API; tuned `server_vad`). |
-| **CoachDriver** | Coordinate one single-flighted coaching attempt from a natural trigger or pending-work wake-up: snapshot one route target plus the latest conversation, route its tool calls, commit only a complete terminal action, and report one outcome to the scheduler. No speaking cooldown/rate cap — restraint is the model's; the only client-side content skip is the filler-only turn-end gate (`TurnSubstance`). | The selected OpenAI Responses API or Claude Code route target; Codex targets are capability-gated unavailable before launch (see [§4 Local CLI brain providers](#local-cli-brain-providers)). Provider-specific summary tiers are defined in `BrainModelCatalog`. |
-| **Local agent runtime** | Keep provider startup outside the coaching latency path while preserving the attempt boundary: a `BrainConversation` lease owns every model turn in one attempt, including a `capture_screen` continuation, then is explicitly finished. Claude leases one initialized safe-mode query. A runtime failure fails the attempt; it never switches to a one-shot transport. | Claude Code stream-json control protocol. The Codex app-server adapter is dormant until that provider exposes an explicit tool-free launch surface. |
+| **CoachDriver** | Coordinate one single-flighted coaching attempt from a natural trigger or pending-work wake-up: snapshot one route target plus the latest conversation, route its tool calls, commit only a complete terminal action, and report one outcome to the scheduler. No speaking cooldown/rate cap — restraint is the model's; the only client-side content skip is the filler-only turn-end gate (`TurnSubstance`). | The selected OpenAI Responses API or Claude Code route target; See [§4 Local CLI brain providers](#local-cli-brain-providers). Provider-specific summary tiers are defined in `BrainModelCatalog`. |
+| **Local agent runtime** | Keep provider startup outside the coaching latency path while preserving the attempt boundary: a `BrainConversation` lease owns every model turn in one attempt, including a `capture_screen` continuation, then is explicitly finished. Claude leases one initialized safe-mode query; Codex opens a fresh ephemeral thread on one session-scoped app-server. A runtime failure fails the attempt; it never switches to a one-shot transport. | Claude Code stream-json control protocol; Codex app-server JSON-RPC over stdio. |
 | **ScreenTool** | Fulfill `capture_screen`: silently shoot the **active window** (default scope) — the window-server frontmost, on whichever display, clean even when partially covered — and attach an **on-device OCR** of the shot to the tool result so the model reads exact text instead of pixels. Falls back to a full-display capture (no OCR) — the Settings-chosen display in Entire-display scope, the main display when no window is eligible; the overlay window is excluded either way. See [settings-window.md](./settings-window.md#capture-scope). | macOS `screencapture` CLI + Apple Vision (`VNRecognizeTextRequest`). |
 | **Overlay Caption** | Render `speak` output: up to ~3 short lines (model-split), shown one at a time and queued so a newer tip never cuts off the current one; non-activating, always-on-top, excluded from capture. Switchable from Settings — **off by default**; when off, tips are suppressed. | AppKit NSPanel; `OverlayCaptionPanel`. |
 | **Overlay Box** | A persistent window logging every `speak` tip in full, timestamped — the scrollable history of what the caption flashed one line at a time. Movable, resizable, opaque, also excluded from capture; switched on/off from Settings (**on by default**), cleared on each Start. Fed by the same `speak` call as the caption via **`BroadcastOverlay`**, which fans one `OverlayRendering.render` out to both sinks (so `CoachDriver` is unchanged). | AppKit NSPanel; `OverlayBoxPanel`. |
@@ -322,14 +322,13 @@ rather than a per-turn screenshot.
 
 The brain can alternatively run through a locally installed **Claude Code** CLI (`BrainProvider`,
 selected in [Settings → Brain](./settings-window.md#brain)), so coaching turns are billed to the
-user's existing Claude **subscription** instead of the metered API key. Codex stays in the provider
-catalog and detector, and remains available to the explicit completed-session evaluator, but it is
-currently unavailable for coaching: its app-server exposes no stable launch surface that removes
-every built-in agent tool.
+user's existing Claude **subscription** instead of the metered API key, or a locally installed
+**Codex** CLI billed to the user's ChatGPT subscription. Both coach through a persistent runtime;
+Codex additionally remains available to the explicit completed-session evaluator.
 
 `BrainClient` is the provider port. Its implementations live under `Brain/Adapters`: the OpenAI
 Responses adapter is separate from the local-agent adapter, which contains shared CLI discovery and
-process infrastructure plus distinct Claude Code and capability-gated Codex sub-adapters.
+process infrastructure plus distinct Claude Code and Codex sub-adapters.
 `CLIBrainClient` implements the same port, so `CoachDriver`, the client-managed memory,
 provider-route policy, and traffic recording are unchanged — only the transport differs.
 `LocalAgentRuntimeSet` owns provider-specific coach/summarizer runtime ownership.
@@ -341,7 +340,7 @@ provider-route policy, and traffic recording are unchanged — only the transpor
   reply, runtime crash, timeout, or cancellation ends the lease and fails that provider attempt.
   There is deliberately **no per-turn Claude process or `codex exec` coaching fallback**: the
   existing [ordered provider route](#ordered-provider-route) decides what a later fresh attempt may
-  do, and an unsupported Codex target is unavailable rather than launched through a weaker envelope.
+  do.
 - **Claude Code keeps one initialized query ready.** Session Start preinitializes the active Claude
   coach with the stream-json control handshake. Taking that single-use lease immediately starts its
   replacement, overlapping initialization with remote inference; the leased process stays alive for
@@ -362,16 +361,19 @@ provider-route policy, and traffic recording are unchanged — only the transpor
   because actor `deinit` cannot await. The stable Swift Subprocess API's execution handle is scoped
   to one async closure and its teardown stops tracking a group when the leader is gone, so adopting
   it would retain these wrappers while adding a dependency.
-- **Codex coaching fails closed before launch.** Detection may establish the binary, authentication
-  marker, and advertised feature names, but a feature deny list cannot prove that an evolving agent
-  has no callable built-in tools. The current app-server has no stable empty-tools field. App
-  preflight therefore rejects a Codex primary and marks a Codex fallback unavailable; a direct
-  `CodexAppServerRuntime` call returns a typed permanent `BrainFailure` before it creates
-  `CODEX_HOME` or starts a process. The retained adapter's private runtime home,
-  ephemeral/pathless-thread checks, read-only sandbox, empty MCP config, feature disables, and
-  agent-event rejection remain defenses in depth behind a future explicit tool-free launch
-  capability; none authorizes the current product to launch it. The completed-session evaluator is
-  separate and intentionally agentic, so its explicit read-only Codex workflow remains available.
+- **Codex keeps one app-server for the session.** Session Start launches a single `codex app-server`
+  under a private owner-only `CODEX_HOME` containing nothing but an `auth.json` symlink, so no user
+  config, profile, plugin, prompt, or `.rules` file can be loaded. Each coaching attempt opens a
+  fresh ephemeral thread and closes it when the lease ends, which is why coach and summarizer can
+  share one runtime: model, prompt, and effort travel per `thread/start`, not in the launch identity.
+  Isolation is the same layered envelope `codex exec` coaching used — read-only sandbox,
+  never-approval, empty MCP config, no project-root markers, zero project-doc bytes, the
+  advertised-feature disable set (delivered both as `--disable` launch flags and as
+  `features.<name> = false` per-thread config), and a prompt forbidding built-in tool use. Codex
+  publishes no control that removes built-in tools, so two runtime checks back that envelope: the
+  `thread/start` response must confirm the thread is ephemeral, pathless, and loaded no instruction
+  sources, and any server request or item event outside the message/reasoning allowlist aborts the
+  turn. The completed-session evaluator remains separate and intentionally agentic.
 - **The JSON action contract remains provider-neutral.** The CLIs do not expose Jarvis's native
   function calls, so the same `ToolDef`s are rendered as a JSON output protocol and parsed back into
   `ToolInvocation`. `BrainConversation` changes transport ownership, not `CoachHistory`: completed
@@ -384,8 +386,8 @@ provider-route policy, and traffic recording are unchanged — only the transpor
   a short timeout, because stale account metadata can survive an expired OAuth session; Codex uses
   its auth-file marker and a bounded, non-model `features list` capability probe. Settings
   distinguishes signed in, signed out, and an unavailable auth probe, and Start refuses a confirmed
-  logout. Coaching isolation is a separate capability result that never depends on a probe's empty,
-  failed, or drifted feature catalog; Codex is unavailable on all three paths. Settings availability
+  logout. An empty, failed, or drifted feature catalog only narrows the disable set that is passed —
+  it never widens what a Codex thread may do, which the sandbox and event allowlist bound. Settings availability
   discovery probes every supported CLI; Start probes only the CLI providers present in the
   configured route. Saving the transcription API key probes no CLI.
 - **The OpenAI key stays required**: transcription always runs on the Realtime API. A CLI provider

@@ -938,3 +938,47 @@
   `Sources/JarvisCore/Brain/Adapters/LocalAgent/DetectedAgentCLI.swift`,
   `Sources/JarvisCore/Brain/Adapters/LocalAgent/ClaudeCode/ClaudeCodeRuntime.swift`,
   `Sources/JarvisCore/Brain/Adapters/LocalAgent/Codex/CodexAppServerRuntime.swift`.
+- **Superseded by:** 2026-07-29 — Codex coaching runs at parity with the `codex exec` risk posture.
+
+### 2026-07-29 — Codex coaching runs at parity with the `codex exec` risk posture
+
+- **Chose:** Enable Codex coaching on the persistent app-server runtime, accepting the same residual
+  risk `codex exec` coaching already shipped with. There is no coaching-capability gate: preflight,
+  route availability, and runtime construction treat Codex like any other detected, signed-in CLI.
+- **Chose:** Deliver the agentic-feature disable set through the per-thread `thread/start` config
+  (`features.<name> = false`) as well as the launch `--disable` flags, while treating neither as
+  load-bearing. Measured on codex-cli 0.145.0 by capturing the outgoing Responses request, both
+  transports offer the model the same four built-in tools — `exec`, `wait`, `request_user_input`,
+  `collaboration` — with the disable set applied and with it absent. They arrive as an
+  `additional_tools` input item rather than the request's `tools` array, which is why a
+  `features.<name>` gate does not remove them (openai/codex#21952, open). The deny list therefore
+  narrows nothing today on either path; the runtime item-event allowlist is the control that bites.
+- **Why:** This is an owner risk acceptance, not a refutation of the analysis above. The absence
+  proof the previous entry demanded was never available on `main` either — the shipped `codex exec`
+  path conceded that Codex has no disable-all-tools flag and relied on the same layered envelope.
+  Holding the app-server path to a stricter bar than the transport it replaces blocked a real
+  latency win for no change in exposure. Verified against codex-cli 0.145.0: `codex app-server
+  --help` and the generated `ThreadStartParams` schema still expose no field that removes built-in
+  tools, so no such control was invented, and a captured-request comparison confirms `codex exec`
+  and the app-server offer the model an identical built-in tool set. Parity is therefore measured,
+  not assumed — and the shared residual surface includes a JavaScript `exec` tool, which is the
+  exposure `main` already carries. Every control `codex exec` enforced is present, and three
+  are strengthened — the ephemeral thread's `ephemeral`/`path`/`instructionSources` are verified in
+  the `thread/start` response rather than assumed, `--ignore-user-config`/`--ignore-rules` become
+  structural (a private `CODEX_HOME` holding only an `auth.json` symlink, so no config, profile,
+  plugin, prompt, or `.rules` file exists to load), and any server request or item event outside the
+  message/reasoning allowlist aborts the turn, which catches built-in families the deny list never
+  named.
+- **Rejected:** (a) Shipping the runtime dormant — ~730 lines of untested-in-production code and a
+  latency claim for a disabled path. (b) Inventing a launch flag to satisfy the old gate — the flag
+  does not exist. (c) Weakening any isolation control to simplify the app-server path.
+- **Changes this decision:** Codex publishing a real disable-all-tools control (adopt it and drop
+  the layered reliance); openai/codex#21952 being fixed such that the disable set provably reaches
+  the tool builder on either transport (re-measure, then drop the duplicate config delivery); or
+  evidence that a built-in tool executes before the item-event allowlist can abort the turn.
+- **Supersedes:** 2026-07-28 — Codex coaching fails closed without a tool-free provider surface. Its
+  Claude `--safe-mode` decision stands unchanged; its Codex capability gate does not.
+- **Detail:** [architecture.md → Local CLI brain providers](./architecture.md#local-cli-brain-providers),
+  [sandbox.md → Data Egress](./sandbox.md#data-egress),
+  `Sources/JarvisCore/Brain/Adapters/LocalAgent/Codex/CodexAppServerRuntime.swift`,
+  `Sources/JarvisCore/Brain/Adapters/LocalAgent/Codex/CodexRuntimeHome.swift`.
