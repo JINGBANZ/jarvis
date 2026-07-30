@@ -20,6 +20,7 @@ final class APIKeyControls: NSObject {
     private var saveButton: NSButton?
     private var cancelButton: NSButton?
     private var status: NSTextField?
+    private var rowSeparator: NSBox?
 
     private static let collapsedHeight: CGFloat = 150
     private static let expandedHeight: CGFloat = 214
@@ -39,23 +40,11 @@ final class APIKeyControls: NSObject {
 
         let card = SettingsCardView(
             frame: NSRect(x: 0, y: 0, width: 712, height: preferredHeight))
-        card.boxType = .custom
-        card.borderWidth = 1
-        card.cornerRadius = 12
-        card.borderColor = .separatorColor
-        card.fillColor = .controlBackgroundColor
-        card.contentViewMargins = .zero
+        card.setHeader(title: "Transcription", detail: "What Jarvis hears")
         card.onLayout = { [weak self] in self?.layout() }
         self.card = card
 
         guard let content = card.contentView else { return card }
-
-        let heading = NSTextField(labelWithString: "TRANSCRIPTION")
-        heading.font = .boldSystemFont(ofSize: NSFont.smallSystemFontSize)
-        heading.textColor = .secondaryLabelColor
-        heading.setAccessibilityLabel("Transcription")
-        heading.identifier = NSUserInterfaceItemIdentifier("transcription-heading")
-        content.addSubview(heading)
 
         let providerLabel = NSTextField(labelWithString: "Provider")
         providerLabel.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
@@ -108,6 +97,10 @@ final class APIKeyControls: NSObject {
         content.addSubview(status)
         self.status = status
 
+        let separator = SettingsStyle.separator()
+        content.addSubview(separator)
+        rowSeparator = separator
+
         applyState()
         layout()
         return card
@@ -119,34 +112,35 @@ final class APIKeyControls: NSObject {
         let height = preferredHeight
         let controlWidth: CGFloat = min(220, max(150, width * 0.46))
         let controlX = width - 14 - controlWidth
+        let bodyTop = height - card.headerHeight
+        let providerRowY = bodyTop - SettingsStyle.rowHeight
+        let keyRowY = providerRowY - SettingsStyle.rowHeight
 
         content.subviews.first {
-            $0.identifier?.rawValue == "transcription-heading"
-        }?.frame = NSRect(x: 16, y: height - 30, width: width - 32, height: 18)
-        content.subviews.first {
             $0.identifier?.rawValue == "transcription-provider-label"
-        }?.frame = NSRect(x: 16, y: height - 74, width: 150, height: 20)
+        }?.frame = NSRect(x: 16, y: providerRowY + 18, width: 150, height: 20)
         providerPopup?.frame = NSRect(
-            x: controlX, y: height - 80, width: controlWidth, height: 32)
+            x: controlX, y: providerRowY + 11, width: controlWidth, height: 32)
         content.subviews.first {
             $0.identifier?.rawValue == "transcription-key-label"
-        }?.frame = NSRect(x: 16, y: height - 128, width: 150, height: 20)
+        }?.frame = NSRect(x: 16, y: keyRowY + 18, width: 150, height: 20)
+        rowSeparator?.frame = NSRect(x: 16, y: providerRowY, width: width - 16, height: 1)
 
         if editing {
             field?.frame = NSRect(
-                x: controlX, y: height - 134, width: controlWidth, height: 26)
+                x: controlX, y: keyRowY + 15, width: controlWidth, height: 26)
             saveButton?.frame = NSRect(
-                x: width - 14 - 82, y: 31, width: 82, height: 32)
+                x: width - 14 - 82, y: 16, width: 82, height: 32)
             cancelButton?.frame = NSRect(
-                x: width - 14 - 172, y: 31, width: 82, height: 32)
+                x: width - 14 - 172, y: 16, width: 82, height: 32)
             status?.frame = NSRect(
-                x: 16, y: 8, width: max(160, width - 206), height: 20)
+                x: 16, y: 22, width: max(160, width - 206), height: 20)
         } else {
             actionButton?.sizeToFit()
             let actionWidth = max(82, (actionButton?.frame.width ?? 0) + 20)
             actionButton?.frame = NSRect(
                 x: width - 14 - actionWidth,
-                y: height - 134,
+                y: keyRowY + 11,
                 width: actionWidth,
                 height: 32)
         }

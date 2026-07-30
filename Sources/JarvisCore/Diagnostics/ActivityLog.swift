@@ -355,39 +355,70 @@ public final class ActivityLog: @unchecked Sendable {
             || m.hasPrefix("⚠️ brain change failed")
     }
 
-    /// The empty page shell: dark theme, a header with a live count, the row container, the lightbox
-    /// overlay, and the JS that `appendRow`/`openShot`/`closeShot`/`clearRows`/`setMeta` drive. Rows
-    /// are injected at runtime via `evaluateJavaScript`; no row HTML is rendered server-side, so the
-    /// page never embeds untrusted text and there is no reload.
+    /// The empty page shell: an adaptive Settings-style activity feed, a header with a live count,
+    /// the lightbox overlay, and the JS that `appendRow`/`openShot`/`closeShot`/`clearRows`/`setMeta`
+    /// drive. Rows are injected at runtime via `evaluateJavaScript`; no row HTML is rendered
+    /// server-side, so the page never embeds untrusted text and there is no reload.
     public static func htmlShell() -> String {
         """
         <!doctype html><html lang="en"><head>
         <meta charset="utf-8">
         <title>Jarvis Activity</title>
         <style>
-          :root { color-scheme: dark; }
-          body { margin: 0; background: #0d1117; color: #c9d1d9;
-                 font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; }
-          header { position: sticky; top: 0; padding: 10px 16px; background: #161b22;
-                   border-bottom: 1px solid #30363d; font-weight: 600; z-index: 10; }
-          header .count { color: #8b949e; font-weight: 400; }
-          main { padding: 8px 16px 40px; }
-          .row { display: flex; gap: 12px; padding: 1px 0; white-space: pre-wrap; }
-          .t { color: #6e7681; flex: 0 0 auto; }
-          .m { flex: 1 1 auto; }
-          .say .m  { color: #3fb950; }
-          .see .m  { color: #d29922; }
-          .hear .m { color: #58a6ff; }
-          .think .m{ color: #8b949e; }
-          .err .m  { color: #f85149; }
-          .shot { display: block; margin-top: 4px; width: fit-content; }
+          :root {
+            color-scheme: light dark;
+            --background: #ffffff;
+            --surface: #f8f8fa;
+            --line: rgba(28, 31, 39, 0.12);
+            --text: #35363b;
+            --muted: #85868d;
+            --say: #267b48;
+            --see: #a66017;
+            --hear: #176fae;
+            --think: #6d6e75;
+            --error: #c23e38;
+          }
+          @media (prefers-color-scheme: dark) {
+            :root {
+              --background: #1e1e20;
+              --surface: #262628;
+              --line: rgba(255, 255, 255, 0.12);
+              --text: #e1e1e3;
+              --muted: #929299;
+              --say: #55b578;
+              --see: #e4a54c;
+              --hear: #62aee7;
+              --think: #a0a0a7;
+              --error: #ef716a;
+            }
+          }
+          body { margin: 0; background: var(--background); color: var(--text);
+                 font: 12px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text",
+                       "Helvetica Neue", sans-serif; }
+          header { position: sticky; top: 0; padding: 9px 14px; background: var(--surface);
+                   border-bottom: 1px solid var(--line); color: var(--muted);
+                   font-size: 10px; font-weight: 700; letter-spacing: .045em;
+                   text-transform: uppercase; z-index: 10; }
+          header .count { font-weight: 500; letter-spacing: 0; text-transform: none; }
+          main { padding: 0 0 28px; }
+          .row { display: grid; grid-template-columns: 66px minmax(0, 1fr); gap: 12px;
+                 padding: 10px 14px; border-bottom: 1px solid var(--line);
+                 white-space: pre-wrap; }
+          .t { color: var(--muted); font-size: 10px; }
+          .m { min-width: 0; }
+          .say .m  { color: var(--say); }
+          .see .m  { color: var(--see); }
+          .hear .m { color: var(--hear); }
+          .think .m{ color: var(--think); }
+          .err .m  { color: var(--error); }
+          .shot { display: block; margin-top: 7px; width: fit-content; }
           .shot img { display: block; max-height: 140px; max-width: 280px;
-                      border: 1px solid #30363d; border-radius: 6px; cursor: zoom-in; }
+                      border: 1px solid var(--line); border-radius: 8px; cursor: zoom-in; }
           .lightbox { position: fixed; inset: 0; z-index: 1000; display: none;
                       align-items: center; justify-content: center; cursor: zoom-out;
-                      background: rgba(1, 4, 9, 0.85); }
+                      background: rgba(10, 12, 16, 0.86); }
           .lightbox.open { display: flex; }
-          .lightbox img { max-width: 92vw; max-height: 92vh; border: 1px solid #30363d;
+          .lightbox img { max-width: 92vw; max-height: 92vh; border: 1px solid var(--line);
                           border-radius: 8px; box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6); }
         </style></head><body>
         <header>Jarvis — activity log <span class="count" id="count"></span></header>

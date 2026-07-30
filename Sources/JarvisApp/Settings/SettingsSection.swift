@@ -14,8 +14,8 @@ protocol SettingsSection: AnyObject {
     func didResignActive()
     /// Called when the Settings window closes. Default: no-op.
     func windowWillClose()
-    /// Whether this section's view should stretch to fill the whole tab. Default: false — the
-    /// fixed-form panels keep their designed size, pinned to the top of the tab.
+    /// Whether this section's view should stretch to fill the whole tab. Default: false for a future
+    /// compact fixed-form panel; every built-in section uses the shared full-tab page shell.
     var fillsTab: Bool { get }
 }
 

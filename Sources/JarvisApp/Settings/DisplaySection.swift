@@ -1,18 +1,11 @@
 import AppKit
 import JarvisCore
 
-/// Settings panel for what the coach screenshots when `capture_screen` fires. One dropdown covers
-/// both decisions: the active window (default) or one "Entire display" entry per connected display,
-/// named the way `screencapture -D` counts them (1 = the main display, the one with the menu bar;
-/// `NSScreen.screens` puts the main display first in the same order). Persisted through
-/// `ScreenCapturePreferences` and read at capture time, so a change applies to the very next
-/// screenshot — no restart needed. The display entries refresh when displays are plugged or
-/// unplugged while the tab is visible; a stored selection pointing at a now-missing display shows
-/// (and captures — see `ScreenCaptureCLI`) the main display without clobbering the stored value,
-/// so replugging the monitor restores the choice.
+/// Settings panel for what the coach screenshots when `capture_screen` fires.
 @MainActor
 final class DisplaySection: NSObject, SettingsSection {
     let title = "Screen"
+    let fillsTab = true
 
     private let preferences: ScreenCapturePreferences
     private var popup: NSPopUpButton?
@@ -23,36 +16,96 @@ final class DisplaySection: NSObject, SettingsSection {
     }
 
     func makeView() -> NSView {
-        let view = NSView(frame: NSRect(x: 0, y: 0, width: 560, height: 432))
+        let body = NSView(frame: NSRect(x: 0, y: 0, width: 712, height: 432))
 
-        let label = NSTextField(labelWithString: "Capture Scope")
-        label.frame = NSRect(x: 24, y: 372, width: 200, height: 20)
-        view.addSubview(label)
-
-        let popup = NSPopUpButton(frame: NSRect(x: 24, y: 340, width: 380, height: 26))
+        let popup = NSPopUpButton()
         popup.target = self
         popup.action = #selector(scopeChanged)
         popup.setAccessibilityLabel("Capture scope")
-        view.addSubview(popup)
         self.popup = popup
         reloadItems()
 
-        let note = NSTextField(labelWithString: "Active window captures the window you're clicking and typing in, on any display.")
-        note.frame = NSRect(x: 24, y: 308, width: 512, height: 20)
-        note.textColor = .secondaryLabelColor
-        view.addSubview(note)
-        let note2 = NSTextField(labelWithString: "When no window is capturable, or a chosen display is disconnected, the main display is captured.")
-        note2.frame = NSRect(x: 24, y: 288, width: 512, height: 20)
-        note2.textColor = .secondaryLabelColor
-        view.addSubview(note2)
+        let cardHeight = SettingsStyle.cardHeaderHeight + 64
+        let card = SettingsCardView(
+            frame: NSRect(x: 0, y: 0, width: 712, height: cardHeight))
+        card.translatesAutoresizingMaskIntoConstraints = false
+        card.setHeader(title: "Screen capture", detail: "Applied to the next capture")
+        let row = SettingsRowView(
+            title: "Capture scope",
+            detail: "Active window is the most private option",
+            controlView: popup,
+            controlSize: NSSize(width: 300, height: 32),
+            preferredHeight: 64,
+            showsSeparator: false)
+        card.contentView?.addSubview(row)
+        card.onLayout = { [weak card, weak row] in
+            guard let card, let row else { return }
+            row.frame = card.bodyFrame
+        }
 
-        return view
+        let callout = makeCallout()
+        callout.translatesAutoresizingMaskIntoConstraints = false
+        body.addSubview(card)
+        body.addSubview(callout)
+        NSLayoutConstraint.activate([
+            card.topAnchor.constraint(equalTo: body.topAnchor),
+            card.leadingAnchor.constraint(equalTo: body.leadingAnchor),
+            card.trailingAnchor.constraint(equalTo: body.trailingAnchor),
+            card.heightAnchor.constraint(equalToConstant: cardHeight),
+            callout.topAnchor.constraint(equalTo: card.bottomAnchor, constant: SettingsStyle.sectionSpacing),
+            callout.leadingAnchor.constraint(equalTo: body.leadingAnchor),
+            callout.trailingAnchor.constraint(equalTo: body.trailingAnchor),
+            callout.heightAnchor.constraint(equalToConstant: 68),
+        ])
+
+        return SettingsPageView(
+            title: "Screen",
+            summary: "Control what Jarvis can see when it needs visual context.",
+            bodyView: body)
+    }
+
+    private func makeCallout() -> NSBox {
+        let callout = NSBox()
+        callout.boxType = .custom
+        callout.borderWidth = 1
+        callout.cornerRadius = 10
+        callout.borderColor = NSColor.systemBlue.withAlphaComponent(0.18)
+        callout.fillColor = NSColor.systemBlue.withAlphaComponent(0.07)
+        callout.contentViewMargins = .zero
+
+        guard let content = callout.contentView else { return callout }
+        let icon = NSImageView()
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        icon.image = NSImage(systemSymbolName: "info.circle.fill", accessibilityDescription: nil)
+        icon.contentTintColor = .systemBlue
+        content.addSubview(icon)
+
+        let note = NSTextField(wrappingLabelWithString:
+            "Jarvis captures only when the brain requests visual context. If the active window "
+            + "is unavailable, or a chosen display disconnects, the main display is used.")
+        note.translatesAutoresizingMaskIntoConstraints = false
+        note.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        note.textColor = .secondaryLabelColor
+        content.addSubview(note)
+
+        NSLayoutConstraint.activate([
+            icon.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 14),
+            icon.topAnchor.constraint(equalTo: content.topAnchor, constant: 14),
+            icon.widthAnchor.constraint(equalToConstant: 22),
+            icon.heightAnchor.constraint(equalToConstant: 22),
+            note.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 10),
+            note.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -14),
+            note.centerYAnchor.constraint(equalTo: content.centerYAnchor),
+        ])
+        return callout
     }
 
     func didBecomeActive() {
-        reloadItems() // catch a plug/unplug that happened while another tab was selected
+        reloadItems()
         screenObserver = NotificationCenter.default.addObserver(
-            forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil,
+            queue: .main
         ) { [weak self] _ in
             Task { @MainActor in self?.reloadItems() }
         }
@@ -63,7 +116,7 @@ final class DisplaySection: NSObject, SettingsSection {
         screenObserver = nil
     }
 
-    /// Row 0 is the active-window scope; on rows 1…n the row number IS the display's
+    /// Row 0 is the active-window scope; on rows 1…n the row number is the display's
     /// `screencapture -D` index.
     private func reloadItems() {
         guard let popup else { return }
@@ -74,11 +127,10 @@ final class DisplaySection: NSObject, SettingsSection {
         case .activeWindow:
             popup.selectItem(at: 0)
         case .entireDisplay:
-            // Show the stored display if it's still connected, else the main display — without
-            // clobbering the stored value, so replugging the monitor restores the choice.
-            // (Screens can be briefly empty mid-reconfigure, leaving only row 0.)
             let stored = preferences.displayIndex
-            popup.selectItem(at: stored < popup.numberOfItems ? stored : min(1, popup.numberOfItems - 1))
+            popup.selectItem(at: stored < popup.numberOfItems
+                ? stored
+                : min(1, popup.numberOfItems - 1))
         }
     }
 

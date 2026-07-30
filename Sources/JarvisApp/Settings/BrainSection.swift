@@ -1,21 +1,6 @@
 import AppKit
 import JarvisCore
 
-/// Reports viewport changes so the document stack can stay top-aligned as Settings resizes.
-@MainActor
-private final class BrainSettingsScrollView: NSScrollView {
-    var onViewportChanged: (() -> Void)?
-    private var lastViewportSize = NSSize.zero
-
-    override func layout() {
-        super.layout()
-        let size = contentView.bounds.size
-        guard size != lastViewportSize else { return }
-        lastViewportSize = size
-        onViewportChanged?()
-    }
-}
-
 /// Minimal Brain Settings surface: one provider route, one reasoning-effort row, and transcription.
 ///
 /// Provider/model ordering is edited by `ProviderRouteEditor`; credentials remain isolated in
@@ -35,9 +20,8 @@ final class BrainSection: NSObject, SettingsSection {
     let title = "Brain"
     let fillsTab = true
 
-    private static let reasoningHeight: CGFloat = 54
-    private static let sectionSpacing: CGFloat = 14
-    private static let documentInsets: CGFloat = 24
+    private static let reasoningHeight =
+        SettingsStyle.cardHeaderHeight + SettingsStyle.rowHeight
 
     private let preferences: BrainPreferences
     private let detector: AgentCLIDetector
@@ -45,7 +29,8 @@ final class BrainSection: NSObject, SettingsSection {
         (PreferenceChange, [BrainProvider: DetectedAgentCLI]?) -> Void
     private let apiKey: APIKeyControls
 
-    private var scrollView: BrainSettingsScrollView?
+    private var pageView: SettingsPageView?
+    private var scrollView: SettingsScrollView?
     private var documentStack: NSStackView?
     private var providerEditor: ProviderRouteEditor?
     private var providerHeightConstraint: NSLayoutConstraint?
@@ -74,23 +59,16 @@ final class BrainSection: NSObject, SettingsSection {
     }
 
     func makeView() -> NSView {
-        let scrollView = BrainSettingsScrollView(
+        let scrollView = SettingsScrollView(
             frame: NSRect(x: 0, y: 0, width: 760, height: 560))
         scrollView.autoresizingMask = [.width, .height]
-        scrollView.drawsBackground = false
-        scrollView.hasVerticalScroller = true
-        scrollView.autohidesScrollers = true
 
         let stack = NSStackView(frame: NSRect(x: 0, y: 0, width: 760, height: 560))
         stack.orientation = .vertical
         stack.alignment = .width
         stack.distribution = .fill
-        stack.spacing = Self.sectionSpacing
-        stack.edgeInsets = NSEdgeInsets(
-            top: Self.documentInsets,
-            left: Self.documentInsets,
-            bottom: Self.documentInsets,
-            right: Self.documentInsets)
+        stack.spacing = SettingsStyle.sectionSpacing
+        stack.edgeInsets = NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
         stack.autoresizingMask = [.width]
         self.scrollView = scrollView
         self.documentStack = stack
@@ -146,12 +124,19 @@ final class BrainSection: NSObject, SettingsSection {
         renderDetection()
         recalculateDocumentHeight()
         revealTop()
-        return scrollView
+        let page = SettingsPageView(
+            title: "Brain",
+            summary: "Choose how Jarvis thinks, reasons, and transcribes.",
+            status: activeTarget.map { "\($0.provider.displayName) in use" },
+            bodyView: scrollView)
+        pageView = page
+        return page
     }
 
     /// Reflect the driver's selected runtime target without mutating the saved route.
     func setActiveTarget(_ target: BrainTarget?) {
         activeTarget = target
+        pageView?.setStatus(target.map { "\($0.provider.displayName) in use" })
         providerEditor?.render(detectedCLIs: detectedCLIs, activeTarget: activeTarget)
     }
 
@@ -160,12 +145,10 @@ final class BrainSection: NSObject, SettingsSection {
     }
 
     private func makeReasoningCard() -> SettingsCardView {
-        let card = Self.makeCard()
+        let card = SettingsCardView(
+            frame: NSRect(x: 0, y: 0, width: 712, height: Self.reasoningHeight))
+        card.setHeader(title: "Coaching", detail: "Response behavior")
         guard let content = card.contentView else { return card }
-
-        let label = NSTextField(labelWithString: "Reasoning effort")
-        label.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
-        content.addSubview(label)
 
         let popup = NSPopUpButton()
         popup.addItems(withTitles: ReasoningEffort.allCases.map(\.displayName))
@@ -175,31 +158,18 @@ final class BrainSection: NSObject, SettingsSection {
         if let row = ReasoningEffort.allCases.firstIndex(of: preferences.effort) {
             popup.selectItem(at: row)
         }
-        content.addSubview(popup)
+        let row = SettingsRowView(
+            title: "Reasoning effort",
+            detail: "Balances speed and depth",
+            controlView: popup,
+            showsSeparator: false)
+        content.addSubview(row)
 
-        card.onLayout = { [weak content, weak label, weak popup] in
-            guard let content, let label, let popup else { return }
-            let controlWidth = min(220, max(150, content.bounds.width * 0.46))
-            label.frame = NSRect(x: 16, y: 17, width: 180, height: 20)
-            popup.frame = NSRect(
-                x: content.bounds.width - 14 - controlWidth,
-                y: 11,
-                width: controlWidth,
-                height: 32)
+        card.onLayout = { [weak card, weak row] in
+            guard let card, let row else { return }
+            row.frame = card.bodyFrame
         }
         card.onLayout?()
-        return card
-    }
-
-    private static func makeCard() -> SettingsCardView {
-        let card = SettingsCardView(frame: NSRect(x: 0, y: 0, width: 712, height: 54))
-        card.translatesAutoresizingMaskIntoConstraints = false
-        card.boxType = .custom
-        card.borderWidth = 1
-        card.cornerRadius = 12
-        card.borderColor = .separatorColor
-        card.fillColor = .controlBackgroundColor
-        card.contentViewMargins = .zero
         return card
     }
 
@@ -230,9 +200,8 @@ final class BrainSection: NSObject, SettingsSection {
             Self.reasoningHeight,
             apiKey.preferredHeight,
         ].compactMap { $0 }
-        let contentHeight = Self.documentInsets * 2
-            + visibleHeights.reduce(0, +)
-            + CGFloat(max(0, visibleHeights.count - 1)) * Self.sectionSpacing
+        let contentHeight = visibleHeights.reduce(0, +)
+            + CGFloat(max(0, visibleHeights.count - 1)) * SettingsStyle.sectionSpacing
         let viewportHeight = scrollView?.contentView.bounds.height ?? 0
         let height = max(contentHeight, viewportHeight)
         let oldHeight = stack.frame.height
