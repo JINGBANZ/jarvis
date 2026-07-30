@@ -19,6 +19,8 @@ public struct CLIBrainClient: BrainClient, Sendable {
     public static let defaultTimeout: TimeInterval = 120
     /// A silent Codex runtime stall must not batch later transcript turns for two minutes.
     public static let codexDefaultTimeout: TimeInterval = 30
+    /// Live coaching abandons a stalled local-agent turn in favor of a fresh attempt.
+    public static let liveCoachingTimeout: TimeInterval = 15
 
     public init(
         provider: BrainProvider,
