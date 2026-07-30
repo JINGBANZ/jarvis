@@ -79,14 +79,22 @@ final class SettingsPageView: NSView {
             height: 18)
 
         if !statusBox.isHidden {
-            statusLabel.sizeToFit()
-            let badgeWidth = max(78, statusLabel.frame.width + 20)
+            let labelSize = statusLabel.fittingSize
+            let badgeWidth = max(78, ceil(labelSize.width) + 20)
             statusBox.frame = NSRect(
                 x: bounds.width - inset - badgeWidth,
                 y: headerBottom + 11,
                 width: badgeWidth,
                 height: 24)
-            statusLabel.frame = NSRect(x: 8, y: 3, width: badgeWidth - 16, height: 18)
+            statusBox.layoutSubtreeIfNeeded()
+            let contentBounds = statusBox.contentView?.bounds
+                ?? NSRect(x: 0, y: 0, width: badgeWidth, height: 24)
+            let labelHeight = min(ceil(labelSize.height), contentBounds.height)
+            statusLabel.frame = NSRect(
+                x: 8,
+                y: floor((contentBounds.height - labelHeight) / 2),
+                width: badgeWidth - 16,
+                height: labelHeight)
         }
 
         let bodyTop = headerBottom - SettingsStyle.pageHeaderSpacing

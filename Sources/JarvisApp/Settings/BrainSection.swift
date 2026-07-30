@@ -62,9 +62,6 @@ final class BrainSection: NSObject, SettingsSection {
         let scrollView = SettingsScrollView(
             frame: NSRect(x: 0, y: 0, width: 760, height: 560))
         scrollView.autoresizingMask = [.width, .height]
-        scrollView.drawsBackground = false
-        scrollView.hasVerticalScroller = true
-        scrollView.autohidesScrollers = true
 
         let stack = NSStackView(frame: NSRect(x: 0, y: 0, width: 760, height: 560))
         stack.orientation = .vertical

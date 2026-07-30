@@ -27,9 +27,6 @@ final class OverlaySection: NSObject, SettingsSection {
         let scrollView = SettingsScrollView(
             frame: NSRect(x: 0, y: 0, width: 712, height: 432))
         scrollView.autoresizingMask = [.width, .height]
-        scrollView.drawsBackground = false
-        scrollView.hasVerticalScroller = true
-        scrollView.autohidesScrollers = true
 
         let document = NSView(frame: scrollView.bounds)
         document.autoresizingMask = [.width]
