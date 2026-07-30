@@ -23,7 +23,7 @@ final class SettingsWindow: NSObject, NSWindowDelegate, NSTabViewDelegate {
 
     /// One size for every tab — switching tabs must never resize the window (per-tab sizes made it
     /// jump on each switch). The user can still resize freely down to `minContentSize`, which keeps
-    /// the fixed-form panels fully visible.
+    /// the shared page shell and responsive trailing controls usable.
     private static let defaultContentSize = NSSize(width: 820, height: 600)
     private static let minContentSize = NSSize(width: 560, height: 460)
 
@@ -62,9 +62,8 @@ final class SettingsWindow: NSObject, NSWindowDelegate, NSTabViewDelegate {
         self.tabView = tabView
     }
 
-    /// Wrap a fixed-layout section view so it hugs the top of the tab (and centers horizontally)
-    /// when the tab is larger than the view's designed frame — AppKit's y-origin is the bottom, so
-    /// an unwrapped fixed-frame view would ride the bottom edge instead.
+    /// Compatibility wrapper for a future compact fixed-layout section. The four built-in sections
+    /// fill the tab through `SettingsPageView`.
     private static func topPinned(_ view: NSView) -> NSView {
         let container = NSView(frame: view.frame)
         // Flexible bottom + equal flexible side margins: pinned top, centered horizontally.

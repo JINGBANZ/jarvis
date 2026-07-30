@@ -57,7 +57,7 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         let content = NSView(frame: NSRect(x: 0, y: 0, width: 560, height: 420))
         content.autoresizingMask = [.width, .height]
 
-        let headerHeight: CGFloat = 44
+        let headerHeight: CGFloat = 50
         let header = NSVisualEffectView(frame: NSRect(x: 0,
                                                       y: content.bounds.height - headerHeight,
                                                       width: content.bounds.width,
@@ -67,16 +67,12 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         header.blendingMode = .withinWindow
         header.state = .active
 
-        let sessionLabel = NSTextField(labelWithString: "Session")
-        sessionLabel.translatesAutoresizingMaskIntoConstraints = false
-        sessionLabel.textColor = .secondaryLabelColor
-        header.addSubview(sessionLabel)
-
         let pop = NSPopUpButton(frame: .zero)
         pop.translatesAutoresizingMaskIntoConstraints = false
         pop.target = self
         pop.action = #selector(sessionChanged)
         pop.toolTip = "Switch between this and previous sessions"
+        pop.setAccessibilityLabel("Session")
         pop.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         header.addSubview(pop)
         self.picker = pop
@@ -105,22 +101,20 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         // Prefer the full picker width, but let window resizing compress it.
         preferredPickerWidth.priority = .init(rawValue: 490)
         NSLayoutConstraint.activate([
-            sessionLabel.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 14),
-            sessionLabel.centerYAnchor.constraint(equalTo: header.centerYAnchor),
-            pop.leadingAnchor.constraint(equalTo: sessionLabel.trailingAnchor, constant: 2),
+            pop.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 12),
             pop.centerYAnchor.constraint(equalTo: header.centerYAnchor),
             pop.widthAnchor.constraint(greaterThanOrEqualToConstant: 120),
             preferredPickerWidth,
             copyID.leadingAnchor.constraint(equalTo: pop.trailingAnchor, constant: 8),
             copyID.centerYAnchor.constraint(equalTo: header.centerYAnchor),
-            copyID.widthAnchor.constraint(equalToConstant: 78),
+            copyID.widthAnchor.constraint(equalToConstant: 72),
             copyID.trailingAnchor.constraint(lessThanOrEqualTo: evaluate.leadingAnchor, constant: -8),
             evaluate.centerYAnchor.constraint(equalTo: header.centerYAnchor),
-            evaluate.widthAnchor.constraint(equalToConstant: 104),
+            evaluate.widthAnchor.constraint(equalToConstant: 96),
             evaluate.trailingAnchor.constraint(equalTo: clear.leadingAnchor, constant: -8),
             clear.centerYAnchor.constraint(equalTo: header.centerYAnchor),
-            clear.widthAnchor.constraint(equalToConstant: 120),
-            clear.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -14),
+            clear.widthAnchor.constraint(equalToConstant: 110),
+            clear.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -12),
         ])
 
         let wv = WKWebView(frame: NSRect(x: 0, y: 0,

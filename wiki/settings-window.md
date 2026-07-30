@@ -26,7 +26,7 @@ protocol SettingsSection: AnyObject {
     func didBecomeActive()            // default: no-op — this tab became visible
     func didResignActive()            // default: no-op — another tab chosen, or window closing
     func windowWillClose()            // default: no-op
-    var fillsTab: Bool { get }        // default: false — fixed-form panels pin to the top
+    var fillsTab: Bool { get }        // default: false — built-in sections opt into the full page
 }
 ```
 
@@ -38,22 +38,36 @@ its tab is visible** rather than for the whole time the window is open.
 
 ### Window sizing
 
-One user-resizable window size for every tab — 820×600 by default, minimum 560×460 (which keeps the
-fixed-form panels fully visible). Switching tabs never resizes the window; whatever size the user
-set stays. A section whose content should stretch with the window returns `fillsTab == true`
-(`BrainSection` and `ActivitySection`, whose scrollable content uses the available height); the other
-fixed-form panels keep their designed frame,
-wrapped so they pin to the top of the tab and center horizontally (AppKit's y-origin is the bottom,
-so an unwrapped fixed-frame view would ride the bottom edge in a taller window).
+One user-resizable window size for every tab — 820×600 by default, minimum 560×460. Switching tabs
+never resizes the window; whatever size the user set stays. Every built-in section returns
+`fillsTab == true` and uses `SettingsPageView`, so page margins and headers expand consistently while
+cards and trailing controls adapt to the available width. Brain and Overlay put their variable-height
+cards in `SettingsScrollView`; Screen and Activity use the same page shell without an unnecessary
+outer scroll view.
+
+### Shared visual system
+
+The tabs share four AppKit primitives rather than styling their controls independently:
+
+- `SettingsPageView` owns the page title, one-line summary, optional live status badge, and outer
+  margins.
+- `SettingsCardView` owns the rounded group boundary and optional title/detail header.
+- `SettingsRowView` owns label/help typography, row height, separators, and responsive trailing
+  control alignment.
+- `SettingsStyle` owns the spacing, corner radius, and sizing tokens used by all three.
+
+Sections still own their behavior and concrete controls. The visual primitives do not read or write
+preferences, start probes, load Activity, or know about another tab. Activity keeps its `WKWebView`
+lazy lifecycle; its adaptive light/dark feed is simply framed by the same page and card chrome.
 
 ### Sections
 
 | Section class | Tab title | Always present | Description |
 |---|---|---|---|
-| `BrainSection` | "Brain" | yes | Everything that decides who answers a coaching attempt, in one tab: the primary provider/model, an ordered editable fallback list of provider/model targets, the reasoning-effort dropdown (one global setting, mapped onto each provider's scale), and the OpenAI API-key controls (`APIKeyControls`: an `NSSecureTextField` that saves to an owner-only file). Saving a key never restarts a live conversation: established Realtime sockets stay connected and use it on a later reconnect. Valid Brain changes take effect between coaching attempts while running, or on the next Start while stopped. |
-| `OverlaySection` | "Overlay" | yes | Two groups, one per overlay surface — **Overlay Caption** (the transient on-screen tip) and **Overlay Box** (the persistent response history). Each has a header with an On/Off toggle (an `NSSwitch` + "On"/"Off" label) and a one-line description. When a surface is **on** it also shows its Text Size + Opacity sliders (with live readouts) and a live sample, **only while the Overlay tab is selected** (`didBecomeActive`/`didResignActive`); when **off**, its sliders and sample are hidden and the layout collapses. Persists via `OverlayAppearance`. |
-| `DisplaySection` | "Screen" | yes | One dropdown — the capture scope: **Active window** (default) or one **Entire display** entry per connected display; persists via `ScreenCapturePreferences`. Applies to the next screenshot. |
-| `ActivitySection` | "Activity" | yes | Embeds the `ActivityViewer` content view (`makeContentView()` / `teardown()`); `fillsTab == true` so the log stretches with the window. Its header shows the selected session's exact directory ID with **Copy ID**. A session without a report shows **Evaluate**: one click runs the sole `AgenticEvaluator` through a locally installed Claude Code / Codex CLI over the source checkout plus the complete session directory, writes owner-only `eval-report.md`, and opens it. While it runs the button shows **Evaluating…**; afterward it becomes **Open report**, which reopens the saved result without another model run. The agent reads the full unfiltered `jarvis-activity.jsonl` whenever it needs the user-visible sequence and correlates it with `brain-traffic.jsonl`, screenshots, and live source. `scripts/eval-session.sh` is a second launcher for this same Core evaluator, not another evaluation path. `EvalReportPage` renders the markdown as `eval-report.html`; **Copy as Markdown** hands the raw report to an agent chat. Evaluation, report opening, and history clearing stay disabled through the live coaching/teardown lifecycle. |
+| `BrainSection` | "Brain" | yes | Everything that decides who answers a coaching attempt, in one scrolling page: the primary provider/model, an ordered editable fallback list, the reasoning-effort row, and the OpenAI transcription/key controls. A live status badge mirrors the active provider without moving the saved route. Saving a key never restarts a live conversation: established Realtime sockets stay connected and use it on a later reconnect. Valid Brain changes take effect between coaching attempts while running, or on the next Start while stopped. |
+| `OverlaySection` | "Overlay" | yes | Two matching cards, one per overlay surface — **Overlay Caption** (the transient on-screen tip) and **Overlay Box** (the persistent response history). Each card has an icon, description, On/Off toggle, and the same Text Size + Opacity row layout. When a surface is **on** its rows and live sample appear only while the Overlay tab is selected (`didBecomeActive`/`didResignActive`); when **off**, its rows and sample are hidden and the card collapses. Persists via `OverlayAppearance`. |
+| `DisplaySection` | "Screen" | yes | One **Screen capture** card with the capture-scope dropdown — **Active window** (default) or one **Entire display** entry per connected display — followed by a concise fallback/privacy callout. Persists via `ScreenCapturePreferences` and applies to the next screenshot. |
+| `ActivitySection` | "Activity" | yes | Embeds the `ActivityViewer` content (`makeContentView()` / `teardown()`) in the shared page/card shell so the adaptive light/dark feed stretches with the window. Its compact toolbar shows the selected session's exact directory ID with **Copy ID**. A session without a report shows **Evaluate**: one click runs the sole `AgenticEvaluator` through a locally installed Claude Code / Codex CLI over the source checkout plus the complete session directory, writes owner-only `eval-report.md`, and opens it. While it runs the button shows **Evaluating…**; afterward it becomes **Open report**, which reopens the saved result without another model run. The agent reads the full unfiltered `jarvis-activity.jsonl` whenever it needs the user-visible sequence and correlates it with `brain-traffic.jsonl`, screenshots, and live source. `scripts/eval-session.sh` is a second launcher for this same Core evaluator, not another evaluation path. `EvalReportPage` renders the markdown as `eval-report.html`; **Copy as Markdown** hands the raw report to an agent chat. Evaluation, report opening, and history clearing stay disabled through the live coaching/teardown lifecycle. |
 
 `AppDelegate` builds the section list at launch and passes it to `SettingsWindow`. All four tabs are
 always present, but each tab's content is created lazily on first selection during that open.
@@ -108,8 +122,8 @@ tracks intent separately from `panel.isVisible` so the setting can't desync). Th
 The Brain tab owns the whole "who answers a coaching attempt" decision, persisted through
 `BrainPreferences` (UserDefaults).
 
-The tab is one vertically scrolling stack of three rounded groups: **Provider**, **Reasoning
-effort**, then **Transcription**. The Provider group is one uninterrupted route: Primary and every
+The page header sits above one vertically scrolling stack of three rounded groups: **Provider
+route**, **Coaching**, then **Transcription**. The Provider group is one uninterrupted route: Primary and every
 Fallback row share the same label / provider / model alignment, with ordering actions only on
 fallbacks. There are no row dividers or permanent explanatory paragraphs. Fallback rows expand the
 outer document instead of hiding inside a second scroll area. While coaching runs, a compact **In
@@ -256,12 +270,17 @@ fallback or a later capture.
 |---|---|
 | `Sources/JarvisApp/Settings/SettingsSection.swift` | Protocol definition |
 | `Sources/JarvisApp/Settings/SettingsWindow.swift` | Host window + tab view |
+| `Sources/JarvisApp/Settings/SettingsStyle.swift` | Shared page/card/row sizing and spacing tokens |
+| `Sources/JarvisApp/Settings/SettingsPageView.swift` | Full-tab page title, summary, status, and content shell |
+| `Sources/JarvisApp/Settings/SettingsCardView.swift` | Rounded group boundary, optional header, and resize callback |
+| `Sources/JarvisApp/Settings/SettingsRowView.swift` | Shared label/help/trailing-control row |
+| `Sources/JarvisApp/Settings/SettingsScrollView.swift` | Viewport-change adapter for variable-height card documents |
 | `Sources/JarvisApp/Settings/BrainSection.swift` | Minimal Brain tab composition: Provider + Reasoning effort + Transcription |
 | `Sources/JarvisApp/Settings/BrainTargetRowView.swift` | Shared inline provider/model row for primary and fallback targets |
 | `Sources/JarvisApp/Settings/ProviderRouteEditor.swift` | Unified Primary + ordered fallback card and persistence mutations |
-| `Sources/JarvisApp/Settings/SettingsCardView.swift` | Resize callback at the grouped-card boundary |
 | `Sources/JarvisApp/Settings/APIKeyControls.swift` | Transcription provider + collapsed API-key editor |
 | `Sources/JarvisApp/Settings/OverlaySection.swift` | Overlay-appearance tab |
+| `Sources/JarvisApp/Settings/OverlaySurfaceSettingsView.swift` | One reusable overlay-surface card and its slider/readout rows |
 | `Sources/JarvisApp/Settings/DisplaySection.swift` | Capture-scope tab (scope + display in one dropdown) |
 | `Sources/JarvisApp/Settings/NSScreen+DisplayTitles.swift` | Display naming for the dropdown's entire-display entries |
 | `Sources/JarvisApp/Settings/ActivitySection.swift` | Activity tab |

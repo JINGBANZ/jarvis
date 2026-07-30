@@ -24,6 +24,26 @@ import WebKit
         #expect(cls?.contains("say") == true)
     }
 
+    @MainActor @Test func activityFeedUsesAdaptiveSettingsRowLayout() async throws {
+        let h = WebViewHarness()
+        try await h.load(ActivityLog.htmlShell())
+        try await h.eval(ActivityLog.rowScript(time: "10:00", message: "💬 tip", imageBase64: nil))
+
+        let colorScheme = try await h.eval(
+            "getComputedStyle(document.documentElement).colorScheme"
+        ) as? String
+        let display = try await h.eval(
+            "getComputedStyle(document.querySelector('.row')).display"
+        ) as? String
+        let border = try await h.eval(
+            "getComputedStyle(document.querySelector('.row')).borderBottomStyle"
+        ) as? String
+        #expect(colorScheme?.contains("light") == true)
+        #expect(colorScheme?.contains("dark") == true)
+        #expect(display == "grid")
+        #expect(border == "solid")
+    }
+
     @MainActor @Test func thumbnailClickOpensLightboxAndEscapeCloses() async throws {
         let h = WebViewHarness()
         try await h.load(ActivityLog.htmlShell())

@@ -12,7 +12,6 @@ final class ProviderRouteEditor: NSObject {
     private let preferences: BrainPreferences
     private let onChange: () -> Void
     private let onHeightChanged: (CGFloat) -> Void
-    private let groupLabel = NSTextField(labelWithString: "PROVIDER")
     private let addButton = NSButton(title: "＋ Add fallback", target: nil, action: nil)
     private var primaryRow: BrainTargetRowView?
     private var fallbackRows: [BrainTargetRowView] = []
@@ -128,17 +127,7 @@ final class ProviderRouteEditor: NSObject {
     }
 
     private func build() {
-        view.boxType = .custom
-        view.borderWidth = 1
-        view.cornerRadius = 12
-        view.borderColor = .separatorColor
-        view.fillColor = .controlBackgroundColor
-        view.contentViewMargins = .zero
-
-        groupLabel.font = .boldSystemFont(ofSize: NSFont.smallSystemFontSize)
-        groupLabel.textColor = .secondaryLabelColor
-        groupLabel.setAccessibilityLabel("Provider")
-        view.contentView?.addSubview(groupLabel)
+        view.setHeader(title: "Provider route", detail: "Used top to bottom")
 
         addButton.target = self
         addButton.action = #selector(addFallback)
@@ -150,8 +139,6 @@ final class ProviderRouteEditor: NSObject {
     private func layoutRows() {
         let width = view.bounds.width
         let height = preferredHeight
-        groupLabel.frame = NSRect(
-            x: 16, y: height - 30, width: width - 32, height: 18)
         var nextTop = height - Self.headerHeight
         if let primaryRow {
             nextTop -= primaryRow.preferredHeight
