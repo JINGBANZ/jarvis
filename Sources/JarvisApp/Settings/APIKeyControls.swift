@@ -1,7 +1,8 @@
 import AppKit
 import JarvisCore
+@preconcurrency import Speech
 
-/// Minimal transcription-provider and OpenAI credential editor for Brain Settings.
+/// Transcription-provider and OpenAI credential editor for Brain Settings.
 ///
 /// The collapsed state communicates configuration through its action only: `Add API key` when
 /// absent, `Edit` when present. Entry controls expand on explicit user action; errors appear only
@@ -9,6 +10,7 @@ import JarvisCore
 @MainActor
 final class APIKeyControls: NSObject {
     private let store: FileSecretStore
+    private let preferences: TranscriptionPreferences
     private let onKeySaved: (String) -> Void
 
     private var card: SettingsCardView?
@@ -29,8 +31,13 @@ final class APIKeyControls: NSObject {
         editing ? Self.expandedHeight : Self.collapsedHeight
     }
 
-    init(store: FileSecretStore, onKeySaved: @escaping (String) -> Void) {
+    init(
+        store: FileSecretStore,
+        preferences: TranscriptionPreferences,
+        onKeySaved: @escaping (String) -> Void
+    ) {
         self.store = store
+        self.preferences = preferences
         self.onKeySaved = onKeySaved
     }
 
@@ -52,13 +59,32 @@ final class APIKeyControls: NSObject {
         content.addSubview(providerLabel)
 
         let provider = NSPopUpButton()
-        provider.addItem(withTitle: BrainProvider.openAI.displayName)
+        for choice in TranscriptionProvider.allCases {
+            let title = choice == .appleSpeech
+                ? "\(choice.displayName) (macOS 26+)"
+                : choice.displayName
+            provider.addItem(withTitle: title)
+            provider.lastItem?.representedObject = choice.rawValue
+            if choice == .appleSpeech {
+                provider.lastItem?.isEnabled = Self.appleSpeechIsAvailable
+                provider.lastItem?.toolTip = Self.appleSpeechIsAvailable
+                    ? "On-device English (US) transcription"
+                    : "Requires macOS 26 and Apple Speech support"
+            }
+        }
+        if let selected = provider.itemArray.firstIndex(where: {
+            $0.representedObject as? String == preferences.provider.rawValue
+        }) {
+            provider.selectItem(at: selected)
+        }
+        provider.target = self
+        provider.action = #selector(providerChanged)
         provider.setAccessibilityLabel("Transcription provider")
         provider.identifier = NSUserInterfaceItemIdentifier("transcription-provider")
         content.addSubview(provider)
         providerPopup = provider
 
-        let keyLabel = NSTextField(labelWithString: "API key")
+        let keyLabel = NSTextField(labelWithString: "OpenAI API key")
         keyLabel.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
         keyLabel.identifier = NSUserInterfaceItemIdentifier("transcription-key-label")
         content.addSubview(keyLabel)
@@ -166,6 +192,15 @@ final class APIKeyControls: NSObject {
         field?.window?.makeFirstResponder(field)
     }
 
+    @objc private func providerChanged(_ sender: NSPopUpButton) {
+        guard let raw = sender.selectedItem?.representedObject as? String,
+              let provider = TranscriptionProvider(rawValue: raw) else {
+            return
+        }
+        preferences.provider = provider
+        jlog("Jarvis: \(provider.displayName) transcription selected for the next Start.")
+    }
+
     @objc private func cancelTapped() {
         editing = false
         status?.stringValue = ""
@@ -191,5 +226,12 @@ final class APIKeyControls: NSObject {
         actionButton?.title = "Edit"
         applyState()
         layout()
+    }
+
+    private static var appleSpeechIsAvailable: Bool {
+        if #available(macOS 26.0, *) {
+            return SpeechTranscriber.isAvailable
+        }
+        return false
     }
 }

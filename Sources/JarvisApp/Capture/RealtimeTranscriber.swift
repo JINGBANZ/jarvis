@@ -14,11 +14,12 @@ import JarvisCore
 /// Robustness: waits for the server's configuration acknowledgement before reporting ready, probes
 /// ready sockets with ping/pong, and reconnects with capped exponential backoff on every detected
 /// send, receive, close, startup-timeout, or liveness failure.
-final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @unchecked Sendable {
+final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSocketDelegate,
+    @unchecked Sendable {
     var onTurnEnd: (@Sendable () -> Void)?
     var onSilence: (@Sendable (TimeInterval) -> Void)?
     var onSpeechActivityChanged: (@Sendable (Bool) -> Void)?
-    var onConnectionStateChange: (@Sendable (RealtimeConnectionState) -> Void)?
+    var onConnectionStateChange: (@Sendable (TranscriptionConnectionState) -> Void)?
     /// Fired when transcription becomes unusable, either from an unrecoverable provider rejection or
     /// after reconnection is abandoned, so the app can stop instead of lying green.
     var onTerminalFailure: (@Sendable (TranscriptionFailureReason) -> Void)?
@@ -757,7 +758,7 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
              + "(network: \(networkStatus()))")
     }
 
-    private func emitState(_ state: RealtimeConnectionState) {
+    private func emitState(_ state: TranscriptionConnectionState) {
         onConnectionStateChange?(state)
     }
 

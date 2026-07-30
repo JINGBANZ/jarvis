@@ -4,8 +4,8 @@ import Foundation
 /// user's API key; the CLI providers keep a locally installed coding-agent runtime alive for the
 /// Jarvis session, so the user's existing Claude / ChatGPT *subscription* pays for the brain instead
 /// of API metering.
-/// Voice transcription is a separate concern and always needs the OpenAI key (Realtime API) —
-/// selecting a CLI provider changes only who answers the coaching turns.
+/// Voice transcription is a separately selected provider; choosing a brain changes only who answers
+/// the coaching turns.
 public enum BrainProvider: String, CaseIterable, Sendable {
     case openAI = "openai"
     case claudeCode = "claude-code"

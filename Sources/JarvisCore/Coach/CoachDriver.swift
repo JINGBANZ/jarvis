@@ -253,8 +253,8 @@ public final class CoachDriver: @unchecked Sendable {
         return true
     }
 
-    /// Realtime VAD feeds both speakers into one aggregate gate. Automatic pending-work attempts wait
-    /// until both sides are inactive; natural triggers still coalesce while waiting.
+    /// Transcription activity feeds both speakers into one aggregate gate. Automatic pending-work
+    /// attempts wait until both sides are inactive; natural triggers still coalesce while waiting.
     public func updateSpeechActivity(_ isActive: Bool, for speaker: Speaker) {
         speechActivity.setActive(isActive, for: speaker)
     }

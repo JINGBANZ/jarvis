@@ -110,6 +110,8 @@
 
 - **Chose:** `gpt-5.5` brain via the Responses API (tool-use + vision); `gpt-4o-transcribe` over the GA Realtime API; API-only, no local models.
 - **Why:** Best available quality; verified against the docs in 2026-06.
+- **Superseded in part by:** 2026-07-30 — Apple SpeechAnalyzer is an opt-in transcription provider.
+  The OpenAI model/path and default stand; transcription is no longer API-only.
 - **Detail:** [architecture.md](./architecture.md#models-and-apis).
 
 ### 2026-06-15 — Tuned `server_vad` + debounce; quiet graceful Stop
@@ -332,6 +334,8 @@
 - **Rejected:** (a) Wiring the CLIs' MCP interfaces for native tool calling — a protocol server + handshake per turn for three tools; the JSON-line protocol does the same job with a parser that tolerates prose/fences and degrades a forced `speak` to speaking the raw reply. (b) Auth verification by running the CLI at detection time — slow, may bill a request, and a Keychain prompt from `security` would be worse; the marker heuristic is a UI hint, with failures surfacing loudly at Start. (c) Replacing transcription too — the CLIs have no realtime audio surface; the OpenAI key remains the ears.
 - **Superseded in part by:** 2026-07-18 — Claude sign-in uses Claude's bounded auth-status command. Binary discovery and Codex's auth marker stand.
 - **Superseded in part by:** 2026-07-18 — Codex coaching invocations are isolated and bounded.
+- **Superseded in part by:** 2026-07-30 — Apple SpeechAnalyzer is an opt-in transcription provider.
+  The brain-provider seam stands; the OpenAI-key-always-required claim does not.
 - **Detail:** [architecture.md → Local CLI brain providers](./architecture.md#local-cli-brain-providers), [settings-window.md → Brain](./settings-window.md#brain); egress note in [sandbox.md](./sandbox.md#data-egress).
 
 ### 2026-07-16 — Realtime transcript integrity is tracked per audio item
@@ -1038,3 +1042,35 @@
   `Sources/JarvisCore/Brain/Adapters/LocalAgent/CLIBrainClient.swift`,
   `Sources/JarvisCore/Brain/Adapters/LocalAgent/Codex/CodexAppServerRuntime.swift`,
   `Sources/JarvisApp/App/AppDelegate.swift`.
+### 2026-07-30 — Apple SpeechAnalyzer is an opt-in transcription provider
+
+- **Chose:** Separate transcription selection from the brain route through a provider-neutral
+  `TranscriptionSession` port. OpenAI Realtime remains the default. On macOS 26 or later, Settings
+  offers opt-in Apple Speech backed by `SpeechAnalyzer`/`SpeechTranscriber`; one Start snapshots one
+  provider for both `me` and `them`, and a live session never switches providers automatically.
+- **Chose:** Keep the Apple first slice fixed to English (US), prepare or download its
+  `AssetInventory` model before replacing a running pipeline, convert the existing ordered 24 kHz
+  PCM into the framework's preferred format, and admit final transcription results only. A
+  content-free adaptive PCM tracker postpones coaching while speech is active but never gates
+  analyzer input or retains audio. The OpenAI key is required only when OpenAI supplies
+  transcription or appears in the configured brain route.
+- **Why:** Apple Speech removes continuous audio egress and transcription API billing for users who
+  explicitly choose the on-device path, while the existing OpenAI default preserves installed
+  behavior and its proven reconnect/integrity machinery. A session-scoped choice keeps privacy,
+  billing, and failure behavior legible: an Apple failure cannot silently turn into an OpenAI upload.
+- **Rejected:** (a) Automatic Apple → OpenAI fallback — it crosses an explicit privacy/billing
+  boundary and may require a credential the selected path did not need. (b) Mixing providers between
+  `me` and `them`, or switching one during a live session — it makes readiness, failure, and
+  transcript timing provider-dependent inside one conversation. (c) A locale picker or language
+  auto-detection in the first slice — it multiplies model/readiness/accuracy validation before the
+  English path has a live A/B. (d) `SFSpeechRecognizer` for older macOS releases — it would add a
+  second Apple adapter with a different authorization, availability, and result lifecycle instead
+  of the chosen SpeechAnalyzer boundary. (e) Adding `SpeechDetector` as a transcription gate —
+  Apple documents an accuracy tradeoff when it drops audio, and its current results sequence does
+  not expose usable speech boundaries; local activity therefore affects scheduling only.
+- **Supersedes in part:** 2026-06 — Models verified, and 2026-07-16 — Local Claude Code / Codex CLIs
+  as alternative brain providers. The OpenAI transcription implementation remains the default; the
+  API-only and always-needs-an-OpenAI-key constraints do not.
+- **Detail:** [architecture.md → Models and APIs](./architecture.md#models-and-apis),
+  [settings-window.md → Brain](./settings-window.md#brain),
+  [sandbox.md → Data Egress](./sandbox.md#data-egress).

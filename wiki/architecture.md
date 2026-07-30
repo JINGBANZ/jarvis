@@ -20,8 +20,8 @@ has something genuinely useful to add, it speaks up **unprompted** with a short 
 on-screen overlay.
 
 The guiding belief: **build the harness, not the intelligence.** The intelligence already exists
-(the selected brain model and `gpt-4o-transcribe` on the OpenAI Realtime API). The macOS capabilities
-already exist (ScreenCaptureKit, AVFoundation, Vision, the built-in `screencapture` tool, NSPanel).
+(the selected brain model and transcription provider). The macOS capabilities already exist
+(SpeechAnalyzer, ScreenCaptureKit, AVFoundation, Vision, the built-in `screencapture` tool, NSPanel).
 Jarvis is the thin layer of glue that wires them into a proactive coach. We write the least code
 possible and reinvent nothing.
 
@@ -31,9 +31,9 @@ possible and reinvent nothing.
             ┌──────────────────────────────────────────────────────────────┐
             │                         JARVIS HARNESS                         │
             │                                                                │
-  mic  ─────┤  AudioInput ──► Transcriber (gpt-4o-transcribe) ──► transcript    │
-  sys-audio ┤                          │ turn-end / silence events           │
-            │                          ▼                                      │
+  mic  ─────┤  AudioInput ──► selected Transcriber ──► transcript              │
+  sys-audio ┤                       │ turn-end / silence events                │
+            │                       ▼                                          │
             │                 CoachDriver ──(brain model + tools)─┐           │
             │                       ▲   │                         │           │
             │          capture_screen   │ speak(lines)            │           │
@@ -43,8 +43,10 @@ possible and reinvent nothing.
             └──────────────────────────────────────────────────────────────┘
 ```
 
-Always-on and cheap: audio streams continuously to the Realtime API, producing a rolling,
-speaker-labeled transcript. The transcript — not the screen — is the constant input signal.
+Always-on and cheap: audio streams continuously to the selected transcription adapter, producing a
+rolling, speaker-labeled transcript. OpenAI Realtime is the default; Apple Speech is an opt-in,
+on-device English (US) adapter on macOS 26+. The transcript — not the screen — is the constant
+input signal.
 
 On demand and expensive: the screen is **only** captured when the model asks for it via the
 `capture_screen` tool, and a coaching response is **only** produced when the model calls `speak`.
@@ -53,9 +55,10 @@ moments the model judges worthwhile.
 
 ### The turn
 
-1. The Transcriber emits a **turn-end** event (`gpt-4o-transcribe` server VAD ends the turn after a
-   tuned silence window) or a **silence check** fires (you've gone quiet, maybe stuck). The silence
-   check carries *how long* you've been quiet and backs off across a long silence (the interval
+1. The Transcriber emits a **turn-end** event after it finalizes an utterance (OpenAI uses tuned
+   server VAD; Apple Speech uses final `SpeechTranscriber` segments plus the same client debounce),
+   or a **silence check** fires (you've gone quiet, maybe stuck). The silence check carries *how
+   long* you've been quiet and backs off across a long silence (the interval
    doubles each step up to a cap — see `Config`), resetting on speech; past an idle cutoff it stops
    probing entirely (you've stepped away — a nudge into an empty room still bills a request) until
    speech re-arms it.
@@ -131,13 +134,13 @@ plugins ship only with full Xcode, and Jarvis builds **CLT-only** (see
 | **AggregateEchoCapture** | The whole capture path: one **private Core Audio aggregate device** = the built-in mic (`me`, clock master) + a system-output **process tap** (`them`, drift-compensated onto the mic's clock). A single IOProc delivers both sample-synced at the device's **native rate** — the one-clock case AEC3 needs; the capture **reads that rate and resamples mic+tap up to 48 kHz** for AEC3 (a no-op when the device is already 48 kHz). So **any input device works** — built-in, USB, 44.1 kHz gear, or AirPods (Bluetooth HFP at 16/24 kHz) — instead of the old hard 48 kHz pin that silently failed to start on Bluetooth mics. Inside the callback it runs AEC3 (tap = far reference, mic = near), removing the other side's speaker bleed from the mic *before* transcription — no headphones, and double-talk works (measured 30–50 dB cancellation). The untouched resampled tap remains the `them` source while a separate padded/truncated copy aligns AEC; wire delivery is serialized off the realtime IOProc. Then both sides downsample to 24 kHz. Replaces the old separate `AVAudioEngine` mic + `SCStream`. | Core Audio (`AudioHardwareCreateProcessTap`, private aggregate device, drift compensation) + `AVAudioConverter` resampling + WebRTC **AEC3**. |
 | **WebRTCEchoCanceller** | AEC3 echo canceller driven at 48 kHz on 10 ms frames inside the capture IOProc; far reference first, then the mic cleaned in place. | WebRTC **AEC3** (`webrtc-audio-processing`), vendored static + zero-dylib via `scripts/build-aec.sh`. |
 | **ErrorReporter** | The single funnel for user-facing failures. Severity on a Foundation-only `UserFacingError` decides the lifecycle consequence; an explicit startup/runtime context decides presentation. Startup failures may alert, but runtime failures never activate Jarvis or present UI even when they stop the session. `BrainFailure` feeds attempt outcomes into the finite provider route; only route exhaustion enters terminal reporting. Fixed, typed Activity outcomes carry stable on-disk identities while raw detail stays in `JarvisLog`. | AppKit (`NSAlert`) for startup only. |
-| **Transcriber** | Maintain a rolling, speaker-labeled, **spoken-time timestamped** transcript; emit speech-activity, turn-end, and backing-off silence events (with quiet duration). Two instances run in parallel — one per side — tagging lines `me`/`them` into one shared transcript. A per-`item_id` ledger reconciles out-of-order delta/completed/failed/VAD events and salvages streamed text. An utterance-local failure with no usable words stays diagnostic and cannot trigger the brain; a permanent account or configuration rejection stops the unusable session with a fixed Activity reason. A privacy-preserving continuity witness records content-free capture/delivery/socket/server checkpoints and locally derived activity intervals, so the session log can locate a future gap without retaining PCM or adding pseudo-speech to model context. A socket is ready only after the server acknowledges its configuration; active ping/pong probes, send/receive errors, and startup timeouts all drive the same reconnect path. | `gpt-4o-transcribe` (Realtime API; tuned `server_vad`). |
+| **Transcriber** | Maintain a rolling, speaker-labeled, **spoken-time timestamped** transcript; emit speech-activity, turn-end, and backing-off silence events (with quiet duration). Two instances run in parallel — one per side — tagging lines `me`/`them` into one shared transcript through the provider-neutral `TranscriptionSession` port. The default OpenAI adapter keeps its per-`item_id` reconciliation, delta salvage, acknowledged readiness, ping/pong health, and transactional reconnect path. The opt-in macOS 26+ Apple adapter prepares one English (US) asset before capture, converts the existing 24 kHz PCM to `SpeechAnalyzer`'s preferred format, and commits final results only. Its content-free local activity tracker delays coaching but never gates transcription or retains PCM. Either path keeps unusable words diagnostic-only and records content-free boundary evidence. | OpenAI `gpt-4o-transcribe` (Realtime API; tuned `server_vad`) or Apple `SpeechAnalyzer` / `SpeechTranscriber` (on-device). |
 | **CoachDriver** | Coordinate one single-flighted coaching attempt from a natural trigger or pending-work wake-up: snapshot one route target plus the latest conversation, route its tool calls, commit only a complete terminal action, and report one outcome to the scheduler. No speaking cooldown/rate cap — restraint is the model's; the only client-side content skip is the filler-only turn-end gate (`TurnSubstance`). | The selected OpenAI Responses API, Claude Code, or Codex route target; See [§4 Local CLI brain providers](#local-cli-brain-providers). Provider-specific summary tiers are defined in `BrainModelCatalog`. |
 | **Local agent runtime** | Keep provider startup outside the coaching latency path while preserving the attempt boundary: a `BrainConversation` lease owns every model turn in one attempt, including a `capture_screen` continuation, then is explicitly finished. Claude leases one initialized safe-mode query; Codex prepares the first target-specific ephemeral thread at Session Start and opens a fresh thread for each later attempt on one session-scoped app-server. A runtime failure fails the attempt; it never switches to a one-shot transport. | Claude Code stream-json control protocol; Codex app-server JSON-RPC over stdio. |
 | **ScreenTool** | Fulfill `capture_screen`: silently shoot the **active window** (default scope) — the window-server frontmost, on whichever display, clean even when partially covered — and attach an **on-device OCR** of the shot to the tool result so the model reads exact text instead of pixels. Falls back to a full-display capture (no OCR) — the Settings-chosen display in Entire-display scope, the main display when no window is eligible; the overlay window is excluded either way. See [settings-window.md](./settings-window.md#capture-scope). | macOS `screencapture` CLI + Apple Vision (`VNRecognizeTextRequest`). |
 | **Overlay Caption** | Render `speak` output: up to ~3 short lines (model-split), shown one at a time and queued so a newer tip never cuts off the current one; non-activating, always-on-top, excluded from capture. Switchable from Settings — **off by default**; when off, tips are suppressed. | AppKit NSPanel; `OverlayCaptionPanel`. |
 | **Overlay Box** | A persistent window logging every `speak` tip in full, timestamped — the scrollable history of what the caption flashed one line at a time. Movable, resizable, opaque, also excluded from capture; switched on/off from Settings (**on by default**), cleared on each Start. Fed by the same `speak` call as the caption via **`BroadcastOverlay`**, which fans one `OverlayRendering.render` out to both sinks (so `CoachDriver` is unchanged). | AppKit NSPanel; `OverlayBoxPanel`. |
-| **MenuBar** | Manual **Start/Stop** of the pipeline (no auto-start), an explicit connection state (starting, listening, reconnecting, system-audio connecting, microphone-only, or stopped), and one-time API-key entry. It turns green only when the microphone transcription socket is configured and ready. The two overlay surfaces are switched from Settings, not the menu. | AppKit menu-bar item; owner-only file for the key. |
+| **MenuBar** | Manual **Start/Stop** of the pipeline (no auto-start), an explicit connection state (starting, listening, reconnecting, system-audio connecting, microphone-only, or stopped), and one-time API-key entry when OpenAI is in use. It turns green only when the microphone transcription endpoint is ready. The two overlay surfaces are switched from Settings, not the menu. | AppKit menu-bar item; owner-only file for the key. |
 | **HotkeyController** | Register the global **⌥⌘J** hint hotkey and route a press to a one-trip `manualHint` turn while a session runs (beep otherwise). See [§2 On-demand hint](#on-demand-hint-j). | Carbon HIToolbox (`RegisterEventHotKey`, no TCC). |
 
 Each component has one job and a narrow interface. The CoachDriver is the only place the
@@ -209,10 +212,10 @@ the live cursor between attempts. A reasoning-effort edit rebuilds clients at th
 failure counts; the already-running attempt remains valid, so its success or failure updates route
 health normally.
 
-Saving the transcription API key refreshes only OpenAI clients and never probes or replaces CLI
-clients. It preserves the route cursor and counts. An in-flight OpenAI failure belongs to the
-superseded credential and is ignored, while an in-flight attempt on an unaffected CLI retains normal
-success/failure accounting.
+Saving the OpenAI API key refreshes only OpenAI clients and OpenAI transcription reconnect
+credentials; it never probes or replaces CLI clients. It preserves the route cursor and counts. An
+in-flight OpenAI failure belongs to the superseded credential and is ignored, while an in-flight
+attempt on an unaffected CLI retains normal success/failure accounting.
 
 A **coaching attempt** snapshots one target and the latest provider-neutral conversation, then keeps
 that target for the complete tool loop. Every provider request in that loop is made once. A complete,
@@ -283,7 +286,8 @@ The implementation keeps orchestration, route policy, and OS edges separate:
 
 ## 4. Data Flow & Cost Model
 
-- **Continuous (cheap):** audio → Realtime → transcript. This runs the whole session.
+- **Continuous (cheap):** audio → the selected transcription adapter → transcript. This runs the
+  whole session; Apple Speech removes continuous audio egress and OpenAI transcription billing.
 - **Per-turn (cheap):** a selected-brain call on each substantive turn-end and each silence event, with a
   bounded, mostly-cached working set. Filler-only turn-ends (from either speaker) are skipped
   client-side — free. No image unless the model asks.
@@ -315,10 +319,16 @@ rather than a per-turn screenshot.
   or failed summary leaves the full history intact for a later attempt. Requests are sent `store:true`
   so they stay inspectable in the OpenAI dashboard for debugging — the retention tradeoff is
   documented in [sandbox.md](./sandbox.md).
-- **Transcription — `gpt-4o-transcribe` over the GA Realtime API** with **tuned `server_vad`** (not
-  `semantic_vad`, which is reported flaky in transcription-only mode — it can stop emitting
-  `…transcription.completed` entirely). Turn-end fires on `…transcription.completed`, plus a
-  client-side debounce so a brief mid-thought pause doesn't fragment one sentence into several turns.
+- **Transcription has its own provider setting.** OpenAI remains the default:
+  `gpt-4o-transcribe` over the GA Realtime API with **tuned `server_vad`** (not `semantic_vad`,
+  which is reported flaky in transcription-only mode). The macOS 26+ opt-in is Apple
+  `SpeechAnalyzer` with a `SpeechTranscriber` fixed to English (US) for this first slice.
+  `AssetInventory` installs the model before the new pipeline replaces a running one, and final
+  results alone enter Activity/model context. Apple documents `SpeechDetector` as an optional
+  power-saving gate that may trade away transcription accuracy, while its result stream does not
+  expose usable VAD boundaries; Jarvis therefore sends all audio to the transcriber and uses its
+  existing content-free PCM activity detector only to postpone coaching until speech settles. Both
+  adapters apply the client-side turn debounce.
 
 ### Local CLI brain providers
 
@@ -399,9 +409,10 @@ provider-route policy, and traffic recording are unchanged — only the transpor
   it never widens what a Codex thread may do, which the sandbox and event allowlist bound. Settings availability
   discovery probes every supported CLI; Start probes only the CLI providers present in the
   configured route. Saving the transcription API key probes no CLI.
-- **The OpenAI key stays required**: transcription always runs on the Realtime API. A CLI provider
-  moves the brain/summarizer off the key, not the ears; the session evaluator independently runs
-  through a separate, explicit one-shot agentic audit over the completed session directory.
+- **The OpenAI key is conditional**: it is required when OpenAI supplies transcription or appears
+  anywhere in the configured brain route. Apple Speech plus a CLI-only route starts without it. The
+  session evaluator independently runs through a separate, explicit one-shot agentic audit over the
+  completed session directory.
   A controlled signed-in benchmark through each revision's production `CLIBrainClient` measured the
   complete model portion of a coaching attempt:
 
@@ -458,7 +469,11 @@ successful rebuild resets it for a later incident.
 
 The always-on legs are built to survive transient failure rather than die on it:
 
-- **The realtime transcription socket *will* drop** (network blips, server resets, the ~60-min
+- **Transcription selection is explicit and session-scoped.** Start snapshots one provider for both
+  speaker endpoints. Changing Settings affects the next Start, and neither adapter silently sends
+  audio to the other provider after failure. A microphone-side terminal failure ends the unusable
+  session; a system-audio-side failure degrades to microphone-only with fixed Activity copy.
+- **An OpenAI Realtime transcription socket *will* drop** (network blips, server resets, the ~60-min
   session cap) and a Realtime session **cannot be resumed** — a dropped connection means a new
   session. A socket is not declared ready at the WebSocket handshake: the transcriber waits for the
   server's session-configuration acknowledgement under a startup deadline. Once ready, ping/pong
@@ -489,6 +504,14 @@ The always-on legs are built to survive transient failure rather than die on it:
   their retained PCM is transcribed by the replacement session instead of first emitting a partial
   or gap that the replay would duplicate. Stale speech state therefore cannot suppress silence
   coaching after reconnect. Reconnect uses capped exponential backoff.
+- **Apple Speech has no network reconnect loop.** Start validates macOS/device support, resolves an
+  English (US) locale equivalent, and downloads any missing asset before capture replaces an
+  existing pipeline. Each endpoint then owns one analyzer and an ordered memory-only input stream.
+  Setup uses the same bounded pre-ready audio budget as OpenAI; overflow is diagnostic. Final
+  provider ranges supply spoken timestamps and continuity boundaries. The local activity tracker
+  retains only adaptive level state, not PCM, and gates coaching timing rather than transcription
+  input. An analyzer, result-stream, conversion, or input-stream failure stays inside the Apple
+  boundary and follows the terminal/degraded lifecycle above—never an implicit OpenAI fallback.
 - **The brain call** is single-flighted (a turn can't double-speak) and runs under a Core-owned
   workload deadline shared by the API, Claude, and Codex transports. A one-shot local auxiliary
   response uses one absolute budget across provider setup and inference rather than restarting the
@@ -530,11 +553,12 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
 - **API key in an owner-only file** (`0600`), not the Keychain — see [sandbox.md §3](./sandbox.md) for why.
 - **Built and run in the main `forrest` account inside a git worktree** (recoverability). The
   separate-restricted-account requirement is waived for the personal build; see [sandbox.md](./sandbox.md).
-- **Egress is narrow and explicit:** audio to `gpt-4o-transcribe`; a screenshot + transcript window
-  to the selected brain provider/model *only when the model triggers a capture/response*. The audio
-  witness persists only counters, sequence/sample metadata, timestamps, socket generations, server
-  audio-clock values, and a local activity bit in the owner-only session log — never PCM or
-  recovered words. The only screen-/audio-derived data written to **local** disk is the owner-only,
+- **Egress is narrow and explicit:** the default OpenAI transcriber sends audio to
+  `gpt-4o-transcribe`, while opt-in Apple Speech keeps raw audio on-device; a screenshot + transcript
+  window goes to the selected brain provider/model *only when the model triggers a capture/response*.
+  The audio witness persists only counters, sequence/sample metadata, timestamps, provider
+  generations, provider audio-clock values, and a local activity bit in the owner-only session
+  log — never PCM or recovered words. The only screen-/audio-derived data written to **local** disk is the owner-only,
   bounded per-session **activity log** (spoken tips,
   deliberate-silence outcomes, fixed failed-action and stop/degrade notices, transcribed lines, and
   the screenshots the model saw); raw mic audio and the live transcript are never archived. Requests

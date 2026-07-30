@@ -7,19 +7,31 @@ import JarvisCore
 /// `@unchecked Sendable`: `lock` guards lifecycle and overflow state; `AudioContinuityWitness`
 /// independently guards its state, and timer creation/invalidation is dispatched to the main queue.
 final class RealtimeContinuityReporter: @unchecked Sendable {
+    enum Boundary: String {
+        case openAIRealtime = "OpenAI Realtime"
+        case appleSpeech = "Apple Speech"
+    }
+
     private let speaker: Speaker
     private let clock: Clock
     private let sessionStart: TimeInterval
+    private let boundary: Boundary
     private let witness: AudioContinuityWitness
     private let lock = NSLock()
     private var timer: Timer?
     private var stopped = true
     private var overflowAccumulator = ReconnectBufferOverflowAccumulator()
 
-    init(speaker: Speaker, clock: Clock, sessionStart: TimeInterval) {
+    init(
+        speaker: Speaker,
+        clock: Clock,
+        sessionStart: TimeInterval,
+        boundary: Boundary = .openAIRealtime
+    ) {
         self.speaker = speaker
         self.clock = clock
         self.sessionStart = sessionStart
+        self.boundary = boundary
         witness = AudioContinuityWitness(startedAt: 0)
     }
 
@@ -121,11 +133,12 @@ final class RealtimeContinuityReporter: @unchecked Sendable {
                     + "fail=\(socket.sendFailures),server=\(socket.serverSpeechSignals),"
                     + "last_seq=\(lastSequence)"
             }.joined(separator: ";")
-            jlog("Jarvis audio witness [\(speaker.rawValue)] @\(Self.seconds(snapshot.emittedAt)): "
+            jlog("Jarvis audio witness [\(speaker.rawValue), \(boundary.rawValue)] "
+                 + "@\(Self.seconds(snapshot.emittedAt)): "
                  + "capture=\(snapshot.capturedChunks)/\(snapshot.capturedSamples), "
                  + "delivery=\(snapshot.deliveredChunks)/\(snapshot.deliveredSamples), "
                  + "pending=\(snapshot.pendingCapturedChunks), active=\(snapshot.localActivityDetected), "
-                 + "sockets=[\(sockets)]")
+                 + "provider_paths=[\(sockets)]")
         }
 
         for anomaly in output.anomalies {
@@ -153,10 +166,10 @@ final class RealtimeContinuityReporter: @unchecked Sendable {
                 jlog("⚠️ audio continuity [\(speaker.rawValue)] reconnect buffer overflow: "
                      + "evicted=\(evictedChunks), sequences=\(first)...\(last)")
             case .localActivityUnmatched(let activeSince, let duration):
-                jlog("⚠️ audio continuity [\(speaker.rawValue)] local activity had no server speech "
+                jlog("⚠️ audio continuity [\(speaker.rawValue)] local activity had no provider speech "
                      + "event: since=\(Self.seconds(activeSince)), window=\(Self.seconds(duration))")
             case .serverSpeechObservedAfterUnmatchedActivity(let activeSince, let serverObservedAt):
-                jlog("ℹ️ audio continuity [\(speaker.rawValue)] late server speech event resolved "
+                jlog("ℹ️ audio continuity [\(speaker.rawValue)] late provider speech event resolved "
                      + "the prior warning: activity_since=\(Self.seconds(activeSince)), "
                      + "server_at=\(Self.seconds(serverObservedAt))")
             }

@@ -1,7 +1,7 @@
 import Foundation
 
-/// A small synchronous bridge from Realtime VAD callbacks to the asynchronous pending-attempt
-/// scheduler. The scheduler suspends without polling while either conversation side is speaking.
+/// A small synchronous bridge from transcription activity callbacks to the asynchronous
+/// pending-attempt scheduler. The scheduler suspends without polling while either side is speaking.
 ///
 /// `@unchecked Sendable` is safe because `lock` guards all mutable state (`activeSpeakers` and
 /// `waiters`), and continuations are removed under that lock before they are resumed.

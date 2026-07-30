@@ -50,12 +50,16 @@ final class BrainSection: NSObject, SettingsSection {
         onPreferencesChanged:
             @escaping (PreferenceChange, [BrainProvider: DetectedAgentCLI]?) -> Void,
         keyStore: FileSecretStore,
+        transcriptionPreferences: TranscriptionPreferences,
         onKeySaved: @escaping (String) -> Void
     ) {
         self.preferences = preferences
         self.detector = detector
         self.onPreferencesChanged = onPreferencesChanged
-        self.apiKey = APIKeyControls(store: keyStore, onKeySaved: onKeySaved)
+        self.apiKey = APIKeyControls(
+            store: keyStore,
+            preferences: transcriptionPreferences,
+            onKeySaved: onKeySaved)
     }
 
     func makeView() -> NSView {
