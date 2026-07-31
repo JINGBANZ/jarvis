@@ -540,6 +540,8 @@
   coaching transport with Codex app-server/SDK — substantially more lifecycle and protocol surface
   when this call needs one final text object.
 - **Supersedes in part:** 2026-07-16 — Local Claude Code / Codex CLIs as alternative brain providers.
+- **Superseded in part by:** 2026-07-30 — Live local-agent coaching shares one latency deadline.
+  Provider defaults remain provider-specific; the live coach passes an explicit common deadline.
 - **Detail:** [architecture.md → Local CLI brain providers](./architecture.md#local-cli-brain-providers),
   `Sources/JarvisCore/Brain/Adapters/LocalAgent/CLIBrainClient+Invocation.swift`,
   `AgentCLIProcessRunner.swift`.
@@ -982,3 +984,20 @@
   [sandbox.md → Data Egress](./sandbox.md#data-egress),
   `Sources/JarvisCore/Brain/Adapters/LocalAgent/Codex/CodexAppServerRuntime.swift`,
   `Sources/JarvisCore/Brain/Adapters/LocalAgent/Codex/CodexRuntimeHome.swift`.
+
+### 2026-07-30 — Live local-agent coaching shares one latency deadline
+
+- **Chose:** Give the live Claude Code and Codex coaching clients one explicit latency deadline.
+  Keep local-agent provider defaults unchanged for summarization and every other caller. The
+  completed-session evaluator, failure classification, fresh-attempt scheduling, observation
+  carryover, and ordered-route budgets are unchanged.
+- **Why:** In session `2026-07-30_16-41-44_687E`, five Codex turns completed in 3.1–6.6 seconds,
+  while one stalled turn reached the prior live ceiling and pushed the recovered useful answer to
+  about 45 seconds after the request. The existing fresh-attempt boundary recovered correctly; the
+  latency-sensitive overlay should stop waiting sooner without changing that recovery policy.
+- **Rejected:** (a) Lowering `CLIBrainClient` provider defaults globally — that would also change
+  summarization and other auxiliary clients. (b) Giving the two live local providers different
+  deadlines — they serve the same overlay latency contract. (c) Changing API, evaluator, routing,
+  retry, or failure semantics — the session evidence did not justify those broader changes.
+- **Detail:** `Sources/JarvisApp/App/AppDelegate.swift`,
+  `Sources/JarvisCore/Brain/Adapters/LocalAgent/CLIBrainClient.swift`.

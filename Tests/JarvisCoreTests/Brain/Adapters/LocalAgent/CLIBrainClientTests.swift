@@ -16,6 +16,7 @@ import Testing
         replies: [String],
         tools: [ToolDef] = coachTools,
         toolChoice: ToolChoice = .required,
+        timeout: TimeInterval? = nil,
         traffic: BrainTrafficLog? = nil
     ) -> (CLIBrainClient, FakeLocalAgentRuntime) {
         let backend = FakeLocalAgentRuntime(replies: replies)
@@ -26,6 +27,7 @@ import Testing
             model: provider == .claudeCode ? "claude-sonnet-5" : "gpt-5.6-sol",
             reasoningEffort: "low",
             workDirectory: workDir,
+            timeout: timeout,
             traffic: traffic,
             trafficTag: "coach",
             systemPrompt: "coach prompt",
@@ -34,6 +36,33 @@ import Testing
             runtime: runtime,
             prewarm: false)
         return (client, backend)
+    }
+
+    @Test func liveCoachingOverrideDoesNotChangeProviderDefaults() throws {
+        let workDir = try makeWorkDir()
+        let (claudeCoach, _) = client(
+            .claudeCode,
+            workDir: workDir,
+            replies: [],
+            timeout: CLIBrainClient.liveCoachingTimeout)
+        let (codexCoach, _) = client(
+            .codexCLI,
+            workDir: workDir,
+            replies: [],
+            timeout: CLIBrainClient.liveCoachingTimeout)
+        let (defaultClaude, _) = client(.claudeCode, workDir: workDir, replies: [])
+        let (defaultCodex, _) = client(.codexCLI, workDir: workDir, replies: [])
+
+        #expect(CLIBrainClient.liveCoachingTimeout == 15)
+        #expect(claudeCoach.configuration.timeout == CLIBrainClient.liveCoachingTimeout)
+        #expect(codexCoach.configuration.timeout == CLIBrainClient.liveCoachingTimeout)
+        #expect(defaultClaude.configuration.timeout == CLIBrainClient.defaultTimeout)
+        #expect(defaultCodex.configuration.timeout == CLIBrainClient.codexDefaultTimeout)
+
+        claudeCoach.terminate()
+        codexCoach.terminate()
+        defaultClaude.terminate()
+        defaultCodex.terminate()
     }
 
     @Test func persistentRuntimeParsesStaySilent() async throws {

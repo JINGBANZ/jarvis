@@ -247,6 +247,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                        model: target.modelID,
                                        reasoningEffort: effort.rawValue,
                                        workDirectory: sessionDir,
+                                       timeout: CLIBrainClient.liveCoachingTimeout,
                                        traffic: sessionTraffic, trafficTag: "coach",
                                        systemPrompt: coachSystemPrompt,
                                        tools: coachTools,
