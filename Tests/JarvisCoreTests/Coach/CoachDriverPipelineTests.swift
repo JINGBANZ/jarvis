@@ -1798,18 +1798,21 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     /// Compaction fails soft: if the summarizer errors, the full history simply rides along.
     @Test func compactionFailureKeepsFullHistory() async {
         let clock = ManualClock(now: 0)
+        let recorder = BrainFailureRecorder()
         let brain = ScriptedBrain(script: [
             .init(toolCalls: [.staySilent(callId: "quiet")]),
         ])
         let summarizer = ScriptedThrowBrain(script: [nil])
         let (driver, transcript) = makeDriver(brain: brain, summarizer: summarizer, clock: clock,
-                                              config: Config(historyCompactionTokenThreshold: 5))
+                                              config: Config(historyCompactionTokenThreshold: 5),
+                                              onBrainFailure: { recorder.record($0) })
         transcript.append(.init(speaker: .me, text: "a reasonably long problem statement to remember", at: 0))
         await driver.handleTrigger(.turnEnd)
         transcript.append(.init(speaker: .me, text: "next thought", at: 5))
         await driver.handleTrigger(.turnEnd)
         let second = brain.calls[1].compactMap(\.text).joined(separator: "\n")
         #expect(second.contains("a reasonably long problem statement to remember"))   // nothing lost
+        #expect(recorder.failures.isEmpty)   // auxiliary failure never enters route health
     }
 
     // MARK: - Observability: structured turn outcomes

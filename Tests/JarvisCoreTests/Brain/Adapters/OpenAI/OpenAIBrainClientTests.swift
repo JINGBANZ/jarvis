@@ -161,6 +161,36 @@ private func speakResponseBody(arguments: String) -> Data {
         #expect(resp.toolCalls.isEmpty)
     }
 
+    @Test func historyCompactionOverrideDoesNotChangeDefaultTimeout() async throws {
+        let timeouts = CapturedTimeouts()
+        let response = Data(#"{"output":[]}"#.utf8)
+        let summarizer = OpenAIBrainClient(
+            apiKey: "sk-x",
+            model: "gpt-5.4-mini",
+            timeout: CoachDriver.historyCompactionTimeout,
+            send: { request in
+                timeouts.append(request.timeoutInterval)
+                return (response, http(200))
+            })
+        let defaultClient = OpenAIBrainClient(
+            apiKey: "sk-x",
+            model: "gpt-5.4-mini",
+            send: { request in
+                timeouts.append(request.timeoutInterval)
+                return (response, http(200))
+            })
+
+        _ = try await summarizer.respond(messages: [.user("condense this")], tools: [])
+        _ = try await defaultClient.respond(messages: [.user("condense this")], tools: [])
+
+        #expect(CoachDriver.historyCompactionTimeout == 15)
+        #expect(OpenAIBrainClient.defaultTimeout == 60)
+        #expect(timeouts.values == [
+            CoachDriver.historyCompactionTimeout,
+            OpenAIBrainClient.defaultTimeout,
+        ])
+    }
+
     /// Any non-2xx fails fast — there is no in-request retry. A failure throws to the driver, which
     /// recovers on the next trigger by re-sending the (still-uncommitted) backlog — fresher than
     /// retrying a stale body in place.
@@ -405,6 +435,14 @@ final class CapturedBody: @unchecked Sendable {
     private let lock = NSLock()
     func set(_ d: Data?) { lock.lock(); data = d; lock.unlock() }
     func get() -> Data? { lock.lock(); defer { lock.unlock() }; return data }
+}
+
+/// Thread-safe timeout recorder for request-policy tests.
+final class CapturedTimeouts: @unchecked Sendable {
+    private var recorded: [TimeInterval] = []
+    private let lock = NSLock()
+    func append(_ timeout: TimeInterval) { lock.lock(); recorded.append(timeout); lock.unlock() }
+    var values: [TimeInterval] { lock.lock(); defer { lock.unlock() }; return recorded }
 }
 
 /// Thread-safe call counter for retry tests.

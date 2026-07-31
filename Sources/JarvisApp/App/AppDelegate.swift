@@ -258,6 +258,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                         model: BrainModelCatalog.summarizerModelID(for: target.provider),
                                         reasoningEffort: ReasoningEffort.low.rawValue,
                                         workDirectory: sessionDir,
+                                        timeout: CoachDriver.historyCompactionTimeout,
                                         traffic: sessionTraffic, trafficTag: "summarizer",
                                         systemPrompt: CoachDriver.summaryInstructions,
                                         tools: [],
@@ -272,7 +273,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 traffic: sessionTraffic, trafficTag: "coach")
             summarizer = OpenAIBrainClient(
                 apiKey: key, model: BrainModelCatalog.summarizerModelID(for: .openAI),
-                reasoningEffort: ReasoningEffort.low.rawValue, maxOutputTokens: 2_048,
+                reasoningEffort: ReasoningEffort.low.rawValue,
+                timeout: CoachDriver.historyCompactionTimeout, maxOutputTokens: 2_048,
                 traffic: sessionTraffic, trafficTag: "summarizer")
         }
         return BrainRuntime(coach: coachBase, summarizer: summarizer)

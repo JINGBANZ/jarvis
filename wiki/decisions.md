@@ -999,5 +999,27 @@
   summarization and other auxiliary clients. (b) Giving the two live local providers different
   deadlines — they serve the same overlay latency contract. (c) Changing API, evaluator, routing,
   retry, or failure semantics — the session evidence did not justify those broader changes.
+- **Superseded in part by:** 2026-07-31 — History compaction has one cross-provider deadline. The
+  live coaching deadline and provider defaults stand; compaction no longer inherits those defaults.
 - **Detail:** `Sources/JarvisApp/App/AppDelegate.swift`,
   `Sources/JarvisCore/Brain/Adapters/LocalAgent/CLIBrainClient.swift`.
+
+### 2026-07-31 — History compaction has one cross-provider deadline
+
+- **Chose:** Give OpenAI, Claude Code, and Codex history-compaction summarizers one explicit,
+  Core-owned deadline, passed when `AppDelegate` constructs those role-specific clients. Keep
+  compaction awaited, tool-less, low-effort, and tagged `summarizer`; an empty result, timeout, or
+  other failure keeps the full history and never enters provider-route health. Generic provider
+  defaults, live coaching, ordered routing, retry scheduling, and the completed-session evaluator
+  remain unchanged.
+- **Why:** Compaction runs before the active handling slot is released, so inheriting a transport's
+  broad hang backstop can batch newer speech behind an auxiliary operation. Abandoning a stalled
+  summary is lossless because the uncompressed history remains available and compaction retries
+  after a later successful turn.
+- **Rejected:** (a) Lowering provider defaults — unrelated callers need their existing ceilings.
+  (b) Reusing the local-only live-coaching constant — compaction is a distinct cross-provider role.
+  (c) Detaching compaction into background work — history ordering and snapshot races need a separate
+  design.
+- **Detail:** `CoachDriver.historyCompactionTimeout` in
+  `Sources/JarvisCore/Coach/CoachDriver.swift`,
+  `Sources/JarvisApp/App/AppDelegate.swift`.

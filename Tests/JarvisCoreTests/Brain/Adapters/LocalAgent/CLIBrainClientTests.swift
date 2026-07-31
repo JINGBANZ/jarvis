@@ -65,6 +65,39 @@ import Testing
         defaultCodex.terminate()
     }
 
+    @Test func historyCompactionOverrideDoesNotChangeProviderDefaults() throws {
+        let workDir = try makeWorkDir()
+        let (claudeSummarizer, _) = client(
+            .claudeCode,
+            workDir: workDir,
+            replies: [],
+            tools: [],
+            toolChoice: .auto,
+            timeout: CoachDriver.historyCompactionTimeout)
+        let (codexSummarizer, _) = client(
+            .codexCLI,
+            workDir: workDir,
+            replies: [],
+            tools: [],
+            toolChoice: .auto,
+            timeout: CoachDriver.historyCompactionTimeout)
+        let (defaultClaude, _) = client(.claudeCode, workDir: workDir, replies: [])
+        let (defaultCodex, _) = client(.codexCLI, workDir: workDir, replies: [])
+
+        #expect(CoachDriver.historyCompactionTimeout == 15)
+        #expect(CLIBrainClient.defaultTimeout == 120)
+        #expect(CLIBrainClient.codexDefaultTimeout == 30)
+        #expect(claudeSummarizer.configuration.timeout == CoachDriver.historyCompactionTimeout)
+        #expect(codexSummarizer.configuration.timeout == CoachDriver.historyCompactionTimeout)
+        #expect(defaultClaude.configuration.timeout == CLIBrainClient.defaultTimeout)
+        #expect(defaultCodex.configuration.timeout == CLIBrainClient.codexDefaultTimeout)
+
+        claudeSummarizer.terminate()
+        codexSummarizer.terminate()
+        defaultClaude.terminate()
+        defaultCodex.terminate()
+    }
+
     @Test func persistentRuntimeParsesStaySilent() async throws {
         let (client, backend) = client(
             workDir: try makeWorkDir(),
