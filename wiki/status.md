@@ -13,9 +13,14 @@ implemented.** The coach covers behavioral, system-design, and coding questions.
 whose specific answer depends on visible context missing from the conversation calls `capture_screen`
 before `speak`; a fresh screenshot/OCR satisfies that request, while a fully stated question can be
 answered without a reflexive capture. The independent Transcription setting keeps **OpenAI as the
-default** and adds opt-in, on-device **Apple Speech** on macOS 26 or later. One Start snapshots one
-provider for both `me` and `them`; there is no automatic provider fallback. Apple Speech prepares
-the English (US) model before replacing a running pipeline, submits every captured sample to
+default**, keeps **GPT-4o Transcribe** as its default model, adds opt-in **GPT Live Transcribe**, and
+adds opt-in, on-device **Apple Speech** on macOS 26 or later. OpenAI language expectations default to
+Automatic rather than English; English, Mandarin Chinese, and English + Mandarin Chinese are
+session-level hints, not per-turn language choices. GPT Live can receive both expected languages,
+while GPT-4o uses automatic detection for the mixed profile because it accepts at most one language
+hint. One Start snapshots the provider, OpenAI model/profile, or Apple locale for both `me` and
+`them`; there is no automatic provider or model fallback. Apple Speech prepares the selected
+supported locale before replacing a running pipeline, submits every captured sample to
 `SpeechAnalyzer`, records only final results, and uses content-free local activity solely to keep
 coaching from waking mid-utterance. An OpenAI key is required only when OpenAI supplies
 transcription or appears in the brain route.
@@ -70,14 +75,17 @@ fixed notices remain available in Activity. The gate statically rejects unreview
 
 ## Next action
 
-Run a same-input transcription smoke on macOS 26 first. Start once with the default OpenAI provider
-and once with Apple Speech, exercising both microphone and system audio; confirm Apple downloads or
-reuses the English model before capture, reaches Listening, preserves `me`/`them` ordering, emits no
-mid-utterance coaching turn, and stops cleanly. Confirm Apple Speech plus a CLI-only brain route
-starts without an API key, while any OpenAI transcription or brain target still requires one.
-Change the transcription picker during a live run and confirm the current provider remains active
-until the next Start; force an Apple analyzer failure and confirm Jarvis never sends audio to OpenAI
-as an implicit fallback.
+Run a same-input English/Mandarin transcription A/B on macOS 26 first. Use OpenAI with the same
+English + Mandarin Chinese profile for one GPT-4o Transcribe session and one GPT Live Transcribe
+session; exercise both microphone and system audio, include a within-sentence language switch, and
+compare final `heard:` text, completion latency, and reconnect stability. Confirm the debug log names
+the selected model/profile and that GPT-4o sends no single-language hint for the mixed profile. Then
+run Apple Speech once per relevant conversation locale; confirm it downloads or reuses the selected
+model before capture, reaches Listening, preserves `me`/`them` ordering, emits no mid-utterance
+coaching turn, and stops cleanly. Confirm Apple Speech plus a CLI-only brain route starts without an
+API key, while any OpenAI transcription or brain target still requires one. Change any transcription
+setting during a live run and confirm the current snapshot remains active until the next Start; force
+an Apple analyzer failure and confirm Jarvis never sends audio to OpenAI as an implicit fallback.
 
 Then run the live prompt smoke on a fresh session: show an interview question without speaking its
 details, ask “Jarvis, how can I solve this in one pass?”, and confirm the first action is
@@ -110,7 +118,7 @@ Tested `JarvisCore` + `JarvisOverlay` harness is green (`./scripts/run-tests.sh`
 thin OS shell, verified by the smoke run.
 
 - `Sources/JarvisCore/Audio/` — transactional PCM + utterance buffering, adaptive content-free activity detection, non-destructive AEC reference alignment, and system-audio timeline preservation (`PCMBuffer`, `UtteranceBuffer`, `PCM16Framer`, `AudioDownmix`, `AdaptiveAudioActivityDetector`, `PCM16SpeechActivityTracker`, `EchoReferenceAlignment`, `SystemAudioTimeline`).
-- `Sources/JarvisCore/Transcription/` — provider-neutral session/provider contracts, the OpenAI Realtime wire contract and per-item ledger, and the rolling transcript (`TranscriptionSession`, `TranscriptionProvider`, `RealtimeSession`, `RealtimeTranscriptionLedger`, `Transcript`, `NoiseReduction`).
+- `Sources/JarvisCore/Transcription/` — provider-neutral session/provider contracts and immutable Start configuration, selectable OpenAI model/language-profile values, the OpenAI Realtime wire contract and per-item ledger, and the rolling transcript (`TranscriptionSession`, `TranscriptionProvider`, `TranscriptionConfiguration`, `OpenAITranscriptionModel`, `OpenAITranscriptionLanguageProfile`, `RealtimeSession`, `RealtimeTranscriptionLedger`, `Transcript`, `NoiseReduction`).
 - `Sources/JarvisCore/Brain/` — provider-neutral `BrainClient`/attempt-scoped `BrainConversation` contracts and models stay at the root. `Adapters/OpenAI/` owns the Responses transport; `Adapters/LocalAgent/` owns CLI detection, `CLIBrainClient`, the Claude Code and Codex runtimes, and the bounded shared process edge. `LocalAgentRuntimeSet` encapsulates provider-specific coach/summarizer ownership. `AgentCLIProcessRunner` remains only for the explicit completed-session evaluator. The subsystem also owns provider-boundary failure classification (`BrainFailure`), immutable `BrainTarget`/`BrainRoute`, `BrainProvider`, `BrainModelCatalog` (first per-provider entry is the default), and `ReasoningEffort`.
 - `Sources/JarvisCore/Coach/` — the event loop: `CoachDriver` (fresh-attempt scheduling and one-target tool-loop orchestration), the pure forward-only `BrainRouteSession`, `SpeechActivityGate`, `CoachHistory` (client-managed session memory), `ToolDefs` (coach tools + system prompt).
 - `Sources/JarvisCore/Triggers/` — turn/silence trigger detection, substance classification, and silence backoff (`Trigger`, `TurnSubstance`, `SilenceBackoff`).
@@ -134,5 +142,4 @@ thin OS shell, verified by the smoke run.
 - **First notarized release** — the release workflow needs its five repo secrets (Developer ID `.p12` + App Store Connect API key; names in `.github/workflows/release.yml`) set before the first Release PR is merged; the first run is the pipeline's live test.
 - **Universal binary** — `Sources/CJarvisAEC/lib/libjarvis-aec.a` is arm64-only; `lipo` in an x86_64 slice if Intel is ever needed.
 - **Neural double-talk canceller** (DTLN / Muesli-style on the same aligned streams) — the escalation if AEC3 over-attenuates the user under loud far audio in practice.
-- **Multilingual transcription settings** — Apple Speech is deliberately fixed to English (US) for the first provider slice; there is no locale picker or language auto-detection yet.
 - **Minimum macOS version confirmed** — currently targeting macOS 14+; confirm against the APIs actually used (ScreenCaptureKit needs 13+).

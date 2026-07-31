@@ -33,8 +33,11 @@ mic + system audio ──► selected transcription provider ──► speaker-l
 - During proactive turns, screen capture is model-triggered. It captures the active window by default,
   adds on-device OCR, and can instead target an entire display from **Settings → Screen**. The ⌥⌘J
   shortcut captures immediately and forces a hint.
-- Transcription defaults to OpenAI. On macOS 26 or later, **Apple Speech** is an opt-in, on-device
-  English (US) provider; the selection applies on the next Start.
+- Transcription defaults to OpenAI **GPT-4o Transcribe**, with **GPT Live Transcribe** available for
+  session-by-session comparison. Language expectations default to automatic; optional English,
+  Mandarin, and English + Mandarin profiles guide recognition without choosing a language per turn.
+  On macOS 26 or later, **Apple Speech** is an opt-in, on-device provider using one selected
+  conversation locale.
 - The coaching brain can use the OpenAI API or an installed Claude Code / Codex CLI. An OpenAI API
   key is required only when OpenAI supplies transcription or appears in the configured brain route.
 - The transient **Overlay Caption** is off by default; the persistent **Overlay Box** is on by default.
@@ -65,8 +68,9 @@ Then:
 2. Open the menu-bar item and choose **Settings… → Brain**. The default OpenAI transcription
    provider needs an OpenAI API key; the key is stored in an owner-only file and
    `OPENAI_API_KEY` is available as a headless fallback.
-3. Optionally choose **Apple Speech** for on-device English transcription on macOS 26+, then choose
-   the brain provider, model, capture scope, and overlay appearance.
+3. Choose the transcription model and expected languages, or choose **Apple Speech** on macOS 26+
+   and select the conversation locale. Then choose the brain route, capture scope, and overlay
+   appearance.
 4. Choose **Start Jarvis**. Use **Stop Jarvis** to end the session, or press **⌥⌘J** while it is
    running to request a hint immediately.
 
@@ -86,9 +90,9 @@ When launched with `./scripts/build-app.sh --run`, each Start creates an owner-o
 
 The history is pruned to the ten most recent sessions. Raw audio and the rolling in-memory transcript
 are not archived, although finalized `heard:` lines are part of the activity record. The default
-OpenAI provider sends audio to OpenAI for transcription; Apple Speech keeps raw audio on-device
-after its language model is installed. Coaching text and any requested screenshot go to the selected
-brain provider. See
+The selected OpenAI transcription model receives audio when OpenAI is the provider; Apple Speech
+keeps raw audio on-device after its selected locale model is installed. Coaching text and any
+requested screenshot go to the selected brain provider. See
 [`wiki/sandbox.md`](./wiki/sandbox.md) for the complete local-persistence, egress, and retention model.
 
 ## Development

@@ -5,7 +5,7 @@ import JarvisCore
 /// resolved before capture begins and never changes inside the live session.
 enum TranscriptionSessionFactory {
     static func make(
-        provider: TranscriptionProvider,
+        configuration: TranscriptionConfiguration,
         apiKey: String,
         appleSpeechLocale: Locale?,
         speaker: Speaker,
@@ -14,11 +14,12 @@ enum TranscriptionSessionFactory {
         config: Config,
         networkStatus: @escaping @Sendable () -> String
     ) -> any TranscriptionSession {
-        switch provider {
+        switch configuration.provider {
         case .openAI:
             RealtimeTranscriber(
                 apiKey: apiKey,
-                model: config.transcriptionModel,
+                model: configuration.openAIModel,
+                languageProfile: configuration.openAILanguageProfile,
                 speaker: speaker,
                 transcript: transcript,
                 clock: clock,

@@ -17,18 +17,30 @@ final class APIKeyControls: NSObject {
     private var onHeightChanged: ((CGFloat) -> Void)?
     private var editing = false
     private var providerPopup: NSPopUpButton?
+    private var modelLabel: NSTextField?
+    private var modelPopup: NSPopUpButton?
+    private var languageLabel: NSTextField?
+    private var languagePopup: NSPopUpButton?
+    private var localeLabel: NSTextField?
+    private var localePopup: NSPopUpButton?
+    private var guidance: NSTextField?
     private var actionButton: NSButton?
     private var field: NSSecureTextField?
     private var saveButton: NSButton?
     private var cancelButton: NSButton?
     private var status: NSTextField?
     private var rowSeparator: NSBox?
+    private var localeLoadTask: Task<Void, Never>?
 
-    private static let collapsedHeight: CGFloat = 150
-    private static let expandedHeight: CGFloat = 214
+    private static let openAICollapsedHeight: CGFloat = 330
+    private static let appleSpeechCollapsedHeight: CGFloat = 284
+    private static let editorHeight: CGFloat = 64
 
     var preferredHeight: CGFloat {
-        editing ? Self.expandedHeight : Self.collapsedHeight
+        let collapsed = preferences.provider == .openAI
+            ? Self.openAICollapsedHeight
+            : Self.appleSpeechCollapsedHeight
+        return collapsed + (editing ? Self.editorHeight : 0)
     }
 
     init(
@@ -68,7 +80,7 @@ final class APIKeyControls: NSObject {
             if choice == .appleSpeech {
                 provider.lastItem?.isEnabled = Self.appleSpeechIsAvailable
                 provider.lastItem?.toolTip = Self.appleSpeechIsAvailable
-                    ? "On-device English (US) transcription"
+                    ? "On-device transcription using one selected conversation locale"
                     : "Requires macOS 26 and Apple Speech support"
             }
         }
@@ -83,6 +95,74 @@ final class APIKeyControls: NSObject {
         provider.identifier = NSUserInterfaceItemIdentifier("transcription-provider")
         content.addSubview(provider)
         providerPopup = provider
+
+        let modelLabel = NSTextField(labelWithString: "Model")
+        modelLabel.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
+        content.addSubview(modelLabel)
+        self.modelLabel = modelLabel
+
+        let model = NSPopUpButton()
+        for choice in OpenAITranscriptionModel.allCases {
+            model.addItem(withTitle: choice.displayName)
+            model.lastItem?.representedObject = choice.rawValue
+        }
+        if let selected = model.itemArray.firstIndex(where: {
+            $0.representedObject as? String == preferences.openAIModel.rawValue
+        }) {
+            model.selectItem(at: selected)
+        }
+        model.target = self
+        model.action = #selector(modelChanged)
+        model.setAccessibilityLabel("OpenAI transcription model")
+        model.identifier = NSUserInterfaceItemIdentifier("transcription-model")
+        content.addSubview(model)
+        modelPopup = model
+
+        let languageLabel = NSTextField(labelWithString: "Expected languages")
+        languageLabel.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
+        content.addSubview(languageLabel)
+        self.languageLabel = languageLabel
+
+        let language = NSPopUpButton()
+        for choice in OpenAITranscriptionLanguageProfile.allCases {
+            language.addItem(withTitle: choice.displayName)
+            language.lastItem?.representedObject = choice.rawValue
+        }
+        if let selected = language.itemArray.firstIndex(where: {
+            $0.representedObject as? String
+                == preferences.openAILanguageProfile.rawValue
+        }) {
+            language.selectItem(at: selected)
+        }
+        language.target = self
+        language.action = #selector(languageChanged)
+        language.setAccessibilityLabel("Expected transcription languages")
+        language.identifier = NSUserInterfaceItemIdentifier("transcription-languages")
+        content.addSubview(language)
+        languagePopup = language
+
+        let localeLabel = NSTextField(labelWithString: "Conversation locale")
+        localeLabel.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
+        content.addSubview(localeLabel)
+        self.localeLabel = localeLabel
+
+        let locale = NSPopUpButton()
+        locale.addItem(withTitle: "Loading locales…")
+        locale.isEnabled = false
+        locale.target = self
+        locale.action = #selector(localeChanged)
+        locale.setAccessibilityLabel("Apple Speech conversation locale")
+        locale.identifier = NSUserInterfaceItemIdentifier("transcription-locale")
+        content.addSubview(locale)
+        localePopup = locale
+
+        let guidance = NSTextField(wrappingLabelWithString: "")
+        guidance.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        guidance.textColor = .secondaryLabelColor
+        guidance.maximumNumberOfLines = 2
+        guidance.lineBreakMode = .byWordWrapping
+        content.addSubview(guidance)
+        self.guidance = guidance
 
         let keyLabel = NSTextField(labelWithString: "OpenAI API key")
         keyLabel.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
@@ -127,6 +207,9 @@ final class APIKeyControls: NSObject {
         content.addSubview(separator)
         rowSeparator = separator
 
+        if preferences.provider == .appleSpeech {
+            loadAppleSpeechLocales()
+        }
         applyState()
         layout()
         return card
@@ -136,21 +219,40 @@ final class APIKeyControls: NSObject {
         guard let card, let content = card.contentView else { return }
         let width = content.bounds.width
         let height = preferredHeight
-        let controlWidth: CGFloat = min(220, max(150, width * 0.46))
+        let controlWidth: CGFloat = min(280, max(180, width * 0.46))
         let controlX = width - 14 - controlWidth
         let bodyTop = height - card.headerHeight
         let providerRowY = bodyTop - SettingsStyle.rowHeight
-        let keyRowY = providerRowY - SettingsStyle.rowHeight
+        let usesOpenAI = preferences.provider == .openAI
+        let modelOrLocaleRowY = providerRowY - 46
+        let languageRowY = modelOrLocaleRowY - 46
+        let guidanceRowY = (usesOpenAI ? languageRowY : modelOrLocaleRowY) - 54
+        let keyRowY = guidanceRowY - SettingsStyle.rowHeight
 
         content.subviews.first {
             $0.identifier?.rawValue == "transcription-provider-label"
         }?.frame = NSRect(x: 16, y: providerRowY + 18, width: 150, height: 20)
         providerPopup?.frame = NSRect(
             x: controlX, y: providerRowY + 11, width: controlWidth, height: 32)
+        modelLabel?.frame = NSRect(
+            x: 16, y: modelOrLocaleRowY + 18, width: 180, height: 20)
+        modelPopup?.frame = NSRect(
+            x: controlX, y: modelOrLocaleRowY + 11, width: controlWidth, height: 32)
+        languageLabel?.frame = NSRect(
+            x: 16, y: languageRowY + 18, width: 180, height: 20)
+        languagePopup?.frame = NSRect(
+            x: controlX, y: languageRowY + 11, width: controlWidth, height: 32)
+        localeLabel?.frame = NSRect(
+            x: 16, y: modelOrLocaleRowY + 18, width: 180, height: 20)
+        localePopup?.frame = NSRect(
+            x: controlX, y: modelOrLocaleRowY + 11, width: controlWidth, height: 32)
+        guidance?.frame = NSRect(
+            x: 16, y: guidanceRowY + 7, width: width - 32, height: 40)
         content.subviews.first {
             $0.identifier?.rawValue == "transcription-key-label"
         }?.frame = NSRect(x: 16, y: keyRowY + 18, width: 150, height: 20)
-        rowSeparator?.frame = NSRect(x: 16, y: providerRowY, width: width - 16, height: 1)
+        rowSeparator?.frame = NSRect(
+            x: 16, y: providerRowY, width: width - 16, height: 1)
 
         if editing {
             field?.frame = NSRect(
@@ -173,6 +275,14 @@ final class APIKeyControls: NSObject {
     }
 
     private func applyState() {
+        let usesOpenAI = preferences.provider == .openAI
+        modelLabel?.isHidden = !usesOpenAI
+        modelPopup?.isHidden = !usesOpenAI
+        languageLabel?.isHidden = !usesOpenAI
+        languagePopup?.isHidden = !usesOpenAI
+        localeLabel?.isHidden = usesOpenAI
+        localePopup?.isHidden = usesOpenAI
+        guidance?.stringValue = guidanceText
         actionButton?.isHidden = editing
         field?.isHidden = !editing
         saveButton?.isHidden = !editing
@@ -199,6 +309,44 @@ final class APIKeyControls: NSObject {
         }
         preferences.provider = provider
         jlog("Jarvis: \(provider.displayName) transcription selected for the next Start.")
+        if provider == .appleSpeech,
+           localePopup?.selectedItem?.representedObject == nil {
+            loadAppleSpeechLocales()
+        }
+        applyState()
+        layout()
+    }
+
+    @objc private func modelChanged(_ sender: NSPopUpButton) {
+        guard let raw = sender.selectedItem?.representedObject as? String,
+              let model = OpenAITranscriptionModel(rawValue: raw) else {
+            return
+        }
+        preferences.openAIModel = model
+        jlog("Jarvis: \(model.displayName) selected for the next Start.")
+        applyState()
+        layout()
+    }
+
+    @objc private func languageChanged(_ sender: NSPopUpButton) {
+        guard let raw = sender.selectedItem?.representedObject as? String,
+              let profile = OpenAITranscriptionLanguageProfile(rawValue: raw) else {
+            return
+        }
+        preferences.openAILanguageProfile = profile
+        jlog(
+            "Jarvis: \(profile.displayName) transcription languages selected "
+                + "for the next Start.")
+        applyState()
+        layout()
+    }
+
+    @objc private func localeChanged(_ sender: NSPopUpButton) {
+        guard let identifier = sender.selectedItem?.representedObject as? String else {
+            return
+        }
+        preferences.appleSpeechLocaleIdentifier = identifier
+        jlog("Jarvis: Apple Speech locale \(identifier) selected for the next Start.")
     }
 
     @objc private func cancelTapped() {
@@ -207,6 +355,85 @@ final class APIKeyControls: NSObject {
         field?.stringValue = ""
         applyState()
         layout()
+    }
+
+    private var guidanceText: String {
+        switch preferences.provider {
+        case .appleSpeech:
+            "Apple Speech uses one locale for the whole session. Choose the primary locale; use OpenAI for English–Mandarin code-switching."
+        case .openAI:
+            switch preferences.openAILanguageProfile {
+            case .automatic:
+                "No language hint is sent. The transcription model detects the spoken language."
+            case .english, .mandarinChinese:
+                "This hint guides recognition when it matches the conversation; it does not translate the transcript."
+            case .englishAndMandarinChinese:
+                if preferences.openAIModel == .gptLiveTranscribe {
+                    "Both languages are hinted to GPT Live; either speaker may switch within a sentence."
+                } else {
+                    "GPT-4o accepts one language hint, so this mixed profile uses automatic detection."
+                }
+            }
+        }
+    }
+
+    private func loadAppleSpeechLocales() {
+        localeLoadTask?.cancel()
+        guard #available(macOS 26.0, *), SpeechTranscriber.isAvailable else {
+            localePopup?.removeAllItems()
+            localePopup?.addItem(withTitle: "Unavailable")
+            localePopup?.isEnabled = false
+            return
+        }
+
+        localePopup?.removeAllItems()
+        localePopup?.addItem(withTitle: "Loading locales…")
+        localePopup?.isEnabled = false
+        let preferredIdentifier = preferences.appleSpeechLocaleIdentifier
+        localeLoadTask = Task { [weak self] in
+            let locales = await SpeechTranscriber.supportedLocales
+            let preferred = Locale(identifier: preferredIdentifier)
+            let equivalent = await SpeechTranscriber.supportedLocale(
+                equivalentTo: preferred)
+            guard !Task.isCancelled, let self else { return }
+            populateAppleSpeechLocales(
+                locales,
+                selectedIdentifier: equivalent?.identifier)
+        }
+    }
+
+    private func populateAppleSpeechLocales(
+        _ locales: [Locale],
+        selectedIdentifier: String?
+    ) {
+        guard let localePopup else { return }
+        localePopup.removeAllItems()
+        localePopup.addItem(withTitle: "Choose locale…")
+
+        let sortedLocales = locales.sorted {
+            Self.localeTitle($0).localizedCaseInsensitiveCompare(
+                Self.localeTitle($1)) == .orderedAscending
+        }
+        for locale in sortedLocales {
+            localePopup.addItem(withTitle: Self.localeTitle(locale))
+            localePopup.lastItem?.representedObject = locale.identifier
+            localePopup.lastItem?.toolTip = locale.identifier
+        }
+        localePopup.isEnabled = !sortedLocales.isEmpty
+
+        if let selectedIdentifier,
+           let selected = localePopup.itemArray.firstIndex(where: {
+               $0.representedObject as? String == selectedIdentifier
+           }) {
+            localePopup.selectItem(at: selected)
+        } else {
+            localePopup.selectItem(at: 0)
+        }
+    }
+
+    private static func localeTitle(_ locale: Locale) -> String {
+        Locale.current.localizedString(forIdentifier: locale.identifier)
+            ?? locale.identifier
     }
 
     @objc private func saveTapped() {

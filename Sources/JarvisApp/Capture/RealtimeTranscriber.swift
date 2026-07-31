@@ -7,9 +7,10 @@ import JarvisCore
 ///
 /// The wire contract (connect URL with `?intent=transcription`, the `session.update` payload, the
 /// audio-append event) is built by the pure, unit-tested `RealtimeSession` in JarvisCore. The
-/// transcription model is `gpt-4o-transcribe`, which supports `server_vad` so the server
-/// auto-commits the audio buffer per utterance and emits `…transcription.completed` — no manual
-/// `input_audio_buffer.commit` is required.
+/// Both selectable transcription models use `server_vad`, so the server auto-commits the audio
+/// buffer per utterance and emits `…transcription.completed` — no manual
+/// `input_audio_buffer.commit` is required. Provisional GPT Live deltas remain lifecycle-only;
+/// finalized text is still the sole input to Activity and the coaching model.
 ///
 /// Robustness: waits for the server's configuration acknowledgement before reporting ready, probes
 /// ready sockets with ping/pong, and reconnects with capped exponential backoff on every detected
@@ -27,7 +28,8 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
     private let reconnectSchedule = RetrySchedule(
         maximumRetries: 6, initialDelay: 1, maximumDelay: 30)
     private var apiKey: String
-    private let model: String
+    private let model: OpenAITranscriptionModel
+    private let languageProfile: OpenAITranscriptionLanguageProfile
     /// Who this socket is transcribing: `.me` (mic) or `.them` (system audio). Two transcribers run
     /// in parallel — one per side — feeding the same `RollingTranscript`, so the coach sees both.
     private let speaker: Speaker
@@ -71,18 +73,30 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
     private var pendingAudioTimelineOrigin: TimeInterval = 0
     private var activeAudioTimelineOrigin: TimeInterval = 0
 
-    init(apiKey: String, model: String, speaker: Speaker = .me, transcript: RollingTranscript, clock: Clock,
-         silenceTimeout: TimeInterval, silenceMaxInterval: TimeInterval,
-         silenceIdleCutoff: TimeInterval = .infinity,
-         silenceDurationMs: Int = 1000, noiseReduction: NoiseReductionMode = .auto,
-         turnDebounce: TimeInterval = 0.4, transcriptionTerminalTimeout: TimeInterval = 8,
-         transcriptionActiveTimeout: TimeInterval = 180,
-         maxBufferedAudioSeconds: TimeInterval = 60,
-         readyTimeout: TimeInterval = 10, pingInterval: TimeInterval = 20,
-         pongTimeout: TimeInterval = 10,
-         networkStatus: @escaping @Sendable () -> String = { "unavailable" }) {
+    init(
+        apiKey: String,
+        model: OpenAITranscriptionModel,
+        languageProfile: OpenAITranscriptionLanguageProfile,
+        speaker: Speaker = .me,
+        transcript: RollingTranscript,
+        clock: Clock,
+        silenceTimeout: TimeInterval,
+        silenceMaxInterval: TimeInterval,
+        silenceIdleCutoff: TimeInterval = .infinity,
+        silenceDurationMs: Int = 1000,
+        noiseReduction: NoiseReductionMode = .auto,
+        turnDebounce: TimeInterval = 0.4,
+        transcriptionTerminalTimeout: TimeInterval = 8,
+        transcriptionActiveTimeout: TimeInterval = 180,
+        maxBufferedAudioSeconds: TimeInterval = 60,
+        readyTimeout: TimeInterval = 10,
+        pingInterval: TimeInterval = 20,
+        pongTimeout: TimeInterval = 10,
+        networkStatus: @escaping @Sendable () -> String = { "unavailable" }
+    ) {
         self.apiKey = apiKey
         self.model = model
+        self.languageProfile = languageProfile
         self.speaker = speaker
         self.transcript = transcript
         self.clock = clock
@@ -163,7 +177,9 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         lock.unlock()
         previousSession?.invalidateAndCancel()   // release the previous session's delegate retain
         invalidateConnectionTimers()
-        jlog("Jarvis realtime [\(speaker.rawValue)]: opening socket #\(socketGeneration)")
+        jlog(
+            "Jarvis realtime [\(speaker.rawValue)]: opening socket #\(socketGeneration) "
+                + "model=\(model.rawValue) language-profile=\(languageProfile.rawValue)")
         task.resume()
         configureSession()
         receiveLoop(task: task, generation: socketGeneration)
@@ -201,8 +217,11 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         // Resolve .auto against the live default-input device each session, so a reconnect after a
         // device swap (e.g. plugging in AirPods) picks the right profile.
         let profile = NoiseReduction.profile(mode: noiseReduction, micProximity: InputDeviceProximity.current())
-        send(json: RealtimeSession.sessionUpdate(model: model, silenceDurationMs: silenceDurationMs,
-                                                 noiseReduction: profile))
+        send(json: RealtimeSession.sessionUpdate(
+            model: model,
+            languageProfile: languageProfile,
+            silenceDurationMs: silenceDurationMs,
+            noiseReduction: profile))
     }
 
     /// Records the first content-free checkpoint on the delivery queue using the timestamp assigned

@@ -10,20 +10,45 @@ import Testing
         return defaults
     }
 
-    @Test func absentSelectionPreservesTheOpenAIDefault() {
-        #expect(TranscriptionPreferences(defaults: freshDefaults()).provider == .openAI)
+    @Test func absentSelectionUsesCompatibilityAndAutomaticDefaults() {
+        let preferences = TranscriptionPreferences(defaults: freshDefaults())
+        #expect(preferences.provider == .openAI)
+        #expect(preferences.openAIModel == .gpt4oTranscribe)
+        #expect(preferences.openAILanguageProfile == .automatic)
+        #expect(preferences.appleSpeechLocaleIdentifier == Locale.current.identifier)
     }
 
-    @Test func providerRoundTripsThroughDefaults() {
+    @Test func selectionsRoundTripThroughDefaults() {
         let defaults = freshDefaults()
-        TranscriptionPreferences(defaults: defaults).provider = .appleSpeech
-        #expect(TranscriptionPreferences(defaults: defaults).provider == .appleSpeech)
+        let written = TranscriptionPreferences(defaults: defaults)
+        written.provider = .appleSpeech
+        written.openAIModel = .gptLiveTranscribe
+        written.openAILanguageProfile = .englishAndMandarinChinese
+        written.appleSpeechLocaleIdentifier = "zh-CN"
+
+        let read = TranscriptionPreferences(defaults: defaults)
+        #expect(read.provider == .appleSpeech)
+        #expect(read.openAIModel == .gptLiveTranscribe)
+        #expect(read.openAILanguageProfile == .englishAndMandarinChinese)
+        #expect(read.appleSpeechLocaleIdentifier == "zh-CN")
+        #expect(read.configuration == TranscriptionConfiguration(
+            provider: .appleSpeech,
+            openAIModel: .gptLiveTranscribe,
+            openAILanguageProfile: .englishAndMandarinChinese,
+            appleSpeechLocaleIdentifier: "zh-CN"))
     }
 
-    @Test func unknownSelectionFailsBackToOpenAI() {
+    @Test func unknownSelectionsUseSafeDefaults() {
         let defaults = freshDefaults()
         defaults.set("future-provider", forKey: "transcription.provider")
-        #expect(TranscriptionPreferences(defaults: defaults).provider == .openAI)
+        defaults.set("future-model", forKey: "transcription.openai.model")
+        defaults.set(
+            "future-profile",
+            forKey: "transcription.openai.language-profile")
+        let preferences = TranscriptionPreferences(defaults: defaults)
+        #expect(preferences.provider == .openAI)
+        #expect(preferences.openAIModel == .gpt4oTranscribe)
+        #expect(preferences.openAILanguageProfile == .automatic)
     }
 
     @Test func displayNamesAndCredentialRequirementsAreStable() {
@@ -31,6 +56,12 @@ import Testing
         #expect(TranscriptionProvider.openAI.requiresOpenAIAPIKey)
         #expect(TranscriptionProvider.appleSpeech.displayName == "Apple Speech")
         #expect(!TranscriptionProvider.appleSpeech.requiresOpenAIAPIKey)
+        #expect(OpenAITranscriptionModel.gpt4oTranscribe.displayName
+                == "GPT-4o Transcribe")
+        #expect(OpenAITranscriptionModel.gptLiveTranscribe.displayName
+                == "GPT Live Transcribe")
+        #expect(OpenAITranscriptionLanguageProfile.englishAndMandarinChinese.displayName
+                == "English + Mandarin Chinese")
     }
 
     @Test func openAIKeyRequirementCombinesTranscriptionAndBrainRoute() {

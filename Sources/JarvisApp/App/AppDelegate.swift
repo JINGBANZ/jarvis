@@ -479,7 +479,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let wasRunning = transcriber != nil || themTranscriber != nil
         let reportContext: UserFacingError.PresentationContext =
             wasRunning ? .runtime : .startup
-        let transcriptionProvider = transcriptionPreferences.provider
+        let transcriptionConfiguration = transcriptionPreferences.configuration
+        let transcriptionProvider = transcriptionConfiguration.provider
         let brainRoute = brainPreferences.configuredRoute
         let key = secrets.apiKey() ?? ""
         let requiresOpenAIKey = transcriptionProvider.requiresOpenAIAPIKey(for: brainRoute)
@@ -511,7 +512,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return installPreparedStart(
                 apiKey: key,
                 brainRoute: brainRoute,
-                transcriptionProvider: transcriptionProvider,
+                transcriptionConfiguration: transcriptionConfiguration,
                 appleSpeechLocale: nil,
                 detectedCLIs: [:],
                 wasRunning: wasRunning,
@@ -534,7 +535,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     return
                 }
                 do {
-                    appleSpeechLocale = try await AppleSpeechModelPreparation.prepareEnglish()
+                    appleSpeechLocale = try await AppleSpeechModelPreparation.prepare(
+                        localeIdentifier:
+                            transcriptionConfiguration.appleSpeechLocaleIdentifier)
                 } catch {
                     guard !Task.isCancelled, self.pendingStartRevision == revision else {
                         return
@@ -561,7 +564,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let credentialIsCurrent = !requiresOpenAIKey
                 || (self.secrets.apiKey() ?? "") == key
             guard credentialIsCurrent,
-                  self.transcriptionPreferences.provider == transcriptionProvider,
+                  self.transcriptionPreferences.configuration == transcriptionConfiguration,
                   self.brainPreferences.configuredRoute == brainRoute else {
                 self.pendingStartTask = nil
                 self.refreshConnectionUI()
@@ -573,7 +576,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             _ = self.installPreparedStart(
                 apiKey: key,
                 brainRoute: brainRoute,
-                transcriptionProvider: transcriptionProvider,
+                transcriptionConfiguration: transcriptionConfiguration,
                 appleSpeechLocale: appleSpeechLocale,
                 detectedCLIs: detectedCLIs,
                 wasRunning: wasRunning,
@@ -604,7 +607,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func installPreparedStart(
         apiKey key: String,
         brainRoute: BrainRoute,
-        transcriptionProvider: TranscriptionProvider,
+        transcriptionConfiguration: TranscriptionConfiguration,
         appleSpeechLocale: Locale?,
         detectedCLIs initialDetectedCLIs: [BrainProvider: DetectedAgentCLI],
         wasRunning: Bool,
@@ -631,6 +634,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         transcript = RollingTranscript()
         beginNewSession()  // rotate to a fresh session dir + activity/debug log
         overlayBox.clear() // …and a fresh response history for the new conversation
+        switch transcriptionConfiguration.provider {
+        case .openAI:
+            jlog(
+                "Jarvis transcription: provider=OpenAI "
+                    + "model=\(transcriptionConfiguration.openAIModel.rawValue) "
+                    + "language-profile="
+                    + transcriptionConfiguration.openAILanguageProfile.rawValue)
+        case .appleSpeech:
+            jlog(
+                "Jarvis transcription: provider=Apple Speech "
+                    + "locale=\(appleSpeechLocale?.identifier ?? "unprepared")")
+        }
 
         // Each target's coach and summarizer share the session traffic log. Every fresh attempt is a
         // distinct audit-visible request; no transport wrapper replays a failed request.
@@ -659,7 +674,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let turns = TurnTaskBox()
         // "Me" side: the mic. Drives turn-end and the backing-off silence check ("are you stuck?").
         let transcriber = TranscriptionSessionFactory.make(
-            provider: transcriptionProvider,
+            configuration: transcriptionConfiguration,
             apiKey: key,
             appleSpeechLocale: appleSpeechLocale,
             speaker: .me,
@@ -679,7 +694,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // other side finishes (e.g. asks you something), but NOT the silence check — the "are you
         // stuck?" prompt is about the *user*, so only the mic owns that timer.
         let themTranscriber = TranscriptionSessionFactory.make(
-            provider: transcriptionProvider,
+            configuration: transcriptionConfiguration,
             apiKey: key,
             appleSpeechLocale: appleSpeechLocale,
             speaker: .them,
@@ -706,7 +721,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let themTranscriber else { return }
             Task { @MainActor [weak self] in
                 guard let self, self.themTranscriber === themTranscriber else { return }
-                if transcriptionProvider == .openAI, reason != .connectionLost {
+                if transcriptionConfiguration.provider == .openAI,
+                   reason != .connectionLost {
                     self.reportTranscriptionFailure(reason)
                     return
                 }

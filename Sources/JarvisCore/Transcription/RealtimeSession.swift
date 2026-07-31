@@ -2,7 +2,7 @@ import Foundation
 
 /// Pure builders for the OpenAI GA Realtime **transcription** session — extracted from the
 /// WebSocket client so the wire contract is unit-testable (the live socket is not). Verified
-/// against the realtime-transcription guide (2026-06).
+/// against the realtime-transcription guide (2026-07).
 public enum RealtimeSession {
     public static let sampleRate = 24_000
 
@@ -14,7 +14,10 @@ public enum RealtimeSession {
 
     /// The `session.update` payload: `session.type:"transcription"` with config nested under
     /// `session.audio.input` (format / transcription model / server-VAD turn detection).
-    /// `server_vad` requires a VAD-capable model such as `gpt-4o-transcribe`.
+    ///
+    /// GPT-4o accepts the legacy singular `language` hint. GPT Live accepts the plural `languages`
+    /// list and rejects a payload that also carries the singular field. Mixed-language GPT-4o
+    /// sessions therefore omit `language` and use the model's automatic recognition.
     ///
     /// `silenceDurationMs` tunes how long a pause must last before the server ends the turn. The
     /// server default (~500 ms) ends a turn on a brief mid-thought pause and chops one spoken
@@ -26,12 +29,27 @@ public enum RealtimeSession {
     /// nil to disable) filters the input buffer *before* it reaches VAD and the model — OpenAI's
     /// first-line defense against non-speech blips firing the VAD and producing phantom transcripts.
     /// Sent as an object `{"type": …}`; a bare string is rejected by the server.
-    public static func sessionUpdate(model: String, language: String = "en",
-                                     silenceDurationMs: Int = 1000,
-                                     noiseReduction: String? = "near_field") -> [String: Any] {
+    public static func sessionUpdate(
+        model: OpenAITranscriptionModel,
+        languageProfile: OpenAITranscriptionLanguageProfile = .automatic,
+        silenceDurationMs: Int = 1000,
+        noiseReduction: String? = "near_field"
+    ) -> [String: Any] {
+        var transcription: [String: Any] = ["model": model.rawValue]
+        switch model {
+        case .gpt4oTranscribe:
+            if let language = languageProfile.singularLanguageHint {
+                transcription["language"] = language
+            }
+        case .gptLiveTranscribe:
+            if let languages = languageProfile.liveLanguageHints {
+                transcription["languages"] = languages
+            }
+        }
+
         var input: [String: Any] = [
             "format": ["type": "audio/pcm", "rate": sampleRate],
-            "transcription": ["model": model, "language": language],
+            "transcription": transcription,
             "turn_detection": [
                 "type": "server_vad",
                 "silence_duration_ms": silenceDurationMs,

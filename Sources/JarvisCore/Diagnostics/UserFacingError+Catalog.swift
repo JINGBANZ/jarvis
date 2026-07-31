@@ -23,21 +23,21 @@ public extension UserFacingError {
               sessionEndReason: .openAIAPIKeyMissing)
     }
 
-    /// Apple Speech is selected on an unsupported OS/device, or its English model is unavailable.
+    /// Apple Speech is selected on an unsupported OS/device, or its selected locale is unavailable.
     /// This is a preflight refusal, so a currently running session remains intact.
     static var appleSpeechUnavailable: UserFacingError {
         .init(
             title: "Apple Speech unavailable",
-            message: "On-device transcription requires macOS 26 or later, Apple Speech support, and the English speech model. Choose OpenAI transcription or use a supported Mac.",
+            message: "On-device transcription requires macOS 26 or later, Apple Speech support, and a supported conversation locale. Check the locale in Settings or choose OpenAI transcription.",
             severity: .warning)
     }
 
-    /// The supported Apple model could not be downloaded or prepared. Keep raw framework/download
+    /// The selected Apple model could not be downloaded or prepared. Keep raw framework/download
     /// detail in the debug log and give the explicit Start action a fixed recovery suggestion.
     static var appleSpeechPreparationFailed: UserFacingError {
         .init(
             title: "Couldn’t prepare Apple Speech",
-            message: "Jarvis couldn’t prepare the on-device English speech model. Check your network connection and available storage, then press Start again.",
+            message: "Jarvis couldn’t prepare the selected on-device speech model. Check your network connection, locale, and available storage, then press Start again.",
             severity: .warning)
     }
 

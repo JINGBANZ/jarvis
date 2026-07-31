@@ -1074,3 +1074,34 @@
 - **Detail:** [architecture.md → Models and APIs](./architecture.md#models-and-apis),
   [settings-window.md → Brain](./settings-window.md#brain),
   [sandbox.md → Data Egress](./sandbox.md#data-egress).
+- **Superseded in part by:** 2026-07-30 — Transcription language is a Start-time profile and GPT
+  Live is opt-in. Apple remains one analyzer per speaker and one locale per session; the fixed
+  English locale and no-locale-picker choices do not.
+
+### 2026-07-30 — Transcription language is a Start-time profile and GPT Live is opt-in
+
+- **Chose:** Keep OpenAI as the default transcription provider and GPT-4o Transcribe as its default
+  model, with GPT Live Transcribe as an explicit session-by-session A/B choice. Language expectations
+  default to Automatic, so Jarvis sends no hidden English hint. The optional English, Mandarin, and
+  English + Mandarin profiles are one immutable Start snapshot shared by both speakers and every
+  reconnect. GPT Live receives both mixed-language expectations; GPT-4o leaves the mixed profile
+  automatic because it accepts only one language hint.
+- **Chose:** Populate the Apple Speech locale picker from the framework's runtime-supported locales,
+  initially suggesting the supported equivalent of the current macOS locale. Keep one Apple locale
+  for the complete session and do not run parallel locale transcribers.
+- **Why:** Either interview participant may switch between English and Mandarin inside one sentence.
+  A per-turn language choice is both too late and conceptually wrong for code-switching; the
+  transcription model must recognize the mixed audio itself. An explicit session profile gives the
+  model useful prior information when its wire contract supports it without hard-coding English or
+  adding a local language classifier. The opt-in model picker makes GPT Live accuracy, finalization
+  latency, and stability directly comparable against the existing GPT-4o path.
+- **Rejected:** (a) Hard-coding English for either OpenAI or Apple. (b) Choosing a language for every
+  utterance in Jarvis—the same utterance may contain both. (c) Parallel Apple transcribers—more
+  lifecycle, asset, and reconciliation complexity before evidence that it is needed. (d) Racing
+  OpenAI models or sending the same live audio to both—duplicates egress and cost; A/B sessions keep
+  the comparison explicit.
+- **Supersedes in part:** 2026-07-30 — Apple SpeechAnalyzer is an opt-in transcription provider. Its
+  provider/session boundary stands; its fixed-English first slice does not.
+- **Detail:** [architecture.md → Models and APIs](./architecture.md#models-and-apis),
+  [settings-window.md → Brain](./settings-window.md#brain),
+  [sandbox.md → Data Egress](./sandbox.md#data-egress).

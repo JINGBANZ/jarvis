@@ -11,7 +11,6 @@ import Testing
         #expect(c.overlayNoticeBufferSeconds == 2.0)
         #expect(c.overlaySecondsPerWord == 0.35)
         #expect(c.overlayMaxDisplaySeconds == 8)
-        #expect(c.transcriptionModel == "gpt-4o-transcribe")
         #expect(c.vadSilenceDurationMs == 1000)
         #expect(c.turnDebounceSeconds == 0.4)
         #expect(c.maxBufferedAudioSeconds == 60)
