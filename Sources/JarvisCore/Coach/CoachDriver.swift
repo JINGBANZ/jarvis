@@ -182,9 +182,12 @@ public final class CoachDriver: @unchecked Sendable {
         let historyBase: [ChatMessage] = [.system(coachSystemPrompt)] + history.snapshot()
         // New speech (when there is any) followed by the trigger note (when there is one — a
         // turn-end has none, the stamped delta already carries that signal). Never both empty:
-        // an empty turn-end delta is gated above, and silence/manual-hint always have a note.
-        let userText = [delta.text.isEmpty ? nil : "New since last turn:\n\(delta.text)",
-                        ctx.promptLine].compactMap { $0 }.joined(separator: "\n\n")
+        // an empty turn-end delta is gated above, and silence/manual-hint always have a note. The
+        // explicit boundary lets the prompt select the final turn instead of mistaking a retained
+        // historical fragment for newly delivered speech.
+        let currentTurnText = [delta.text.isEmpty ? nil : "New since last turn:\n\(delta.text)",
+                               ctx.promptLine].compactMap { $0 }.joined(separator: "\n\n")
+        let userText = "Current turn:\n\(currentTurnText)"
         var turnMessages: [ChatMessage] = [.user(userText)]
 
         // Manual hint (hotkey): the user explicitly asked for help, so capture the screen HERE and

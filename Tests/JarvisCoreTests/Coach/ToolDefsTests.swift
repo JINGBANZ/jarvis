@@ -74,13 +74,13 @@ import Testing
 
     @Test func coachPromptLimitsFragmentGateToFreshSpeech() {
         let prompt = coachSystemPrompt.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        #expect(prompt.contains("inspect only the final \"Current turn:\" block"))
+        #expect(prompt.contains("ignore every earlier one in history"))
         #expect(prompt.contains(
-            "apply only when this turn's user text includes a \"New since last turn\" block"
+            "Apply this gate only when that final block includes \"New since last turn\""
         ))
         #expect(prompt.contains("Judge only the newest speech inside that block"))
-        #expect(prompt.contains(
-            "A silence-only turn with no \"New since last turn\" block also bypasses it"
-        ))
+        #expect(prompt.contains("A final \"Current turn:\" block with no \"New since last turn\""))
         #expect(prompt.contains("the newest historical speech was fragmentary"))
     }
 

@@ -2,10 +2,11 @@ import Foundation
 import Testing
 @testable import JarvisCore
 
-/// How the per-turn user message is assembled (CoachDriver.runTurn): new speech is wrapped in a
-/// "New since last turn:" block ONLY when there is any, followed by the trigger note ONLY when the
-/// trigger has one — a turn-end has none (the stamped delta already says the user just spoke), so
-/// its message is the bare block; a silence wake-up with nothing said is the bare note.
+/// How the per-turn user message is assembled (CoachDriver.runTurn): every request gets an explicit
+/// "Current turn:" boundary. New speech is wrapped in a "New since last turn:" block ONLY when there
+/// is any, followed by the trigger note ONLY when the trigger has one — a turn-end has none (the
+/// stamped delta already says the user just spoke), so its payload is the bare speech block; a
+/// silence wake-up with nothing said carries only the bare note after the boundary.
 @Suite struct CoachDriverContextMessageTests {
     private func makeDriver(brain: BrainClient, clock: Clock) -> (CoachDriver, RollingTranscript) {
         let transcript = RollingTranscript()
@@ -30,7 +31,8 @@ import Testing
 
         await driver.handleTrigger(.turnEnd)
 
-        #expect(lastUserMessage(brain) == "New since last turn:\n[00:00] me: brute force two-sum")
+        #expect(lastUserMessage(brain) ==
+                "Current turn:\nNew since last turn:\n[00:00] me: brute force two-sum")
     }
 
     /// No new speech (a silence wake-up with nothing said): the message is the bare trigger note —
@@ -42,7 +44,7 @@ import Testing
         await driver.handleTrigger(.silence(secondsQuiet: 30))
 
         let msg = lastUserMessage(brain)
-        #expect(msg == "[00:00] (no speech for 30s)")
+        #expect(msg == "Current turn:\n[00:00] (no speech for 30s)")
         #expect(msg?.contains("New since last turn") == false)
         #expect(msg?.contains("nothing new") == false)
     }
@@ -56,7 +58,8 @@ import Testing
         await driver.handleTrigger(.silence(secondsQuiet: 45))
 
         #expect(lastUserMessage(brain) ==
-                "New since last turn:\n[00:00] me: hmm let me think\n\n[00:00] (no speech for 45s)")
+                "Current turn:\nNew since last turn:\n[00:00] me: hmm let me think\n\n"
+                + "[00:00] (no speech for 45s)")
     }
 
     /// A fragment committed after `stay_silent` remains useful history, but it must not masquerade as
@@ -74,8 +77,8 @@ import Testing
 
         let userMessages = brain.calls[1].filter { $0.role == .user }.compactMap(\.text)
         #expect(userMessages == [
-            "New since last turn:\n[00:00] me: one pass",
-            "[00:00] (no speech for 30s)",
+            "Current turn:\nNew since last turn:\n[00:00] me: one pass",
+            "Current turn:\n[00:00] (no speech for 30s)",
         ])
     }
 }
