@@ -400,6 +400,106 @@ import Testing
         #expect(requests(method: "initialize", in: trace).count == 1)
     }
 
+    @Test func timedOutCodexCompactionInterruptsOnlyItsThread() async throws {
+        let directory = try makeWorkDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let trace = directory.appendingPathComponent("trace")
+        let executable = try makeExecutable(
+            in: directory,
+            named: "fake-codex",
+            script: """
+                #!/bin/sh
+                thread_number=0
+                while IFS= read -r line; do
+                  printf 'input: %s\\n' "$line" >> '\(shellQuoted(trace.path))'
+                  request_id=$(printf '%s' "$line" | sed -n 's/.*"id":\\([0-9][0-9]*\\).*/\\1/p')
+                  method=$(printf '%s' "$line" | sed -n 's/.*"method":"\\([^"]*\\)".*/\\1/p' | tr -d '\\\\')
+                  case "$method" in
+                    initialize)
+                      printf '{"id":%s,"result":{}}\\n' "$request_id"
+                      ;;
+                    thread/start)
+                      thread_number=$((thread_number + 1))
+                      active_thread="thread-$thread_number"
+                      printf '{"id":%s,"result":{"thread":{"id":"%s","ephemeral":true,"path":null},"instructionSources":[]}}\\n' "$request_id" "$active_thread"
+                      ;;
+                    thread/unsubscribe)
+                      printf '{"id":%s,"result":{}}\\n' "$request_id"
+                      ;;
+                    turn/start)
+                      active_thread=$(printf '%s' "$line" | sed -n 's/.*"threadId":"\\([^"]*\\)".*/\\1/p')
+                      turn_number=${active_thread#thread-}
+                      active_turn="turn-$turn_number"
+                      printf '{"id":%s,"result":{"turn":{"id":"%s","status":"inProgress","items":[]}}}\\n' "$request_id" "$active_turn"
+                      if [ "$active_thread" != "thread-2" ]; then
+                        printf '{"method":"item/completed","params":{"threadId":"%s","turnId":"%s","item":{"type":"agentMessage","text":"%s"}}}\\n' "$active_thread" "$active_turn" '{\\"tool\\":\\"stay_silent\\",\\"arguments\\":{}}'
+                        printf '{"method":"turn/completed","params":{"threadId":"%s","turn":{"id":"%s","status":"completed","items":[{"type":"agentMessage"}]}}}\\n' "$active_thread" "$active_turn"
+                      fi
+                      ;;
+                    turn/interrupt)
+                      interrupted_thread=$(printf '%s' "$line" | sed -n 's/.*"threadId":"\\([^"]*\\)".*/\\1/p')
+                      interrupted_turn=$(printf '%s' "$line" | sed -n 's/.*"turnId":"\\([^"]*\\)".*/\\1/p')
+                      printf '{"id":%s,"result":{}}\\n' "$request_id"
+                      printf '{"method":"turn/completed","params":{"threadId":"%s","turn":{"id":"%s","status":"interrupted","items":[]}}}\\n' "$interrupted_thread" "$interrupted_turn"
+                      ;;
+                  esac
+                done
+                """)
+        let runtime = makeRuntime(provider: .codexCLI, directory: directory)
+        let coach = makeClient(
+            provider: .codexCLI,
+            executable: executable,
+            directory: directory,
+            runtime: runtime,
+            prewarm: false,
+            timeout: 2)
+        let summarizer = makeClient(
+            provider: .codexCLI,
+            executable: executable,
+            directory: directory,
+            runtime: runtime,
+            prewarm: false,
+            systemPrompt: "summarize",
+            tools: [],
+            toolChoice: .auto,
+            timeout: 0.2)
+
+        let firstConversation = try await coach.makeConversation()
+        _ = try await firstConversation.respond(
+            messages: [.system("coach prompt"), .user("first")],
+            tools: coachTools,
+            toolChoice: .required)
+        await firstConversation.finish()
+
+        do {
+            _ = try await summarizer.respond(
+                messages: [.system("summarize"), .user("older turns")],
+                tools: [],
+                toolChoice: .auto)
+            Issue.record("expected compaction to time out")
+        } catch {
+            #expect(error.localizedDescription.contains("timed out"))
+        }
+
+        let nextConversation = try await coach.makeConversation()
+        let nextResponse = try await nextConversation.respond(
+            messages: [.system("coach prompt"), .user("newer speech")],
+            tools: coachTools,
+            toolChoice: .required)
+        await nextConversation.finish()
+        guard case .staySilent = try #require(nextResponse.toolCalls.first) else {
+            Issue.record("expected the next coaching turn to use the shared server")
+            return
+        }
+        runtime.terminateNow()
+
+        #expect(requests(method: "initialize", in: trace).count == 1)
+        #expect(requests(method: "thread/start", in: trace).count == 3)
+        let interrupt = try #require(request(method: "turn/interrupt", in: trace))
+        #expect(interrupt["threadId"] as? String == "thread-2")
+        #expect(interrupt["turnId"] as? String == "turn-2")
+    }
+
     @Test func overlappingClaudePrewarmInstallsOneQueryAndKeepsItsReplacement() async throws {
         let directory = try makeWorkDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -609,14 +709,15 @@ import Testing
         prewarm: Bool,
         systemPrompt: String = "coach prompt",
         tools: [ToolDef] = coachTools,
-        toolChoice: ToolChoice = .required
+        toolChoice: ToolChoice = .required,
+        timeout: TimeInterval = 10
     ) -> CLIBrainClient {
         CLIBrainClient(
             provider: provider,
             executable: executable,
             model: "",
             workDirectory: directory,
-            timeout: 10,
+            timeout: timeout,
             systemPrompt: systemPrompt,
             tools: tools,
             toolChoice: toolChoice,

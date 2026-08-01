@@ -26,6 +26,21 @@ actor CodexAppServerRuntime: LocalAgentRuntimeBackend {
         "agentMessage",
         "reasoning",
     ]
+    private static let terminalTurnStatuses: Set<String> = [
+        "completed",
+        "interrupted",
+        "failed",
+    ]
+
+    /// The turn exceeded its workload deadline, but Codex confirmed a scoped interrupt and terminal
+    /// turn state. The caller may retire the thread without tearing down the healthy app-server.
+    private struct RecoveredTurnTimeout: LocalizedError {
+        let seconds: TimeInterval
+
+        var errorDescription: String? {
+            "Codex turn timed out after \(seconds)s"
+        }
+    }
 
     private struct ServerPreparation: Sendable {
         let id: UUID
@@ -68,12 +83,27 @@ actor CodexAppServerRuntime: LocalAgentRuntimeBackend {
     }
 
     func prepare(for configuration: LocalAgentConversationConfiguration) async throws {
-        let preparedServer = try await prepareServer(for: configuration)
-        try await prepareThread(for: configuration, server: preparedServer)
+        try await prepare(
+            for: configuration,
+            deadline: Date().addingTimeInterval(configuration.timeout))
+    }
+
+    private func prepare(
+        for configuration: LocalAgentConversationConfiguration,
+        deadline: Date
+    ) async throws {
+        let preparedServer = try await prepareServer(
+            for: configuration,
+            deadline: deadline)
+        try await prepareThread(
+            for: configuration,
+            server: preparedServer,
+            deadline: deadline)
     }
 
     private func prepareServer(
-        for configuration: LocalAgentConversationConfiguration
+        for configuration: LocalAgentConversationConfiguration,
+        deadline: Date
     ) async throws -> CodexAppServer {
         guard configuration.provider == .codexCLI else {
             preconditionFailure("CodexAppServerRuntime received \(configuration.provider)")
@@ -102,7 +132,7 @@ actor CodexAppServerRuntime: LocalAgentRuntimeBackend {
                     try await CodexAppServer.start(
                         identity: requested,
                         runtimeBaseDirectory: runtimeBaseDirectory,
-                        timeout: configuration.timeout,
+                        deadline: deadline,
                         lifetime: lifetime)
                 })
         }
@@ -126,7 +156,8 @@ actor CodexAppServerRuntime: LocalAgentRuntimeBackend {
 
     private func prepareThread(
         for configuration: LocalAgentConversationConfiguration,
-        server: CodexAppServer
+        server: CodexAppServer,
+        deadline: Date
     ) async throws {
         while true {
             guard activeThreadID == nil else { return }
@@ -165,20 +196,25 @@ actor CodexAppServerRuntime: LocalAgentRuntimeBackend {
                         try await Self.unsubscribe(
                             threadID: staleThread.id,
                             server: server,
-                            requestID: cleanupRequestID)
+                            requestID: cleanupRequestID,
+                            deadline: deadline)
                     }
                     return try await Self.startThread(
                         for: configuration,
                         server: server,
                         requestID: startRequestID,
-                        supportedFeatures: supportedFeatures)
+                        supportedFeatures: supportedFeatures,
+                        deadline: deadline)
                 })
         }
     }
 
-    func openConversation(for configuration: LocalAgentConversationConfiguration)
+    func openConversation(
+        for configuration: LocalAgentConversationConfiguration,
+        deadline: Date
+    )
         async throws -> any LocalAgentConversation {
-        try await prepare(for: configuration)
+        try await prepare(for: configuration, deadline: deadline)
         guard let server, server.isRunning else {
             throw Self.error("Codex app-server was not ready")
         }
@@ -229,10 +265,10 @@ actor CodexAppServerRuntime: LocalAgentRuntimeBackend {
         for configuration: LocalAgentConversationConfiguration,
         server: CodexAppServer,
         requestID: Int,
-        supportedFeatures: Set<String>
+        supportedFeatures: Set<String>,
+        deadline: Date
     ) async throws -> PreparedThread {
         let startedAt = DispatchTime.now().uptimeNanoseconds
-        let deadline = Date().addingTimeInterval(configuration.timeout)
         var config: [String: Any] = [
             "mcp_servers": [:],
             "project_root_markers": [],
@@ -264,7 +300,7 @@ actor CodexAppServerRuntime: LocalAgentRuntimeBackend {
             method: "thread/start",
             parameters: parameters,
             id: requestID,
-            timeout: max(0.01, deadline.timeIntervalSinceNow))
+            timeout: try remainingTimeout(until: deadline))
         let result = try await waitForResponse(
             id: requestID,
             server: server,
@@ -290,18 +326,21 @@ actor CodexAppServerRuntime: LocalAgentRuntimeBackend {
     private static func unsubscribe(
         threadID: String,
         server: CodexAppServer,
-        requestID: Int
+        requestID: Int,
+        deadline: Date? = nil
     ) async throws {
-        let deadline = Date().addingTimeInterval(threadCleanupTimeout)
+        let cleanupDeadline = min(
+            deadline ?? .distantFuture,
+            Date().addingTimeInterval(threadCleanupTimeout))
         try await server.send(
             method: "thread/unsubscribe",
             parameters: ["threadId": threadID],
             id: requestID,
-            timeout: max(0.01, deadline.timeIntervalSinceNow))
+            timeout: try remainingTimeout(until: cleanupDeadline))
         _ = try await waitForResponse(
             id: requestID,
             server: server,
-            deadline: deadline)
+            deadline: cleanupDeadline)
     }
 
     fileprivate func respond(
@@ -346,16 +385,33 @@ actor CodexAppServerRuntime: LocalAgentRuntimeBackend {
                     "effort": CLIBrainClient.codexEffort(configuration.reasoningEffort),
                 ],
                 id: requestID,
-                timeout: max(0.01, deadline.timeIntervalSinceNow))
+                timeout: try Self.remainingTimeout(until: deadline))
 
             var firstAssistantAt: UInt64?
             var completedText: String?
             var fragments: [String] = []
+            var turnID: String?
             while true {
-                let line = try await server.nextLine(deadline: deadline)
+                guard let line = try await server.nextLineBefore(deadline: deadline) else {
+                    guard let turnID else {
+                        throw Self.timeoutError(
+                            "Codex turn timed out before turn/start returned an id")
+                    }
+                    try await interruptTimedOutTurn(
+                        threadID: threadID,
+                        turnID: turnID,
+                        server: server)
+                    throw RecoveredTurnTimeout(seconds: turn.timeout)
+                }
                 guard let payload = Self.object(from: line.text) else { continue }
-                if payload["id"] as? Int == requestID, let rpcError = payload["error"] {
-                    throw Self.error("Codex turn/start failed: \(Self.jsonDescription(rpcError))")
+                if payload["id"] as? Int == requestID {
+                    if let rpcError = payload["error"] {
+                        throw Self.error(
+                            "Codex turn/start failed: \(Self.jsonDescription(rpcError))")
+                    }
+                    if let result = payload["result"] as? [String: Any] {
+                        turnID = Self.turnID(in: result) ?? turnID
+                    }
                 }
 
                 let method = payload["method"] as? String
@@ -368,6 +424,7 @@ actor CodexAppServerRuntime: LocalAgentRuntimeBackend {
                    notificationThread != threadID {
                     continue
                 }
+                turnID = Self.turnID(in: parameters) ?? turnID
 
                 if Self.isDisallowedItemEvent(method: method, parameters: parameters) {
                     throw Self.error(
@@ -409,9 +466,69 @@ actor CodexAppServerRuntime: LocalAgentRuntimeBackend {
                     firstAssistantAt: firstAssistantAt,
                     completedAt: completedAt)
             }
+        } catch let error as RecoveredTurnTimeout {
+            throw error
         } catch {
             invalidate(server)
             throw error
+        }
+    }
+
+    /// Recover a workload timeout at the narrowest provider scope. The server is reusable only after
+    /// both the interrupt RPC and the matching terminal turn notification are observed; otherwise
+    /// the caller invalidates it because the shared stream's state is uncertain.
+    private func interruptTimedOutTurn(
+        threadID: String,
+        turnID: String,
+        server: CodexAppServer
+    ) async throws {
+        let requestID = takeRequestID()
+        let deadline = Date().addingTimeInterval(Self.threadCleanupTimeout)
+        try await server.send(
+            method: "turn/interrupt",
+            parameters: [
+                "threadId": threadID,
+                "turnId": turnID,
+            ],
+            id: requestID,
+            timeout: try Self.remainingTimeout(until: deadline))
+
+        var acknowledged = false
+        var terminal = false
+        while !acknowledged || !terminal {
+            let line = try await server.nextLine(deadline: deadline)
+            guard let payload = Self.object(from: line.text) else { continue }
+            if Self.isServerRequest(payload) {
+                throw Self.error(
+                    "Codex emitted an unexpected server request while interrupting a turn")
+            }
+            if payload["id"] as? Int == requestID {
+                if let rpcError = payload["error"] {
+                    throw Self.error(
+                        "Codex turn/interrupt failed: \(Self.jsonDescription(rpcError))")
+                }
+                acknowledged = true
+                continue
+            }
+
+            let method = payload["method"] as? String
+            let parameters = payload["params"] as? [String: Any]
+            if let notificationThread = parameters?["threadId"] as? String,
+               notificationThread != threadID {
+                continue
+            }
+            if Self.isDisallowedItemEvent(method: method, parameters: parameters) {
+                throw Self.error(
+                    "Codex emitted a disallowed item event while interrupting a turn")
+            }
+            guard method == "turn/completed",
+                  Self.turnID(in: parameters) == turnID,
+                  let completedTurn = parameters?["turn"] as? [String: Any],
+                  let status = completedTurn["status"] as? String,
+                  Self.terminalTurnStatuses.contains(status) else {
+                continue
+            }
+            terminal = true
         }
     }
 
@@ -493,6 +610,13 @@ actor CodexAppServerRuntime: LocalAgentRuntimeBackend {
         try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any]
     }
 
+    private static func turnID(in object: [String: Any]?) -> String? {
+        if let turnID = object?["turnId"] as? String {
+            return turnID
+        }
+        return (object?["turn"] as? [String: Any])?["id"] as? String
+    }
+
     /// The agentic feature names to switch off, intersected with what this installation advertises
     /// so a renamed or absent name is never passed. Shared by the launch argv and the per-thread
     /// config override, which are the two delivery paths for the same `features.<name>=false` knob.
@@ -553,6 +677,21 @@ actor CodexAppServerRuntime: LocalAgentRuntimeBackend {
     fileprivate static func error(_ detail: String) -> NSError {
         NSError(domain: "CodexAppServerRuntime", code: 1,
                 userInfo: [NSLocalizedDescriptionKey: detail])
+    }
+
+    fileprivate static func timeoutError(_ detail: String) -> NSError {
+        NSError(
+            domain: "CodexAppServerRuntime",
+            code: NSURLErrorTimedOut,
+            userInfo: [NSLocalizedDescriptionKey: detail])
+    }
+
+    fileprivate static func remainingTimeout(until deadline: Date) throws -> TimeInterval {
+        let remaining = deadline.timeIntervalSinceNow
+        guard remaining >= 0.01 else {
+            throw timeoutError("Codex app-server request timed out")
+        }
+        return remaining
     }
 }
 
@@ -630,7 +769,7 @@ private final class CodexAppServer: @unchecked Sendable {
 
     static func start(identity: CodexAppServerRuntime.LaunchIdentity,
                       runtimeBaseDirectory: URL,
-                      timeout: TimeInterval,
+                      deadline: Date,
                       lifetime: AgentRuntimeLifetime) async throws -> CodexAppServer {
         let runtimeHome = try CodexRuntimeHome.create(in: runtimeBaseDirectory)
         var didStart = false
@@ -661,7 +800,6 @@ private final class CodexAppServer: @unchecked Sendable {
                 process: process,
                 lifetime: lifetime,
                 runtimeHome: runtimeHome)
-            let deadline = Date().addingTimeInterval(timeout)
             try await server.send(
                 method: "initialize",
                 parameters: [
@@ -672,7 +810,7 @@ private final class CodexAppServer: @unchecked Sendable {
                     ],
                 ],
                 id: 0,
-                timeout: max(0.01, deadline.timeIntervalSinceNow))
+                timeout: try CodexAppServerRuntime.remainingTimeout(until: deadline))
             while true {
                 let line = try await server.nextLine(deadline: deadline)
                 guard let payload = try? JSONSerialization.jsonObject(
@@ -697,7 +835,7 @@ private final class CodexAppServer: @unchecked Sendable {
                 method: "initialized",
                 parameters: nil,
                 id: nil,
-                timeout: max(0.01, deadline.timeIntervalSinceNow))
+                timeout: try CodexAppServerRuntime.remainingTimeout(until: deadline))
             let readyMs = Int(
                 (DispatchTime.now().uptimeNanoseconds - process.launchedAt) / 1_000_000)
             jlog("Jarvis: Codex app-server ready in \(readyMs)ms")
@@ -723,15 +861,16 @@ private final class CodexAppServer: @unchecked Sendable {
     }
 
     func nextLine(deadline: Date) async throws -> AgentRuntimeProcess.Line {
-        let remaining = deadline.timeIntervalSinceNow
-        guard remaining > 0 else {
-            process.terminateNow()
-            throw NSError(
-                domain: "CodexAppServerRuntime",
-                code: NSURLErrorTimedOut,
-                userInfo: [NSLocalizedDescriptionKey: "Codex app-server response timed out"])
-        }
+        let remaining = try CodexAppServerRuntime.remainingTimeout(until: deadline)
         return try await process.nextLine(timeout: remaining)
+    }
+
+    /// A turn deadline is recoverable at thread scope, so observing it must not kill the shared
+    /// process. Callers either synchronize with `turn/interrupt` or invalidate the server themselves.
+    func nextLineBefore(deadline: Date) async throws -> AgentRuntimeProcess.Line? {
+        let remaining = deadline.timeIntervalSinceNow
+        guard remaining >= 0.01 else { return nil }
+        return try await process.nextLineOrNil(timeout: remaining)
     }
 
     func finish() {

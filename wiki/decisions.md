@@ -240,6 +240,9 @@
 - **Superseded in part by:** 2026-07-25 — Coaching attempts exhaust an ordered provider route. The
   no-in-request-replay boundary returns, and pending work now schedules a new attempt even without a
   natural trigger.
+- **Superseded in part by:** 2026-07-31 — Brain response deadlines are workload-owned. The
+  no-in-request-replay and next-trigger recovery boundaries stand; a generic provider-owned
+  generous ceiling does not.
 - **Detail:** [architecture.md → Resilience](./architecture.md#resilience).
 
 ### 2026-07-06 — Silence is a tool call; audio turns require one
@@ -999,27 +1002,39 @@
   summarization and other auxiliary clients. (b) Giving the two live local providers different
   deadlines — they serve the same overlay latency contract. (c) Changing API, evaluator, routing,
   retry, or failure semantics — the session evidence did not justify those broader changes.
-- **Superseded in part by:** 2026-07-31 — History compaction has one cross-provider deadline. The
-  live coaching deadline and provider defaults stand; compaction no longer inherits those defaults.
+- **Superseded in part by:** 2026-07-31 — Brain response deadlines are workload-owned. The common
+  live deadline stands; generic provider-specific defaults do not.
 - **Detail:** `Sources/JarvisApp/App/AppDelegate.swift`,
   `Sources/JarvisCore/Brain/Adapters/LocalAgent/CLIBrainClient.swift`.
 
-### 2026-07-31 — History compaction has one cross-provider deadline
+### 2026-07-31 — Brain response deadlines are workload-owned
 
-- **Chose:** Give OpenAI, Claude Code, and Codex history-compaction summarizers one explicit,
-  Core-owned deadline, passed when `AppDelegate` constructs those role-specific clients. Keep
-  compaction awaited, tool-less, low-effort, and tagged `summarizer`; an empty result, timeout, or
-  other failure keeps the full history and never enters provider-route health. Generic provider
-  defaults, live coaching, ordered routing, retry scheduling, and the completed-session evaluator
-  remain unchanged.
-- **Why:** Compaction runs before the active handling slot is released, so inheriting a transport's
-  broad hang backstop can batch newer speech behind an auxiliary operation. Abandoning a stalled
-  summary is lossless because the uncompressed history remains available and compaction retries
-  after a later successful turn.
-- **Rejected:** (a) Lowering provider defaults — unrelated callers need their existing ceilings.
-  (b) Reusing the local-only live-coaching constant — compaction is a distinct cross-provider role.
-  (c) Detaching compaction into background work — history ordering and snapshot races need a separate
-  design.
-- **Detail:** `CoachDriver.historyCompactionTimeout` in
-  `Sources/JarvisCore/Coach/CoachDriver.swift`,
+- **Chose:** Define live-coaching and history-compaction deadlines as Core workload policy, shared
+  by OpenAI, Claude Code, and Codex instead of keeping transport-specific defaults. Generic clients
+  default to the live workload; `AppDelegate` still passes each role explicitly. A one-shot local
+  auxiliary request calculates one absolute deadline before provider setup and gives inference only
+  the remaining budget. Compaction stays awaited, tool-less, low-effort, and tagged `summarizer`; an
+  empty result, timeout, or other failure keeps the full history and never enters provider-route
+  health.
+- **Chose:** Recover an in-flight Codex turn timeout at thread scope: send `turn/interrupt`, consume
+  its response and the matching terminal turn event, then let normal conversation finish retire the
+  thread. Keep the shared app-server for later coaching. Invalidate it only when the turn cannot be
+  identified or scoped interruption/terminal cleanup cannot be confirmed, because its shared stream
+  is then uncertain.
+- **Why:** Provider transport does not determine how long newer speech may wait; the foreground or
+  auxiliary workload does. Compaction runs before the active handling slot is released, so separate
+  setup and inference ceilings could double that delay. A failed summary is lossless, while
+  restarting a healthy session-scoped Codex transport adds latency to the next coaching attempt.
+- **Rejected:** (a) Provider-specific defaults — they encode workload policy at the wrong boundary.
+  (b) A separate Codex summarizer app-server — duplicates a healthy session transport and its
+  startup cost. (c) Unsubscribing a timed-out thread without first interrupting and draining its
+  terminal event — that leaves the shared event stream unsynchronized. (d) Detached compaction —
+  history ordering and snapshot races need a separate design.
+- **Supersedes in part:** 2026-07-03 — Brain call: generous ceiling, one attempt, recover on next
+  trigger; 2026-07-18 — Codex coaching invocations are isolated and bounded; and 2026-07-30 — Live
+  local-agent coaching shares one latency deadline. Their recovery, isolation, and common
+  live-latency decisions stand; provider-owned timeout defaults do not.
+- **Detail:** `Sources/JarvisCore/Brain/BrainWorkloadTimeout.swift`,
+  `Sources/JarvisCore/Brain/Adapters/LocalAgent/CLIBrainClient.swift`,
+  `Sources/JarvisCore/Brain/Adapters/LocalAgent/Codex/CodexAppServerRuntime.swift`,
   `Sources/JarvisApp/App/AppDelegate.swift`.

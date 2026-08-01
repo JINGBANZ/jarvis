@@ -311,8 +311,10 @@ rather than a per-turn screenshot.
   and past a token threshold (see
   `Config.historyCompactionTokenThreshold`) the oldest span is **compacted** into a short structured
   summary written by a cheaper model (`gpt-5.4-mini`), so the problem statement never falls out of
-  context. Requests are sent `store:true` so they stay inspectable in the OpenAI dashboard for
-  debugging — the retention tradeoff is documented in [sandbox.md](./sandbox.md).
+  context. Compaction uses one Core-owned workload deadline across providers and fails soft: a slow
+  or failed summary leaves the full history intact for a later attempt. Requests are sent `store:true`
+  so they stay inspectable in the OpenAI dashboard for debugging — the retention tradeoff is
+  documented in [sandbox.md](./sandbox.md).
 - **Transcription — `gpt-4o-transcribe` over the GA Realtime API** with **tuned `server_vad`** (not
   `semantic_vad`, which is reported flaky in transcription-only mode — it can stop emitting
   `…transcription.completed` entirely). Turn-end fires on `…transcription.completed`, plus a
@@ -377,7 +379,10 @@ provider-route policy, and traffic recording are unchanged — only the transpor
   [`CodexAppServerRuntime.swift`](../Sources/JarvisCore/Brain/Adapters/LocalAgent/Codex/CodexAppServerRuntime.swift).
   Codex publishes no control that removes built-in tools, so the runtime also verifies the thread
   boundary and aborts on server requests or item events outside the message/reasoning contract. The
-  completed-session evaluator remains separate and intentionally agentic.
+  completed-session evaluator remains separate and intentionally agentic. If inference reaches its
+  workload deadline, Jarvis interrupts that turn and waits for its matching terminal event before
+  retiring the thread; the shared app-server stays available. Failure to confirm that scoped cleanup
+  instead invalidates the server because its event stream is no longer known to be synchronized.
 - **The JSON action contract remains provider-neutral.** The CLIs do not expose Jarvis's native
   function calls, so the same `ToolDef`s are rendered as a JSON output protocol and parsed back into
   `ToolInvocation`. `BrainConversation` changes transport ownership, not `CoachHistory`: completed
@@ -484,8 +489,10 @@ The always-on legs are built to survive transient failure rather than die on it:
   their retained PCM is transcribed by the replacement session instead of first emitting a partial
   or gap that the replay would duplicate. Stale speech state therefore cannot suppress silence
   coaching after reconnect. Reconnect uses capped exponential backoff.
-- **The brain call** is single-flighted (a turn can't double-speak) and runs under a provider-aware
-  request timeout. The API, Claude, and Codex ceilings stay well above the reasoning-turn tail.
+- **The brain call** is single-flighted (a turn can't double-speak) and runs under a Core-owned
+  workload deadline shared by the API, Claude, and Codex transports. A one-shot local auxiliary
+  response uses one absolute budget across provider setup and inference rather than restarting the
+  full deadline for each phase.
   Stop terminates every ready, leased, and preparing local process. Termination and escalation
   target only process identities observed while the original group was proven alive, including
   descendants snapshotted before an immediately exited leader is reaped, and persistent stdout
@@ -500,8 +507,10 @@ The always-on legs are built to survive transient failure rather than die on it:
   attempt. In both cases, only the next fresh attempt runs the next target on the forward-only route.
   A terminal success resets the active target's count and keeps that target installed. No provider
   is probed concurrently, and no automatic recovery returns to the primary. Cancellation remains
-  quiet. Memory **compaction** fails soft outside this route: a failed summary simply leaves the full
-  history for the next attempt.
+  quiet. A timed-out Codex inference first interrupts and drains only that turn, preserving the
+  session-scoped app-server when the matching terminal state confirms the stream is healthy;
+  uncertain protocol cleanup still invalidates the server. Memory **compaction** fails soft outside
+  this route: a failed summary simply leaves the full history for the next attempt.
 - **The audit edge** drains Activity's asynchronous writer as Stop completes. An explicit
   Activity → **Evaluate** click then runs the read-only agentic evaluator over the source checkout
   plus the completed session directory; it reads `jarvis-activity.jsonl` itself in full, so no

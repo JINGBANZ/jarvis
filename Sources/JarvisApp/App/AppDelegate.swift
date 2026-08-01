@@ -247,7 +247,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                        model: target.modelID,
                                        reasoningEffort: effort.rawValue,
                                        workDirectory: sessionDir,
-                                       timeout: CLIBrainClient.liveCoachingTimeout,
+                                       timeout: BrainWorkloadTimeout.liveCoaching,
                                        traffic: sessionTraffic, trafficTag: "coach",
                                        systemPrompt: coachSystemPrompt,
                                        tools: coachTools,
@@ -258,7 +258,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                         model: BrainModelCatalog.summarizerModelID(for: target.provider),
                                         reasoningEffort: ReasoningEffort.low.rawValue,
                                         workDirectory: sessionDir,
-                                        timeout: CoachDriver.historyCompactionTimeout,
+                                        timeout: BrainWorkloadTimeout.historyCompaction,
                                         traffic: sessionTraffic, trafficTag: "summarizer",
                                         systemPrompt: CoachDriver.summaryInstructions,
                                         tools: [],
@@ -269,12 +269,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             coachBase = OpenAIBrainClient(
                 apiKey: key, model: target.modelID,
                 reasoningEffort: effort.rawValue,
+                timeout: BrainWorkloadTimeout.liveCoaching,
                 maxOutputTokens: effort.maxOutputTokens,
                 traffic: sessionTraffic, trafficTag: "coach")
             summarizer = OpenAIBrainClient(
                 apiKey: key, model: BrainModelCatalog.summarizerModelID(for: .openAI),
                 reasoningEffort: ReasoningEffort.low.rawValue,
-                timeout: CoachDriver.historyCompactionTimeout, maxOutputTokens: 2_048,
+                timeout: BrainWorkloadTimeout.historyCompaction, maxOutputTokens: 2_048,
                 traffic: sessionTraffic, trafficTag: "summarizer")
         }
         return BrainRuntime(coach: coachBase, summarizer: summarizer)

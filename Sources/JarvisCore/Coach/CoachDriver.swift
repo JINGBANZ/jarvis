@@ -1017,9 +1017,6 @@ public final class CoachDriver: @unchecked Sendable {
 
     // MARK: - History compaction
 
-    /// A stalled auxiliary summary must not hold the active handling slot indefinitely.
-    public static let historyCompactionTimeout: TimeInterval = 15
-
     /// Auxiliary compaction fails soft and never counts against provider route health.
     private func compactIfNeeded(using attempt: AttemptBrain) async {
         guard history.estimatedTokens > config.historyCompactionTokenThreshold else { return }

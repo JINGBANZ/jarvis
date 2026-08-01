@@ -15,20 +15,13 @@ public struct CLIBrainClient: BrainClient, Sendable {
     let runtime: CLIBrainRuntime
     private let runtimeLease: CLIBrainRuntime.Lease
 
-    /// A local agent turn's remote inference still needs a generous hang backstop.
-    public static let defaultTimeout: TimeInterval = 120
-    /// A silent Codex runtime stall must not batch later transcript turns for two minutes.
-    public static let codexDefaultTimeout: TimeInterval = 30
-    /// Live coaching abandons a stalled local-agent turn in favor of a fresh attempt.
-    public static let liveCoachingTimeout: TimeInterval = 15
-
     public init(
         provider: BrainProvider,
         executable: URL,
         model: String,
         reasoningEffort: String = ReasoningEffort.default.rawValue,
         workDirectory: URL,
-        timeout: TimeInterval? = nil,
+        timeout: TimeInterval = BrainWorkloadTimeout.liveCoaching,
         traffic: BrainTrafficLog? = nil,
         trafficTag: String = "coach",
         systemPrompt: String,
@@ -51,8 +44,7 @@ public struct CLIBrainClient: BrainClient, Sendable {
             reasoningEffort: reasoningEffort,
             workDirectory: workDirectory,
             instructions: instructions,
-            timeout: timeout ?? (provider == .codexCLI
-                                 ? Self.codexDefaultTimeout : Self.defaultTimeout))
+            timeout: timeout)
         self.provider = provider
         self.traffic = traffic
         self.trafficTag = trafficTag
@@ -66,10 +58,23 @@ public struct CLIBrainClient: BrainClient, Sendable {
     }
 
     public func makeConversation() async throws -> any BrainConversation {
+        let deadline = Date().addingTimeInterval(configuration.timeout)
+        return try await makeConversation(openDeadline: deadline, responseDeadline: nil)
+    }
+
+    private func makeConversation(
+        openDeadline: Date,
+        responseDeadline: Date?
+    ) async throws -> any BrainConversation {
         let openEntered = DispatchTime.now().uptimeNanoseconds
         do {
-            let transport = try await runtime.openConversation(for: configuration)
-            return CLIBrainConversation(client: self, transport: transport)
+            let transport = try await runtime.openConversation(
+                for: configuration,
+                deadline: openDeadline)
+            return CLIBrainConversation(
+                client: self,
+                transport: transport,
+                responseDeadline: responseDeadline)
         } catch {
             if Task.isCancelled || error is CancellationError { throw error }
             recordFailure(error, requestRecord: nil, respondEntered: openEntered)
@@ -86,10 +91,14 @@ public struct CLIBrainClient: BrainClient, Sendable {
     }
 
     /// Auxiliary callers such as memory compaction still use the simple `respond` surface. It opens
-    /// and closes a provider-native conversation; it never falls back to a per-turn command.
+    /// and closes a provider-native conversation under one setup-plus-inference deadline; it never
+    /// falls back to a per-turn command.
     public func respond(messages: [ChatMessage], tools: [ToolDef],
                         toolChoice: ToolChoice) async throws -> BrainResponse {
-        let conversation = try await makeConversation()
+        let deadline = Date().addingTimeInterval(configuration.timeout)
+        let conversation = try await makeConversation(
+            openDeadline: deadline,
+            responseDeadline: deadline)
         do {
             let response = try await conversation.respond(
                 messages: messages, tools: tools, toolChoice: toolChoice)
@@ -105,7 +114,8 @@ public struct CLIBrainClient: BrainClient, Sendable {
         messages: [ChatMessage],
         previousMessageIdentities: [MessageIdentity],
         tools: [ToolDef],
-        toolChoice: ToolChoice
+        toolChoice: ToolChoice,
+        timeout: TimeInterval? = nil
     ) throws -> (turn: LocalAgentTurn, requestRecord: Data, identities: [MessageIdentity]) {
         let identities = messages.map(MessageIdentity.init)
         let isFirst = previousMessageIdentities.isEmpty
@@ -176,7 +186,7 @@ public struct CLIBrainClient: BrainClient, Sendable {
             "input": auditInput,
         ]
         return (
-            LocalAgentTurn(input: input, timeout: configuration.timeout),
+            LocalAgentTurn(input: input, timeout: timeout ?? configuration.timeout),
             Self.recordData(record),
             identities)
     }
@@ -304,17 +314,33 @@ public struct CLIBrainClient: BrainClient, Sendable {
         NSError(domain: "CLIBrainClient", code: code,
                 userInfo: [NSLocalizedDescriptionKey: message])
     }
+
+    static func timeoutError(seconds: TimeInterval) -> NSError {
+        NSError(
+            domain: "CLIBrainClient",
+            code: NSURLErrorTimedOut,
+            userInfo: [
+                NSLocalizedDescriptionKey:
+                    "local agent request timed out after \(seconds)s",
+            ])
+    }
 }
 
 private actor CLIBrainConversation: BrainConversation {
     let client: CLIBrainClient
     let transport: any LocalAgentConversation
+    let responseDeadline: Date?
     var previousMessageIdentities: [CLIBrainClient.MessageIdentity] = []
     var isFinished = false
 
-    init(client: CLIBrainClient, transport: any LocalAgentConversation) {
+    init(
+        client: CLIBrainClient,
+        transport: any LocalAgentConversation,
+        responseDeadline: Date?
+    ) {
         self.client = client
         self.transport = transport
+        self.responseDeadline = responseDeadline
     }
 
     func respond(messages: [ChatMessage], tools: [ToolDef],
@@ -325,11 +351,23 @@ private actor CLIBrainConversation: BrainConversation {
         let respondEntered = DispatchTime.now().uptimeNanoseconds
         var requestRecord: Data?
         do {
+            let remainingTimeout: TimeInterval?
+            if let responseDeadline {
+                let remaining = responseDeadline.timeIntervalSinceNow
+                guard remaining >= 0.01 else {
+                    throw CLIBrainClient.timeoutError(
+                        seconds: client.configuration.timeout)
+                }
+                remainingTimeout = remaining
+            } else {
+                remainingTimeout = nil
+            }
             let prepared = try client.prepareTurn(
                 messages: messages,
                 previousMessageIdentities: previousMessageIdentities,
                 tools: tools,
-                toolChoice: toolChoice)
+                toolChoice: toolChoice,
+                timeout: remainingTimeout)
             requestRecord = prepared.requestRecord
             previousMessageIdentities = prepared.identities
             let result = try await transport.respond(to: prepared.turn)

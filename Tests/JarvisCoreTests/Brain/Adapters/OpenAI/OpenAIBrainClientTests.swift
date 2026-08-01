@@ -161,13 +161,13 @@ private func speakResponseBody(arguments: String) -> Data {
         #expect(resp.toolCalls.isEmpty)
     }
 
-    @Test func historyCompactionOverrideDoesNotChangeDefaultTimeout() async throws {
+    @Test func openAIDefaultAndCompactionUseWorkloadDeadlines() async throws {
         let timeouts = CapturedTimeouts()
         let response = Data(#"{"output":[]}"#.utf8)
         let summarizer = OpenAIBrainClient(
             apiKey: "sk-x",
             model: "gpt-5.4-mini",
-            timeout: CoachDriver.historyCompactionTimeout,
+            timeout: BrainWorkloadTimeout.historyCompaction,
             send: { request in
                 timeouts.append(request.timeoutInterval)
                 return (response, http(200))
@@ -183,11 +183,11 @@ private func speakResponseBody(arguments: String) -> Data {
         _ = try await summarizer.respond(messages: [.user("condense this")], tools: [])
         _ = try await defaultClient.respond(messages: [.user("condense this")], tools: [])
 
-        #expect(CoachDriver.historyCompactionTimeout == 15)
-        #expect(OpenAIBrainClient.defaultTimeout == 60)
+        #expect(BrainWorkloadTimeout.liveCoaching == 15)
+        #expect(BrainWorkloadTimeout.historyCompaction == 15)
         #expect(timeouts.values == [
-            CoachDriver.historyCompactionTimeout,
-            OpenAIBrainClient.defaultTimeout,
+            BrainWorkloadTimeout.historyCompaction,
+            BrainWorkloadTimeout.liveCoaching,
         ])
     }
 
