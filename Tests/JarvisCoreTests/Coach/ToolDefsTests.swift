@@ -71,14 +71,19 @@ import Testing
         #expect(coachSystemPrompt.contains("Wait for more speech"))
     }
 
-    @Test func coachPromptKeepsDirectRepliesAheadOfTheFragmentGate() {
-        let directReply = coachSystemPrompt.range(of: "2. Direct address from \"me\"")
-        let fragmentGate = coachSystemPrompt.range(of: "3. Fragment gate")
+    @Test func coachPromptOrdersDirectRepliesThenFragmentsThenScreenGate() {
+        let directReply = coachSystemPrompt.range(of: "1. Direct address from \"me\"")
+        let fragmentGate = coachSystemPrompt.range(of: "2. Fragment gate")
+        let screenGate = coachSystemPrompt.range(of: "3. Screen gate")
         #expect(directReply != nil)
         #expect(fragmentGate != nil)
-        if let directReply, let fragmentGate {
+        #expect(screenGate != nil)
+        if let directReply, let fragmentGate, let screenGate {
             #expect(directReply.lowerBound < fragmentGate.lowerBound)
+            #expect(fragmentGate.lowerBound < screenGate.lowerBound)
         }
+        #expect(coachSystemPrompt.contains("continue to the screen gate below"))
+        #expect(coachSystemPrompt.contains("A direct reply required by rule 1 bypasses this gate"))
         #expect(coachSystemPrompt.contains(
             "If a direct reply is required, hedge your interpretation instead"
         ))
