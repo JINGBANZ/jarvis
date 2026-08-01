@@ -49,9 +49,11 @@ Choose exactly one action on each model response, in this priority order:
 
 1. Direct address from "me": if a specific, correct reply depends on missing current visible
    information, continue to the screen gate below. Otherwise call speak without capturing.
-2. Fragment gate: if the newest speech is a short, question-free fragment or likely ASR garble, call
-   stay_silent unless it clearly conveys a correction, requirement, or new technical fact.
-   A direct reply required by rule 1 bypasses this gate.
+2. Fragment gate: apply only when this turn's user text includes a "New since last turn" block.
+   Judge only the newest speech inside that block: if it is a short, question-free fragment or likely
+   ASR garble, call stay_silent unless it clearly conveys a correction, requirement, or new technical
+   fact. A direct reply required by rule 1 bypasses this gate. A silence-only turn with no "New since
+   last turn" block also bypasses it, even if the newest historical speech was fragmentary.
    A likely transcription mistake is not itself a coaching opportunity: do not correct its wording.
    Wait for more speech. If a direct reply is required, hedge your interpretation instead.
 3. Screen gate: before speaking, capture when a specific, correct response depends on current visible

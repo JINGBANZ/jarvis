@@ -58,10 +58,11 @@ import Testing
     /// Short fragments and transcription noise should not create unsolicited overlay chatter, while
     /// terse corrections and requirements still carry enough interview signal to coach.
     @Test func coachPromptDefaultsFragmentsAndASRGarbleToSilence() {
-        #expect(coachSystemPrompt.contains(
+        let prompt = coachSystemPrompt.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        #expect(prompt.contains(
             "short, question-free fragment or likely ASR garble"
         ))
-        #expect(coachSystemPrompt.contains(
+        #expect(prompt.contains(
             "stay_silent unless it clearly conveys a correction, requirement, or new technical fact"
         ))
         #expect(coachSystemPrompt.contains(
@@ -69,6 +70,18 @@ import Testing
         ))
         #expect(coachSystemPrompt.contains("do not correct its wording"))
         #expect(coachSystemPrompt.contains("Wait for more speech"))
+    }
+
+    @Test func coachPromptLimitsFragmentGateToFreshSpeech() {
+        let prompt = coachSystemPrompt.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        #expect(prompt.contains(
+            "apply only when this turn's user text includes a \"New since last turn\" block"
+        ))
+        #expect(prompt.contains("Judge only the newest speech inside that block"))
+        #expect(prompt.contains(
+            "A silence-only turn with no \"New since last turn\" block also bypasses it"
+        ))
+        #expect(prompt.contains("the newest historical speech was fragmentary"))
     }
 
     @Test func coachPromptOrdersDirectRepliesThenFragmentsThenScreenGate() {
