@@ -235,7 +235,31 @@ final class AgentRuntimeProcess: @unchecked Sendable {
             try await withCheckedThrowingContinuation { continuation in
                 DispatchQueue.global(qos: .userInitiated).async { [self] in
                     continuation.resume(with: Result {
-                        try waitForLine(timeout: timeout)
+                        guard let line = try waitForLine(
+                            timeout: timeout,
+                            terminateOnTimeout: true
+                        ) else {
+                            preconditionFailure("a terminating line wait cannot time out softly")
+                        }
+                        return line
+                    })
+                }
+            }
+        } onCancel: {
+            self.terminateNow()
+        }
+    }
+
+    /// Read under a recoverable protocol deadline. Unlike `nextLine`, expiry leaves the process
+    /// alive so the owning protocol can interrupt and drain only the timed-out operation.
+    func nextLineOrNil(timeout: TimeInterval) async throws -> Line? {
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                DispatchQueue.global(qos: .userInitiated).async { [self] in
+                    continuation.resume(with: Result {
+                        try waitForLine(
+                            timeout: timeout,
+                            terminateOnTimeout: false)
                     })
                 }
             }
@@ -417,7 +441,10 @@ final class AgentRuntimeProcess: @unchecked Sendable {
         condition.broadcast()
     }
 
-    private func waitForLine(timeout: TimeInterval) throws -> Line {
+    private func waitForLine(
+        timeout: TimeInterval,
+        terminateOnTimeout: Bool
+    ) throws -> Line? {
         let deadline = Date().addingTimeInterval(max(0.01, timeout))
         condition.lock()
         defer { condition.unlock() }
@@ -441,6 +468,7 @@ final class AgentRuntimeProcess: @unchecked Sendable {
                 continue
             }
             guard condition.wait(until: deadline) else {
+                guard terminateOnTimeout else { return nil }
                 condition.unlock()
                 terminateNow()
                 condition.lock()

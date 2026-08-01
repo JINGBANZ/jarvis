@@ -35,7 +35,10 @@ protocol LocalAgentConversation: Sendable {
 
 protocol LocalAgentRuntimeBackend: Sendable {
     func prepare(for configuration: LocalAgentConversationConfiguration) async throws
-    func openConversation(for configuration: LocalAgentConversationConfiguration)
+    func openConversation(
+        for configuration: LocalAgentConversationConfiguration,
+        deadline: Date
+    )
         async throws -> any LocalAgentConversation
     func terminateNow()
 }
@@ -136,9 +139,12 @@ public final class CLIBrainRuntime: @unchecked Sendable {
         }
     }
 
-    func openConversation(for configuration: LocalAgentConversationConfiguration)
+    func openConversation(
+        for configuration: LocalAgentConversationConfiguration,
+        deadline: Date
+    )
         async throws -> any LocalAgentConversation {
-        try await backend.openConversation(for: configuration)
+        try await backend.openConversation(for: configuration, deadline: deadline)
     }
 
     func terminateNow() {

@@ -28,17 +28,11 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
     private let traffic: BrainTrafficLog?
     private let trafficTag: String
 
-    /// A generous request ceiling that is a HANG backstop, not a latency knob. Normal coaching turns
-    /// finish in a few seconds; this only fires on a genuinely stuck request, so it sits well above the
-    /// slow-but-real reasoning tail — a tight value (the old 15s) abandons a still-generating turn
-    /// that would have finished.
-    public static let defaultTimeout: TimeInterval = 60
-
     public init(apiKey: String,
                 model: String,
                 reasoningEffort: String = ReasoningEffort.default.rawValue,
                 endpoint: URL = URL(string: "https://api.openai.com/v1/responses")!,
-                timeout: TimeInterval = OpenAIBrainClient.defaultTimeout,
+                timeout: TimeInterval = BrainWorkloadTimeout.liveCoaching,
                 // The cap MUST track the effort: it's a combined reasoning+output budget, so a value
                 // too small for the effort truncates the run (the high-effort bug). Callers pass the
                 // budget for the *selected* effort (`AppDelegate` → `effort.maxOutputTokens`); this

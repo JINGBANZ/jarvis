@@ -16,10 +16,13 @@ import Testing
         replies: [String],
         tools: [ToolDef] = coachTools,
         toolChoice: ToolChoice = .required,
-        timeout: TimeInterval? = nil,
-        traffic: BrainTrafficLog? = nil
+        timeout: TimeInterval = BrainWorkloadTimeout.liveCoaching,
+        traffic: BrainTrafficLog? = nil,
+        openDelay: TimeInterval = 0
     ) -> (CLIBrainClient, FakeLocalAgentRuntime) {
-        let backend = FakeLocalAgentRuntime(replies: replies)
+        let backend = FakeLocalAgentRuntime(
+            replies: replies,
+            openDelay: openDelay)
         let runtime = CLIBrainRuntime(backend: backend)
         let client = CLIBrainClient(
             provider: provider,
@@ -38,31 +41,67 @@ import Testing
         return (client, backend)
     }
 
-    @Test func liveCoachingOverrideDoesNotChangeProviderDefaults() throws {
+    @Test func localProviderDefaultsUseTheLiveCoachingWorkload() throws {
         let workDir = try makeWorkDir()
-        let (claudeCoach, _) = client(
+        let (claude, _) = client(.claudeCode, workDir: workDir, replies: [])
+        let (codex, _) = client(.codexCLI, workDir: workDir, replies: [])
+
+        #expect(BrainWorkloadTimeout.liveCoaching == 15)
+        #expect(claude.configuration.timeout == BrainWorkloadTimeout.liveCoaching)
+        #expect(codex.configuration.timeout == BrainWorkloadTimeout.liveCoaching)
+
+        claude.terminate()
+        codex.terminate()
+    }
+
+    @Test func historyCompactionDeadlineIsProviderNeutral() throws {
+        let workDir = try makeWorkDir()
+        let (claudeSummarizer, _) = client(
             .claudeCode,
             workDir: workDir,
             replies: [],
-            timeout: CLIBrainClient.liveCoachingTimeout)
-        let (codexCoach, _) = client(
+            tools: [],
+            toolChoice: .auto,
+            timeout: BrainWorkloadTimeout.historyCompaction)
+        let (codexSummarizer, _) = client(
             .codexCLI,
             workDir: workDir,
             replies: [],
-            timeout: CLIBrainClient.liveCoachingTimeout)
-        let (defaultClaude, _) = client(.claudeCode, workDir: workDir, replies: [])
-        let (defaultCodex, _) = client(.codexCLI, workDir: workDir, replies: [])
+            tools: [],
+            toolChoice: .auto,
+            timeout: BrainWorkloadTimeout.historyCompaction)
 
-        #expect(CLIBrainClient.liveCoachingTimeout == 15)
-        #expect(claudeCoach.configuration.timeout == CLIBrainClient.liveCoachingTimeout)
-        #expect(codexCoach.configuration.timeout == CLIBrainClient.liveCoachingTimeout)
-        #expect(defaultClaude.configuration.timeout == CLIBrainClient.defaultTimeout)
-        #expect(defaultCodex.configuration.timeout == CLIBrainClient.codexDefaultTimeout)
+        #expect(BrainWorkloadTimeout.historyCompaction == 15)
+        #expect(claudeSummarizer.configuration.timeout
+                == BrainWorkloadTimeout.historyCompaction)
+        #expect(codexSummarizer.configuration.timeout
+                == BrainWorkloadTimeout.historyCompaction)
 
-        claudeCoach.terminate()
-        codexCoach.terminate()
-        defaultClaude.terminate()
-        defaultCodex.terminate()
+        claudeSummarizer.terminate()
+        codexSummarizer.terminate()
+    }
+
+    @Test func auxiliaryResponseDoesNotRestartItsDeadlineAfterSetup() async throws {
+        let (client, backend) = client(
+            workDir: try makeWorkDir(),
+            replies: [#"{"tool":"stay_silent","arguments":{}}"#],
+            timeout: 0.05,
+            openDelay: 0.15)
+
+        do {
+            _ = try await client.respond(
+                messages: [.system("coach prompt"), .user("hello")],
+                tools: coachTools,
+                toolChoice: .required)
+            Issue.record("expected the setup-plus-inference deadline to expire")
+        } catch {
+            #expect(error.localizedDescription.contains("timed out"))
+        }
+
+        let turns = await backend.turns
+        let finishCount = await backend.finishCount
+        #expect(turns.isEmpty)
+        #expect(finishCount == 1)
     }
 
     @Test func persistentRuntimeParsesStaySilent() async throws {
@@ -427,10 +466,12 @@ private actor FakeLocalAgentRuntime: LocalAgentRuntimeBackend {
     struct RecordedTurn: Sendable {
         let text: String
         let imageCount: Int
+        let timeout: TimeInterval
     }
 
     private var replies: [String]
     private let openError: (any Error)?
+    private let openDelay: TimeInterval
     private(set) var configurations: [LocalAgentConversationConfiguration] = []
     private(set) var turns: [RecordedTurn] = []
     private(set) var openCount = 0
@@ -438,19 +479,31 @@ private actor FakeLocalAgentRuntime: LocalAgentRuntimeBackend {
     nonisolated let termination = RuntimeTerminationRecorder()
     nonisolated var terminationCount: Int { termination.count }
 
-    init(replies: [String], openError: (any Error)? = nil) {
+    init(
+        replies: [String],
+        openError: (any Error)? = nil,
+        openDelay: TimeInterval = 0
+    ) {
         self.replies = replies
         self.openError = openError
+        self.openDelay = openDelay
     }
 
     func prepare(for configuration: LocalAgentConversationConfiguration) async throws {
         configurations.append(configuration)
     }
 
-    func openConversation(for configuration: LocalAgentConversationConfiguration)
+    func openConversation(
+        for configuration: LocalAgentConversationConfiguration,
+        deadline: Date
+    )
         async throws -> any LocalAgentConversation {
         configurations.append(configuration)
         openCount += 1
+        if openDelay > 0 {
+            try await Task.sleep(
+                nanoseconds: UInt64(openDelay * 1_000_000_000))
+        }
         if terminationCount > 0 {
             throw NSError(
                 domain: "FakeLocalAgentRuntime",
@@ -474,7 +527,10 @@ private actor FakeLocalAgentRuntime: LocalAgentRuntimeBackend {
             if case .imageJPEG = $0 { return true }
             return false
         })
-        turns.append(RecordedTurn(text: text, imageCount: imageCount))
+        turns.append(RecordedTurn(
+            text: text,
+            imageCount: imageCount,
+            timeout: turn.timeout))
         guard !replies.isEmpty else {
             throw NSError(
                 domain: "FakeLocalAgentRuntime",

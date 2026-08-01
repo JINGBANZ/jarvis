@@ -15,6 +15,15 @@ actor ClaudeCodeRuntime: LocalAgentRuntimeBackend {
     private var preparing: Preparation?
 
     func prepare(for configuration: LocalAgentConversationConfiguration) async throws {
+        try await prepare(
+            for: configuration,
+            deadline: Date().addingTimeInterval(configuration.timeout))
+    }
+
+    private func prepare(
+        for configuration: LocalAgentConversationConfiguration,
+        deadline: Date
+    ) async throws {
         guard configuration.provider == .claudeCode else {
             preconditionFailure("ClaudeCodeRuntime received \(configuration.provider)")
         }
@@ -26,7 +35,7 @@ actor ClaudeCodeRuntime: LocalAgentRuntimeBackend {
             return
         }
         ready = nil
-        startPreparationIfNeeded(configuration)
+        startPreparationIfNeeded(configuration, deadline: deadline)
         guard let preparation = preparing else {
             throw Self.error("Claude warm-query preparation was unavailable")
         }
@@ -46,9 +55,12 @@ actor ClaudeCodeRuntime: LocalAgentRuntimeBackend {
         }
     }
 
-    func openConversation(for configuration: LocalAgentConversationConfiguration)
+    func openConversation(
+        for configuration: LocalAgentConversationConfiguration,
+        deadline: Date
+    )
         async throws -> any LocalAgentConversation {
-        try await prepare(for: configuration)
+        try await prepare(for: configuration, deadline: deadline)
         guard let query = ready else {
             throw Self.error("Claude warm query was not ready")
         }
@@ -61,14 +73,20 @@ actor ClaudeCodeRuntime: LocalAgentRuntimeBackend {
         lifetime.terminateAll()
     }
 
-    private func startPreparationIfNeeded(_ configuration: LocalAgentConversationConfiguration) {
+    private func startPreparationIfNeeded(
+        _ configuration: LocalAgentConversationConfiguration,
+        deadline: Date? = nil
+    ) {
         guard preparing == nil, ready == nil else { return }
         let lifetime = self.lifetime
+        let preparationDeadline = deadline
+            ?? Date().addingTimeInterval(configuration.timeout)
         preparing = Preparation(
             id: UUID(),
             task: Task.detached(priority: .utility) {
                 try await ClaudeCodeQuery.start(
                     configuration: configuration,
+                    deadline: preparationDeadline,
                     lifetime: lifetime)
             })
     }
@@ -125,6 +143,7 @@ private final class ClaudeCodeQuery: @unchecked Sendable {
     var isRunning: Bool { process.isRunning }
 
     static func start(configuration: LocalAgentConversationConfiguration,
+                      deadline: Date,
                       lifetime: AgentRuntimeLifetime) async throws -> ClaudeCodeQuery {
         var arguments = [
             "-p", "--verbose",
@@ -152,7 +171,6 @@ private final class ClaudeCodeQuery: @unchecked Sendable {
             try lifetime.register(process)
             let query = ClaudeCodeQuery(process: process, lifetime: lifetime)
             let requestID = "jarvis_initialize_\(UUID().uuidString)"
-            let deadline = Date().addingTimeInterval(configuration.timeout)
             try await process.sendJSONObject([
                 "type": "control_request",
                 "request_id": requestID,
