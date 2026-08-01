@@ -56,15 +56,16 @@ import Testing
     }
 
     /// Short fragments and transcription noise should not create unsolicited overlay chatter, while
-    /// terse corrections and requirements still carry enough interview signal to coach.
+    /// substantive speech and explicit stuck signals still carry enough interview signal to coach.
     @Test func coachPromptDefaultsFragmentsAndASRGarbleToSilence() {
         let prompt = coachSystemPrompt.split(whereSeparator: \.isWhitespace).joined(separator: " ")
         #expect(prompt.contains(
-            "short, question-free fragment or likely ASR garble"
+            "the entire fresh delta consists of short, question-free fragments or likely ASR garble"
         ))
         #expect(prompt.contains(
-            "stay_silent unless it clearly conveys a correction, requirement, or new technical fact"
+            "explicit help request or stuck signal, correction, requirement, or technical fact"
         ))
+        #expect(prompt.contains("bypass this gate and continue through the remaining policy"))
         #expect(coachSystemPrompt.contains(
             "A likely transcription mistake is not itself a coaching opportunity"
         ))
@@ -77,11 +78,20 @@ import Testing
         #expect(prompt.contains("inspect only the final user text block"))
         #expect(prompt.contains("ignore every earlier user block in history"))
         #expect(prompt.contains(
-            "Apply this gate only when that final block includes \"New since last turn\""
+            "apply this gate only when that final block includes \"New since last turn\""
         ))
-        #expect(prompt.contains("Judge only the newest speech inside that block"))
+        #expect(prompt.contains("Evaluate all newly delivered speech in that block"))
+        #expect(prompt.contains("not only its last line"))
         #expect(prompt.contains("A final user block with no \"New since last turn\""))
         #expect(prompt.contains("the newest historical speech was fragmentary"))
+    }
+
+    @Test func coachPromptLetsSilenceWakeUpsBypassUnsentFiller() {
+        let prompt = coachSystemPrompt.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        #expect(prompt.contains(
+            "If the final block includes a \"(no speech for ...)\" marker, bypass this gate"
+        ))
+        #expect(prompt.contains("even when unsent speech rides along under \"New since last turn\""))
     }
 
     @Test func coachPromptOrdersDirectRepliesThenFragmentsThenScreenGate() {
