@@ -59,14 +59,12 @@ import Testing
     /// meaningful signals that should continue through the coaching policy.
     @Test func coachPromptScopesFragmentSilence() {
         let prompt = coachSystemPrompt.split(whereSeparator: \.isWhitespace).joined(separator: " ")
-        #expect(prompt.contains("latest user message contains \"New since last turn\""))
-        #expect(prompt.contains("and no \"(no speech for ...)\" marker"))
-        #expect(prompt.contains("inspect all speech in that section"))
-        #expect(prompt.contains("If all of it consists of short, question-free fragments"))
-        #expect(prompt.contains("Help/stuck signals, corrections, requirements, and technical facts"))
-        #expect(prompt.contains("meaningful, not fragments"))
-        #expect(prompt.contains("Do not correct likely transcription mistakes"))
-        #expect(prompt.contains("hedge your interpretation when a reply is required"))
+        #expect(prompt.contains("when a non-silence request contains new speech"))
+        #expect(prompt.contains("call stay_silent only if all of it is incomplete or likely mistranscribed"))
+        #expect(prompt.contains("Help/stuck signals and other meaningful speech bypass this gate"))
+        #expect(prompt.contains(
+            "If a reply is required despite uncertain transcription, hedge rather than correct it"
+        ))
     }
 
     @Test func coachPromptOrdersDirectRepliesThenFragmentsThenScreenGate() {
