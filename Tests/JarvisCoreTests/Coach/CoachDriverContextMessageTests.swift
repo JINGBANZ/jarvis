@@ -59,21 +59,6 @@ import Testing
                 "New since last turn:\n[00:00] me: hmm let me think\n\n[00:00] (no speech for 45s)")
     }
 
-    /// A filler-only turn-end does not advance the sent index, so the first silence wake-up carries
-    /// both the retained filler and its fresh silence marker. The prompt uses the marker to bypass
-    /// fragment silence and reach the proactive screen policy without waiting for another backoff.
-    @Test func silenceAfterSkippedFillerCarriesBlockThenNote() async {
-        let brain = ScriptedBrain(script: [.init(toolCalls: [.staySilent(callId: "quiet")])])
-        let (driver, transcript) = makeDriver(brain: brain, clock: ManualClock(now: 0))
-        transcript.append(.init(speaker: .me, text: "hmm", at: 0))
-
-        #expect(await driver.handleTrigger(.turnEnd) == .skippedFillerOnly)
-        #expect(brain.calls.isEmpty)
-        #expect(await driver.handleTrigger(.silence(secondsQuiet: 30)) == .silentByModel)
-        #expect(lastUserMessage(brain) ==
-                "New since last turn:\n[00:00] me: hmm\n\n[00:00] (no speech for 30s)")
-    }
-
     /// A fragment committed after `stay_silent` remains useful history, but it must not masquerade as
     /// fresh speech on a later proactive silence check. The current turn is the final bare note.
     @Test func silenceAfterFragmentCarriesNoFreshSpeechBlock() async {

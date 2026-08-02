@@ -55,43 +55,18 @@ import Testing
         #expect(!coachSystemPrompt.contains("one tool call each turn"))
     }
 
-    /// Short fragments and transcription noise should not create unsolicited overlay chatter, while
-    /// substantive speech and explicit stuck signals still carry enough interview signal to coach.
-    @Test func coachPromptDefaultsFragmentsAndASRGarbleToSilence() {
+    /// Fragment silence applies only to wholly fragmentary fresh speech, never silence probes or
+    /// meaningful signals that should continue through the coaching policy.
+    @Test func coachPromptScopesFragmentSilence() {
         let prompt = coachSystemPrompt.split(whereSeparator: \.isWhitespace).joined(separator: " ")
-        #expect(prompt.contains(
-            "the entire fresh delta consists of short, question-free fragments or likely ASR garble"
-        ))
-        #expect(prompt.contains(
-            "explicit help request or stuck signal, correction, requirement, or technical fact"
-        ))
-        #expect(prompt.contains("bypass this gate and continue through the remaining policy"))
-        #expect(coachSystemPrompt.contains(
-            "A likely transcription mistake is not itself a coaching opportunity"
-        ))
-        #expect(coachSystemPrompt.contains("do not correct its wording"))
-        #expect(coachSystemPrompt.contains("Wait for more speech"))
-    }
-
-    @Test func coachPromptLimitsFragmentGateToFreshSpeech() {
-        let prompt = coachSystemPrompt.split(whereSeparator: \.isWhitespace).joined(separator: " ")
-        #expect(prompt.contains("inspect only the final user text block"))
-        #expect(prompt.contains("ignore every earlier user block in history"))
-        #expect(prompt.contains(
-            "apply this gate only when that final block includes \"New since last turn\""
-        ))
-        #expect(prompt.contains("Evaluate all newly delivered speech in that block"))
-        #expect(prompt.contains("not only its last line"))
-        #expect(prompt.contains("A final user block with no \"New since last turn\""))
-        #expect(prompt.contains("the newest historical speech was fragmentary"))
-    }
-
-    @Test func coachPromptLetsSilenceWakeUpsBypassUnsentFiller() {
-        let prompt = coachSystemPrompt.split(whereSeparator: \.isWhitespace).joined(separator: " ")
-        #expect(prompt.contains(
-            "If the final block includes a \"(no speech for ...)\" marker, bypass this gate"
-        ))
-        #expect(prompt.contains("even when unsent speech rides along under \"New since last turn\""))
+        #expect(prompt.contains("latest user message contains \"New since last turn\""))
+        #expect(prompt.contains("and no \"(no speech for ...)\" marker"))
+        #expect(prompt.contains("inspect all speech in that section"))
+        #expect(prompt.contains("If all of it consists of short, question-free fragments"))
+        #expect(prompt.contains("Help/stuck signals, corrections, requirements, and technical facts"))
+        #expect(prompt.contains("meaningful, not fragments"))
+        #expect(prompt.contains("Do not correct likely transcription mistakes"))
+        #expect(prompt.contains("hedge your interpretation when a reply is required"))
     }
 
     @Test func coachPromptOrdersDirectRepliesThenFragmentsThenScreenGate() {
@@ -105,11 +80,8 @@ import Testing
             #expect(directReply.lowerBound < fragmentGate.lowerBound)
             #expect(fragmentGate.lowerBound < screenGate.lowerBound)
         }
+        #expect(coachSystemPrompt.contains("bypass the fragment gate"))
         #expect(coachSystemPrompt.contains("continue to the screen gate below"))
-        #expect(coachSystemPrompt.contains("A direct reply required by rule 1 bypasses this gate"))
-        #expect(coachSystemPrompt.contains(
-            "If a direct reply is required, hedge your interpretation instead"
-        ))
     }
 
     @Test func coachContextCoversTechnicalInterviewFormatsWithoutBrandNarrowing() {
