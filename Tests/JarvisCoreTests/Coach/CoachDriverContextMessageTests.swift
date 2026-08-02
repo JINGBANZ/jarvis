@@ -71,4 +71,24 @@ import Testing
         #expect(lastUserMessage(brain) ==
                 "New since last turn:\n[00:00] me: hmm let me think\n\n[00:00] (no speech for 45s)")
     }
+
+    /// A fragment committed after `stay_silent` remains useful history, but it must not masquerade as
+    /// fresh speech on a later proactive silence check. The current turn is the final bare note.
+    @Test func silenceAfterFragmentCarriesNoFreshSpeechBlock() async {
+        let brain = ScriptedBrain(script: [
+            .init(toolCalls: [.staySilent(callId: "quiet1")]),
+            .init(toolCalls: [.staySilent(callId: "quiet2")]),
+        ])
+        let (driver, transcript) = makeDriver(brain: brain, clock: ManualClock(now: 0))
+        transcript.append(.init(speaker: .me, text: "one pass", at: 0))
+
+        #expect(await driver.handleTrigger(.turnEnd) == .silentByModel)
+        #expect(await driver.handleTrigger(.silence(secondsQuiet: 30)) == .silentByModel)
+
+        let userMessages = brain.calls[1].filter { $0.role == .user }.compactMap(\.text)
+        #expect(userMessages == [
+            "New since last turn:\n[00:00] me: one pass",
+            "[00:00] (no speech for 30s)",
+        ])
+    }
 }

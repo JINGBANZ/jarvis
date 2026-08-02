@@ -55,6 +55,33 @@ import Testing
         #expect(!coachSystemPrompt.contains("one tool call each turn"))
     }
 
+    /// Fragment silence applies only to wholly fragmentary fresh speech, never silence probes or
+    /// meaningful signals that should continue through the coaching policy.
+    @Test func coachPromptScopesFragmentSilence() {
+        let prompt = coachSystemPrompt.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        #expect(prompt.contains("when a non-silence request contains new speech"))
+        #expect(prompt.contains("call stay_silent only if all of it is incomplete or likely mistranscribed"))
+        #expect(prompt.contains("Help/stuck signals and other meaningful speech bypass this gate"))
+        #expect(prompt.contains(
+            "If a reply is required despite uncertain transcription, hedge rather than correct it"
+        ))
+    }
+
+    @Test func coachPromptOrdersDirectRepliesThenFragmentsThenScreenGate() {
+        let directReply = coachSystemPrompt.range(of: "1. Direct address from \"me\"")
+        let fragmentGate = coachSystemPrompt.range(of: "2. Fragment gate")
+        let screenGate = coachSystemPrompt.range(of: "3. Screen gate")
+        #expect(directReply != nil)
+        #expect(fragmentGate != nil)
+        #expect(screenGate != nil)
+        if let directReply, let fragmentGate, let screenGate {
+            #expect(directReply.lowerBound < fragmentGate.lowerBound)
+            #expect(fragmentGate.lowerBound < screenGate.lowerBound)
+        }
+        #expect(coachSystemPrompt.contains("bypass the fragment gate"))
+        #expect(coachSystemPrompt.contains("continue to the screen gate below"))
+    }
+
     @Test func coachContextCoversTechnicalInterviewFormatsWithoutBrandNarrowing() {
         let modelContext = captureScreenTool.description + coachSystemPrompt
         #expect(modelContext.contains("behavioral"))
