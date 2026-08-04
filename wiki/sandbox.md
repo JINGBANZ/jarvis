@@ -10,8 +10,8 @@ Two layers below are **relaxed** for the personal build, by explicit decision:
 
 - **No App Sandbox.** The app is **unsandboxed**, signed with a **stable self-signed identity
   (`Jarvis Dev`)** — not ad-hoc, so TCC grants persist across rebuilds (see
-  [build-and-run.md](./build-and-run.md)). Screen Recording + Microphone
-  are granted via **TCC prompts** at first run. Consequence: the app *could* read the user's files —
+  [build-and-run.md](./build-and-run.md)). Screen Recording, Microphone, and System Audio Recording
+  are granted via **TCC prompts**. Consequence: the app *could* read the user's files —
   accepted for a personal tool. (Hardened model: §1.)
 - **No separate account.** The build and the app run in the **main `forrest` account**, inside a
   **git worktree** for recoverability, rather than a restricted `jarvisbuild` account. The former
@@ -39,6 +39,9 @@ The app ships with the macOS App Sandbox enabled and requests **only** the entit
 - Microphone / audio input.
 - Outbound network (to reach the OpenAI APIs).
 
+System-audio process-tap access is separately purpose-described in `Resources/Info.plist` and gated
+by TCC; it is not a general filesystem entitlement.
+
 It requests **no** general filesystem entitlement. It cannot read the user's documents, browser
 data, or home directory. The only files it touches are its own sandbox container and transient
 screenshot temp files it creates and deletes.
@@ -61,7 +64,7 @@ A Standard account `dev` already exists on this Mac and could serve, or add a fr
 **System Settings → Users & Groups → add a Standard user (e.g. `jarvisbuild`) →** log in via Fast
 User Switching → run Claude Code there (the session runs *as* that user — true isolation). Note the
 build still needs one-time **admin** setup from `forrest` (TCC grants, any tool installs), since a
-Standard account cannot grant itself Screen Recording.
+Standard account cannot grant itself Screen Recording or System Audio Recording.
 
 ### 3. Secrets
 
@@ -72,8 +75,9 @@ logged.
 We deliberately **don't** use the macOS Keychain. macOS keys Keychain access to a per-build code
 *partition* — for a self-signed app with no Apple Team ID, that partition is the binary's `cdhash`,
 which changes on every build — so each rebuild is treated as a new program and re-prompts for the
-login-keychain password. (TCC grants for Microphone/Screen Recording don't have this problem: they
-key to the stable signing identity, not the `cdhash`.) The only ways to avoid the re-prompt are an
+login-keychain password. (TCC grants for Microphone, System Audio Recording, and Screen Recording
+don't have this problem: they key to the stable signing identity, not the `cdhash`.) The only ways
+to avoid the re-prompt are an
 Apple Developer Team ID (stable `teamid:` partition) or moving off the Keychain. A `0600` file has
 the same practical trust boundary as the `OPENAI_API_KEY` headless fallback — any process running as
 this user can read it — but never prompts and survives every rebuild. If Jarvis ever ships under a

@@ -3,6 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 ./scripts/check-ghost-mode.sh
+./scripts/check-audio-capture-config.sh
 
 # On a Command-Line-Tools-only machine, swift-testing ships with the CLT but isn't on the default
 # search path, so we point swift at it explicitly. With full Xcode active (e.g. CI runners) it's

@@ -16,6 +16,8 @@
   <key>LSUIElement</key><true/>
   <key>NSMicrophoneUsageDescription</key>
   <string>Jarvis listens to you think aloud to offer coaching tips.</string>
+  <key>NSAudioCaptureUsageDescription</key>
+  <string>Jarvis captures system audio so it can hear the other side of your call and coach you in context.</string>
   <key>NSScreenCaptureUsageDescription</key>
   <string>Jarvis captures the meeting audio (the other side of your call) and screen so it can hear what others say and coach you in context.</string>
 </dict>
