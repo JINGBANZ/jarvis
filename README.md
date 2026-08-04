@@ -89,8 +89,8 @@ When launched with `./scripts/build-app.sh --run`, each Start creates an owner-o
 - `eval-report.md` and `eval-report.html` only after `scripts/eval-session.sh` runs the agentic audit.
 
 The history is pruned to the ten most recent sessions. Raw audio and the rolling in-memory transcript
-are not archived, although finalized `heard:` lines are part of the activity record. The default
-The selected OpenAI transcription model receives audio when OpenAI is the provider; Apple Speech
+are not archived, although finalized `heard:` lines are part of the activity record. The selected
+OpenAI transcription model receives audio when OpenAI is the provider; Apple Speech
 keeps raw audio on-device after its selected locale model is installed. Coaching text and any
 requested screenshot go to the selected brain provider. See
 [`wiki/sandbox.md`](./wiki/sandbox.md) for the complete local-persistence, egress, and retention model.

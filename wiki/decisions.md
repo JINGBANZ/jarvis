@@ -992,56 +992,6 @@
   `Sources/JarvisCore/Brain/Adapters/LocalAgent/Codex/CodexAppServerRuntime.swift`,
   `Sources/JarvisCore/Brain/Adapters/LocalAgent/Codex/CodexRuntimeHome.swift`.
 
-### 2026-07-30 — Live local-agent coaching shares one latency deadline
-
-- **Chose:** Give the live Claude Code and Codex coaching clients one explicit latency deadline.
-  Keep local-agent provider defaults unchanged for summarization and every other caller. The
-  completed-session evaluator, failure classification, fresh-attempt scheduling, observation
-  carryover, and ordered-route budgets are unchanged.
-- **Why:** In session `2026-07-30_16-41-44_687E`, five Codex turns completed in 3.1–6.6 seconds,
-  while one stalled turn reached the prior live ceiling and pushed the recovered useful answer to
-  about 45 seconds after the request. The existing fresh-attempt boundary recovered correctly; the
-  latency-sensitive overlay should stop waiting sooner without changing that recovery policy.
-- **Rejected:** (a) Lowering `CLIBrainClient` provider defaults globally — that would also change
-  summarization and other auxiliary clients. (b) Giving the two live local providers different
-  deadlines — they serve the same overlay latency contract. (c) Changing API, evaluator, routing,
-  retry, or failure semantics — the session evidence did not justify those broader changes.
-- **Superseded in part by:** 2026-07-31 — Brain response deadlines are workload-owned. The common
-  live deadline stands; generic provider-specific defaults do not.
-- **Detail:** `Sources/JarvisApp/App/AppDelegate.swift`,
-  `Sources/JarvisCore/Brain/Adapters/LocalAgent/CLIBrainClient.swift`.
-
-### 2026-07-31 — Brain response deadlines are workload-owned
-
-- **Chose:** Define live-coaching and history-compaction deadlines as Core workload policy, shared
-  by OpenAI, Claude Code, and Codex instead of keeping transport-specific defaults. Generic clients
-  default to the live workload; `AppDelegate` still passes each role explicitly. A one-shot local
-  auxiliary request calculates one absolute deadline before provider setup and gives inference only
-  the remaining budget. Compaction stays awaited, tool-less, low-effort, and tagged `summarizer`; an
-  empty result, timeout, or other failure keeps the full history and never enters provider-route
-  health.
-- **Chose:** Recover an in-flight Codex turn timeout at thread scope: send `turn/interrupt`, consume
-  its response and the matching terminal turn event, then let normal conversation finish retire the
-  thread. Keep the shared app-server for later coaching. Invalidate it only when the turn cannot be
-  identified or scoped interruption/terminal cleanup cannot be confirmed, because its shared stream
-  is then uncertain.
-- **Why:** Provider transport does not determine how long newer speech may wait; the foreground or
-  auxiliary workload does. Compaction runs before the active handling slot is released, so separate
-  setup and inference ceilings could double that delay. A failed summary is lossless, while
-  restarting a healthy session-scoped Codex transport adds latency to the next coaching attempt.
-- **Rejected:** (a) Provider-specific defaults — they encode workload policy at the wrong boundary.
-  (b) A separate Codex summarizer app-server — duplicates a healthy session transport and its
-  startup cost. (c) Unsubscribing a timed-out thread without first interrupting and draining its
-  terminal event — that leaves the shared event stream unsynchronized. (d) Detached compaction —
-  history ordering and snapshot races need a separate design.
-- **Supersedes in part:** 2026-07-03 — Brain call: generous ceiling, one attempt, recover on next
-  trigger; 2026-07-18 — Codex coaching invocations are isolated and bounded; and 2026-07-30 — Live
-  local-agent coaching shares one latency deadline. Their recovery, isolation, and common
-  live-latency decisions stand; provider-owned timeout defaults do not.
-- **Detail:** `Sources/JarvisCore/Brain/BrainWorkloadTimeout.swift`,
-  `Sources/JarvisCore/Brain/Adapters/LocalAgent/CLIBrainClient.swift`,
-  `Sources/JarvisCore/Brain/Adapters/LocalAgent/Codex/CodexAppServerRuntime.swift`,
-  `Sources/JarvisApp/App/AppDelegate.swift`.
 ### 2026-07-30 — Apple SpeechAnalyzer is an opt-in transcription provider
 
 - **Chose:** Separate transcription selection from the brain route through a provider-neutral
@@ -1105,6 +1055,57 @@
 - **Detail:** [architecture.md → Models and APIs](./architecture.md#models-and-apis),
   [settings-window.md → Brain](./settings-window.md#brain),
   [sandbox.md → Data Egress](./sandbox.md#data-egress).
+
+### 2026-07-30 — Live local-agent coaching shares one latency deadline
+
+- **Chose:** Give the live Claude Code and Codex coaching clients one explicit latency deadline.
+  Keep local-agent provider defaults unchanged for summarization and every other caller. The
+  completed-session evaluator, failure classification, fresh-attempt scheduling, observation
+  carryover, and ordered-route budgets are unchanged.
+- **Why:** In session `2026-07-30_16-41-44_687E`, five Codex turns completed in 3.1–6.6 seconds,
+  while one stalled turn reached the prior live ceiling and pushed the recovered useful answer to
+  about 45 seconds after the request. The existing fresh-attempt boundary recovered correctly; the
+  latency-sensitive overlay should stop waiting sooner without changing that recovery policy.
+- **Rejected:** (a) Lowering `CLIBrainClient` provider defaults globally — that would also change
+  summarization and other auxiliary clients. (b) Giving the two live local providers different
+  deadlines — they serve the same overlay latency contract. (c) Changing API, evaluator, routing,
+  retry, or failure semantics — the session evidence did not justify those broader changes.
+- **Superseded in part by:** 2026-07-31 — Brain response deadlines are workload-owned. The common
+  live deadline stands; generic provider-specific defaults do not.
+- **Detail:** `Sources/JarvisApp/App/AppDelegate.swift`,
+  `Sources/JarvisCore/Brain/Adapters/LocalAgent/CLIBrainClient.swift`.
+
+### 2026-07-31 — Brain response deadlines are workload-owned
+
+- **Chose:** Define live-coaching and history-compaction deadlines as Core workload policy, shared
+  by OpenAI, Claude Code, and Codex instead of keeping transport-specific defaults. Generic clients
+  default to the live workload; `AppDelegate` still passes each role explicitly. A one-shot local
+  auxiliary request calculates one absolute deadline before provider setup and gives inference only
+  the remaining budget. Compaction stays awaited, tool-less, low-effort, and tagged `summarizer`; an
+  empty result, timeout, or other failure keeps the full history and never enters provider-route
+  health.
+- **Chose:** Recover an in-flight Codex turn timeout at thread scope: send `turn/interrupt`, consume
+  its response and the matching terminal turn event, then let normal conversation finish retire the
+  thread. Keep the shared app-server for later coaching. Invalidate it only when the turn cannot be
+  identified or scoped interruption/terminal cleanup cannot be confirmed, because its shared stream
+  is then uncertain.
+- **Why:** Provider transport does not determine how long newer speech may wait; the foreground or
+  auxiliary workload does. Compaction runs before the active handling slot is released, so separate
+  setup and inference ceilings could double that delay. A failed summary is lossless, while
+  restarting a healthy session-scoped Codex transport adds latency to the next coaching attempt.
+- **Rejected:** (a) Provider-specific defaults — they encode workload policy at the wrong boundary.
+  (b) A separate Codex summarizer app-server — duplicates a healthy session transport and its
+  startup cost. (c) Unsubscribing a timed-out thread without first interrupting and draining its
+  terminal event — that leaves the shared event stream unsynchronized. (d) Detached compaction —
+  history ordering and snapshot races need a separate design.
+- **Supersedes in part:** 2026-07-03 — Brain call: generous ceiling, one attempt, recover on next
+  trigger; 2026-07-18 — Codex coaching invocations are isolated and bounded; and 2026-07-30 — Live
+  local-agent coaching shares one latency deadline. Their recovery, isolation, and common
+  live-latency decisions stand; provider-owned timeout defaults do not.
+- **Detail:** `Sources/JarvisCore/Brain/BrainWorkloadTimeout.swift`,
+  `Sources/JarvisCore/Brain/Adapters/LocalAgent/CLIBrainClient.swift`,
+  `Sources/JarvisCore/Brain/Adapters/LocalAgent/Codex/CodexAppServerRuntime.swift`,
+  `Sources/JarvisApp/App/AppDelegate.swift`.
 
 ### 2026-08-01 — GPT Live uses local WebRTC VAD and explicit commits
 
