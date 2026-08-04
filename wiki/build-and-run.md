@@ -29,8 +29,9 @@ needs — so a SwiftUI + ScreenCaptureKit binary builds with plain `swift build`
 `scripts/build-app.sh` assembles the executable into a hand-built `.app` bundle (the bundle layout
 and the stable bundle id live in the script and `Resources/Info.plist`).
 
-**Permission persistence is a signing problem.** macOS TCC keys a Screen-Recording/Microphone grant
-to **code signature + bundle id + bundle path**. An ad-hoc signature changes every build, so macOS
+**Permission persistence is a signing problem.** macOS TCC keys Screen-Recording, Microphone, and
+System Audio Recording grants to **code signature + bundle id + bundle path**. An ad-hoc signature
+changes every build, so macOS
 forgets the grant and re-prompts on each rebuild. So `build-app.sh` always signs with a **stable
 self-signed identity (`Jarvis Dev`**, created automatically on first build) — there is **no ad-hoc
 fallback**. With the identity, bundle id, and path all fixed, grants persist across rebuilds and
@@ -39,8 +40,9 @@ relaunches. On the first build macOS prompts once to let `codesign` use the new 
 
 - Recover a stale *denied* state (which macOS won't re-prompt for) with
   `tccutil reset Microphone com.jarvis.coach` (or `ScreenCapture`), then relaunch and Allow.
-- Screen Recording + Microphone are granted by **TCC prompts at first run**, not an App-Sandbox
-  entitlement file. `Permissions.primeAll()` requests them at launch and is idempotent.
+- Screen Recording + Microphone are granted by **TCC prompts at first launch**, not an App-Sandbox
+  entitlement file. `Permissions.primeAll()` requests them at launch and is idempotent. Core Audio
+  requests System Audio Recording when Jarvis first builds its process tap after Start.
 
 ## Distribution — signed, notarized releases from CI
 
@@ -75,8 +77,9 @@ then just run the script) for packaging without CI. Distributed builds run on Ap
 | `./scripts/build-app.sh --run` | Same build, then launch. Per-session logs land in the workspace `.jarvis/` (see below). |
 
 - **Always launch with `open ./Jarvis.app`**, never the bare binary — running it from a shell makes
-  TCC attribute the grant to the *terminal*, so the app reports Microphone/Screen Recording as
-  "denied" even when granted. Pass flags with `open ./Jarvis.app --args …`.
+  TCC attribute the grant to the *terminal*, so the app reports Microphone, System Audio Recording,
+  or Screen Recording as "denied" even when granted. Pass flags with
+  `open ./Jarvis.app --args …`.
 - Jarvis does **not** auto-start: set the OpenAI key once (Settings → Brain, saved to an owner-only
   file; `OPENAI_API_KEY` is a headless fallback), then **Start / Stop** from the menu. The icon shows
   two states only: ⚪️ stopped, 🟢 running.
@@ -128,8 +131,11 @@ Some behavior can only be verified with a real key, a mic, and granted permissio
 the human-facing coaching record. The current validation priority lives in
 [`status.md`](./status.md#next-action).
 
-- Wait for `Jarvis: coaching ready (mic + system audio).` in the debug log. Speak into the microphone
-  and play speech through system audio; confirm both appear as finalized `heard:` entries in Activity.
+- Start while no other app is playing audio. Confirm the macOS recording indicator appears
+  immediately and the first audio-witness snapshot has nonzero capture counters; system playback
+  must not be required to wake the microphone. Then wait for
+  `Jarvis: coaching ready (mic + system audio).`, speak into the microphone, and play speech through
+  system audio; confirm both appear as finalized `heard:` entries in Activity.
 - Show an interview question without speaking its details, then ask, “Jarvis, how can I solve this in
   one pass?” Confirm Activity shows exactly one screen view followed by a screen-specific tip. A fully
   stated behavioral question should not cause an unnecessary capture.

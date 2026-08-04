@@ -147,7 +147,9 @@ final class AggregateEchoCapture: @unchecked Sendable {
             kAudioAggregateDeviceTapListKey: [
                 [kAudioSubTapUIDKey: tapDesc.uuid.uuidString, kAudioSubTapDriftCompensationKey: 1],
             ],
-            kAudioAggregateDeviceTapAutoStartKey: true,
+            // Deliberately omit tap auto-start. Enabling it waits for a tapped process to begin
+            // writing system audio before starting the entire aggregate, including the microphone.
+            // Quiet sessions would otherwise arm successfully without ever delivering an IOProc.
         ]
         var agg = AudioObjectID(kAudioObjectUnknown)
         guard AudioHardwareCreateAggregateDevice(description as CFDictionary, &agg) == noErr,

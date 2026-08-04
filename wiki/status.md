@@ -85,7 +85,8 @@ audio-route switch: Activity should say listening continues, the
 next turn should include any unsent speech, and capture should recover
 without rotating the session. Stop that session, click **Evaluate**, and confirm the agentic report
 opens and identifies the temporary miss from the complete Activity log without misclassifying it as
-a stopped conversation. The standard release checklist remains in
+a stopped conversation. The standard release checklist, including quiet-start capture before system
+playback, remains in
 [build-and-run.md](./build-and-run.md).
 
 ## Built
@@ -105,7 +106,7 @@ thin OS shell, verified by the smoke run.
 - `Sources/JarvisCore/Diagnostics/` — logging, always-on activity log with stable persisted event kinds and fixed typed brain-change/failure notices, privacy-preserving audio continuity evidence, session-history store, wire-level brain traffic capture + the read-only agentic audit over the complete session directory, user-facing errors (`ActivityLog`, `AudioContinuityWitness`, `SessionStore`, `BrainTrafficLog`, `EvaluationTranscript`, `AgenticEvaluation`, `AgenticEvaluator`, `UserFacingError`).
 - `Sources/JarvisOverlay/` — the capture-invisible `NSPanel` surfaces: `OverlayCaptionPanel` (transient), `OverlayBoxPanel` (persistent), `NSPanel+CaptureExclusion`.
 - `Sources/JarvisApp/App/` + `MenuBar/` — entry point, connection-aware menu status, Start/Stop, `ErrorReporter` (startup alerts plus an unconditional no-presentation runtime policy).
-- `Sources/JarvisApp/Capture/` — one-clock aggregate mic + sample-preserving system-audio capture with AEC3 echo cancellation + resampling (`AggregateEchoCapture`, `WebRTCEchoCanceller`, `Resampler`), Realtime item/readiness/liveness/transactional-reconnect/witness handling (`RealtimeTranscriber`, `NetworkPathDiagnostics`), permissions, plus the window-scoped screenshot + OCR edge (`WindowScopedScreenCapture`, `ScreenTextRecognizer`).
+- `Sources/JarvisApp/Capture/` — one-clock aggregate mic + sample-preserving system-audio capture that starts without waiting for a system-audio writer, with AEC3 echo cancellation + resampling (`AggregateEchoCapture`, `WebRTCEchoCanceller`, `Resampler`), Realtime item/readiness/liveness/transactional-reconnect/witness handling (`RealtimeTranscriber`, `NetworkPathDiagnostics`), permissions, plus the window-scoped screenshot + OCR edge (`WindowScopedScreenCapture`, `ScreenTextRecognizer`).
 - `Sources/JarvisApp/Settings/` — the unified Settings window (`SettingsWindow` hosting Brain / Overlay / Screen / Activity sections), with shared page, rounded-card, responsive-row, and scroll primitives so every tab keeps one visual system without coupling section behavior.
 - `Sources/JarvisApp/Shortcuts/HotkeyController.swift` — the global Carbon ⌥⌘J on-demand-hint hotkey.
 - `Sources/JarvisApp/Viewer/ActivityViewer.swift` — the in-app `WKWebView` activity viewer, with an exact selectable/copyable session ID and one-click **Evaluate** / **Open report** agentic audit flow.
