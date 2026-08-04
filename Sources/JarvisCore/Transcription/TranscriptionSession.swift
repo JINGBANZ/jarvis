@@ -22,4 +22,16 @@ public protocol TranscriptionSession: AnyObject, Sendable {
         sequenceNumber: UInt64,
         capturedAt: TimeInterval
     )
+    func recordLocalSpeechEvent(
+        _ event: LocalSpeechEvent,
+        throughSequenceNumber: UInt64
+    )
+}
+
+public extension TranscriptionSession {
+    /// Providers with their own turn detector ignore capture-side speech edges.
+    func recordLocalSpeechEvent(
+        _ event: LocalSpeechEvent,
+        throughSequenceNumber: UInt64
+    ) {}
 }

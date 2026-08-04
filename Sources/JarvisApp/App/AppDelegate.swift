@@ -743,6 +743,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // the cleaned mic to the "me" socket and the sample-preserving system timeline to the "them"
         // socket, with AEC3 run inside its IOProc. If the device can't be built, the whole capture is
         // gone, so treat it as a full (mic-side) terminal failure.
+        let localTurnDetectionSilenceDuration: TimeInterval? =
+            transcriptionConfiguration.provider == .openAI
+                && transcriptionConfiguration.openAIModel == .gptLiveTranscribe
+            ? TimeInterval(config.vadSilenceDurationMs) / 1_000
+            : nil
         let capture = AggregateEchoCapture(
             onMicCaptured: { [weak transcriber] sequence, samples, capturedAt in
                 transcriber?.recordCapturedAudio(
@@ -759,6 +764,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onSystem: { [weak themTranscriber] data, sequence, capturedAt in
                 themTranscriber?.sendAudio(
                     data, sequenceNumber: sequence, capturedAt: capturedAt)
+            },
+            localTurnDetectionSilenceDuration: localTurnDetectionSilenceDuration,
+            onMicSpeechEvent: { [weak transcriber] event, sequence in
+                transcriber?.recordLocalSpeechEvent(
+                    event, throughSequenceNumber: sequence)
+            },
+            onSystemSpeechEvent: { [weak themTranscriber] event, sequence in
+                themTranscriber?.recordLocalSpeechEvent(
+                    event, throughSequenceNumber: sequence)
             })
         // Like the transcriber callbacks above, bind the failure to the capture that emitted it. A
         // final retry from an old capture may arrive after Stop → Start; it must not tear down the

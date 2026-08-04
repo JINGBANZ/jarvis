@@ -1105,3 +1105,26 @@
 - **Detail:** [architecture.md → Models and APIs](./architecture.md#models-and-apis),
   [settings-window.md → Brain](./settings-window.md#brain),
   [sandbox.md → Data Egress](./sandbox.md#data-egress).
+
+### 2026-08-01 — GPT Live uses local WebRTC VAD and explicit commits
+
+- **Chose:** Keep GPT-4o Transcribe on its existing tuned `server_vad` path. For opt-in GPT Live
+  Transcribe, disable unsupported server turn detection and run one classic WebRTC VAD instance per
+  post-AEC 48 kHz speaker stream. A Foundation-only endpoint policy confirms speech and waits through
+  the configured trailing silence. The socket commits only after its ordered append FIFO reaches
+  that sequence boundary; `input_audio_buffer.committed` binds the local timing to the provider's
+  `item_id`, and unresolved committed turns retain both PCM and boundary metadata across reconnect.
+- **Why:** GPT Live rejects a transcription session configured with server turn detection, while its
+  documented transcription workflow requires the client to commit each audio turn. Reusing the VAD
+  already present in Jarvis's statically linked WebRTC archive adds no dependency or model download,
+  keeps raw audio streaming continuously for recognition, and preserves the existing per-item and
+  reconnect integrity guarantees.
+- **Rejected:** (a) The existing RMS activity tracker as the commit authority—it is a diagnostics and
+  coaching-timing heuristic, not a speech detector. (b) OpenAI server VAD for GPT Live—the model
+  rejects that configuration. (c) A new neural VAD dependency—the bundled WebRTC detector is already
+  native, lightweight, and sufficient for the first A/B. (d) Parallel transcription or provider
+  fallback—both duplicate egress/cost or cross the user's explicit provider boundary.
+- **Detail:** [architecture.md → Models and APIs](./architecture.md#models-and-apis),
+  `Sources/JarvisCore/Audio/SpeechEndpointDetector.swift`,
+  `Sources/JarvisCore/Transcription/RealtimeManualTurnCoordinator.swift`,
+  `Sources/JarvisApp/Capture/RealtimeTranscriber.swift`.

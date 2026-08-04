@@ -34,6 +34,8 @@ final class AggregateEchoCapture: @unchecked Sendable {
     private let onSystemCaptured: @Sendable (UInt64, Int, TimeInterval) -> Void
     private let onMicClean: @Sendable (Data, UInt64, TimeInterval) -> Void
     private let onSystem: @Sendable (Data, UInt64, TimeInterval) -> Void
+    private let onMicSpeechEvent: @Sendable (LocalSpeechEvent, UInt64) -> Void
+    private let onSystemSpeechEvent: @Sendable (LocalSpeechEvent, UInt64) -> Void
     /// Fired if the device can't be built/started mid-session (route-change rebuild) — the caller
     /// decides how to surface it. Carries a human-readable reason.
     var onUnavailable: (@Sendable (String) -> Void)?
@@ -45,6 +47,12 @@ final class AggregateEchoCapture: @unchecked Sendable {
     private let aec = WebRTCEchoCanceller()          // adaptive; re-converges across route rebuilds
     private let micDown = Resampler(fromHz: 48_000, toHz: 24_000)   // cleaned mic → 24 kHz wire
     private let sysDown = Resampler(fromHz: 48_000, toHz: 24_000)   // tap → 24 kHz wire
+    private let usesLocalTurnDetection: Bool
+    private let micVoiceActivityDetector: WebRTCVoiceActivityDetector?
+    private let systemVoiceActivityDetector: WebRTCVoiceActivityDetector?
+    /// IOProc-only value state. WebRTC supplies frame decisions; Core owns the endpoint policy.
+    private var micEndpointDetector: SpeechEndpointDetector?
+    private var systemEndpointDetector: SpeechEndpointDetector?
     /// Device-native → 48 kHz, rebuilt per `buildAudioLocked` from the aggregate's actual rate. `nil`
     /// when the device is already 48 kHz (then mic/tap feed AEC directly — the built-in path, unchanged).
     /// Touched only by the IOProc thread (read in `handle`) and by build/rebuild under `lock` while the
@@ -74,11 +82,30 @@ final class AggregateEchoCapture: @unchecked Sendable {
     init(onMicCaptured: @escaping @Sendable (UInt64, Int, TimeInterval) -> Void,
          onSystemCaptured: @escaping @Sendable (UInt64, Int, TimeInterval) -> Void,
          onMicClean: @escaping @Sendable (Data, UInt64, TimeInterval) -> Void,
-         onSystem: @escaping @Sendable (Data, UInt64, TimeInterval) -> Void) {
+         onSystem: @escaping @Sendable (Data, UInt64, TimeInterval) -> Void,
+         localTurnDetectionSilenceDuration: TimeInterval?,
+         onMicSpeechEvent: @escaping @Sendable (LocalSpeechEvent, UInt64) -> Void,
+         onSystemSpeechEvent: @escaping @Sendable (LocalSpeechEvent, UInt64) -> Void) {
         self.onMicCaptured = onMicCaptured
         self.onSystemCaptured = onSystemCaptured
         self.onMicClean = onMicClean
         self.onSystem = onSystem
+        self.onMicSpeechEvent = onMicSpeechEvent
+        self.onSystemSpeechEvent = onSystemSpeechEvent
+        usesLocalTurnDetection = localTurnDetectionSilenceDuration != nil
+        if let localTurnDetectionSilenceDuration {
+            micVoiceActivityDetector = WebRTCVoiceActivityDetector()
+            systemVoiceActivityDetector = WebRTCVoiceActivityDetector()
+            micEndpointDetector = SpeechEndpointDetector(
+                trailingSilenceDuration: localTurnDetectionSilenceDuration)
+            systemEndpointDetector = SpeechEndpointDetector(
+                trailingSilenceDuration: localTurnDetectionSilenceDuration)
+        } else {
+            micVoiceActivityDetector = nil
+            systemVoiceActivityDetector = nil
+            micEndpointDetector = nil
+            systemEndpointDetector = nil
+        }
     }
 
     /// Build + start capture. Returns `nil` on success, or a human-readable reason on failure (the
@@ -92,12 +119,17 @@ final class AggregateEchoCapture: @unchecked Sendable {
         }
         lock.lock()
         stopped = false
-        if #available(macOS 14.2, *), aec != nil, micDown != nil, sysDown != nil {
+        let localTurnDetectionReady = !usesLocalTurnDetection
+            || (micVoiceActivityDetector != nil && systemVoiceActivityDetector != nil)
+        if #available(macOS 14.2, *), aec != nil, micDown != nil, sysDown != nil,
+           localTurnDetectionReady {
             reason = buildAudioLocked()
             if reason == nil { registerRouteListenersLocked() }
         } else {
-            jlog("Jarvis: one-clock capture unavailable — needs macOS 14.2+ and AEC/resampler")
-            reason = "Jarvis needs macOS 14.2 or later for echo-cancelled capture."
+            jlog("Jarvis: one-clock capture unavailable — needs macOS 14.2+, AEC/resampler, and configured VAD")
+            reason = localTurnDetectionReady
+                ? "Jarvis needs macOS 14.2 or later for echo-cancelled capture."
+                : "Couldn't prepare local speech detection for GPT Live Transcribe."
         }
         lock.unlock()
         return reason
@@ -310,6 +342,8 @@ final class AggregateEchoCapture: @unchecked Sendable {
         let systemData = systemTimeline.isEmpty ? nil : Self.data(sysDown.convert(systemTimeline))
         guard micData != nil || systemData != nil else { return }
         let capturedAt = Date().timeIntervalSince1970
+        let micSpeechEvents = localMicSpeechEvents(clean, capturedAt: capturedAt)
+        let systemSpeechEvents = localSystemSpeechEvents(systemTimeline, capturedAt: capturedAt)
         let micChunk: SequencedAudioChunk? = micData.map { data in
             micSequence &+= 1
             return SequencedAudioChunk(
@@ -328,14 +362,80 @@ final class AggregateEchoCapture: @unchecked Sendable {
         let onSystemCaptured = self.onSystemCaptured
         let onMicClean = self.onMicClean
         let onSystem = self.onSystem
+        let onMicSpeechEvent = self.onMicSpeechEvent
+        let onSystemSpeechEvent = self.onSystemSpeechEvent
         deliveryQueue.async {
             if let micChunk {
                 onMicCaptured(micChunk.sequence, micChunk.sampleCount, micChunk.capturedAt)
                 onMicClean(micChunk.data, micChunk.sequence, micChunk.capturedAt)
+                let commitAt = micChunk.capturedAt
+                    + TimeInterval(micChunk.sampleCount) / TimeInterval(RealtimeSession.sampleRate)
+                for event in Self.committing(events: micSpeechEvents, through: commitAt) {
+                    onMicSpeechEvent(event, micChunk.sequence)
+                }
             }
             if let systemChunk {
                 onSystemCaptured(systemChunk.sequence, systemChunk.sampleCount, systemChunk.capturedAt)
                 onSystem(systemChunk.data, systemChunk.sequence, systemChunk.capturedAt)
+                let commitAt = systemChunk.capturedAt
+                    + TimeInterval(systemChunk.sampleCount) / TimeInterval(RealtimeSession.sampleRate)
+                for event in Self.committing(events: systemSpeechEvents, through: commitAt) {
+                    onSystemSpeechEvent(event, systemChunk.sequence)
+                }
+            }
+        }
+    }
+
+    private func localMicSpeechEvents(
+        _ samples: [Int16],
+        capturedAt: TimeInterval
+    ) -> [SpeechEndpointDetector.Event] {
+        guard let micVoiceActivityDetector, var detector = micEndpointDetector else { return [] }
+        let events = Self.endpointEvents(
+            decisions: micVoiceActivityDetector.classify(samples),
+            detector: &detector,
+            capturedAt: capturedAt)
+        micEndpointDetector = detector
+        return events
+    }
+
+    private func localSystemSpeechEvents(
+        _ samples: [Int16],
+        capturedAt: TimeInterval
+    ) -> [SpeechEndpointDetector.Event] {
+        guard let systemVoiceActivityDetector, var detector = systemEndpointDetector else { return [] }
+        let events = Self.endpointEvents(
+            decisions: systemVoiceActivityDetector.classify(samples),
+            detector: &detector,
+            capturedAt: capturedAt)
+        systemEndpointDetector = detector
+        return events
+    }
+
+    private static func endpointEvents(
+        decisions: [Bool],
+        detector: inout SpeechEndpointDetector,
+        capturedAt: TimeInterval
+    ) -> [SpeechEndpointDetector.Event] {
+        decisions.enumerated().compactMap { index, isSpeech in
+            detector.observe(
+                isSpeech: isSpeech,
+                frameStartedAt: capturedAt + TimeInterval(index) / 100)
+        }
+    }
+
+    /// Commit through the whole delivered 24 kHz chunk containing the endpoint. This keeps the wire
+    /// FIFO and capture boundary identical even when a resampler emits a small converter tail.
+    private static func committing(
+        events: [SpeechEndpointDetector.Event],
+        through commitAt: TimeInterval
+    ) -> [LocalSpeechEvent] {
+        events.map { event in
+            switch event {
+            case .started(let startedAt):
+                return .started(at: startedAt)
+            case .ended(let startedAt, _):
+                return .ended(startedAt: startedAt, commitAt: commitAt)
             }
         }
     }

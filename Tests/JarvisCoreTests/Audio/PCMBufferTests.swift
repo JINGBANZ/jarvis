@@ -110,6 +110,7 @@ import Testing
         let recovery = b.prepareForReconnect()
         #expect(recovery.replayedChunks == 1)
         #expect(recovery.oldestCapturedAt == 10)
+        #expect(recovery.oldestSequenceNumber == 41)
         #expect(try #require(b.claimNext()).chunk.sequenceNumber == 41)
     }
 

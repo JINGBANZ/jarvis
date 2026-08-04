@@ -36,6 +36,11 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
     private var replayRecoveryTimer: Timer?
     private var stopped = true
     private var reportedSpeechActive = false
+    private var localSpeechActive = false
+    private var unboundLocalTurnCount = 0
+    /// Local commits have an exact boundary but must keep their PCM replayable until a terminal
+    /// transcript arrives. On reconnect, do not let ledger finalization retire that audio first.
+    private var locallyCommittedItemIDs: Set<String> = []
 
     init(speaker: Speaker, transcript: RollingTranscript, clock: Clock,
          sessionStart: TimeInterval, turnDebounce: TimeInterval,
@@ -67,13 +72,16 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
         pending.clear()
         ledger.clear()
         reconnectRecovery.clear()
+        localSpeechActive = false
+        unboundLocalTurnCount = 0
+        locallyCommittedItemIDs.removeAll(keepingCapacity: false)
         emitSpeechActivityChangeLocked()
         lock.unlock()
     }
 
     var hasUnsettledItems: Bool {
         lock.lock(); defer { lock.unlock() }
-        return ledger.hasPendingItems || reconnectRecovery.blocksCoaching
+        return hasPendingWorkLocked
     }
 
     func stop() {
@@ -86,6 +94,9 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
         pending.clear()
         ledger.clear()
         reconnectRecovery.clear()
+        localSpeechActive = false
+        unboundLocalTurnCount = 0
+        locallyCommittedItemIDs.removeAll(keepingCapacity: false)
         emitSpeechActivityChangeLocked()
         lock.unlock()
         DispatchQueue.main.async {
@@ -108,6 +119,69 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
         return didStart
     }
 
+    func recordLocalSpeechStarted() {
+        lock.lock()
+        guard !stopped else { lock.unlock(); return }
+        localSpeechActive = true
+        emitSpeechActivityChangeLocked()
+        lock.unlock()
+    }
+
+    func recordLocalSpeechEnded() {
+        lock.lock()
+        guard !stopped else { lock.unlock(); return }
+        localSpeechActive = false
+        unboundLocalTurnCount += 1
+        emitSpeechActivityChangeLocked()
+        lock.unlock()
+    }
+
+    /// Associate an explicit-commit acknowledgement with its local timing boundary. The item then
+    /// follows the same delta/final/deadline lifecycle as a server-VAD item.
+    func recordCommittedLocalTurn(
+        itemID: String,
+        startedAt: TimeInterval,
+        committedThroughAt: TimeInterval,
+        consumesUnboundTurn: Bool,
+        socketGeneration: Int
+    ) -> Bool {
+        lock.lock()
+        guard !stopped, isCurrentGeneration(socketGeneration) else {
+            lock.unlock(); return false
+        }
+        let startMilliseconds = max(0, Int((startedAt * 1_000).rounded()))
+        let endMilliseconds = max(startMilliseconds, Int((committedThroughAt * 1_000).rounded()))
+        let didStart = ledger.recordSpeechStarted(
+            itemID: itemID,
+            audioStartMilliseconds: startMilliseconds,
+            timelineOrigin: 0)
+        let didStop = ledger.recordSpeechStopped(
+            itemID: itemID,
+            audioEndMilliseconds: endMilliseconds)
+        if didStart || didStop { locallyCommittedItemIDs.insert(itemID) }
+        if consumesUnboundTurn, unboundLocalTurnCount > 0 { unboundLocalTurnCount -= 1 }
+        discardServerConfirmedAudioLocked()
+        let shouldResume = shouldResumeDeferredTurnLocked()
+        emitSpeechActivityChangeLocked()
+        lock.unlock()
+        if didStart && !didStop {
+            scheduleActiveDeadline(itemID: itemID, socketGeneration: socketGeneration)
+        }
+        if didStop { scheduleTerminalDeadline(itemID: itemID, socketGeneration: socketGeneration) }
+        if shouldResume { scheduleTurnDebounce() }
+        return didStart || didStop
+    }
+
+    func discardUnboundLocalTurns(_ count: Int) {
+        guard count > 0 else { return }
+        lock.lock()
+        unboundLocalTurnCount = max(0, unboundLocalTurnCount - count)
+        let shouldResume = shouldResumeDeferredTurnLocked()
+        emitSpeechActivityChangeLocked()
+        lock.unlock()
+        if shouldResume { scheduleTurnDebounce() }
+    }
+
     /// Returns true when a delta created an item and therefore armed a new active deadline.
     func recordDelta(itemID: String, delta: String, socketGeneration: Int) -> Bool {
         lock.lock()
@@ -123,6 +197,7 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
         lock.lock()
         guard !stopped, isCurrentGeneration(socketGeneration) else { lock.unlock(); return }
         let item = ledger.recordCompleted(itemID: itemID, transcript: text, speaker: speaker)
+        locallyCommittedItemIDs.remove(itemID)
         discardServerConfirmedAudioLocked()
         let handled = reconcileReplacementItemLocked(
             item, reason: item?.recoveredFromDeltas == true ? "completed without usable final" : nil)
@@ -140,6 +215,7 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
         lock.lock()
         guard !stopped, isCurrentGeneration(socketGeneration) else { lock.unlock(); return }
         let item = ledger.recordFailed(itemID: itemID, speaker: speaker)
+        locallyCommittedItemIDs.remove(itemID)
         discardServerConfirmedAudioLocked()
         let recovery: String
         if item?.recoveredFromDeltas == true {
@@ -173,9 +249,11 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
 
     func beginReconnectRecovery(replayAvailable: Bool) -> Int {
         lock.lock()
+        let preserveLocalReplayAudio = !locallyCommittedItemIDs.isEmpty
         let duplicateRiskItems = ledger.replayDuplicateRiskItemCount
         let interruptedItems = ledger.resolveAllInterruptedItems(speaker: speaker)
-        discardServerConfirmedAudioLocked()
+        if !preserveLocalReplayAudio { discardServerConfirmedAudioLocked() }
+        locallyCommittedItemIDs.removeAll(keepingCapacity: true)
         reconnectRecovery.begin(interruptedItems: interruptedItems,
                                 duplicateRiskItemCount: duplicateRiskItems,
                                 replayAvailable: replayAvailable)
@@ -247,7 +325,8 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
         let pendingItems = ledger.pendingItemCount
         let replayItems = reconnectRecovery.unresolvedItemCount
         let result = pending.drainIfSettled(
-            hasPendingTranscriptions: pendingItems > 0 || reconnectRecovery.blocksCoaching)
+            hasPendingTranscriptions: pendingItems > 0 || reconnectRecovery.blocksCoaching
+                || localSpeechActive || unboundLocalTurnCount > 0)
         lock.unlock()
         switch result {
         case .empty:
@@ -286,6 +365,7 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
             }
             let recovery = item.recoveredFromDeltas
                 ? "salvaged streamed text" : "recorded diagnostic; no transcript available"
+            self.locallyCommittedItemIDs.remove(itemID)
             self.discardServerConfirmedAudioLocked()
             jlog("Jarvis realtime [\(self.speaker.rawValue)] transcription terminal timed out "
                  + "after \(timeout)s (item \(itemID)); \(recovery)")
@@ -308,6 +388,7 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
             ) else { self.lock.unlock(); return }
             let recovery = item.recoveredFromDeltas
                 ? "salvaged streamed text" : "recorded diagnostic; no transcript available"
+            self.locallyCommittedItemIDs.remove(itemID)
             self.discardServerConfirmedAudioLocked()
             jlog("Jarvis realtime [\(self.speaker.rawValue)] active transcription timed out "
                  + "after \(timeout)s (item \(itemID)); \(recovery)")
@@ -408,15 +489,20 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
 
     private func shouldResumeDeferredTurnLocked() -> Bool {
         pending.shouldResumeAfterPendingTranscriptionsSettle(
-            hasPendingTranscriptions: ledger.hasPendingItems || reconnectRecovery.blocksCoaching)
+            hasPendingTranscriptions: hasPendingWorkLocked)
     }
 
     /// The retry gate represents an unsettled utterance, not only the VAD interval. Deliver while
     /// holding `lock` so concurrent socket and timeout callbacks cannot reorder state transitions.
     private func emitSpeechActivityChangeLocked() {
-        let active = ledger.hasPendingItems || reconnectRecovery.blocksCoaching
+        let active = hasPendingWorkLocked
         guard active != reportedSpeechActive else { return }
         reportedSpeechActive = active
         onSpeechActivityChanged(active)
+    }
+
+    private var hasPendingWorkLocked: Bool {
+        ledger.hasPendingItems || reconnectRecovery.blocksCoaching
+            || localSpeechActive || unboundLocalTurnCount > 0
     }
 }

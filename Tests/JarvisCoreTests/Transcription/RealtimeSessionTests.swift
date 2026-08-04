@@ -121,6 +121,17 @@ import Testing
         #expect((((input["turn_detection"] as! [String: Any])["silence_duration_ms"]) as? Int) == 700)
     }
 
+    @Test func gptLiveDisablesUnsupportedServerTurnDetection() throws {
+        let payload = RealtimeSession.sessionUpdate(
+            model: .gptLiveTranscribe,
+            silenceDurationMs: 700)
+        let data = try JSONSerialization.data(withJSONObject: payload)
+        let obj = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        let input = (((obj["session"] as! [String: Any])["audio"] as! [String: Any])["input"]
+                     as! [String: Any])
+        #expect(input["turn_detection"] is NSNull)
+    }
+
     /// Layer 1 (pre-VAD): noise reduction is sent as an OBJECT `{"type": "near_field"}` nested under
     /// `audio.input` (GA shape — a string here is the documented LiveKit bug the server rejects). It
     /// filters the buffer before VAD, cutting the non-speech blips that trigger phantom transcripts.
@@ -216,6 +227,12 @@ import Testing
         #expect(ev["audio"] as? String == "AAAA")
     }
 
+    @Test func commitAudioShape() {
+        let event = RealtimeSession.commitAudio(eventID: "commit-7")
+        #expect(event["type"] as? String == "input_audio_buffer.commit")
+        #expect(event["event_id"] as? String == "commit-7")
+    }
+
     @Test func configuredSessionEventRequiresUpdateAcknowledgement() {
         #expect(RealtimeSession.isConfiguredSessionEventType("session.updated"))
         #expect(RealtimeSession.isConfiguredSessionEventType("transcription_session.updated"))
@@ -264,6 +281,13 @@ import Testing
             "type": "error",
             "error": ["code": "insufficient_quota"],
         ]) == .quotaExceeded)
+        #expect(RealtimeSession.terminalTranscriptionFailure(from: [
+            "type": "error",
+            "error": [
+                "code": "invalid_value",
+                "param": "session.audio.input.turn_detection",
+            ],
+        ]) == .configurationRejected)
     }
 
     @Test func terminalTranscriptionFailureLeavesUtteranceAndTransientErrorsRecoverable() {
@@ -283,6 +307,10 @@ import Testing
         ]) == nil)
         #expect(RealtimeSession.terminalTranscriptionFailure(from: [
             "type": RealtimeSession.failedTranscriptionType,
+        ]) == nil)
+        #expect(RealtimeSession.terminalTranscriptionFailure(from: [
+            "type": "error",
+            "error": ["code": "invalid_value", "param": "item.audio"],
         ]) == nil)
     }
 }

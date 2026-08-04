@@ -2,21 +2,26 @@ import Foundation
 import JarvisCore
 
 /// Client for the OpenAI GA Realtime API used as a **transcription session**. Streams PCM16 audio,
-/// configures server-VAD turn detection, and parses transcription + speech events — adding lines to
-/// the RollingTranscript and firing turn/silence events.
+/// configures model-compatible turn detection, and parses transcription + speech events — adding
+/// lines to the RollingTranscript and firing turn/silence events.
 ///
 /// The wire contract (connect URL with `?intent=transcription`, the `session.update` payload, the
-/// audio-append event) is built by the pure, unit-tested `RealtimeSession` in JarvisCore. The
-/// Both selectable transcription models use `server_vad`, so the server auto-commits the audio
-/// buffer per utterance and emits `…transcription.completed` — no manual
-/// `input_audio_buffer.commit` is required. Provisional GPT Live deltas remain lifecycle-only;
-/// finalized text is still the sole input to Activity and the coaching model.
+/// audio-append/commit events) is built by the pure, unit-tested `RealtimeSession` in JarvisCore.
+/// GPT-4o uses server VAD. GPT Live disables unsupported server turn detection and commits boundaries
+/// supplied by capture-side WebRTC VAD, after the ordered FIFO has sent every matching audio chunk.
+/// Provisional deltas remain lifecycle-only; finalized text is still the sole input to Activity and
+/// the coaching model.
 ///
 /// Robustness: waits for the server's configuration acknowledgement before reporting ready, probes
 /// ready sockets with ping/pong, and reconnects with capped exponential backoff on every detected
 /// send, receive, close, startup-timeout, or liveness failure.
 final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSocketDelegate,
     @unchecked Sendable {
+    private enum OutboundAction {
+        case audio(PCMBuffer.Claim, URLSessionWebSocketTask, Int)
+        case commit(RealtimeManualTurnCoordinator.Turn, URLSessionWebSocketTask, Int)
+    }
+
     var onTurnEnd: (@Sendable () -> Void)?
     var onSilence: (@Sendable (TimeInterval) -> Void)?
     var onSpeechActivityChanged: (@Sendable (Bool) -> Void)?
@@ -59,6 +64,9 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
     private var transcriptionLifecycle: RealtimeTranscriptionLifecycle!
     private let continuityReporter: RealtimeContinuityReporter
     private let audioBuffer: PCMBuffer        // mic audio captured while the socket is down
+    /// Present only for GPT Live. Mutated under `lock` so commit ordering is atomic with FIFO/socket
+    /// state; the value itself remains Foundation-only and unit-tested in Core.
+    private var manualTurnCoordinator: RealtimeManualTurnCoordinator?
     private var reconnectAttempt = 0
     private var isReconnecting = false
     private var stopped = false
@@ -113,6 +121,9 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         // PCM16 mono at the realtime sample rate → 2 bytes/sample.
         let bytesPerSecond = RealtimeSession.sampleRate * 2
         self.audioBuffer = PCMBuffer(maxBytes: Int(maxBufferedAudioSeconds) * bytesPerSecond)
+        self.manualTurnCoordinator = model == .gptLiveTranscribe
+            ? RealtimeManualTurnCoordinator()
+            : nil
         self.continuityReporter = RealtimeContinuityReporter(
             speaker: speaker, clock: clock, sessionStart: sessionStart)
         super.init()
@@ -140,6 +151,7 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         stopped = false; reconnectAttempt = 0; isReconnecting = false; rotating = false
         terminalFailureReported = false
         pendingAudioTimelineOrigin = 0; activeAudioTimelineOrigin = 0
+        manualTurnCoordinator?.clear()
         lock.unlock()
         transcriptionLifecycle.start()
         emitState(.connecting)
@@ -198,6 +210,7 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         pendingPingGeneration = nil
         generation += 1                 // invalidate every callback retained by the old task
         audioBuffer.clear()             // atomic with `stopped`: no producer can append after this
+        manualTurnCoordinator?.clear()
         lock.unlock()
         // Timers must be invalidated on the thread that scheduled them (main); doing it synchronously
         // from an off-main Stop (e.g. the onTerminalFailure Task) would silently fail to cancel and
@@ -252,6 +265,27 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         pumpAudioIfReady()
     }
 
+    func recordLocalSpeechEvent(
+        _ event: LocalSpeechEvent,
+        throughSequenceNumber: UInt64
+    ) {
+        guard model == .gptLiveTranscribe else { return }
+        switch event {
+        case .started:
+            transcriptionLifecycle.recordLocalSpeechStarted()
+        case .ended(let startedAt, let commitAt):
+            transcriptionLifecycle.recordLocalSpeechEnded()
+            lock.lock()
+            guard !stopped else { lock.unlock(); return }
+            manualTurnCoordinator?.recordTurn(
+                startedAt: max(0, startedAt - sessionStart),
+                committedThroughAt: max(0, commitAt - sessionStart),
+                throughSequenceNumber: throughSequenceNumber)
+            lock.unlock()
+            pumpAudioIfReady()
+        }
+    }
+
     private func reportBufferEviction(_ evicted: [PCMBuffer.Chunk]) {
         guard !evicted.isEmpty else { return }
         transcriptionLifecycle.recordReplayCoverageLoss()
@@ -259,12 +293,48 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
     }
 
     private func pumpAudioIfReady() {
+        var action: OutboundAction?
+        var droppedTurns: [RealtimeManualTurnCoordinator.Turn] = []
         lock.lock()
-        guard let task, connected, !stopped, !isReconnecting,
-              let claim = audioBuffer.claimNext() else { lock.unlock(); return }
+        guard let task, connected, !stopped, !isReconnecting else {
+            lock.unlock(); return
+        }
         let socketGeneration = generation
+        if manualTurnCoordinator != nil {
+            if let nextSequence = audioBuffer.nextQueuedSequenceNumber {
+                droppedTurns = manualTurnCoordinator?.discardPendingTurns(
+                    before: nextSequence) ?? []
+            }
+            if let turn = manualTurnCoordinator?.takeReadyCommit() {
+                action = .commit(turn, task, socketGeneration)
+            } else if let nextSequence = audioBuffer.nextQueuedSequenceNumber,
+                      manualTurnCoordinator?.allowsSendingAudio(
+                        sequenceNumber: nextSequence) == true,
+                      let claim = audioBuffer.claimNext() {
+                action = .audio(claim, task, socketGeneration)
+            }
+        } else if let claim = audioBuffer.claimNext() {
+            action = .audio(claim, task, socketGeneration)
+        }
         lock.unlock()
-        sendAudioClaim(claim, task: task, socketGeneration: socketGeneration)
+        reportDroppedManualTurns(droppedTurns)
+        switch action {
+        case .audio(let claim, let task, let generation):
+            sendAudioClaim(claim, task: task, socketGeneration: generation)
+        case .commit(let turn, let task, let generation):
+            sendManualCommit(turn, task: task, socketGeneration: generation)
+        case nil:
+            break
+        }
+    }
+
+    private func reportDroppedManualTurns(_ turns: [RealtimeManualTurnCoordinator.Turn]) {
+        guard !turns.isEmpty else { return }
+        let unbound = turns.count(where: \.needsInitialItemBinding)
+        transcriptionLifecycle.discardUnboundLocalTurns(unbound)
+        transcriptionLifecycle.recordReplayCoverageLoss()
+        jlog("Jarvis realtime [\(speaker.rawValue)]: dropped \(turns.count) local turn "
+             + "boundary/boundaries outside retained replay audio")
     }
 
     @discardableResult
@@ -311,11 +381,45 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
             let isCurrentLease = self.task === task && self.generation == socketGeneration
                 && self.connected && !self.stopped && !self.isReconnecting
             let completion = isCurrentLease ? self.audioBuffer.completeSend(claim) : nil
+            if completion != nil {
+                self.manualTurnCoordinator?.recordAudioSent(sequenceNumber: sequence)
+            }
             self.lock.unlock()
             if let completion {
                 self.reportBufferEviction(completion.evicted)
                 self.pumpAudioIfReady()
             }
+        }
+    }
+
+    private func sendManualCommit(
+        _ turn: RealtimeManualTurnCoordinator.Turn,
+        task: URLSessionWebSocketTask,
+        socketGeneration: Int
+    ) {
+        let eventID = "jarvis-commit-\(socketGeneration)-\(turn.id)"
+        guard let data = try? JSONSerialization.data(
+            withJSONObject: RealtimeSession.commitAudio(eventID: eventID)),
+              let text = String(data: data, encoding: .utf8) else {
+            failConnection(task: task, generation: socketGeneration,
+                           diagnostic: "could not encode manual turn commit")
+            return
+        }
+        task.send(.string(text)) { [weak self, weak task] error in
+            guard let self, let task else { return }
+            if let error {
+                self.failConnection(task: task, generation: socketGeneration,
+                                    diagnostic: "manual commit send failed: \(error)")
+                return
+            }
+            self.lock.lock()
+            let isCurrentLease = self.task === task && self.generation == socketGeneration
+                && self.connected && !self.stopped && !self.isReconnecting
+            if isCurrentLease {
+                self.manualTurnCoordinator?.recordCommitSendCompleted(turnID: turn.id)
+            }
+            self.lock.unlock()
+            if isCurrentLease { self.pumpAudioIfReady() }
         }
     }
 
@@ -359,6 +463,46 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         }
 
         switch type {
+        case RealtimeSession.audioBufferCommittedType:
+            guard model == .gptLiveTranscribe,
+                  let itemID = obj["item_id"] as? String else {
+                jlog("Jarvis realtime [\(speaker.rawValue)]: malformed manual commit acknowledgement")
+                break
+            }
+            lock.lock()
+            let turn = manualTurnCoordinator?.acknowledgeCommittedItem(itemID: itemID)
+            lock.unlock()
+            guard let turn else {
+                jlog("Jarvis realtime [\(speaker.rawValue)]: unmatched manual commit acknowledgement "
+                     + "(item \(itemID))")
+                break
+            }
+            // GPT Live has no server VAD events. Its commit acknowledgement is the provider-side
+            // proof for the locally timed interval, so feed that content-free boundary into the same
+            // continuity matcher instead of generating false "no provider speech" anomalies.
+            continuityReporter.recordServerSpeech(
+                .speechStarted,
+                audioTimeMilliseconds: nil,
+                itemID: itemID,
+                sessionAudioTime: turn.startedAt,
+                socketGeneration: socketGeneration)
+            continuityReporter.recordServerSpeech(
+                .speechStopped,
+                audioTimeMilliseconds: nil,
+                itemID: itemID,
+                sessionAudioTime: turn.committedThroughAt,
+                socketGeneration: socketGeneration)
+            let recorded = transcriptionLifecycle.recordCommittedLocalTurn(
+                itemID: itemID,
+                startedAt: turn.startedAt,
+                committedThroughAt: turn.committedThroughAt,
+                consumesUnboundTurn: turn.needsInitialItemBinding,
+                socketGeneration: socketGeneration)
+            if recorded {
+                jlog("Jarvis realtime [\(speaker.rawValue)]: local turn committed "
+                     + "(item \(itemID), through sequence \(turn.throughSequenceNumber))")
+            }
+            pumpAudioIfReady()
         case RealtimeSession.speechStartedType:
             guard let itemID = obj["item_id"] as? String,
                   let audioStartMilliseconds = obj["audio_start_ms"] as? Int else {
@@ -402,6 +546,9 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
                 break
             }
             let transcriptText = obj["transcript"] as? String ?? ""
+            lock.lock()
+            manualTurnCoordinator?.recordItemFinished(itemID: itemID)
+            lock.unlock()
             continuityReporter.recordServerSpeech(.transcriptionCompleted,
                                    audioTimeMilliseconds: nil,
                                    itemID: itemID,
@@ -415,6 +562,9 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
             }
             let error = Self.transcriptionErrorDescription(from: obj)
             let terminalFailure = RealtimeSession.terminalTranscriptionFailure(from: obj)
+            lock.lock()
+            manualTurnCoordinator?.recordItemFinished(itemID: itemID)
+            lock.unlock()
             continuityReporter.recordServerSpeech(.transcriptionFailed,
                                    audioTimeMilliseconds: nil,
                                    itemID: itemID,
@@ -620,11 +770,14 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         // unconfirmed tail now, while producers are excluded by this lock, so audio sent during a
         // half-open interval precedes audio captured during reconnect backoff.
         let replay = audioBuffer.prepareForReconnect()
+        let droppedManualTurns = manualTurnCoordinator?.prepareForReconnect(
+            oldestAvailableSequenceNumber: replay.oldestSequenceNumber) ?? []
         pendingAudioTimelineOrigin = replay.oldestCapturedAt ?? failureAt
         lock.unlock()
 
         let interruptedItems = transcriptionLifecycle.beginReconnectRecovery(
             replayAvailable: audioBuffer.bufferedChunkCount > 0)
+        reportDroppedManualTurns(droppedManualTurns)
         reportBufferEviction(replay.evicted)
         // Old-socket deltas are now held by the reconnect recovery gate. They remain a fallback if
         // every handshake fails or bounded replay loses coverage, without keeping stale item IDs in
