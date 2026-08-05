@@ -37,6 +37,10 @@ enum TranscriptionSessionFactory {
                 pongTimeout: config.realtimePongTimeoutSeconds,
                 networkStatus: networkStatus)
         case .appleSpeech:
+            // Reaching here means preparation already succeeded, which only happens on the macOS 26
+            // SDK path. On older SDKs `AppleSpeechModelPreparation.prepare` reports the provider
+            // unavailable, so the start is rejected before construction and this case is unreachable.
+            #if compiler(>=6.2) && canImport(FoundationModels) && canImport(Speech) && !JARVIS_FORCE_APPLE_SPEECH_FALLBACK
             if #available(macOS 26.0, *), let appleSpeechLocale {
                 AppleSpeechTranscriber(
                     locale: appleSpeechLocale,
@@ -53,6 +57,9 @@ enum TranscriptionSessionFactory {
             } else {
                 preconditionFailure("Apple Speech must be prepared before constructing its session")
             }
+            #else
+            preconditionFailure("Apple Speech is unavailable in this build")
+            #endif
         }
     }
 }

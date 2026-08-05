@@ -1,6 +1,8 @@
 import AppKit
 import JarvisCore
+#if compiler(>=6.2) && canImport(FoundationModels) && canImport(Speech) && !JARVIS_FORCE_APPLE_SPEECH_FALLBACK
 @preconcurrency import Speech
+#endif
 
 /// Transcription-provider and OpenAI credential editor for Brain Settings.
 ///
@@ -379,10 +381,9 @@ final class APIKeyControls: NSObject {
 
     private func loadAppleSpeechLocales() {
         localeLoadTask?.cancel()
+        #if compiler(>=6.2) && canImport(FoundationModels) && canImport(Speech) && !JARVIS_FORCE_APPLE_SPEECH_FALLBACK
         guard #available(macOS 26.0, *), SpeechTranscriber.isAvailable else {
-            localePopup?.removeAllItems()
-            localePopup?.addItem(withTitle: "Unavailable")
-            localePopup?.isEnabled = false
+            markLocalesUnavailable()
             return
         }
 
@@ -400,6 +401,16 @@ final class APIKeyControls: NSObject {
                 locales,
                 selectedIdentifier: equivalent?.identifier)
         }
+        #else
+        // Older SDK: the Speech APIs aren't compiled, so locale discovery is unavailable.
+        markLocalesUnavailable()
+        #endif
+    }
+
+    private func markLocalesUnavailable() {
+        localePopup?.removeAllItems()
+        localePopup?.addItem(withTitle: "Unavailable")
+        localePopup?.isEnabled = false
     }
 
     private func populateAppleSpeechLocales(
@@ -456,9 +467,11 @@ final class APIKeyControls: NSObject {
     }
 
     private static var appleSpeechIsAvailable: Bool {
+        #if compiler(>=6.2) && canImport(FoundationModels) && canImport(Speech) && !JARVIS_FORCE_APPLE_SPEECH_FALLBACK
         if #available(macOS 26.0, *) {
             return SpeechTranscriber.isAvailable
         }
+        #endif
         return false
     }
 }
