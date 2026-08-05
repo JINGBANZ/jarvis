@@ -21,4 +21,9 @@ public struct TranscriptionConfiguration: Equatable, Sendable {
         self.openAILanguageProfile = openAILanguageProfile
         self.appleSpeechLocaleIdentifier = appleSpeechLocaleIdentifier
     }
+
+    /// Apple owns result segmentation internally; OpenAI exposes an explicit turn strategy.
+    public var turnDetectionStrategy: TranscriptionTurnDetectionStrategy? {
+        provider == .openAI ? openAIModel.turnDetectionStrategy : nil
+    }
 }

@@ -744,8 +744,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // socket, with AEC3 run inside its IOProc. If the device can't be built, the whole capture is
         // gone, so treat it as a full (mic-side) terminal failure.
         let localTurnDetectionSilenceDuration: TimeInterval? =
-            transcriptionConfiguration.provider == .openAI
-                && transcriptionConfiguration.openAIModel == .gptLiveTranscribe
+            transcriptionConfiguration.turnDetectionStrategy == .clientCommit
             ? TimeInterval(config.vadSilenceDurationMs) / 1_000
             : nil
         let capture = AggregateEchoCapture(

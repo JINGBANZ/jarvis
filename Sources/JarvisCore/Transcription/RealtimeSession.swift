@@ -4,8 +4,6 @@ import Foundation
 /// WebSocket client so the wire contract is unit-testable (the live socket is not). Verified
 /// against the realtime-transcription guide (2026-08).
 public enum RealtimeSession {
-    public static let sampleRate = 24_000
-
     /// A transcription-only session is selected at connect time via `?intent=transcription`
     /// (`?model=` is the speech-to-speech form). No `OpenAI-Beta` header in GA.
     public static func connectURL() -> URL {
@@ -47,18 +45,21 @@ public enum RealtimeSession {
         }
 
         let turnDetection: Any
-        switch model {
-        case .gpt4oTranscribe:
+        switch model.turnDetectionStrategy {
+        case .serverVAD:
             turnDetection = [
                 "type": "server_vad",
                 "silence_duration_ms": silenceDurationMs,
             ]
-        case .gptLiveTranscribe:
+        case .clientCommit:
             turnDetection = NSNull()
         }
 
         var input: [String: Any] = [
-            "format": ["type": "audio/pcm", "rate": sampleRate],
+            "format": [
+                "type": "audio/pcm",
+                "rate": TranscriptionAudioFormat.pcm16Mono.sampleRate,
+            ],
             "transcription": transcription,
             "turn_detection": turnDetection,
         ]

@@ -118,10 +118,9 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         self.pingInterval = pingInterval
         self.pongTimeout = pongTimeout
         self.networkStatus = networkStatus
-        // PCM16 mono at the realtime sample rate → 2 bytes/sample.
-        let bytesPerSecond = RealtimeSession.sampleRate * 2
-        self.audioBuffer = PCMBuffer(maxBytes: Int(maxBufferedAudioSeconds) * bytesPerSecond)
-        self.manualTurnCoordinator = model == .gptLiveTranscribe
+        self.audioBuffer = PCMBuffer(maxBytes: TranscriptionAudioFormat.pcm16Mono.byteCount(
+            forDuration: maxBufferedAudioSeconds))
+        self.manualTurnCoordinator = model.turnDetectionStrategy == .clientCommit
             ? RealtimeManualTurnCoordinator()
             : nil
         self.continuityReporter = RealtimeContinuityReporter(
@@ -253,7 +252,7 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         // server audio-clock progress can retire that prefix safely.
         let observedAt = clock.now() - sessionStart
         let sessionRelativeCaptureAt = capturedAt - sessionStart
-        let duration = TimeInterval(pcm.count) / TimeInterval(RealtimeSession.sampleRate * 2)
+        let duration = TranscriptionAudioFormat.pcm16Mono.duration(forByteCount: pcm.count)
         lock.lock()
         guard !stopped else { lock.unlock(); return }
         let evicted = audioBuffer.append(pcm, sequenceNumber: sequenceNumber,
@@ -269,7 +268,7 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         _ event: LocalSpeechEvent,
         throughSequenceNumber: UInt64
     ) {
-        guard model == .gptLiveTranscribe else { return }
+        guard model.turnDetectionStrategy == .clientCommit else { return }
         switch event {
         case .started:
             transcriptionLifecycle.recordLocalSpeechStarted()
@@ -464,7 +463,7 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
 
         switch type {
         case RealtimeSession.audioBufferCommittedType:
-            guard model == .gptLiveTranscribe,
+            guard model.turnDetectionStrategy == .clientCommit,
                   let itemID = obj["item_id"] as? String else {
                 jlog("Jarvis realtime [\(speaker.rawValue)]: malformed manual commit acknowledgement")
                 break

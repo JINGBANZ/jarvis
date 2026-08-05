@@ -45,8 +45,12 @@ final class AggregateEchoCapture: @unchecked Sendable {
     private var procID: AudioDeviceIOProcID?
 
     private let aec = WebRTCEchoCanceller()          // adaptive; re-converges across route rebuilds
-    private let micDown = Resampler(fromHz: 48_000, toHz: 24_000)   // cleaned mic → 24 kHz wire
-    private let sysDown = Resampler(fromHz: 48_000, toHz: 24_000)   // tap → 24 kHz wire
+    private let micDown = Resampler(
+        fromHz: 48_000,
+        toHz: Double(TranscriptionAudioFormat.pcm16Mono.sampleRate))
+    private let sysDown = Resampler(
+        fromHz: 48_000,
+        toHz: Double(TranscriptionAudioFormat.pcm16Mono.sampleRate))
     private let usesLocalTurnDetection: Bool
     private let micVoiceActivityDetector: WebRTCVoiceActivityDetector?
     private let systemVoiceActivityDetector: WebRTCVoiceActivityDetector?
@@ -369,7 +373,8 @@ final class AggregateEchoCapture: @unchecked Sendable {
                 onMicCaptured(micChunk.sequence, micChunk.sampleCount, micChunk.capturedAt)
                 onMicClean(micChunk.data, micChunk.sequence, micChunk.capturedAt)
                 let commitAt = micChunk.capturedAt
-                    + TimeInterval(micChunk.sampleCount) / TimeInterval(RealtimeSession.sampleRate)
+                    + TimeInterval(micChunk.sampleCount)
+                        / TimeInterval(TranscriptionAudioFormat.pcm16Mono.sampleRate)
                 for event in Self.committing(events: micSpeechEvents, through: commitAt) {
                     onMicSpeechEvent(event, micChunk.sequence)
                 }
@@ -378,7 +383,8 @@ final class AggregateEchoCapture: @unchecked Sendable {
                 onSystemCaptured(systemChunk.sequence, systemChunk.sampleCount, systemChunk.capturedAt)
                 onSystem(systemChunk.data, systemChunk.sequence, systemChunk.capturedAt)
                 let commitAt = systemChunk.capturedAt
-                    + TimeInterval(systemChunk.sampleCount) / TimeInterval(RealtimeSession.sampleRate)
+                    + TimeInterval(systemChunk.sampleCount)
+                        / TimeInterval(TranscriptionAudioFormat.pcm16Mono.sampleRate)
                 for event in Self.committing(events: systemSpeechEvents, through: commitAt) {
                     onSystemSpeechEvent(event, systemChunk.sequence)
                 }

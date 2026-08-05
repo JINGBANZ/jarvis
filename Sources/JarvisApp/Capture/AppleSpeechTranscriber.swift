@@ -87,8 +87,8 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
         let sessionStart = clock.now()
         self.sessionStart = sessionStart
         self.turnDebounce = turnDebounce
-        maximumBufferedBytes = Int(maxBufferedAudioSeconds)
-            * RealtimeSession.sampleRate * MemoryLayout<Int16>.size
+        maximumBufferedBytes = TranscriptionAudioFormat.pcm16Mono.byteCount(
+            forDuration: maxBufferedAudioSeconds)
         continuityReporter = RealtimeContinuityReporter(
             speaker: speaker,
             clock: clock,
@@ -616,8 +616,8 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
     private static var inputFormat: AVAudioFormat? {
         AVAudioFormat(
             commonFormat: .pcmFormatInt16,
-            sampleRate: Double(RealtimeSession.sampleRate),
-            channels: 1,
+            sampleRate: Double(TranscriptionAudioFormat.pcm16Mono.sampleRate),
+            channels: AVAudioChannelCount(TranscriptionAudioFormat.pcm16Mono.channelCount),
             interleaved: true)
     }
 }

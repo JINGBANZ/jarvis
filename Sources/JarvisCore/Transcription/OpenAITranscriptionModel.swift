@@ -16,4 +16,14 @@ public enum OpenAITranscriptionModel: String, CaseIterable, Codable, Sendable {
             "GPT Live Transcribe"
         }
     }
+
+    /// One capability source consumed by session configuration, capture, and commit coordination.
+    public var turnDetectionStrategy: TranscriptionTurnDetectionStrategy {
+        switch self {
+        case .gpt4oTranscribe:
+            .serverVAD
+        case .gptLiveTranscribe:
+            .clientCommit
+        }
+    }
 }

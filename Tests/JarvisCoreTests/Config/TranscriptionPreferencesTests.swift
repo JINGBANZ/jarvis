@@ -62,6 +62,24 @@ import Testing
                 == "GPT Live Transcribe")
         #expect(OpenAITranscriptionLanguageProfile.englishAndMandarinChinese.displayName
                 == "English + Mandarin Chinese")
+        #expect(OpenAITranscriptionModel.gpt4oTranscribe.turnDetectionStrategy == .serverVAD)
+        #expect(OpenAITranscriptionModel.gptLiveTranscribe.turnDetectionStrategy == .clientCommit)
+    }
+
+    @Test func turnStrategyAppliesOnlyToOpenAIConfiguration() {
+        let openAI = TranscriptionConfiguration(
+            provider: .openAI,
+            openAIModel: .gptLiveTranscribe,
+            openAILanguageProfile: .automatic,
+            appleSpeechLocaleIdentifier: "en-US")
+        let apple = TranscriptionConfiguration(
+            provider: .appleSpeech,
+            openAIModel: .gptLiveTranscribe,
+            openAILanguageProfile: .automatic,
+            appleSpeechLocaleIdentifier: "en-US")
+
+        #expect(openAI.turnDetectionStrategy == .clientCommit)
+        #expect(apple.turnDetectionStrategy == nil)
     }
 
     @Test func openAIKeyRequirementCombinesTranscriptionAndBrainRoute() {
