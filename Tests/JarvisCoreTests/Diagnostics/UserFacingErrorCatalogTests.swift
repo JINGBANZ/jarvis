@@ -16,7 +16,20 @@ import Testing
     @Test func noAPIKeyIsFatal() {
         #expect(UserFacingError.noAPIKey.severity == .fatal)
         #expect(UserFacingError.noAPIKey.severity.showsAlert)
+        #expect(UserFacingError.noAPIKey.message.contains("transcription provider or brain route"))
         #expect(UserFacingError.noAPIKey.sessionEndReason == .openAIAPIKeyMissing)
+    }
+
+    @Test func appleSpeechPreflightFailuresAlertWithoutStopping() {
+        for error in [
+            UserFacingError.appleSpeechUnavailable,
+            UserFacingError.appleSpeechPreparationFailed,
+        ] {
+            #expect(error.severity == .warning)
+            #expect(error.severity.showsAlert)
+            #expect(!error.severity.stopsSession)
+            #expect(error.sessionEndReason == nil)
+        }
     }
 
     @Test func captureFailedIsFatalAndCarriesReason() {

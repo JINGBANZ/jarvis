@@ -92,7 +92,7 @@ import Testing
     }
 
     @Test func sessionUpdateShape() throws {
-        let payload = RealtimeSession.sessionUpdate(model: "gpt-4o-transcribe")
+        let payload = RealtimeSession.sessionUpdate(model: .gpt4oTranscribe)
         let data = try JSONSerialization.data(withJSONObject: payload)
         let obj = try JSONSerialization.jsonObject(with: data) as! [String: Any]
         #expect(obj["type"] as? String == "session.update")
@@ -100,7 +100,10 @@ import Testing
         #expect(session["type"] as? String == "transcription")
         let input = (session["audio"] as! [String: Any])["input"] as! [String: Any]
         #expect(((input["format"] as! [String: Any])["rate"] as? Int) == 24_000)
-        #expect(((input["transcription"] as! [String: Any])["model"] as? String) == "gpt-4o-transcribe")
+        let transcription = input["transcription"] as! [String: Any]
+        #expect(transcription["model"] as? String == "gpt-4o-transcribe")
+        #expect(transcription["language"] == nil)
+        #expect(transcription["languages"] == nil)
         let td = input["turn_detection"] as! [String: Any]
         #expect((td["type"] as? String) == "server_vad")
         // Tuned: a longer silence window so a mid-thought pause doesn't end the turn mid-sentence.
@@ -109,18 +112,31 @@ import Testing
 
     /// The silence window is configurable (so it can be tuned per mic/acoustics).
     @Test func sessionUpdateHonorsConfiguredSilenceWindow() throws {
-        let payload = RealtimeSession.sessionUpdate(model: "gpt-4o-transcribe", silenceDurationMs: 700)
+        let payload = RealtimeSession.sessionUpdate(
+            model: .gpt4oTranscribe,
+            silenceDurationMs: 700)
         let data = try JSONSerialization.data(withJSONObject: payload)
         let obj = try JSONSerialization.jsonObject(with: data) as! [String: Any]
         let input = (((obj["session"] as! [String: Any])["audio"] as! [String: Any])["input"] as! [String: Any])
         #expect((((input["turn_detection"] as! [String: Any])["silence_duration_ms"]) as? Int) == 700)
     }
 
+    @Test func gptLiveDisablesUnsupportedServerTurnDetection() throws {
+        let payload = RealtimeSession.sessionUpdate(
+            model: .gptLiveTranscribe,
+            silenceDurationMs: 700)
+        let data = try JSONSerialization.data(withJSONObject: payload)
+        let obj = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        let input = (((obj["session"] as! [String: Any])["audio"] as! [String: Any])["input"]
+                     as! [String: Any])
+        #expect(input["turn_detection"] is NSNull)
+    }
+
     /// Layer 1 (pre-VAD): noise reduction is sent as an OBJECT `{"type": "near_field"}` nested under
     /// `audio.input` (GA shape — a string here is the documented LiveKit bug the server rejects). It
     /// filters the buffer before VAD, cutting the non-speech blips that trigger phantom transcripts.
     @Test func sessionUpdateIncludesNoiseReductionNearFieldByDefault() throws {
-        let payload = RealtimeSession.sessionUpdate(model: "gpt-4o-transcribe")
+        let payload = RealtimeSession.sessionUpdate(model: .gpt4oTranscribe)
         let data = try JSONSerialization.data(withJSONObject: payload)
         let obj = try JSONSerialization.jsonObject(with: data) as! [String: Any]
         let input = (((obj["session"] as! [String: Any])["audio"] as! [String: Any])["input"] as! [String: Any])
@@ -136,16 +152,85 @@ import Testing
                 with: try JSONSerialization.data(withJSONObject: payload)) as! [String: Any]
             return (((obj["session"] as! [String: Any])["audio"] as! [String: Any])["input"] as! [String: Any])
         }
-        let far = try input(RealtimeSession.sessionUpdate(model: "m", noiseReduction: "far_field"))
+        let far = try input(RealtimeSession.sessionUpdate(
+            model: .gpt4oTranscribe,
+            noiseReduction: "far_field"))
         #expect((far["noise_reduction"] as? [String: Any])?["type"] as? String == "far_field")
-        let off = try input(RealtimeSession.sessionUpdate(model: "m", noiseReduction: nil))
+        let off = try input(RealtimeSession.sessionUpdate(
+            model: .gpt4oTranscribe,
+            noiseReduction: nil))
         #expect(off["noise_reduction"] == nil)
+    }
+
+    @Test func languageProfilesUseEachModelsSupportedWireField() throws {
+        func transcription(
+            model: OpenAITranscriptionModel,
+            profile: OpenAITranscriptionLanguageProfile
+        ) throws -> [String: Any] {
+            let payload = RealtimeSession.sessionUpdate(
+                model: model,
+                languageProfile: profile)
+            let data = try JSONSerialization.data(withJSONObject: payload)
+            let object = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+            let session = object["session"] as! [String: Any]
+            let audio = session["audio"] as! [String: Any]
+            let input = audio["input"] as! [String: Any]
+            return input["transcription"] as! [String: Any]
+        }
+
+        let gpt4oEnglish = try transcription(
+            model: .gpt4oTranscribe,
+            profile: .english)
+        #expect(gpt4oEnglish["language"] as? String == "en")
+        #expect(gpt4oEnglish["languages"] == nil)
+
+        let gpt4oMandarin = try transcription(
+            model: .gpt4oTranscribe,
+            profile: .mandarinChinese)
+        #expect(gpt4oMandarin["language"] as? String == "zh")
+        #expect(gpt4oMandarin["languages"] == nil)
+
+        let gpt4oMixed = try transcription(
+            model: .gpt4oTranscribe,
+            profile: .englishAndMandarinChinese)
+        #expect(gpt4oMixed["language"] == nil)
+        #expect(gpt4oMixed["languages"] == nil)
+
+        let liveEnglish = try transcription(
+            model: .gptLiveTranscribe,
+            profile: .english)
+        #expect(liveEnglish["language"] == nil)
+        #expect(liveEnglish["languages"] as? [String] == ["en"])
+
+        let liveMandarin = try transcription(
+            model: .gptLiveTranscribe,
+            profile: .mandarinChinese)
+        #expect(liveMandarin["language"] == nil)
+        #expect(liveMandarin["languages"] as? [String] == ["zh-cn"])
+
+        let liveMixed = try transcription(
+            model: .gptLiveTranscribe,
+            profile: .englishAndMandarinChinese)
+        #expect(liveMixed["language"] == nil)
+        #expect(liveMixed["languages"] as? [String] == ["en", "zh-cn"])
+
+        let liveAutomatic = try transcription(
+            model: .gptLiveTranscribe,
+            profile: .automatic)
+        #expect(liveAutomatic["language"] == nil)
+        #expect(liveAutomatic["languages"] == nil)
     }
 
     @Test func appendAudioShape() {
         let ev = RealtimeSession.appendAudio(base64PCM: "AAAA")
         #expect(ev["type"] as? String == "input_audio_buffer.append")
         #expect(ev["audio"] as? String == "AAAA")
+    }
+
+    @Test func commitAudioShape() {
+        let event = RealtimeSession.commitAudio(eventID: "commit-7")
+        #expect(event["type"] as? String == "input_audio_buffer.commit")
+        #expect(event["event_id"] as? String == "commit-7")
     }
 
     @Test func configuredSessionEventRequiresUpdateAcknowledgement() {
@@ -196,6 +281,13 @@ import Testing
             "type": "error",
             "error": ["code": "insufficient_quota"],
         ]) == .quotaExceeded)
+        #expect(RealtimeSession.terminalTranscriptionFailure(from: [
+            "type": "error",
+            "error": [
+                "code": "invalid_value",
+                "param": "session.audio.input.turn_detection",
+            ],
+        ]) == .configurationRejected)
     }
 
     @Test func terminalTranscriptionFailureLeavesUtteranceAndTransientErrorsRecoverable() {
@@ -215,6 +307,10 @@ import Testing
         ]) == nil)
         #expect(RealtimeSession.terminalTranscriptionFailure(from: [
             "type": RealtimeSession.failedTranscriptionType,
+        ]) == nil)
+        #expect(RealtimeSession.terminalTranscriptionFailure(from: [
+            "type": "error",
+            "error": ["code": "invalid_value", "param": "item.audio"],
         ]) == nil)
     }
 }

@@ -239,13 +239,14 @@ import Foundation
             .sessionEnded(reason: .transcriptionStopped(reason: .authenticationFailed)),
             .sessionEnded(reason: .transcriptionStopped(reason: .accessDenied)),
             .sessionEnded(reason: .transcriptionStopped(reason: .configurationRejected)),
+            .sessionEnded(reason: .transcriptionStopped(reason: .appleSpeechUnavailable)),
             .sessionEnded(reason: .audioCaptureUnavailable),
             .systemAudioStopped,
             .settingsChangeNotApplied,
         ]
         let messages = events.map { $0.rendered.message }
 
-        #expect(messages.count == 8)
+        #expect(messages.count == 9)
         #expect(messages[0].contains("session ended by error"))
         #expect(messages[0].contains("transcription connection was lost"))
         #expect(messages[1].contains("API quota is exhausted"))
@@ -253,9 +254,10 @@ import Foundation
         #expect(messages[2].contains("rejected the API key"))
         #expect(messages[3].contains("denied transcription access"))
         #expect(messages[4].contains("rejected the transcription configuration"))
-        #expect(messages[5].contains("audio capture became unavailable"))
-        #expect(messages[6].contains("microphone coaching continues"))
-        #expect(messages[7].contains("current coaching session continues"))
+        #expect(messages[5].contains("Apple Speech transcription became unavailable"))
+        #expect(messages[6].contains("audio capture became unavailable"))
+        #expect(messages[7].contains("microphone coaching continues"))
+        #expect(messages[8].contains("current coaching session continues"))
         for message in messages {
             #expect(!message.contains("OAuth"))
             #expect(!message.contains("AirPods"))

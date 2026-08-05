@@ -2,23 +2,30 @@ import Foundation
 import JarvisCore
 
 /// Client for the OpenAI GA Realtime API used as a **transcription session**. Streams PCM16 audio,
-/// configures server-VAD turn detection, and parses transcription + speech events — adding lines to
-/// the RollingTranscript and firing turn/silence events.
+/// configures model-compatible turn detection, and parses transcription + speech events. The shared
+/// Core coordinator publishes finalized lines and owns provider-neutral coaching triggers.
 ///
 /// The wire contract (connect URL with `?intent=transcription`, the `session.update` payload, the
-/// audio-append event) is built by the pure, unit-tested `RealtimeSession` in JarvisCore. The
-/// transcription model is `gpt-4o-transcribe`, which supports `server_vad` so the server
-/// auto-commits the audio buffer per utterance and emits `…transcription.completed` — no manual
-/// `input_audio_buffer.commit` is required.
+/// audio-append/commit events) is built by the pure, unit-tested `RealtimeSession` in JarvisCore.
+/// GPT-4o uses server VAD. GPT Live disables unsupported server turn detection and commits boundaries
+/// supplied by capture-side WebRTC VAD, after the ordered FIFO has sent every matching audio chunk.
+/// Provisional deltas remain lifecycle-only; finalized text is still the sole input to Activity and
+/// the coaching model.
 ///
 /// Robustness: waits for the server's configuration acknowledgement before reporting ready, probes
 /// ready sockets with ping/pong, and reconnects with capped exponential backoff on every detected
 /// send, receive, close, startup-timeout, or liveness failure.
-final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @unchecked Sendable {
+final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSocketDelegate,
+    @unchecked Sendable {
+    private enum OutboundAction {
+        case audio(PCMBuffer.Claim, URLSessionWebSocketTask, Int)
+        case commit(RealtimeManualTurnCoordinator.Turn, URLSessionWebSocketTask, Int)
+    }
+
     var onTurnEnd: (@Sendable () -> Void)?
     var onSilence: (@Sendable (TimeInterval) -> Void)?
     var onSpeechActivityChanged: (@Sendable (Bool) -> Void)?
-    var onConnectionStateChange: (@Sendable (RealtimeConnectionState) -> Void)?
+    var onConnectionStateChange: (@Sendable (TranscriptionConnectionState) -> Void)?
     /// Fired when transcription becomes unusable, either from an unrecoverable provider rejection or
     /// after reconnection is abandoned, so the app can stop instead of lying green.
     var onTerminalFailure: (@Sendable (TranscriptionFailureReason) -> Void)?
@@ -26,11 +33,11 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
     private let reconnectSchedule = RetrySchedule(
         maximumRetries: 6, initialDelay: 1, maximumDelay: 30)
     private var apiKey: String
-    private let model: String
+    private let model: OpenAITranscriptionModel
+    private let languageProfile: OpenAITranscriptionLanguageProfile
     /// Who this socket is transcribing: `.me` (mic) or `.them` (system audio). Two transcribers run
     /// in parallel — one per side — feeding the same `RollingTranscript`, so the coach sees both.
     private let speaker: Speaker
-    private let transcript: RollingTranscript
     private let clock: Clock
     private let sessionStart: TimeInterval
     private let silenceDurationMs: Int
@@ -43,19 +50,16 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
     private let lock = NSLock()
     private var session: URLSession?     // retained so stop() can invalidate it (URLSession holds its delegate)
     private var task: URLSessionWebSocketTask?
-    private var silenceTimer: Timer?
-    /// Backs off the proactive silence-check interval across a long quiet stretch. Mutated only on
-    /// the main queue (where the silence timer is scheduled and fires), so it needs no extra lock.
-    private var silenceBackoff: SilenceBackoff
-    /// Whether the idle-cutoff pause has been logged for the current quiet stretch (log it once, not
-    /// on every dormant re-check). Main-queue only, like `silenceBackoff`.
-    private var silencePausedLogged = false
     private var pingTimer: Timer?
     private var readyTimer: Timer?
     private var pongTimer: Timer?
+    private var coachingCoordinator: TranscriptionCoachingCoordinator!
     private var transcriptionLifecycle: RealtimeTranscriptionLifecycle!
     private let continuityReporter: RealtimeContinuityReporter
     private let audioBuffer: PCMBuffer        // mic audio captured while the socket is down
+    /// Present only for GPT Live. Mutated under `lock` so commit ordering is atomic with FIFO/socket
+    /// state; the value itself remains Foundation-only and unit-tested in Core.
+    private var manualTurnCoordinator: RealtimeManualTurnCoordinator?
     private var reconnectAttempt = 0
     private var isReconnecting = false
     private var stopped = false
@@ -70,40 +74,67 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
     private var pendingAudioTimelineOrigin: TimeInterval = 0
     private var activeAudioTimelineOrigin: TimeInterval = 0
 
-    init(apiKey: String, model: String, speaker: Speaker = .me, transcript: RollingTranscript, clock: Clock,
-         silenceTimeout: TimeInterval, silenceMaxInterval: TimeInterval,
-         silenceIdleCutoff: TimeInterval = .infinity,
-         silenceDurationMs: Int = 1000, noiseReduction: NoiseReductionMode = .auto,
-         turnDebounce: TimeInterval = 0.4, transcriptionTerminalTimeout: TimeInterval = 8,
-         transcriptionActiveTimeout: TimeInterval = 180,
-         maxBufferedAudioSeconds: TimeInterval = 60,
-         readyTimeout: TimeInterval = 10, pingInterval: TimeInterval = 20,
-         pongTimeout: TimeInterval = 10,
-         networkStatus: @escaping @Sendable () -> String = { "unavailable" }) {
+    init(
+        apiKey: String,
+        model: OpenAITranscriptionModel,
+        languageProfile: OpenAITranscriptionLanguageProfile,
+        speaker: Speaker = .me,
+        transcript: RollingTranscript,
+        clock: Clock,
+        silenceTimeout: TimeInterval,
+        silenceMaxInterval: TimeInterval,
+        silenceIdleCutoff: TimeInterval = .infinity,
+        silenceDurationMs: Int = 1000,
+        noiseReduction: NoiseReductionMode = .auto,
+        turnDebounce: TimeInterval = 0.4,
+        transcriptionTerminalTimeout: TimeInterval = 8,
+        transcriptionActiveTimeout: TimeInterval = 180,
+        maxBufferedAudioSeconds: TimeInterval = 60,
+        readyTimeout: TimeInterval = 10,
+        pingInterval: TimeInterval = 20,
+        pongTimeout: TimeInterval = 10,
+        networkStatus: @escaping @Sendable () -> String = { "unavailable" }
+    ) {
         self.apiKey = apiKey
         self.model = model
+        self.languageProfile = languageProfile
         self.speaker = speaker
-        self.transcript = transcript
         self.clock = clock
         let sessionStart = clock.now()
         self.sessionStart = sessionStart
-        self.silenceBackoff = SilenceBackoff(base: silenceTimeout, maxInterval: silenceMaxInterval,
-                                             idleCutoff: silenceIdleCutoff)
         self.silenceDurationMs = silenceDurationMs
         self.noiseReduction = noiseReduction
         self.readyTimeout = readyTimeout
         self.pingInterval = pingInterval
         self.pongTimeout = pongTimeout
         self.networkStatus = networkStatus
-        // PCM16 mono at the realtime sample rate → 2 bytes/sample.
-        let bytesPerSecond = RealtimeSession.sampleRate * 2
-        self.audioBuffer = PCMBuffer(maxBytes: Int(maxBufferedAudioSeconds) * bytesPerSecond)
+        self.audioBuffer = PCMBuffer(maxBytes: TranscriptionAudioFormat.pcm16Mono.byteCount(
+            forDuration: maxBufferedAudioSeconds))
+        self.manualTurnCoordinator = model.turnDetectionStrategy == .clientCommit
+            ? RealtimeManualTurnCoordinator()
+            : nil
         self.continuityReporter = RealtimeContinuityReporter(
             speaker: speaker, clock: clock, sessionStart: sessionStart)
         super.init()
+        self.coachingCoordinator = TranscriptionCoachingCoordinator(
+            speaker: speaker,
+            transcript: transcript,
+            clock: clock,
+            sessionStart: sessionStart,
+            turnDebounce: turnDebounce,
+            silenceTimeout: silenceTimeout,
+            silenceMaxInterval: silenceMaxInterval,
+            silenceIdleCutoff: silenceIdleCutoff,
+            silenceEnabled: speaker == .me,
+            onTurnEnd: { [weak self] in self?.onTurnEnd?() },
+            onSilence: { [weak self] quiet in self?.onSilence?(quiet) },
+            onSpeechActivityChanged: { [weak self] active in
+                self?.onSpeechActivityChanged?(active)
+            })
         self.transcriptionLifecycle = RealtimeTranscriptionLifecycle(
-            speaker: speaker, transcript: transcript, clock: clock, sessionStart: sessionStart,
-            turnDebounce: turnDebounce, terminalTimeout: transcriptionTerminalTimeout,
+            speaker: speaker,
+            coachingCoordinator: coachingCoordinator,
+            terminalTimeout: transcriptionTerminalTimeout,
             activeTimeout: transcriptionActiveTimeout,
             isCurrentGeneration: { [weak self] generation in
                 self?.isLive(socketGeneration: generation) == true
@@ -111,11 +142,6 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
             isReady: { [weak self] generation in self?.isReady(socketGeneration: generation) == true },
             discardConfirmedAudio: { [weak self] boundary in
                 _ = self?.audioBuffer.discardSent(through: boundary)
-            },
-            resetSilenceTimer: { [weak self] in self?.resetSilenceTimer() },
-            onTurnEnd: { [weak self] in self?.onTurnEnd?() },
-            onSpeechActivityChanged: { [weak self] active in
-                self?.onSpeechActivityChanged?(active)
             })
     }
 
@@ -125,15 +151,11 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         stopped = false; reconnectAttempt = 0; isReconnecting = false; rotating = false
         terminalFailureReported = false
         pendingAudioTimelineOrigin = 0; activeAudioTimelineOrigin = 0
+        manualTurnCoordinator?.clear()
         lock.unlock()
         transcriptionLifecycle.start()
         emitState(.connecting)
         openSocket()
-        // Arm the proactive silence check exactly once, here on the first connect. A reconnect (session
-        // rotation) re-enters via openSocket() directly, NOT connect(), so the running timer is left
-        // alone — its backoff step and elapsed quiet carry across the rotation instead of snapping back
-        // to the base interval every ~hour. (Speech still resets it, via `handle`.)
-        resetSilenceTimer()
         continuityReporter.start()
     }
 
@@ -162,7 +184,9 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         lock.unlock()
         previousSession?.invalidateAndCancel()   // release the previous session's delegate retain
         invalidateConnectionTimers()
-        jlog("Jarvis realtime [\(speaker.rawValue)]: opening socket #\(socketGeneration)")
+        jlog(
+            "Jarvis realtime [\(speaker.rawValue)]: opening socket #\(socketGeneration) "
+                + "model=\(model.rawValue) language-profile=\(languageProfile.rawValue)")
         task.resume()
         configureSession()
         receiveLoop(task: task, generation: socketGeneration)
@@ -172,7 +196,6 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
     func stop() {
         lock.lock()
         stopped = true; connected = false
-        let st = silenceTimer; silenceTimer = nil
         let pt = pingTimer; pingTimer = nil
         let rt = readyTimer; readyTimer = nil
         let pot = pongTimer; pongTimer = nil
@@ -181,12 +204,13 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         pendingPingGeneration = nil
         generation += 1                 // invalidate every callback retained by the old task
         audioBuffer.clear()             // atomic with `stopped`: no producer can append after this
+        manualTurnCoordinator?.clear()
         lock.unlock()
         // Timers must be invalidated on the thread that scheduled them (main); doing it synchronously
         // from an off-main Stop (e.g. the onTerminalFailure Task) would silently fail to cancel and
         // could let a stray timer fire onSilence on a torn-down pipeline.
         DispatchQueue.main.async {
-            st?.invalidate(); pt?.invalidate(); rt?.invalidate(); pot?.invalidate()
+            pt?.invalidate(); rt?.invalidate(); pot?.invalidate()
         }
         continuityReporter.stop()
         transcriptionLifecycle.stop()
@@ -200,8 +224,11 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         // Resolve .auto against the live default-input device each session, so a reconnect after a
         // device swap (e.g. plugging in AirPods) picks the right profile.
         let profile = NoiseReduction.profile(mode: noiseReduction, micProximity: InputDeviceProximity.current())
-        send(json: RealtimeSession.sessionUpdate(model: model, silenceDurationMs: silenceDurationMs,
-                                                 noiseReduction: profile))
+        send(json: RealtimeSession.sessionUpdate(
+            model: model,
+            languageProfile: languageProfile,
+            silenceDurationMs: silenceDurationMs,
+            noiseReduction: profile))
     }
 
     /// Records the first content-free checkpoint on the delivery queue using the timestamp assigned
@@ -220,7 +247,7 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         // server audio-clock progress can retire that prefix safely.
         let observedAt = clock.now() - sessionStart
         let sessionRelativeCaptureAt = capturedAt - sessionStart
-        let duration = TimeInterval(pcm.count) / TimeInterval(RealtimeSession.sampleRate * 2)
+        let duration = TranscriptionAudioFormat.pcm16Mono.duration(forByteCount: pcm.count)
         lock.lock()
         guard !stopped else { lock.unlock(); return }
         let evicted = audioBuffer.append(pcm, sequenceNumber: sequenceNumber,
@@ -232,6 +259,27 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         pumpAudioIfReady()
     }
 
+    func recordLocalSpeechEvent(
+        _ event: LocalSpeechEvent,
+        throughSequenceNumber: UInt64
+    ) {
+        guard model.turnDetectionStrategy == .clientCommit else { return }
+        switch event {
+        case .started:
+            transcriptionLifecycle.recordLocalSpeechStarted()
+        case .ended(let startedAt, let commitAt):
+            transcriptionLifecycle.recordLocalSpeechEnded()
+            lock.lock()
+            guard !stopped else { lock.unlock(); return }
+            manualTurnCoordinator?.recordTurn(
+                startedAt: max(0, startedAt - sessionStart),
+                committedThroughAt: max(0, commitAt - sessionStart),
+                throughSequenceNumber: throughSequenceNumber)
+            lock.unlock()
+            pumpAudioIfReady()
+        }
+    }
+
     private func reportBufferEviction(_ evicted: [PCMBuffer.Chunk]) {
         guard !evicted.isEmpty else { return }
         transcriptionLifecycle.recordReplayCoverageLoss()
@@ -239,12 +287,48 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
     }
 
     private func pumpAudioIfReady() {
+        var action: OutboundAction?
+        var droppedTurns: [RealtimeManualTurnCoordinator.Turn] = []
         lock.lock()
-        guard let task, connected, !stopped, !isReconnecting,
-              let claim = audioBuffer.claimNext() else { lock.unlock(); return }
+        guard let task, connected, !stopped, !isReconnecting else {
+            lock.unlock(); return
+        }
         let socketGeneration = generation
+        if manualTurnCoordinator != nil {
+            if let nextSequence = audioBuffer.nextQueuedSequenceNumber {
+                droppedTurns = manualTurnCoordinator?.discardPendingTurns(
+                    before: nextSequence) ?? []
+            }
+            if let turn = manualTurnCoordinator?.takeReadyCommit() {
+                action = .commit(turn, task, socketGeneration)
+            } else if let nextSequence = audioBuffer.nextQueuedSequenceNumber,
+                      manualTurnCoordinator?.allowsSendingAudio(
+                        sequenceNumber: nextSequence) == true,
+                      let claim = audioBuffer.claimNext() {
+                action = .audio(claim, task, socketGeneration)
+            }
+        } else if let claim = audioBuffer.claimNext() {
+            action = .audio(claim, task, socketGeneration)
+        }
         lock.unlock()
-        sendAudioClaim(claim, task: task, socketGeneration: socketGeneration)
+        reportDroppedManualTurns(droppedTurns)
+        switch action {
+        case .audio(let claim, let task, let generation):
+            sendAudioClaim(claim, task: task, socketGeneration: generation)
+        case .commit(let turn, let task, let generation):
+            sendManualCommit(turn, task: task, socketGeneration: generation)
+        case nil:
+            break
+        }
+    }
+
+    private func reportDroppedManualTurns(_ turns: [RealtimeManualTurnCoordinator.Turn]) {
+        guard !turns.isEmpty else { return }
+        let unbound = turns.count(where: \.needsInitialItemBinding)
+        transcriptionLifecycle.discardUnboundLocalTurns(unbound)
+        transcriptionLifecycle.recordReplayCoverageLoss()
+        jlog("Jarvis realtime [\(speaker.rawValue)]: dropped \(turns.count) local turn "
+             + "boundary/boundaries outside retained replay audio")
     }
 
     @discardableResult
@@ -291,11 +375,45 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
             let isCurrentLease = self.task === task && self.generation == socketGeneration
                 && self.connected && !self.stopped && !self.isReconnecting
             let completion = isCurrentLease ? self.audioBuffer.completeSend(claim) : nil
+            if completion != nil {
+                self.manualTurnCoordinator?.recordAudioSent(sequenceNumber: sequence)
+            }
             self.lock.unlock()
             if let completion {
                 self.reportBufferEviction(completion.evicted)
                 self.pumpAudioIfReady()
             }
+        }
+    }
+
+    private func sendManualCommit(
+        _ turn: RealtimeManualTurnCoordinator.Turn,
+        task: URLSessionWebSocketTask,
+        socketGeneration: Int
+    ) {
+        let eventID = "jarvis-commit-\(socketGeneration)-\(turn.id)"
+        guard let data = try? JSONSerialization.data(
+            withJSONObject: RealtimeSession.commitAudio(eventID: eventID)),
+              let text = String(data: data, encoding: .utf8) else {
+            failConnection(task: task, generation: socketGeneration,
+                           diagnostic: "could not encode manual turn commit")
+            return
+        }
+        task.send(.string(text)) { [weak self, weak task] error in
+            guard let self, let task else { return }
+            if let error {
+                self.failConnection(task: task, generation: socketGeneration,
+                                    diagnostic: "manual commit send failed: \(error)")
+                return
+            }
+            self.lock.lock()
+            let isCurrentLease = self.task === task && self.generation == socketGeneration
+                && self.connected && !self.stopped && !self.isReconnecting
+            if isCurrentLease {
+                self.manualTurnCoordinator?.recordCommitSendCompleted(turnID: turn.id)
+            }
+            self.lock.unlock()
+            if isCurrentLease { self.pumpAudioIfReady() }
         }
     }
 
@@ -339,6 +457,46 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         }
 
         switch type {
+        case RealtimeSession.audioBufferCommittedType:
+            guard model.turnDetectionStrategy == .clientCommit,
+                  let itemID = obj["item_id"] as? String else {
+                jlog("Jarvis realtime [\(speaker.rawValue)]: malformed manual commit acknowledgement")
+                break
+            }
+            lock.lock()
+            let turn = manualTurnCoordinator?.acknowledgeCommittedItem(itemID: itemID)
+            lock.unlock()
+            guard let turn else {
+                jlog("Jarvis realtime [\(speaker.rawValue)]: unmatched manual commit acknowledgement "
+                     + "(item \(itemID))")
+                break
+            }
+            // GPT Live has no server VAD events. Its commit acknowledgement is the provider-side
+            // proof for the locally timed interval, so feed that content-free boundary into the same
+            // continuity matcher instead of generating false "no provider speech" anomalies.
+            continuityReporter.recordServerSpeech(
+                .speechStarted,
+                audioTimeMilliseconds: nil,
+                itemID: itemID,
+                sessionAudioTime: turn.startedAt,
+                socketGeneration: socketGeneration)
+            continuityReporter.recordServerSpeech(
+                .speechStopped,
+                audioTimeMilliseconds: nil,
+                itemID: itemID,
+                sessionAudioTime: turn.committedThroughAt,
+                socketGeneration: socketGeneration)
+            let recorded = transcriptionLifecycle.recordCommittedLocalTurn(
+                itemID: itemID,
+                startedAt: turn.startedAt,
+                committedThroughAt: turn.committedThroughAt,
+                consumesUnboundTurn: turn.needsInitialItemBinding,
+                socketGeneration: socketGeneration)
+            if recorded {
+                jlog("Jarvis realtime [\(speaker.rawValue)]: local turn committed "
+                     + "(item \(itemID), through sequence \(turn.throughSequenceNumber))")
+            }
+            pumpAudioIfReady()
         case RealtimeSession.speechStartedType:
             guard let itemID = obj["item_id"] as? String,
                   let audioStartMilliseconds = obj["audio_start_ms"] as? Int else {
@@ -382,6 +540,9 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
                 break
             }
             let transcriptText = obj["transcript"] as? String ?? ""
+            lock.lock()
+            manualTurnCoordinator?.recordItemFinished(itemID: itemID)
+            lock.unlock()
             continuityReporter.recordServerSpeech(.transcriptionCompleted,
                                    audioTimeMilliseconds: nil,
                                    itemID: itemID,
@@ -395,6 +556,9 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
             }
             let error = Self.transcriptionErrorDescription(from: obj)
             let terminalFailure = RealtimeSession.terminalTranscriptionFailure(from: obj)
+            lock.lock()
+            manualTurnCoordinator?.recordItemFinished(itemID: itemID)
+            lock.unlock()
             continuityReporter.recordServerSpeech(.transcriptionFailed,
                                    audioTimeMilliseconds: nil,
                                    itemID: itemID,
@@ -600,11 +764,14 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
         // unconfirmed tail now, while producers are excluded by this lock, so audio sent during a
         // half-open interval precedes audio captured during reconnect backoff.
         let replay = audioBuffer.prepareForReconnect()
+        let droppedManualTurns = manualTurnCoordinator?.prepareForReconnect(
+            oldestAvailableSequenceNumber: replay.oldestSequenceNumber) ?? []
         pendingAudioTimelineOrigin = replay.oldestCapturedAt ?? failureAt
         lock.unlock()
 
         let interruptedItems = transcriptionLifecycle.beginReconnectRecovery(
             replayAvailable: audioBuffer.bufferedChunkCount > 0)
+        reportDroppedManualTurns(droppedManualTurns)
         reportBufferEviction(replay.evicted)
         // Old-socket deltas are now held by the reconnect recovery gate. They remain a fallback if
         // every handshake fails or bounded replay loses coverage, without keeping stale item IDs in
@@ -757,79 +924,7 @@ final class RealtimeTranscriber: NSObject, URLSessionWebSocketDelegate, @uncheck
              + "(network: \(networkStatus()))")
     }
 
-    private func emitState(_ state: RealtimeConnectionState) {
+    private func emitState(_ state: TranscriptionConnectionState) {
         onConnectionStateChange?(state)
-    }
-
-    /// (Re)start the proactive silence check from its base interval — called from `connect()` (the first
-    /// connect) and whenever usable speech is appended, so a fresh quiet stretch always begins at the
-    /// base interval before backing off. A reconnect re-enters via `openSocket()` and deliberately does
-    /// NOT call this, so a session rotation preserves the current backoff step rather than resetting it.
-    private func resetSilenceTimer() {
-        // The "them" transcriber leaves onSilence nil (only the mic owns the "are you stuck?" prompt);
-        // skip arming a timer that would just no-op, avoiding per-utterance main-queue/Timer churn.
-        guard onSilence != nil else { return }
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.silenceBackoff.reset()
-            self.silencePausedLogged = false
-            self.armSilenceTimer()
-        }
-    }
-
-    /// Schedule the next "maybe stuck" silence check using the current backoff interval. When it fires
-    /// (no speech in the meantime) it reports how long the user has been quiet, then re-arms with the
-    /// next, longer interval — so a long silence is gently re-checked (the interval doubles each step
-    /// up to a cap; see `Config`) rather than nudged once and never again. Must be called on the main queue.
-    private func armSilenceTimer() {
-        let interval = silenceBackoff.next()
-        scheduleSilenceTimer(after: interval, quietThreshold: interval)
-    }
-
-    /// Keep a due silence check pending while a transcription item is unresolved. This short local
-    /// recheck does not advance or reset backoff: a VAD noise/start event contains no usable context
-    /// and must not buy another full 120-second interval. A finalized line resets the real timer.
-    private func scheduleSilenceTimer(after delay: TimeInterval, quietThreshold interval: TimeInterval) {
-        lock.lock(); silenceTimer?.invalidate()
-        silenceTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
-            guard let self else { return }
-            self.silenceTimerDidFire(quietThreshold: interval)
-        }
-        lock.unlock()
-    }
-
-    private func silenceTimerDidFire(quietThreshold interval: TimeInterval) {
-        lock.lock(); let isStopped = stopped; lock.unlock()
-        guard !isStopped else { return }   // don't drive a coaching turn on a torn-down pipeline
-        if transcriptionLifecycle.hasUnsettledItems {
-            scheduleSilenceTimer(after: 1, quietThreshold: interval)
-            return
-        }
-        let quiet = transcript.silenceDuration(now: clock.now() - sessionStart)
-        // Only nudge on GENUINE conversational silence. The transcript is shared with the "them"
-        // (system-audio) socket, so `quiet` reflects the last line from EITHER side. If the other
-        // party spoke within this interval the user isn't stuck — they're listening — so suppress
-        // the nudge and restart the backoff, so a fresh quiet stretch begins at the base interval
-        // once the conversation actually goes quiet. (Mic speech resets via resetSilenceTimer; this
-        // covers the them side, which only feeds the shared transcript and doesn't reset the timer.)
-        guard quiet >= interval else {
-            silenceBackoff.reset()
-            silencePausedLogged = false
-            armSilenceTimer()
-            return
-        }
-        // Idle cutoff, enforced at FIRE time (a timer scheduled just under the cutoff must not
-        // bill one last probe past it). Past the cutoff the user has stepped away, so suppress
-        // the probe but keep this (free, local) check chain alive: it is the only path that can
-        // revive probing on "them" speech — that side only feeds the shared transcript, and the
-        // guard above then resets the backoff. Mic speech revives via resetSilenceTimer as usual.
-        if silenceBackoff.shouldProbe(quietSoFar: quiet) {
-            silencePausedLogged = false
-            onSilence?(quiet)
-        } else if !silencePausedLogged {
-            silencePausedLogged = true   // log the pause once, not every capped interval
-            jlog("🤫 quiet for \(Int(quiet))s — pausing silence checks until speech resumes")
-        }
-        armSilenceTimer()             // re-arm with the next (backed-off) interval
     }
 }

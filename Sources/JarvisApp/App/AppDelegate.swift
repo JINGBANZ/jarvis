@@ -22,20 +22,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var brainSection: BrainSection!
     private let appearance = OverlayAppearance()
     private let brainPreferences = BrainPreferences()
+    private let transcriptionPreferences = TranscriptionPreferences()
     private let screenPreferences = ScreenCapturePreferences()
     private var activityViewer: ActivityViewer!    // embedded as the Settings Activity tab
-    /// Two transcription sockets feeding one shared transcript: mic → `.me`, system audio → `.them`.
-    private var transcriber: RealtimeTranscriber?       // "me" (mic)
-    private var themTranscriber: RealtimeTranscriber?   // "them" (system audio)
-    private var micConnectionState: RealtimeConnectionState = .stopped
-    private var systemConnectionState: RealtimeConnectionState = .stopped
+    /// Two provider sessions feeding one shared transcript: mic → `.me`, system audio → `.them`.
+    private var transcriber: (any TranscriptionSession)?       // "me" (mic)
+    private var themTranscriber: (any TranscriptionSession)?   // "them" (system audio)
+    private var micConnectionState: TranscriptionConnectionState = .stopped
+    private var systemConnectionState: TranscriptionConnectionState = .stopped
     private var reportedCoachingReady = false
     private var reportedTranscriptionFailure = false
     /// Resource allocation begins before audio capture can prove startup succeeded. Keep that
     /// provisional state separate so tearing it down cannot look like the end of a live session.
     private var sessionIsLive = false
     /// One-clock capture: a single private aggregate device (built-in mic + system-output tap on one
-    /// drift-compensated clock) feeds both transcription sockets, running AEC3 inside its IOProc so the
+    /// drift-compensated clock) feeds both transcription endpoints, running AEC3 inside its IOProc so the
     /// other side's speaker bleed is cancelled from the mic. Replaces the separate AVAudioEngine mic +
     /// ScreenCaptureKit capture.
     private var aggregateCapture: AggregateEchoCapture?
@@ -142,6 +143,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     update: change == .topology ? .topologyEdit : .effortEdit)
             },
             keyStore: secretFile,
+            transcriptionPreferences: transcriptionPreferences,
             onKeySaved: { [weak self] key in
                 self?.applySavedAPIKeyToRunningSession(key)
             })
@@ -174,10 +176,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             fire()
         }
 
-        if secrets.apiKey()?.isEmpty == false {
-            jlog("Jarvis: ready — press Start in the menu bar to begin coaching.")
+        if brainPreferences.configuredRoute == nil {
+            jlog("Jarvis: no brain provider yet — choose one in Settings, then press Start.")
+        } else if transcriptionPreferences.provider.requiresOpenAIAPIKey(
+            for: brainPreferences.configuredRoute
+        ), secrets.apiKey()?.isEmpty != false {
+            jlog("Jarvis: no OpenAI API key yet — paste it in Settings, then press Start.")
         } else {
-            jlog("Jarvis: no API key yet — paste it in Settings, then press Start.")
+            jlog("Jarvis: ready — press Start in the menu bar to begin coaching.")
         }
     }
 
@@ -391,13 +397,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let coachDriver, transcriber != nil, let sessionDirectory = currentSessionDir else {
             return
         }
-        guard let key = apiKeyOverride ?? secrets.apiKey(), !key.isEmpty else {
-            jlog("Jarvis: can't apply brain settings — no API key.")
+        guard let route = brainPreferences.configuredRoute else {
+            jlog("Jarvis: can't apply brain settings — no primary provider.")
             ActivityLog.shared.record(.settingsChangeNotApplied)
             return
         }
-        guard let route = brainPreferences.configuredRoute else {
-            jlog("Jarvis: can't apply brain settings — no primary provider.")
+        let key = apiKeyOverride ?? secrets.apiKey() ?? ""
+        guard !route.targets.contains(where: { $0.provider == .openAI }) || !key.isEmpty else {
+            jlog("Jarvis: can't apply brain settings — an OpenAI target has no API key.")
             ActivityLog.shared.record(.settingsChangeNotApplied)
             return
         }
@@ -450,11 +457,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// restarting transcription.
     private func applySavedAPIKeyToRunningSession(_ key: String) {
         guard let transcriber else { return }
-        transcriber.updateAPIKey(key)
-        themTranscriber?.updateAPIKey(key)
+        (transcriber as? RealtimeTranscriber)?.updateAPIKey(key)
+        (themTranscriber as? RealtimeTranscriber)?.updateAPIKey(key)
         guard let route = brainPreferences.configuredRoute,
               route.targets.contains(where: { $0.provider == .openAI }) else {
-            jlog("Jarvis: saved API key will apply to future Realtime connections.")
+            jlog("Jarvis: saved API key will apply to future OpenAI transcription connections.")
             return
         }
         applyBrainPreferencesToRunningSession(
@@ -463,16 +470,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             update: .credentialRefresh)
     }
 
-    /// Validate a Start immediately, then prepare any local-CLI targets away from the main actor.
+    /// Validate a Start immediately, then prepare any local-CLI targets and on-device speech assets.
     /// Returns `true` once startup is accepted; the menu remains in Starting until preparation and
-    /// the Realtime connections finish. Stop, a newer Start, a key change, or a route edit makes the
-    /// prepared result stale before it can install a pipeline.
+    /// both transcription endpoints finish. Stop, a newer Start, or a relevant preference/credential
+    /// edit makes the prepared result stale before it can install a pipeline.
     @discardableResult
     private func start() -> Bool {
         let wasRunning = transcriber != nil || themTranscriber != nil
         let reportContext: UserFacingError.PresentationContext =
             wasRunning ? .runtime : .startup
-        guard let key = secrets.apiKey(), !key.isEmpty else {
+        let transcriptionConfiguration = transcriptionPreferences.configuration
+        let transcriptionProvider = transcriptionConfiguration.provider
+        let brainRoute = brainPreferences.configuredRoute
+        let key = secrets.apiKey() ?? ""
+        let requiresOpenAIKey = transcriptionProvider.requiresOpenAIAPIKey(for: brainRoute)
+        guard !requiresOpenAIKey || !key.isEmpty else {
             jlog("Jarvis: can't start — no API key.")
             if wasRunning {
                 ActivityLog.shared.record(.settingsChangeNotApplied)
@@ -480,7 +492,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             errorReporter.reportImmediately(.noAPIKey, context: reportContext)
             return false
         }
-        guard let brainRoute = brainPreferences.configuredRoute else {
+        guard let brainRoute else {
             jlog("Jarvis: can't start — no primary provider.")
             if wasRunning {
                 ActivityLog.shared.record(.settingsChangeNotApplied)
@@ -495,10 +507,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         pendingStartTask?.cancel()
         pendingStartTask = nil
         let cliProviders = brainRoute.targets.map(\.provider).filter(\.usesLocalCLI)
-        guard !cliProviders.isEmpty else {
+        let preparesAppleSpeech = transcriptionProvider == .appleSpeech
+        guard preparesAppleSpeech || !cliProviders.isEmpty else {
             return installPreparedStart(
                 apiKey: key,
                 brainRoute: brainRoute,
+                transcriptionConfiguration: transcriptionConfiguration,
+                appleSpeechLocale: nil,
                 detectedCLIs: [:],
                 wasRunning: wasRunning,
                 reportContext: reportContext)
@@ -507,12 +522,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menuBar.setState(.starting)
         let detector = AgentCLIDetector()
         pendingStartTask = Task { [weak self] in
+            guard let self else { return }
+            var appleSpeechLocale: Locale?
+            if preparesAppleSpeech {
+                guard #available(macOS 26.0, *) else {
+                    self.rejectPreparedStart(
+                        .appleSpeechUnavailable,
+                        diagnostic: "Apple Speech requires macOS 26 or later.",
+                        revision: revision,
+                        wasRunning: wasRunning,
+                        context: reportContext)
+                    return
+                }
+                do {
+                    appleSpeechLocale = try await AppleSpeechModelPreparation.prepare(
+                        localeIdentifier:
+                            transcriptionConfiguration.appleSpeechLocaleIdentifier)
+                } catch {
+                    guard !Task.isCancelled, self.pendingStartRevision == revision else {
+                        return
+                    }
+                    let userError: UserFacingError
+                    if error is AppleSpeechModelPreparation.Failure {
+                        userError = .appleSpeechUnavailable
+                    } else {
+                        userError = .appleSpeechPreparationFailed
+                    }
+                    self.rejectPreparedStart(
+                        userError,
+                        diagnostic: "Apple Speech preparation failed: \(error)",
+                        revision: revision,
+                        wasRunning: wasRunning,
+                        context: reportContext)
+                    return
+                }
+            }
             let detected = await detector.detectAllAsync(cliProviders)
-            guard let self, !Task.isCancelled,
-                  self.pendingStartRevision == revision else {
+            guard !Task.isCancelled, self.pendingStartRevision == revision else {
                 return
             }
-            guard self.secrets.apiKey() == key,
+            let credentialIsCurrent = !requiresOpenAIKey
+                || (self.secrets.apiKey() ?? "") == key
+            guard credentialIsCurrent,
+                  self.transcriptionPreferences.configuration == transcriptionConfiguration,
                   self.brainPreferences.configuredRoute == brainRoute else {
                 self.pendingStartTask = nil
                 self.refreshConnectionUI()
@@ -524,6 +576,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             _ = self.installPreparedStart(
                 apiKey: key,
                 brainRoute: brainRoute,
+                transcriptionConfiguration: transcriptionConfiguration,
+                appleSpeechLocale: appleSpeechLocale,
                 detectedCLIs: detectedCLIs,
                 wasRunning: wasRunning,
                 reportContext: reportContext)
@@ -531,11 +585,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
+    private func rejectPreparedStart(
+        _ error: UserFacingError,
+        diagnostic: String,
+        revision: UInt,
+        wasRunning: Bool,
+        context: UserFacingError.PresentationContext
+    ) {
+        guard pendingStartRevision == revision else { return }
+        pendingStartTask = nil
+        jlog("Jarvis: can't start — \(diagnostic)")
+        if wasRunning {
+            ActivityLog.shared.record(.settingsChangeNotApplied)
+        }
+        errorReporter.reportImmediately(error, context: context)
+        refreshConnectionUI()
+    }
+
     /// Install a fully prepared route on the main actor. The primary preflight still happens before
     /// tearing down a running pipeline, while unavailable fallback CLIs remain ordered skip targets.
     private func installPreparedStart(
         apiKey key: String,
         brainRoute: BrainRoute,
+        transcriptionConfiguration: TranscriptionConfiguration,
+        appleSpeechLocale: Locale?,
         detectedCLIs initialDetectedCLIs: [BrainProvider: DetectedAgentCLI],
         wasRunning: Bool,
         reportContext: UserFacingError.PresentationContext
@@ -561,6 +634,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         transcript = RollingTranscript()
         beginNewSession()  // rotate to a fresh session dir + activity/debug log
         overlayBox.clear() // …and a fresh response history for the new conversation
+        switch transcriptionConfiguration.provider {
+        case .openAI:
+            jlog(
+                "Jarvis transcription: provider=OpenAI "
+                    + "model=\(transcriptionConfiguration.openAIModel.rawValue) "
+                    + "language-profile="
+                    + transcriptionConfiguration.openAILanguageProfile.rawValue)
+        case .appleSpeech:
+            jlog(
+                "Jarvis transcription: provider=Apple Speech "
+                    + "locale=\(appleSpeechLocale?.identifier ?? "unprepared")")
+        }
 
         // Each target's coach and summarizer share the session traffic log. Every fresh attempt is a
         // distinct audit-visible request; no transport wrapper replays a failed request.
@@ -588,21 +673,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // coalesced inside CoachDriver (the running turn batches them in), so we don't cancel here.
         let turns = TurnTaskBox()
         // "Me" side: the mic. Drives turn-end and the backing-off silence check ("are you stuck?").
-        let transcriber = RealtimeTranscriber(apiKey: key, model: config.transcriptionModel,
-                                              speaker: .me, transcript: transcript, clock: clock,
-                                              silenceTimeout: config.silenceTimeoutSeconds,
-                                              silenceMaxInterval: config.silenceMaxIntervalSeconds,
-                                              silenceIdleCutoff: config.silenceIdleCutoffSeconds,
-                                              silenceDurationMs: config.vadSilenceDurationMs,
-                                              noiseReduction: config.audioNoiseReduction,
-                                              turnDebounce: config.turnDebounceSeconds,
-                                              maxBufferedAudioSeconds: config.maxBufferedAudioSeconds,
-                                              readyTimeout: config.realtimeReadyTimeoutSeconds,
-                                              pingInterval: config.realtimePingIntervalSeconds,
-                                              pongTimeout: config.realtimePongTimeoutSeconds,
-                                              networkStatus: { [networkDiagnostics] in
-                                                  networkDiagnostics.currentSummary
-                                              })
+        let transcriber = TranscriptionSessionFactory.make(
+            configuration: transcriptionConfiguration,
+            apiKey: key,
+            appleSpeechLocale: appleSpeechLocale,
+            speaker: .me,
+            transcript: transcript,
+            clock: clock,
+            config: config,
+            networkStatus: { [networkDiagnostics] in
+                networkDiagnostics.currentSummary
+            })
         transcriber.onTurnEnd = { turns.run { await driver.handleTrigger(.turnEnd) } }
         transcriber.onSilence = { secs in turns.run { await driver.handleTrigger(.silence(secondsQuiet: secs)) } }
         transcriber.onSpeechActivityChanged = {
@@ -612,20 +693,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // "Them" side: system audio (remote participants). Drives turn-end so Jarvis can react when the
         // other side finishes (e.g. asks you something), but NOT the silence check — the "are you
         // stuck?" prompt is about the *user*, so only the mic owns that timer.
-        let themTranscriber = RealtimeTranscriber(apiKey: key, model: config.transcriptionModel,
-                                                  speaker: .them, transcript: transcript, clock: clock,
-                                                  silenceTimeout: config.silenceTimeoutSeconds,
-                                                  silenceMaxInterval: config.silenceMaxIntervalSeconds,
-                                                  silenceDurationMs: config.vadSilenceDurationMs,
-                                                  noiseReduction: config.audioNoiseReduction,
-                                                  turnDebounce: config.turnDebounceSeconds,
-                                                  maxBufferedAudioSeconds: config.maxBufferedAudioSeconds,
-                                                  readyTimeout: config.realtimeReadyTimeoutSeconds,
-                                                  pingInterval: config.realtimePingIntervalSeconds,
-                                                  pongTimeout: config.realtimePongTimeoutSeconds,
-                                                  networkStatus: { [networkDiagnostics] in
-                                                      networkDiagnostics.currentSummary
-                                                  })
+        let themTranscriber = TranscriptionSessionFactory.make(
+            configuration: transcriptionConfiguration,
+            apiKey: key,
+            appleSpeechLocale: appleSpeechLocale,
+            speaker: .them,
+            transcript: transcript,
+            clock: clock,
+            config: config,
+            networkStatus: { [networkDiagnostics] in
+                networkDiagnostics.currentSummary
+            })
         themTranscriber.onTurnEnd = { turns.run { await driver.handleTrigger(.turnEnd) } }
         themTranscriber.onSpeechActivityChanged = {
             driver.updateSpeechActivity($0, for: .them)
@@ -643,12 +721,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let themTranscriber else { return }
             Task { @MainActor [weak self] in
                 guard let self, self.themTranscriber === themTranscriber else { return }
-                if reason != .connectionLost {
+                if transcriptionConfiguration.provider == .openAI,
+                   reason != .connectionLost {
                     self.reportTranscriptionFailure(reason)
                     return
                 }
-                // A system-audio connection loss degrades gracefully: stop that transcriber while
-                // microphone coaching continues. The shared capture simply drops tap audio.
+                // A system-audio transport loss or local analyzer failure degrades gracefully: stop
+                // that endpoint while microphone coaching continues. The shared capture drops tap audio.
                 themTranscriber.stop()
                 self.themTranscriber = nil
                 // The transcriber's asynchronous `.stopped` callback is identity-guarded and will
@@ -664,6 +743,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // the cleaned mic to the "me" socket and the sample-preserving system timeline to the "them"
         // socket, with AEC3 run inside its IOProc. If the device can't be built, the whole capture is
         // gone, so treat it as a full (mic-side) terminal failure.
+        let localTurnDetectionSilenceDuration: TimeInterval? =
+            transcriptionConfiguration.turnDetectionStrategy == .clientCommit
+            ? TimeInterval(config.vadSilenceDurationMs) / 1_000
+            : nil
         let capture = AggregateEchoCapture(
             onMicCaptured: { [weak transcriber] sequence, samples, capturedAt in
                 transcriber?.recordCapturedAudio(
@@ -680,6 +763,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onSystem: { [weak themTranscriber] data, sequence, capturedAt in
                 themTranscriber?.sendAudio(
                     data, sequenceNumber: sequence, capturedAt: capturedAt)
+            },
+            localTurnDetectionSilenceDuration: localTurnDetectionSilenceDuration,
+            onMicSpeechEvent: { [weak transcriber] event, sequence in
+                transcriber?.recordLocalSpeechEvent(
+                    event, throughSequenceNumber: sequence)
+            },
+            onSystemSpeechEvent: { [weak themTranscriber] event, sequence in
+                themTranscriber?.recordLocalSpeechEvent(
+                    event, throughSequenceNumber: sequence)
             })
         // Like the transcriber callbacks above, bind the failure to the capture that emitted it. A
         // final retry from an old capture may arrive after Stop → Start; it must not tear down the
@@ -731,17 +823,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return false
         }
         sessionIsLive = true
-        jlog("Jarvis: coaching starting — verifying realtime transcription connections.")
+        jlog("Jarvis: coaching starting — verifying transcription endpoints.")
         jlog("Jarvis network path at start: \(networkDiagnostics.currentSummary)")
         activityViewer.coachingStateDidChange()   // the live session is no longer evaluable
         return true
     }
 
-    /// Stop and tear down the capture (one aggregate device) and BOTH transcription sockets
+    /// Stop and tear down the capture (one aggregate device) and BOTH transcription endpoints
     /// (mic/"me" and system-audio/"them"). Safe to call when already stopped. The capture and both
     /// transcribers must go: otherwise a turn-end trigger from a still-live socket could drive a
     /// coaching turn on a torn-down driver — the exact "speak after Stop" failure the turns box exists
-    /// to prevent — and a subsequent Start would leak the orphaned IOProc/sockets.
+    /// to prevent — and a subsequent Start would leak the orphaned IOProc/endpoints.
     private func stop(reason: SessionEndReason) {
         pendingStartRevision &+= 1
         pendingStartTask?.cancel()
@@ -792,8 +884,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         activityViewer?.coachingStateDidChange()
     }
 
-    /// Deduplicate the two sockets sharing one OpenAI key: either can discover a permanent account or
-    /// configuration failure first, but Activity should show one reason and teardown should run once.
+    /// Deduplicate endpoint failures: either side can fail first, but Activity should show one reason
+    /// and teardown should run once.
     private func reportTranscriptionFailure(_ reason: TranscriptionFailureReason) {
         guard !reportedTranscriptionFailure, transcriber != nil || themTranscriber != nil else { return }
         reportedTranscriptionFailure = true
@@ -804,7 +896,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .transcriptionStopped(reason: reason), context: .runtime)
     }
 
-    /// The mic socket is the truth for whether Jarvis is listening. System audio may reconnect or
+    /// The mic endpoint is the truth for whether Jarvis is listening. System audio may reconnect or
     /// fail independently; that degrades the other side of a call without pretending the mic is down.
     private func refreshConnectionUI() {
         guard transcriber != nil else {

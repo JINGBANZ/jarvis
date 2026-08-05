@@ -134,6 +134,7 @@ public final class PCMBuffer: @unchecked Sendable {
     public struct ReplayPreparation: Equatable, Sendable {
         public let replayedChunks: Int
         public let oldestCapturedAt: TimeInterval?
+        public let oldestSequenceNumber: UInt64?
         public let evicted: [Chunk]
     }
 
@@ -162,6 +163,7 @@ public final class PCMBuffer: @unchecked Sendable {
         }
         return ReplayPreparation(replayedChunks: replayed,
                                  oldestCapturedAt: chunks.first?.capturedAt,
+                                 oldestSequenceNumber: chunks.first?.sequenceNumber,
                                  evicted: evicted)
     }
 
@@ -225,6 +227,11 @@ public final class PCMBuffer: @unchecked Sendable {
     public var oldestQueuedCaptureTime: TimeInterval? {
         lock.lock(); defer { lock.unlock() }
         return chunks.first?.capturedAt
+    }
+
+    public var nextQueuedSequenceNumber: UInt64? {
+        lock.lock(); defer { lock.unlock() }
+        return chunks.first?.sequenceNumber
     }
 
     private func trimSentTailLocked(recordingIn evicted: inout [Chunk]) {

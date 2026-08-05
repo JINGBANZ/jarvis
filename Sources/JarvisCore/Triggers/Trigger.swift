@@ -3,7 +3,7 @@ import Foundation
 /// Why the coach loop woke up. Every trigger goes straight to the brain, which decides whether to
 /// speak — including when the user addresses Jarvis by name (the model reads that from the transcript).
 public enum TriggerReason: Sendable, Equatable {
-    case turnEnd                              // server VAD: the speaker finished an utterance
+    case turnEnd                              // the transcriber finalized an utterance
     case silence(secondsQuiet: TimeInterval)  // no speech for the current backoff interval
     case manualHint                           // user pressed the hint hotkey — capture + force a hint, one trip
 }

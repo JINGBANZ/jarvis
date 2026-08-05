@@ -37,7 +37,7 @@ The app ships with the macOS App Sandbox enabled and requests **only** the entit
 
 - Screen recording (for `capture_screen` / ScreenCaptureKit).
 - Microphone / audio input.
-- Outbound network (to reach the OpenAI APIs).
+- Outbound network (to reach selected remote providers; Apple manages Speech model downloads).
 
 System-audio process-tap access is separately purpose-described in `Resources/Info.plist` and gated
 by TCC; it is not a general filesystem entitlement.
@@ -90,7 +90,12 @@ empty), and optionally delete the now-orphaned item with `security delete-generi
 
 Narrow and explicit. Data leaves the machine only via:
 
-- **Audio → `gpt-4o-transcribe`** on the OpenAI Realtime API (continuous, for transcription).
+- **With the default OpenAI transcription provider, audio → the selected Realtime transcription
+  model** continuously (`gpt-4o-transcribe` by default; opt-in `gpt-live-transcribe`). The selected
+  language expectation is configuration metadata; Automatic sends none. With opt-in **Apple Speech**
+  on macOS 26+, raw audio remains on-device and `SpeechAnalyzer` emits final text using the selected
+  conversation locale. `AssetInventory` may download Apple's language model, but it does not upload
+  captured audio.
 - **Screenshot + transcript window → the selected brain provider/model** — and *only* when the
   model triggers a `capture_screen` and/or a coaching turn. No screen content leaves the machine on
   idle turns.
@@ -104,7 +109,7 @@ Narrow and explicit. Data leaves the machine only via:
   There is no one-shot coaching fallback. Runtime failure remains inside the existing fresh-attempt
   provider-route policy, and Stop kills every ready, leased, or preparing process. This trusts a CLI
   the user already runs on this machine without widening what Jarvis itself may touch. Transcription
-  audio still goes to the OpenAI Realtime API regardless.
+  audio follows the separately selected transcription provider.
 - **With Codex selected for coaching**, the payload goes to one session-scoped `codex app-server`
   under the user's own ChatGPT account and OpenAI's consumer retention terms. It runs under a private
   owner-only `CODEX_HOME` whose only content is an `auth.json` symlink, so no user config, profile,
@@ -126,9 +131,10 @@ Narrow and explicit. Data leaves the machine only via:
   without a live checkout; the app never substitutes a weaker API-only audit.
 
 There is **no rolling screen/audio archive and no "recall" database** — Jarvis keeps no continuous
-recording of what it sees or hears. The **raw captured streams stay transient**: mic audio streams to
-the API and is dropped, the live transcript lives in memory, and the transient file `screencapture`
-writes a frame into is created inside the owner-only session directory (never `/tmp`) and deleted —
+recording of what it sees or hears. The **raw captured streams stay transient**: audio is either
+streamed to OpenAI and dropped or analyzed on-device by Apple Speech, the live transcript lives in
+memory, and the transient file `screencapture` writes a frame into is created inside the owner-only
+session directory (never `/tmp`) and deleted —
 with its absence verified — before the capture returns. The one thing persisted *on this machine* is
 the **per-session log directory** — owner-only and bounded; see below.
 

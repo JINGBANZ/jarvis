@@ -9,6 +9,7 @@ public enum TranscriptionFailureReason: CaseIterable, Sendable, Equatable {
     case authenticationFailed
     case accessDenied
     case configurationRejected
+    case appleSpeechUnavailable
 
     public var activityDescription: String {
         switch self {
@@ -22,6 +23,8 @@ public enum TranscriptionFailureReason: CaseIterable, Sendable, Equatable {
             "OpenAI denied transcription access; check your API project"
         case .configurationRejected:
             "OpenAI rejected the transcription configuration; check jarvis-debug.log"
+        case .appleSpeechUnavailable:
+            "Apple Speech transcription became unavailable; check jarvis-debug.log"
         }
     }
 }

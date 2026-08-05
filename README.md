@@ -14,16 +14,16 @@ screen-aware hint.
 ## How it works
 
 ```text
-mic + system audio ──► realtime transcription ──► speaker-labeled transcript
-                                                        │ substantive turn / silence
-                                                        ▼
-                                                   CoachDriver
-                                                        │ selected brain
-                                  ┌─────────────────────┼──────────────────┐
-                                  ▼                     ▼                  ▼
-                           capture_screen          stay_silent          speak
-                                  │                                        │
-                         active window + OCR                 caption + overlay box
+mic + system audio ──► selected transcription provider ──► speaker-labeled transcript
+                                                                  │ substantive turn / silence
+                                                                  ▼
+                                                             CoachDriver
+                                                                  │ selected brain
+                                           ┌─────────────────────┼──────────────────┐
+                                           ▼                     ▼                  ▼
+                                    capture_screen          stay_silent          speak
+                                           │                                        │
+                                  active window + OCR                 caption + overlay box
 ```
 
 - Microphone and system audio are transcribed separately as `me` and `them`; WebRTC AEC3 reduces
@@ -33,8 +33,13 @@ mic + system audio ──► realtime transcription ──► speaker-labeled tr
 - During proactive turns, screen capture is model-triggered. It captures the active window by default,
   adds on-device OCR, and can instead target an entire display from **Settings → Screen**. The ⌥⌘J
   shortcut captures immediately and forces a hint.
-- The coaching brain can use the OpenAI API or an installed Claude Code / Codex CLI. An OpenAI API key
-  is always required because realtime voice transcription still uses OpenAI.
+- Transcription defaults to OpenAI **GPT-4o Transcribe**, with **GPT Live Transcribe** available for
+  session-by-session comparison. Language expectations default to automatic; optional English,
+  Mandarin, and English + Mandarin profiles guide recognition without choosing a language per turn.
+  On macOS 26 or later, **Apple Speech** is an opt-in, on-device provider using one selected
+  conversation locale.
+- The coaching brain can use the OpenAI API or an installed Claude Code / Codex CLI. An OpenAI API
+  key is required only when OpenAI supplies transcription or appears in the configured brain route.
 - The transient **Overlay Caption** is off by default; the persistent **Overlay Box** is on by default.
   Both can be configured independently and are excluded from screen capture.
 
@@ -45,7 +50,7 @@ For the full loop and its design rationale, see
 
 - Apple silicon Mac running macOS 14 or later
 - Swift 6 and the macOS Command Line Tools; full Xcode is not required
-- An OpenAI API key
+- An OpenAI API key when using OpenAI transcription or an OpenAI brain target
 - Microphone and Screen Recording permission
 
 ## Quick start
@@ -60,9 +65,12 @@ The first build creates a stable local `Jarvis Dev` signing identity. When macOS
 Then:
 
 1. Grant **Microphone** and **Screen Recording** when macOS prompts.
-2. Open the menu-bar item, choose **Settings… → Brain**, and save your OpenAI API key. The key is
-   stored in an owner-only file; `OPENAI_API_KEY` is available as a headless fallback.
-3. Optionally choose the brain provider, model, capture scope, and overlay appearance in Settings.
+2. Open the menu-bar item and choose **Settings… → Brain**. The default OpenAI transcription
+   provider needs an OpenAI API key; the key is stored in an owner-only file and
+   `OPENAI_API_KEY` is available as a headless fallback.
+3. Choose the transcription model and expected languages, or choose **Apple Speech** on macOS 26+
+   and select the conversation locale. Then choose the brain route, capture scope, and overlay
+   appearance.
 4. Choose **Start Jarvis**. Use **Stop Jarvis** to end the session, or press **⌥⌘J** while it is
    running to request a hint immediately.
 
@@ -81,8 +89,10 @@ When launched with `./scripts/build-app.sh --run`, each Start creates an owner-o
 - `eval-report.md` and `eval-report.html` only after `scripts/eval-session.sh` runs the agentic audit.
 
 The history is pruned to the ten most recent sessions. Raw audio and the rolling in-memory transcript
-are not archived, although finalized `heard:` lines are part of the activity record. Audio is sent to
-OpenAI for transcription, and coaching context is sent to the selected brain provider. See
+are not archived, although finalized `heard:` lines are part of the activity record. The selected
+OpenAI transcription model receives audio when OpenAI is the provider; Apple Speech
+keeps raw audio on-device after its selected locale model is installed. Coaching text and any
+requested screenshot go to the selected brain provider. See
 [`wiki/sandbox.md`](./wiki/sandbox.md) for the complete local-persistence, egress, and retention model.
 
 ## Development

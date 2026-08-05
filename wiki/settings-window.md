@@ -64,7 +64,7 @@ lazy lifecycle; its adaptive light/dark feed is simply framed by the same page a
 
 | Section class | Tab title | Always present | Description |
 |---|---|---|---|
-| `BrainSection` | "Brain" | yes | Everything that decides who answers a coaching attempt, in one scrolling page: the primary provider/model, an ordered editable fallback list, the reasoning-effort row, and the OpenAI transcription/key controls. A live status badge mirrors the active provider without moving the saved route. Saving a key never restarts a live conversation: established Realtime sockets stay connected and use it on a later reconnect. Valid Brain changes take effect between coaching attempts while running, or on the next Start while stopped. |
+| `BrainSection` | "Brain" | yes | Everything that decides who answers a coaching attempt, plus the independent transcription configuration, in one scrolling page: the primary provider/model, an ordered editable fallback list, the reasoning-effort row, transcription provider/model/language-or-locale controls, and OpenAI API-key controls. A live status badge mirrors the active brain provider without moving the saved route. Saving a key never restarts a live conversation: established OpenAI Realtime endpoints stay connected and use it on a later reconnect. Valid Brain-route changes take effect between coaching attempts while running; transcription changes take effect on the next Start. |
 | `OverlaySection` | "Overlay" | yes | Two matching cards, one per overlay surface — **Overlay Caption** (the transient on-screen tip) and **Overlay Box** (the persistent response history). Each card has an icon, description, On/Off toggle, and the same Text Size + Opacity row layout. When a surface is **on** its rows and live sample appear only while the Overlay tab is selected (`didBecomeActive`/`didResignActive`); when **off**, its rows and sample are hidden and the card collapses. Persists via `OverlayAppearance`. |
 | `DisplaySection` | "Screen" | yes | One **Screen capture** card with the capture-scope dropdown — **Active window** (default) or one **Entire display** entry per connected display — followed by a concise fallback/privacy callout. Persists via `ScreenCapturePreferences` and applies to the next screenshot. |
 | `ActivitySection` | "Activity" | yes | Embeds the `ActivityViewer` content (`makeContentView()` / `teardown()`) in the shared page/card shell so the adaptive light/dark feed stretches with the window. Its compact toolbar shows the selected session's exact directory ID with **Copy ID**. A session without a report shows **Evaluate**: one click runs the sole `AgenticEvaluator` through a locally installed Claude Code / Codex CLI over the source checkout plus the complete session directory, writes owner-only `eval-report.md`, and opens it. While it runs the button shows **Evaluating…**; afterward it becomes **Open report**, which reopens the saved result without another model run. The agent reads the full unfiltered `jarvis-activity.jsonl` whenever it needs the user-visible sequence and correlates it with `brain-traffic.jsonl`, screenshots, and live source. `scripts/eval-session.sh` is a second launcher for this same Core evaluator, not another evaluation path. `EvalReportPage` renders the markdown as `eval-report.html`; **Copy as Markdown** hands the raw report to an agent chat. Evaluation, report opening, and history clearing stay disabled through the live coaching/teardown lifecycle. |
@@ -145,7 +145,7 @@ passed; it never widens what a coaching thread may do.
 
 Before first-time setup, Primary shows **Choose provider…**, its model menu is disabled, and **Add
 fallback** is disabled. Selecting Primary creates the first valid route. Older installations that
-already have the required transcription key retain the historical OpenAI default through a one-time
+already have an OpenAI key retain the historical OpenAI brain default through a one-time
 compatibility migration instead of being forced through setup again.
 
 **Fallbacks.** Below the primary, an ordered list contains zero or more explicitly authorized
@@ -184,20 +184,40 @@ whichever provider is active. `CLIBrainClient` maps it onto Claude Code's `--eff
 per-thread `model_reasoning_effort`; both CLI scales start at `low`, so None clamps to Low while the
 three shared levels pass through.
 
-**Transcription.** This group names the separate speech-to-text role explicitly so future
-transcription providers can be added without conflating them with the brain route. It currently
-shows **OpenAI API** as the sole provider and an **API key** row whose action is **Add API key** or
-**Edit**—there is no persistent saved-status sentence. The key stays **required regardless of brain
-provider** because realtime voice transcription runs on the OpenAI Realtime API. A CLI brain moves
-only coaching off the key.
+**Transcription.** This group owns the separate speech-to-text role without conflating it with the
+brain route. Its picker contains **OpenAI** (the default) and **Apple Speech (macOS 26+)**. Apple is
+enabled only when the running Mac and OS expose `SpeechTranscriber`; selecting it persists through
+`TranscriptionPreferences` and applies on the next Start, never halfway through a live session.
+
+With OpenAI selected, **Model** offers **GPT-4o Transcribe** (the default) and opt-in **GPT Live
+Transcribe** for session-by-session A/B testing. **Expected languages** offers Automatic (the
+default), English, Mandarin Chinese, and English + Mandarin Chinese. Automatic sends no language
+hint. A single-language selection guides recognition but does not translate. GPT Live receives both
+expectations for the mixed profile; GPT-4o receives no language hint for that profile because it
+accepts only one. The profile is one immutable Start-time expectation shared by `me` and `them`, so
+the transcription model—not a Jarvis per-turn classifier—handles a speaker switching languages
+inside one sentence.
+
+With Apple Speech selected, **Conversation locale** is populated from
+`SpeechTranscriber.supportedLocales`; the initial suggestion is the supported equivalent of the
+current macOS locale. Start downloads or reuses that selected model before replacing a running
+pipeline. Apple Speech uses one locale for the whole session, so Settings explicitly recommends
+OpenAI for English/Mandarin code-switching. Jarvis does not run parallel Apple transcribers, and the
+runtime never falls back to OpenAI implicitly if the Apple analyzer fails.
+
+The **OpenAI API key** row remains visible because OpenAI may supply either transcription or one of
+the configured brain targets. Its action is **Add API key** or **Edit**—there is no persistent
+saved-status sentence. The key is required only when OpenAI is selected for transcription or appears
+anywhere in the brain route; Apple Speech plus a CLI-only route can start without one.
 
 Reads are validated: a persisted primary model id no longer in that provider's catalog uses the
 provider default without rewriting the invalid value, while invalid fallback rows are removed during
 route normalization. An unrecognized provider/effort likewise uses its existing default rather than
-reaching the API. The transcription model is deliberately **not** here — it's a separate field and
-code path (`Config.transcriptionModel`). A running `CoachDriver` applies valid edits atomically at
-the coaching-attempt boundary while transcript, client-managed history, audio pipeline, and session
-logs continue unchanged. A provider, model, or route-order edit replaces the route for the next
+reaching the API. Transcription preferences are validated independently: unknown OpenAI model ids
+use GPT-4o, unknown language profiles use Automatic, and an unsupported Apple locale fails visibly
+at Start rather than choosing a different language. A running `CoachDriver` applies valid brain edits
+atomically at the coaching-attempt boundary while transcript, client-managed history, audio
+pipeline, and session logs continue unchanged. A provider, model, or route-order edit replaces the route for the next
 attempt and resets the session-local cursor to the newly selected primary. The new active local
 runtime begins preparing immediately; ready or in-flight processes owned only by the superseded
 route are terminated. This topology edit is the only way to revisit a target that
@@ -209,8 +229,8 @@ its failure counts. An attempt already in flight keeps its snapshotted client an
 authoritative: its success or failure updates route health normally, and the new effort begins with
 the next attempt. The replacement at the preserved active cursor—whether primary or fallback—starts
 preparing immediately; replacements behind that cursor are terminated without being prepared. Saving
-the transcription API key likewise preserves route health, but refreshes only OpenAI clients and
-never probes or replaces a CLI client.
+the OpenAI API key likewise preserves route health, but refreshes only OpenAI clients and OpenAI
+transcription reconnect credentials; it never probes or replaces a CLI client.
 
 A local-CLI target is preflighted first. A confirmed missing binary or signed-out account cannot
 activate; the running route stays intact and Activity records fixed settings-not-applied copy.
@@ -220,9 +240,9 @@ changes apply on the **next Start**. Runtime readiness is not a routing signal: 
 query or Codex's app-server is unavailable, that provider attempt fails and follows the normal
 fresh-attempt route policy. Neither CLI ever falls back to a one-shot command.
 
-All Brain choices persist via `BrainPreferences` —
-`Sources/JarvisCore/Config/BrainPreferences.swift` is the single source for the UserDefaults keys,
-defaults, and validation (the catalogs themselves live in
+Brain-route choices persist via `BrainPreferences`, while the independent transcription provider,
+OpenAI model/language profile, and Apple locale persist via `TranscriptionPreferences`. Their files
+are the single sources for UserDefaults keys, defaults, and validation (the brain model catalogs live in
 `Sources/JarvisCore/Brain/BrainModelCatalog.swift`).
 
 ## Capture Scope
@@ -279,6 +299,8 @@ fallback or a later capture.
 | `Sources/JarvisApp/Settings/BrainTargetRowView.swift` | Shared inline provider/model row for primary and fallback targets |
 | `Sources/JarvisApp/Settings/ProviderRouteEditor.swift` | Unified Primary + ordered fallback card and persistence mutations |
 | `Sources/JarvisApp/Settings/APIKeyControls.swift` | Transcription provider + collapsed API-key editor |
+| `Sources/JarvisCore/Transcription/TranscriptionProvider.swift` | Provider identities, labels, and OpenAI-key requirement |
+| `Sources/JarvisCore/Config/TranscriptionPreferences.swift` | Persisted provider selection; absent/unknown values default to OpenAI |
 | `Sources/JarvisApp/Settings/OverlaySection.swift` | Overlay-appearance tab |
 | `Sources/JarvisApp/Settings/OverlaySurfaceSettingsView.swift` | One reusable overlay-surface card and its slider/readout rows |
 | `Sources/JarvisApp/Settings/DisplaySection.swift` | Capture-scope tab (scope + display in one dropdown) |

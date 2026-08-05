@@ -2,10 +2,8 @@ import Foundation
 
 /// Pure builders for the OpenAI GA Realtime **transcription** session — extracted from the
 /// WebSocket client so the wire contract is unit-testable (the live socket is not). Verified
-/// against the realtime-transcription guide (2026-06).
+/// against the realtime-transcription guide (2026-08).
 public enum RealtimeSession {
-    public static let sampleRate = 24_000
-
     /// A transcription-only session is selected at connect time via `?intent=transcription`
     /// (`?model=` is the speech-to-speech form). No `OpenAI-Beta` header in GA.
     public static func connectURL() -> URL {
@@ -13,29 +11,57 @@ public enum RealtimeSession {
     }
 
     /// The `session.update` payload: `session.type:"transcription"` with config nested under
-    /// `session.audio.input` (format / transcription model / server-VAD turn detection).
-    /// `server_vad` requires a VAD-capable model such as `gpt-4o-transcribe`.
+    /// `session.audio.input` (format / transcription model / model-compatible turn detection).
     ///
-    /// `silenceDurationMs` tunes how long a pause must last before the server ends the turn. The
-    /// server default (~500 ms) ends a turn on a brief mid-thought pause and chops one spoken
-    /// sentence into several utterances; ~1000 ms lets a "thinking aloud" coder finish. We keep
-    /// `server_vad` rather than `semantic_vad`, which is reported flaky in transcription-only mode
-    /// (it can stop emitting completed events entirely). See wiki/architecture.md (Models and APIs).
+    /// GPT-4o accepts the legacy singular `language` hint. GPT Live accepts the plural `languages`
+    /// list and rejects a payload that also carries the singular field. Mixed-language GPT-4o
+    /// sessions therefore omit `language` and use the model's automatic recognition.
+    ///
+    /// GPT-4o uses `server_vad`; `silenceDurationMs` tunes how long a pause must last before that
+    /// server ends the turn. GPT Live does not support server turn detection, so its payload clears
+    /// `turn_detection` and the client commits boundaries found by local WebRTC VAD. See
+    /// wiki/architecture.md (Models and APIs).
     ///
     /// `noiseReduction` ("near_field" for a headset/close mic, "far_field" for a laptop/room mic, or
     /// nil to disable) filters the input buffer *before* it reaches VAD and the model — OpenAI's
     /// first-line defense against non-speech blips firing the VAD and producing phantom transcripts.
     /// Sent as an object `{"type": …}`; a bare string is rejected by the server.
-    public static func sessionUpdate(model: String, language: String = "en",
-                                     silenceDurationMs: Int = 1000,
-                                     noiseReduction: String? = "near_field") -> [String: Any] {
-        var input: [String: Any] = [
-            "format": ["type": "audio/pcm", "rate": sampleRate],
-            "transcription": ["model": model, "language": language],
-            "turn_detection": [
+    public static func sessionUpdate(
+        model: OpenAITranscriptionModel,
+        languageProfile: OpenAITranscriptionLanguageProfile = .automatic,
+        silenceDurationMs: Int = 1000,
+        noiseReduction: String? = "near_field"
+    ) -> [String: Any] {
+        var transcription: [String: Any] = ["model": model.rawValue]
+        switch model {
+        case .gpt4oTranscribe:
+            if let language = languageProfile.singularLanguageHint {
+                transcription["language"] = language
+            }
+        case .gptLiveTranscribe:
+            if let languages = languageProfile.liveLanguageHints {
+                transcription["languages"] = languages
+            }
+        }
+
+        let turnDetection: Any
+        switch model.turnDetectionStrategy {
+        case .serverVAD:
+            turnDetection = [
                 "type": "server_vad",
                 "silence_duration_ms": silenceDurationMs,
+            ]
+        case .clientCommit:
+            turnDetection = NSNull()
+        }
+
+        var input: [String: Any] = [
+            "format": [
+                "type": "audio/pcm",
+                "rate": TranscriptionAudioFormat.pcm16Mono.sampleRate,
             ],
+            "transcription": transcription,
+            "turn_detection": turnDetection,
         ]
         if let noiseReduction {
             input["noise_reduction"] = ["type": noiseReduction]
@@ -49,6 +75,11 @@ public enum RealtimeSession {
     /// Append-audio event (base64 PCM16).
     public static func appendAudio(base64PCM: String) -> [String: Any] {
         ["type": "input_audio_buffer.append", "audio": base64PCM]
+    }
+
+    /// Explicitly finalize the current input buffer. GPT Live requires this with turn detection off.
+    public static func commitAudio(eventID: String) -> [String: Any] {
+        ["type": "input_audio_buffer.commit", "event_id": eventID]
     }
 
     /// A socket is usable only after the server acknowledges `session.update`. The earlier created
@@ -69,6 +100,7 @@ public enum RealtimeSession {
 
     public static let speechStartedType = "input_audio_buffer.speech_started"
     public static let speechStoppedType = "input_audio_buffer.speech_stopped"
+    public static let audioBufferCommittedType = "input_audio_buffer.committed"
     public static let deltaTranscriptionType = "conversation.item.input_audio_transcription.delta"
 
     /// The event type the server emits when an utterance's transcription is final.
@@ -97,6 +129,11 @@ public enum RealtimeSession {
             return .accessDenied
         case "model_not_found":
             return .configurationRejected
+        case "invalid_value":
+            let parameter = (error["param"] as? String)?.lowercased()
+            if eventType == "error", parameter?.hasPrefix("session.") == true {
+                return .configurationRejected
+            }
         default:
             break
         }

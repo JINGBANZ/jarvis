@@ -14,13 +14,31 @@ public extension UserFacingError {
             sessionEndReason: .brainProviderNotConfigured)
     }
 
-    /// No API key on Start. Realtime voice transcription always runs on the OpenAI key — whichever
-    /// brain provider is selected — so the session never comes up: fatal.
+    /// No API key on Start when either transcription or one of the configured brain targets uses
+    /// OpenAI, so the requested route cannot be constructed.
     static var noAPIKey: UserFacingError {
         .init(title: "No OpenAI API key set",
-              message: "Voice transcription needs an OpenAI API key even when the brain runs on a local CLI. Open \u{201C}Settings\u{2026}\u{201D} \u{2192} Brain, paste your key, then press Start.",
+              message: "The selected transcription provider or brain route uses OpenAI. Open \u{201C}Settings\u{2026}\u{201D} \u{2192} Brain, paste your OpenAI API key, then press Start.",
               severity: .fatal,
               sessionEndReason: .openAIAPIKeyMissing)
+    }
+
+    /// Apple Speech is selected on an unsupported OS/device, or its selected locale is unavailable.
+    /// This is a preflight refusal, so a currently running session remains intact.
+    static var appleSpeechUnavailable: UserFacingError {
+        .init(
+            title: "Apple Speech unavailable",
+            message: "On-device transcription requires macOS 26 or later, Apple Speech support, and a supported conversation locale. Check the locale in Settings or choose OpenAI transcription.",
+            severity: .warning)
+    }
+
+    /// The selected Apple model could not be downloaded or prepared. Keep raw framework/download
+    /// detail in the debug log and give the explicit Start action a fixed recovery suggestion.
+    static var appleSpeechPreparationFailed: UserFacingError {
+        .init(
+            title: "Couldn’t prepare Apple Speech",
+            message: "Jarvis couldn’t prepare the selected on-device speech model. Check your network connection, locale, and available storage, then press Start again.",
+            severity: .warning)
     }
 
     /// The selected brain provider's CLI isn't installed (or was removed since it was selected).
@@ -76,8 +94,8 @@ public extension UserFacingError {
               sessionEndReason: .audioCaptureUnavailable)
     }
 
-    /// The mic ("me") transcription socket gave up (bad key / quota / network) — NOT a mic-hardware
-    /// failure (that's `captureStopped`). Coaching can't continue, so stop without revealing UI.
+    /// The mic ("me") transcription endpoint gave up — NOT a mic-hardware failure (that's
+    /// `captureStopped`). Coaching can't continue, so stop without revealing UI.
     static func transcriptionStopped(reason: TranscriptionFailureReason) -> UserFacingError {
         .init(title: "Transcription stopped",
               message: "Jarvis could not continue because \(reason.activityDescription).",
@@ -85,8 +103,8 @@ public extension UserFacingError {
               sessionEndReason: .transcriptionStopped(reason: reason))
     }
 
-    /// The system-audio ("them") socket gave up. The mic still works, so this is a graceful degrade —
-    /// a non-blocking notice, NOT a session-ending alert.
+    /// The system-audio ("them") endpoint gave up. The mic still works, so this is a graceful
+    /// degrade — a non-blocking notice, NOT a session-ending alert.
     static var systemAudioStopped: UserFacingError {
         .init(title: "System audio stopped",
               message: "Stopped transcribing the other side's audio; your microphone is still active.",

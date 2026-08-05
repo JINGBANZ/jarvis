@@ -30,11 +30,6 @@ public struct Config: Sendable {
     /// Ceiling on a line's display time. Tighter than movie-caption caps (~6–7s): a coaching tip goes
     /// stale fast, and an over-long display also delays the next queued (fresher) tip.
     public var overlayMaxDisplaySeconds: TimeInterval
-    /// Realtime transcription model. `gpt-4o-transcribe` — supports `server_vad` turn detection,
-    /// so the Realtime server auto-commits the audio buffer at each speech boundary and emits
-    /// `…transcription.completed` (this is what makes the coach loop fire). `gpt-realtime-whisper`
-    /// is lower-latency but has NO server VAD — it would require manual `input_audio_buffer.commit`.
-    public var transcriptionModel: String
     /// Server-VAD silence window: how long a pause must last before the server ends the turn.
     /// Raised above the ~500 ms server default so a mid-thought pause doesn't split a sentence.
     public var vadSilenceDurationMs: Int
@@ -67,7 +62,6 @@ public struct Config: Sendable {
         overlayNoticeBufferSeconds: TimeInterval = 2.0,
         overlaySecondsPerWord: TimeInterval = 0.35,
         overlayMaxDisplaySeconds: TimeInterval = 8,
-        transcriptionModel: String = "gpt-4o-transcribe",
         vadSilenceDurationMs: Int = 1000,
         audioNoiseReduction: NoiseReductionMode = .auto,
         turnDebounceSeconds: TimeInterval = 0.4,
@@ -83,7 +77,6 @@ public struct Config: Sendable {
         self.overlayNoticeBufferSeconds = overlayNoticeBufferSeconds
         self.overlaySecondsPerWord = overlaySecondsPerWord
         self.overlayMaxDisplaySeconds = overlayMaxDisplaySeconds
-        self.transcriptionModel = transcriptionModel
         self.vadSilenceDurationMs = vadSilenceDurationMs
         self.audioNoiseReduction = audioNoiseReduction
         self.turnDebounceSeconds = turnDebounceSeconds

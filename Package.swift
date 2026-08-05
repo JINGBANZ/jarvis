@@ -14,10 +14,11 @@ let package = Package(
         // The AppKit overlay lives in its own library target (not the executable) so it can be
         // imported by tests — see Tests/JarvisOverlayTests for the screen-capture invisibility checks.
         .target(name: "JarvisOverlay", dependencies: ["JarvisCore"]),
-        // Acoustic echo cancellation (WebRTC AEC3), the OS/native-bound edge. The C++ implementation
-        // is prebuilt + statically merged with abseil into Sources/CJarvisAEC/lib/libjarvis-aec.a by scripts/build-aec.sh
-        // (zero runtime dylib deps), so `swift build` compiles only the pure-C shim header and links
-        // the archive — no C++ toolchain or vendored headers needed. See scripts/aec/jarvis_aec.cpp.
+        // WebRTC audio processing (AEC3 + classic VAD), the OS/native-bound edge. The C++ AEC3
+        // implementation and upstream VAD are prebuilt + statically merged with abseil into
+        // Sources/CJarvisAEC/lib/libjarvis-aec.a by scripts/build-aec.sh (zero runtime dylib deps),
+        // so `swift build` compiles only the dependency-free C facade and links the archive — no C++
+        // toolchain or vendored headers needed. See scripts/aec/jarvis_aec.cpp.
         .target(
             name: "CJarvisAEC",
             exclude: ["lib"],   // the prebuilt .a is linked, not compiled
