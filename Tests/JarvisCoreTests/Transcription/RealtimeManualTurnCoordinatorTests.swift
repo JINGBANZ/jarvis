@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import JarvisCore
 
@@ -40,6 +41,25 @@ import Testing
         let acknowledgedReplay = coordinator.acknowledgeCommittedItem(itemID: "replacement-item")
         let replayBinding = try #require(acknowledgedReplay)
         #expect(!replayBinding.needsInitialItemBinding)
+    }
+
+    @Test func sentBoundaryRemainsCommitEligibleWhenNextChunkIsQueued() throws {
+        let buffer = PCMBuffer(maxBytes: 1_000)
+        buffer.append(Data([4]), sequenceNumber: 4, capturedAt: 4, duration: 1)
+        buffer.append(Data([5]), sequenceNumber: 5, capturedAt: 5, duration: 1)
+        var coordinator = RealtimeManualTurnCoordinator()
+        coordinator.recordTurn(startedAt: 3, committedThroughAt: 5, throughSequenceNumber: 4)
+
+        let boundaryClaim = try #require(buffer.claimNext())
+        #expect(buffer.completeSend(boundaryClaim) != nil)
+        coordinator.recordAudioSent(sequenceNumber: 4)
+
+        #expect(buffer.nextQueuedSequenceNumber == 5)
+        let retainedSequence = try #require(buffer.oldestRetainedSequenceNumber)
+        #expect(retainedSequence == 4)
+        #expect(coordinator.discardPendingTurns(before: retainedSequence).isEmpty)
+        let readyCommit = coordinator.takeReadyCommit()
+        #expect(try #require(readyCommit).throughSequenceNumber == 4)
     }
 
     @Test func terminalItemIsNotReplayed() throws {

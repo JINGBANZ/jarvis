@@ -60,6 +60,9 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
     /// Present only for GPT Live. Mutated under `lock` so commit ordering is atomic with FIFO/socket
     /// state; the value itself remains Foundation-only and unit-tested in Core.
     private var manualTurnCoordinator: RealtimeManualTurnCoordinator?
+    /// GPT Live keeps only a short local pre-roll while idle. Active speech and endpoint trailing
+    /// silence then enter `audioBuffer`; GPT-4o bypasses this gate and keeps server VAD unchanged.
+    private var manualSpeechBuffer: SpeechGatedAudioBuffer?
     private var reconnectAttempt = 0
     private var isReconnecting = false
     private var stopped = false
@@ -90,6 +93,7 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         transcriptionTerminalTimeout: TimeInterval = 8,
         transcriptionActiveTimeout: TimeInterval = 180,
         maxBufferedAudioSeconds: TimeInterval = 60,
+        manualTurnPreRollDuration: TimeInterval = 0.3,
         readyTimeout: TimeInterval = 10,
         pingInterval: TimeInterval = 20,
         pongTimeout: TimeInterval = 10,
@@ -110,8 +114,10 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         self.networkStatus = networkStatus
         self.audioBuffer = PCMBuffer(maxBytes: TranscriptionAudioFormat.pcm16Mono.byteCount(
             forDuration: maxBufferedAudioSeconds))
-        self.manualTurnCoordinator = model.turnDetectionStrategy == .clientCommit
-            ? RealtimeManualTurnCoordinator()
+        let usesManualTurns = model.turnDetectionStrategy == .clientCommit
+        self.manualTurnCoordinator = usesManualTurns ? RealtimeManualTurnCoordinator() : nil
+        self.manualSpeechBuffer = usesManualTurns
+            ? SpeechGatedAudioBuffer(maximumPreRollDuration: manualTurnPreRollDuration)
             : nil
         self.continuityReporter = RealtimeContinuityReporter(
             speaker: speaker, clock: clock, sessionStart: sessionStart)
@@ -152,6 +158,7 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         terminalFailureReported = false
         pendingAudioTimelineOrigin = 0; activeAudioTimelineOrigin = 0
         manualTurnCoordinator?.clear()
+        manualSpeechBuffer?.clear()
         lock.unlock()
         transcriptionLifecycle.start()
         emitState(.connecting)
@@ -205,6 +212,7 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         generation += 1                 // invalidate every callback retained by the old task
         audioBuffer.clear()             // atomic with `stopped`: no producer can append after this
         manualTurnCoordinator?.clear()
+        manualSpeechBuffer?.clear()
         lock.unlock()
         // Timers must be invalidated on the thread that scheduled them (main); doing it synchronously
         // from an off-main Stop (e.g. the onTerminalFailure Task) would silently fail to cancel and
@@ -242,17 +250,20 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
     }
 
     func sendAudio(_ pcm: Data, sequenceNumber: UInt64, capturedAt: TimeInterval) {
-        // Every chunk enters one ordered FIFO. Local send completion moves it into a bounded recovery
-        // tail rather than deleting it: Realtime does not acknowledge append events, so only later
-        // server audio-clock progress can retire that prefix safely.
+        // GPT-4o sends every chunk; GPT Live releases only bounded pre-roll and endpoint-gated speech.
+        // Eligible audio enters one ordered FIFO. Local send completion moves it into a bounded
+        // recovery tail because only later server item lifecycle can retire that prefix safely.
         let observedAt = clock.now() - sessionStart
         let sessionRelativeCaptureAt = capturedAt - sessionStart
-        let duration = TranscriptionAudioFormat.pcm16Mono.duration(forByteCount: pcm.count)
+        let chunk = PCMBuffer.Chunk(
+            data: pcm,
+            sequenceNumber: sequenceNumber,
+            capturedAt: sessionRelativeCaptureAt,
+            duration: TranscriptionAudioFormat.pcm16Mono.duration(forByteCount: pcm.count))
         lock.lock()
         guard !stopped else { lock.unlock(); return }
-        let evicted = audioBuffer.append(pcm, sequenceNumber: sequenceNumber,
-                                         capturedAt: sessionRelativeCaptureAt,
-                                         duration: duration)
+        let readyChunks = manualSpeechBuffer?.append(chunk) ?? [chunk]
+        let evicted = appendToAudioBuffer(readyChunks)
         lock.unlock()
         continuityReporter.recordDelivery(sequence: sequenceNumber, pcm16: pcm, at: observedAt)
         reportBufferEviction(evicted)
@@ -267,16 +278,35 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         switch event {
         case .started:
             transcriptionLifecycle.recordLocalSpeechStarted()
+            lock.lock()
+            guard !stopped else { lock.unlock(); return }
+            let evicted = appendToAudioBuffer(manualSpeechBuffer?.speechStarted() ?? [])
+            lock.unlock()
+            reportBufferEviction(evicted)
+            pumpAudioIfReady()
         case .ended(let startedAt, let commitAt):
             transcriptionLifecycle.recordLocalSpeechEnded()
             lock.lock()
             guard !stopped else { lock.unlock(); return }
+            manualSpeechBuffer?.speechEnded()
             manualTurnCoordinator?.recordTurn(
                 startedAt: max(0, startedAt - sessionStart),
                 committedThroughAt: max(0, commitAt - sessionStart),
                 throughSequenceNumber: throughSequenceNumber)
             lock.unlock()
             pumpAudioIfReady()
+        }
+    }
+
+    /// Move speech-gated chunks into the reconnect-safe FIFO. Callers serialize the manual gate with
+    /// turn/socket state under `lock`; `PCMBuffer` independently protects its own storage.
+    private func appendToAudioBuffer(_ chunks: [PCMBuffer.Chunk]) -> [PCMBuffer.Chunk] {
+        chunks.flatMap { chunk in
+            audioBuffer.append(
+                chunk.data,
+                sequenceNumber: chunk.sequenceNumber,
+                capturedAt: chunk.capturedAt,
+                duration: chunk.duration)
         }
     }
 
@@ -295,9 +325,9 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         }
         let socketGeneration = generation
         if manualTurnCoordinator != nil {
-            if let nextSequence = audioBuffer.nextQueuedSequenceNumber {
+            if let retainedSequence = audioBuffer.oldestRetainedSequenceNumber {
                 droppedTurns = manualTurnCoordinator?.discardPendingTurns(
-                    before: nextSequence) ?? []
+                    before: retainedSequence) ?? []
             }
             if let turn = manualTurnCoordinator?.takeReadyCommit() {
                 action = .commit(turn, task, socketGeneration)

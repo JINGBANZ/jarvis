@@ -5,6 +5,8 @@ import JarvisCore
 /// Installs and reserves the selected locale before a new Apple Speech pipeline replaces a running
 /// session. The configured module identity is disposable; `AssetInventory` manages shared system
 /// assets by module configuration and automatically reserves a locale when installation needs it.
+/// `SpeechTranscriber` runs entirely on-device; Apple's speech-recognition usage key applies to APIs
+/// that send speech data to its servers, so this path intentionally avoids legacy authorization.
 @available(macOS 26.0, *)
 enum AppleSpeechModelPreparation {
     enum Failure: Error {

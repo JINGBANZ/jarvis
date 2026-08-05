@@ -99,6 +99,7 @@ import Testing
     }
 }
 
+/// `@unchecked Sendable`: `lock` guards every read and write of the recorded callback values.
 private final class CoachingEvents: @unchecked Sendable {
     private let lock = NSLock()
     private var turns = 0
