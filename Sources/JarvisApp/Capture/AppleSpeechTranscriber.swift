@@ -1,3 +1,8 @@
+// The whole adapter names macOS 26 Speech APIs (`SpeechAnalyzer`, `SpeechTranscriber`,
+// `AnalyzerInput`), so it compiles only when the toolchain exposes that SDK. See `Package.swift`
+// (`APPLE_SPEECH_SDK`) for the compile-time boundary; on older SDKs the fallback in
+// `TranscriptionSessionFactory` / `AppleSpeechModelPreparation` keeps Apple Speech unavailable.
+#if APPLE_SPEECH_SDK
 import Foundation
 @preconcurrency import AVFoundation
 import CoreMedia
@@ -500,3 +505,4 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
             interleaved: true)
     }
 }
+#endif

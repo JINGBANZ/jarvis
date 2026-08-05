@@ -6,6 +6,25 @@ import Foundation
 // linker's working directory.
 let packageRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().path
 
+// Single source of truth for whether the active toolchain ships the macOS 26 `SpeechAnalyzer` /
+// `SpeechTranscriber` APIs that back Apple Speech transcription. `@available(macOS 26.0, *)` gates
+// *runtime* execution, but it does not hide those type names from an older SDK/compiler, so every
+// direct reference needs a *compile-time* boundary. Xcode 26 is the first SDK to contain the
+// symbols and it pairs with Swift 6.2, so the compiler version is the compile-time proxy for SDK
+// availability; older toolchains (e.g. the macOS 15 CI runner on Swift 6.1.x) build the fallback
+// that reports Apple Speech unavailable. The manifest is compiled by the same toolchain that builds
+// the package, so `#if compiler(...)` here reflects the real build compiler.
+//
+// Set `JARVIS_FORCE_APPLE_SPEECH_FALLBACK=1` to force-build the fallback path on a new toolchain so
+// it can't silently bit-rot; run it from a clean checkout (CI) or after `rm -rf .build`, since SPM
+// does not treat an env-var change alone as a reason to reconfigure.
+var jarvisAppSwiftSettings: [SwiftSetting] = []
+#if compiler(>=6.2)
+if ProcessInfo.processInfo.environment["JARVIS_FORCE_APPLE_SPEECH_FALLBACK"] == nil {
+    jarvisAppSwiftSettings.append(.define("APPLE_SPEECH_SDK"))
+}
+#endif
+
 let package = Package(
     name: "Jarvis",
     platforms: [.macOS(.v14)],
@@ -30,7 +49,8 @@ let package = Package(
         ),
         .executableTarget(
             name: "JarvisApp",
-            dependencies: ["JarvisCore", "JarvisOverlay", "CJarvisAEC"]
+            dependencies: ["JarvisCore", "JarvisOverlay", "CJarvisAEC"],
+            swiftSettings: jarvisAppSwiftSettings
         ),
         // The dev-side CLI half of the agentic session audit (see AgenticEvaluation): renders a
         // session's traffic to a compact transcript and prints the agent task prompt. A separate,
