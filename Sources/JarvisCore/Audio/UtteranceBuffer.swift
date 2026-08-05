@@ -1,9 +1,9 @@
 import Foundation
 
 /// Accumulates the `…transcription.completed` fragments of one spoken turn so the coach sees the
-/// WHOLE utterance, not just the first fragment. The transcriber debounces fragment arrival and then
-/// drains this buffer only after its Realtime ledger has no unfinished items. Pure and lock-guarded
-/// so the coalescing is unit-testable outside the app target.
+/// WHOLE utterance, not just the first fragment. The shared transcription coordinator debounces
+/// fragment arrival and drains this buffer only after the provider reports no unfinished work. Pure
+/// and lock-guarded so the coalescing is unit-testable outside the app target.
 public final class UtteranceBuffer: @unchecked Sendable {
     public enum DrainResult: Equatable, Sendable {
         case empty
@@ -14,8 +14,8 @@ public final class UtteranceBuffer: @unchecked Sendable {
     private let lock = NSLock()
     private var text = ""
     private var fragments = 0
-    /// A debounce expired while Realtime still owned an unfinished item. The item lifecycle, rather
-    /// than a polling timer, uses this bit to re-arm the debounce once every item is terminal.
+    /// A debounce expired while the provider still owned unfinished work. The lifecycle, rather than
+    /// a polling timer, uses this bit to re-arm the debounce once that work is terminal.
     private var waitingForPendingTranscriptions = false
 
     public init() {}
@@ -31,9 +31,9 @@ public final class UtteranceBuffer: @unchecked Sendable {
         waitingForPendingTranscriptions = false
     }
 
-    /// Drain only after every Realtime item for this speaker is terminal. A later fragment can
-    /// already be active when the previous fragment's final transcript arrives, so elapsed debounce
-    /// time alone is not evidence that the semantic turn ended.
+    /// Drain only after every provider item for this speaker is terminal. A later fragment can already
+    /// be active when the previous fragment's final transcript arrives, so elapsed debounce time alone
+    /// is not evidence that the semantic turn ended.
     public func drainIfSettled(hasPendingTranscriptions: Bool) -> DrainResult {
         lock.lock(); defer { lock.unlock() }
         guard fragments > 0 else {

@@ -2,8 +2,8 @@ import Foundation
 import JarvisCore
 
 /// Client for the OpenAI GA Realtime API used as a **transcription session**. Streams PCM16 audio,
-/// configures model-compatible turn detection, and parses transcription + speech events — adding
-/// lines to the RollingTranscript and firing turn/silence events.
+/// configures model-compatible turn detection, and parses transcription + speech events. The shared
+/// Core coordinator publishes finalized lines and owns provider-neutral coaching triggers.
 ///
 /// The wire contract (connect URL with `?intent=transcription`, the `session.update` payload, the
 /// audio-append/commit events) is built by the pure, unit-tested `RealtimeSession` in JarvisCore.
@@ -38,7 +38,6 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
     /// Who this socket is transcribing: `.me` (mic) or `.them` (system audio). Two transcribers run
     /// in parallel — one per side — feeding the same `RollingTranscript`, so the coach sees both.
     private let speaker: Speaker
-    private let transcript: RollingTranscript
     private let clock: Clock
     private let sessionStart: TimeInterval
     private let silenceDurationMs: Int
@@ -51,16 +50,10 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
     private let lock = NSLock()
     private var session: URLSession?     // retained so stop() can invalidate it (URLSession holds its delegate)
     private var task: URLSessionWebSocketTask?
-    private var silenceTimer: Timer?
-    /// Backs off the proactive silence-check interval across a long quiet stretch. Mutated only on
-    /// the main queue (where the silence timer is scheduled and fires), so it needs no extra lock.
-    private var silenceBackoff: SilenceBackoff
-    /// Whether the idle-cutoff pause has been logged for the current quiet stretch (log it once, not
-    /// on every dormant re-check). Main-queue only, like `silenceBackoff`.
-    private var silencePausedLogged = false
     private var pingTimer: Timer?
     private var readyTimer: Timer?
     private var pongTimer: Timer?
+    private var coachingCoordinator: TranscriptionCoachingCoordinator!
     private var transcriptionLifecycle: RealtimeTranscriptionLifecycle!
     private let continuityReporter: RealtimeContinuityReporter
     private let audioBuffer: PCMBuffer        // mic audio captured while the socket is down
@@ -106,12 +99,9 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         self.model = model
         self.languageProfile = languageProfile
         self.speaker = speaker
-        self.transcript = transcript
         self.clock = clock
         let sessionStart = clock.now()
         self.sessionStart = sessionStart
-        self.silenceBackoff = SilenceBackoff(base: silenceTimeout, maxInterval: silenceMaxInterval,
-                                             idleCutoff: silenceIdleCutoff)
         self.silenceDurationMs = silenceDurationMs
         self.noiseReduction = noiseReduction
         self.readyTimeout = readyTimeout
@@ -126,9 +116,25 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         self.continuityReporter = RealtimeContinuityReporter(
             speaker: speaker, clock: clock, sessionStart: sessionStart)
         super.init()
+        self.coachingCoordinator = TranscriptionCoachingCoordinator(
+            speaker: speaker,
+            transcript: transcript,
+            clock: clock,
+            sessionStart: sessionStart,
+            turnDebounce: turnDebounce,
+            silenceTimeout: silenceTimeout,
+            silenceMaxInterval: silenceMaxInterval,
+            silenceIdleCutoff: silenceIdleCutoff,
+            silenceEnabled: speaker == .me,
+            onTurnEnd: { [weak self] in self?.onTurnEnd?() },
+            onSilence: { [weak self] quiet in self?.onSilence?(quiet) },
+            onSpeechActivityChanged: { [weak self] active in
+                self?.onSpeechActivityChanged?(active)
+            })
         self.transcriptionLifecycle = RealtimeTranscriptionLifecycle(
-            speaker: speaker, transcript: transcript, clock: clock, sessionStart: sessionStart,
-            turnDebounce: turnDebounce, terminalTimeout: transcriptionTerminalTimeout,
+            speaker: speaker,
+            coachingCoordinator: coachingCoordinator,
+            terminalTimeout: transcriptionTerminalTimeout,
             activeTimeout: transcriptionActiveTimeout,
             isCurrentGeneration: { [weak self] generation in
                 self?.isLive(socketGeneration: generation) == true
@@ -136,11 +142,6 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
             isReady: { [weak self] generation in self?.isReady(socketGeneration: generation) == true },
             discardConfirmedAudio: { [weak self] boundary in
                 _ = self?.audioBuffer.discardSent(through: boundary)
-            },
-            resetSilenceTimer: { [weak self] in self?.resetSilenceTimer() },
-            onTurnEnd: { [weak self] in self?.onTurnEnd?() },
-            onSpeechActivityChanged: { [weak self] active in
-                self?.onSpeechActivityChanged?(active)
             })
     }
 
@@ -155,11 +156,6 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         transcriptionLifecycle.start()
         emitState(.connecting)
         openSocket()
-        // Arm the proactive silence check exactly once, here on the first connect. A reconnect (session
-        // rotation) re-enters via openSocket() directly, NOT connect(), so the running timer is left
-        // alone — its backoff step and elapsed quiet carry across the rotation instead of snapping back
-        // to the base interval every ~hour. (Speech still resets it, via `handle`.)
-        resetSilenceTimer()
         continuityReporter.start()
     }
 
@@ -200,7 +196,6 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
     func stop() {
         lock.lock()
         stopped = true; connected = false
-        let st = silenceTimer; silenceTimer = nil
         let pt = pingTimer; pingTimer = nil
         let rt = readyTimer; readyTimer = nil
         let pot = pongTimer; pongTimer = nil
@@ -215,7 +210,7 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         // from an off-main Stop (e.g. the onTerminalFailure Task) would silently fail to cancel and
         // could let a stray timer fire onSilence on a torn-down pipeline.
         DispatchQueue.main.async {
-            st?.invalidate(); pt?.invalidate(); rt?.invalidate(); pot?.invalidate()
+            pt?.invalidate(); rt?.invalidate(); pot?.invalidate()
         }
         continuityReporter.stop()
         transcriptionLifecycle.stop()
@@ -931,77 +926,5 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
 
     private func emitState(_ state: TranscriptionConnectionState) {
         onConnectionStateChange?(state)
-    }
-
-    /// (Re)start the proactive silence check from its base interval — called from `connect()` (the first
-    /// connect) and whenever usable speech is appended, so a fresh quiet stretch always begins at the
-    /// base interval before backing off. A reconnect re-enters via `openSocket()` and deliberately does
-    /// NOT call this, so a session rotation preserves the current backoff step rather than resetting it.
-    private func resetSilenceTimer() {
-        // The "them" transcriber leaves onSilence nil (only the mic owns the "are you stuck?" prompt);
-        // skip arming a timer that would just no-op, avoiding per-utterance main-queue/Timer churn.
-        guard onSilence != nil else { return }
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.silenceBackoff.reset()
-            self.silencePausedLogged = false
-            self.armSilenceTimer()
-        }
-    }
-
-    /// Schedule the next "maybe stuck" silence check using the current backoff interval. When it fires
-    /// (no speech in the meantime) it reports how long the user has been quiet, then re-arms with the
-    /// next, longer interval — so a long silence is gently re-checked (the interval doubles each step
-    /// up to a cap; see `Config`) rather than nudged once and never again. Must be called on the main queue.
-    private func armSilenceTimer() {
-        let interval = silenceBackoff.next()
-        scheduleSilenceTimer(after: interval, quietThreshold: interval)
-    }
-
-    /// Keep a due silence check pending while a transcription item is unresolved. This short local
-    /// recheck does not advance or reset backoff: a VAD noise/start event contains no usable context
-    /// and must not buy another full 120-second interval. A finalized line resets the real timer.
-    private func scheduleSilenceTimer(after delay: TimeInterval, quietThreshold interval: TimeInterval) {
-        lock.lock(); silenceTimer?.invalidate()
-        silenceTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
-            guard let self else { return }
-            self.silenceTimerDidFire(quietThreshold: interval)
-        }
-        lock.unlock()
-    }
-
-    private func silenceTimerDidFire(quietThreshold interval: TimeInterval) {
-        lock.lock(); let isStopped = stopped; lock.unlock()
-        guard !isStopped else { return }   // don't drive a coaching turn on a torn-down pipeline
-        if transcriptionLifecycle.hasUnsettledItems {
-            scheduleSilenceTimer(after: 1, quietThreshold: interval)
-            return
-        }
-        let quiet = transcript.silenceDuration(now: clock.now() - sessionStart)
-        // Only nudge on GENUINE conversational silence. The transcript is shared with the "them"
-        // (system-audio) socket, so `quiet` reflects the last line from EITHER side. If the other
-        // party spoke within this interval the user isn't stuck — they're listening — so suppress
-        // the nudge and restart the backoff, so a fresh quiet stretch begins at the base interval
-        // once the conversation actually goes quiet. (Mic speech resets via resetSilenceTimer; this
-        // covers the them side, which only feeds the shared transcript and doesn't reset the timer.)
-        guard quiet >= interval else {
-            silenceBackoff.reset()
-            silencePausedLogged = false
-            armSilenceTimer()
-            return
-        }
-        // Idle cutoff, enforced at FIRE time (a timer scheduled just under the cutoff must not
-        // bill one last probe past it). Past the cutoff the user has stepped away, so suppress
-        // the probe but keep this (free, local) check chain alive: it is the only path that can
-        // revive probing on "them" speech — that side only feeds the shared transcript, and the
-        // guard above then resets the backoff. Mic speech revives via resetSilenceTimer as usual.
-        if silenceBackoff.shouldProbe(quietSoFar: quiet) {
-            silencePausedLogged = false
-            onSilence?(quiet)
-        } else if !silencePausedLogged {
-            silencePausedLogged = true   // log the pause once, not every capped interval
-            jlog("🤫 quiet for \(Int(quiet))s — pausing silence checks until speech resumes")
-        }
-        armSilenceTimer()             // re-arm with the next (backed-off) interval
     }
 }

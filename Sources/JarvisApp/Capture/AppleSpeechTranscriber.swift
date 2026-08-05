@@ -5,14 +5,13 @@ import JarvisCore
 @preconcurrency import Speech
 
 /// On-device macOS 26+ transcription session backed by `SpeechAnalyzer`. Final results enter the
-/// same speaker-labeled transcript and coaching callbacks as the OpenAI adapter; volatile results
-/// are deliberately disabled so provisional revisions never reach Activity or model context.
-/// Transcription itself stays ungated for accuracy. A transient local PCM activity tracker only
-/// delays turn/silence callbacks until speech settles and never retains audio.
+/// shared Core coaching coordinator; volatile results are deliberately disabled so provisional
+/// revisions never reach Activity or model context. Transcription itself stays ungated for accuracy.
+/// A transient local PCM activity tracker only reports whether provider work is unsettled.
 ///
-/// `@unchecked Sendable`: `lock` guards lifecycle, callback eligibility, analyzer ownership, and
-/// timers; `audioQueue` exclusively owns conversion, buffering, stream submission, and PCM activity
-/// state. Callbacks are configured before `connect()` and remain immutable for the live session.
+/// `@unchecked Sendable`: `lock` guards lifecycle, callback eligibility, and analyzer ownership;
+/// `audioQueue` exclusively owns conversion, buffering, stream submission, and PCM activity state.
+/// Callbacks are configured before `connect()` and remain immutable for the live session.
 @available(macOS 26.0, *)
 final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
     var onTurnEnd: (@Sendable () -> Void)?
@@ -35,10 +34,8 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
 
     private let locale: Locale
     private let speaker: Speaker
-    private let transcript: RollingTranscript
     private let clock: Clock
     private let sessionStart: TimeInterval
-    private let turnDebounce: TimeInterval
     private let maximumBufferedBytes: Int
     private let continuityReporter: RealtimeContinuityReporter
 
@@ -47,8 +44,6 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
     private var stopped = true
     private var generation = 0
     private var terminalFailureReported = false
-    private var speechActive = false
-    private var turnPending = false
     /// Session-relative time of the first buffer accepted by this analyzer. SpeechAnalyzer ranges
     /// start at zero; adding this offset keeps the two independently prepared endpoints on the
     /// shared transcript/continuity clock without injecting wall-clock jitter into every buffer.
@@ -56,10 +51,7 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
     private var setupTask: Task<Void, Never>?
     private var resultsTask: Task<Void, Never>?
     private var analyzer: SpeechAnalyzer?
-    private var debounceTimer: Timer?
-    private var silenceTimer: Timer?
-    private var silenceBackoff: SilenceBackoff
-    private var silencePausedLogged = false
+    private var coachingCoordinator: TranscriptionCoachingCoordinator!
 
     /// Audio-queue-only state. Capture delivery is already serial, and this provider-local queue
     /// keeps activity observation, conversion, and stream submission ordered while setup completes.
@@ -82,11 +74,9 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
     ) {
         self.locale = locale
         self.speaker = speaker
-        self.transcript = transcript
         self.clock = clock
         let sessionStart = clock.now()
         self.sessionStart = sessionStart
-        self.turnDebounce = turnDebounce
         maximumBufferedBytes = TranscriptionAudioFormat.pcm16Mono.byteCount(
             forDuration: maxBufferedAudioSeconds)
         continuityReporter = RealtimeContinuityReporter(
@@ -94,28 +84,37 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
             clock: clock,
             sessionStart: sessionStart,
             boundary: .appleSpeech)
-        silenceBackoff = SilenceBackoff(
-            base: silenceTimeout,
-            maxInterval: silenceMaxInterval,
-            idleCutoff: silenceIdleCutoff)
         audioQueue = DispatchQueue(
             label: "jarvis.apple-speech.\(speaker.rawValue)",
             qos: .userInitiated)
+        coachingCoordinator = TranscriptionCoachingCoordinator(
+            speaker: speaker,
+            transcript: transcript,
+            clock: clock,
+            sessionStart: sessionStart,
+            turnDebounce: turnDebounce,
+            silenceTimeout: silenceTimeout,
+            silenceMaxInterval: silenceMaxInterval,
+            silenceIdleCutoff: silenceIdleCutoff,
+            silenceEnabled: speaker == .me,
+            onTurnEnd: { [weak self] in self?.onTurnEnd?() },
+            onSilence: { [weak self] quiet in self?.onSilence?(quiet) },
+            onSpeechActivityChanged: { [weak self] active in
+                self?.onSpeechActivityChanged?(active)
+            })
     }
 
     func connect() {
         lock.lock()
         stopped = false
         terminalFailureReported = false
-        speechActive = false
-        turnPending = false
         analyzerTimelineOffset = nil
         generation += 1
         let generation = generation
         lock.unlock()
 
         emitState(.connecting)
-        resetSilenceTimer()
+        coachingCoordinator.start()
         continuityReporter.start()
         let task = Task<Void, Never> { [weak self] in
             guard let self else { return }
@@ -139,18 +138,12 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
         let setupTask = setupTask
         let resultsTask = resultsTask
         let analyzer = analyzer
-        let debounceTimer = debounceTimer
-        let silenceTimer = silenceTimer
-        let wasSpeechActive = speechActive
         self.setupTask = nil
         self.resultsTask = nil
         self.analyzer = nil
-        self.debounceTimer = nil
-        self.silenceTimer = nil
-        speechActive = false
-        turnPending = false
         lock.unlock()
 
+        coachingCoordinator.stop()
         setupTask?.cancel()
         resultsTask?.cancel()
         audioQueue.async { [weak self] in
@@ -164,12 +157,7 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
         if let analyzer {
             Task { await analyzer.cancelAndFinishNow() }
         }
-        DispatchQueue.main.async {
-            debounceTimer?.invalidate()
-            silenceTimer?.invalidate()
-        }
         continuityReporter.stop()
-        if wasSpeechActive { onSpeechActivityChanged?(false) }
         emitState(.stopped)
     }
 
@@ -410,8 +398,6 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
     private func handle(_ result: SpeechTranscriber.Result, generation: Int) {
         guard result.isFinal else { return }
         let raw = String(result.text.characters)
-        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard text.contains(where: { $0.isLetter || $0.isNumber }) else { return }
 
         lock.lock()
         guard !stopped, !terminalFailureReported, self.generation == generation else {
@@ -427,11 +413,12 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
         let spokenEnd = resultEnd.isFinite && resultEnd >= resultStart
             ? timelineOffset + resultEnd
             : spokenAt
-        transcript.append(.init(speaker: speaker, text: text, at: spokenAt))
-        ActivityLog.shared.record(.heard(speaker: speaker, text: text))
-        jlog("🗣 heard (\(speaker.rawValue)): \"\(text)\" (Apple Speech)")
-        turnPending = true
         lock.unlock()
+        guard coachingCoordinator.recordFinalizedTranscript(
+            raw,
+            spokenAt: spokenAt,
+            source: "Apple Speech"
+        ) else { return }
         continuityReporter.recordServerSpeech(
             .speechStarted,
             audioTimeMilliseconds: Int(max(0, spokenAt) * 1_000),
@@ -447,120 +434,11 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
             audioTimeMilliseconds: Int(max(0, spokenEnd) * 1_000),
             sessionAudioTime: spokenEnd,
             socketGeneration: generation)
-        resetSilenceTimer()
-        scheduleTurnDebounce(generation: generation)
     }
 
     private func setSpeechActivity(_ active: Bool, generation: Int) {
-        let shouldResumeTurn: Bool
-        lock.lock()
-        guard !stopped, !terminalFailureReported, self.generation == generation,
-              speechActive != active else {
-            lock.unlock()
-            return
-        }
-        speechActive = active
-        shouldResumeTurn = !active && turnPending
-        lock.unlock()
-        onSpeechActivityChanged?(active)
-        if shouldResumeTurn {
-            scheduleTurnDebounce(generation: generation)
-        }
-    }
-
-    private func scheduleTurnDebounce(generation: Int) {
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.lock.lock()
-            guard !self.stopped, !self.terminalFailureReported,
-                  self.generation == generation else {
-                self.lock.unlock()
-                return
-            }
-            self.debounceTimer?.invalidate()
-            self.debounceTimer = Timer.scheduledTimer(
-                withTimeInterval: self.turnDebounce,
-                repeats: false
-            ) { [weak self] _ in
-                self?.fireTurn(generation: generation)
-            }
-            self.lock.unlock()
-        }
-    }
-
-    private func fireTurn(generation: Int) {
-        lock.lock()
-        guard !stopped, !terminalFailureReported,
-              self.generation == generation, turnPending else {
-            lock.unlock()
-            return
-        }
-        debounceTimer?.invalidate()
-        debounceTimer = nil
-        guard !speechActive else {
-            lock.unlock()
-            return
-        }
-        turnPending = false
-        lock.unlock()
-        onTurnEnd?()
-    }
-
-    private func resetSilenceTimer() {
-        guard onSilence != nil else { return }
-        DispatchQueue.main.async { [weak self] in
-            guard let self, self.isLive else { return }
-            self.silenceBackoff.reset()
-            self.silencePausedLogged = false
-            self.armSilenceTimer()
-        }
-    }
-
-    private func armSilenceTimer() {
-        let interval = silenceBackoff.next()
-        scheduleSilenceTimer(after: interval, quietThreshold: interval)
-    }
-
-    private func scheduleSilenceTimer(
-        after delay: TimeInterval,
-        quietThreshold interval: TimeInterval
-    ) {
-        lock.lock()
-        silenceTimer?.invalidate()
-        silenceTimer = Timer.scheduledTimer(
-            withTimeInterval: delay,
-            repeats: false
-        ) { [weak self] _ in
-            self?.silenceTimerDidFire(quietThreshold: interval)
-        }
-        lock.unlock()
-    }
-
-    private func silenceTimerDidFire(quietThreshold interval: TimeInterval) {
-        lock.lock()
-        let shouldDefer = stopped || terminalFailureReported || speechActive
-        lock.unlock()
-        guard !shouldDefer else {
-            if isLive {
-                scheduleSilenceTimer(after: 1, quietThreshold: interval)
-            }
-            return
-        }
-        let quiet = transcript.silenceDuration(now: clock.now() - sessionStart)
-        guard quiet >= interval else {
-            silenceBackoff.reset()
-            silencePausedLogged = false
-            armSilenceTimer()
-            return
-        }
-        if silenceBackoff.shouldProbe(quietSoFar: quiet) {
-            silencePausedLogged = false
-            onSilence?(quiet)
-        } else if !silencePausedLogged {
-            silencePausedLogged = true
-            jlog("🤫 quiet for \(Int(quiet))s — pausing silence checks until speech resumes")
-        }
-        armSilenceTimer()
+        guard isLive(generation: generation) else { return }
+        coachingCoordinator.updateActivity(active)
     }
 
     private func fail(generation: Int, diagnostic: String) {
@@ -571,6 +449,7 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
         }
         terminalFailureReported = true
         lock.unlock()
+        coachingCoordinator.stop()
         jlog("Jarvis Apple Speech [\(speaker.rawValue)]: \(diagnostic)")
         emitState(.failed)
         onTerminalFailure?(.appleSpeechUnavailable)
