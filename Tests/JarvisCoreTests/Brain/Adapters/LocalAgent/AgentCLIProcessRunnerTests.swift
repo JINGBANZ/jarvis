@@ -2,7 +2,10 @@ import Testing
 import Foundation
 @testable import JarvisCore
 
-@Suite struct AgentCLIProcessRunnerTests {
+// Every case owns a real subprocess, pipe drains, and watchdog signals. Running all runner stress
+// cases together only floods that shared OS boundary and can starve unrelated process integration;
+// Swift Testing still runs all non-process suites in parallel.
+@Suite(.serialized) struct AgentCLIProcessRunnerTests {
     @Test func capturesStdinFedStdoutStderrAndExitCode() async throws {
         let run = AgentCLIRun(executable: URL(fileURLWithPath: "/bin/sh"),
                               arguments: ["-c", "cat; echo oops 1>&2; exit 3"],
@@ -22,9 +25,10 @@ import Foundation
                               arguments: ["30"], stdin: nil,
                               workingDirectory: FileManager.default.temporaryDirectory,
                               timeout: 60)
+        let timings = AgentCLIPhaseTimings()
         let started = Date()
-        let task = Task { try await AgentCLIProcessRunner.run(run) }
-        try? await Task.sleep(nanoseconds: 200_000_000)
+        let task = Task { try await AgentCLIProcessRunner.run(run, timings: timings) }
+        #expect(await waitUntil { timings.instant(.processLaunched) != nil })
         task.cancel()
         let result = await task.result
         #expect(Date().timeIntervalSince(started) < 15)   // nowhere near sleep's 30s or the 60s timeout
@@ -150,7 +154,7 @@ import Foundation
                               timeout: 60)
         let timings = AgentCLIPhaseTimings()
         let task = Task { try await AgentCLIProcessRunner.run(run, timings: timings) }
-        try? await Task.sleep(nanoseconds: 200_000_000)
+        #expect(await waitUntil { timings.instant(.processLaunched) != nil })
         task.cancel()
         _ = await task.result
         #expect(timings.instant(.processLaunched) != nil)
@@ -174,5 +178,16 @@ import Foundation
             #expect(error.localizedDescription.contains("startup-stalled"))
             #expect(BrainFailure(error).disposition == .temporary)
         }
+    }
+
+    private func waitUntil(
+        timeout: TimeInterval = 5,
+        _ condition: @escaping @Sendable () -> Bool
+    ) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !condition(), Date() < deadline {
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+        return condition()
     }
 }
