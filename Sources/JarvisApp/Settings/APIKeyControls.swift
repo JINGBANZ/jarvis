@@ -370,10 +370,10 @@ final class APIKeyControls: NSObject {
             case .english, .mandarinChinese:
                 "This hint guides recognition when it matches the conversation; it does not translate the transcript."
             case .englishAndMandarinChinese:
-                if preferences.openAIModel == .gptLiveTranscribe {
-                    "Both languages are hinted to GPT Live; either speaker may switch within a sentence."
-                } else {
+                if preferences.openAIModel == .gpt4oTranscribe {
                     "GPT-4o accepts one language hint, so this mixed profile uses automatic detection."
+                } else {
+                    "Both languages are hinted to \(preferences.openAIModel.displayName); either speaker may switch within a sentence."
                 }
             }
         }

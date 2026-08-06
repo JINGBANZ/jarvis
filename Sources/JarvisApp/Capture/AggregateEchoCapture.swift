@@ -133,7 +133,7 @@ final class AggregateEchoCapture: @unchecked Sendable {
             jlog("Jarvis: one-clock capture unavailable — needs macOS 14.2+, AEC/resampler, and configured VAD")
             reason = localTurnDetectionReady
                 ? "Jarvis needs macOS 14.2 or later for echo-cancelled capture."
-                : "Couldn't prepare local speech detection for GPT Live Transcribe."
+                : "Couldn't prepare local speech detection for this transcription model."
         }
         lock.unlock()
         return reason

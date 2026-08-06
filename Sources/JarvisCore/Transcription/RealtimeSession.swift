@@ -13,14 +13,15 @@ public enum RealtimeSession {
     /// The `session.update` payload: `session.type:"transcription"` with config nested under
     /// `session.audio.input` (format / transcription model / model-compatible turn detection).
     ///
-    /// GPT-4o accepts the legacy singular `language` hint. GPT Live accepts the plural `languages`
-    /// list and rejects a payload that also carries the singular field. Mixed-language GPT-4o
-    /// sessions therefore omit `language` and use the model's automatic recognition.
+    /// GPT-4o accepts the legacy singular `language` hint. GPT Transcribe and GPT Live accept the
+    /// plural `languages` list and a free-form recording context; GPT Live also receives the low
+    /// streaming-delay setting. Mixed-language GPT-4o sessions omit `language` and use the model's
+    /// automatic recognition. No literal keyword hints are sent.
     ///
-    /// GPT-4o uses `server_vad`; `silenceDurationMs` tunes how long a pause must last before that
-    /// server ends the turn. GPT Live does not support server turn detection, so its payload clears
-    /// `turn_detection` and the client commits boundaries found by local WebRTC VAD. See
-    /// wiki/architecture.md (Models and APIs).
+    /// GPT-4o uses `server_vad`; `silenceDurationMs` tunes how long a pause must last before the
+    /// server ends the turn. GPT Transcribe and GPT Live require committed-turn transcription, so
+    /// their payloads clear `turn_detection` and the client commits boundaries found by local
+    /// WebRTC VAD. See wiki/architecture.md (Models and APIs).
     ///
     /// `noiseReduction` ("near_field" for a headset/close mic, "far_field" for a laptop/room mic, or
     /// nil to disable) filters the input buffer *before* it reaches VAD and the model — OpenAI's
@@ -28,6 +29,7 @@ public enum RealtimeSession {
     /// Sent as an object `{"type": …}`; a bare string is rejected by the server.
     public static func sessionUpdate(
         model: OpenAITranscriptionModel,
+        speaker: Speaker = .me,
         languageProfile: OpenAITranscriptionLanguageProfile = .automatic,
         silenceDurationMs: Int = 1000,
         noiseReduction: String? = "near_field"
@@ -38,9 +40,13 @@ public enum RealtimeSession {
             if let language = languageProfile.singularLanguageHint {
                 transcription["language"] = language
             }
-        case .gptLiveTranscribe:
-            if let languages = languageProfile.liveLanguageHints {
+        case .gptTranscribe, .gptLiveTranscribe:
+            transcription["prompt"] = transcriptionPrompt(for: speaker)
+            if let languages = languageProfile.multipleLanguageHints {
                 transcription["languages"] = languages
+            }
+            if model == .gptLiveTranscribe {
+                transcription["delay"] = "low"
             }
         }
 
@@ -72,12 +78,27 @@ public enum RealtimeSession {
         ]
     }
 
+    /// Fixed recording context for the selected speaker stream. Keeping it app-owned prevents OCR
+    /// or an uncertain earlier transcript from feeding recognition errors back into later turns.
+    static func transcriptionPrompt(for speaker: Speaker) -> String {
+        switch speaker {
+        case .me:
+            "A live technical-interview conversation captured from the local user's microphone. "
+                + "This stream contains the user's speech and may include names, numbers, and "
+                + "technical terminology."
+        case .them:
+            "A live technical-interview conversation captured from Mac system audio. This stream "
+                + "contains other participants' speech and may include names, numbers, and "
+                + "technical terminology."
+        }
+    }
+
     /// Append-audio event (base64 PCM16).
     public static func appendAudio(base64PCM: String) -> [String: Any] {
         ["type": "input_audio_buffer.append", "audio": base64PCM]
     }
 
-    /// Explicitly finalize the current input buffer. GPT Live requires this with turn detection off.
+    /// Explicitly finalize the current input buffer for a client-commit model.
     public static func commitAudio(eventID: String) -> [String: Any] {
         ["type": "input_audio_buffer.commit", "event_id": eventID]
     }
@@ -106,6 +127,20 @@ public enum RealtimeSession {
     /// The event type the server emits when an utterance's transcription is final.
     public static let completedTranscriptionType = "conversation.item.input_audio_transcription.completed"
     public static let failedTranscriptionType = "conversation.item.input_audio_transcription.failed"
+
+    /// GPT Transcribe's detected language codes from a completed event. `nil` means the event carries
+    /// no detected-language field; an empty array is meaningful and means no reliable prediction.
+    public static func detectedLanguageCodes(from event: [String: Any]) -> [String]? {
+        guard event["type"] as? String == completedTranscriptionType,
+              let languages = event["languages"] as? [[String: Any]] else {
+            return nil
+        }
+        return languages.compactMap { language in
+            guard let code = language["code"] as? String else { return nil }
+            let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+    }
 
     /// Classify only failures that cannot recover on the next utterance. Realtime also uses the
     /// failed-transcription event for item-local failures such as `audio_unintelligible`, so an

@@ -7,10 +7,10 @@ import JarvisCore
 ///
 /// The wire contract (connect URL with `?intent=transcription`, the `session.update` payload, the
 /// audio-append/commit events) is built by the pure, unit-tested `RealtimeSession` in JarvisCore.
-/// GPT-4o uses server VAD. GPT Live disables unsupported server turn detection and commits boundaries
-/// supplied by capture-side WebRTC VAD, after the ordered FIFO has sent every matching audio chunk.
-/// Provisional deltas remain lifecycle-only; finalized text is still the sole input to Activity and
-/// the coaching model.
+/// GPT-4o uses server VAD. GPT Transcribe and GPT Live disable automatic turn detection and commit
+/// boundaries supplied by capture-side WebRTC VAD, after the ordered FIFO has sent every matching
+/// audio chunk. Provisional deltas remain lifecycle-only; finalized text is still the sole input to
+/// Activity and the coaching model.
 ///
 /// Robustness: waits for the server's configuration acknowledgement before reporting ready, probes
 /// ready sockets with ping/pong, and reconnects with capped exponential backoff on every detected
@@ -57,11 +57,11 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
     private var transcriptionLifecycle: RealtimeTranscriptionLifecycle!
     private let continuityReporter: RealtimeContinuityReporter
     private let audioBuffer: PCMBuffer        // mic audio captured while the socket is down
-    /// Present only for GPT Live. Mutated under `lock` so commit ordering is atomic with FIFO/socket
-    /// state; the value itself remains Foundation-only and unit-tested in Core.
+    /// Present only for client-commit models. Mutated under `lock` so commit ordering is atomic with
+    /// FIFO/socket state; the value itself remains Foundation-only and unit-tested in Core.
     private var jarvisManagedTurnCoordinator: RealtimeJarvisManagedTurnCoordinator?
-    /// GPT Live keeps only a short local pre-roll while idle. Active speech and endpoint trailing
-    /// silence then enter `audioBuffer`; GPT-4o bypasses this gate and keeps server VAD unchanged.
+    /// Jarvis-managed models keep only a short local pre-roll while idle. Active speech and endpoint
+    /// trailing silence then enter `audioBuffer`; server-VAD models bypass this gate.
     private var jarvisManagedSpeechBuffer: SpeechGatedAudioBuffer?
     private var reconnectAttempt = 0
     private var isReconnecting = false
@@ -236,6 +236,7 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         let profile = NoiseReduction.profile(mode: noiseReduction, micProximity: InputDeviceProximity.current())
         send(json: RealtimeSession.sessionUpdate(
             model: model,
+            speaker: speaker,
             languageProfile: languageProfile,
             silenceDurationMs: silenceDurationMs,
             noiseReduction: profile))
@@ -252,7 +253,8 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
     }
 
     func sendAudio(_ pcm: Data, sequenceNumber: UInt64, capturedAt: TimeInterval) {
-        // GPT-4o sends every chunk; GPT Live releases only bounded pre-roll and endpoint-gated speech.
+        // GPT-4o sends every chunk; client-commit models release only bounded pre-roll and
+        // endpoint-gated speech.
         // Eligible audio enters one ordered FIFO. Local send completion moves it into a bounded
         // recovery tail because only later server item lifecycle can retire that prefix safely.
         let observedAt = clock.now() - sessionStart
@@ -279,6 +281,7 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         guard model.turnDetectionStrategy == .clientCommit else { return }
         switch event {
         case .started:
+            jlog("Jarvis realtime [\(speaker.rawValue)]: local speech started")
             transcriptionLifecycle.recordLocalSpeechStarted()
             lock.lock()
             guard !stopped else { lock.unlock(); return }
@@ -287,6 +290,8 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
             reportBufferEviction(evicted)
             pumpAudioIfReady()
         case .ended(let startedAt, let commitAt):
+            jlog("Jarvis realtime [\(speaker.rawValue)]: local speech ended "
+                 + "(through sequence \(throughSequenceNumber))")
             transcriptionLifecycle.recordLocalSpeechEnded()
             lock.lock()
             guard !stopped else { lock.unlock(); return }
@@ -447,7 +452,11 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
                 self.jarvisManagedTurnCoordinator?.recordCommitSendCompleted(turnID: turn.id)
             }
             self.lock.unlock()
-            if isCurrentLease { self.pumpAudioIfReady() }
+            if isCurrentLease {
+                jlog("Jarvis realtime [\(self.speaker.rawValue)]: local turn commit sent "
+                     + "(turn \(turn.id), through sequence \(turn.throughSequenceNumber))")
+                self.pumpAudioIfReady()
+            }
         }
     }
 
@@ -507,9 +516,10 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
                      + "(item \(itemID))")
                 break
             }
-            // GPT Live has no server VAD events. Its commit acknowledgement is the provider-side
-            // proof for the locally timed interval, so feed that content-free boundary into the same
-            // continuity matcher instead of generating false "no provider speech" anomalies.
+            // Client-commit models have no server VAD events. The commit acknowledgement is the
+            // provider-side proof for the locally timed interval, so feed that content-free boundary
+            // into the same continuity matcher instead of generating false "no provider speech"
+            // anomalies.
             continuityReporter.recordServerSpeech(
                 .speechStarted,
                 audioTimeMilliseconds: nil,
@@ -576,6 +586,11 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
                 break
             }
             let transcriptText = obj["transcript"] as? String ?? ""
+            if let languages = RealtimeSession.detectedLanguageCodes(from: obj) {
+                let detail = languages.isEmpty ? "none-reliable" : languages.joined(separator: ",")
+                jlog("Jarvis realtime [\(speaker.rawValue)]: detected-languages=\(detail) "
+                     + "(item \(itemID))")
+            }
             lock.lock()
             jarvisManagedTurnCoordinator?.recordItemFinished(itemID: itemID)
             lock.unlock()

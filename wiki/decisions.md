@@ -1129,3 +1129,53 @@
   `Sources/JarvisCore/Audio/SpeechEndpointDetector.swift`,
   `Sources/JarvisCore/Transcription/RealtimeJarvisManagedTurnCoordinator.swift`,
   `Sources/JarvisApp/Capture/RealtimeTranscriber.swift`.
+
+### 2026-08-06 — GPT Transcribe uses server VAD while GPT Live keeps local endpoints
+
+- **Chose:** Add GPT Transcribe as an opt-in OpenAI model without changing GPT-4o Transcribe as the
+  default. GPT Transcribe uses the same tuned server-VAD boundary as GPT-4o; GPT Live retains its
+  local WebRTC VAD and acknowledged explicit commits. GPT Transcribe and GPT Live receive fixed,
+  speaker-role-aware recording context and plural expected-language hints, while GPT Live also
+  requests low transcription delay. GPT Transcribe completion-language metadata goes only to debug
+  diagnostics. Vocabulary keywords remain unset.
+- **Why:** The current GPT Transcribe Realtime contract accepts server VAD and produces the same
+  speech-start, speech-stop, committed-item, and completed-item sequence Jarvis already reconciles.
+  That keeps endpoint ownership on the server for models that support it and preserves local VAD
+  only where the selected model requires client commits. Fixed context and expected languages apply
+  the provider's accuracy guidance without adding changing screen/transcript content to the session
+  configuration or persisting new audio-derived data.
+- **Rejected:** (a) Requiring local VAD for GPT Transcribe despite its supported server boundary—this
+  adds endpoint and reconnect machinery without a provider constraint. (b) Removing GPT Live—the
+  opt-in path remains useful for low-latency comparison and has a working client-commit contract.
+  (c) Enabling server VAD for GPT Live—the live API rejects that model/configuration combination.
+  (d) Dynamic OCR, prior-turn, or transcript-derived prompts—the role context is sufficient for this
+  step and avoids another changing data path. (e) Vocabulary keywords—the user explicitly deferred
+  them. (f) Changing the default before a same-input three-model comparison.
+- **Detail:** [architecture.md → Models and APIs](./architecture.md#models-and-apis),
+  [settings-window.md → Brain](./settings-window.md#brain),
+  `Sources/JarvisCore/Transcription/RealtimeSession.swift`,
+  `Sources/JarvisCore/Transcription/OpenAITranscriptionModel.swift`,
+  `Sources/JarvisApp/Capture/RealtimeTranscriber.swift`.
+- **Superseded by:** 2026-08-06 — GPT Transcribe requires explicit committed turns.
+
+### 2026-08-06 — GPT Transcribe requires explicit committed turns
+
+- **Chose:** Keep GPT-4o Transcribe on tuned server VAD. Run GPT Transcribe and GPT Live through the
+  existing local WebRTC VAD, ordered append, explicit commit, acknowledgement, and `item_id`
+  lifecycle path. GPT Transcribe retains its fixed recording context, plural expected-language
+  hints, and diagnostic completion-language handling; vocabulary keywords remain unset.
+- **Why:** OpenAI documents GPT Transcribe's Realtime mode as a committed-turn workflow with
+  `turn_detection: null`, where transcription begins after `input_audio_buffer.commit`. A
+  configuration-only live probe accepted `server_vad`, but real session
+  `2026-08-06_20-07-57_977B` captured and delivered both streams without a completed transcript
+  because Jarvis never sent a commit. Schema acceptance therefore did not prove working endpoint
+  behavior. Reusing the already-built client-commit path is the smallest contract-correct fix.
+- **Rejected:** (a) Keeping GPT Transcribe on accepted-but-nonfunctional server VAD. (b) Adding a
+  second endpoint mechanism when the GPT Live path already provides ordered, reconnect-safe commits.
+  (c) Removing GPT Live or changing the GPT-4o default. (d) Enabling vocabulary hints before the
+  user requests them.
+- **Supersedes:** 2026-08-06 — GPT Transcribe uses server VAD while GPT Live keeps local endpoints.
+- **Detail:** [architecture.md → Models and APIs](./architecture.md#models-and-apis),
+  `Sources/JarvisCore/Transcription/OpenAITranscriptionModel.swift`,
+  `Sources/JarvisCore/Transcription/RealtimeSession.swift`,
+  `Sources/JarvisApp/Capture/RealtimeTranscriber.swift`.

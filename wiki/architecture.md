@@ -57,8 +57,9 @@ moments the model judges worthwhile.
 ### The turn
 
 1. The Transcriber emits a **turn-end** event after it finalizes an utterance (GPT-4o uses tuned
-   server VAD, GPT Live uses local WebRTC VAD plus an explicit acknowledged commit, and Apple Speech
-   uses final `SpeechTranscriber` segments; all paths share the same client debounce),
+   server VAD, GPT Transcribe and GPT Live use local WebRTC VAD plus an explicit acknowledged
+   commit, and Apple Speech uses final `SpeechTranscriber` segments; all paths share the same client
+   debounce),
    or a **silence check** fires (you've gone quiet, maybe stuck). The silence check carries *how
    long* you've been quiet and backs off across a long silence (the interval
    doubles each step up to a cap — see `Config`), resetting on speech; past an idle cutoff it stops
@@ -133,10 +134,10 @@ plugins ship only with full Xcode, and Jarvis builds **CLT-only** (see
 
 | Component | Responsibility | Built on (borrowed) |
 |---|---|---|
-| **AggregateEchoCapture** | The whole capture path: one **private Core Audio aggregate device** = the built-in mic (`me`, clock master) + a system-output **process tap** (`them`, drift-compensated onto the mic's clock). A single IOProc delivers both sample-synced at the device's **native rate** — the one-clock case AEC3 needs; the capture **reads that rate and resamples mic+tap up to 48 kHz** for AEC3 (a no-op when the device is already 48 kHz). So **any input device works** — built-in, USB, 44.1 kHz gear, or AirPods (Bluetooth HFP at 16/24 kHz) — instead of the old hard 48 kHz pin that silently failed to start on Bluetooth mics. Inside the callback it runs AEC3 (tap = far reference, mic = near), removing the other side's speaker bleed from the mic *before* transcription — no headphones, and double-talk works (measured 30–50 dB cancellation). The untouched resampled tap remains the `them` source while a separate padded/truncated copy aligns AEC; wire delivery is serialized off the realtime IOProc. When GPT Live is selected, separate classic WebRTC VAD instances inspect these post-AEC 48 kHz streams and emit content-free turn edges. Both sides then downsample to 24 kHz. Replaces the old separate `AVAudioEngine` mic + `SCStream`. | Core Audio (`AudioHardwareCreateProcessTap`, private aggregate device, drift compensation) + `AVAudioConverter` resampling + WebRTC **AEC3/VAD**. |
+| **AggregateEchoCapture** | The whole capture path: one **private Core Audio aggregate device** = the built-in mic (`me`, clock master) + a system-output **process tap** (`them`, drift-compensated onto the mic's clock). A single IOProc delivers both sample-synced at the device's **native rate** — the one-clock case AEC3 needs; the capture **reads that rate and resamples mic+tap up to 48 kHz** for AEC3 (a no-op when the device is already 48 kHz). So **any input device works** — built-in, USB, 44.1 kHz gear, or AirPods (Bluetooth HFP at 16/24 kHz) — instead of the old hard 48 kHz pin that silently failed to start on Bluetooth mics. Inside the callback it runs AEC3 (tap = far reference, mic = near), removing the other side's speaker bleed from the mic *before* transcription — no headphones, and double-talk works (measured 30–50 dB cancellation). The untouched resampled tap remains the `them` source while a separate padded/truncated copy aligns AEC; wire delivery is serialized off the realtime IOProc. When a client-commit model is selected, separate classic WebRTC VAD instances inspect these post-AEC 48 kHz streams and emit content-free turn edges. Both sides then downsample to 24 kHz. Replaces the old separate `AVAudioEngine` mic + `SCStream`. | Core Audio (`AudioHardwareCreateProcessTap`, private aggregate device, drift compensation) + `AVAudioConverter` resampling + WebRTC **AEC3/VAD**. |
 | **WebRTCEchoCanceller** | AEC3 echo canceller driven at 48 kHz on 10 ms frames inside the capture IOProc; far reference first, then the mic cleaned in place. | WebRTC **AEC3** (`webrtc-audio-processing`), vendored static + zero-dylib via `scripts/build-aec.sh`. |
 | **ErrorReporter** | The single funnel for user-facing failures. Severity on a Foundation-only `UserFacingError` decides the lifecycle consequence; an explicit startup/runtime context decides presentation. Startup failures may alert, but runtime failures never activate Jarvis or present UI even when they stop the session. `BrainFailure` feeds attempt outcomes into the finite provider route; only route exhaustion enters terminal reporting. Fixed, typed Activity outcomes carry stable on-disk identities while raw detail stays in `JarvisLog`. | AppKit (`NSAlert`) for startup only. |
-| **Transcriber** | Maintain a rolling, speaker-labeled, **spoken-time timestamped** transcript; emit speech-activity, turn-end, and backing-off silence events (with quiet duration). Two instances run in parallel — one per side — tagging lines `me`/`them` into one shared transcript through the provider-neutral `TranscriptionSession` port. The default OpenAI adapter keeps its per-`item_id` reconciliation, delta salvage, acknowledged readiness, ping/pong health, and transactional reconnect path. GPT-4o Transcribe remains its default model and uses tuned server VAD. GPT Live Transcribe is opt-in; a bounded local pre-roll opens at confirmed speech onset, active speech and configured trailing silence enter the ordered audio FIFO, and indefinite idle silence stays off the wire. Endpoints commit only after that FIFO reaches their boundary, and the server's commit acknowledgement binds each boundary to its `item_id`. The opt-in macOS 26+ Apple adapter prepares one selected-locale asset before capture, converts the existing 24 kHz PCM to `SpeechAnalyzer`'s preferred format, and commits final results only. Its content-free local activity tracker delays coaching but never gates transcription or retains PCM. Every path keeps unusable words diagnostic-only and records content-free boundary evidence. | OpenAI Realtime transcription (model-compatible server or local turn detection) or Apple `SpeechAnalyzer` / `SpeechTranscriber` (on-device). |
+| **Transcriber** | Maintain a rolling, speaker-labeled, **spoken-time timestamped** transcript; emit speech-activity, turn-end, and backing-off silence events (with quiet duration). Two instances run in parallel — one per side — tagging lines `me`/`them` into one shared transcript through the provider-neutral `TranscriptionSession` port. The default OpenAI adapter keeps its per-`item_id` reconciliation, delta salvage, acknowledged readiness, ping/pong health, and transactional reconnect path. GPT-4o Transcribe remains its default model and uses tuned server VAD. GPT Transcribe and GPT Live Transcribe remain opt-in with local WebRTC VAD: a bounded pre-roll opens at confirmed speech onset, active speech and trailing silence enter the ordered audio FIFO, and indefinite idle silence stays off the wire. Endpoints commit only after that FIFO reaches their boundary, and the server's commit acknowledgement binds each boundary to its `item_id`. GPT Transcribe also reports detected completion languages to debug diagnostics. Both new models receive fixed context for the captured speaker role, and GPT Live additionally requests low transcription delay. The opt-in macOS 26+ Apple adapter prepares one selected-locale asset before capture, converts the existing 24 kHz PCM to `SpeechAnalyzer`'s preferred format, and commits final results only. Its content-free local activity tracker delays coaching but never gates transcription or retains PCM. Every path keeps unusable words diagnostic-only and records content-free boundary evidence. | OpenAI Realtime transcription (model-compatible server or local turn detection) or Apple `SpeechAnalyzer` / `SpeechTranscriber` (on-device). |
 | **CoachDriver** | Coordinate one single-flighted coaching attempt from a natural trigger or pending-work wake-up: snapshot one route target plus the latest conversation, route its tool calls, commit only a complete terminal action, and report one outcome to the scheduler. No speaking cooldown/rate cap — restraint is the model's; the only client-side content skip is the filler-only turn-end gate (`TurnSubstance`). | The selected OpenAI Responses API, Claude Code, or Codex route target; See [§4 Local CLI brain providers](#local-cli-brain-providers). Provider-specific summary tiers are defined in `BrainModelCatalog`. |
 | **Local agent runtime** | Keep provider startup outside the coaching latency path while preserving the attempt boundary: a `BrainConversation` lease owns every model turn in one attempt, including a `capture_screen` continuation, then is explicitly finished. Claude leases one initialized safe-mode query; Codex prepares the first target-specific ephemeral thread at Session Start and opens a fresh thread for each later attempt on one session-scoped app-server. A runtime failure fails the attempt; it never switches to a one-shot transport. | Claude Code stream-json control protocol; Codex app-server JSON-RPC over stdio. |
 | **ScreenTool** | Fulfill `capture_screen`: silently shoot the **active window** (default scope) — the window-server frontmost, on whichever display, clean even when partially covered — and attach an **on-device OCR** of the shot to the tool result so the model reads exact text instead of pixels. Falls back to a full-display capture (no OCR) — the Settings-chosen display in Entire-display scope, the main display when no window is eligible; the overlay window is excluded either way. See [settings-window.md](./settings-window.md#capture-scope). | macOS `screencapture` CLI + Apple Vision (`VNRecognizeTextRequest`). |
@@ -322,17 +323,21 @@ rather than a per-turn screenshot.
   so they stay inspectable in the OpenAI dashboard for debugging — the retention tradeoff is
   documented in [sandbox.md](./sandbox.md).
 - **Transcription has its own provider, model, and language settings.** OpenAI remains the provider
-  default and `gpt-4o-transcribe` remains its model default; `gpt-live-transcribe` is an opt-in A/B
-  choice. Both use the GA Realtime API, but keep their distinct turn contracts: GPT-4o uses tuned
-  `server_vad`, while GPT Live disables unsupported server turn detection, keeps only a bounded local
-  pre-roll while idle, and explicitly commits endpoints from classic WebRTC VAD running locally on
-  each post-AEC 48 kHz stream. Automatic is the
-  default language profile and sends no
-  language hint. A single-language profile guides recognition without translating, while the
-  English + Mandarin profile supplies both expectations to GPT Live and leaves GPT-4o automatic
-  because the older model accepts at most one language hint. This is one session-level expectation
-  shared by both speakers, not a language decision per turn; either speaker may switch within a
-  sentence. The macOS 26+ opt-in is Apple `SpeechAnalyzer` with one `SpeechTranscriber` locale chosen
+  default and `gpt-4o-transcribe` remains its model default; `gpt-transcribe` and
+  `gpt-live-transcribe` are opt-in comparison choices. All use the GA Realtime API, but keep their
+  model-compatible turn contracts: GPT-4o uses tuned `server_vad`, while GPT Transcribe and GPT Live
+  disable automatic turn detection, keep only bounded local pre-roll while idle, and explicitly
+  commit endpoints from classic WebRTC VAD running locally on each post-AEC 48 kHz stream. GPT
+  Transcribe and GPT Live receive fixed role-aware recording context; GPT Live also requests low
+  transcription delay. Jarvis does not send vocabulary keywords. Automatic is the default language
+  profile and sends no language hint. A
+  single-language profile guides recognition without translating, while the English + Mandarin
+  profile supplies both expectations to GPT Transcribe and GPT Live and leaves GPT-4o automatic
+  because the older model accepts at most one language hint. GPT Transcribe's completion-language
+  metadata is logged for diagnosis without entering Activity or model context. This is one
+  session-level expectation shared by both speakers, not a language decision per turn; either
+  speaker may switch within a sentence. The macOS 26+ opt-in is Apple `SpeechAnalyzer` with one
+  `SpeechTranscriber` locale chosen
   from the framework's runtime-supported list. `AssetInventory` installs that model before the new
   pipeline replaces a running one, and final results alone enter Activity/model context. Apple
   documents `SpeechDetector` as an optional power-saving gate that may trade away transcription
@@ -494,13 +499,13 @@ The always-on legs are built to survive transient failure rather than die on it:
   socket has a generation so stale callbacks cannot damage the new one, and diagnostics label the
   `me`/`them` side, socket generation, server session, and current macOS network-path summary. While
   reconnecting, speech-eligible audio remains in one **transactional FIFO plus recovery tail**
-  (`PCMBuffer`, capped at `maxBufferedAudioSeconds`); idle GPT Live audio stays in the separate bounded
-  `SpeechGatedAudioBuffer` pre-roll until onset. Exactly one oldest chunk is claimed at a time. A
+  (`PCMBuffer`, capped at `maxBufferedAudioSeconds`); idle client-commit audio stays in the separate
+  bounded `SpeechGatedAudioBuffer` pre-roll until onset. Exactly one oldest chunk is claimed at a time. A
   successful URLSession callback moves it into the in-memory tail rather than deleting it, because Realtime intentionally
   sends no confirmation for `input_audio_buffer.append`; only acknowledged item lifecycle progress
-  retires a safe prefix. For GPT Live, an explicit commit never crosses its sequence boundary, the
-  returned `input_audio_buffer.committed` event binds that boundary to an `item_id`, and committed
-  PCM remains replayable until the item is terminal. On failure, unresolved local boundaries are
+  retires a safe prefix. For GPT Transcribe and GPT Live, an explicit commit never crosses its
+  sequence boundary, the returned `input_audio_buffer.committed` event binds that boundary to an
+  `item_id`, and committed PCM remains replayable until the item is terminal. On failure, unresolved local boundaries are
   requeued with the unconfirmed tail ahead of audio captured
   during reconnect backoff. This closes the ready-transition, asynchronous-send, and idle half-open
   loss edges; deliberate cap eviction is logged as diagnostic metadata. Within a healthy socket,
@@ -511,8 +516,8 @@ The always-on legs are built to survive transient failure rather than die on it:
   Sequence, sample, timestamp, and socket-generation checkpoints cover the capture, delivery,
   WebSocket attempt/completion, and server-event boundaries. Periodic content-free summaries and
   typed anomalies show which boundary stopped advancing. Bounded local activity intervals match
-  overlapping server VAD intervals on the session audio clock, including delayed reconnect replay,
-  so a quiet dip inside one server utterance is not reported as a gap. This evidence stays in the
+  overlapping provider turn intervals on the session audio clock, including delayed reconnect
+  replay, so a quiet dip inside one provider utterance is not reported as a gap. This evidence stays in the
   owner-only session log: it diagnoses loss but cannot reconstruct words that never reached
   transcription, and none of it enters model context. VAD-only start/stop events do not
   restart silence checks without contributing context. Pending items are finalized by bounded

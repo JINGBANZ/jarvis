@@ -38,6 +38,23 @@ import Testing
             appleSpeechLocaleIdentifier: "zh-CN"))
     }
 
+    @Test func gptTranscribeSelectionRoundTripsThroughDefaults() {
+        let defaults = freshDefaults()
+        let written = TranscriptionPreferences(defaults: defaults)
+        written.provider = .openAI
+        written.openAIModel = .gptTranscribe
+        written.openAILanguageProfile = .mandarinChinese
+        written.appleSpeechLocaleIdentifier = "en-US"
+
+        let read = TranscriptionPreferences(defaults: defaults)
+        #expect(read.openAIModel == .gptTranscribe)
+        #expect(read.configuration == TranscriptionConfiguration(
+            provider: .openAI,
+            openAIModel: .gptTranscribe,
+            openAILanguageProfile: .mandarinChinese,
+            appleSpeechLocaleIdentifier: "en-US"))
+    }
+
     @Test func unknownSelectionsUseSafeDefaults() {
         let defaults = freshDefaults()
         defaults.set("future-provider", forKey: "transcription.provider")
@@ -58,11 +75,14 @@ import Testing
         #expect(!TranscriptionProvider.appleSpeech.requiresOpenAIAPIKey)
         #expect(OpenAITranscriptionModel.gpt4oTranscribe.displayName
                 == "GPT-4o Transcribe")
+        #expect(OpenAITranscriptionModel.gptTranscribe.displayName
+                == "GPT Transcribe")
         #expect(OpenAITranscriptionModel.gptLiveTranscribe.displayName
                 == "GPT Live Transcribe")
         #expect(OpenAITranscriptionLanguageProfile.englishAndMandarinChinese.displayName
                 == "English + Mandarin Chinese")
         #expect(OpenAITranscriptionModel.gpt4oTranscribe.turnDetectionStrategy == .serverVAD)
+        #expect(OpenAITranscriptionModel.gptTranscribe.turnDetectionStrategy == .clientCommit)
         #expect(OpenAITranscriptionModel.gptLiveTranscribe.turnDetectionStrategy == .clientCommit)
     }
 
@@ -75,6 +95,22 @@ import Testing
         let apple = TranscriptionConfiguration(
             provider: .appleSpeech,
             openAIModel: .gptLiveTranscribe,
+            openAILanguageProfile: .automatic,
+            appleSpeechLocaleIdentifier: "en-US")
+
+        #expect(openAI.turnDetectionStrategy == .clientCommit)
+        #expect(apple.turnDetectionStrategy == nil)
+    }
+
+    @Test func gptTranscribeTurnStrategyAppliesOnlyToOpenAIConfiguration() {
+        let openAI = TranscriptionConfiguration(
+            provider: .openAI,
+            openAIModel: .gptTranscribe,
+            openAILanguageProfile: .automatic,
+            appleSpeechLocaleIdentifier: "en-US")
+        let apple = TranscriptionConfiguration(
+            provider: .appleSpeech,
+            openAIModel: .gptTranscribe,
             openAILanguageProfile: .automatic,
             appleSpeechLocaleIdentifier: "en-US")
 
