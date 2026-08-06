@@ -280,6 +280,7 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         guard model.turnDetectionStrategy == .clientCommit else { return }
         switch event {
         case .started:
+            jlog("Jarvis realtime [\(speaker.rawValue)]: local speech started")
             transcriptionLifecycle.recordLocalSpeechStarted()
             lock.lock()
             guard !stopped else { lock.unlock(); return }
@@ -288,6 +289,8 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
             reportBufferEviction(evicted)
             pumpAudioIfReady()
         case .ended(let startedAt, let commitAt):
+            jlog("Jarvis realtime [\(speaker.rawValue)]: local speech ended "
+                 + "(through sequence \(throughSequenceNumber))")
             transcriptionLifecycle.recordLocalSpeechEnded()
             lock.lock()
             guard !stopped else { lock.unlock(); return }
@@ -448,7 +451,11 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
                 self.jarvisManagedTurnCoordinator?.recordCommitSendCompleted(turnID: turn.id)
             }
             self.lock.unlock()
-            if isCurrentLease { self.pumpAudioIfReady() }
+            if isCurrentLease {
+                jlog("Jarvis realtime [\(self.speaker.rawValue)]: local turn commit sent "
+                     + "(turn \(turn.id), through sequence \(turn.throughSequenceNumber))")
+                self.pumpAudioIfReady()
+            }
         }
     }
 
