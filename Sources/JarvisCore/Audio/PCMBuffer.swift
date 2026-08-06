@@ -234,6 +234,15 @@ public final class PCMBuffer: @unchecked Sendable {
         return chunks.first?.sequenceNumber
     }
 
+    /// Oldest sequenced chunk still available for either steady-state commit or reconnect replay.
+    /// Unlike `nextQueuedSequenceNumber`, this includes locally-sent audio in the recovery tail.
+    public var oldestRetainedSequenceNumber: UInt64? {
+        lock.lock(); defer { lock.unlock() }
+        let oldestSent = sentChunks.first { $0.sequenceNumber != nil }?.sequenceNumber
+        let oldestQueued = chunks.first { $0.sequenceNumber != nil }?.sequenceNumber
+        return oldestSent ?? oldestQueued
+    }
+
     private func trimSentTailLocked(recordingIn evicted: inout [Chunk]) {
         while sentByteCount + queuedByteCount > maxBytes, !sentChunks.isEmpty,
               sentChunks.count > 1 || !chunks.isEmpty {
