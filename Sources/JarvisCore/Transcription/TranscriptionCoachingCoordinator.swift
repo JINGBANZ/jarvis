@@ -3,6 +3,7 @@ import Foundation
 /// Provider-neutral owner for finalized transcript delivery and the coaching triggers derived from it.
 /// Provider adapters report only final text and whether their own work is unsettled; this coordinator
 /// keeps turn coalescing, debounce, speech gating, and silence backoff identical across providers.
+/// `@unchecked Sendable`: `lock` guards every mutable field; collaborators and callbacks are Sendable.
 public final class TranscriptionCoachingCoordinator: @unchecked Sendable {
     private let speaker: Speaker
     private let transcript: RollingTranscript

@@ -1,8 +1,9 @@
 import Foundation
 
-/// Orders explicit Realtime commits against the audio FIFO and keeps unresolved boundaries replayable.
+/// Orders explicit Realtime commits for turns Jarvis manages with local speech detection.
+/// Keeps those boundaries aligned with the audio FIFO and replayable across reconnects.
 /// The socket owner serializes access to this value alongside its connection state.
-public struct RealtimeManualTurnCoordinator: Sendable {
+public struct RealtimeJarvisManagedTurnCoordinator: Sendable {
     public struct Turn: Equatable, Sendable {
         public let id: UInt64
         public let startedAt: TimeInterval

@@ -1127,5 +1127,5 @@
   fallback—both duplicate egress/cost or cross the user's explicit provider boundary.
 - **Detail:** [architecture.md → Models and APIs](./architecture.md#models-and-apis),
   `Sources/JarvisCore/Audio/SpeechEndpointDetector.swift`,
-  `Sources/JarvisCore/Transcription/RealtimeManualTurnCoordinator.swift`,
+  `Sources/JarvisCore/Transcription/RealtimeJarvisManagedTurnCoordinator.swift`,
   `Sources/JarvisApp/Capture/RealtimeTranscriber.swift`.
