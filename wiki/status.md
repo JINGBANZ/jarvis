@@ -26,10 +26,10 @@ supported locale before replacing a running pipeline, submits every captured sam
 coaching from waking mid-utterance. An OpenAI key is required only when OpenAI supplies
 transcription or appears in the brain route.
 The OpenAI path still reconciles each Realtime `item_id` across VAD, delta, completion, and failure
-events. GPT-4o and GPT Transcribe use tuned server VAD. GPT Live clears unsupported server turn
-detection and uses separate local WebRTC VAD instances for `me` and `them`; bounded in-memory
-pre-roll preserves speech onset while indefinite idle silence stays off the wire. Each endpoint is
-committed only after its ordered audio sequence has been sent, then bound to the
+events. GPT-4o uses tuned server VAD. GPT Transcribe and GPT Live clear automatic turn detection and
+use separate local WebRTC VAD instances for `me` and `them`; bounded in-memory pre-roll preserves
+speech onset while indefinite idle silence stays off the wire. Each endpoint is committed only after
+its ordered audio sequence has been sent, then bound to the
 server-acknowledged `item_id`. GPT Transcribe and GPT Live receive fixed, role-aware recording
 context, GPT Live requests low transcription delay, and GPT Transcribe completion-language metadata
 stays diagnostic-only. Vocabulary hints are not configured. Unfinished committed turns keep their
@@ -89,8 +89,8 @@ same English + Mandarin Chinese profile for one GPT-4o Transcribe, one GPT Trans
 Live Transcribe session; exercise both microphone and system audio, include a within-sentence
 language switch, and compare final `heard:` text, completion latency, and reconnect stability.
 Confirm the debug log names the selected model/profile, GPT-4o sends no single-language hint for the
-mixed profile, GPT Transcribe finalizes from server VAD and logs completion-language metadata, and
-GPT Live logs acknowledged local commits without a `turn_detection` configuration rejection. Then
+mixed profile, GPT Transcribe and GPT Live log acknowledged local commits without a
+`turn_detection` configuration rejection, and GPT Transcribe logs completion-language metadata. Then
 run Apple Speech once per relevant conversation locale; confirm it downloads or reuses the selected
 model before capture, reaches Listening, preserves `me`/`them` ordering, emits no mid-utterance
 coaching turn, and stops cleanly. Confirm Apple Speech plus a CLI-only brain route starts without an

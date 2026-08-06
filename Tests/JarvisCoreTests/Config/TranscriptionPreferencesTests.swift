@@ -65,7 +65,7 @@ import Testing
         #expect(OpenAITranscriptionLanguageProfile.englishAndMandarinChinese.displayName
                 == "English + Mandarin Chinese")
         #expect(OpenAITranscriptionModel.gpt4oTranscribe.turnDetectionStrategy == .serverVAD)
-        #expect(OpenAITranscriptionModel.gptTranscribe.turnDetectionStrategy == .serverVAD)
+        #expect(OpenAITranscriptionModel.gptTranscribe.turnDetectionStrategy == .clientCommit)
         #expect(OpenAITranscriptionModel.gptLiveTranscribe.turnDetectionStrategy == .clientCommit)
     }
 
@@ -81,7 +81,7 @@ import Testing
             openAILanguageProfile: .automatic,
             appleSpeechLocaleIdentifier: "en-US")
 
-        #expect(openAI.turnDetectionStrategy == .serverVAD)
+        #expect(openAI.turnDetectionStrategy == .clientCommit)
         #expect(apple.turnDetectionStrategy == nil)
     }
 

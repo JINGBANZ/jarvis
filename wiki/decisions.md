@@ -1156,3 +1156,26 @@
   `Sources/JarvisCore/Transcription/RealtimeSession.swift`,
   `Sources/JarvisCore/Transcription/OpenAITranscriptionModel.swift`,
   `Sources/JarvisApp/Capture/RealtimeTranscriber.swift`.
+- **Superseded by:** 2026-08-06 — GPT Transcribe requires explicit committed turns.
+
+### 2026-08-06 — GPT Transcribe requires explicit committed turns
+
+- **Chose:** Keep GPT-4o Transcribe on tuned server VAD. Run GPT Transcribe and GPT Live through the
+  existing local WebRTC VAD, ordered append, explicit commit, acknowledgement, and `item_id`
+  lifecycle path. GPT Transcribe retains its fixed recording context, plural expected-language
+  hints, and diagnostic completion-language handling; vocabulary keywords remain unset.
+- **Why:** OpenAI documents GPT Transcribe's Realtime mode as a committed-turn workflow with
+  `turn_detection: null`, where transcription begins after `input_audio_buffer.commit`. A
+  configuration-only live probe accepted `server_vad`, but real session
+  `2026-08-06_20-07-57_977B` captured and delivered both streams without a completed transcript
+  because Jarvis never sent a commit. Schema acceptance therefore did not prove working endpoint
+  behavior. Reusing the already-built client-commit path is the smallest contract-correct fix.
+- **Rejected:** (a) Keeping GPT Transcribe on accepted-but-nonfunctional server VAD. (b) Adding a
+  second endpoint mechanism when the GPT Live path already provides ordered, reconnect-safe commits.
+  (c) Removing GPT Live or changing the GPT-4o default. (d) Enabling vocabulary hints before the
+  user requests them.
+- **Supersedes:** 2026-08-06 — GPT Transcribe uses server VAD while GPT Live keeps local endpoints.
+- **Detail:** [architecture.md → Models and APIs](./architecture.md#models-and-apis),
+  `Sources/JarvisCore/Transcription/OpenAITranscriptionModel.swift`,
+  `Sources/JarvisCore/Transcription/RealtimeSession.swift`,
+  `Sources/JarvisApp/Capture/RealtimeTranscriber.swift`.

@@ -7,10 +7,10 @@ import JarvisCore
 ///
 /// The wire contract (connect URL with `?intent=transcription`, the `session.update` payload, the
 /// audio-append/commit events) is built by the pure, unit-tested `RealtimeSession` in JarvisCore.
-/// GPT-4o and GPT Transcribe use server VAD. GPT Live disables unsupported server turn detection and
-/// commits boundaries supplied by capture-side WebRTC VAD, after the ordered FIFO has sent every
-/// matching audio chunk. Provisional deltas remain lifecycle-only; finalized text is still the sole
-/// input to Activity and the coaching model.
+/// GPT-4o uses server VAD. GPT Transcribe and GPT Live disable automatic turn detection and commit
+/// boundaries supplied by capture-side WebRTC VAD, after the ordered FIFO has sent every matching
+/// audio chunk. Provisional deltas remain lifecycle-only; finalized text is still the sole input to
+/// Activity and the coaching model.
 ///
 /// Robustness: waits for the server's configuration acknowledgement before reporting ready, probes
 /// ready sockets with ping/pong, and reconnects with capped exponential backoff on every detected
@@ -508,9 +508,10 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
                      + "(item \(itemID))")
                 break
             }
-            // GPT Live has no server VAD events. Its commit acknowledgement is the provider-side
-            // proof for the locally timed interval, so feed that content-free boundary into the same
-            // continuity matcher instead of generating false "no provider speech" anomalies.
+            // Client-commit models have no server VAD events. The commit acknowledgement is the
+            // provider-side proof for the locally timed interval, so feed that content-free boundary
+            // into the same continuity matcher instead of generating false "no provider speech"
+            // anomalies.
             continuityReporter.recordServerSpeech(
                 .speechStarted,
                 audioTimeMilliseconds: nil,

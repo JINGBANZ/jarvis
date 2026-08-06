@@ -132,7 +132,7 @@ import Testing
         #expect(input["turn_detection"] is NSNull)
     }
 
-    @Test func gptTranscribeUsesServerTurnDetection() throws {
+    @Test func gptTranscribeUsesCommittedTurnDetection() throws {
         let payload = RealtimeSession.sessionUpdate(
             model: .gptTranscribe,
             silenceDurationMs: 700)
@@ -140,9 +140,7 @@ import Testing
         let obj = try JSONSerialization.jsonObject(with: data) as! [String: Any]
         let input = (((obj["session"] as! [String: Any])["audio"] as! [String: Any])["input"]
                      as! [String: Any])
-        let turnDetection = try #require(input["turn_detection"] as? [String: Any])
-        #expect(turnDetection["type"] as? String == "server_vad")
-        #expect(turnDetection["silence_duration_ms"] as? Int == 700)
+        #expect(input["turn_detection"] is NSNull)
     }
 
     /// Layer 1 (pre-VAD): noise reduction is sent as an OBJECT `{"type": "near_field"}` nested under

@@ -18,10 +18,10 @@ public enum RealtimeSession {
     /// streaming-delay setting. Mixed-language GPT-4o sessions omit `language` and use the model's
     /// automatic recognition. No literal keyword hints are sent.
     ///
-    /// GPT-4o and GPT Transcribe use `server_vad`; `silenceDurationMs` tunes how long a pause must
-    /// last before the server ends the turn. GPT Live does not support server turn detection, so its
-    /// payload clears `turn_detection` and the client commits boundaries found by local WebRTC VAD.
-    /// See wiki/architecture.md (Models and APIs).
+    /// GPT-4o uses `server_vad`; `silenceDurationMs` tunes how long a pause must last before the
+    /// server ends the turn. GPT Transcribe and GPT Live require committed-turn transcription, so
+    /// their payloads clear `turn_detection` and the client commits boundaries found by local
+    /// WebRTC VAD. See wiki/architecture.md (Models and APIs).
     ///
     /// `noiseReduction` ("near_field" for a headset/close mic, "far_field" for a laptop/room mic, or
     /// nil to disable) filters the input buffer *before* it reaches VAD and the model — OpenAI's
@@ -98,7 +98,7 @@ public enum RealtimeSession {
         ["type": "input_audio_buffer.append", "audio": base64PCM]
     }
 
-    /// Explicitly finalize the current input buffer for a client-commit model such as GPT Live.
+    /// Explicitly finalize the current input buffer for a client-commit model.
     public static func commitAudio(eventID: String) -> [String: Any] {
         ["type": "input_audio_buffer.commit", "event_id": eventID]
     }

@@ -53,7 +53,7 @@ over answers* (interview "cheating") rather than *coach with short nudges* — o
 - **Screen capture:** macOS built-in `screencapture` CLI; ScreenCaptureKit (screen + system audio).
 - **OCR (if needed):** Apple Vision `RecognizeTextRequest` (on-device).
 - **Transcription:** selectable `gpt-4o-transcribe`, `gpt-transcribe`, or `gpt-live-transcribe` on the
-  OpenAI Realtime API (GPT-4o and GPT Transcribe with tuned server VAD; GPT Live with local WebRTC
+  OpenAI Realtime API (GPT-4o with tuned server VAD; GPT Transcribe and GPT Live with local WebRTC
   VAD and explicit commits), or one selected-locale Apple `SpeechAnalyzer` transcriber on macOS 26+.
 - **Overlay:** AppKit NSPanel (non-activating, floating, can exclude itself from capture).
 - **Brain:** `gpt-5.5` with tool-use + vision.
