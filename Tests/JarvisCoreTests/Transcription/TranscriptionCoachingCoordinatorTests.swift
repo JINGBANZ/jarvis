@@ -11,6 +11,7 @@ import Testing
             transcript: transcript,
             clock: clock,
             sessionStart: 100,
+            turnDebounce: 0,
             events: events)
 
         coordinator.start()
@@ -20,7 +21,7 @@ import Testing
         #expect(coordinator.recordFinalizedTranscript(
             "second fragment", spokenAt: 2, source: "test"))
 
-        try? await Task.sleep(nanoseconds: 40_000_000)
+        await drainMainQueue()
         #expect(events.turnCount == 0)
         #expect(events.activity == [true])
 
@@ -40,7 +41,7 @@ import Testing
             transcript: transcript,
             clock: clock,
             sessionStart: 10,
-            turnDebounce: 0.05,
+            turnDebounce: 0,
             events: events)
 
         coordinator.start()
@@ -49,7 +50,7 @@ import Testing
         #expect(coordinator.recordFinalizedTranscript("usable", spokenAt: nil, source: "test"))
         coordinator.stop()
 
-        try? await Task.sleep(nanoseconds: 100_000_000)
+        await drainMainQueue()
         #expect(events.turnCount == 0)
         #expect(events.activity == [true, false])
         #expect(transcript.renderFrom(index: 0).text == "[00:00] me: usable")
@@ -146,7 +147,7 @@ private final class CoachingEvents: @unchecked Sendable {
 }
 
 private func waitUntil(
-    timeoutNanoseconds: UInt64 = 500_000_000,
+    timeoutNanoseconds: UInt64 = 5_000_000_000,
     condition: @escaping @Sendable () -> Bool
 ) async -> Bool {
     let startedAt = DispatchTime.now().uptimeNanoseconds
@@ -155,4 +156,15 @@ private func waitUntil(
         try? await Task.sleep(nanoseconds: 5_000_000)
     }
     return condition()
+}
+
+/// The zero-delay debounce has already submitted its work to this serial queue. A later sentinel
+/// proves that the scheduled turn had a chance to run, without guessing how many milliseconds the
+/// main actor needs under the parallel suite.
+private func drainMainQueue() async {
+    await withCheckedContinuation { continuation in
+        DispatchQueue.main.async {
+            continuation.resume()
+        }
+    }
 }
