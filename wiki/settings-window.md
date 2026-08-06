@@ -193,12 +193,10 @@ With OpenAI selected, **Model** offers **GPT-4o Transcribe** (the default), opt-
 Transcribe**, and opt-in **GPT Live Transcribe** for session-by-session comparison. **Expected
 languages** offers Automatic (the default), English, Mandarin Chinese, and English + Mandarin
 Chinese. Automatic sends no language hint. A single-language selection guides recognition but does
-not translate. GPT Transcribe and GPT Live receive both expectations for the mixed profile; GPT-4o
-receives no language hint for that profile because it accepts only one. The two newer models also
-receive fixed context for the captured speaker role, and GPT Live requests low transcription delay;
-Jarvis does not configure vocabulary keywords. The profile is one immutable Start-time expectation
-shared by `me` and `them`, so the transcription model—not a Jarvis per-turn classifier—handles a
-speaker switching languages inside one sentence.
+not translate. The profile is one immutable Start-time expectation shared by `me` and `them`, so the
+transcription model—not a Jarvis per-turn classifier—handles a speaker switching languages inside
+one sentence. Model-specific language, context, and turn-detection behavior is defined in
+[architecture.md](./architecture.md#models-and-apis).
 
 With Apple Speech selected, **Conversation locale** is populated from
 `SpeechTranscriber.supportedLocales`; the initial suggestion is the supported equivalent of the

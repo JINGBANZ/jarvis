@@ -253,7 +253,8 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
     }
 
     func sendAudio(_ pcm: Data, sequenceNumber: UInt64, capturedAt: TimeInterval) {
-        // GPT-4o sends every chunk; GPT Live releases only bounded pre-roll and endpoint-gated speech.
+        // GPT-4o sends every chunk; client-commit models release only bounded pre-roll and
+        // endpoint-gated speech.
         // Eligible audio enters one ordered FIFO. Local send completion moves it into a bounded
         // recovery tail because only later server item lifecycle can retire that prefix safely.
         let observedAt = clock.now() - sessionStart

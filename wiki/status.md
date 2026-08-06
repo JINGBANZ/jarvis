@@ -16,29 +16,20 @@ answered without a reflexive capture. The independent Transcription setting keep
 default**, keeps **GPT-4o Transcribe** as its default model, adds opt-in **GPT Transcribe** and
 **GPT Live Transcribe**, and adds opt-in, on-device **Apple Speech** on macOS 26 or later. OpenAI
 language expectations default to Automatic rather than English; English, Mandarin Chinese, and
-English + Mandarin Chinese are session-level hints, not per-turn language choices. GPT Transcribe
-and GPT Live can receive both expected languages, while GPT-4o uses automatic detection for the
-mixed profile because it accepts at most one language hint. One Start snapshots the provider,
-OpenAI model/profile, or Apple locale for both `me` and
-`them`; there is no automatic provider or model fallback. Apple Speech prepares the selected
+English + Mandarin Chinese remain session-level hints rather than per-turn language choices. One
+Start snapshots the provider, OpenAI model/profile, or Apple locale for both `me` and `them`; there
+is no automatic provider or model fallback. Apple Speech prepares the selected
 supported locale before replacing a running pipeline, submits every captured sample to
 `SpeechAnalyzer`, records only final results, and uses content-free local activity solely to keep
 coaching from waking mid-utterance. An OpenAI key is required only when OpenAI supplies
-transcription or appears in the brain route.
-The OpenAI path still reconciles each Realtime `item_id` across VAD, delta, completion, and failure
-events. GPT-4o uses tuned server VAD. GPT Transcribe and GPT Live clear automatic turn detection and
-use separate local WebRTC VAD instances for `me` and `them`; bounded in-memory pre-roll preserves
-speech onset while indefinite idle silence stays off the wire. Each endpoint is committed only after
-its ordered audio sequence has been sent, then bound to the
-server-acknowledged `item_id`. GPT Transcribe and GPT Live receive fixed, role-aware recording
-context, GPT Live requests low transcription delay, and GPT Transcribe completion-language metadata
-stays diagnostic-only. Vocabulary hints are not configured. Unfinished committed turns keep their
-boundary and PCM through reconnect. The shared path salvages partial text while keeping unavailable
-items diagnostic-only; preserves every real
-system-audio sample while padding only missing tap silence for VAD; and keeps AEC on a separate
-exact-length reference. Content-free continuity checkpoints cover capture through provider speech
-without archiving PCM, and timestamp-interval correlation handles locally split or replayed
-utterances without adding diagnostic text to the brain transcript.
+transcription or appears in the brain route. The detailed model, language, turn-detection, context,
+and completion contracts live in [architecture.md](./architecture.md#models-and-apis).
+The shared transcription path reconciles provider item lifecycles, preserves reconnectable audio
+boundaries, salvages partial text while keeping unavailable items diagnostic-only, preserves every
+real system-audio sample while padding only missing tap silence for activity detection, and keeps
+AEC on a separate exact-length reference. Content-free continuity checkpoints cover capture through
+provider speech without archiving PCM, and timestamp-interval correlation handles locally split or
+replayed utterances without adding diagnostic text to the brain transcript.
 Locally accepted WebSocket sends remain in a bounded memory-only recovery tail because Realtime does
 not acknowledge audio appends; server audio-clock progress retires only a safe prefix, and a
 replacement socket replays the rest after a half-open failure. A live Wi-Fi reconnect run confirms
