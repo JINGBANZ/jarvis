@@ -25,6 +25,7 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
     var onSpeechActivityChanged: (@Sendable (Bool) -> Void)?
     var onConnectionStateChange: (@Sendable (TranscriptionConnectionState) -> Void)?
     var onTerminalFailure: (@Sendable (TranscriptionFailureReason) -> Void)?
+    var onCaptureContinuity: (@Sendable (CaptureReadinessMonitor.Signal) -> Void)?
 
     private struct BufferedAudio {
         let data: Data
@@ -108,6 +109,9 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
             onSpeechActivityChanged: { [weak self] active in
                 self?.onSpeechActivityChanged?(active)
             })
+        continuityReporter.onCaptureContinuity = { [weak self] signal in
+            self?.onCaptureContinuity?(signal)
+        }
     }
 
     func connect() {

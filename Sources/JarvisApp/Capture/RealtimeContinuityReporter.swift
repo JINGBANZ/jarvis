@@ -21,6 +21,15 @@ final class RealtimeContinuityReporter: @unchecked Sendable {
     private var timer: Timer?
     private var stopped = true
     private var evictionAccumulator = ReplayBufferEvictionAccumulator()
+    /// Latches so each capture-continuity edge is surfaced once per incident: the first frame ever, a
+    /// stall (from the witness anomaly), and its resume. Guarded by `lock`.
+    private var emittedFirstFrame = false
+    private var reportedStall = false
+
+    /// Promotes actual audio-frame arrival into readiness. Fired off the witness's own evidence (no
+    /// second counter): `firstFrame` once, `stalled` on the witness's captureStalled anomaly, `resumed`
+    /// when capture returns. Consumed by `CaptureReadinessMonitor` in the app.
+    var onCaptureContinuity: (@Sendable (CaptureReadinessMonitor.Signal) -> Void)?
 
     init(
         speaker: Speaker,
@@ -39,6 +48,8 @@ final class RealtimeContinuityReporter: @unchecked Sendable {
         lock.lock()
         stopped = false
         evictionAccumulator.reset()
+        emittedFirstFrame = false
+        reportedStall = false
         lock.unlock()
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
@@ -68,6 +79,15 @@ final class RealtimeContinuityReporter: @unchecked Sendable {
     }
 
     func recordCapture(sequence: UInt64, sampleCount: Int, at timestamp: TimeInterval) {
+        lock.lock()
+        let emitFirstFrame = !emittedFirstFrame
+        emittedFirstFrame = true
+        let emitResume = reportedStall
+        reportedStall = false
+        lock.unlock()
+        // A delivered frame is capture health regardless of amplitude, so surface it by arrival only.
+        if emitFirstFrame { onCaptureContinuity?(.firstFrame) }
+        if emitResume { onCaptureContinuity?(.resumed) }
         consume(witness.recordCapture(sequence: sequence, sampleCount: sampleCount, at: timestamp))
     }
 
@@ -155,6 +175,11 @@ final class RealtimeContinuityReporter: @unchecked Sendable {
                 let lastCapture = lastCaptureAt.map(Self.seconds) ?? "never"
                 jlog("⚠️ audio continuity [\(speaker.rawValue)] capture stalled for "
                      + "\(Self.seconds(duration)) (last=\(lastCapture))")
+                lock.lock()
+                let emitStall = !reportedStall
+                reportedStall = true
+                lock.unlock()
+                if emitStall { onCaptureContinuity?(.stalled) }
             case .sequenceGap(let stage, let expected, let observed):
                 let boundary = stage == .capture ? "capture" : "delivery"
                 jlog("⚠️ audio continuity [\(speaker.rawValue)] \(boundary) sequence gap: "

@@ -34,7 +34,12 @@ boundaries, salvages partial text while keeping unavailable items diagnostic-onl
 real system-audio sample while padding only missing tap silence for activity detection, and keeps
 AEC on a separate exact-length reference. Content-free continuity checkpoints cover capture through
 provider speech without archiving PCM, and timestamp-interval correlation handles locally split or
-replayed utterances without adding diagnostic text to the brain transcript.
+replayed utterances without adding diagnostic text to the brain transcript. Readiness waits on actual
+audio-frame arrival, not just ready provider sockets: a Foundation-only
+[`CaptureReadinessMonitor`](../Sources/JarvisCore/Diagnostics/CaptureReadinessMonitor.swift) tracks
+each stream's first captured frame — by callback count, so valid digital silence still counts — and,
+reusing the continuity witness's stall evidence, turns a missing first frame or a sustained post-ready
+stall into a terminal microphone failure or a microphone-only system degrade.
 Locally accepted WebSocket sends remain in a bounded memory-only recovery tail because Realtime does
 not acknowledge audio appends; server audio-clock progress retires only a safe prefix, and a
 replacement socket replays the rest after a half-open failure. A live Wi-Fi reconnect run confirms

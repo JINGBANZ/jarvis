@@ -132,10 +132,12 @@ the human-facing coaching record. The current validation priority lives in
 [`status.md`](./status.md#next-action).
 
 - Start while no other app is playing audio. Confirm the macOS recording indicator appears
-  immediately and the first audio-witness snapshot has nonzero capture counters; system playback
-  must not be required to wake the microphone. Then wait for
-  `Jarvis: coaching ready (mic + system audio).`, speak into the microphone, and play speech through
-  system audio; confirm both appear as finalized `heard:` entries in Activity.
+  immediately and that the debug log shows nonzero mic **and** system capture counters *before*
+  `Jarvis: coaching ready (mic + system audio).` — readiness now waits on actual frame arrival, not
+  just ready provider sockets, so system playback must not be required to wake the microphone. Then
+  speak into the microphone and play speech through system audio; confirm both appear as finalized
+  `heard:` entries in Activity. If frames never arrive, confirm Jarvis stops (mic) or degrades to
+  microphone-only (system) instead of reporting ready.
 - Show an interview question without speaking its details, then ask, “Jarvis, how can I solve this in
   one pass?” Confirm Activity shows exactly one screen view followed by a screen-specific tip. A fully
   stated behavioral question should not cause an unnecessary capture.
