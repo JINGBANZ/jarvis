@@ -23,7 +23,10 @@ import AppKit
 /// XCTest isn't available on a Command-Line-Tools-only install. So the *async* tests are nonisolated
 /// `@Test`s that `await` a `@MainActor` helper — keeping the AppKit work on the main actor while
 /// sidestepping the bug.
-@Suite struct OverlayInvisibilityTests {
+// Caption playback is one main-actor timer state machine. Serializing these cases prevents several
+// independent virtual captions from making each other's timer observations scheduler-dependent;
+// unrelated Core and Viewer suites still run in parallel.
+@Suite(.serialized) struct OverlayInvisibilityTests {
 
     @MainActor @Test
     func overlaySetsCaptureExclusionAtInit() {
