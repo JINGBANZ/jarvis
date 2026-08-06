@@ -1,3 +1,9 @@
+// The whole adapter names macOS 26 Speech APIs (`SpeechAnalyzer`, `SpeechTranscriber`,
+// `AnalyzerInput`), so it compiles only when both the compiler and active SDK expose them.
+// `FoundationModels` is the macOS 26 SDK marker because `Speech` itself predates those APIs. The
+// fallback in `TranscriptionSessionFactory` / `AppleSpeechModelPreparation` keeps Apple Speech
+// unavailable on older SDKs and when explicitly force-building the fallback.
+#if compiler(>=6.2) && canImport(FoundationModels) && canImport(Speech) && !JARVIS_FORCE_APPLE_SPEECH_FALLBACK
 import Foundation
 @preconcurrency import AVFoundation
 import CoreMedia
@@ -500,3 +506,4 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
             interleaved: true)
     }
 }
+#endif

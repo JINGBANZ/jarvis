@@ -6,6 +6,19 @@ import Foundation
 // linker's working directory.
 let packageRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().path
 
+// Source files decide whether the macOS 26 Apple Speech APIs exist by checking the active SDK at
+// their compile site. The package manifest cannot make that decision: SwiftPM compiles it against
+// the host SDK even when `swift build --sdk ...` selects a different target SDK.
+//
+// Set `JARVIS_FORCE_APPLE_SPEECH_FALLBACK=1` to compile the fallback on a macOS 26 SDK so that path
+// remains independently buildable. Use a clean scratch path when switching the flag because SwiftPM
+// does not treat environment-only manifest changes as source changes.
+let forceAppleSpeechFallback =
+    ProcessInfo.processInfo.environment["JARVIS_FORCE_APPLE_SPEECH_FALLBACK"] == "1"
+let jarvisAppSwiftSettings: [SwiftSetting] = forceAppleSpeechFallback
+    ? [.define("JARVIS_FORCE_APPLE_SPEECH_FALLBACK")]
+    : []
+
 let package = Package(
     name: "Jarvis",
     platforms: [.macOS(.v14)],
@@ -30,7 +43,8 @@ let package = Package(
         ),
         .executableTarget(
             name: "JarvisApp",
-            dependencies: ["JarvisCore", "JarvisOverlay", "CJarvisAEC"]
+            dependencies: ["JarvisCore", "JarvisOverlay", "CJarvisAEC"],
+            swiftSettings: jarvisAppSwiftSettings
         ),
         // The dev-side CLI half of the agentic session audit (see AgenticEvaluation): renders a
         // session's traffic to a compact transcript and prints the agent task prompt. A separate,
