@@ -32,7 +32,7 @@ import Testing
     @Test func reconnectKeepsPendingTurnAudioSeparateFromBoundedNextTurnPreRoll() throws {
         var gate = SpeechGatedAudioBuffer(maximumPreRollDuration: 0.2)
         let reconnectBuffer = PCMBuffer(maxBytes: 1_000)
-        var coordinator = RealtimeManualTurnCoordinator()
+        var coordinator = RealtimeJarvisManagedTurnCoordinator()
 
         _ = gate.append(chunk(1, duration: 0.1))
         _ = gate.append(chunk(2, duration: 0.1))

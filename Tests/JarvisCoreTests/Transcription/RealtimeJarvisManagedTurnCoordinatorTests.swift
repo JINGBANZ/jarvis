@@ -2,9 +2,9 @@ import Foundation
 import Testing
 @testable import JarvisCore
 
-@Suite struct RealtimeManualTurnCoordinatorTests {
+@Suite struct RealtimeJarvisManagedTurnCoordinatorTests {
     @Test func commitWaitsUntilAudioThroughBoundaryWasSent() throws {
-        var coordinator = RealtimeManualTurnCoordinator()
+        var coordinator = RealtimeJarvisManagedTurnCoordinator()
         coordinator.recordTurn(startedAt: 1, committedThroughAt: 2, throughSequenceNumber: 4)
 
         coordinator.recordAudioSent(sequenceNumber: 3)
@@ -23,7 +23,7 @@ import Testing
     }
 
     @Test func acknowledgementBindsTurnOnlyOnceAcrossReplay() throws {
-        var coordinator = RealtimeManualTurnCoordinator()
+        var coordinator = RealtimeJarvisManagedTurnCoordinator()
         coordinator.recordTurn(startedAt: 1, committedThroughAt: 2, throughSequenceNumber: 4)
         coordinator.recordAudioSent(sequenceNumber: 4)
         let readyFirstCommit = coordinator.takeReadyCommit()
@@ -47,7 +47,7 @@ import Testing
         let buffer = PCMBuffer(maxBytes: 1_000)
         buffer.append(Data([4]), sequenceNumber: 4, capturedAt: 4, duration: 1)
         buffer.append(Data([5]), sequenceNumber: 5, capturedAt: 5, duration: 1)
-        var coordinator = RealtimeManualTurnCoordinator()
+        var coordinator = RealtimeJarvisManagedTurnCoordinator()
         coordinator.recordTurn(startedAt: 3, committedThroughAt: 5, throughSequenceNumber: 4)
 
         let boundaryClaim = try #require(buffer.claimNext())
@@ -63,7 +63,7 @@ import Testing
     }
 
     @Test func terminalItemIsNotReplayed() throws {
-        var coordinator = RealtimeManualTurnCoordinator()
+        var coordinator = RealtimeJarvisManagedTurnCoordinator()
         coordinator.recordTurn(startedAt: 1, committedThroughAt: 2, throughSequenceNumber: 4)
         coordinator.recordAudioSent(sequenceNumber: 4)
         let readyCommit = coordinator.takeReadyCommit()
@@ -77,7 +77,7 @@ import Testing
     }
 
     @Test func terminalBeforeAcknowledgementIsNotReplayed() throws {
-        var coordinator = RealtimeManualTurnCoordinator()
+        var coordinator = RealtimeJarvisManagedTurnCoordinator()
         coordinator.recordTurn(startedAt: 1, committedThroughAt: 2, throughSequenceNumber: 8)
         coordinator.recordAudioSent(sequenceNumber: 8)
         let readyCommit = coordinator.takeReadyCommit()
@@ -93,7 +93,7 @@ import Testing
     }
 
     @Test func missingReplayAudioDropsBoundaryInsteadOfCommittingNewerAudio() throws {
-        var coordinator = RealtimeManualTurnCoordinator()
+        var coordinator = RealtimeJarvisManagedTurnCoordinator()
         coordinator.recordTurn(startedAt: 1, committedThroughAt: 2, throughSequenceNumber: 4)
         coordinator.recordTurn(startedAt: 3, committedThroughAt: 4, throughSequenceNumber: 9)
 
