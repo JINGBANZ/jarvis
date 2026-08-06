@@ -33,11 +33,11 @@ mic + system audio ──► selected transcription provider ──► speaker-l
 - During proactive turns, screen capture is model-triggered. It captures the active window by default,
   adds on-device OCR, and can instead target an entire display from **Settings → Screen**. The ⌥⌘J
   shortcut captures immediately and forces a hint.
-- Transcription defaults to OpenAI **GPT-4o Transcribe**, with **GPT Live Transcribe** available for
-  session-by-session comparison. Language expectations default to automatic; optional English,
-  Mandarin, and English + Mandarin profiles guide recognition without choosing a language per turn.
-  On macOS 26 or later, **Apple Speech** is an opt-in, on-device provider using one selected
-  conversation locale.
+- Transcription defaults to OpenAI **GPT-4o Transcribe**, with **GPT Transcribe** and **GPT Live
+  Transcribe** available for session-by-session comparison. Language expectations default to
+  automatic; optional English, Mandarin, and English + Mandarin profiles guide recognition without
+  choosing a language per turn. On macOS 26 or later, **Apple Speech** is an opt-in, on-device
+  provider using one selected conversation locale.
 - The coaching brain can use the OpenAI API or an installed Claude Code / Codex CLI. An OpenAI API
   key is required only when OpenAI supplies transcription or appears in the configured brain route.
 - The transient **Overlay Caption** is off by default; the persistent **Overlay Box** is on by default.

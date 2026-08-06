@@ -35,8 +35,9 @@ public enum OpenAITranscriptionLanguageProfile: String, CaseIterable, Codable, S
         }
     }
 
-    /// GPT Live accepts a `languages` array, including the documented regional Chinese codes.
-    public var liveLanguageHints: [String]? {
+    /// The newest OpenAI transcription models accept a `languages` array, including the documented
+    /// regional Chinese codes.
+    public var multipleLanguageHints: [String]? {
         switch self {
         case .automatic:
             nil

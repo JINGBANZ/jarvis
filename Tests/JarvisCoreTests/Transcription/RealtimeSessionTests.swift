@@ -132,6 +132,19 @@ import Testing
         #expect(input["turn_detection"] is NSNull)
     }
 
+    @Test func gptTranscribeUsesServerTurnDetection() throws {
+        let payload = RealtimeSession.sessionUpdate(
+            model: .gptTranscribe,
+            silenceDurationMs: 700)
+        let data = try JSONSerialization.data(withJSONObject: payload)
+        let obj = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        let input = (((obj["session"] as! [String: Any])["audio"] as! [String: Any])["input"]
+                     as! [String: Any])
+        let turnDetection = try #require(input["turn_detection"] as? [String: Any])
+        #expect(turnDetection["type"] as? String == "server_vad")
+        #expect(turnDetection["silence_duration_ms"] as? Int == 700)
+    }
+
     /// Layer 1 (pre-VAD): noise reduction is sent as an OBJECT `{"type": "near_field"}` nested under
     /// `audio.input` (GA shape — a string here is the documented LiveKit bug the server rejects). It
     /// filters the buffer before VAD, cutting the non-speech blips that trigger phantom transcripts.
@@ -196,6 +209,30 @@ import Testing
         #expect(gpt4oMixed["language"] == nil)
         #expect(gpt4oMixed["languages"] == nil)
 
+        let transcribeEnglish = try transcription(
+            model: .gptTranscribe,
+            profile: .english)
+        #expect(transcribeEnglish["language"] == nil)
+        #expect(transcribeEnglish["languages"] as? [String] == ["en"])
+
+        let transcribeMandarin = try transcription(
+            model: .gptTranscribe,
+            profile: .mandarinChinese)
+        #expect(transcribeMandarin["language"] == nil)
+        #expect(transcribeMandarin["languages"] as? [String] == ["zh-cn"])
+
+        let transcribeMixed = try transcription(
+            model: .gptTranscribe,
+            profile: .englishAndMandarinChinese)
+        #expect(transcribeMixed["language"] == nil)
+        #expect(transcribeMixed["languages"] as? [String] == ["en", "zh-cn"])
+
+        let transcribeAutomatic = try transcription(
+            model: .gptTranscribe,
+            profile: .automatic)
+        #expect(transcribeAutomatic["language"] == nil)
+        #expect(transcribeAutomatic["languages"] == nil)
+
         let liveEnglish = try transcription(
             model: .gptLiveTranscribe,
             profile: .english)
@@ -219,6 +256,60 @@ import Testing
             profile: .automatic)
         #expect(liveAutomatic["language"] == nil)
         #expect(liveAutomatic["languages"] == nil)
+    }
+
+    @Test func newestModelsUseFixedRoleContextWithoutVocabularyHints() throws {
+        func transcription(
+            model: OpenAITranscriptionModel,
+            speaker: Speaker
+        ) throws -> [String: Any] {
+            let payload = RealtimeSession.sessionUpdate(model: model, speaker: speaker)
+            let data = try JSONSerialization.data(withJSONObject: payload)
+            let object = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+            let session = object["session"] as! [String: Any]
+            let audio = session["audio"] as! [String: Any]
+            let input = audio["input"] as! [String: Any]
+            return input["transcription"] as! [String: Any]
+        }
+
+        let legacy = try transcription(model: .gpt4oTranscribe, speaker: .me)
+        #expect(legacy["prompt"] == nil)
+        #expect(legacy["keywords"] == nil)
+        #expect(legacy["delay"] == nil)
+
+        let committed = try transcription(model: .gptTranscribe, speaker: .me)
+        #expect(committed["prompt"] as? String == RealtimeSession.transcriptionPrompt(for: .me))
+        #expect((committed["prompt"] as? String)?.contains("microphone") == true)
+        #expect(committed["keywords"] == nil)
+        #expect(committed["delay"] == nil)
+
+        let live = try transcription(model: .gptLiveTranscribe, speaker: .them)
+        #expect(live["prompt"] as? String == RealtimeSession.transcriptionPrompt(for: .them))
+        #expect((live["prompt"] as? String)?.contains("system audio") == true)
+        #expect(live["keywords"] == nil)
+        #expect(live["delay"] as? String == "low")
+        #expect((committed["prompt"] as? String) != (live["prompt"] as? String))
+    }
+
+    @Test func detectedLanguageCodesPreserveAbsentAndEmptyMeanings() {
+        let type = RealtimeSession.completedTranscriptionType
+        #expect(RealtimeSession.detectedLanguageCodes(from: [
+            "type": type,
+            "languages": [["code": "fr"], ["code": " zh-cn "]],
+        ]) == ["fr", "zh-cn"])
+        #expect(RealtimeSession.detectedLanguageCodes(from: [
+            "type": type,
+            "languages": [],
+        ]) == [])
+        #expect(RealtimeSession.detectedLanguageCodes(from: ["type": type]) == nil)
+        #expect(RealtimeSession.detectedLanguageCodes(from: [
+            "type": RealtimeSession.deltaTranscriptionType,
+            "languages": [["code": "en"]],
+        ]) == nil)
+        #expect(RealtimeSession.detectedLanguageCodes(from: [
+            "type": type,
+            "languages": "en",
+        ]) == nil)
     }
 
     @Test func appendAudioShape() {

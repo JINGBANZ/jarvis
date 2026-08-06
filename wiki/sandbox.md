@@ -91,11 +91,13 @@ empty), and optionally delete the now-orphaned item with `security delete-generi
 Narrow and explicit. Data leaves the machine only via:
 
 - **With the default OpenAI transcription provider, audio → the selected Realtime transcription
-  model** continuously (`gpt-4o-transcribe` by default; opt-in `gpt-live-transcribe`). The selected
-  language expectation is configuration metadata; Automatic sends none. With opt-in **Apple Speech**
-  on macOS 26+, raw audio remains on-device and `SpeechAnalyzer` emits final text using the selected
-  conversation locale. `AssetInventory` may download Apple's language model, but it does not upload
-  captured audio.
+  model** continuously (`gpt-4o-transcribe` by default; opt-in `gpt-transcribe` or
+  `gpt-live-transcribe`). The selected language expectation is configuration metadata; Automatic
+  sends none. GPT Transcribe and GPT Live also receive fixed context identifying whether the stream
+  is microphone or system audio; it contains no captured screen or transcript content. With opt-in
+  **Apple Speech** on macOS 26+, raw audio remains on-device and `SpeechAnalyzer` emits final text
+  using the selected conversation locale. `AssetInventory` may download Apple's language model, but
+  it does not upload captured audio.
 - **Screenshot + transcript window → the selected brain provider/model** — and *only* when the
   model triggers a `capture_screen` and/or a coaching turn. No screen content leaves the machine on
   idle turns.

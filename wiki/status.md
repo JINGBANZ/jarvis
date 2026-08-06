@@ -13,24 +13,28 @@ implemented.** The coach covers behavioral, system-design, and coding questions.
 whose specific answer depends on visible context missing from the conversation calls `capture_screen`
 before `speak`; a fresh screenshot/OCR satisfies that request, while a fully stated question can be
 answered without a reflexive capture. The independent Transcription setting keeps **OpenAI as the
-default**, keeps **GPT-4o Transcribe** as its default model, adds opt-in **GPT Live Transcribe**, and
-adds opt-in, on-device **Apple Speech** on macOS 26 or later. OpenAI language expectations default to
-Automatic rather than English; English, Mandarin Chinese, and English + Mandarin Chinese are
-session-level hints, not per-turn language choices. GPT Live can receive both expected languages,
-while GPT-4o uses automatic detection for the mixed profile because it accepts at most one language
-hint. One Start snapshots the provider, OpenAI model/profile, or Apple locale for both `me` and
+default**, keeps **GPT-4o Transcribe** as its default model, adds opt-in **GPT Transcribe** and
+**GPT Live Transcribe**, and adds opt-in, on-device **Apple Speech** on macOS 26 or later. OpenAI
+language expectations default to Automatic rather than English; English, Mandarin Chinese, and
+English + Mandarin Chinese are session-level hints, not per-turn language choices. GPT Transcribe
+and GPT Live can receive both expected languages, while GPT-4o uses automatic detection for the
+mixed profile because it accepts at most one language hint. One Start snapshots the provider,
+OpenAI model/profile, or Apple locale for both `me` and
 `them`; there is no automatic provider or model fallback. Apple Speech prepares the selected
 supported locale before replacing a running pipeline, submits every captured sample to
 `SpeechAnalyzer`, records only final results, and uses content-free local activity solely to keep
 coaching from waking mid-utterance. An OpenAI key is required only when OpenAI supplies
 transcription or appears in the brain route.
 The OpenAI path still reconciles each Realtime `item_id` across VAD, delta, completion, and failure
-events. GPT-4o retains tuned server VAD. GPT Live clears unsupported server turn detection and uses
-separate local WebRTC VAD instances for `me` and `them`; bounded in-memory pre-roll preserves speech
-onset while indefinite idle silence stays off the wire. Each endpoint is committed only after its
-ordered audio sequence has been sent, then bound to the server-acknowledged `item_id`. Unfinished
-committed turns keep their boundary and PCM through reconnect. The shared path salvages partial text
-while keeping unavailable items diagnostic-only; preserves every real
+events. GPT-4o and GPT Transcribe use tuned server VAD. GPT Live clears unsupported server turn
+detection and uses separate local WebRTC VAD instances for `me` and `them`; bounded in-memory
+pre-roll preserves speech onset while indefinite idle silence stays off the wire. Each endpoint is
+committed only after its ordered audio sequence has been sent, then bound to the
+server-acknowledged `item_id`. GPT Transcribe and GPT Live receive fixed, role-aware recording
+context, GPT Live requests low transcription delay, and GPT Transcribe completion-language metadata
+stays diagnostic-only. Vocabulary hints are not configured. Unfinished committed turns keep their
+boundary and PCM through reconnect. The shared path salvages partial text while keeping unavailable
+items diagnostic-only; preserves every real
 system-audio sample while padding only missing tap silence for VAD; and keeps AEC on a separate
 exact-length reference. Content-free continuity checkpoints cover capture through provider speech
 without archiving PCM, and timestamp-interval correlation handles locally split or replayed
@@ -80,12 +84,13 @@ fixed notices remain available in Activity. The gate statically rejects unreview
 
 ## Next action
 
-Run a same-input English/Mandarin transcription A/B on macOS 26 first. Use OpenAI with the same
-English + Mandarin Chinese profile for one GPT-4o Transcribe session and one GPT Live Transcribe
-session; exercise both microphone and system audio, include a within-sentence language switch, and
-compare final `heard:` text, completion latency, and reconnect stability. Confirm the debug log names
-the selected model/profile, GPT-4o sends no single-language hint for the mixed profile, and GPT Live
-logs acknowledged local commits without a `turn_detection` configuration rejection. Then
+Run a same-input English/Mandarin transcription comparison on macOS 26 first. Use OpenAI with the
+same English + Mandarin Chinese profile for one GPT-4o Transcribe, one GPT Transcribe, and one GPT
+Live Transcribe session; exercise both microphone and system audio, include a within-sentence
+language switch, and compare final `heard:` text, completion latency, and reconnect stability.
+Confirm the debug log names the selected model/profile, GPT-4o sends no single-language hint for the
+mixed profile, GPT Transcribe finalizes from server VAD and logs completion-language metadata, and
+GPT Live logs acknowledged local commits without a `turn_detection` configuration rejection. Then
 run Apple Speech once per relevant conversation locale; confirm it downloads or reuses the selected
 model before capture, reaches Listening, preserves `me`/`them` ordering, emits no mid-utterance
 coaching turn, and stops cleanly. Confirm Apple Speech plus a CLI-only brain route starts without an

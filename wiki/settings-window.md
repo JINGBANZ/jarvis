@@ -189,14 +189,16 @@ brain route. Its picker contains **OpenAI** (the default) and **Apple Speech (ma
 enabled only when the running Mac and OS expose `SpeechTranscriber`; selecting it persists through
 `TranscriptionPreferences` and applies on the next Start, never halfway through a live session.
 
-With OpenAI selected, **Model** offers **GPT-4o Transcribe** (the default) and opt-in **GPT Live
-Transcribe** for session-by-session A/B testing. **Expected languages** offers Automatic (the
-default), English, Mandarin Chinese, and English + Mandarin Chinese. Automatic sends no language
-hint. A single-language selection guides recognition but does not translate. GPT Live receives both
-expectations for the mixed profile; GPT-4o receives no language hint for that profile because it
-accepts only one. The profile is one immutable Start-time expectation shared by `me` and `them`, so
-the transcription model—not a Jarvis per-turn classifier—handles a speaker switching languages
-inside one sentence.
+With OpenAI selected, **Model** offers **GPT-4o Transcribe** (the default), opt-in **GPT
+Transcribe**, and opt-in **GPT Live Transcribe** for session-by-session comparison. **Expected
+languages** offers Automatic (the default), English, Mandarin Chinese, and English + Mandarin
+Chinese. Automatic sends no language hint. A single-language selection guides recognition but does
+not translate. GPT Transcribe and GPT Live receive both expectations for the mixed profile; GPT-4o
+receives no language hint for that profile because it accepts only one. The two newer models also
+receive fixed context for the captured speaker role, and GPT Live requests low transcription delay;
+Jarvis does not configure vocabulary keywords. The profile is one immutable Start-time expectation
+shared by `me` and `them`, so the transcription model—not a Jarvis per-turn classifier—handles a
+speaker switching languages inside one sentence.
 
 With Apple Speech selected, **Conversation locale** is populated from
 `SpeechTranscriber.supportedLocales`; the initial suggestion is the supported equivalent of the
