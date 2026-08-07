@@ -21,7 +21,7 @@ Start snapshots the provider, OpenAI model/profile, or Apple locale for both `me
 is no automatic provider or model fallback. An initial same-input macOS 26 system-audio comparison
 keeps GPT-4o Transcribe as the default: among the tested GPT-4o, GPT Live, and Apple Speech arms, it
 alone preserved the English, Mandarin, and within-sentence language-switching inputs. This is
-directional evidence rather than a full benchmark: GPT Transcribe landed afterward, and
+directional evidence rather than a full benchmark because it does not include GPT Transcribe;
 [issue #136](https://github.com/JINGBANZ/jarvis/issues/136) owns repeated system-audio runs plus an
 explicitly opt-in reconnect/replay scenario before any future default change. Apple Speech prepares
 the selected supported locale before replacing a running pipeline, submits every captured sample to
