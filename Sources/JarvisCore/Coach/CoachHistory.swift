@@ -93,8 +93,9 @@ public final class CoachHistory: @unchecked Sendable {
         return calls.isEmpty ? nil : .assistantToolCalls(calls)
     }
 
-    /// Rough size of the memory in tokens (chars/4) — used only to decide WHEN to compact, so
-    /// precision doesn't matter. No image term: screenshots are stubbed to text at commit.
+    /// Rough size of the memory in tokens — used only to decide WHEN to compact. ASCII text uses the
+    /// common chars/4 heuristic; every non-ASCII scalar counts as one so Chinese and other scripts do
+    /// not wait several times too long. No image term: screenshots are stubbed to text at commit.
     public var estimatedTokens: Int {
         lock.lock(); defer { lock.unlock() }
         return Self.estimate(messages)
@@ -102,10 +103,25 @@ public final class CoachHistory: @unchecked Sendable {
 
     private static func estimate(_ messages: [ChatMessage]) -> Int {
         messages.reduce(0) { total, m in
-            var t = total + ((m.text?.count ?? 0) / 4)
-            if let calls = m.toolCalls { t += calls.reduce(0) { $0 + ($1.argumentsJSON.count / 4) + 8 } }
+            var t = total + (m.text.map(estimatedTextTokens) ?? 0)
+            if let calls = m.toolCalls {
+                t += calls.reduce(0) { $0 + estimatedTextTokens($1.argumentsJSON) + 8 }
+            }
             return t
         }
+    }
+
+    private static func estimatedTextTokens(_ text: String) -> Int {
+        var asciiCount = 0
+        var nonASCIICount = 0
+        for scalar in text.unicodeScalars {
+            if scalar.value < 128 {
+                asciiCount += 1
+            } else {
+                nonASCIICount += 1
+            }
+        }
+        return ((asciiCount + 3) / 4) + nonASCIICount
     }
 
     /// The oldest span to summarize: the longest message prefix holding roughly `fraction` of the

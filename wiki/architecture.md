@@ -70,11 +70,13 @@ moments the model judges worthwhile.
    cooldown, rate cap, or wake-word gate. Whether to speak (and whether the user just addressed
    Jarvis) is the model's call, governed by the system prompt; the only hard gates are the user's
    Start/Stop and the **substance gate** (`TurnSubstance`): a turn-end whose delta is pure
-   back-channel filler ("Hmm", "嗯") or empty is skipped without a request. Classification is
+   known filler ("Hmm", "嗯", or a sequence such as "Uh. Okay. Hmm.") or empty is skipped without a
+   request. Known filler lines are also removed from a mixed brain-facing delta, while Activity keeps
+   the complete finalized transcription. Unknown short fragments fail open. Classification is
    speaker-aware only where conversational meaning demands it: a short interviewer rejection such
-   as "No" is substantive, even though the same user-side fragment is normally filler. Interviewer
-   questions remain first-class and may draw a proactive tip. Skipped lines ride along on the next
-   substantive turn; silence checks and the hint hotkey always go through.
+   as "No" is substantive, even though the same user-side response is known filler. Interviewer
+   questions remain first-class and may draw a proactive tip. Consumed filler never rides into a
+   later request; silence checks and the hint hotkey always go through.
 3. It calls the **selected brain model** with the coach system prompt, the session memory
    (`CoachHistory`), the
    new transcript delta, the timing context (seconds silent, session elapsed), and the tool set
@@ -292,9 +294,10 @@ The implementation keeps orchestration, route policy, and OS edges separate:
 
 - **Continuous (cheap):** audio → the selected transcription adapter → transcript. This runs the
   whole session; Apple Speech removes continuous audio egress and OpenAI transcription billing.
-- **Per-turn (cheap):** a selected-brain call on each substantive turn-end and each silence event, with a
-  bounded, mostly-cached working set. Filler-only turn-ends (from either speaker) are skipped
-  client-side — free. No image unless the model asks.
+- **Per-turn (cheap):** a selected-brain call on each substantive turn-end and each silence event,
+  with a bounded, mostly-cached working set. Known filler is removed before brain input, and
+  filler-only turn-ends (from either speaker) are skipped client-side — free. No image unless the
+  model asks.
 - **On-demand (expensive):** a screenshot + vision tokens, only when the model calls
   `capture_screen`. A coaching response, only when the model calls `speak`.
 
@@ -317,10 +320,12 @@ rather than a per-turn screenshot.
   items live only inside the turn that produced them — at commit, the pixels become a one-line stub
   and the capture's OCR text (in the tool result) is what persists, and reasoning items are dropped;
   and past a token threshold (see
-  `Config.historyCompactionTokenThreshold`) the oldest span is **compacted** into a short structured
-  summary written by a cheaper model (`gpt-5.4-mini`), so the problem statement never falls out of
-  context. Compaction uses one Core-owned workload deadline across providers and fails soft: a slow
-  or failed summary leaves the full history intact for a later attempt. Requests are sent `store:true`
+  `Config.historyCompactionTokenThreshold`) the oldest span is **compacted** into a short,
+  interview-format-neutral briefing written by a cheaper model (`gpt-5.4-mini`). Its size estimate
+  treats non-ASCII scripts conservatively; the briefing preserves durable goals, requirements,
+  progress, prior advice, and unresolved questions while retiring obsolete detail from resolved
+  topics. Compaction uses one Core-owned workload deadline across providers and fails soft: a slow or
+  failed summary leaves the full history intact for a later attempt. Requests are sent `store:true`
   so they stay inspectable in the OpenAI dashboard for debugging — the retention tradeoff is
   documented in [sandbox.md](./sandbox.md).
 - **Transcription has its own provider, model, and language settings.** OpenAI remains the provider
@@ -590,8 +595,8 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
   are sent `store:true`, so what the model saw does remain inspectable (and retained) server-side at
   OpenAI for debugging (see [sandbox.md](./sandbox.md)).
 - **Behavioral restraint (model-governed):** there is **no cooldown or rate cap** in code. Every
-  substantive utterance — from either speaker; only back-channel filler is skipped as pure cost —
-  reaches the brain, and the brain decides whether it has anything worth
+  substantive utterance — from either speaker; only known filler is removed as pure cost — reaches
+  the brain, and the brain decides whether it has anything worth
   saying — that restraint lives in the system prompt (see
   [`JarvisPrompts.Coach.system`](../Sources/JarvisCore/Prompts/JarvisPrompts+Coach.swift)).
   This keeps

@@ -29,11 +29,23 @@ import Testing
         }
     }
 
-    /// Short fragments are filler in ANY language — the zero-maintenance fallback for back-channels
-    /// the list has never heard of.
-    @Test func shortFragmentsAreFillerInAnyLanguage() {
-        for text in ["m", "の", "え", "네", "ja", "!!", "…", ""] {
+    /// One transcription completion can contain several punctuation-separated acknowledgements.
+    /// They are still filler when every part is known explicitly.
+    @Test func compositeBackChannelsAreFiller() {
+        for text in ["Oh, so, so.", "Okay. Hmm.", "Uh. OK. Okay, okay.",
+                     "Hmm. Hmm. Hmm. 嗯，明白。", "Oh. Yeah. Okay."] {
             #expect(!TurnSubstance.isSubstantive(text), "expected filler: \(text)")
+        }
+    }
+
+    /// Unknown short fragments fail open. A length rule would discard technical terms and terse
+    /// answers merely because they are short; pure punctuation remains content-free.
+    @Test func unknownShortFragmentsFailOpen() {
+        for text in ["の", "え", "네", "ja", "R", "Go", "C++", "B.F.S."] {
+            #expect(TurnSubstance.isSubstantive(text), "expected substance: \(text)")
+        }
+        for text in ["!!", "…", ""] {
+            #expect(!TurnSubstance.isSubstantive(text), "expected noise: \(text)")
         }
     }
 

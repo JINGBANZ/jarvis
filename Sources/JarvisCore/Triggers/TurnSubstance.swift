@@ -1,16 +1,15 @@
 import Foundation
 
 /// Decides whether a transcript line carries coaching-relevant substance or is pure back-channel
-/// filler ("Hmm", "嗯嗯", "ok"). The coach loop skips a turn-end whose whole delta is filler — from
-/// either speaker — so filler never buys a brain request; the lines still ride along as context on
-/// the next substantive turn, and silence checks fire regardless, so a wrong skip costs one turn of
-/// delay at most.
+/// filler ("Hmm", "嗯嗯", "ok"). The coach loop removes known filler from brain-facing context and
+/// skips a turn-end whose whole delta is filler — from either speaker — so it never buys a request.
+/// The finalized transcript still remains in Activity for the user to audit.
 ///
 /// Why a list is enough: back-channels are a small CLOSED class per language (roughly a dozen forms);
 /// the apparent endless variety is elongation/repetition, which the repeat-collapsing normalization
-/// absorbs ("Hmmmm." → "hm", "嗯嗯" → "嗯"). Unknown-language back-channels are caught by the
-/// short-fragment fallback. Everything else FAILS OPEN to the brain — the model stays the judge of
-/// meaning; this is punctuation-level hygiene, not a wake-word gate.
+/// absorbs ("Hmmmm." → "hm", "嗯嗯" → "嗯"). Everything outside that closed class FAILS OPEN to
+/// the brain — including unknown short fragments. The model stays the judge of meaning; this is
+/// punctuation-level hygiene, not a wake-word gate.
 public enum TurnSubstance {
     /// A bare rejection from the interviewer is not a back-channel: it corrects the user's current
     /// understanding and needs an immediate coaching turn. The same words from the user remain
@@ -31,9 +30,15 @@ public enum TurnSubstance {
         "对", "对的", "是", "是的", "明白", "可以", "行", "了解",
     ].map(normalized))
 
+    /// Separators that may join several independent filler acknowledgements in one transcription
+    /// result ("Uh. Okay. Hmm."). Whitespace is deliberately excluded because some closed-class
+    /// entries are phrases ("got it", "I see"); an unknown phrase continues to fail open.
+    private static let fillerSeparators = CharacterSet.punctuationCharacters
+        .union(.symbols)
+        .union(.newlines)
+
     /// True when the line should reach the brain. Order matters: overrides first (a question or an
-    /// address is always substance, whoever said it), then normalize, then the closed-class list and
-    /// the ≤2-character fallback.
+    /// address is always substance, whoever said it), then normalize and consult the closed class.
     public static func isSubstantive(_ text: String) -> Bool {
         let lower = text.lowercased()
         if lower.contains("jarvis") { return true }
@@ -41,9 +46,9 @@ public enum TurnSubstance {
 
         let collapsed = normalized(lower)
 
-        if collapsed.isEmpty { return false }              // pure punctuation / noise
-        if fillers.contains(collapsed) { return false }    // closed-class back-channel
-        if collapsed.count <= 2 { return false }           // short fragment in ANY language
+        if collapsed.isEmpty { return false }                       // pure punctuation / noise
+        if fillers.contains(collapsed) { return false }             // one known back-channel
+        if isKnownFillerSequence(lower) { return false }            // several known back-channels
         return true
     }
 
@@ -67,5 +72,14 @@ public enum TurnSubstance {
             if collapsed.last != ch { collapsed.append(ch) }
         }
         return collapsed
+    }
+
+    /// True only when punctuation/newlines separate two or more known filler forms. Requiring every
+    /// part to be in the closed class keeps technical fragments such as "B.F.S." substantive.
+    private static func isKnownFillerSequence(_ lower: String) -> Bool {
+        let parts = lower.components(separatedBy: fillerSeparators)
+            .map(normalized)
+            .filter { !$0.isEmpty }
+        return parts.count > 1 && parts.allSatisfy(fillers.contains)
     }
 }

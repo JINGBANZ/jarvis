@@ -641,6 +641,19 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(brain.calls.isEmpty)
     }
 
+    /// Several known acknowledgements in one transcription completion are still one filler-only
+    /// turn and do not buy a request.
+    @Test func compositeFillerTurnEndSkipsTheBrain() async {
+        let brain = ScriptedBrain(script: [
+            .init(toolCalls: [.staySilent(callId: "quiet")]),
+        ])
+        let (driver, transcript) = makeDriver(brain: brain, clock: ManualClock(now: 0))
+        transcript.append(.init(speaker: .me, text: "Uh. OK. Okay, okay.", at: 1))
+
+        #expect(await driver.handleTrigger(.turnEnd) == .skippedFillerOnly)
+        #expect(brain.calls.isEmpty)
+    }
+
     /// The gate is speaker-NEUTRAL: an interviewer question is substance and reaches the brain — the
     /// prompt lets the model offer the user a proactive tip for answering it.
     @Test func interviewerQuestionReachesTheBrain() async {
@@ -664,9 +677,9 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(brain.calls.isEmpty)
     }
 
-    /// Skipped filler is NOT lost: the sent-index doesn't advance on a skip, so it rides along with
-    /// the next substantive turn in one request.
-    @Test func skippedFillerRidesAlongOnTheNextTurn() async {
+    /// Activity has already retained finalized speech, so a locally skipped filler line is consumed
+    /// and does not inflate the next substantive request.
+    @Test func skippedFillerDoesNotRideAlongOnTheNextTurn() async {
         let clock = ManualClock(now: 0)
         let brain = ScriptedBrain(script: [
             .init(toolCalls: [.staySilent(callId: "quiet")]),
@@ -676,9 +689,26 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(await driver.handleTrigger(.turnEnd) == .skippedFillerOnly)
         transcript.append(.init(speaker: .me, text: "I'd check both neighbors at that height", at: 5))
         await driver.handleTrigger(.turnEnd)
-        let userText = brain.calls[0].compactMap { $0.text }.joined(separator: " ")
-        #expect(userText.contains("嗯"))                                     // filler context arrived...
-        #expect(userText.contains("I'd check both neighbors at that height")) // ...with the real line
+        let userText = brain.calls[0].filter { $0.role == .user }.compactMap(\.text)
+            .joined(separator: " ")
+        #expect(!userText.contains("嗯"))
+        #expect(userText.contains("I'd check both neighbors at that height"))
+    }
+
+    /// Known filler beside real speech remains in Activity but is removed from brain-facing input.
+    @Test func mixedDeltaSendsOnlySubstantiveLines() async {
+        let brain = ScriptedBrain(script: [
+            .init(toolCalls: [.staySilent(callId: "quiet")]),
+        ])
+        let (driver, transcript) = makeDriver(brain: brain, clock: ManualClock(now: 0))
+        transcript.append(.init(speaker: .me, text: "Hmm.", at: 1))
+        transcript.append(.init(speaker: .them, text: "How would you test that?", at: 2))
+
+        #expect(await driver.handleTrigger(.turnEnd) == .silentByModel)
+        let userText = brain.calls[0].filter { $0.role == .user }.compactMap(\.text)
+            .joined(separator: " ")
+        #expect(!userText.contains("Hmm."))
+        #expect(userText.contains("How would you test that?"))
     }
 
     /// Silence wake-ups are NOT gated: with nothing new said, the model may still want to look at the
