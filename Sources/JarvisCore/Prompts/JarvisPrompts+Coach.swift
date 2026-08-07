@@ -2,6 +2,7 @@ import Foundation
 
 extension JarvisPrompts {
     public enum Coach {
+        /// The coach system prompt — the only place response behavior is governed (no code-side guardrail).
         public static let system = """
         # Identity
         You are Jarvis, a calm, sharp technical-interview coach for behavioral, system-design, and coding
