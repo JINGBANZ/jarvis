@@ -4,7 +4,8 @@
 # The sole evaluator runs through an agentic CLI (Claude Code / Codex) whose workspace is this repo
 # checkout PLUS the complete session directory. The auditor reads the full Activity log and raw
 # traffic whenever useful, then verifies each finding against the harness's own code
-# (CoachHistory.swift, CoachDriver.swift, ToolDefs.swift, …) instead of guessing from a reduced prompt.
+# (Prompts/, CoachHistory.swift, CoachDriver.swift, ToolDefs.swift, …) instead of guessing
+# from a reduced prompt.
 #
 # The script and Activity's Evaluate button both call the same Foundation-only evaluator. The agent
 # authenticates with the user's existing `claude`/`codex` login — Jarvis's owner-only API-key file is

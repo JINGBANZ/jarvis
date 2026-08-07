@@ -782,9 +782,9 @@ public final class CoachDriver: @unchecked Sendable {
             return .skipped(.skippedFillerOnly)
         }
 
-        let historyBase: [ChatMessage] = [.system(coachSystemPrompt)] + history.snapshot()
+        let historyBase: [ChatMessage] = [.system(JarvisPrompts.Coach.system)] + history.snapshot()
         let userText = [
-            delta.text.isEmpty ? nil : "New since last turn:\n\(delta.text)",
+            delta.text.isEmpty ? nil : JarvisPrompts.Coach.newSpeech(delta.text),
             context.promptLine,
         ].compactMap { $0 }.joined(separator: "\n\n")
         var turnMessages: [ChatMessage] = [.user(userText)] + work.observations
@@ -807,7 +807,7 @@ public final class CoachDriver: @unchecked Sendable {
                 turnMessages.append(.userImage(shot.imageBase64))
                 if let text = shot.recognizedText {
                     jlog("🔤 read \(text.count(where: { $0 == "\n" }) + 1) lines of on-screen text")
-                    let observation = ChatMessage.user(Self.recognizedTextBlock(text))
+                    let observation = ChatMessage.user(JarvisPrompts.Coach.recognizedText(text))
                     observations.append(observation)
                     turnMessages.append(observation)
                 }
@@ -816,7 +816,7 @@ public final class CoachDriver: @unchecked Sendable {
                 jlog("👁 screenshot failed")
                 ActivityLog.shared.record(.screenViewFailed)
                 work.observations = [
-                    .user("The screen capture requested for the manual hint failed."),
+                    .user(JarvisPrompts.Coach.manualHintCaptureFailed),
                 ]
             }
             work.manualHintPrepared = true
@@ -903,14 +903,16 @@ public final class CoachDriver: @unchecked Sendable {
                             jlog("🔤 read \(text.count(where: { $0 == "\n" }) + 1) lines of on-screen text")
                         }
                         work.observations = [
-                            .user(Self.captureResultText(shot)),
+                            .user(JarvisPrompts.Coach.captureResult(
+                                recognizedText: shot.recognizedText
+                            )),
                             .userImage(shot.imageBase64),
                         ]
                     } else {
                         jlog("👁 screenshot failed")
                         ActivityLog.shared.record(.screenViewFailed)
                         work.observations = [
-                            .user("A screen capture requested earlier in this turn failed."),
+                            .user(JarvisPrompts.Coach.earlierCaptureFailed),
                         ]
                     }
 
@@ -923,13 +925,15 @@ public final class CoachDriver: @unchecked Sendable {
                     if let shot {
                         turnMessages.append(.init(
                             role: .tool,
-                            text: Self.captureResultText(shot),
+                            text: JarvisPrompts.Coach.captureResult(
+                                recognizedText: shot.recognizedText
+                            ),
                             toolCallId: callID))
                         turnMessages.append(.userImage(shot.imageBase64))
                     } else {
                         turnMessages.append(.init(
                             role: .tool,
-                            text: "screenshot failed",
+                            text: JarvisPrompts.Coach.captureFailed,
                             toolCallId: callID))
                     }
 
@@ -948,7 +952,7 @@ public final class CoachDriver: @unchecked Sendable {
                     turnMessages.append(.assistantToolCalls(response.rawToolCalls))
                     turnMessages.append(.init(
                         role: .tool,
-                        text: "shown to the user",
+                        text: JarvisPrompts.Coach.tipShown,
                         toolCallId: callID))
                     history.commit(turnMessages)
                     commitTranscript(through: delta.upTo)
@@ -988,11 +992,6 @@ public final class CoachDriver: @unchecked Sendable {
         history.commit(turn)
     }
 
-    private static func captureResultText(_ shot: ScreenSnapshot) -> String {
-        guard let text = shot.recognizedText else { return "screenshot captured" }
-        return "screenshot captured\n\n\(recognizedTextBlock(text))"
-    }
-
     /// Screen capture is an OS-bound synchronous edge, so run it off the cooperative executor.
     /// Cancellation asks the capture adapter to terminate its helper, then waits for `capture()` to
     /// return so the attempt cannot outlive cleanup of screen-derived files.
@@ -1011,10 +1010,6 @@ public final class CoachDriver: @unchecked Sendable {
         }
     }
 
-    private static func recognizedTextBlock(_ text: String) -> String {
-        "\(CoachHistory.ocrHeader)\n\(text)"
-    }
-
     // MARK: - History compaction
 
     /// Auxiliary compaction fails soft and never counts against provider route health.
@@ -1023,7 +1018,10 @@ public final class CoachDriver: @unchecked Sendable {
         guard let (oldest, count) = history.compactionPrefix() else { return }
         do {
             let response = try await (attempt.summarizer ?? attempt.brain).respond(
-                messages: [.system(Self.summaryInstructions), .user(Self.renderForSummary(oldest))],
+                messages: [
+                    .system(JarvisPrompts.HistorySummary.system),
+                    .user(JarvisPrompts.HistorySummary.input(oldest)),
+                ],
                 tools: [],
                 toolChoice: .auto)
             guard let summary = response.outputText, !summary.isEmpty else {
@@ -1037,24 +1035,6 @@ public final class CoachDriver: @unchecked Sendable {
         }
     }
 
-    public static let summaryInstructions = """
-    You condense a live coding-interview coaching session's history into a briefing the coach will \
-    rely on for the rest of the session. Keep, in this order: the interview problem statement (all \
-    load-bearing details); the user's current approach and how far they've got; every tip the coach \
-    already gave (so it isn't repeated); any open questions or requirements from the interviewer. \
-    Plain text, under 250 words. Output only the briefing.
-    """
-
-    private static func renderForSummary(_ messages: [ChatMessage]) -> String {
-        messages.map { message in
-            if let calls = message.toolCalls {
-                return calls.map { "coach called \($0.name)" }.joined(separator: "\n")
-            }
-            if message.imageBase64JPEG != nil { return "[screenshot]" }
-            let text = message.text ?? ""
-            return message.role == .tool ? "tool result: \(text)" : text
-        }.joined(separator: "\n")
-    }
 }
 
 /// Observable outcome of the trigger-coordination call. Provider failures may lead to more than one

@@ -20,45 +20,48 @@ import Testing
     }
 
     @Test func coachToolsDescribeCaptureAndOverlayContracts() {
-        #expect(coachSystemPrompt.contains("capture_screen"))
+        #expect(JarvisPrompts.Coach.system.contains("capture_screen"))
+        #expect(captureScreenTool.description == JarvisPrompts.Coach.ToolDescription.captureScreen)
+        #expect(speakTool.description == JarvisPrompts.Coach.ToolDescription.speak)
+        #expect(staySilentTool.description == JarvisPrompts.Coach.ToolDescription.staySilent)
         #expect(captureScreenTool.description.contains("one fresh result satisfies that request"))
         #expect(speakTool.description.contains("up to 3 short standalone overlay lines"))
         #expect(staySilentTool.description.contains("default for unsolicited turns"))
     }
 
     @Test func coachPromptRequiresMissingVisibleContextBeforeSpeaking() {
-        #expect(coachSystemPrompt.contains("Screen gate: before speaking, capture"))
-        #expect(coachSystemPrompt.contains("absent from the conversation"))
-        #expect(coachSystemPrompt.contains("This gate applies to either speaker"))
-        #expect(coachSystemPrompt.contains("Never guess missing content"))
-        #expect(coachSystemPrompt.contains("one pass\" without the problem"))
+        #expect(JarvisPrompts.Coach.system.contains("Screen gate: before speaking, capture"))
+        #expect(JarvisPrompts.Coach.system.contains("absent from the conversation"))
+        #expect(JarvisPrompts.Coach.system.contains("This gate applies to either speaker"))
+        #expect(JarvisPrompts.Coach.system.contains("Never guess missing content"))
+        #expect(JarvisPrompts.Coach.system.contains("one pass\" without the problem"))
     }
 
     /// Line-level claims must come from the image, not OCR — a live session audit caught the model
     /// "correcting" an already-correct line it had misread from OCR noise. OCR-only sightings turn
     /// into a double-check tip (the overlay is one-way; there's no dialogue to "ask" in).
     @Test func coachPromptGroundsLineLevelClaimsInTheImage() {
-        #expect(coachSystemPrompt.contains("the screenshot image is ground truth"))
-        #expect(coachSystemPrompt.contains("verify it in the image"))
-        #expect(coachSystemPrompt.contains("frame the tip as something to double-check"))
+        #expect(JarvisPrompts.Coach.system.contains("the screenshot image is ground truth"))
+        #expect(JarvisPrompts.Coach.system.contains("verify it in the image"))
+        #expect(JarvisPrompts.Coach.system.contains("frame the tip as something to double-check"))
     }
 
     @Test func coachPromptTreatsFreshCaptureAsSatisfyingScreenGate() {
-        #expect(coachSystemPrompt.contains("A fresh screenshot or OCR in the current input"))
-        #expect(coachSystemPrompt.contains("A fresh capture result satisfies the screen gate"))
-        #expect(coachSystemPrompt.contains("do not capture again"))
-        #expect(coachSystemPrompt.contains("the same request"))
+        #expect(JarvisPrompts.Coach.system.contains("A fresh screenshot or OCR in the current input"))
+        #expect(JarvisPrompts.Coach.system.contains("A fresh capture result satisfies the screen gate"))
+        #expect(JarvisPrompts.Coach.system.contains("do not capture again"))
+        #expect(JarvisPrompts.Coach.system.contains("the same request"))
     }
 
     @Test func coachPromptRequiresOneActionPerModelResponse() {
-        #expect(coachSystemPrompt.contains("one action on each model response"))
-        #expect(!coachSystemPrompt.contains("one tool call each turn"))
+        #expect(JarvisPrompts.Coach.system.contains("one action on each model response"))
+        #expect(!JarvisPrompts.Coach.system.contains("one tool call each turn"))
     }
 
     /// Fragment silence applies only to wholly fragmentary fresh speech, never silence probes or
     /// meaningful signals that should continue through the coaching policy.
     @Test func coachPromptScopesFragmentSilence() {
-        let prompt = coachSystemPrompt.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        let prompt = JarvisPrompts.Coach.system.split(whereSeparator: \.isWhitespace).joined(separator: " ")
         #expect(prompt.contains("when a non-silence request contains new speech"))
         #expect(prompt.contains("call stay_silent only if all of it is incomplete or likely mistranscribed"))
         #expect(prompt.contains("Help/stuck signals and other meaningful speech bypass this gate"))
@@ -68,9 +71,9 @@ import Testing
     }
 
     @Test func coachPromptOrdersDirectRepliesThenFragmentsThenScreenGate() {
-        let directReply = coachSystemPrompt.range(of: "1. Direct address from \"me\"")
-        let fragmentGate = coachSystemPrompt.range(of: "2. Fragment gate")
-        let screenGate = coachSystemPrompt.range(of: "3. Screen gate")
+        let directReply = JarvisPrompts.Coach.system.range(of: "1. Direct address from \"me\"")
+        let fragmentGate = JarvisPrompts.Coach.system.range(of: "2. Fragment gate")
+        let screenGate = JarvisPrompts.Coach.system.range(of: "3. Screen gate")
         #expect(directReply != nil)
         #expect(fragmentGate != nil)
         #expect(screenGate != nil)
@@ -78,12 +81,12 @@ import Testing
             #expect(directReply.lowerBound < fragmentGate.lowerBound)
             #expect(fragmentGate.lowerBound < screenGate.lowerBound)
         }
-        #expect(coachSystemPrompt.contains("bypass the fragment gate"))
-        #expect(coachSystemPrompt.contains("continue to the screen gate below"))
+        #expect(JarvisPrompts.Coach.system.contains("bypass the fragment gate"))
+        #expect(JarvisPrompts.Coach.system.contains("continue to the screen gate below"))
     }
 
     @Test func coachContextCoversTechnicalInterviewFormatsWithoutBrandNarrowing() {
-        let modelContext = captureScreenTool.description + coachSystemPrompt
+        let modelContext = captureScreenTool.description + JarvisPrompts.Coach.system
         #expect(modelContext.contains("behavioral"))
         #expect(modelContext.contains("system-design"))
         #expect(modelContext.contains("coding"))
@@ -91,15 +94,15 @@ import Testing
     }
 
     @Test func coachPromptHasOneConsistentFullSolutionRule() {
-        #expect(coachSystemPrompt.contains("Give a full solution only when \"me\" explicitly asks"))
-        #expect(!coachSystemPrompt.contains("never the whole answer"))
+        #expect(JarvisPrompts.Coach.system.contains("Give a full solution only when \"me\" explicitly asks"))
+        #expect(!JarvisPrompts.Coach.system.contains("never the whole answer"))
     }
 
     /// Silence is a TOOL now: the prompt must direct the model to stay_silent (never free text),
     /// or a required tool_choice would leave it no sanctioned way to stay quiet.
     @Test func coachPromptDirectsSilenceToTheStaySilentTool() {
-        #expect(coachSystemPrompt.contains("stay_silent"))
-        #expect(!coachSystemPrompt.contains("call no tool"))
+        #expect(JarvisPrompts.Coach.system.contains("stay_silent"))
+        #expect(!JarvisPrompts.Coach.system.contains("call no tool"))
     }
 
     // MARK: - ToolInvocation.parse (the shared wire-call mapping)
