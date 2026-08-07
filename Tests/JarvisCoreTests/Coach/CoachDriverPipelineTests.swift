@@ -666,6 +666,22 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(brain.calls.count == 1)
     }
 
+    /// A correction remains substantive when the transcriber combines it with acknowledgements
+    /// that would otherwise form a composite filler line.
+    @Test func compositeInterviewerCorrectionReachesTheBrain() async {
+        let brain = ScriptedBrain(script: [
+            .init(toolCalls: [.staySilent(callId: "quiet")]),
+        ])
+        let (driver, transcript) = makeDriver(brain: brain, clock: ManualClock(now: 0))
+        transcript.append(.init(speaker: .them, text: "No. Okay.", at: 1))
+
+        #expect(await driver.handleTrigger(.turnEnd) == .silentByModel)
+        #expect(brain.calls.count == 1)
+        let userText = brain.calls[0].filter { $0.role == .user }.compactMap(\.text)
+            .joined(separator: " ")
+        #expect(userText.contains("No. Okay."))
+    }
+
     /// An empty-delta turn-end (fragments already sent last turn) is skipped the same way.
     @Test func emptyDeltaTurnEndSkipsTheBrain() async {
         let clock = ManualClock(now: 0)

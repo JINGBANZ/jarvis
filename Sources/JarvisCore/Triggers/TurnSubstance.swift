@@ -55,7 +55,7 @@ public enum TurnSubstance {
     /// Speaker-aware entry point used by the coach's delta gate. Most filler behavior stays neutral,
     /// but a terse interviewer rejection is a correction, not conversational noise.
     public static func isSubstantive(_ line: TranscriptLine) -> Bool {
-        if line.speaker == .them, interviewerCorrections.contains(normalized(line.text.lowercased())) {
+        if line.speaker == .them, containsInterviewerCorrection(line.text.lowercased()) {
             return true
         }
         return isSubstantive(line.text)
@@ -77,9 +77,19 @@ public enum TurnSubstance {
     /// True only when punctuation/newlines separate two or more known filler forms. Requiring every
     /// part to be in the closed class keeps technical fragments such as "B.F.S." substantive.
     private static func isKnownFillerSequence(_ lower: String) -> Bool {
-        let parts = lower.components(separatedBy: fillerSeparators)
+        let parts = normalizedSeparatorParts(lower)
+        return parts.count > 1 && parts.allSatisfy(fillers.contains)
+    }
+
+    /// A composite interviewer line such as "No. Okay." still carries an immediate correction even
+    /// though each component is otherwise in the filler class.
+    private static func containsInterviewerCorrection(_ lower: String) -> Bool {
+        normalizedSeparatorParts(lower).contains(where: interviewerCorrections.contains)
+    }
+
+    private static func normalizedSeparatorParts(_ lower: String) -> [String] {
+        lower.components(separatedBy: fillerSeparators)
             .map(normalized)
             .filter { !$0.isEmpty }
-        return parts.count > 1 && parts.allSatisfy(fillers.contains)
     }
 }

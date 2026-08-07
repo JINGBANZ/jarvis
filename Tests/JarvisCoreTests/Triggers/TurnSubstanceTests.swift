@@ -57,10 +57,10 @@ import Testing
         }
     }
 
-    /// A terse interviewer rejection changes the requirements immediately. It must not wait for the
-    /// next long utterance, while the same one-word response from the user remains a back-channel.
+    /// A terse interviewer rejection changes the requirements immediately, including when the
+    /// transcriber combines it with other acknowledgements. The same user response remains filler.
     @Test func interviewerRejectionIsImmediateSubstance() {
-        for text in ["No.", "nope"] {
+        for text in ["No.", "nope", "No. Okay.", "No. No.", "Nope. Hmm."] {
             #expect(TurnSubstance.isSubstantive(.init(speaker: .them, text: text, at: 1)))
             #expect(!TurnSubstance.isSubstantive(.init(speaker: .me, text: text, at: 1)))
         }
