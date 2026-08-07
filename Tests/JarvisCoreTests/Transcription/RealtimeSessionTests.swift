@@ -294,13 +294,13 @@ import Testing
         #expect(legacy["delay"] == nil)
 
         let committed = try transcription(model: .gptTranscribe, speaker: .me)
-        #expect(committed["prompt"] as? String == RealtimeSession.transcriptionPrompt(for: .me))
+        #expect(committed["prompt"] as? String == JarvisPrompts.Transcription.context(for: .me))
         #expect((committed["prompt"] as? String)?.contains("microphone") == true)
         #expect(committed["keywords"] == nil)
         #expect(committed["delay"] == nil)
 
         let live = try transcription(model: .gptLiveTranscribe, speaker: .them)
-        #expect(live["prompt"] as? String == RealtimeSession.transcriptionPrompt(for: .them))
+        #expect(live["prompt"] as? String == JarvisPrompts.Transcription.context(for: .them))
         #expect((live["prompt"] as? String)?.contains("system audio") == true)
         #expect(live["keywords"] == nil)
         #expect(live["delay"] as? String == "low")
