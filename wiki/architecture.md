@@ -2,13 +2,13 @@
 
 > A living document. Describes the vision, the harness loop, the components, and the principles
 > that govern Jarvis. Exact schemas, prompts, and config are not duplicated here — they live in
-> `Sources/JarvisCore/` (`Prompts/JarvisPrompts.swift`, `Coach/ToolDefs.swift`, `Config/Config.swift`).
+> `Sources/JarvisCore/` (`Prompts/`, `Coach/ToolDefs.swift`, `Config/Config.swift`).
 
 > **Scope:** This page describes the **native Swift app** — the thing being built. The earlier
 > two-phase plan (a Natively fork PoC first) was **dropped on 2026-06-14**; we build this directly,
 > including the model-triggered `capture_screen` tool-loop. See [decisions.md](./decisions.md).
 > Exact schemas, the coach prompt, and config are **not duplicated here** — they live in code
-> (`Sources/JarvisCore/`, especially `Prompts/JarvisPrompts.swift`, `Coach/ToolDefs.swift`, and
+> (`Sources/JarvisCore/`, especially `Prompts/`, `Coach/ToolDefs.swift`, and
 > `Config/Config.swift`); this page is
 > the *why*, the code is the *what*.
 
@@ -593,7 +593,7 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
   substantive utterance — from either speaker; only back-channel filler is skipped as pure cost —
   reaches the brain, and the brain decides whether it has anything worth
   saying — that restraint lives in the system prompt (see
-  [`JarvisPrompts.Coach.system`](../Sources/JarvisCore/Prompts/JarvisPrompts.swift)).
+  [`JarvisPrompts.Coach.system`](../Sources/JarvisCore/Prompts/JarvisPrompts+Coach.swift)).
   This keeps
   conversation natural: a follow-up question is never stranded behind a timer. The hard control is
   the menu-bar **Start/Stop** — coaching never runs until explicitly started, and stopping tears the

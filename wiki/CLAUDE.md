@@ -37,7 +37,7 @@ git log and the decision log ([Convention 8](#8-log-load-bearing-decisions-in-on
 ### 4. Reference source; don't paste code.
 
 The wiki holds the *why* and the shape; the *what* — schemas, prompts, signatures, config values,
-constants — lives in code (`JarvisPrompts.swift`, `ToolDefs.swift`, `Config.swift`, …): point to it by
+constants — lives in code (`Prompts/`, `ToolDefs.swift`, `Config.swift`, …): point to it by
 path/symbol (`see Config in Sources/JarvisCore/Config/Config.swift`) instead of copying. A snippet drifts
 the moment code changes; a pointer survives. Prefer text diagrams (Mermaid/PlantUML) over committed
 image binaries, which fossilize.
