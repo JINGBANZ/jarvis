@@ -52,6 +52,8 @@ import Foundation
         #expect(prompt.contains("## Recommendations"))
         #expect(prompt.contains("[confirmed]"))
         #expect(prompt.contains("[hypothesis]"))
+        #expect(prompt.contains("Prompts/JarvisPrompts.swift"))
+        #expect(prompt.contains("all predefined model-facing prompt"))
         #expect(prompt.contains("CoachHistory.swift"))
         #expect(prompt.contains(AgenticEvaluation.reportFilename))
         #expect(prompt.contains(ActivityLog.filename))

@@ -28,9 +28,12 @@ public struct TriggerContext: Sendable {
         case .turnEnd:
             return nil
         case .silence(let secs):
-            return "[\(stamp)] (no speech for \(Self.durationPhrase(secs)))"
+            return JarvisPrompts.Coach.silenceTrigger(
+                timestamp: stamp,
+                duration: Self.durationPhrase(secs)
+            )
         case .manualHint:
-            return "[\(stamp)] The user pressed the hint shortcut. They want your single most useful hint about what's on their screen right now — answer using the attached screenshot and the recent transcript."
+            return JarvisPrompts.Coach.manualHintTrigger(timestamp: stamp)
         }
     }
 
