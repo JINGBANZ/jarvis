@@ -143,6 +143,24 @@ import Testing
         #expect(input["turn_detection"] is NSNull)
     }
 
+    @Test func commitEventClassificationIgnoresServerVADAndValidatesClientAcknowledgements() {
+        let event: [String: Any] = [
+            "type": RealtimeSession.audioBufferCommittedType,
+            "item_id": "item-42",
+        ]
+
+        #expect(RealtimeSession.audioBufferCommitEvent(from: event, model: .gpt4oTranscribe)
+                == .ignored)
+        #expect(RealtimeSession.audioBufferCommitEvent(from: event, model: .gptTranscribe)
+                == .acknowledgement(itemID: "item-42"))
+        #expect(RealtimeSession.audioBufferCommitEvent(
+            from: ["type": RealtimeSession.audioBufferCommittedType],
+            model: .gptLiveTranscribe) == .malformedAcknowledgement)
+        #expect(RealtimeSession.audioBufferCommitEvent(
+            from: ["type": RealtimeSession.speechStartedType, "item_id": "item-42"],
+            model: .gptLiveTranscribe) == .ignored)
+    }
+
     /// Layer 1 (pre-VAD): noise reduction is sent as an OBJECT `{"type": "near_field"}` nested under
     /// `audio.input` (GA shape — a string here is the documented LiveKit bug the server rejects). It
     /// filters the buffer before VAD, cutting the non-speech blips that trigger phantom transcripts.

@@ -240,13 +240,16 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
                      waitingForReplay: waiting)
     }
 
-    func recordReplayCoverageLoss() {
+    @discardableResult
+    func recordReplayCoverageLoss() -> Bool {
         lock.lock()
+        let recoveryWasActive = reconnectRecovery.isActive
         let fallbackItems = reconnectRecovery.recordCoverageLoss()
         for item in fallbackItems { appendFinalizedItemLocked(item, reason: "replay coverage lost") }
         updateCoachingActivityLocked()
         lock.unlock()
         if !fallbackItems.isEmpty { cancelReplayRecoveryDeadline() }
+        return recoveryWasActive
     }
 
     func finalizeInterrupted(reason: String) {

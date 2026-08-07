@@ -18,8 +18,13 @@ default**, keeps **GPT-4o Transcribe** as its default model, adds opt-in **GPT T
 language expectations default to Automatic rather than English; English, Mandarin Chinese, and
 English + Mandarin Chinese remain session-level hints rather than per-turn language choices. One
 Start snapshots the provider, OpenAI model/profile, or Apple locale for both `me` and `them`; there
-is no automatic provider or model fallback. Apple Speech prepares the selected
-supported locale before replacing a running pipeline, submits every captured sample to
+is no automatic provider or model fallback. An initial same-input macOS 26 system-audio comparison
+keeps GPT-4o Transcribe as the default: among the tested GPT-4o, GPT Live, and Apple Speech arms, it
+alone preserved the English, Mandarin, and within-sentence language-switching inputs. This is
+directional evidence rather than a full benchmark: GPT Transcribe landed afterward, and
+[issue #136](https://github.com/JINGBANZ/jarvis/issues/136) owns repeated system-audio runs plus an
+explicitly opt-in reconnect/replay scenario before any future default change. Apple Speech prepares
+the selected supported locale before replacing a running pipeline, submits every captured sample to
 `SpeechAnalyzer`, records only final results, and uses content-free local activity solely to keep
 coaching from waking mid-utterance. An OpenAI key is required only when OpenAI supplies
 transcription or appears in the brain route. The detailed model, language, turn-detection, context,
@@ -75,19 +80,13 @@ fixed notices remain available in Activity. The gate statically rejects unreview
 
 ## Next action
 
-Run a same-input English/Mandarin transcription comparison on macOS 26 first. Use OpenAI with the
-same English + Mandarin Chinese profile for one GPT-4o Transcribe, one GPT Transcribe, and one GPT
-Live Transcribe session; exercise both microphone and system audio, include a within-sentence
-language switch, and compare final `heard:` text, completion latency, and reconnect stability.
-Confirm the debug log names the selected model/profile, GPT-4o sends no single-language hint for the
-mixed profile, GPT Transcribe and GPT Live log acknowledged local commits without a
-`turn_detection` configuration rejection, and GPT Transcribe logs completion-language metadata. Then
-run Apple Speech once per relevant conversation locale; confirm it downloads or reuses the selected
-model before capture, reaches Listening, preserves `me`/`them` ordering, emits no mid-utterance
-coaching turn, and stops cleanly. Confirm Apple Speech plus a CLI-only brain route starts without an
-API key, while any OpenAI transcription or brain target still requires one. Change any transcription
-setting during a live run and confirm the current snapshot remains active until the next Start; force
-an Apple analyzer failure and confirm Jarvis never sends audio to OpenAI as an implicit fallback.
+Finish the remaining transcription configuration smoke without expanding the performance benchmark:
+confirm Apple Speech plus a CLI-only brain route starts without an API key, while any OpenAI
+transcription or brain target still requires one. Change a transcription setting during a live run
+and confirm the current snapshot remains active until the next Start; force an Apple analyzer failure
+and confirm Jarvis never sends audio to OpenAI as an implicit fallback. Microphone benchmarking and
+Apple-specific finalization optimization are not required; the repeated model matrix and opt-in
+network interruption belong to [issue #136](https://github.com/JINGBANZ/jarvis/issues/136).
 
 Then run the live prompt smoke on a fresh session: show an interview question without speaking its
 details, ask “Jarvis, how can I solve this in one pass?”, and confirm the first action is
