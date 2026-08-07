@@ -41,7 +41,7 @@ public enum RealtimeSession {
                 transcription["language"] = language
             }
         case .gptTranscribe, .gptLiveTranscribe:
-            transcription["prompt"] = transcriptionPrompt(for: speaker)
+            transcription["prompt"] = JarvisPrompts.Transcription.context(for: speaker)
             if let languages = languageProfile.multipleLanguageHints {
                 transcription["languages"] = languages
             }
@@ -76,21 +76,6 @@ public enum RealtimeSession {
             "type": "session.update",
             "session": ["type": "transcription", "audio": ["input": input]],
         ]
-    }
-
-    /// Fixed recording context for the selected speaker stream. Keeping it app-owned prevents OCR
-    /// or an uncertain earlier transcript from feeding recognition errors back into later turns.
-    static func transcriptionPrompt(for speaker: Speaker) -> String {
-        switch speaker {
-        case .me:
-            "A live technical-interview conversation captured from the local user's microphone. "
-                + "This stream contains the user's speech and may include names, numbers, and "
-                + "technical terminology."
-        case .them:
-            "A live technical-interview conversation captured from Mac system audio. This stream "
-                + "contains other participants' speech and may include names, numbers, and "
-                + "technical terminology."
-        }
     }
 
     /// Append-audio event (base64 PCM16).

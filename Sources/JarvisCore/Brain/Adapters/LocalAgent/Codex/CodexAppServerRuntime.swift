@@ -289,7 +289,7 @@ actor CodexAppServerRuntime: LocalAgentRuntimeBackend {
             "approvalPolicy": "never",
             "sandbox": "read-only",
             "ephemeral": true,
-            "baseInstructions": CLIBrainClient.codexDirectResponseInstruction
+            "baseInstructions": JarvisPrompts.LocalAgent.codexDirectResponse
                 + "\n\n" + configuration.instructions,
             "config": config,
         ]
