@@ -14,18 +14,6 @@ public final class CoachHistory: @unchecked Sendable {
     private let lock = NSLock()
     private var messages: [ChatMessage] = []
 
-    // Deliberately not an instruction: a session-audit showed the earlier "call capture_screen for
-    // a fresh look" phrasing, repeated once per stubbed screenshot in user-role history, biased the
-    // model toward capturing on every quiet turn (stay_silent was never chosen).
-    static let imageStub = "[an earlier screenshot was here — no longer available]"
-
-    /// The opening line of every OCR block the driver commits (see `CoachDriver.recognizedTextBlock`,
-    /// which builds on this constant so the two can't drift). Matched at commit time: a new capture's
-    /// OCR supersedes every earlier one, which then collapses to `ocrStub`.
-    static let ocrHeader = "Text recognized on the captured window (on-device OCR — may contain "
-        + "errors; the screenshot image is ground truth):"
-    static let ocrStub = "[an earlier screen's OCR text was here — superseded by a newer capture]"
-
     public init() {}
 
     /// The full memory, oldest first. Callers prepend the system prompt and append the new turn.
@@ -62,23 +50,32 @@ public final class CoachHistory: @unchecked Sendable {
         guard !turn.isEmpty else { return }
         lock.lock(); defer { lock.unlock() }
         var turn = turn
-        if let newest = turn.lastIndex(where: { $0.text?.contains(Self.ocrHeader) == true }) {
+        let ocrHeader = JarvisPrompts.Coach.recognizedTextHeader
+        if let newest = turn.lastIndex(where: { $0.text?.contains(ocrHeader) == true }) {
             messages = messages.map(Self.collapsingSupersededOCR)
             // One tool loop may capture more than once — only the turn's newest OCR stays verbatim.
             for i in turn.indices where i < newest { turn[i] = Self.collapsingSupersededOCR(turn[i]) }
         }
         messages.append(contentsOf: turn.compactMap { m in
             if let raw = m.rawItemsJSON { return Self.convertRawItems(raw) }
-            return m.imageBase64JPEG != nil ? .user(Self.imageStub) : m
+            return m.imageBase64JPEG != nil
+                ? .user(JarvisPrompts.Coach.earlierImageStub)
+                : m
         })
     }
 
-    /// Rewrite one committed message so its OCR block (if any) becomes `ocrStub`. Text before the
-    /// block — e.g. a tool result's "screenshot captured" line — survives.
+    /// Rewrite one committed message so its OCR block becomes the catalog's superseded marker.
+    /// Text before the block — e.g. a successful capture result — survives.
     private static func collapsingSupersededOCR(_ m: ChatMessage) -> ChatMessage {
-        guard let text = m.text, let header = text.range(of: ocrHeader) else { return m }
-        return ChatMessage(role: m.role, text: String(text[..<header.lowerBound]) + ocrStub,
-                           toolCallId: m.toolCallId)
+        guard let text = m.text,
+              let header = text.range(of: JarvisPrompts.Coach.recognizedTextHeader)
+        else { return m }
+        return ChatMessage(
+            role: m.role,
+            text: String(text[..<header.lowerBound])
+                + JarvisPrompts.Coach.supersededRecognizedTextStub,
+            toolCallId: m.toolCallId
+        )
     }
 
     /// The commit-time conversion of a verbatim passthrough message: keep its `function_call` items
@@ -135,7 +132,7 @@ public final class CoachHistory: @unchecked Sendable {
     public func compact(prefixCount: Int, summary: String) {
         lock.lock(); defer { lock.unlock() }
         guard prefixCount > 0, prefixCount <= messages.count else { return }
-        let head = ChatMessage.user("[session so far, condensed — earlier turns were summarized]\n\(summary)")
+        let head = ChatMessage.user(JarvisPrompts.Coach.condensedHistory(summary))
         messages.replaceSubrange(0..<prefixCount, with: [head])
     }
 }
