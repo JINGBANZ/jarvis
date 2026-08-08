@@ -269,8 +269,8 @@
 - **Rejected:** (a) A them-only speaker gate — cheaper, but it silences Jarvis exactly when the interviewer asks the user a question. (b) A longer client debounce window (adds reply latency, merges less). (c) A classifier model for filler (~$0.03/hr and latency; unwarranted while the closed class + fail-open holds).
 - **Detail:** `Sources/JarvisCore/Triggers/TurnSubstance.swift`, `CoachDriver.runTurn`.
 - **Superseded in part by:** 2026-08-07 — Known filler is consumed before brain context. The
-  speaker-neutral closed class stands; deferred filler and the arbitrary short-fragment fallback do
-  not.
+  speaker-neutral, fail-open shape stands; deferred filler, the arbitrary short-fragment fallback,
+  and the broad acknowledgement list do not.
 
 ### 2026-07-07 — Session memory moved client-side, with compaction
 
@@ -385,6 +385,9 @@
   actionable feedback, not a back-channel.
 - **Rejected:** Removing the filler gate — would restore the large steady-state cost from acknowledgments.
 - **Detail:** `Sources/JarvisCore/Triggers/TurnSubstance.swift`.
+- **Superseded by:** 2026-08-07 — Clear hesitation sounds are consumed before brain context. Terse
+  contextual replies now fail open for either speaker, so the interviewer-only exception is no
+  longer needed.
 
 ### 2026-07-17 — Audio continuity evidence is content-free, not a recording
 
@@ -1186,24 +1189,27 @@
   `Sources/JarvisCore/Transcription/RealtimeSession.swift`,
   `Sources/JarvisApp/Capture/RealtimeTranscriber.swift`.
 
-### 2026-08-07 — Known filler is consumed before brain context
+### 2026-08-07 — Clear hesitation sounds are consumed before brain context
 
-- **Chose:** Keep the speaker-neutral closed-class substance gate, recognize punctuation-separated
-  sequences of known filler, and remove known filler lines from every brain-facing transcript delta.
-  A filler-only turn consumes its transcript boundary without a request, while Activity retains the
-  complete finalized transcription. Unknown short fragments fail open; direct questions, Jarvis
-  addresses, and terse interviewer corrections remain substantive.
-- **Why:** Session `2026-08-07_11-15-48_B24D` showed that isolated filler was already skipped, but
-  combinations such as “Uh. OK. Okay, okay.” escaped the exact-phrase check and bought a full-history
-  `stay_silent` request. Previously skipped filler also entered the next substantive request, turning
-  a saved call into recurring context cost.
+- **Chose:** Keep a speaker-neutral, conservative substance gate for clear non-semantic vocal sounds,
+  recognize separated sequences of those sounds, and remove them from every brain-facing transcript
+  delta. A turn with nothing else consumes its transcript boundary without a request, while Activity
+  retains the complete finalized transcription. Context-dependent short replies such as “Yes,” “No,”
+  “Okay,” “对,” and “可以” fail open for either speaker, as do unknown short fragments.
+- **Why:** Session `2026-08-07_11-15-48_B24D` showed that isolated hesitation sounds were already
+  skipped, but combined sounds could escape the exact-phrase check and buy a full-history
+  `stay_silent` request. Previously skipped noise also entered the next substantive request, turning
+  a saved call into recurring context cost. A narrow discard set saves those calls without silently
+  deleting short answers whose meaning depends on the conversation.
 - **Rejected:** (a) Asking the transcription model to delete filler — it is not a deterministic
-  omission boundary and would silently change the audit record. (b) Treating every unknown short
-  fragment as filler — it can discard terse answers and technical terms. (c) A classifier model —
-  extra latency and cost for a small explicit class.
+  omission boundary and would silently change the audit record. (b) Treating contextual replies or
+  every unknown short fragment as filler — either can carry an answer, correction, or technical term.
+  (c) A classifier model — extra latency and cost for a small explicit class. (d) Sending filler or an
+  artificial placeholder after a failed attempt — when no substantive text or saved observation
+  remains, there is no useful context for a fresh request.
 - **Supersedes in part:** 2026-07-07 — Filler-only turn-ends skip the brain. Its speaker-neutral gate
-  and explicit overrides stand; skipped lines no longer ride forward, and unknown short fragments
-  no longer disappear by length alone.
+  stands, but the broad acknowledgement list and explicit speaker overrides do not; skipped sounds
+  no longer ride forward, and unknown short fragments no longer disappear by length alone.
 - **Detail:** [architecture.md → The turn](./architecture.md#the-turn),
   `Sources/JarvisCore/Triggers/TurnSubstance.swift`,
   `Sources/JarvisCore/Coach/CoachDriver.swift`.

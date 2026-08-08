@@ -625,10 +625,10 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(overlay.rendered.isEmpty)
     }
 
-    // MARK: - The substance gate: filler never buys a brain request
+    // MARK: - The substance gate: clear hesitation sounds never buy a brain request
 
-    /// A turn-end whose whole delta is back-channel filler — from EITHER speaker — is skipped without
-    /// a request: filler can't produce a tip, and the request would only re-bill the working set.
+    /// A turn-end whose whole delta is clear hesitation sounds — from EITHER speaker — is skipped
+    /// without a request: those sounds can't produce a tip, and the call would only re-bill context.
     @Test func fillerOnlyTurnEndSkipsTheBrain() async {
         let clock = ManualClock(now: 0)
         let brain = ScriptedBrain(script: [
@@ -641,14 +641,14 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(brain.calls.isEmpty)
     }
 
-    /// Several known acknowledgements in one transcription completion are still one filler-only
+    /// Several clear hesitation sounds in one transcription completion are still one filler-only
     /// turn and do not buy a request.
     @Test func compositeFillerTurnEndSkipsTheBrain() async {
         let brain = ScriptedBrain(script: [
             .init(toolCalls: [.staySilent(callId: "quiet")]),
         ])
         let (driver, transcript) = makeDriver(brain: brain, clock: ManualClock(now: 0))
-        transcript.append(.init(speaker: .me, text: "Uh. OK. Okay, okay.", at: 1))
+        transcript.append(.init(speaker: .me, text: "Uh. Hmm. Oh, oh.", at: 1))
 
         #expect(await driver.handleTrigger(.turnEnd) == .skippedFillerOnly)
         #expect(brain.calls.isEmpty)
@@ -666,20 +666,22 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(brain.calls.count == 1)
     }
 
-    /// A correction remains substantive when the transcriber combines it with acknowledgements
-    /// that would otherwise form a composite filler line.
-    @Test func compositeInterviewerCorrectionReachesTheBrain() async {
+    /// Context-dependent short replies remain substantive for either speaker, including when the
+    /// transcriber combines one with a clear hesitation sound.
+    @Test func contextDependentTerseRepliesReachTheBrainForEitherSpeaker() async {
         let brain = ScriptedBrain(script: [
             .init(toolCalls: [.staySilent(callId: "quiet")]),
         ])
         let (driver, transcript) = makeDriver(brain: brain, clock: ManualClock(now: 0))
         transcript.append(.init(speaker: .them, text: "No. Okay.", at: 1))
+        transcript.append(.init(speaker: .me, text: "Yes. Hmm.", at: 2))
 
         #expect(await driver.handleTrigger(.turnEnd) == .silentByModel)
         #expect(brain.calls.count == 1)
         let userText = brain.calls[0].filter { $0.role == .user }.compactMap(\.text)
             .joined(separator: " ")
         #expect(userText.contains("No. Okay."))
+        #expect(userText.contains("Yes. Hmm."))
     }
 
     /// An empty-delta turn-end (fragments already sent last turn) is skipped the same way.
@@ -711,7 +713,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(userText.contains("I'd check both neighbors at that height"))
     }
 
-    /// Known filler beside real speech remains in Activity but is removed from brain-facing input.
+    /// A clear hesitation sound beside real speech remains in Activity but is removed from input.
     @Test func mixedDeltaSendsOnlySubstantiveLines() async {
         let brain = ScriptedBrain(script: [
             .init(toolCalls: [.staySilent(callId: "quiet")]),
@@ -739,7 +741,9 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(brain.calls.count == 1)
     }
 
-    @Test func fillerWakeCannotCancelFailedSilenceAttempt() async {
+    /// A filler wake after a failed silence attempt has no new value to send. It consumes the
+    /// transcript boundary instead of starting a fresh provider request with an empty user message.
+    @Test func fillerWakeAfterFailedSilenceSkipsEmptyFreshAttempt() async {
         let gate = AsyncGate()
         let brain = GatedFailureThenSpeakingBrain(gate: gate)
         let overlay = FakeOverlay()
@@ -754,9 +758,9 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(await driver.handleTrigger(.turnEnd) == .busy)
         await gate.release()
 
-        #expect(await outcome == .spoke)
-        #expect(brain.calls.count == 2)
-        #expect(overlay.rendered == [["recovered pending turn"]])
+        #expect(await outcome == .skippedFillerOnly)
+        #expect(brain.calls.count == 1)
+        #expect(overlay.rendered.isEmpty)
     }
 
     // MARK: - Client-managed session memory (CoachHistory)
@@ -1613,6 +1617,37 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(!fallbackRequest.contains { $0.toolCalls != nil })
     }
 
+    /// A completed screen observation is useful context for a fresh attempt even when the only new
+    /// speech is filler. Send the observation directly: do not recapture, replay raw tool state, or
+    /// manufacture an empty/synthetic speech message.
+    @Test func savedObservationStartsFreshAttemptWithoutEmptySpeech() async {
+        let gate = AsyncGate()
+        let brain = CaptureThenGatedFailureThenSpeakingBrain(gate: gate)
+        let screen = FakeScreen(recognizedText: "let answer = 42")
+        let (driver, transcript) = makeDriver(
+            brain: brain,
+            screen: screen,
+            clock: ManualClock())
+
+        async let outcome = driver.handleTrigger(.silence(secondsQuiet: 30))
+        await gate.waitUntilEntered()
+        transcript.append(.init(speaker: .them, text: "Hmm.", at: 1))
+        #expect(await driver.handleTrigger(.turnEnd) == .busy)
+        await gate.release()
+
+        #expect(await outcome == .spoke)
+        #expect(screen.captureCount == 1)
+        #expect(brain.calls.count == 3)
+        let freshRequest = brain.calls[2]
+        #expect(!freshRequest.contains { $0.role == .user && $0.text == "" })
+        #expect(!freshRequest.contains { ($0.text ?? "").contains("Hmm.") })
+        #expect(freshRequest.contains { $0.imageBase64JPEG == screen.payload })
+        #expect(freshRequest.contains { ($0.text ?? "").contains("let answer = 42") })
+        #expect(!freshRequest.contains { $0.role == .tool })
+        #expect(!freshRequest.contains { $0.rawItemsJSON != nil })
+        #expect(!freshRequest.contains { $0.toolCalls != nil })
+    }
+
     @Test func automaticPendingAttemptWaitsForBothSpeakersToStop() async {
         let gate = AsyncGate()
         let delayGate = AsyncGate()
@@ -2101,12 +2136,12 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         await gate.release()
 
         #expect(await first == .spoke)
-        let retryUserText = brain.calls[1]
+        let freshAttemptUserText = brain.calls[1]
             .filter { $0.role == .user }
             .compactMap(\.text)
             .joined(separator: "\n")
-        #expect(retryUserText.contains("new speech ended"))
-        #expect(!retryUserText.contains("no speech for"))
+        #expect(freshAttemptUserText.contains("new speech ended"))
+        #expect(!freshAttemptUserText.contains("no speech for"))
     }
 
     /// Audio-driven turns REQUIRE a tool call (never free text): the model picks which tool from the
@@ -2432,6 +2467,50 @@ final class GatedFailureThenSpeakingBrain: BrainClient, @unchecked Sendable {
                     id: "recovered", name: "speak",
                     argumentsJSON: #"{"lines":["recovered pending turn"]}"#),
             ])
+    }
+}
+
+/// Captures once, then parks and fails the continuation request. The next call belongs to a fresh
+/// attempt and lets tests inspect exactly which provider-neutral context survives.
+final class CaptureThenGatedFailureThenSpeakingBrain: BrainClient, @unchecked Sendable {
+    private let gate: AsyncGate
+    private let lock = NSLock()
+    private var recordedCalls: [[ChatMessage]] = []
+    var calls: [[ChatMessage]] { lock.withLock { recordedCalls } }
+
+    init(gate: AsyncGate) { self.gate = gate }
+
+    func respond(messages: [ChatMessage], tools: [ToolDef],
+                 toolChoice: ToolChoice) async throws -> BrainResponse {
+        let index = lock.withLock {
+            recordedCalls.append(messages)
+            return recordedCalls.count - 1
+        }
+        switch index {
+        case 0:
+            return BrainResponse(
+                toolCalls: [.captureScreen(callId: "capture")],
+                rawToolCalls: [
+                    RawToolCall(
+                        id: "capture",
+                        name: "capture_screen",
+                        argumentsJSON: "{}"),
+                ])
+        case 1:
+            await gate.enter()
+            throw NSError(
+                domain: "FutureProvider", code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "temporary provider interruption"])
+        default:
+            return BrainResponse(
+                toolCalls: [.speak(callId: "recovered", lines: ["used saved observation"])],
+                rawToolCalls: [
+                    RawToolCall(
+                        id: "recovered",
+                        name: "speak",
+                        argumentsJSON: #"{"lines":["used saved observation"]}"#),
+                ])
+        }
     }
 }
 
