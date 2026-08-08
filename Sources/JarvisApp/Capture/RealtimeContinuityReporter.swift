@@ -21,6 +21,15 @@ final class RealtimeContinuityReporter: @unchecked Sendable {
     private var timer: Timer?
     private var stopped = true
     private var evictionAccumulator = ReplayBufferEvictionAccumulator()
+    /// Latches so positive sample progress is surfaced only for the first frame and the first frame
+    /// after a witness stall. Guarded by `lock`.
+    private var emittedFirstFrame = false
+    private var reportedStall = false
+
+    /// Promotes actual audio-frame arrival into readiness. Fired off the witness's own evidence (no
+    /// second counter): positive sample progress on first capture/resume and `.stalled` on the
+    /// witness's capture-stalled anomaly. Consumed by `CaptureReadinessMonitor` in the app.
+    var onCaptureContinuity: (@Sendable (CaptureReadinessMonitor.Signal) -> Void)?
 
     init(
         speaker: Speaker,
@@ -39,6 +48,8 @@ final class RealtimeContinuityReporter: @unchecked Sendable {
         lock.lock()
         stopped = false
         evictionAccumulator.reset()
+        emittedFirstFrame = false
+        reportedStall = false
         lock.unlock()
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
@@ -68,7 +79,22 @@ final class RealtimeContinuityReporter: @unchecked Sendable {
     }
 
     func recordCapture(sequence: UInt64, sampleCount: Int, at timestamp: TimeInterval) {
-        consume(witness.recordCapture(sequence: sequence, sampleCount: sampleCount, at: timestamp))
+        precondition(sampleCount >= 0)
+        let witnessOutput = witness.recordCapture(
+            sequence: sequence, sampleCount: sampleCount, at: timestamp)
+        lock.lock()
+        let hasSampleProgress = sampleCount > 0
+        let emitCaptureProgress = hasSampleProgress && (!emittedFirstFrame || reportedStall)
+        if hasSampleProgress {
+            emittedFirstFrame = true
+            reportedStall = false
+        }
+        lock.unlock()
+        // Positive sample progress is health regardless of amplitude; a zero-length callback is not.
+        if emitCaptureProgress {
+            onCaptureContinuity?(.captured(sampleCount: sampleCount))
+        }
+        consume(witnessOutput)
     }
 
     func recordDelivery(sequence: UInt64, pcm16: Data, at timestamp: TimeInterval) {
@@ -155,6 +181,11 @@ final class RealtimeContinuityReporter: @unchecked Sendable {
                 let lastCapture = lastCaptureAt.map(Self.seconds) ?? "never"
                 jlog("⚠️ audio continuity [\(speaker.rawValue)] capture stalled for "
                      + "\(Self.seconds(duration)) (last=\(lastCapture))")
+                lock.lock()
+                let emitStall = !reportedStall
+                reportedStall = true
+                lock.unlock()
+                if emitStall { onCaptureContinuity?(.stalled) }
             case .sequenceGap(let stage, let expected, let observed):
                 let boundary = stage == .capture ? "capture" : "delivery"
                 jlog("⚠️ audio continuity [\(speaker.rawValue)] \(boundary) sequence gap: "

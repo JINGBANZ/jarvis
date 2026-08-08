@@ -67,18 +67,21 @@ public final class AudioContinuityWitness: @unchecked Sendable {
         precondition(sampleCount >= 0)
         lock.lock(); defer { lock.unlock() }
         var anomalies: [Anomaly] = []
-        let stallReference = lastCaptureAt ?? startedAt
-        let stalledFor = max(0, timestamp - stallReference)
-        if !captureStallReported, stalledFor >= configuration.captureStallThreshold {
-            anomalies.append(.captureStalled(lastCaptureAt: lastCaptureAt, duration: stalledFor))
+        let hasSampleProgress = sampleCount > 0
+        if hasSampleProgress {
+            let stallReference = lastCaptureAt ?? startedAt
+            let stalledFor = max(0, timestamp - stallReference)
+            if !captureStallReported, stalledFor >= configuration.captureStallThreshold {
+                anomalies.append(.captureStalled(lastCaptureAt: lastCaptureAt, duration: stalledFor))
+            }
+            captureStallReported = false
+            lastCaptureAt = timestamp
         }
-        captureStallReported = false
         if let previous = lastCapturedSequence, sequence != previous &+ 1 {
             anomalies.append(.sequenceGap(stage: .capture, expected: previous &+ 1,
                                           observed: sequence))
         }
         lastCapturedSequence = sequence
-        lastCaptureAt = timestamp
         capturedChunks += 1
         capturedSamples += sampleCount
         if pendingCaptures[sequence] == nil { pendingCaptureOrder.append(sequence) }
