@@ -11,7 +11,12 @@ import Testing
             transcript: transcript,
             clock: clock,
             sessionStart: 100,
+            turnDebounce: 0,
             events: events)
+        guard let pendingTurn = PendingTurnProbe(coordinator) else {
+            Issue.record("Could not inspect the coordinator's pending utterance buffer")
+            return
+        }
 
         coordinator.start()
         coordinator.updateActivity(true)
@@ -20,7 +25,9 @@ import Testing
         #expect(coordinator.recordFinalizedTranscript(
             "second fragment", spokenAt: 2, source: "test"))
 
-        try? await Task.sleep(nanoseconds: 40_000_000)
+        #expect(await waitUntil {
+            pendingTurn.observeAndRestoreWaitingState()
+        })
         #expect(events.turnCount == 0)
         #expect(events.activity == [true])
 
@@ -36,20 +43,19 @@ import Testing
         let transcript = RollingTranscript()
         let clock = ManualClock(now: 10)
         let events = CoachingEvents()
+        let turnDebounce: TimeInterval = 0.02
         let coordinator = makeCoordinator(
             transcript: transcript,
             clock: clock,
             sessionStart: 10,
-            turnDebounce: 0.05,
+            turnDebounce: turnDebounce,
             events: events)
 
-        coordinator.start()
-        #expect(!coordinator.recordFinalizedTranscript(" … ", spokenAt: nil, source: "test"))
-        coordinator.updateActivity(true)
-        #expect(coordinator.recordFinalizedTranscript("usable", spokenAt: nil, source: "test"))
-        coordinator.stop()
+        let accepted = await recordAndStopBeforeQueuedDebounceRuns(coordinator)
+        #expect(!accepted.empty)
+        #expect(accepted.usable)
 
-        try? await Task.sleep(nanoseconds: 100_000_000)
+        await waitForMainQueue(after: turnDebounce * 2)
         #expect(events.turnCount == 0)
         #expect(events.activity == [true, false])
         #expect(transcript.renderFrom(index: 0).text == "[00:00] me: usable")
@@ -146,7 +152,7 @@ private final class CoachingEvents: @unchecked Sendable {
 }
 
 private func waitUntil(
-    timeoutNanoseconds: UInt64 = 500_000_000,
+    timeoutNanoseconds: UInt64 = 5_000_000_000,
     condition: @escaping @Sendable () -> Bool
 ) async -> Bool {
     let startedAt = DispatchTime.now().uptimeNanoseconds
@@ -155,4 +161,50 @@ private func waitUntil(
         try? await Task.sleep(nanoseconds: 5_000_000)
     }
     return condition()
+}
+
+/// Production scheduled its debounce before this later-deadline marker on the same serial queue.
+/// Reaching the marker proves the invalidated `fireTurn` callback was dequeued first, even when
+/// parallel test load delays both callbacks beyond their deadlines.
+private func waitForMainQueue(after delay: TimeInterval) async {
+    await withCheckedContinuation { continuation in
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+            continuation.resume()
+        }
+    }
+}
+
+/// `fireTurn` has no externally visible callback while transcription remains active. This
+/// test-local probe observes the exact `UtteranceBuffer` transition instead of adding a production
+/// hook, then restores the state so `updateActivity(false)` still exercises the normal resume path.
+private struct PendingTurnProbe: Sendable {
+    private let pending: UtteranceBuffer
+
+    init?(_ coordinator: TranscriptionCoachingCoordinator) {
+        guard let pending = Mirror(reflecting: coordinator).descendant("pending")
+            as? UtteranceBuffer else { return nil }
+        self.pending = pending
+    }
+
+    func observeAndRestoreWaitingState() -> Bool {
+        guard pending.shouldResumeAfterPendingTranscriptionsSettle(
+            hasPendingTranscriptions: false
+        ) else { return false }
+        return pending.drainIfSettled(hasPendingTranscriptions: true)
+            == .waitingForPendingTranscriptions
+    }
+}
+
+/// Running the complete start/record/stop sequence in one main-actor turn guarantees the debounce
+/// is genuinely queued but cannot execute until after `stop()` invalidates it.
+@MainActor
+private func recordAndStopBeforeQueuedDebounceRuns(
+    _ coordinator: TranscriptionCoachingCoordinator
+) -> (empty: Bool, usable: Bool) {
+    coordinator.start()
+    let empty = coordinator.recordFinalizedTranscript(" … ", spokenAt: nil, source: "test")
+    coordinator.updateActivity(true)
+    let usable = coordinator.recordFinalizedTranscript("usable", spokenAt: nil, source: "test")
+    coordinator.stop()
+    return (empty, usable)
 }

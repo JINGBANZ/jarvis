@@ -53,6 +53,7 @@ import Testing
             try await client.makeConversation()
         }
         try await waitForRequestCount(1, method: "thread/start", in: trace)
+        try await waitForFile(pidFile)
         let pid = try #require(
             pid_t(String(contentsOf: pidFile, encoding: .utf8)
                 .trimmingCharacters(in: .whitespacesAndNewlines)))
@@ -842,15 +843,17 @@ import Testing
     }
 
     private func waitForFile(_ file: URL) async throws {
-        let deadline = Date().addingTimeInterval(2)
+        let deadline = Date().addingTimeInterval(10)
         while !FileManager.default.fileExists(atPath: file.path), Date() < deadline {
             try await Task.sleep(nanoseconds: 20_000_000)
         }
-        _ = try #require(FileManager.default.fileExists(atPath: file.path))
+        _ = try #require(
+            FileManager.default.fileExists(atPath: file.path),
+            "timed out waiting for \(file.lastPathComponent)")
     }
 
     private func waitForLineCount(_ expected: Int, in file: URL) async throws {
-        let deadline = Date().addingTimeInterval(3)
+        let deadline = Date().addingTimeInterval(10)
         while Date() < deadline {
             if let text = try? String(contentsOf: file, encoding: .utf8),
                text.split(separator: "\n").count >= expected {
@@ -858,7 +861,9 @@ import Testing
             }
             try await Task.sleep(nanoseconds: 20_000_000)
         }
-        Issue.record("timed out waiting for \(expected) launches")
+        let count = (try? String(contentsOf: file, encoding: .utf8)
+            .split(separator: "\n").count) ?? 0
+        _ = try #require(count >= expected, "timed out waiting for \(expected) launches")
     }
 
     private func waitForRequestCount(
@@ -866,14 +871,16 @@ import Testing
         method: String,
         in trace: URL
     ) async throws {
-        let deadline = Date().addingTimeInterval(3)
+        let deadline = Date().addingTimeInterval(10)
         while Date() < deadline {
             if requests(method: method, in: trace).count >= expected {
                 return
             }
             try await Task.sleep(nanoseconds: 20_000_000)
         }
-        Issue.record("timed out waiting for \(expected) \(method) requests")
+        _ = try #require(
+            requests(method: method, in: trace).count >= expected,
+            "timed out waiting for \(expected) \(method) requests")
     }
 
     private func waitForProcessExit(_ pid: pid_t) async throws {
