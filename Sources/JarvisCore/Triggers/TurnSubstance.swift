@@ -35,6 +35,7 @@ public enum TurnSubstance {
         let lower = text.lowercased()
         if lower.contains("jarvis") { return true }
         if lower.contains("?") || lower.contains("？") { return true }
+        if containsAcronymLikeSound(text) { return true }
 
         let collapsed = normalized(lower)
 
@@ -68,6 +69,21 @@ public enum TurnSubstance {
     private static func isDiscardableSoundSequence(_ lower: String) -> Bool {
         let parts = normalizedSeparatorParts(lower)
         return parts.count > 1 && parts.allSatisfy(discardableSounds.contains)
+    }
+
+    /// Preserve an all-uppercase token whose lowercase spelling collides with a sound ("M", "ER",
+    /// "UM", "OH"). Capitalization is the only local evidence that it may be a variable or acronym;
+    /// ordinary ASR fillers such as "Um" and "Oh" remain discardable.
+    private static func containsAcronymLikeSound(_ text: String) -> Bool {
+        text.components(separatedBy: soundSeparators).contains { part in
+            guard discardableSounds.contains(normalized(part.lowercased())) else { return false }
+            let casedLetters = part.unicodeScalars.filter {
+                CharacterSet.uppercaseLetters.contains($0) || CharacterSet.lowercaseLetters.contains($0)
+            }
+            return !casedLetters.isEmpty && casedLetters.allSatisfy {
+                CharacterSet.uppercaseLetters.contains($0)
+            }
+        }
     }
 
     private static func normalizedSeparatorParts(_ lower: String) -> [String] {

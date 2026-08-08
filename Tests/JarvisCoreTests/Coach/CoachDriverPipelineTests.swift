@@ -684,6 +684,24 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(userText.contains("Yes. Hmm."))
     }
 
+    /// Uppercase tokens that spell like hesitation sounds can be variables or acronyms. They must
+    /// reach the brain rather than being permanently consumed at the transcript boundary.
+    @Test func acronymLikeShortUtterancesReachTheBrain() async {
+        let brain = ScriptedBrain(script: [
+            .init(toolCalls: [.staySilent(callId: "quiet")]),
+        ])
+        let (driver, transcript) = makeDriver(brain: brain, clock: ManualClock(now: 0))
+        transcript.append(.init(speaker: .them, text: "ER", at: 1))
+        transcript.append(.init(speaker: .me, text: "M", at: 2))
+
+        #expect(await driver.handleTrigger(.turnEnd) == .silentByModel)
+        #expect(brain.calls.count == 1)
+        let userText = brain.calls[0].filter { $0.role == .user }.compactMap(\.text)
+            .joined(separator: " ")
+        #expect(userText.contains("[00:01] them: ER"))
+        #expect(userText.contains("[00:02] me: M"))
+    }
+
     /// An empty-delta turn-end (fragments already sent last turn) is skipped the same way.
     @Test func emptyDeltaTurnEndSkipsTheBrain() async {
         let clock = ManualClock(now: 0)

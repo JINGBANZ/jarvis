@@ -53,6 +53,17 @@ import Testing
         }
     }
 
+    /// Capitalization can distinguish a technical identifier from an otherwise identical vocal
+    /// sound. Ambiguous all-uppercase forms fail open; normal sentence-cased fillers stay filtered.
+    @Test func acronymLikeSoundSpellingsFailOpen() {
+        for text in ["M", "ER", "UM", "OH", "U.M.", "UM. Oh."] {
+            #expect(TurnSubstance.isSubstantive(text), "expected acronym-like substance: \(text)")
+        }
+        for text in ["m", "Er", "Um", "Oh"] {
+            #expect(!TurnSubstance.isSubstantive(text), "expected vocal sound: \(text)")
+        }
+    }
+
     /// Questions and addresses punch through, whoever said them — including interviewer questions
     /// that should draw a proactive tip, and even a bare "ok?" that would otherwise be filler.
     @Test func questionsAndAddressesAlwaysSubstantive() {
