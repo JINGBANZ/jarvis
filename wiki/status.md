@@ -34,12 +34,12 @@ boundaries, salvages partial text while keeping unavailable items diagnostic-onl
 real system-audio sample while padding only missing tap silence for activity detection, and keeps
 AEC on a separate exact-length reference. Content-free continuity checkpoints cover capture through
 provider speech without archiving PCM, and timestamp-interval correlation handles locally split or
-replayed utterances without adding diagnostic text to the brain transcript. Readiness waits on actual
-audio-frame arrival, not just ready provider sockets: a Foundation-only
-[`CaptureReadinessMonitor`](../Sources/JarvisCore/Diagnostics/CaptureReadinessMonitor.swift) tracks
-each stream's first captured frame — by callback count, so valid digital silence still counts — and,
-reusing the continuity witness's stall evidence, turns a missing first frame or a sustained post-ready
-stall into a terminal microphone failure or a microphone-only system degrade.
+replayed utterances without adding diagnostic text to the brain transcript. The app combines
+provider connection state with content-free capture health from the Foundation-only
+[`CaptureReadinessMonitor`](../Sources/JarvisCore/Diagnostics/CaptureReadinessMonitor.swift): each
+stream's first positive sample-count callback establishes frame health, so valid digital silence
+counts, while a missing first frame or a sustained stall after frame flow begins becomes a terminal
+microphone failure or a microphone-only system degrade.
 Locally accepted WebSocket sends remain in a bounded memory-only recovery tail because Realtime does
 not acknowledge audio appends; server audio-clock progress retires only a safe prefix, and a
 replacement socket replays the rest after a half-open failure. A live Wi-Fi reconnect run confirms
@@ -132,7 +132,7 @@ thin OS shell, verified by the smoke run.
 - `Sources/JarvisCore/Overlay/` — overlay text model + length-proportional timing + fan-out (`OverlayRendering`, `OverlayTiming`, `OverlayAppearance`, `BroadcastOverlay`).
 - `Sources/JarvisCore/Config/` — config + owner-only secrets + transcription/brain/screen preferences (`Config`, `Secrets`, `TranscriptionPreferences`, `BrainPreferences`, `ScreenCapturePreferences`, `ScreenCaptureScope`).
 - `Sources/JarvisCore/Support/` — small shared runtime primitives (`Clock`, `TurnTaskBox`, `RetrySchedule`, `RetryIncident`).
-- `Sources/JarvisCore/Diagnostics/` — logging, always-on activity log with stable persisted event kinds and fixed typed brain-change/failure notices, privacy-preserving audio continuity evidence, session-history store, wire-level brain traffic capture + the read-only agentic audit over the complete session directory, user-facing errors (`ActivityLog`, `AudioContinuityWitness`, `SessionStore`, `BrainTrafficLog`, `EvaluationTranscript`, `AgenticEvaluation`, `AgenticEvaluator`, `UserFacingError`).
+- `Sources/JarvisCore/Diagnostics/` — logging, always-on activity log with stable persisted event kinds and fixed typed brain-change/failure notices, privacy-preserving audio continuity and capture-readiness policy, session-history store, wire-level brain traffic capture + the read-only agentic audit over the complete session directory, user-facing errors (`ActivityLog`, `AudioContinuityWitness`, `CaptureReadinessMonitor`, `SessionStore`, `BrainTrafficLog`, `EvaluationTranscript`, `AgenticEvaluation`, `AgenticEvaluator`, `UserFacingError`).
 - `Sources/JarvisOverlay/` — the capture-invisible `NSPanel` surfaces: `OverlayCaptionPanel` (transient), `OverlayBoxPanel` (persistent), `NSPanel+CaptureExclusion`.
 - `Sources/JarvisApp/App/` + `MenuBar/` — entry point, connection-aware menu status, Start/Stop, `ErrorReporter` (startup alerts plus an unconditional no-presentation runtime policy).
 - `Sources/JarvisApp/Capture/` — one-clock aggregate mic + sample-preserving system-audio capture that starts without waiting for a system-audio writer, with AEC3 echo cancellation, classic WebRTC VAD, and resampling (`AggregateEchoCapture`, `WebRTCEchoCanceller`, `WebRTCVoiceActivityDetector`, `Resampler`); provider construction (`TranscriptionSessionFactory`); OpenAI Realtime item/readiness/liveness/transactional-reconnect handling (`RealtimeTranscriber`); macOS 26+ on-device final-result transcription and model preparation (`AppleSpeechTranscriber`, `AppleSpeechModelPreparation`); continuity/network diagnostics; permissions; plus the window-scoped screenshot + OCR edge (`WindowScopedScreenCapture`, `ScreenTextRecognizer`).

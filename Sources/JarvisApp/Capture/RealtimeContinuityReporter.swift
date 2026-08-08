@@ -21,14 +21,14 @@ final class RealtimeContinuityReporter: @unchecked Sendable {
     private var timer: Timer?
     private var stopped = true
     private var evictionAccumulator = ReplayBufferEvictionAccumulator()
-    /// Latches so each capture-continuity edge is surfaced once per incident: the first frame ever, a
-    /// stall (from the witness anomaly), and its resume. Guarded by `lock`.
+    /// Latches so positive sample progress is surfaced only for the first frame and the first frame
+    /// after a witness stall. Guarded by `lock`.
     private var emittedFirstFrame = false
     private var reportedStall = false
 
     /// Promotes actual audio-frame arrival into readiness. Fired off the witness's own evidence (no
-    /// second counter): `firstFrame` once, `stalled` on the witness's captureStalled anomaly, `resumed`
-    /// when capture returns. Consumed by `CaptureReadinessMonitor` in the app.
+    /// second counter): positive sample progress on first capture/resume and `.stalled` on the
+    /// witness's capture-stalled anomaly. Consumed by `CaptureReadinessMonitor` in the app.
     var onCaptureContinuity: (@Sendable (CaptureReadinessMonitor.Signal) -> Void)?
 
     init(
@@ -79,16 +79,22 @@ final class RealtimeContinuityReporter: @unchecked Sendable {
     }
 
     func recordCapture(sequence: UInt64, sampleCount: Int, at timestamp: TimeInterval) {
+        precondition(sampleCount >= 0)
+        let witnessOutput = witness.recordCapture(
+            sequence: sequence, sampleCount: sampleCount, at: timestamp)
         lock.lock()
-        let emitFirstFrame = !emittedFirstFrame
-        emittedFirstFrame = true
-        let emitResume = reportedStall
-        reportedStall = false
+        let hasSampleProgress = sampleCount > 0
+        let emitCaptureProgress = hasSampleProgress && (!emittedFirstFrame || reportedStall)
+        if hasSampleProgress {
+            emittedFirstFrame = true
+            reportedStall = false
+        }
         lock.unlock()
-        // A delivered frame is capture health regardless of amplitude, so surface it by arrival only.
-        if emitFirstFrame { onCaptureContinuity?(.firstFrame) }
-        if emitResume { onCaptureContinuity?(.resumed) }
-        consume(witness.recordCapture(sequence: sequence, sampleCount: sampleCount, at: timestamp))
+        // Positive sample progress is health regardless of amplitude; a zero-length callback is not.
+        if emitCaptureProgress {
+            onCaptureContinuity?(.captured(sampleCount: sampleCount))
+        }
+        consume(witnessOutput)
     }
 
     func recordDelivery(sequence: UInt64, pcm16: Data, at timestamp: TimeInterval) {

@@ -1182,15 +1182,16 @@
 
 ### 2026-08-06 — Audio-frame arrival gates coaching readiness
 
-- **Chose:** Make readiness prove capture, not just provider sessions. A Foundation-only
-  `CaptureReadinessMonitor` tracks provider readiness and the first captured frame independently for
-  the mic and system streams and withholds full listening until both required streams are provider-ready
-  *and* have delivered at least one frame. First-frame health is decided by callback/sample-count
-  progress, never amplitude, so valid digital silence still counts. A required stream that delivers no
-  first frame within a deadline, or that stalls for a sustained window after readiness, becomes a
-  terminal microphone failure or a microphone-only system degrade; the monitor reuses
-  `AudioContinuityWitness` stall evidence (surfaced through `RealtimeContinuityReporter`) rather than a
-  second counter, and the app supplies only observations, a 1 s poll, and the lifecycle effects.
+- **Chose:** Make readiness prove capture, not just provider sessions. The app owns endpoint
+  connection mechanics and feeds ready/not-ready observations into a Foundation-only
+  `CaptureReadinessMonitor`, which combines those observations with independent mic and system frame
+  health. Full listening requires both ready providers and a positive sample-count callback from both
+  capture paths. Amplitude never enters the decision, so valid digital silence still counts. A required
+  stream that delivers no samples within a deadline, or that stalls for a sustained window after frame
+  flow begins, becomes a terminal microphone failure or a microphone-only system degrade. The monitor
+  reuses `AudioContinuityWitness` stall evidence surfaced through `RealtimeContinuityReporter`; the app
+  supplies observations, the polling cadence in `AppDelegate.startCaptureReadiness()`, route-rebuild
+  recovery state, connection-attempt presentation, and lifecycle effects.
 - **Why:** Ready provider sockets proved sessions were up while both streams sat at capture=0/0 during a
   quiet-start failure; the witness already saw the stall but only logged it. Promoting frame arrival into
   readiness, and giving a sustained stall a typed consequence, closes that gap without weakening ghost
@@ -1198,10 +1199,13 @@
   the policy Foundation-only makes the timeouts and degrade/terminal decisions deterministically testable.
 - **Rejected:** (a) Inferring capture health from speech energy/amplitude — silence would read as failure.
   (b) A second capture counter in the app — duplicates and can disagree with the witness. (c) Reusing the
-  witness's 2 s stall threshold directly as the post-ready consequence — too aggressive; a normal debounced
-  capture route rebuild would trip it, so the sustained-stall window sits well above it. (d) Restoring
+  `AudioContinuityWitness.Configuration.captureStallThreshold` directly as the lifecycle consequence —
+  too aggressive; `AggregateEchoCapture` explicitly suspends that consequence while its bounded route
+  recovery owns the incident, then `CaptureReadinessMonitor.Configuration.sustainedStallTimeout` governs
+  a fresh post-recovery window. (d) Restoring
   `kAudioAggregateDeviceTapAutoStartKey` to guarantee frames — reintroduces the system-playback dependency.
 - **Detail:** `Sources/JarvisCore/Diagnostics/CaptureReadinessMonitor.swift`,
   `Sources/JarvisCore/Diagnostics/AudioContinuityWitness.swift`,
+  `Sources/JarvisApp/Capture/AggregateEchoCapture.swift`,
   `Sources/JarvisApp/Capture/RealtimeContinuityReporter.swift`,
   `Sources/JarvisApp/App/AppDelegate.swift`.

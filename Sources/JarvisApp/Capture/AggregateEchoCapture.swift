@@ -39,6 +39,9 @@ final class AggregateEchoCapture: @unchecked Sendable {
     /// Fired if the device can't be built/started mid-session (route-change rebuild) — the caller
     /// decides how to surface it. Carries a human-readable reason.
     var onUnavailable: (@Sendable (String) -> Void)?
+    /// True while the capture owns a bounded route-rebuild incident, false after it successfully
+    /// rebuilds. Exhaustion is reported through `onUnavailable` instead.
+    var onRecoveryStateChange: (@Sendable (Bool) -> Void)?
 
     private var tapID = AudioObjectID(kAudioObjectUnknown)
     private var aggregateID = AudioObjectID(kAudioObjectUnknown)
@@ -72,6 +75,8 @@ final class AggregateEchoCapture: @unchecked Sendable {
     /// conversation through that interval; only a full bounded retry budget proves capture unusable.
     private var rebuildIncident = RetryIncident(schedule: RetrySchedule(
         maximumRetries: 6, initialDelay: 0.5, maximumDelay: 5))
+    /// Confined to `routeQueue`; keeps repeated device notifications inside one recovery interval.
+    private var rebuildRecoveryInProgress = false
     /// Both speaker streams share one queue to preserve the IOProc's callback order (cleaned mic,
     /// then untouched system tap) without doing Realtime encoding/sends on the audio thread.
     private let deliveryQueue = DispatchQueue(label: "jarvis.aec.delivery", qos: .userInitiated)
@@ -120,6 +125,7 @@ final class AggregateEchoCapture: @unchecked Sendable {
             pendingRebuild?.cancel()
             pendingRebuild = nil
             rebuildIncident.reset()
+            rebuildRecoveryInProgress = false
         }
         lock.lock()
         stopped = false
@@ -144,6 +150,7 @@ final class AggregateEchoCapture: @unchecked Sendable {
             pendingRebuild?.cancel()
             pendingRebuild = nil
             rebuildIncident.stop()
+            rebuildRecoveryInProgress = false
         }
         lock.lock()
         stopped = true
@@ -252,6 +259,10 @@ final class AggregateEchoCapture: @unchecked Sendable {
         let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
             guard let self else { return }
             guard self.rebuildIncident.beginOrContinue() else { return }
+            if !self.rebuildRecoveryInProgress {
+                self.rebuildRecoveryInProgress = true
+                self.onRecoveryStateChange?(true)
+            }
             self.pendingRebuild?.cancel()
             let work = DispatchWorkItem { [weak self] in self?.rebuild() }
             self.pendingRebuild = work
@@ -294,6 +305,10 @@ final class AggregateEchoCapture: @unchecked Sendable {
         if reason == nil {
             rebuildIncident.succeeded()
             pendingRebuild = nil
+            if rebuildRecoveryInProgress {
+                rebuildRecoveryInProgress = false
+                onRecoveryStateChange?(false)
+            }
         } else {
             failureAction = rebuildIncident.failed()
         }
@@ -308,6 +323,7 @@ final class AggregateEchoCapture: @unchecked Sendable {
             pendingRebuild = work
             routeQueue.asyncAfter(deadline: .now() + delay, execute: work)
         case .exhausted:
+            rebuildRecoveryInProgress = false
             jlog("Jarvis: capture rebuild unavailable after bounded retries")
             onUnavailable?(reason)        // notify outside the lock
         case .ignore:

@@ -50,6 +50,25 @@ import Testing
         #expect(witness.poll(at: 2.5).anomalies.isEmpty)
     }
 
+    @Test func zeroSampleCallbacksDoNotResetCaptureStallProgress() {
+        let witness = makeWitness(captureStallThreshold: 2)
+        #expect(witness.recordCapture(
+            sequence: 0, sampleCount: 480, at: 0).anomalies.isEmpty)
+        #expect(witness.recordCapture(
+            sequence: 1, sampleCount: 0, at: 1.9).anomalies.isEmpty)
+
+        let stalled = witness.recordCapture(sequence: 2, sampleCount: 0, at: 2.1)
+        #expect(stalled.anomalies == [.captureStalled(lastCaptureAt: 0, duration: 2.1)])
+        #expect(witness.recordCapture(
+            sequence: 3, sampleCount: 0, at: 3).anomalies.isEmpty)
+
+        _ = witness.recordCapture(sequence: 4, sampleCount: 480, at: 3.5)
+        #expect(witness.poll(at: 5.49).anomalies.isEmpty)
+        #expect(witness.poll(at: 6).anomalies == [
+            .captureStalled(lastCaptureAt: 3.5, duration: 2.5),
+        ])
+    }
+
     @Test func pendingCaptureReportsDeliveryLagBeforeDeliveryRecovers() {
         let witness = makeWitness(deliveryLagThreshold: 0.25)
         _ = witness.recordCapture(sequence: 12, sampleCount: 480, at: 0)

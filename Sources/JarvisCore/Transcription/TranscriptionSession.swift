@@ -9,9 +9,9 @@ public protocol TranscriptionSession: AnyObject, Sendable {
     var onSpeechActivityChanged: (@Sendable (Bool) -> Void)? { get set }
     var onConnectionStateChange: (@Sendable (TranscriptionConnectionState) -> Void)? { get set }
     var onTerminalFailure: (@Sendable (TranscriptionFailureReason) -> Void)? { get set }
-    /// Content-free capture-continuity edges (first frame, stall, resume) derived from this endpoint's
-    /// continuity witness. They promote actual frame arrival — not just provider readiness — into the
-    /// app's capture-readiness decision. See `CaptureReadinessMonitor`.
+    /// Content-free capture progress/stall edges derived from this endpoint's continuity witness.
+    /// They let Core combine positive sample-count progress with provider readiness without exposing
+    /// amplitude or PCM. See `CaptureReadinessMonitor`.
     var onCaptureContinuity: (@Sendable (CaptureReadinessMonitor.Signal) -> Void)? { get set }
 
     func connect()

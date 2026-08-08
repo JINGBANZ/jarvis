@@ -792,6 +792,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     .captureStopped(reason: reason), context: .runtime)
             }
         }
+        capture.onRecoveryStateChange = { [weak self, weak capture] inProgress in
+            guard let capture else { return }
+            Task { @MainActor [weak self] in
+                guard let self, self.aggregateCapture === capture,
+                      let monitor = self.captureReadiness else { return }
+                monitor.setCaptureRecoveryInProgress(
+                    inProgress, at: self.clock.now() - self.captureReadinessStart)
+            }
+        }
         self.transcriber = transcriber
         self.themTranscriber = themTranscriber
         self.aggregateCapture = capture
@@ -803,7 +812,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         micConnectionState = .connecting
         systemConnectionState = .connecting
         reportedCoachingReady = false
-        startCaptureReadiness()
         transcriber.onCaptureContinuity = { [weak self, weak transcriber] signal in
             guard let transcriber else { return }
             Task { @MainActor [weak self] in
@@ -824,6 +832,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { @MainActor [weak self] in
                 guard let self, self.transcriber === transcriber else { return }
                 self.micConnectionState = state
+                self.captureReadiness?.setProviderReady(
+                    state == .ready, for: .microphone)
                 self.refreshConnectionUI()
             }
         }
@@ -832,6 +842,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { @MainActor [weak self] in
                 guard let self, self.themTranscriber === themTranscriber else { return }
                 self.systemConnectionState = state
+                self.captureReadiness?.setProviderReady(
+                    state == .ready, for: .system)
                 self.refreshConnectionUI()
             }
         }
@@ -845,6 +857,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 .captureFailed(reason: reason), context: reportContext)
             return false
         }
+        // Capture setup is synchronous and can legitimately take longer than the first-frame
+        // deadline. Arm that deadline only after AudioDeviceStart succeeds; callbacks were installed
+        // above, so any frame already queued on the main actor is still observed by this monitor.
+        startCaptureReadiness()
         sessionIsLive = true
         jlog("Jarvis: coaching starting — verifying transcription endpoints.")
         jlog("Jarvis network path at start: \(networkDiagnostics.currentSummary)")
@@ -933,25 +949,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .reconnecting(let attempt):
             menuBar.setState(.reconnecting(attempt: attempt))
         case .ready:
-            // A ready provider socket is not proof audio frames are flowing. Wait for the first
-            // captured mic frame before leaving the starting state, and for the first system frame
-            // before claiming full listening.
-            let micHasFrame = captureReadiness?.hasFirstFrame(.microphone) ?? false
-            let systemHasFrame = captureReadiness?.hasFirstFrame(.system) ?? false
-            let systemUnavailable = captureReadiness?.isSystemUnavailable ?? false
-            if !micHasFrame {
+            // Core combines provider readiness with capture-frame health; AppKit only maps the
+            // deterministic result onto the menu and the one-time human lifecycle milestone.
+            switch captureReadiness?.readiness ?? .waitingForMicrophone {
+            case .waitingForMicrophone, .stopped:
                 menuBar.setState(.starting)
-            } else if systemConnectionState == .ready && systemHasFrame {
+            case .waitingForSystem:
+                menuBar.setState(.systemAudioConnecting)
+            case .ready:
                 menuBar.setState(.listening)
                 if !reportedCoachingReady {
                     reportedCoachingReady = true
                     jlog("Jarvis: coaching ready (mic + system audio).")
                 }
-            } else if systemConnectionState == .failed || systemConnectionState == .stopped
-                        || systemUnavailable {
+            case .microphoneOnly:
                 menuBar.setState(.microphoneOnly)
-            } else {
-                menuBar.setState(.systemAudioConnecting)
             }
         case .failed:
             // `onTerminalFailure` immediately routes through ErrorReporter and stops the session.
@@ -962,12 +974,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Begin capture-frame readiness tracking for the session being installed. The 1s poll owns the
-    /// initial first-frame deadline and the post-ready sustained-stall deadline; observations arrive
-    /// through `handleCaptureContinuity`.
+    /// initial first-frame deadline and the sustained-stall deadline after frame flow begins;
+    /// observations arrive through `handleCaptureContinuity`.
     private func startCaptureReadiness() {
         captureReadinessTimer?.invalidate()
         captureReadinessStart = clock.now()
-        captureReadiness = CaptureReadinessMonitor(startedAt: 0)
+        let monitor = CaptureReadinessMonitor(startedAt: 0)
+        monitor.setProviderReady(micConnectionState == .ready, for: .microphone)
+        monitor.setProviderReady(systemConnectionState == .ready, for: .system)
+        captureReadiness = monitor
         captureReadinessTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self, let monitor = self.captureReadiness else { return }
@@ -983,14 +998,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         captureReadiness = nil
     }
 
-    /// Fold one capture observation into the readiness monitor and apply any consequence. A new mic
-    /// frame can be the edge that flips the menu from starting to listening, so refresh on it.
+    /// Fold one capture observation into the readiness monitor and apply any consequence. Positive
+    /// sample progress can be the edge that flips the menu from starting to listening, so refresh on it.
     private func handleCaptureContinuity(_ signal: CaptureReadinessMonitor.Signal,
                                          for stream: CaptureReadinessMonitor.Stream) {
         guard let captureReadiness else { return }
+        let observedAt = clock.now() - captureReadinessStart
+        let hadFirstFrame = captureReadiness.hasFirstFrame(stream)
         let effects = captureReadiness.note(
-            signal, for: stream, at: clock.now() - captureReadinessStart)
-        if signal == .firstFrame { refreshConnectionUI() }
+            signal, for: stream, at: observedAt)
+        if case .captured(let sampleCount) = signal, sampleCount > 0 {
+            if !hadFirstFrame {
+                jlog("Jarvis capture readiness [\(stream.rawValue)]: "
+                     + "capture=1/\(sampleCount), first=\(String(format: "%.3fs", observedAt))")
+            }
+            refreshConnectionUI()
+        }
         applyCaptureReadinessEffects(effects)
     }
 
@@ -1001,14 +1024,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         for effect in effects {
             switch effect {
             case .microphoneCaptureFailed(let cause):
-                jlog("Jarvis: microphone capture never became healthy (\(cause.rawValue)) — stopping.")
+                jlog("Jarvis: microphone capture unhealthy (\(cause.rawValue)) — stopping.")
                 errorReporter.reportImmediately(
                     .captureStopped(
                         reason: "Jarvis stopped receiving microphone audio. Check the input device and press Start."),
                     context: .runtime)
             case .degradeToMicrophoneOnly(let cause):
                 guard themTranscriber != nil || systemConnectionState != .failed else { break }
-                jlog("Jarvis: system audio capture never became healthy (\(cause.rawValue)) — "
+                jlog("Jarvis: system audio capture unhealthy (\(cause.rawValue)) — "
                      + "microphone coaching continues.")
                 themTranscriber?.stop()
                 themTranscriber = nil
