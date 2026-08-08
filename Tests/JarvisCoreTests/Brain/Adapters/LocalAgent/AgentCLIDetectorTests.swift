@@ -9,7 +9,10 @@ import Glibc
 
 /// Detection runs against a real, throwaway home-directory fixture: executables are actual 0755
 /// shell scripts, so Claude auth tests exercise the production subprocess + JSON parsing path.
-@Suite struct AgentCLIDetectorTests {
+// Detection deliberately exercises real status-command subprocesses and watchdog teardown. Keep
+// those probes sequential so their tight timeout cases do not saturate the process scheduler used by
+// other integration suites; the throwaway homes already isolate their filesystem state.
+@Suite(.serialized) struct AgentCLIDetectorTests {
     private let fm = FileManager.default
 
     /// A fresh fake home directory per test.
