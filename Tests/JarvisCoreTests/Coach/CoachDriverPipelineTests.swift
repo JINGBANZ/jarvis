@@ -2637,34 +2637,3 @@ private func turnOutcomeBeforeTimeout(
         return outcome
     }
 }
-
-private func waitUntilAsync(
-    timeoutNanoseconds: UInt64 = 5_000_000_000,
-    condition: @escaping @Sendable () async -> Bool
-) async -> Bool {
-    let startedAt = DispatchTime.now().uptimeNanoseconds
-    while DispatchTime.now().uptimeNanoseconds - startedAt < timeoutNanoseconds {
-        if await condition() { return true }
-        if Task.isCancelled { return false }
-        try? await Task.sleep(nanoseconds: 1_000_000)
-    }
-    return await condition()
-}
-
-private func turnOutcomeBeforeTimeout(
-    timeoutNanoseconds: UInt64 = 5_000_000_000,
-    operation: @escaping @Sendable () async -> TurnOutcome
-) async -> TurnOutcome? {
-    await withTaskGroup(of: TurnOutcome?.self) { group in
-        group.addTask {
-            await operation()
-        }
-        group.addTask {
-            try? await Task.sleep(nanoseconds: timeoutNanoseconds)
-            return nil
-        }
-        let outcome = await group.next() ?? nil
-        group.cancelAll()
-        return outcome
-    }
-}
