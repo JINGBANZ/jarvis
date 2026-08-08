@@ -1264,3 +1264,38 @@
 - **Detail:** [architecture.md → Models and APIs](./architecture.md#models-and-apis),
   `Sources/JarvisCore/Coach/CoachHistory.swift`,
   `Sources/JarvisCore/Prompts/JarvisPrompts+HistorySummary.swift`.
+
+### 2026-08-08 — Session evaluation uses persisted coaching-attempt provenance
+
+- **Chose:** Persist one owner-only coaching-attempt companion beside Activity and brain traffic.
+  It records the natural trigger versus a pending-work wake, the indexed finalized delta and the
+  substance gate's decision, the initial-versus-screen-continuation boundary, and the terminal
+  outcome. Every coach wire call carries the matching attempt identity. The evaluator joins those
+  records to compute trigger/filler/call-phase counts; absent historical provenance and absent
+  provider telemetry remain unavailable rather than zero.
+- **Chose:** Keep Activity human-facing and keep raw wire traffic untouched. The derived evaluation
+  transcript safely elides the exact shared prefix inside a growing one-item CLI request and removes
+  exact reply duplicates from runtime envelopes, with explicit source pointers and stable call
+  numbering. Reports separate transcript input, Jarvis output, Activity consequence, and trigger;
+  they never use total `stay_silent` actions as an avoidable-call estimate. Recommendations are
+  limited to three and distinguish session evidence, source verification, hypotheses, and behavior
+  to preserve. Without retained audio, ASR error claims remain hypotheses.
+- **Why:** Session `2026-08-07_11-15-48_B24D` proved that traffic plus prose could not recover which
+  finalized lines actually caused a call: the evaluator missed local filler skips, over-attributed
+  model silence, blurred request speech with generated output, and expanded a growing CLI history
+  into a multi-megabyte derived input. Capturing provenance at the attempt boundary makes causal
+  accounting deterministic without turning Activity into an engineering log or weakening the
+  session's owner-only retention boundary.
+- **Rejected:** (a) Inferring triggers from Activity/debug prose—the missing local skips and
+  pending-work wakes are not reconstructible. (b) Treating every accumulated filler line as causal,
+  or every `stay_silent` as avoidable. (c) Copying diagnostics into Activity—it mixes human history
+  with scheduler detail. (d) Rewriting or discarding raw traffic—the complete source remains the
+  cardinality and wire-contract authority. (e) Archiving audio to validate ASR—it reverses the
+  privacy posture for an evaluator convenience.
+- **Extends:** 2026-07-15 — Brain traffic is recorded per session; one-click LLM audit, and
+  2026-07-24 — Session evaluation is agentic-only and reads complete source logs.
+- **Detail:** [architecture.md → Resilience](./architecture.md#resilience),
+  [sandbox.md → Data Egress](./sandbox.md#data-egress),
+  `Sources/JarvisCore/Diagnostics/CoachingAttemptLog.swift`,
+  `Sources/JarvisCore/Diagnostics/TriggerQualityMetrics.swift`,
+  `Sources/JarvisCore/Diagnostics/EvaluationTranscript.swift`.

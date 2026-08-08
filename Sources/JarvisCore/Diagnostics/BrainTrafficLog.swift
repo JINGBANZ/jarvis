@@ -64,6 +64,15 @@ public final class BrainTrafficLog: @unchecked Sendable {
             line["status"] = status
             line["error"] = error
             if let phases, !phases.isEmpty { line["phases"] = phases }
+            if tag == "coach", let context = CoachingAttemptLog.currentRequest {
+                line["coach_attempt"] = [
+                    "id": context.attemptID,
+                    "trigger": context.trigger,
+                    "source_trigger": context.sourceTrigger,
+                    "phase": context.phase.rawValue,
+                    "sequence": context.sequence,
+                ]
+            }
             line["request"] = Self.redactingImages(Self.jsonValue(request))
             if let response { line["response"] = Self.jsonValue(response) }
             guard let data = try? JSONSerialization.data(withJSONObject: line) else { return }

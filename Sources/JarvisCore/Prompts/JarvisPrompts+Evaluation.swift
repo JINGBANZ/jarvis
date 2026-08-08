@@ -6,6 +6,7 @@ extension JarvisPrompts {
             sessionDirectoryPath: String,
             transcriptFilename: String,
             trafficFilename: String,
+            attemptsFilename: String,
             activityFilename: String,
             reportFilename: String
         ) -> String {
@@ -20,18 +21,26 @@ extension JarvisPrompts {
             YOUR WORKSPACE is a checkout of the Jarvis source repository. The audited session lives at:
                 \(sessionDirectoryPath)
             with these inputs in that directory:
-              - `\(transcriptFilename)` — the session's wire-level LLM traffic. It OPENS with a \
-            "=== deterministic metrics ===" table computed from the raw traffic (per-call and \
-            aggregate input / cache-read / cache-write / output tokens and cost, plus a per-model \
-            breakdown). Trust its known numbers and availability labels: `—` means unavailable, not zero, \
-            and a `known (N unavailable)` value is partial, not a session total. Quote only what the table \
-            supports; never recompute a total by eye. The rest is \
+              - `\(transcriptFilename)` — the compact evaluation view. It OPENS with the \
+            `=== deterministic metrics ===` usage/cost table followed by deterministic \
+            transcription/trigger-quality counts. Trust their \
+            known numbers and availability labels: `—` means unavailable, not zero, and a \
+            `known (N unavailable)` value is partial, not a session total. Quote only what these sections \
+            support; never recompute a total by eye. The rest is \
             one block per API call, in order — your PRIMARY narrative input. To keep it compact, content \
-            byte-identical to the previous same-tag call is elided and marked "(unchanged)" — those \
-            markers are exactly where the prompt cache SHOULD be hitting.
+            byte-identical to the previous same-tag call is elided and marked "(unchanged)"; a growing \
+            single CLI text item also elides its exact common prefix with an explicit marker. Those markers \
+            are exactly where the prompt cache SHOULD be hitting. Coach call headers name the trigger and \
+            initial-vs-screenshot-continuation phase when provenance was recorded.
               - `\(trafficFilename)` — the same traffic un-elided. Because the transcript elides \
             byte-identical repeats, ANY cardinal count (stub occurrences, OCR dumps, marker repetitions) \
             MUST be counted here, not from the elided transcript.
+              - `\(attemptsFilename)` — coaching-attempt provenance: trigger vs pending-work wake, \
+            source trigger, indexed finalized transcript lines and their runtime filler classification, and \
+            terminal action. It may be absent for sessions recorded before provenance shipped; then the \
+            corresponding values are unavailable and MUST NOT be inferred from prose logs. Use the matching \
+            attempt id on each coach traffic call to attribute causality. A line's presence in accumulated \
+            history does not prove that it triggered the call.
               - `\(activityFilename)` — the COMPLETE sanitized human-facing coaching record: heard \
             speech, manual hints, every brain action, and every fixed stop/degrade notice, with stable \
             event kinds in `k`. Read the file itself in full; it is deliberately NOT filtered, summarized, \
@@ -66,7 +75,9 @@ extension JarvisPrompts {
             domain), `Sources/JarvisCore/Coach/ToolDefs.swift` (tool schemas), \
             `Sources/JarvisCore/Coach/CoachHistory.swift` (client-managed memory: append-only prefix, \
             screenshot stubbing, compaction), `Sources/JarvisCore/Coach/CoachDriver.swift` (the event loop, \
-            the filler substance gate, compaction trigger), \
+            the filler substance gate, trigger provenance, compaction trigger), \
+            `Sources/JarvisCore/Diagnostics/CoachingAttemptLog.swift` and \
+            `TriggerQualityMetrics.swift` (the persisted provenance schema and deterministic counts), \
             `Sources/JarvisCore/Brain/ReasoningEffort.swift` (`max_output_tokens` is a COMBINED \
             reasoning+output budget — a tight cap recreates the documented `status:"incomplete"` \
             truncation), and `Sources/JarvisCore/Config/Config.swift`. Before recommending a mechanism, \
@@ -74,6 +85,13 @@ extension JarvisPrompts {
             prompt_cache_key pinning) already exist.
 
             Write a markdown report with exactly these sections:
+
+            ## Transcription and trigger quality
+            Report the deterministic heard/filler/skip/call/continuation/terminal counts first. Distinguish \
+            filler present in accumulated history from filler that formed the brain-facing delta for a call. \
+            `stay_silent` is a model decision after a call, NEVER a proxy for an avoidable call. Raw audio is \
+            intentionally not retained, so suspicious wording may be labelled only as a hypothesis; never \
+            claim a word was mistranscribed, inserted, or omitted without audio ground truth.
 
             ## Context engineering
             Inefficiencies in what the harness sends: cache-busting prefix changes (input marked changed \
@@ -89,15 +107,20 @@ extension JarvisPrompts {
 
             ## Coaching quality
             Given the transcript deltas the model saw: tips that were wrong, late, redundant, or noisy; \
-            silences that should have been tips and vice versa.
+            silences that should have been tips and vice versa. For EVERY cited incident, write the \
+            attribution explicitly: "The `me`/`them` transcript input said X; trigger Y caused call #N; \
+            Jarvis brain output generated Z; Activity recorded W." Never write the ambiguous "Call #N said \
+            X" when X came from request input.
 
             ## Recommendations
-            Concrete changes, ordered by expected impact, each tied to evidence above. Prefix EACH with a \
-            label:
-              - `[confirmed]` — you verified it against the code in this checkout (cite the file/symbol). \
-            Use this ONLY when you actually read the relevant code; "confirmed" means confirmed against the \
-            implementation, not merely consistent with the traffic.
-              - `[hypothesis]` — plausible from the traffic but not (or not yet) checked against the code.
+            At most THREE concrete, non-duplicative actions ordered by expected impact. Tie each to evidence \
+            above and prefix it with exactly one evidence label:
+              - `[session-proven]` — directly demonstrated by this session's persisted evidence.
+              - `[source-confirmed]` — a mechanism verified against code in this checkout; cite file/symbol.
+              - `[hypothesis]` — plausible but requiring validation (including any ASR claim without audio).
+              - `[preserve]` — positive behavior that must survive a change; do not phrase it as a defect.
+            Keep hypotheses and preservation notes distinct from proven defects, and merge recommendations \
+            that address the same cause.
 
             Cite call numbers (call #N) as evidence throughout. If the data doesn't support a finding, say \
             so rather than speculating. Before finalizing, re-check every number in your draft against the \

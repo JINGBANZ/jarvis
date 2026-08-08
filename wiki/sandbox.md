@@ -127,9 +127,10 @@ Narrow and explicit. Data leaves the machine only via:
   intentionally agentic under the explicit Evaluate boundary below.
 - **An explicit Activity → Evaluate click** sends the selected completed session to a read-only,
   non-persisted Claude Code / Codex agent under that CLI account. Unlike a coaching turn, this agent
-  may inspect the complete `jarvis-activity.jsonl`, brain traffic, saved screenshots, and source
-  checkout because correlation across those inputs is the audit's purpose. Evaluation is unavailable
-  without a live checkout; the app never substitutes a weaker API-only audit.
+  may inspect the complete `jarvis-activity.jsonl`, coaching-attempt provenance, brain traffic,
+  saved screenshots, and source checkout because correlation across those inputs is the audit's
+  purpose. Evaluation is unavailable without a live checkout; the app never substitutes a weaker
+  API-only audit.
 
 There is **no rolling screen/audio archive and no "recall" database** — Jarvis keeps no continuous
 recording of what it sees or hears. The **raw captured streams stay transient**: audio is either
@@ -151,12 +152,15 @@ the **per-session log directory** — owner-only and bounded; see below.
 **The per-session log directory is the one bounded form of disk persistence, hardened to stay
 owner-only.** It holds the **activity log** (the in-app `WKWebView` viewer's `jarvis-activity.jsonl` +
 the screenshots the model looked at, alongside `jarvis-debug.log`) — the model's spoken tips and the
-transcribed "heard:" lines so a session can be reviewed afterward — plus the **brain traffic record**
-(`brain-traffic.jsonl`: the exact request/response bodies exchanged with the LLM provider, with
-base64 screenshots redacted to stubs since the pixels are already the shot files) and, once the user
-runs the agentic session evaluator from Activity or `scripts/eval-session.sh`, its `eval-report.md` and the browsable
-`eval-report.html` rendered from it. The evaluator receives this complete owner-only session
-directory; `jarvis-activity.jsonl` is not copied or prefiltered into another prompt artifact. Every
+transcribed "heard:" lines so a session can be reviewed afterward — plus the **coaching-attempt
+provenance** (`coaching-attempts.jsonl`: finalized transcript lines at the decision boundary,
+runtime substance classification, trigger/wake, call phase, and terminal outcome) and the **brain
+traffic record** (`brain-traffic.jsonl`: the exact request/response bodies exchanged with the LLM
+provider, with base64 screenshots redacted to stubs since the pixels are already the shot files).
+Once the user runs the agentic session evaluator from Activity or `scripts/eval-session.sh`, the
+directory also holds its derived `eval-transcript.txt`, `eval-report.md`, and browsable
+`eval-report.html`. The evaluator receives this complete owner-only session directory;
+`jarvis-activity.jsonl` is not copied or prefiltered into another prompt artifact. Every
 launch writes this record as the default session-review affordance. The files go to a per-session
 directory in the **gitignored, workspace-local `.jarvis/`** (passed to the `open`-launched app via
 `--log-dir` by `build-app.sh --run`) — or, when the bundle is opened directly with no `--log-dir`, a

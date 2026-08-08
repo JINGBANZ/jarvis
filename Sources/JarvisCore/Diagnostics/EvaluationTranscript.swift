@@ -9,12 +9,17 @@ enum EvaluationTranscript {
     /// Render the recorded traffic as a readable transcript, one block per round trip, eliding
     /// request content that is byte-identical to the previous call with the same tag (see the type
     /// comment). Malformed lines are skipped; an empty/blank file renders as "".
-    static func render(jsonl: String) -> String {
+    static func render(
+        jsonl: String,
+        attemptsJSONL: String? = nil,
+        activityJSONL: String? = nil
+    ) -> String {
         var blocks: [String] = []
         // Elision state, per logical client and provider/model destination.
         var prevInstructions: [String: String] = [:]
         var prevTools: [String: String] = [:]
         var prevInput: [String: [String]] = [:]
+        var prevInputText: [String: [String?]] = [:]
         var callNumber = 0
 
         for raw in jsonl.split(separator: "\n", omittingEmptySubsequences: true) {
@@ -36,6 +41,17 @@ enum EvaluationTranscript {
             header += " · \(provider)"
             if let status = entry["status"] as? Int { header += " · HTTP \(status)" }
             if let ms = entry["ms"] as? Int { header += " · \(ms) ms" }
+            if let provenance = entry["coach_attempt"] as? [String: Any] {
+                if let id = provenance["id"] as? Int { header += " · attempt #\(id)" }
+                if let trigger = provenance["trigger"] as? String {
+                    header += " · trigger=\(trigger)"
+                }
+                if let phase = provenance["phase"] as? String {
+                    header += " · phase=\(phase)"
+                }
+            } else if tag == "coach" {
+                header += " · trigger=unavailable"
+            }
             lines.append(header)
             if let error = entry["error"] as? String { lines.append("TRANSPORT ERROR: \(error)") }
 
@@ -43,10 +59,11 @@ enum EvaluationTranscript {
                 lines.append(contentsOf: renderRequest(request, tag: tag, streamKey: streamKey,
                                                        prevInstructions: &prevInstructions,
                                                        prevTools: &prevTools,
-                                                       prevInput: &prevInput))
+                                                       prevInput: &prevInput,
+                                                       prevInputText: &prevInputText))
             }
             if let response = entry["response"] {
-                lines.append(contentsOf: renderResponse(response))
+                lines.append(contentsOf: renderResponse(response, tag: tag))
             }
             blocks.append(lines.joined(separator: "\n"))
         }
@@ -55,13 +72,18 @@ enum EvaluationTranscript {
         // interprets numbers instead of summing usage blobs by hand — the source of the 2026-07-19
         // audit's cost/cache arithmetic errors. Empty traffic still renders "" (callers guard on it).
         let body = blocks.joined(separator: "\n\n")
-        return SessionMetrics.render(jsonl: jsonl) + "\n\n" + body
+        let triggerMetrics = TriggerQualityMetrics.render(
+            trafficJSONL: jsonl,
+            attemptsJSONL: attemptsJSONL,
+            activityJSONL: activityJSONL)
+        return SessionMetrics.render(jsonl: jsonl) + "\n\n" + triggerMetrics + "\n\n" + body
     }
 
     private static func renderRequest(_ request: [String: Any], tag: String, streamKey: String,
                                       prevInstructions: inout [String: String],
                                       prevTools: inout [String: String],
-                                      prevInput: inout [String: [String]]) -> [String] {
+                                      prevInput: inout [String: [String]],
+                                      prevInputText: inout [String: [String?]]) -> [String] {
         var lines: [String] = []
         var params = "request: model=\(request["model"] as? String ?? "?")"
         if let reasoning = request["reasoning"] { params += " reasoning=\(compact(reasoning))" }
@@ -87,23 +109,34 @@ enum EvaluationTranscript {
         prevTools[streamKey] = tools
 
         let items = request["input"] as? [Any] ?? []
-        let rendered = items.map { renderInputItem($0) }
         let canon = items.map { canonical($0) }
         let prev = prevInput[streamKey] ?? []
+        let previousText = prevInputText[streamKey] ?? []
+        let currentText = items.map(cliText)
         var shared = 0
         while shared < min(canon.count, prev.count), canon[shared] == prev[shared] { shared += 1 }
-        lines.append("input (\(items.count) items):")
+        lines.append("brain request input (\(items.count) items):")
         if shared > 0 {
             lines.append("  [items 1–\(shared) unchanged from the previous \(tag) call — the stable, cacheable prefix]")
         }
-        lines.append(contentsOf: rendered.dropFirst(shared).map { "  \($0)" })
+        for index in shared..<items.count {
+            lines.append("  " + renderInputItem(
+                items[index],
+                previousCLIText: index < previousText.count ? previousText[index] : nil,
+                tag: tag))
+        }
         prevInput[streamKey] = canon
+        prevInputText[streamKey] = currentText
         return lines
     }
 
     /// Flatten one Responses `input` item to a single labelled line: role messages get their text
     /// (image parts were already redacted at record time), function calls/results get name + payload.
-    private static func renderInputItem(_ item: Any) -> String {
+    private static func renderInputItem(
+        _ item: Any,
+        previousCLIText: String?,
+        tag: String
+    ) -> String {
         guard let dict = item as? [String: Any] else { return compact(item) }
         if let role = dict["role"] as? String {
             let content = (dict["content"] as? [[String: Any]] ?? [])
@@ -122,7 +155,8 @@ enum EvaluationTranscript {
             return "assistant reasoning (replayed verbatim — \(compact(dict).count) chars)"
         // CLI-provider records (`CLIBrainClient`): plain content blocks, images already stubbed.
         case "text":
-            return "text: \(dict["text"] as? String ?? "")"
+            let text = dict["text"] as? String ?? ""
+            return "text: " + renderCLITextDelta(text, previous: previousCLIText, tag: tag)
         case "image":
             return "image: \(dict["image"] as? String ?? "(redacted)")"
         default:
@@ -130,10 +164,13 @@ enum EvaluationTranscript {
         }
     }
 
-    private static func renderResponse(_ response: Any) -> [String] {
-        guard let dict = response as? [String: Any] else { return ["response (unparsed): \(compact(response))"] }
+    private static func renderResponse(_ response: Any, tag: String) -> [String] {
+        let outputLabel = tag == "coach" ? "Jarvis brain output" : "\(tag) brain output"
+        guard let dict = response as? [String: Any] else {
+            return ["\(outputLabel) (unparsed): \(compact(response))"]
+        }
         var lines: [String] = []
-        var header = "response:"
+        var header = "\(outputLabel):"
         if let status = dict["status"] as? String { header += " status=\(status)" }
         if let details = dict["incomplete_details"] { header += " incomplete_details=\(compact(details))" }
         if let exit = dict["exitCode"] as? Int { header += " exit=\(exit)" }   // CLI-provider record
@@ -155,15 +192,75 @@ enum EvaluationTranscript {
         }
         // CLI-provider records carry the reply as one string plus the CLI's own envelope metadata
         // (usage/duration for claude) instead of a Responses `output` array.
-        if let reply = dict["reply"] as? String, !reply.isEmpty { lines.append("  → text: \(reply)") }
-        if let cli = dict["cli"] { lines.append("  cli: \(compact(cli))") }
-        if let runtime = dict["runtime"] { lines.append("  runtime: \(compact(runtime))") }
+        let reply = (dict["reply"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        if let reply { lines.append("  → text: \(reply)") }
+        if let cli = dict["cli"] {
+            lines.append("  cli: \(compact(removingDuplicateReply(cli, reply: reply)))")
+        }
+        if let runtime = dict["runtime"] {
+            lines.append("  runtime: \(compact(removingDuplicateReply(runtime, reply: reply)))")
+        }
         if let stderr = dict["stderr"] as? String, !stderr.isEmpty { lines.append("  stderr: \(stderr)") }
         // Usage is the quantitative core of the audit: `input_tokens_details.cached_tokens` vs
         // `input_tokens` is the prompt-cache hit rate, per call.
         if let usage = dict["usage"] { lines.append("  usage: \(compact(usage))") }
         if let error = dict["error"], !(error is NSNull) { lines.append("  API ERROR: \(compact(error))") }
         return lines
+    }
+
+    /// A fresh CLI attempt encodes its entire conversation as one growing text item. Item-level
+    /// prefix elision therefore cannot help. Elide a substantial exact character prefix, preferably
+    /// at a line boundary, and keep an explicit marker pointing to the untouched traffic source.
+    private static func renderCLITextDelta(_ text: String, previous: String?, tag: String) -> String {
+        guard let previous else { return text }
+        var currentIndex = text.startIndex
+        var previousIndex = previous.startIndex
+        while currentIndex < text.endIndex,
+              previousIndex < previous.endIndex,
+              text[currentIndex] == previous[previousIndex] {
+            text.formIndex(after: &currentIndex)
+            previous.formIndex(after: &previousIndex)
+        }
+        let exactCount = text.distance(from: text.startIndex, to: currentIndex)
+        guard exactCount >= 80, currentIndex < text.endIndex else { return text }
+
+        let prefix = text[..<currentIndex]
+        let lineBoundary = prefix.lastIndex(of: "\n").map { text.index(after: $0) }
+        let safeEnd: String.Index
+        if let lineBoundary,
+           text.distance(from: text.startIndex, to: lineBoundary) >= 80 {
+            safeEnd = lineBoundary
+        } else if exactCount >= 256 {
+            safeEnd = currentIndex
+        } else {
+            return text
+        }
+        let count = text.distance(from: text.startIndex, to: safeEnd)
+        let marker = "[first \(count) chars unchanged from the previous \(tag) call within this CLI text item — full input remains in \(BrainTrafficLog.filename)]"
+        return marker + "\n" + text[safeEnd...]
+    }
+
+    private static func cliText(_ item: Any) -> String? {
+        guard let dict = item as? [String: Any],
+              dict["type"] as? String == "text"
+        else { return nil }
+        return dict["text"] as? String
+    }
+
+    /// Codex's runtime envelope repeats `response.reply` inside `items`/`itemsView`. Preserve the
+    /// envelope metadata but replace any exact duplicate string with an explicit one-line marker.
+    private static func removingDuplicateReply(_ value: Any, reply: String?) -> Any {
+        guard let reply else { return value }
+        if let string = value as? String {
+            return string == reply ? "[duplicate of response.reply omitted]" : string
+        }
+        if let array = value as? [Any] {
+            return array.map { removingDuplicateReply($0, reply: reply) }
+        }
+        if let dictionary = value as? [String: Any] {
+            return dictionary.mapValues { removingDuplicateReply($0, reply: reply) }
+        }
+        return value
     }
 
     /// Deterministic single-line JSON for both display and prefix comparison.

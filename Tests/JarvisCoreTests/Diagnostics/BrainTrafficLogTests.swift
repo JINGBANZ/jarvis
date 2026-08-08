@@ -81,4 +81,40 @@ import Foundation
         let inner = (redacted?["nested"] as? [[String: Any]])?.first
         #expect((inner?["image_url"] as? String)?.hasPrefix("[base64 image omitted") == true)
     }
+
+    @Test func coachingRequestContextLinksTheWireCallToItsAttempt() throws {
+        let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
+        let log = BrainTrafficLog(); log.enable(directory: dir)
+        let context = CoachingAttemptLog.requestContext(
+            attemptID: 7,
+            wake: .pendingWork,
+            reason: .turnEnd,
+            phase: .captureScreenContinuation,
+            sequence: 2)
+
+        CoachingAttemptLog.$currentRequest.withValue(context) {
+            log.record(
+                tag: "coach",
+                request: Data(#"{"model":"gpt-5.5"}"#.utf8),
+                response: Data(#"{"status":"completed"}"#.utf8),
+                status: 200,
+                latencyMs: 12)
+            log.record(
+                tag: "summarizer",
+                request: Data(#"{"model":"gpt-5.4-mini"}"#.utf8),
+                response: Data(#"{"status":"completed"}"#.utf8),
+                status: 200,
+                latencyMs: 8)
+        }
+
+        let entries = try lines(in: dir)
+        let entry = try #require(entries.first)
+        let provenance = try #require(entry["coach_attempt"] as? [String: Any])
+        #expect(provenance["id"] as? Int == 7)
+        #expect(provenance["trigger"] as? String == "pending_work")
+        #expect(provenance["source_trigger"] as? String == "turn_end")
+        #expect(provenance["phase"] as? String == "capture_screen_continuation")
+        #expect(provenance["sequence"] as? Int == 2)
+        #expect(entries[1]["coach_attempt"] == nil)
+    }
 }

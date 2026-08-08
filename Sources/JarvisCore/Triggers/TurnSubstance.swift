@@ -11,6 +11,18 @@ import Foundation
 /// speaker. Elongation/repetition normalization absorbs spelling variants ("Hmmmm." → "hm", "嗯嗯" →
 /// "嗯"). The model stays the judge of meaning; this is punctuation-level hygiene, not a wake-word gate.
 public enum TurnSubstance {
+    /// Audit-visible classification of the same conservative gate used at runtime. Keeping the
+    /// reason alongside the Boolean decision lets session evaluation distinguish one known filler
+    /// sound from a punctuation-separated filler sequence without re-implementing this policy.
+    enum Classification: String, Sendable {
+        case substantive
+        case knownFiller = "known_filler"
+        case compositeFiller = "composite_filler"
+        case empty
+
+        var isSubstantive: Bool { self == .substantive }
+    }
+
     /// Human-readable non-semantic vocal sounds, kept in natural spelling. Each is run through
     /// `normalized` when the set is built so it matches normalized input. Keep semantic
     /// acknowledgements out of this set even when they are often used casually.
@@ -32,17 +44,23 @@ public enum TurnSubstance {
     /// True when the line should reach the brain. Order matters: overrides first (a question or an
     /// address is always substance, whoever said it), then normalize and consult the closed class.
     public static func isSubstantive(_ text: String) -> Bool {
+        classification(of: text).isSubstantive
+    }
+
+    /// The reason behind `isSubstantive`, persisted with coaching-attempt provenance. This stays
+    /// internal because it is a diagnostics contract, not a second public filtering surface.
+    static func classification(of text: String) -> Classification {
         let lower = text.lowercased()
-        if lower.contains("jarvis") { return true }
-        if lower.contains("?") || lower.contains("？") { return true }
-        if containsAcronymLikeSound(text) { return true }
+        if lower.contains("jarvis") { return .substantive }
+        if lower.contains("?") || lower.contains("？") { return .substantive }
+        if containsAcronymLikeSound(text) { return .substantive }
 
         let collapsed = normalized(lower)
 
-        if collapsed.isEmpty { return false }                              // pure punctuation / noise
-        if discardableSounds.contains(collapsed) { return false }          // one clear sound
-        if isDiscardableSoundSequence(lower) { return false }              // several clear sounds
-        return true
+        if collapsed.isEmpty { return .empty }                              // pure punctuation / noise
+        if discardableSounds.contains(collapsed) { return .knownFiller }    // one clear sound
+        if isDiscardableSoundSequence(lower) { return .compositeFiller }    // several clear sounds
+        return .substantive
     }
 
     /// Speaker-labeled entry point used by the coach's delta gate. Classification stays neutral:

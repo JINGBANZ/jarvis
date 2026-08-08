@@ -22,6 +22,7 @@ public final class CoachDriver: @unchecked Sendable {
     private let history = CoachHistory()
     private let speechActivity = SpeechActivityGate()
     private let automaticAttemptDelay: AutomaticAttemptDelay
+    private let coachingAttempts: CoachingAttemptLog?
 
     /// Safety backstop against a pathological model that loops on capture_screen forever.
     private let maxToolIterations = 4
@@ -50,6 +51,7 @@ public final class CoachDriver: @unchecked Sendable {
     /// without losing a trigger that lands just before the async waiter is installed.
     private var pendingTriggerGeneration: UInt = 0
     private var pendingTriggerWaiters: [UUID: CheckedContinuation<Void, Never>] = [:]
+    private var nextAttemptID = 0
 
     private struct AttemptBrain {
         let routeRevision: UInt
@@ -63,6 +65,7 @@ public final class CoachDriver: @unchecked Sendable {
 
     private struct PendingCoachingWork {
         var reason: TriggerReason
+        var wake: CoachingAttemptLog.Wake = .trigger
         /// Completed effects safe to carry between attempts and providers: ordinary user context
         /// only. At most the latest screen observation is retained. Never raw reasoning, tool ids,
         /// or call/result linkage.
@@ -79,6 +82,11 @@ public final class CoachDriver: @unchecked Sendable {
         )
         case skipped(TurnOutcome)
         case cancelled
+    }
+
+    private struct AttemptExecution {
+        let id: Int?
+        let result: AttemptResult
     }
 
     private struct RouteExhaustionDelivery {
@@ -123,6 +131,7 @@ public final class CoachDriver: @unchecked Sendable {
         screen: ScreenCapturing,
         overlay: OverlayRendering,
         clock: Clock,
+        coachingAttempts: CoachingAttemptLog? = nil,
         automaticAttemptDelay: AutomaticAttemptDelay? = nil
     ) {
         self.config = config
@@ -132,6 +141,7 @@ public final class CoachDriver: @unchecked Sendable {
         self.screen = screen
         self.overlay = overlay
         self.clock = clock
+        self.coachingAttempts = coachingAttempts
         self.sessionStart = clock.now()
         self.automaticAttemptDelay = automaticAttemptDelay ?? Self.defaultAutomaticAttemptDelay
     }
@@ -268,6 +278,14 @@ public final class CoachDriver: @unchecked Sendable {
             committedTranscriptCount = count
         }
         stateLock.unlock()
+    }
+
+    private func takeNextAttemptID() -> Int {
+        stateLock.lock()
+        nextAttemptID += 1
+        let id = nextAttemptID
+        stateLock.unlock()
+        return id
     }
 
     private enum TriggerClaim {
@@ -651,10 +669,18 @@ public final class CoachDriver: @unchecked Sendable {
                 return .brainError
             }
 
-            switch await runAttempt(work, using: attempt) {
+            let execution = await runAttempt(work, using: attempt)
+            switch execution.result {
             case .completed(let outcome):
                 latestOutcome = outcome
                 recordAttemptSuccess(on: attempt)
+                if let id = execution.id {
+                    let terminal: CoachingAttemptLog.TerminalAction = outcome == .spoke
+                        ? .speak
+                        : .staySilent
+                    coachingAttempts?.recordFinished(
+                        attemptID: id, terminal: terminal, outcome: outcome)
+                }
                 automaticSequence = 0
                 guard let next = finishOrTakeNextTrigger() else {
                     return latestOutcome
@@ -663,18 +689,39 @@ public final class CoachDriver: @unchecked Sendable {
 
             case .skipped(let outcome):
                 latestOutcome = outcome
+                if let id = execution.id {
+                    coachingAttempts?.recordFinished(
+                        attemptID: id, terminal: .skippedFiller, outcome: outcome)
+                }
                 guard let next = finishOrTakeNextTrigger() else {
                     return latestOutcome
                 }
                 work = PendingCoachingWork(reason: next)
 
             case .cancelled:
+                if let id = execution.id {
+                    coachingAttempts?.recordFinished(
+                        attemptID: id, terminal: .cancelled, outcome: .cancelled)
+                }
                 releaseHandlingSlot()
                 return .cancelled
 
             case .failed(let outcome, let failure, var failedWork):
                 latestOutcome = outcome
                 let action = await recordAttemptFailure(failure, on: attempt)
+                if let id = execution.id {
+                    let terminal: CoachingAttemptLog.TerminalAction
+                    switch action {
+                    case .exhausted:
+                        terminal = .exhaustion
+                    case .retry, .staleRevision:
+                        terminal = .failure
+                    }
+                    coachingAttempts?.recordFinished(
+                        attemptID: id,
+                        terminal: terminal,
+                        outcome: outcome)
+                }
                 let routeChanged: Bool
                 switch action {
                 case .exhausted:
@@ -697,6 +744,7 @@ public final class CoachDriver: @unchecked Sendable {
                 }
 
                 var wake = takePendingTriggerSnapshot()
+                var receivedTrigger = wake.reason != nil
                 var explicitManualWake = wake.reason == .manualHint
                 if let reason = wake.reason {
                     failedWork.reason = Self.coalescing(failedWork.reason, with: reason)
@@ -723,6 +771,7 @@ public final class CoachDriver: @unchecked Sendable {
                 let speechInterruptGeneration = speechActivity.interruptGenerationSnapshot()
                 wake = takePendingTriggerSnapshot()
                 if let reason = wake.reason {
+                    receivedTrigger = true
                     explicitManualWake = explicitManualWake || reason == .manualHint
                     work.reason = Self.coalescing(work.reason, with: reason)
                 }
@@ -734,9 +783,11 @@ public final class CoachDriver: @unchecked Sendable {
                     // pending-work attempt into the force-speak attempt.
                     wake = takePendingTriggerSnapshot()
                     if let reason = wake.reason {
+                        receivedTrigger = true
                         work.reason = Self.coalescing(work.reason, with: reason)
                     }
                 }
+                work.wake = receivedTrigger ? .trigger : .pendingWork
             }
         }
 
@@ -748,10 +799,10 @@ public final class CoachDriver: @unchecked Sendable {
     private func runAttempt(
         _ pendingWork: PendingCoachingWork,
         using attempt: AttemptBrain
-    ) async -> AttemptResult {
+    ) async -> AttemptExecution {
         if Task.isCancelled {
             jlog("… attempt cancelled (stopped) before handling")
-            return .cancelled
+            return AttemptExecution(id: nil, result: .cancelled)
         }
 
         var work = pendingWork
@@ -764,9 +815,22 @@ public final class CoachDriver: @unchecked Sendable {
         let context = TriggerContext(
             reason: reason,
             sessionElapsedSeconds: now - sessionStart)
-        let delta = transcript.renderFrom(index: currentCommittedTranscriptCount())
-        let substantiveLines = delta.lines.filter(TurnSubstance.isSubstantive)
+        let transcriptStartIndex = currentCommittedTranscriptCount()
+        let delta = transcript.renderFrom(index: transcriptStartIndex)
+        let classifications = delta.lines.map { TurnSubstance.classification(of: $0.text) }
+        let substantiveLines = zip(delta.lines, classifications).compactMap {
+            $0.1.isSubstantive ? $0.0 : nil
+        }
         let substantiveDeltaText = RollingTranscript.render(substantiveLines)
+        let attemptID = takeNextAttemptID()
+        coachingAttempts?.recordStarted(
+            attemptID: attemptID,
+            wake: work.wake,
+            reason: reason,
+            target: attempt.target,
+            transcriptStartIndex: transcriptStartIndex,
+            transcriptLines: delta.lines,
+            classifications: classifications)
 
         let userText = [
             substantiveDeltaText.isEmpty
@@ -785,7 +849,7 @@ public final class CoachDriver: @unchecked Sendable {
                 : String(delta.lines.map(\.text).joined(separator: " · ").prefix(80))
             jlog("… skipped as filler (\(preview)) — not calling the brain")
             commitTranscript(through: delta.upTo)
-            return .skipped(.skippedFillerOnly)
+            return AttemptExecution(id: attemptID, result: .skipped(.skippedFillerOnly))
         }
         let historyBase: [ChatMessage] = [.system(JarvisPrompts.Coach.system)] + history.snapshot()
 
@@ -798,7 +862,7 @@ public final class CoachDriver: @unchecked Sendable {
             let shot = await Self.captureScreen(using: screen)
             if Task.isCancelled {
                 jlog("… attempt cancelled (stopped) after capture")
-                return .cancelled
+                return AttemptExecution(id: attemptID, result: .cancelled)
             }
             if let shot {
                 jlog("👁 looking at your screen")
@@ -826,18 +890,30 @@ public final class CoachDriver: @unchecked Sendable {
             reason == .manualHint ? .force(speakTool.name) : .required
         jlog("💭 thinking… [\(attempt.target.provider.displayName)]")
 
+        var requestPhase: CoachingAttemptLog.RequestPhase = .initial
+        var requestSequence = 1
         let conversation: any BrainConversation
         do {
-            conversation = try await attempt.brain.makeConversation()
+            let requestContext = CoachingAttemptLog.requestContext(
+                attemptID: attemptID,
+                wake: work.wake,
+                reason: reason,
+                phase: requestPhase,
+                sequence: requestSequence)
+            conversation = try await CoachingAttemptLog.$currentRequest.withValue(requestContext) {
+                try await attempt.brain.makeConversation()
+            }
         } catch {
             if Task.isCancelled || error is CancellationError {
                 jlog("… attempt cancelled (interrupted)")
-                return .cancelled
+                return AttemptExecution(id: attemptID, result: .cancelled)
             }
             let failure = BrainFailure(error)
             jlog("Jarvis coach: brain conversation failed on \(reason) via "
                  + "\(attempt.target.provider.displayName): \(failure.detail)")
-            return .failed(outcome: .brainError, failure: failure, work: work)
+            return AttemptExecution(
+                id: attemptID,
+                result: .failed(outcome: .brainError, failure: failure, work: work))
         }
 
         let result: AttemptResult = await { () async -> AttemptResult in
@@ -846,10 +922,18 @@ public final class CoachDriver: @unchecked Sendable {
                 iterations += 1
                 let response: BrainResponse
                 do {
-                    response = try await conversation.respond(
-                        messages: historyBase + turnMessages,
-                        tools: coachTools,
-                        toolChoice: toolChoice)
+                    let requestContext = CoachingAttemptLog.requestContext(
+                        attemptID: attemptID,
+                        wake: work.wake,
+                        reason: reason,
+                        phase: requestPhase,
+                        sequence: requestSequence)
+                    response = try await CoachingAttemptLog.$currentRequest.withValue(requestContext) {
+                        try await conversation.respond(
+                            messages: historyBase + turnMessages,
+                            tools: coachTools,
+                            toolChoice: toolChoice)
+                    }
                 } catch {
                     if Task.isCancelled || error is CancellationError {
                         jlog("… attempt cancelled (interrupted)")
@@ -936,6 +1020,8 @@ public final class CoachDriver: @unchecked Sendable {
                             text: JarvisPrompts.Coach.captureFailed,
                             toolCallId: callID))
                     }
+                    requestPhase = .captureScreenContinuation
+                    requestSequence += 1
 
                 case .speak(let callID, let lines):
                     if Task.isCancelled {
@@ -984,7 +1070,7 @@ public final class CoachDriver: @unchecked Sendable {
         if case .completed = result {
             await compactIfNeeded(using: attempt)
         }
-        return result
+        return AttemptExecution(id: attemptID, result: result)
     }
 
     private func commitIfWorthKeeping(_ turn: [ChatMessage], deltaText: String) {
