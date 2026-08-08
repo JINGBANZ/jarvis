@@ -44,11 +44,9 @@ import Testing
             turnDebounce: 0,
             events: events)
 
-        coordinator.start()
-        #expect(!coordinator.recordFinalizedTranscript(" … ", spokenAt: nil, source: "test"))
-        coordinator.updateActivity(true)
-        #expect(coordinator.recordFinalizedTranscript("usable", spokenAt: nil, source: "test"))
-        coordinator.stop()
+        let accepted = await recordAndStopBeforeQueuedDebounceRuns(coordinator)
+        #expect(!accepted.empty)
+        #expect(accepted.usable)
 
         await drainMainQueue()
         #expect(events.turnCount == 0)
@@ -167,4 +165,18 @@ private func drainMainQueue() async {
             continuation.resume()
         }
     }
+}
+
+/// Running the complete start/record/stop sequence in one main-actor turn guarantees the
+/// zero-delay debounce is genuinely queued but cannot execute until after `stop()` invalidates it.
+@MainActor
+private func recordAndStopBeforeQueuedDebounceRuns(
+    _ coordinator: TranscriptionCoachingCoordinator
+) -> (empty: Bool, usable: Bool) {
+    coordinator.start()
+    let empty = coordinator.recordFinalizedTranscript(" … ", spokenAt: nil, source: "test")
+    coordinator.updateActivity(true)
+    let usable = coordinator.recordFinalizedTranscript("usable", spokenAt: nil, source: "test")
+    coordinator.stop()
+    return (empty, usable)
 }

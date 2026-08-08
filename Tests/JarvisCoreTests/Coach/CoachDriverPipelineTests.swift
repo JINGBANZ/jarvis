@@ -1578,7 +1578,12 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         driver.updateSpeechActivity(true, for: .me)
         driver.updateSpeechActivity(true, for: .them)
         transcript.append(.init(speaker: .me, text: "wait for quiet", at: 0))
-        async let outcome = driver.handleTrigger(.turnEnd)
+        let outcome = Task {
+            await turnOutcomeBeforeTimeout {
+                await driver.handleTrigger(.turnEnd)
+            }
+        }
+        defer { outcome.cancel() }
         await gate.waitUntilEntered()
         await gate.release()
         await delayGate.waitUntilEntered()
@@ -1588,8 +1593,13 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(brain.calls.count == 1)
 
         await delayGate.release()
+        // Give a broken retry a bounded chance to make the forbidden second call. While `.them`
+        // remains active, the pending attempt must stay parked instead.
+        #expect(!(await waitUntil {
+            brain.calls.count == 2
+        }))
         driver.updateSpeechActivity(false, for: .them)
-        #expect(await outcome == .spoke)
+        #expect(await outcome.value == .spoke)
         #expect(brain.calls.count == 2)
     }
 
@@ -1608,7 +1618,15 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         driver.updateSpeechActivity(true, for: .them)
         transcript.append(.init(speaker: .me, text: "failed pending thought", at: 0))
 
-        async let outcome = driver.handleTrigger(.turnEnd)
+        let outcome = Task {
+            await turnOutcomeBeforeTimeout {
+                await driver.handleTrigger(.turnEnd)
+            }
+        }
+        defer {
+            outcome.cancel()
+            driver.updateSpeechActivity(false, for: .them)
+        }
         await gate.waitUntilEntered()
         await gate.release()
         await delayProbe.waitUntilEntered()
@@ -1616,9 +1634,8 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
         transcript.append(.init(speaker: .me, text: "latest words for the hint", at: 1))
         #expect(await driver.handleTrigger(.manualHint) == .busy)
-        #expect(await outcome == .spoke)
+        #expect(await outcome.value == .spoke)
         #expect(brain.calls.count == 2)
-        driver.updateSpeechActivity(false, for: .them)
         #expect(screen.captureCount == 1)
         #expect(brain.calls[1].contains {
             ($0.text ?? "").contains("latest words for the hint")
@@ -2413,5 +2430,35 @@ private actor AutomaticDelayProbe {
     func waitUntilEntered() async {
         if entered { return }
         await withCheckedContinuation { enteredWaiters.append($0) }
+    }
+}
+
+private func waitUntil(
+    timeoutNanoseconds: UInt64 = 200_000_000,
+    condition: @escaping @Sendable () -> Bool
+) async -> Bool {
+    let startedAt = DispatchTime.now().uptimeNanoseconds
+    while DispatchTime.now().uptimeNanoseconds - startedAt < timeoutNanoseconds {
+        if condition() { return true }
+        try? await Task.sleep(nanoseconds: 1_000_000)
+    }
+    return condition()
+}
+
+private func turnOutcomeBeforeTimeout(
+    timeoutNanoseconds: UInt64 = 5_000_000_000,
+    operation: @escaping @Sendable () async -> TurnOutcome
+) async -> TurnOutcome? {
+    await withTaskGroup(of: TurnOutcome?.self) { group in
+        group.addTask {
+            await operation()
+        }
+        group.addTask {
+            try? await Task.sleep(nanoseconds: timeoutNanoseconds)
+            return nil
+        }
+        let outcome = await group.next() ?? nil
+        group.cancelAll()
+        return outcome
     }
 }
