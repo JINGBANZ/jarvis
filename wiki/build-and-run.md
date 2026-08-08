@@ -123,6 +123,46 @@ runtime). It also sidesteps the `file://` `fetch()` restriction that forced the 
   `Jarvis.app`; without live source it refuses to run a weaker audit. `./scripts/eval-session.sh
   [session-dir]` is the terminal launcher for the same Core evaluator.
 
+## System-audio transcription benchmark
+
+`./scripts/transcription-benchmark.sh standard` launches a hidden mode of the signed app and runs the
+fixed matrix in
+[`TranscriptionBenchmark`](../Sources/JarvisCore/Benchmark/TranscriptionBenchmark.swift). The matrix
+covers every selectable OpenAI transcription model with its matching English, Mandarin, and bilingual
+language profile, plus Apple Speech with one locale at a time. Each arm replays one synthesized,
+non-user fixture at least three times. Synthesis happens once per run, the summary records the byte
+hash, and every repetition replays those same bytes. The tap includes only Jarvis's own playback
+process, so the benchmark neither opens the microphone nor captures unrelated system audio.
+
+The Foundation-only evaluator reports recognition quality, final heard order, missing results,
+duplicate finals, revised provider items, unavailable transcripts, and four distinct latency
+boundaries:
+
+- readiness: session `connect()` to the provider's acknowledged ready state;
+- server endpoint: the end of fixture speech to an accepted server speech-stop event;
+- client commit: the end of fixture speech to successful local commit transmission;
+- final: the end of fixture speech to the accepted final or diagnostic-only unavailable result.
+
+GPT-4o's server-VAD path therefore reports endpoint latency, while the client-commit models report
+commit latency. Apple owns its endpoint internally and reports readiness plus final latency. The
+machine-readable contract and scoring stay in the Core source above rather than being duplicated in
+the wiki.
+
+`./scripts/transcription-benchmark.sh reconnect --confirm-network-interruption` is a separate,
+interactive validation for the OpenAI paths. It requires the operator to type a confirmation, then
+pauses for the operator to disable and restore networking for each model. The script never toggles an
+interface. Jarvis waits until the live session actually enters reconnecting, captures two ordered
+synthetic phrases during the outage, and passes only when the replacement generation produces both
+exactly once and in order, with buffered audio replayed, no replay eviction, and no provider/model
+fallback. This command is never part of the build or test gate.
+
+Each run writes owner-only `summary.json`, `jarvis-debug.log`, progress, and reconnect handshake files
+under `.jarvis/transcription-benchmarks/<run>/`. No captured PCM is written. The synthesized fixture
+files are temporary, live inside that same run directory, and are deleted before exit; a failed
+cleanup is explicit in the debug log. Standard mode can request System Audio Recording permission but
+does not require microphone permission. A live standard run and especially a reconnect run remain
+explicit operator actions, never autonomous validation steps.
+
 ## Live smoke checklist
 
 Some behavior can only be verified with a real key, a mic, and granted permissions. Run

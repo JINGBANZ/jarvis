@@ -1,0 +1,286 @@
+import CoreAudio
+import Foundation
+import JarvisCore
+
+/// Process-scoped system-audio capture for the explicit benchmark mode. It taps only this app's
+/// synthetic playback process, never opens a microphone, and never retains PCM after delivery.
+///
+/// `@unchecked Sendable`: lifecycle/device ownership is guarded by `lock`; audio state is confined
+/// to the single IOProc while running, and `AudioDeviceStop` drains it before teardown mutates state.
+final class SystemAudioBenchmarkCapture: @unchecked Sendable {
+    enum Failure: Error, CustomStringConvertible {
+        case unsupported
+        case processAudioObjectUnavailable
+        case tapCreationFailed(OSStatus)
+        case aggregateCreationFailed(OSStatus)
+        case sampleRateUnavailable
+        case conversionUnavailable
+        case callbackCreationFailed(OSStatus)
+        case startFailed(OSStatus)
+
+        var description: String {
+            switch self {
+            case .unsupported: "System-audio benchmark capture requires macOS 14.2 or later"
+            case .processAudioObjectUnavailable:
+                "Jarvis's synthetic playback process was not visible to Core Audio"
+            case .tapCreationFailed(let status): "Process-tap creation failed (OSStatus \(status))"
+            case .aggregateCreationFailed(let status):
+                "Tap-only aggregate creation failed (OSStatus \(status))"
+            case .sampleRateUnavailable: "Could not read the benchmark tap sample rate"
+            case .conversionUnavailable: "Could not prepare benchmark audio conversion"
+            case .callbackCreationFailed(let status):
+                "Benchmark audio callback creation failed (OSStatus \(status))"
+            case .startFailed(let status): "Benchmark audio device start failed (OSStatus \(status))"
+            }
+        }
+    }
+
+    private struct Chunk: Sendable {
+        let data: Data
+        let sequence: UInt64
+        let sampleCount: Int
+        let capturedAt: TimeInterval
+        let speechEvents: [LocalSpeechEvent]
+    }
+
+    private let onCaptured: @Sendable (UInt64, Int, TimeInterval) -> Void
+    private let onAudio: @Sendable (Data, UInt64, TimeInterval) -> Void
+    private let onSpeechEvent: @Sendable (LocalSpeechEvent, UInt64) -> Void
+    private let lock = NSLock()
+    private let deliveryQueue = DispatchQueue(
+        label: "jarvis.benchmark.system-audio.delivery",
+        qos: .userInitiated)
+
+    private var tapID = AudioObjectID(kAudioObjectUnknown)
+    private var aggregateID = AudioObjectID(kAudioObjectUnknown)
+    private var procID: AudioDeviceIOProcID?
+    private var downToWire: Resampler?
+    private var upToVAD: Resampler?
+    private var voiceActivityDetector: WebRTCVoiceActivityDetector?
+    /// IOProc-only state while the device runs; teardown first drains that callback.
+    private var endpointDetector = SpeechEndpointDetector(trailingSilenceDuration: 1.0)
+    private var sequence: UInt64 = 0
+
+    init(
+        onCaptured: @escaping @Sendable (UInt64, Int, TimeInterval) -> Void,
+        onAudio: @escaping @Sendable (Data, UInt64, TimeInterval) -> Void,
+        onSpeechEvent: @escaping @Sendable (LocalSpeechEvent, UInt64) -> Void
+    ) {
+        self.onCaptured = onCaptured
+        self.onAudio = onAudio
+        self.onSpeechEvent = onSpeechEvent
+    }
+
+    func start() throws {
+        guard #available(macOS 14.2, *) else { throw Failure.unsupported }
+        lock.lock()
+        defer { lock.unlock() }
+        do {
+            try buildLocked()
+        } catch {
+            teardownLocked()
+            throw error
+        }
+    }
+
+    func stop() {
+        lock.lock()
+        teardownLocked()
+        lock.unlock()
+        // AudioDeviceStop drains IOProc. Drain its already-enqueued delivery work as well before a
+        // caller stops the active transcription session.
+        deliveryQueue.sync {}
+    }
+
+    @available(macOS 14.2, *)
+    private func buildLocked() throws {
+        guard let processObjectID = Self.currentProcessAudioObjectID() else {
+            throw Failure.processAudioObjectUnavailable
+        }
+        let tapDescription = CATapDescription(
+            monoMixdownOfProcesses: [processObjectID])
+        tapDescription.name = "Jarvis transcription benchmark"
+        tapDescription.isPrivate = true
+        tapDescription.muteBehavior = CATapMuteBehavior.unmuted
+
+        var tap = AudioObjectID(kAudioObjectUnknown)
+        let tapStatus = AudioHardwareCreateProcessTap(tapDescription, &tap)
+        guard tapStatus == noErr, tap != kAudioObjectUnknown else {
+            throw Failure.tapCreationFailed(tapStatus)
+        }
+        tapID = tap
+
+        let aggregateUID = "com.jarvis.transcription-benchmark.\(UUID().uuidString)"
+        let description: [String: Any] = [
+            kAudioAggregateDeviceNameKey: "Jarvis Transcription Benchmark",
+            kAudioAggregateDeviceUIDKey: aggregateUID,
+            kAudioAggregateDeviceIsPrivateKey: true,
+            kAudioAggregateDeviceTapListKey: [
+                [
+                    kAudioSubTapUIDKey: tapDescription.uuid.uuidString,
+                    kAudioSubTapDriftCompensationKey: 1,
+                ],
+            ],
+        ]
+        var aggregate = AudioObjectID(kAudioObjectUnknown)
+        let aggregateStatus = AudioHardwareCreateAggregateDevice(
+            description as CFDictionary, &aggregate)
+        guard aggregateStatus == noErr, aggregate != kAudioObjectUnknown else {
+            throw Failure.aggregateCreationFailed(aggregateStatus)
+        }
+        aggregateID = aggregate
+
+        guard let sampleRate = Self.nominalSampleRate(aggregate) else {
+            throw Failure.sampleRateUnavailable
+        }
+        guard let downToWire = Resampler(
+            fromHz: sampleRate,
+            toHz: Double(TranscriptionAudioFormat.pcm16Mono.sampleRate)),
+              let voiceActivityDetector = WebRTCVoiceActivityDetector() else {
+            throw Failure.conversionUnavailable
+        }
+        self.downToWire = downToWire
+        self.voiceActivityDetector = voiceActivityDetector
+        if abs(sampleRate - 48_000) >= 1 {
+            guard let upToVAD = Resampler(fromHz: sampleRate, toHz: 48_000) else {
+                throw Failure.conversionUnavailable
+            }
+            self.upToVAD = upToVAD
+        } else {
+            upToVAD = nil
+        }
+
+        var proc: AudioDeviceIOProcID?
+        let callbackStatus = AudioDeviceCreateIOProcIDWithBlock(
+            &proc, aggregate, nil
+        ) { [weak self] _, input, _, _, _ in
+            self?.handle(input)
+        }
+        guard callbackStatus == noErr, let proc else {
+            throw Failure.callbackCreationFailed(callbackStatus)
+        }
+        procID = proc
+        let startStatus = AudioDeviceStart(aggregate, proc)
+        guard startStatus == noErr else { throw Failure.startFailed(startStatus) }
+        jlog("Jarvis benchmark: process-scoped tap capture started at \(Int(sampleRate)) Hz")
+    }
+
+    private func teardownLocked() {
+        if let procID, aggregateID != kAudioObjectUnknown {
+            AudioDeviceStop(aggregateID, procID)
+            AudioDeviceDestroyIOProcID(aggregateID, procID)
+        }
+        if aggregateID != kAudioObjectUnknown {
+            AudioHardwareDestroyAggregateDevice(aggregateID)
+        }
+        if #available(macOS 14.2, *), tapID != kAudioObjectUnknown {
+            AudioHardwareDestroyProcessTap(tapID)
+        }
+        procID = nil
+        aggregateID = AudioObjectID(kAudioObjectUnknown)
+        tapID = AudioObjectID(kAudioObjectUnknown)
+        downToWire = nil
+        upToVAD = nil
+        voiceActivityDetector = nil
+        endpointDetector.reset()
+        sequence = 0
+    }
+
+    private func handle(_ list: UnsafePointer<AudioBufferList>) {
+        let buffers = UnsafeMutableAudioBufferListPointer(
+            UnsafeMutablePointer(mutating: list))
+        guard let buffer = buffers.first,
+              let downToWire,
+              let voiceActivityDetector else { return }
+        let nativeSamples = Self.monoInt16(buffer)
+        guard !nativeSamples.isEmpty else { return }
+        let vadSamples = upToVAD?.convert(nativeSamples) ?? nativeSamples
+        let capturedAt = Date().timeIntervalSince1970
+        let decisions = voiceActivityDetector.classify(vadSamples)
+        var endpointEvents: [SpeechEndpointDetector.Event] = []
+        endpointEvents.reserveCapacity(2)
+        for (index, decision) in decisions.enumerated() {
+            if let event = endpointDetector.observe(
+                isSpeech: decision,
+                frameStartedAt: capturedAt + TimeInterval(index) / 100) {
+                endpointEvents.append(event)
+            }
+        }
+
+        let wireSamples = downToWire.convert(nativeSamples)
+        guard !wireSamples.isEmpty else { return }
+        sequence &+= 1
+        let sequence = sequence
+        let sampleCount = wireSamples.count
+        let commitAt = capturedAt + TimeInterval(sampleCount)
+            / TimeInterval(TranscriptionAudioFormat.pcm16Mono.sampleRate)
+        let speechEvents = endpointEvents.map { event -> LocalSpeechEvent in
+            switch event {
+            case .started(let startedAt): .started(at: startedAt)
+            case .ended(let startedAt, _): .ended(startedAt: startedAt, commitAt: commitAt)
+            }
+        }
+        let data = wireSamples.withUnsafeBufferPointer { Data(buffer: $0) }
+        let chunk = Chunk(
+            data: data,
+            sequence: sequence,
+            sampleCount: sampleCount,
+            capturedAt: capturedAt,
+            speechEvents: speechEvents)
+        deliveryQueue.async { [onCaptured, onAudio, onSpeechEvent] in
+            onCaptured(chunk.sequence, chunk.sampleCount, chunk.capturedAt)
+            onAudio(chunk.data, chunk.sequence, chunk.capturedAt)
+            for event in chunk.speechEvents {
+                onSpeechEvent(event, chunk.sequence)
+            }
+        }
+    }
+
+    @available(macOS 14.2, *)
+    private static func currentProcessAudioObjectID() -> AudioObjectID? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyTranslatePIDToProcessObject,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        var processIdentifier = getpid()
+        var objectID = AudioObjectID(kAudioObjectUnknown)
+        var dataSize = UInt32(MemoryLayout<AudioObjectID>.size)
+        let qualifierSize = UInt32(MemoryLayout<pid_t>.size)
+
+        for _ in 0..<40 {
+            let status = AudioObjectGetPropertyData(
+                AudioObjectID(kAudioObjectSystemObject),
+                &address,
+                qualifierSize,
+                &processIdentifier,
+                &dataSize,
+                &objectID)
+            if status == noErr, objectID != kAudioObjectUnknown { return objectID }
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        return nil
+    }
+
+    private static func nominalSampleRate(_ device: AudioObjectID) -> Double? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyNominalSampleRate,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        var rate = 0.0
+        var size = UInt32(MemoryLayout<Double>.size)
+        guard AudioObjectGetPropertyData(
+            device, &address, 0, nil, &size, &rate) == noErr,
+              rate > 0 else { return nil }
+        return rate
+    }
+
+    private static func monoInt16(_ buffer: AudioBuffer) -> [Int16] {
+        let count = Int(buffer.mDataByteSize) / MemoryLayout<Float32>.size
+        guard count > 0, let data = buffer.mData else { return [] }
+        let samples = UnsafeBufferPointer(
+            start: data.bindMemory(to: Float32.self, capacity: count),
+            count: count)
+        return AudioDownmix.monoInt16(
+            Array(samples), channels: Int(buffer.mNumberChannels))
+    }
+}

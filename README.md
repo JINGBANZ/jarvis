@@ -107,9 +107,19 @@ The repository uses SwiftPM and has no Xcode project.
 | Build the app without launching | `./scripts/build-app.sh [release\|debug]` |
 | Build and launch | `./scripts/build-app.sh --run` |
 | Audit a finished session | `./scripts/eval-session.sh [session-dir]` |
+| Run the fixed system-audio transcription matrix | `./scripts/transcription-benchmark.sh standard` |
+| Validate transcription reconnects | `./scripts/transcription-benchmark.sh reconnect --confirm-network-interruption` |
 
 Use `./scripts/run-tests.sh`, not raw `swift test`; the wrapper supplies the swift-testing paths
 needed by Command Line Tools-only installations.
+
+The transcription benchmark plays only fixed synthetic phrases through Jarvis's own process and
+captures that process's system audio without opening a microphone. Standard mode covers every
+selectable transcription path with at least three identical repetitions. Reconnect mode is separate:
+it requires an interactive confirmation and asks the operator to disable and restore networking; the
+script never changes a network interface itself. Owner-only summaries land under
+`.jarvis/transcription-benchmarks/`, and the temporary synthetic audio files are removed at exit. See
+the [benchmark operating contract](./wiki/build-and-run.md#system-audio-transcription-benchmark).
 
 The package boundaries are intentionally small:
 

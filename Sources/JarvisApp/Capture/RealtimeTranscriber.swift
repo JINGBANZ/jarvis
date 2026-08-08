@@ -30,6 +30,7 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
     /// after reconnection is abandoned, so the app can stop instead of lying green.
     var onTerminalFailure: (@Sendable (TranscriptionFailureReason) -> Void)?
     var onCaptureContinuity: (@Sendable (CaptureReadinessMonitor.Signal) -> Void)?
+    var onDiagnosticEvent: (@Sendable (TranscriptionDiagnosticEvent) -> Void)?
 
     private let reconnectSchedule = RetrySchedule(
         maximumRetries: 6, initialDelay: 1, maximumDelay: 30)
@@ -47,6 +48,8 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
     private let pingInterval: TimeInterval
     private let pongTimeout: TimeInterval
     private let networkStatus: @Sendable () -> String
+    /// Never invoke benchmark observers while holding the transport/lifecycle locks.
+    private let diagnosticQueue = DispatchQueue(label: "jarvis.realtime.diagnostics")
 
     private let lock = NSLock()
     private var session: URLSession?     // retained so stop() can invalidate it (URLSession holds its delegate)
@@ -154,6 +157,22 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
             isReady: { [weak self] generation in self?.isReady(socketGeneration: generation) == true },
             discardConfirmedAudio: { [weak self] boundary in
                 _ = self?.audioBuffer.discardSent(through: boundary)
+            },
+            onFinalizedItem: { [weak self] item in
+                guard let self else { return }
+                self.emitDiagnostic(.init(
+                    kind: .finalized,
+                    provider: TranscriptionProvider.openAI.rawValue,
+                    model: self.model.rawValue,
+                    speaker: self.speaker.rawValue,
+                    generation: self.currentGeneration,
+                    itemID: item.itemID,
+                    text: item.text,
+                    spokenAt: item.spokenAt.map { self.sessionStart + $0 },
+                    spokenEndAt: item.spokenEndAt.map { self.sessionStart + $0 },
+                    observedAt: self.clock.now(),
+                    recoveredFromDeltas: item.recoveredFromDeltas,
+                    transcriptUnavailable: item.isTranscriptUnavailable))
             })
     }
 
@@ -328,6 +347,15 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         connectionUnavailable: Bool
     ) {
         guard !evicted.isEmpty else { return }
+        emitDiagnostic(.init(
+            kind: .bufferEviction,
+            provider: TranscriptionProvider.openAI.rawValue,
+            model: model.rawValue,
+            speaker: speaker.rawValue,
+            generation: currentGeneration,
+            observedAt: clock.now(),
+            evictedChunks: evicted.count,
+            oldestReplaySequence: evicted.compactMap(\.sequenceNumber).min()))
         let recoveryWasActive = transcriptionLifecycle.recordReplayCoverageLoss()
         continuityReporter.recordBufferEviction(
             evicted,
@@ -466,6 +494,15 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
             if isCurrentLease {
                 jlog("Jarvis realtime [\(self.speaker.rawValue)]: local turn commit sent "
                      + "(turn \(turn.id), through sequence \(turn.throughSequenceNumber))")
+                self.emitDiagnostic(.init(
+                    kind: .clientCommit,
+                    provider: TranscriptionProvider.openAI.rawValue,
+                    model: self.model.rawValue,
+                    speaker: self.speaker.rawValue,
+                    generation: socketGeneration,
+                    itemID: "local-turn-\(turn.id)",
+                    audioBoundaryAt: self.sessionStart + turn.committedThroughAt,
+                    observedAt: self.clock.now()))
                 self.pumpAudioIfReady()
             }
         }
@@ -599,6 +636,15 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
                 break
             }
             let transcriptText = obj["transcript"] as? String ?? ""
+            emitDiagnostic(.init(
+                kind: .providerFinal,
+                provider: TranscriptionProvider.openAI.rawValue,
+                model: model.rawValue,
+                speaker: speaker.rawValue,
+                generation: socketGeneration,
+                itemID: itemID,
+                text: transcriptText,
+                observedAt: clock.now()))
             if let languages = RealtimeSession.detectedLanguageCodes(from: obj) {
                 let detail = languages.isEmpty ? "none-reliable" : languages.joined(separator: ",")
                 jlog("Jarvis realtime [\(speaker.rawValue)]: detected-languages=\(detail) "
@@ -620,6 +666,15 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
             }
             let error = Self.transcriptionErrorDescription(from: obj)
             let terminalFailure = RealtimeSession.terminalTranscriptionFailure(from: obj)
+            emitDiagnostic(.init(
+                kind: .providerFinal,
+                provider: TranscriptionProvider.openAI.rawValue,
+                model: model.rawValue,
+                speaker: speaker.rawValue,
+                generation: socketGeneration,
+                itemID: itemID,
+                observedAt: clock.now(),
+                transcriptUnavailable: true))
             lock.lock()
             jarvisManagedTurnCoordinator?.recordItemFinished(itemID: itemID)
             lock.unlock()
@@ -652,9 +707,22 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
             let endDetail = audioEndMilliseconds.map { ", audio_end_ms \($0)" } ?? ""
             jlog("Jarvis realtime [\(speaker.rawValue)] speech stopped "
                  + "(item \(itemID)\(endDetail))")
-            _ = transcriptionLifecycle.recordSpeechStopped(
+            let didStop = transcriptionLifecycle.recordSpeechStopped(
                 itemID: itemID, audioEndMilliseconds: audioEndMilliseconds,
                 socketGeneration: socketGeneration)
+            if didStop {
+                emitDiagnostic(.init(
+                    kind: .serverEndpoint,
+                    provider: TranscriptionProvider.openAI.rawValue,
+                    model: model.rawValue,
+                    speaker: speaker.rawValue,
+                    generation: socketGeneration,
+                    itemID: itemID,
+                    audioBoundaryAt: audioEndMilliseconds.map {
+                        sessionStart + timelineOrigin + TimeInterval($0) / 1_000
+                    },
+                    observedAt: clock.now()))
+            }
             // Do not reset proactive silence here. Bare VAD start/stop events contain no usable
             // context; only an appended final/salvaged line begins a fresh silence interval.
         case "session.created", "transcription_session.created":
@@ -715,6 +783,14 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
                      + "replay coverage; salvaged \(recovery.fallbackItems) interrupted item(s)")
             }
         }
+        emitDiagnostic(.init(
+            kind: .ready,
+            provider: TranscriptionProvider.openAI.rawValue,
+            model: model.rawValue,
+            speaker: speaker.rawValue,
+            generation: socketGeneration,
+            observedAt: clock.now(),
+            replayedChunks: wasReconnect ? bufferedChunks : nil))
         // Producers always append to the same claimed FIFO. Making readiness visible before this
         // pump is safe: a racing producer may claim the oldest chunk itself, but cannot bypass it or
         // strand the chunk it just appended.
@@ -832,6 +908,18 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
             oldestAvailableSequenceNumber: replay.oldestSequenceNumber) ?? []
         pendingAudioTimelineOrigin = replay.oldestCapturedAt ?? failureAt
         lock.unlock()
+
+        emitDiagnostic(.init(
+            kind: .reconnectPrepared,
+            provider: TranscriptionProvider.openAI.rawValue,
+            model: model.rawValue,
+            speaker: speaker.rawValue,
+            generation: failedGeneration,
+            observedAt: clock.now(),
+            reconnectAttempt: attempt + 1,
+            replayedChunks: replay.replayedChunks,
+            evictedChunks: replay.evicted.count,
+            oldestReplaySequence: replay.oldestSequenceNumber))
 
         let interruptedItems = transcriptionLifecycle.beginReconnectRecovery(
             replayAvailable: audioBuffer.bufferedChunkCount > 0)
@@ -961,6 +1049,17 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         guard let currentTask = task else { return false }
         return !stopped && !isReconnecting
             && currentTask === candidate && generation == candidateGeneration
+    }
+
+    private var currentGeneration: Int {
+        lock.lock(); defer { lock.unlock() }
+        return generation
+    }
+
+    private func emitDiagnostic(_ event: TranscriptionDiagnosticEvent) {
+        diagnosticQueue.async { [weak self] in
+            self?.onDiagnosticEvent?(event)
+        }
     }
 
     private func invalidateReadyTimer(task: URLSessionWebSocketTask, generation socketGeneration: Int) {

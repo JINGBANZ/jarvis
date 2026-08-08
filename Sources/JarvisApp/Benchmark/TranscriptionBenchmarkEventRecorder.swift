@@ -1,0 +1,102 @@
+import Foundation
+import JarvisCore
+
+/// `@unchecked Sendable`: every mutable observation array and terminal state is guarded by `lock`.
+final class TranscriptionBenchmarkEventRecorder: @unchecked Sendable {
+    struct Snapshot: Sendable {
+        let events: [TranscriptionDiagnosticEvent]
+        let captureObservations: [TranscriptionBenchmark.CaptureObservation]
+        let states: [TranscriptionConnectionState]
+        let terminalFailure: TranscriptionFailureReason?
+    }
+
+    enum Failure: Error, CustomStringConvertible {
+        case timedOut(String)
+        case terminal(TranscriptionFailureReason)
+
+        var description: String {
+            switch self {
+            case .timedOut(let boundary): "Timed out waiting for \(boundary)"
+            case .terminal(let reason): "Transcription failed: \(reason.activityDescription)"
+            }
+        }
+    }
+
+    private let lock = NSLock()
+    private var events: [TranscriptionDiagnosticEvent] = []
+    private var captureObservations: [TranscriptionBenchmark.CaptureObservation] = []
+    private var states: [TranscriptionConnectionState] = []
+    private var terminalFailure: TranscriptionFailureReason?
+
+    func record(_ event: TranscriptionDiagnosticEvent) {
+        lock.lock(); events.append(event); lock.unlock()
+    }
+
+    func record(_ state: TranscriptionConnectionState) {
+        lock.lock(); states.append(state); lock.unlock()
+    }
+
+    func recordCapture(sequence: UInt64, samples: Int) {
+        lock.lock()
+        captureObservations.append(.init(
+            sequenceNumber: sequence, sampleCount: samples))
+        lock.unlock()
+    }
+
+    func record(_ failure: TranscriptionFailureReason) {
+        lock.lock(); terminalFailure = failure; lock.unlock()
+    }
+
+    func snapshot() -> Snapshot {
+        lock.lock(); defer { lock.unlock() }
+        return Snapshot(
+            events: events,
+            captureObservations: captureObservations,
+            states: states,
+            terminalFailure: terminalFailure)
+    }
+
+    func waitForReady(
+        minimumGeneration: Int = 0,
+        timeout: TimeInterval
+    ) async throws -> TranscriptionDiagnosticEvent {
+        try await wait(timeout: timeout, boundary: "transcription readiness") { snapshot in
+            snapshot.events.first {
+                $0.kind == .ready && $0.generation >= minimumGeneration
+            }
+        }
+    }
+
+    func waitForReconnect(timeout: TimeInterval) async throws {
+        _ = try await wait(timeout: timeout, boundary: "the observed network outage") { snapshot in
+            snapshot.states.contains {
+                if case .reconnecting = $0 { return true }
+                return false
+            } ? true : nil
+        } as Bool
+    }
+
+    func waitForFinals(count: Int, timeout: TimeInterval) async throws {
+        _ = try await wait(timeout: timeout, boundary: "\(count) finalized transcript(s)") { snapshot in
+            snapshot.events.count(where: { $0.kind == .finalized }) >= count ? true : nil
+        } as Bool
+    }
+
+    private func wait<Value: Sendable>(
+        timeout: TimeInterval,
+        boundary: String,
+        predicate: (Snapshot) -> Value?
+    ) async throws -> Value {
+        let deadline = Date().timeIntervalSince1970 + timeout
+        while Date().timeIntervalSince1970 < deadline {
+            try Task.checkCancellation()
+            let current = snapshot()
+            if let terminalFailure = current.terminalFailure {
+                throw Failure.terminal(terminalFailure)
+            }
+            if let value = predicate(current) { return value }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        throw Failure.timedOut(boundary)
+    }
+}

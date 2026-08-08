@@ -21,9 +21,13 @@ Start snapshots the provider, OpenAI model/profile, or Apple locale for both `me
 is no automatic provider or model fallback. An initial same-input macOS 26 system-audio comparison
 keeps GPT-4o Transcribe as the default: among the tested GPT-4o, GPT Live, and Apple Speech arms, it
 alone preserved the English, Mandarin, and within-sentence language-switching inputs. This is
-directional evidence rather than a full benchmark because it does not include GPT Transcribe;
-[issue #136](https://github.com/JINGBANZ/jarvis/issues/136) owns repeated system-audio runs plus an
-explicitly opt-in reconnect/replay scenario before any future default change. Apple Speech prepares
+directional evidence rather than a full benchmark because it does not include GPT Transcribe. A
+repeatable hidden-app harness now covers all OpenAI models and single-locale Apple Speech with fixed
+synthetic English, Mandarin, and bilingual system audio, at least three byte-identical repetitions
+per arm, audio-free structured lifecycle evidence, and a deterministic summary. Its separate reconnect mode
+requires interactive confirmation and operator-controlled network changes; neither mode changes
+defaults or runs in the gate. Live benchmark results remain uncollected until an operator explicitly
+runs them. Apple Speech prepares
 the selected supported locale before replacing a running pipeline, submits every captured sample to
 `SpeechAnalyzer`, records only final results, and uses content-free local activity solely to keep
 coaching from waking mid-utterance. An OpenAI key is required only when OpenAI supplies
@@ -85,13 +89,19 @@ fixed notices remain available in Activity. The gate statically rejects unreview
 
 ## Next action
 
-Finish the remaining transcription configuration smoke without expanding the performance benchmark:
+Run `./scripts/transcription-benchmark.sh standard` with System Audio Recording permission and inspect
+the owner-only summary for all 12 arms. Separately opt in to
+`./scripts/transcription-benchmark.sh reconnect --confirm-network-interruption`, manually disable and
+restore networking for each OpenAI model, and confirm both outage phrases return exactly once and in
+order with no replay eviction or provider fallback. These live runs are not part of the gate and do
+not use the microphone.
+
+Then finish the remaining transcription configuration smoke:
 confirm Apple Speech plus a CLI-only brain route starts without an API key, while any OpenAI
 transcription or brain target still requires one. Change a transcription setting during a live run
 and confirm the current snapshot remains active until the next Start; force an Apple analyzer failure
 and confirm Jarvis never sends audio to OpenAI as an implicit fallback. Microphone benchmarking and
-Apple-specific finalization optimization are not required; the repeated model matrix and opt-in
-network interruption belong to [issue #136](https://github.com/JINGBANZ/jarvis/issues/136).
+Apple-specific finalization optimization are not required.
 
 Then run the live prompt smoke on a fresh session: show an interview question without speaking its
 details, ask “Jarvis, how can I solve this in one pass?”, and confirm the first action is
@@ -125,6 +135,7 @@ thin OS shell, verified by the smoke run.
 
 - `Sources/JarvisCore/Audio/` — transactional PCM + utterance buffering, bounded speech pre-roll, adaptive content-free activity detection, stable frame-decision endpoints, non-destructive AEC reference alignment, and system-audio timeline preservation (`PCMBuffer`, `SpeechGatedAudioBuffer`, `UtteranceBuffer`, `PCM16Framer`, `SpeechEndpointDetector`, `AudioDownmix`, `AdaptiveAudioActivityDetector`, `PCM16SpeechActivityTracker`, `EchoReferenceAlignment`, `SystemAudioTimeline`).
 - `Sources/JarvisCore/Transcription/` — provider-neutral session/provider contracts and immutable Start configuration, selectable OpenAI model/language-profile values, the OpenAI Realtime wire contract, reconnect-safe Jarvis-managed turn coordinator, per-item ledger, and rolling transcript (`TranscriptionSession`, `TranscriptionProvider`, `TranscriptionConfiguration`, `OpenAITranscriptionModel`, `OpenAITranscriptionLanguageProfile`, `RealtimeSession`, `RealtimeJarvisManagedTurnCoordinator`, `RealtimeTranscriptionLedger`, `Transcript`, `NoiseReduction`).
+- `Sources/JarvisCore/Benchmark/` + `Sources/JarvisApp/Benchmark/` — the Foundation-only fixed transcription matrix, scoring and deterministic summary contract, plus the hidden signed-app runner, process-scoped synthetic system-audio tap, and explicitly operator-controlled reconnect handshake (`TranscriptionBenchmark`, `TranscriptionDiagnosticEvent`, `TranscriptionBenchmarkRunner`, `SystemAudioBenchmarkCapture`; operational contract in [build-and-run.md](./build-and-run.md#system-audio-transcription-benchmark)).
 - `Sources/JarvisCore/Brain/` — provider-neutral `BrainClient`/attempt-scoped `BrainConversation` contracts and models stay at the root. `Adapters/OpenAI/` owns the Responses transport; `Adapters/LocalAgent/` owns CLI detection, `CLIBrainClient`, the Claude Code and Codex runtimes, and the bounded shared process edge. `LocalAgentRuntimeSet` encapsulates provider-specific coach/summarizer ownership. `AgentCLIProcessRunner` remains only for the explicit completed-session evaluator. The subsystem also owns provider-boundary failure classification (`BrainFailure`), immutable `BrainTarget`/`BrainRoute`, `BrainProvider`, `BrainModelCatalog` (first per-provider entry is the default), and `ReasoningEffort`.
 - `Sources/JarvisCore/Coach/` — the event loop: `CoachDriver` (fresh-attempt scheduling and one-target tool-loop orchestration), the pure forward-only `BrainRouteSession`, `SpeechActivityGate`, `CoachHistory` (client-managed session memory), and `ToolDefs` (coach tool schemas).
 - `Sources/JarvisCore/Triggers/` — turn/silence trigger detection, substance classification, and silence backoff (`Trigger`, `TurnSubstance`, `SilenceBackoff`).

@@ -26,6 +26,7 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
     var onConnectionStateChange: (@Sendable (TranscriptionConnectionState) -> Void)?
     var onTerminalFailure: (@Sendable (TranscriptionFailureReason) -> Void)?
     var onCaptureContinuity: (@Sendable (CaptureReadinessMonitor.Signal) -> Void)?
+    var onDiagnosticEvent: (@Sendable (TranscriptionDiagnosticEvent) -> Void)?
 
     private struct BufferedAudio {
         let data: Data
@@ -45,12 +46,14 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
     private let sessionStart: TimeInterval
     private let maximumBufferedBytes: Int
     private let continuityReporter: RealtimeContinuityReporter
+    private let diagnosticQueue = DispatchQueue(label: "jarvis.apple-speech.diagnostics")
 
     private let lock = NSLock()
     private let audioQueue: DispatchQueue
     private var stopped = true
     private var generation = 0
     private var terminalFailureReported = false
+    private var diagnosticFinalSequence: UInt64 = 0
     /// Session-relative time of the first buffer accepted by this analyzer. SpeechAnalyzer ranges
     /// start at zero; adding this offset keeps the two independently prepared endpoints on the
     /// shared transcript/continuity clock without injecting wall-clock jitter into every buffer.
@@ -118,6 +121,7 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
         lock.lock()
         stopped = false
         terminalFailureReported = false
+        diagnosticFinalSequence = 0
         analyzerTimelineOffset = nil
         generation += 1
         let generation = generation
@@ -310,6 +314,13 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
 
         jlog("Jarvis Apple Speech [\(speaker.rawValue)]: ready "
              + "(\(locale.identifier), \(Int(format.sampleRate)) Hz).")
+        emitDiagnostic(.init(
+            kind: .ready,
+            provider: TranscriptionProvider.appleSpeech.rawValue,
+            localeIdentifier: locale.identifier,
+            speaker: speaker.rawValue,
+            generation: generation,
+            observedAt: clock.now()))
         emitState(.ready)
     }
 
@@ -423,12 +434,25 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
         let spokenEnd = resultEnd.isFinite && resultEnd >= resultStart
             ? timelineOffset + resultEnd
             : spokenAt
+        diagnosticFinalSequence &+= 1
+        let diagnosticItemID = "apple-\(generation)-\(diagnosticFinalSequence)"
         lock.unlock()
         guard coachingCoordinator.recordFinalizedTranscript(
             raw,
             spokenAt: spokenAt,
             source: "Apple Speech"
         ) else { return }
+        emitDiagnostic(.init(
+            kind: .providerFinal,
+            provider: TranscriptionProvider.appleSpeech.rawValue,
+            localeIdentifier: locale.identifier,
+            speaker: speaker.rawValue,
+            generation: generation,
+            itemID: diagnosticItemID,
+            text: raw,
+            spokenAt: sessionStart + spokenAt,
+            spokenEndAt: sessionStart + spokenEnd,
+            observedAt: clock.now()))
         continuityReporter.recordServerSpeech(
             .speechStarted,
             audioTimeMilliseconds: Int(max(0, spokenAt) * 1_000),
@@ -439,6 +463,17 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
             audioTimeMilliseconds: Int(max(0, spokenEnd) * 1_000),
             sessionAudioTime: spokenEnd,
             socketGeneration: generation)
+        emitDiagnostic(.init(
+            kind: .finalized,
+            provider: TranscriptionProvider.appleSpeech.rawValue,
+            localeIdentifier: locale.identifier,
+            speaker: speaker.rawValue,
+            generation: generation,
+            itemID: diagnosticItemID,
+            text: raw,
+            spokenAt: sessionStart + spokenAt,
+            spokenEndAt: sessionStart + spokenEnd,
+            observedAt: clock.now()))
         continuityReporter.recordServerSpeech(
             .transcriptionCompleted,
             audioTimeMilliseconds: Int(max(0, spokenEnd) * 1_000),
@@ -500,6 +535,12 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
 
     private func emitState(_ state: TranscriptionConnectionState) {
         onConnectionStateChange?(state)
+    }
+
+    private func emitDiagnostic(_ event: TranscriptionDiagnosticEvent) {
+        diagnosticQueue.async { [weak self] in
+            self?.onDiagnosticEvent?(event)
+        }
     }
 
     private static var inputFormat: AVAudioFormat? {
