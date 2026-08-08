@@ -266,11 +266,12 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
             duration: TranscriptionAudioFormat.pcm16Mono.duration(forByteCount: pcm.count))
         lock.lock()
         guard !stopped else { lock.unlock(); return }
+        let connectionUnavailable = !connected
         let readyChunks = jarvisManagedSpeechBuffer?.append(chunk) ?? [chunk]
         let evicted = appendToAudioBuffer(readyChunks)
         lock.unlock()
         continuityReporter.recordDelivery(sequence: sequenceNumber, pcm16: pcm, at: observedAt)
-        reportBufferEviction(evicted)
+        reportBufferEviction(evicted, connectionUnavailable: connectionUnavailable)
         pumpAudioIfReady()
     }
 
@@ -285,9 +286,10 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
             transcriptionLifecycle.recordLocalSpeechStarted()
             lock.lock()
             guard !stopped else { lock.unlock(); return }
+            let connectionUnavailable = !connected
             let evicted = appendToAudioBuffer(jarvisManagedSpeechBuffer?.speechStarted() ?? [])
             lock.unlock()
-            reportBufferEviction(evicted)
+            reportBufferEviction(evicted, connectionUnavailable: connectionUnavailable)
             pumpAudioIfReady()
         case .ended(let startedAt, let commitAt):
             jlog("Jarvis realtime [\(speaker.rawValue)]: local speech ended "
@@ -317,10 +319,15 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         }
     }
 
-    private func reportBufferEviction(_ evicted: [PCMBuffer.Chunk]) {
+    private func reportBufferEviction(
+        _ evicted: [PCMBuffer.Chunk],
+        connectionUnavailable: Bool
+    ) {
         guard !evicted.isEmpty else { return }
-        transcriptionLifecycle.recordReplayCoverageLoss()
-        continuityReporter.recordBufferEviction(evicted)
+        let recoveryWasActive = transcriptionLifecycle.recordReplayCoverageLoss()
+        continuityReporter.recordBufferEviction(
+            evicted,
+            replayCoverageAtRisk: connectionUnavailable || recoveryWasActive)
     }
 
     private func pumpAudioIfReady() {
@@ -419,7 +426,7 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
             }
             self.lock.unlock()
             if let completion {
-                self.reportBufferEviction(completion.evicted)
+                self.reportBufferEviction(completion.evicted, connectionUnavailable: false)
                 self.pumpAudioIfReady()
             }
         }
@@ -501,10 +508,12 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
 
         switch type {
         case RealtimeSession.audioBufferCommittedType:
-            guard model.turnDetectionStrategy == .clientCommit,
-                  let itemID = obj["item_id"] as? String else {
-                jlog("Jarvis realtime [\(speaker.rawValue)]: malformed Jarvis-managed "
-                     + "commit acknowledgement")
+            let commitEvent = RealtimeSession.audioBufferCommitEvent(from: obj, model: model)
+            guard case .acknowledgement(let itemID) = commitEvent else {
+                if commitEvent == .malformedAcknowledgement {
+                    jlog("Jarvis realtime [\(speaker.rawValue)]: malformed Jarvis-managed "
+                         + "commit acknowledgement")
+                }
                 break
             }
             lock.lock()
@@ -823,7 +832,7 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         let interruptedItems = transcriptionLifecycle.beginReconnectRecovery(
             replayAvailable: audioBuffer.bufferedChunkCount > 0)
         reportDroppedJarvisManagedTurns(droppedJarvisManagedTurns)
-        reportBufferEviction(replay.evicted)
+        reportBufferEviction(replay.evicted, connectionUnavailable: true)
         // Old-socket deltas are now held by the reconnect recovery gate. They remain a fallback if
         // every handshake fails or bounded replay loses coverage, without keeping stale item IDs in
         // the replacement ledger or releasing a partial coaching turn early.

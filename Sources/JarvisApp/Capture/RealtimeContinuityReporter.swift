@@ -20,7 +20,7 @@ final class RealtimeContinuityReporter: @unchecked Sendable {
     private let lock = NSLock()
     private var timer: Timer?
     private var stopped = true
-    private var overflowAccumulator = ReconnectBufferOverflowAccumulator()
+    private var evictionAccumulator = ReplayBufferEvictionAccumulator()
 
     init(
         speaker: Speaker,
@@ -38,7 +38,7 @@ final class RealtimeContinuityReporter: @unchecked Sendable {
     func start() {
         lock.lock()
         stopped = false
-        overflowAccumulator.reset()
+        evictionAccumulator.reset()
         lock.unlock()
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
@@ -58,11 +58,11 @@ final class RealtimeContinuityReporter: @unchecked Sendable {
         stopped = true
         let timer = self.timer
         self.timer = nil
-        let overflow = overflowAccumulator.flush(at: now)
+        let evictionReport = evictionAccumulator.flush(at: now)
         lock.unlock()
         DispatchQueue.main.async { timer?.invalidate() }
-        if let overflow {
-            handle(witness.recordReconnectBufferOverflow(evictedSequences: overflow, at: now))
+        if let evictionReport {
+            handle(evictionReport)
         }
         handle(witness.poll(at: now, forceSnapshot: true))
     }
@@ -101,14 +101,22 @@ final class RealtimeContinuityReporter: @unchecked Sendable {
             sessionAudioTime: sessionAudioTime, observedAt: now))
     }
 
-    func recordBufferEviction(_ chunks: [PCMBuffer.Chunk]) {
+    func recordBufferEviction(_ chunks: [PCMBuffer.Chunk], replayCoverageAtRisk: Bool) {
         guard !chunks.isEmpty else { return }
         let timestamp = now
         lock.lock()
-        let sequences = overflowAccumulator.record(chunks.compactMap(\.sequenceNumber), at: timestamp)
+        let report = evictionAccumulator.record(
+            chunks.compactMap(\.sequenceNumber),
+            replayCoverageAtRisk: replayCoverageAtRisk,
+            at: timestamp)
         lock.unlock()
-        guard let sequences else { return }
-        consume(witness.recordReconnectBufferOverflow(evictedSequences: sequences, at: timestamp))
+        guard let report else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.lock.lock(); let stopped = self.stopped; self.lock.unlock()
+            guard !stopped else { return }
+            self.handle(report)
+        }
     }
 
     private var now: TimeInterval { clock.now() - sessionStart }
@@ -163,7 +171,7 @@ final class RealtimeContinuityReporter: @unchecked Sendable {
             case .reconnectBufferOverflow(let evictedChunks, let firstSequence, let lastSequence):
                 let first = firstSequence.map(String.init) ?? "unknown"
                 let last = lastSequence.map(String.init) ?? "unknown"
-                jlog("⚠️ audio continuity [\(speaker.rawValue)] reconnect buffer overflow: "
+                jlog("⚠️ audio continuity [\(speaker.rawValue)] reconnect replay coverage lost: "
                      + "evicted=\(evictedChunks), sequences=\(first)...\(last)")
             case .localActivityUnmatched(let activeSince, let duration):
                 jlog("⚠️ audio continuity [\(speaker.rawValue)] local activity had no provider speech "
@@ -173,6 +181,19 @@ final class RealtimeContinuityReporter: @unchecked Sendable {
                      + "the prior warning: activity_since=\(Self.seconds(activeSince)), "
                      + "server_at=\(Self.seconds(serverObservedAt))")
             }
+        }
+    }
+
+    private func handle(_ report: ReplayBufferEvictionAccumulator.Report) {
+        switch report {
+        case .boundedReplayWindowReached(let sequences):
+            let first = sequences.first.map(String.init) ?? "unknown"
+            let last = sequences.last.map(String.init) ?? "unknown"
+            jlog("ℹ️ audio continuity [\(speaker.rawValue)] bounded replay window reached with no "
+                 + "active recovery: expired=\(sequences.count), sequences=\(first)...\(last); "
+                 + "further steady-state expiry suppressed")
+        case .replayCoverageLost(let sequences):
+            handle(witness.recordReconnectBufferOverflow(evictedSequences: sequences, at: now))
         }
     }
 

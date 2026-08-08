@@ -124,6 +124,28 @@ public enum RealtimeSession {
     public static let audioBufferCommittedType = "input_audio_buffer.committed"
     public static let deltaTranscriptionType = "conversation.item.input_audio_transcription.delta"
 
+    /// Server-VAD sessions may emit `input_audio_buffer.committed` as part of their normal server-owned
+    /// turn lifecycle. Only client-commit models bind that event to a Jarvis-managed local boundary.
+    public enum AudioBufferCommitEvent: Equatable, Sendable {
+        case ignored
+        case malformedAcknowledgement
+        case acknowledgement(itemID: String)
+    }
+
+    public static func audioBufferCommitEvent(
+        from event: [String: Any],
+        model: OpenAITranscriptionModel
+    ) -> AudioBufferCommitEvent {
+        guard event["type"] as? String == audioBufferCommittedType,
+              model.turnDetectionStrategy == .clientCommit else {
+            return .ignored
+        }
+        guard let itemID = event["item_id"] as? String else {
+            return .malformedAcknowledgement
+        }
+        return .acknowledgement(itemID: itemID)
+    }
+
     /// The event type the server emits when an utterance's transcription is final.
     public static let completedTranscriptionType = "conversation.item.input_audio_transcription.completed"
     public static let failedTranscriptionType = "conversation.item.input_audio_transcription.failed"
