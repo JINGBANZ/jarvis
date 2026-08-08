@@ -1603,7 +1603,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(brain.calls.count == 2)
     }
 
-    @Test func lateManualHintInterruptsSpeechWaitAndJoinsPendingAttempt() async {
+    @Test func lateManualHintInterruptsSpeechWaitAndJoinsPendingAttempt() async throws {
         let gate = AsyncGate()
         let delayProbe = AutomaticDelayProbe()
         let brain = GatedFailureThenSpeakingBrain(gate: gate)
@@ -1635,7 +1635,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         transcript.append(.init(speaker: .me, text: "latest words for the hint", at: 1))
         #expect(await driver.handleTrigger(.manualHint) == .busy)
         #expect(await outcome.value == .spoke)
-        #expect(brain.calls.count == 2)
+        try #require(brain.calls.count == 2)
         #expect(screen.captureCount == 1)
         #expect(brain.calls[1].contains {
             ($0.text ?? "").contains("latest words for the hint")

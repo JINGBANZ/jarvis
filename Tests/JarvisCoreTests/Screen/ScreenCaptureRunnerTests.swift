@@ -122,14 +122,20 @@ import Testing
             captureDirectory: directory,
             executable: executable)
         let capture = Task.detached {
-            runner.capture(arguments: [])
+            guard !Task.isCancelled else { return ScreenCaptureRunner.Outcome.cancelled }
+            return runner.capture(arguments: [])
         }
-        defer { runner.cancelCapture() }
-        try await waitForFile(pidFile)
-        try await waitForTransientJPEG(in: directory)
-        let pid = try #require(
-            pid_t(String(contentsOf: pidFile, encoding: .utf8)
-                .trimmingCharacters(in: .whitespacesAndNewlines)))
+        let pid: pid_t
+        do {
+            try await waitForFile(pidFile)
+            try await waitForTransientJPEG(in: directory)
+            pid = try #require(
+                pid_t(String(contentsOf: pidFile, encoding: .utf8)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)))
+        } catch {
+            await cancelAndAwait(capture, runner: runner)
+            throw error
+        }
 
         let cancelledAt = Date()
         runner.cancelCapture()
@@ -239,17 +245,43 @@ import Testing
         let runner = ScreenCaptureRunner(
             captureDirectory: directory,
             executable: executable)
-        let capture = Task.detached { runner.capture(arguments: []) }
-        defer { runner.cancelCapture() }
-        try await waitForTransientJPEG(in: directory)
-
-        let jpeg = try #require(try transientJPEGs(in: directory).first)
-        let mode = try #require(
-            FileManager.default.attributesOfItem(atPath: jpeg.path)[.posixPermissions] as? NSNumber)
-        #expect(mode.int16Value == 0o600)
+        let capture = Task.detached {
+            guard !Task.isCancelled else { return ScreenCaptureRunner.Outcome.cancelled }
+            return runner.capture(arguments: [])
+        }
+        do {
+            try await waitForTransientJPEG(in: directory)
+            let jpeg = try #require(try transientJPEGs(in: directory).first)
+            let mode = try #require(
+                FileManager.default.attributesOfItem(atPath: jpeg.path)[.posixPermissions]
+                    as? NSNumber)
+            #expect(mode.int16Value == 0o600)
+        } catch {
+            await cancelAndAwait(capture, runner: runner)
+            throw error
+        }
 
         runner.cancelCapture()
         _ = await capture.value
+    }
+
+    /// A detached task cancelled before `ScreenCaptureRunner` registers its command still needs a
+    /// cancellation request after registration. Keep requesting until the task is joined so no
+    /// failure path can return with the infinite fixture or a transient JPEG still alive.
+    private func cancelAndAwait(
+        _ capture: Task<ScreenCaptureRunner.Outcome, Never>,
+        runner: ScreenCaptureRunner
+    ) async {
+        capture.cancel()
+        let cancellationPump = Task {
+            while !Task.isCancelled {
+                runner.cancelCapture()
+                try? await Task.sleep(nanoseconds: 20_000_000)
+            }
+        }
+        _ = await capture.value
+        cancellationPump.cancel()
+        _ = await cancellationPump.value
     }
 
     private func makeDirectory() throws -> URL {

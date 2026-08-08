@@ -168,14 +168,12 @@ import Testing
             workingDirectory: directory)
         defer { process.terminateNow() }
 
-        let childDeadline = Date().addingTimeInterval(2)
-        while !FileManager.default.fileExists(atPath: childFile.path),
-              Date() < childDeadline {
-            try await Task.sleep(nanoseconds: 20_000_000)
-        }
-        let child = try #require(pid_t(
-            String(contentsOf: childFile, encoding: .utf8)
-                .trimmingCharacters(in: .whitespacesAndNewlines)))
+        let childIdentifier = try await waitForProcessIdentifier(
+            in: childFile,
+            timeout: 2)
+        let child = try #require(
+            childIdentifier,
+            "timed out waiting for the helper PID")
 
         // Wait for the handler to observe the configured limit. Reading before that event could
         // consume an empty line and prevent the buffer from ever crossing the limit.
@@ -320,14 +318,12 @@ import Testing
         _ = try await process.nextLine(timeout: 2)
 
         process.terminateNow()
-        let childDeadline = Date().addingTimeInterval(3)
-        while !FileManager.default.fileExists(atPath: childFile.path),
-              Date() < childDeadline {
-            try await Task.sleep(nanoseconds: 20_000_000)
-        }
-        let child = try #require(pid_t(
-            String(contentsOf: childFile, encoding: .utf8)
-                .trimmingCharacters(in: .whitespacesAndNewlines)))
+        let childIdentifier = try await waitForProcessIdentifier(
+            in: childFile,
+            timeout: 3)
+        let child = try #require(
+            childIdentifier,
+            "timed out waiting for the helper PID")
 
         let terminationDeadline = Date().addingTimeInterval(4)
         while processState(child) == "running", Date() < terminationDeadline {
@@ -366,5 +362,22 @@ import Testing
             try? await Task.sleep(nanoseconds: 20_000_000)
         }
         return !process.isRunning
+    }
+
+    private func waitForProcessIdentifier(
+        in file: URL,
+        timeout: TimeInterval
+    ) async throws -> pid_t? {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if let contents = try? String(contentsOf: file, encoding: .utf8),
+               let processIdentifier = pid_t(
+                   contents.trimmingCharacters(in: .whitespacesAndNewlines)),
+               processIdentifier > 0 {
+                return processIdentifier
+            }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        return nil
     }
 }
