@@ -1637,7 +1637,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     /// A completed screen observation is useful context for a fresh attempt even when the only new
     /// speech is filler. Send the observation directly: do not recapture, replay raw tool state, or
     /// manufacture an empty/synthetic speech message.
-    @Test func savedObservationStartsFreshAttemptWithoutEmptySpeech() async {
+    @Test func savedObservationStartsFreshAttemptWithoutEmptySpeech() async throws {
         let gate = AsyncGate()
         let brain = CaptureThenGatedFailureThenSpeakingBrain(gate: gate)
         let screen = FakeScreen(recognizedText: "let answer = 42")
@@ -1646,15 +1646,20 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             screen: screen,
             clock: ManualClock())
 
-        async let outcome = driver.handleTrigger(.silence(secondsQuiet: 30))
-        await gate.waitUntilEntered()
+        let outcome = Task {
+            await turnOutcomeBeforeTimeout {
+                await driver.handleTrigger(.silence(secondsQuiet: 30))
+            }
+        }
+        defer { outcome.cancel() }
+        #expect(await waitUntilAsync { await gate.hasEntered })
         transcript.append(.init(speaker: .them, text: "Hmm.", at: 1))
         #expect(await driver.handleTrigger(.turnEnd) == .busy)
         await gate.release()
 
-        #expect(await outcome == .spoke)
+        #expect(await outcome.value == .spoke)
         #expect(screen.captureCount == 1)
-        #expect(brain.calls.count == 3)
+        try #require(brain.calls.count == 3)
         let freshRequest = brain.calls[2]
         #expect(!freshRequest.contains { $0.role == .user && $0.text == "" })
         #expect(!freshRequest.contains { ($0.text ?? "").contains("Hmm.") })
@@ -2513,6 +2518,8 @@ actor AsyncGate {
     private var released = false
     private var releaseWaiters: [CheckedContinuation<Void, Never>] = []
 
+    var hasEntered: Bool { entered }
+
     func enter() async {
         entered = true
         enteredWaiters.forEach { $0.resume() }
@@ -2547,5 +2554,36 @@ private actor AutomaticDelayProbe {
     func waitUntilEntered() async {
         if entered { return }
         await withCheckedContinuation { enteredWaiters.append($0) }
+    }
+}
+
+private func waitUntilAsync(
+    timeoutNanoseconds: UInt64 = 5_000_000_000,
+    condition: @escaping @Sendable () async -> Bool
+) async -> Bool {
+    let startedAt = DispatchTime.now().uptimeNanoseconds
+    while DispatchTime.now().uptimeNanoseconds - startedAt < timeoutNanoseconds {
+        if await condition() { return true }
+        if Task.isCancelled { return false }
+        try? await Task.sleep(nanoseconds: 1_000_000)
+    }
+    return await condition()
+}
+
+private func turnOutcomeBeforeTimeout(
+    timeoutNanoseconds: UInt64 = 5_000_000_000,
+    operation: @escaping @Sendable () async -> TurnOutcome
+) async -> TurnOutcome? {
+    await withTaskGroup(of: TurnOutcome?.self) { group in
+        group.addTask {
+            await operation()
+        }
+        group.addTask {
+            try? await Task.sleep(nanoseconds: timeoutNanoseconds)
+            return nil
+        }
+        let outcome = await group.next() ?? nil
+        group.cancelAll()
+        return outcome
     }
 }
