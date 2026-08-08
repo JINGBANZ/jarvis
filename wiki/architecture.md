@@ -70,11 +70,12 @@ moments the model judges worthwhile.
    cooldown, rate cap, or wake-word gate. Whether to speak (and whether the user just addressed
    Jarvis) is the model's call, governed by the system prompt; the only hard gates are the user's
    Start/Stop and the **substance gate** (`TurnSubstance`): a turn-end whose delta is pure
-   back-channel filler ("Hmm", "嗯") or empty is skipped without a request. Classification is
-   speaker-aware only where conversational meaning demands it: a short interviewer rejection such
-   as "No" is substantive, even though the same user-side fragment is normally filler. Interviewer
-   questions remain first-class and may draw a proactive tip. Skipped lines ride along on the next
-   substantive turn; silence checks and the hint hotkey always go through.
+   clear hesitation sounds ("Hmm", "嗯", or a sequence such as "Uh. Hmm. Oh.") or empty is skipped
+   without a request. Those sounds are also removed from a mixed brain-facing delta, while Activity
+   keeps the complete finalized transcription. Context-dependent short replies such as "Yes", "No",
+   "Okay", "对", and "可以" fail open for either speaker, as do unknown short fragments. Interviewer
+   questions remain first-class and may draw a proactive tip. Consumed noise never rides into a
+   later request; silence checks and the hint hotkey always go through.
 3. It calls the **selected brain model** with the coach system prompt, the session memory
    (`CoachHistory`), the
    new transcript delta, the timing context (seconds silent, session elapsed), and the tool set
@@ -139,7 +140,7 @@ plugins ship only with full Xcode, and Jarvis builds **CLT-only** (see
 | **WebRTCEchoCanceller** | AEC3 echo canceller driven at 48 kHz on 10 ms frames inside the capture IOProc; far reference first, then the mic cleaned in place. | WebRTC **AEC3** (`webrtc-audio-processing`), vendored static + zero-dylib via `scripts/build-aec.sh`. |
 | **ErrorReporter** | The single funnel for user-facing failures. Severity on a Foundation-only `UserFacingError` decides the lifecycle consequence; an explicit startup/runtime context decides presentation. Startup failures may alert, but runtime failures never activate Jarvis or present UI even when they stop the session. `BrainFailure` feeds attempt outcomes into the finite provider route; only route exhaustion enters terminal reporting. Fixed, typed Activity outcomes carry stable on-disk identities while raw detail stays in `JarvisLog`. | AppKit (`NSAlert`) for startup only. |
 | **Transcriber** | Maintain a rolling, speaker-labeled, **spoken-time timestamped** transcript; emit speech-activity, turn-end, and backing-off silence events (with quiet duration). Two instances run in parallel — one per side — tagging lines `me`/`them` into one shared transcript through the provider-neutral `TranscriptionSession` port. The default OpenAI adapter keeps its per-`item_id` reconciliation, delta salvage, acknowledged readiness, ping/pong health, and transactional reconnect path. GPT-4o Transcribe remains its default model and uses tuned server VAD. GPT Transcribe and GPT Live Transcribe remain opt-in with local WebRTC VAD: a bounded pre-roll opens at confirmed speech onset, active speech and trailing silence enter the ordered audio FIFO, and indefinite idle silence stays off the wire. Endpoints commit only after that FIFO reaches their boundary, and the server's commit acknowledgement binds each boundary to its `item_id`. GPT Transcribe also reports detected completion languages to debug diagnostics. Both new models receive fixed context for the captured speaker role, and GPT Live additionally requests low transcription delay. The opt-in macOS 26+ Apple adapter prepares one selected-locale asset before capture, converts the existing 24 kHz PCM to `SpeechAnalyzer`'s preferred format, and commits final results only. Its content-free local activity tracker delays coaching but never gates transcription or retains PCM. Every path keeps unusable words diagnostic-only and records content-free boundary evidence. | OpenAI Realtime transcription (model-compatible server or local turn detection) or Apple `SpeechAnalyzer` / `SpeechTranscriber` (on-device). |
-| **CoachDriver** | Coordinate one single-flighted coaching attempt from a natural trigger or pending-work wake-up: snapshot one route target plus the latest conversation, route its tool calls, commit only a complete terminal action, and report one outcome to the scheduler. No speaking cooldown/rate cap — restraint is the model's; the only client-side content skip is the filler-only turn-end gate (`TurnSubstance`). | The selected OpenAI Responses API, Claude Code, or Codex route target; See [§4 Local CLI brain providers](#local-cli-brain-providers). Provider-specific summary tiers are defined in `BrainModelCatalog`. |
+| **CoachDriver** | Coordinate one single-flighted coaching attempt from a natural trigger or pending-work wake-up: snapshot one route target plus the latest conversation, route its tool calls, commit only a complete terminal action, and report one outcome to the scheduler. No speaking cooldown/rate cap — restraint is the model's; `TurnSubstance` removes only clear hesitation sounds from mixed deltas and skips a turn-end when no substantive text or saved observation remains. | The selected OpenAI Responses API, Claude Code, or Codex route target; See [§4 Local CLI brain providers](#local-cli-brain-providers). Provider-specific summary tiers are defined in `BrainModelCatalog`. |
 | **Local agent runtime** | Keep provider startup outside the coaching latency path while preserving the attempt boundary: a `BrainConversation` lease owns every model turn in one attempt, including a `capture_screen` continuation, then is explicitly finished. Claude leases one initialized safe-mode query; Codex prepares the first target-specific ephemeral thread at Session Start and opens a fresh thread for each later attempt on one session-scoped app-server. A runtime failure fails the attempt; it never switches to a one-shot transport. | Claude Code stream-json control protocol; Codex app-server JSON-RPC over stdio. |
 | **ScreenTool** | Fulfill `capture_screen`: silently shoot the **active window** (default scope) — the window-server frontmost, on whichever display, clean even when partially covered — and attach an **on-device OCR** of the shot to the tool result so the model reads exact text instead of pixels. Falls back to a full-display capture (no OCR) — the Settings-chosen display in Entire-display scope, the main display when no window is eligible; the overlay window is excluded either way. See [settings-window.md](./settings-window.md#capture-scope). | macOS `screencapture` CLI + Apple Vision (`VNRecognizeTextRequest`). |
 | **Overlay Caption** | Render `speak` output: up to ~3 short lines (model-split), shown one at a time and queued so a newer tip never cuts off the current one; non-activating, always-on-top, excluded from capture. Switchable from Settings — **off by default**; when off, tips are suppressed. | AppKit NSPanel; `OverlayCaptionPanel`. |
@@ -292,8 +293,9 @@ The implementation keeps orchestration, route policy, and OS edges separate:
 
 - **Continuous (cheap):** audio → the selected transcription adapter → transcript. This runs the
   whole session; Apple Speech removes continuous audio egress and OpenAI transcription billing.
-- **Per-turn (cheap):** a selected-brain call on each substantive turn-end and each silence event, with a
-  bounded, mostly-cached working set. Filler-only turn-ends (from either speaker) are skipped
+- **Per-turn (cheap):** a selected-brain call on each substantive turn-end and each silence event,
+  with a bounded, mostly-cached working set. Clear non-semantic hesitation sounds are removed before
+  brain input, and turn-ends containing only those sounds (from either speaker) are skipped
   client-side — free. No image unless the model asks.
 - **On-demand (expensive):** a screenshot + vision tokens, only when the model calls
   `capture_screen`. A coaching response, only when the model calls `speak`.
@@ -317,10 +319,12 @@ rather than a per-turn screenshot.
   items live only inside the turn that produced them — at commit, the pixels become a one-line stub
   and the capture's OCR text (in the tool result) is what persists, and reasoning items are dropped;
   and past a token threshold (see
-  `Config.historyCompactionTokenThreshold`) the oldest span is **compacted** into a short structured
-  summary written by a cheaper model (`gpt-5.4-mini`), so the problem statement never falls out of
-  context. Compaction uses one Core-owned workload deadline across providers and fails soft: a slow
-  or failed summary leaves the full history intact for a later attempt. Requests are sent `store:true`
+  `Config.historyCompactionTokenThreshold`) the oldest span is **compacted** into a short,
+  interview-format-neutral briefing written by a cheaper model (`gpt-5.4-mini`). Its size estimate
+  treats non-ASCII scripts conservatively; the exact retention and topic-retirement policy lives in
+  [`JarvisPrompts.HistorySummary.system`](../Sources/JarvisCore/Prompts/JarvisPrompts+HistorySummary.swift).
+  Compaction uses one Core-owned workload deadline across providers and fails soft: a slow or failed
+  summary leaves the full history intact for a later attempt. Requests are sent `store:true`
   so they stay inspectable in the OpenAI dashboard for debugging — the retention tradeoff is
   documented in [sandbox.md](./sandbox.md).
 - **Transcription has its own provider, model, and language settings.** OpenAI remains the provider
@@ -590,8 +594,8 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
   are sent `store:true`, so what the model saw does remain inspectable (and retained) server-side at
   OpenAI for debugging (see [sandbox.md](./sandbox.md)).
 - **Behavioral restraint (model-governed):** there is **no cooldown or rate cap** in code. Every
-  substantive utterance — from either speaker; only back-channel filler is skipped as pure cost —
-  reaches the brain, and the brain decides whether it has anything worth
+  substantive utterance — from either speaker; only clear non-semantic hesitation sounds are removed
+  as pure cost — reaches the brain, and the brain decides whether it has anything worth
   saying — that restraint lives in the system prompt (see
   [`JarvisPrompts.Coach.system`](../Sources/JarvisCore/Prompts/JarvisPrompts+Coach.swift)).
   This keeps

@@ -3,10 +3,12 @@ import Foundation
 extension JarvisPrompts {
     public enum HistorySummary {
         public static let system = """
-        You condense a live coding-interview coaching session's history into a briefing the coach will \
-        rely on for the rest of the session. Keep, in this order: the interview problem statement (all \
-        load-bearing details); the user's current approach and how far they've got; every tip the coach \
-        already gave (so it isn't repeated); any open questions or requirements from the interviewer. \
+        You condense an older span of a live coaching session's history into a briefing the coach will \
+        rely on for the rest of the session. Preserve durable context: the participants and goal; the \
+        active topic or task and its load-bearing details; the user's approach, progress, and decisions; \
+        advice the coach already gave so it is not repeated; and requirements, feedback, or unresolved \
+        questions from the interviewer or caller. Compress resolved topics to only facts likely to matter \
+        later and omit obsolete detail. Do not assume a coding interview or any single interview format. \
         Plain text, under 250 words. Output only the briefing.
         """
 

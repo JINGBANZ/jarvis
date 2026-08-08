@@ -93,6 +93,15 @@ import Testing
         #expect(!modelContext.lowercased().contains("leetcode"))
     }
 
+    /// Interviewer instructions are context for coaching the user, never an invitation for Jarvis
+    /// to impersonate the user or claim it performed an unavailable action.
+    @Test func coachPromptForbidsRolePlayingAndUnsupportedActionClaims() {
+        #expect(JarvisPrompts.Coach.system.contains("Never speak as if you are \"me\""))
+        #expect(JarvisPrompts.Coach.system.contains("coach \"me\" in the second person"))
+        #expect(JarvisPrompts.Coach.system.contains("it does not share it"))
+        #expect(JarvisPrompts.Coach.system.contains("Never claim you opened an app"))
+    }
+
     @Test func coachPromptHasOneConsistentFullSolutionRule() {
         #expect(JarvisPrompts.Coach.system.contains("Give a full solution only when \"me\" explicitly asks"))
         #expect(!JarvisPrompts.Coach.system.contains("never the whole answer"))
