@@ -128,4 +128,16 @@ import Testing
         #expect(h.estimatedTokens > afterText)                    // the stub still counts…
         #expect(h.estimatedTokens < afterText + 100)              // …but nowhere near image cost
     }
+
+    /// The compaction trigger must not apply an English chars/4 estimate to Chinese text. Equal
+    /// character counts deliberately produce a more conservative estimate for non-ASCII scripts.
+    @Test func estimateTreatsNonASCIITextConservatively() {
+        let latin = CoachHistory()
+        latin.commit([.user(String(repeating: "a", count: 100))])
+        let chinese = CoachHistory()
+        chinese.commit([.user(String(repeating: "中", count: 100))])
+
+        #expect(latin.estimatedTokens == 25)
+        #expect(chinese.estimatedTokens == 100)
+    }
 }

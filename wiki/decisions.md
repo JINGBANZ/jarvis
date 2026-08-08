@@ -268,6 +268,9 @@
 - **Why:** Roughly 40–45% of an interviewer-heavy session's turn-ends are back-channel ("Hmm", "嗯", "对") that can never produce a tip, yet each re-billed the whole working set. Normalization + a closed class scales where a raw allowlist wouldn't: back-channels are a small closed set per language and the apparent variety is elongation, which collapsing absorbs. Gating on *what* was said (not *who*) keeps interviewer questions first-class — they may draw a proactive tip for the user (prompt relaxed accordingly).
 - **Rejected:** (a) A them-only speaker gate — cheaper, but it silences Jarvis exactly when the interviewer asks the user a question. (b) A longer client debounce window (adds reply latency, merges less). (c) A classifier model for filler (~$0.03/hr and latency; unwarranted while the closed class + fail-open holds).
 - **Detail:** `Sources/JarvisCore/Triggers/TurnSubstance.swift`, `CoachDriver.runTurn`.
+- **Superseded in part by:** 2026-08-07 — Known filler is consumed before brain context. The
+  speaker-neutral, fail-open shape stands; deferred filler, the arbitrary short-fragment fallback,
+  and the broad acknowledgement list do not.
 
 ### 2026-07-07 — Session memory moved client-side, with compaction
 
@@ -276,6 +279,9 @@
 - **Rejected:** (a) Keeping conversations and rotating them with a summary seed — same summarization work, but retains the unbounded-growth window and the lock failure mode. (b) `store:false` for privacy — deferred by choice; debuggability wins while the harness is being tuned, and it's now a one-line flip.
 - **Detail:** `Sources/JarvisCore/Coach/CoachHistory.swift`, `CoachDriver.compactIfNeeded`, [sandbox.md](./sandbox.md) for the retention posture.
 - **Superseded (in part) by:** the 2026-07-16 entry — screenshots now never outlive their turn as pixels; the rest of this entry stands.
+- **Superseded in part by:** 2026-08-07 — History compaction is language- and interview-format
+  neutral. Client-owned memory and bounded summarization stand; the English-oriented size estimate
+  and coding-specific briefing do not.
 
 ### 2026-07-07 — `capture_screen` is window-scoped with an on-device OCR sidecar
 
@@ -379,6 +385,9 @@
   actionable feedback, not a back-channel.
 - **Rejected:** Removing the filler gate — would restore the large steady-state cost from acknowledgments.
 - **Detail:** `Sources/JarvisCore/Triggers/TurnSubstance.swift`.
+- **Superseded by:** 2026-08-07 — Clear hesitation sounds are consumed before brain context. Terse
+  contextual replies now fail open for either speaker, so the interviewer-only exception is no
+  longer needed.
 
 ### 2026-07-17 — Audio continuity evidence is content-free, not a recording
 
@@ -1209,3 +1218,49 @@
   `Sources/JarvisApp/Capture/AggregateEchoCapture.swift`,
   `Sources/JarvisApp/Capture/RealtimeContinuityReporter.swift`,
   `Sources/JarvisApp/App/AppDelegate.swift`.
+
+### 2026-08-07 — Clear hesitation sounds are consumed before brain context
+
+- **Chose:** Keep a speaker-neutral, conservative substance gate for clear non-semantic vocal sounds,
+  recognize separated sequences of those sounds, and remove them from every brain-facing transcript
+  delta. A turn with nothing else consumes its transcript boundary without a request, while Activity
+  retains the complete finalized transcription. Context-dependent short replies such as “Yes,” “No,”
+  “Okay,” “对,” and “可以” fail open for either speaker, as do unknown short fragments.
+- **Why:** Session `2026-08-07_11-15-48_B24D` showed that isolated hesitation sounds were already
+  skipped, but combined sounds could escape the exact-phrase check and buy a full-history
+  `stay_silent` request. Previously skipped noise also entered the next substantive request, turning
+  a saved call into recurring context cost. A narrow discard set saves those calls without silently
+  deleting short answers whose meaning depends on the conversation.
+- **Rejected:** (a) Asking the transcription model to delete filler — it is not a deterministic
+  omission boundary and would silently change the audit record. (b) Treating contextual replies or
+  every unknown short fragment as filler — either can carry an answer, correction, or technical term.
+  (c) A classifier model — extra latency and cost for a small explicit class. (d) Sending filler or an
+  artificial placeholder after a failed attempt — when no substantive text or saved observation
+  remains, there is no useful context for a fresh request.
+- **Supersedes in part:** 2026-07-07 — Filler-only turn-ends skip the brain. Its speaker-neutral gate
+  stands, but the broad acknowledgement list and explicit speaker overrides do not; skipped sounds
+  no longer ride forward, and unknown short fragments no longer disappear by length alone.
+- **Detail:** [architecture.md → The turn](./architecture.md#the-turn),
+  `Sources/JarvisCore/Triggers/TurnSubstance.swift`,
+  `Sources/JarvisCore/Coach/CoachDriver.swift`.
+
+### 2026-08-07 — History compaction is language- and interview-format neutral
+
+- **Chose:** Estimate non-ASCII session memory conservatively instead of applying the English
+  characters-per-token shortcut to every script. Summarize older history as a general live-coaching
+  briefing: preserve durable goals, requirements, progress, decisions, prior advice, feedback, and
+  unresolved questions; compress resolved topics and omit obsolete detail. Do not assume a coding
+  interview or add an explicit phase state machine.
+- **Why:** The Chinese-heavy audited session reached a large recurring request while the old estimate
+  still remained below the compaction threshold. Its older project and behavioral discussion would
+  also have been forced into a hard-coded coding-problem summary even if compaction had run.
+- **Rejected:** (a) Lowering the threshold globally — it does not fix the language bias and compacts
+  English sessions too early. (b) A hard-coded interview-phase detector — the general summarizer can
+  retire resolved topics first, without adding another brittle state machine. (c) Separate summary
+  schemas per interview type — they duplicate policy and can misclassify mixed sessions.
+- **Supersedes in part:** 2026-07-07 — Session memory moved client-side, with compaction. Client-owned
+  memory, the bounded briefing, and fail-soft behavior stand; the English-biased estimate and
+  coding-only summary do not.
+- **Detail:** [architecture.md → Models and APIs](./architecture.md#models-and-apis),
+  `Sources/JarvisCore/Coach/CoachHistory.swift`,
+  `Sources/JarvisCore/Prompts/JarvisPrompts+HistorySummary.swift`.

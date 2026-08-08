@@ -68,9 +68,6 @@ public final class CoachDriver: @unchecked Sendable {
         /// or call/result linkage.
         var observations: [ChatMessage] = []
         var manualHintPrepared = false
-        /// Distinguishes a fresh natural event from a failed attempt whose automatic wake was
-        /// coalesced with that event. Filler suppression must never cancel the latter.
-        var hasFailedAttempt = false
     }
 
     private enum AttemptResult {
@@ -704,7 +701,6 @@ public final class CoachDriver: @unchecked Sendable {
                 if let reason = wake.reason {
                     failedWork.reason = Self.coalescing(failedWork.reason, with: reason)
                 }
-                failedWork.hasFailedAttempt = true
                 work = failedWork
                 automaticSequence += 1
 
@@ -769,25 +765,29 @@ public final class CoachDriver: @unchecked Sendable {
             reason: reason,
             sessionElapsedSeconds: now - sessionStart)
         let delta = transcript.renderFrom(index: currentCommittedTranscriptCount())
+        let substantiveLines = delta.lines.filter(TurnSubstance.isSubstantive)
+        let substantiveDeltaText = RollingTranscript.render(substantiveLines)
 
-        // Filler-only natural events do not spend a provider attempt. A natural wake may also
-        // coalesce with failed pending work whose transcript delta is empty (for example, a silence
-        // attempt); that automatic attempt must still run.
-        if reason == .turnEnd && !work.hasFailedAttempt
-            && !delta.lines.contains(where: TurnSubstance.isSubstantive) {
+        let userText = [
+            substantiveDeltaText.isEmpty
+                ? nil
+                : JarvisPrompts.Coach.newSpeech(substantiveDeltaText),
+            context.promptLine,
+        ].compactMap { $0 }.joined(separator: "\n\n")
+        var turnMessages = userText.isEmpty ? work.observations : [.user(userText)] + work.observations
+
+        // A request needs meaningful speech, a trigger instruction, or a provider-neutral
+        // observation completed by the failed attempt. Activity has already retained finalized
+        // filler, so an empty fresh attempt has no value to send and needs no synthetic placeholder.
+        if turnMessages.isEmpty {
             let preview = delta.lines.isEmpty
                 ? "nothing new"
                 : String(delta.lines.map(\.text).joined(separator: " · ").prefix(80))
             jlog("… skipped as filler (\(preview)) — not calling the brain")
+            commitTranscript(through: delta.upTo)
             return .skipped(.skippedFillerOnly)
         }
-
         let historyBase: [ChatMessage] = [.system(JarvisPrompts.Coach.system)] + history.snapshot()
-        let userText = [
-            delta.text.isEmpty ? nil : JarvisPrompts.Coach.newSpeech(delta.text),
-            context.promptLine,
-        ].compactMap { $0 }.joined(separator: "\n\n")
-        var turnMessages: [ChatMessage] = [.user(userText)] + work.observations
 
         if reason == .manualHint && !work.manualHintPrepared {
             if let prompt = context.promptLine {
@@ -965,7 +965,7 @@ public final class CoachDriver: @unchecked Sendable {
                     }
                     jlog("… nothing useful to add, staying silent")
                     ActivityLog.shared.record(.stayedSilent)
-                    commitIfWorthKeeping(turnMessages, deltaText: delta.text)
+                    commitIfWorthKeeping(turnMessages, deltaText: substantiveDeltaText)
                     commitTranscript(through: delta.upTo)
                     return .completed(.silentByModel)
                 }

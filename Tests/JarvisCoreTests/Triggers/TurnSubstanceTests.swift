@@ -2,20 +2,10 @@ import Testing
 @testable import JarvisCore
 
 @Suite struct TurnSubstanceTests {
-    /// The closed class: plain back-channels in both shipped languages are filler.
-    @Test func backChannelsAreFiller() {
-        for text in ["Hmm", "hm", "Mm-hmm.", "uh", "Um...", "ok", "OK.", "Okay",
-                     "yeah", "Yes.", "right", "Sure", "oh", "嗯", "啊", "哦", "好的",
-                     "对", "是的", "明白", "行", "了解"] {
-            #expect(!TurnSubstance.isSubstantive(text), "expected filler: \(text)")
-        }
-    }
-
-    /// Multi-letter back-channels whose spelling has a doubled letter ("cool", "I see") must still
-    /// match: the `fillers` set is normalized with the same collapse step as the input, so a doubled
-    /// letter can't silently drop an entry out of the set. Regression for the dead-entry bug.
-    @Test func doubledLetterBackChannelsAreFiller() {
-        for text in ["cool", "Cool.", "cooool", "I see", "I see.", "isee", "I  see"] {
+    /// Only clear vocal hesitation sounds in the shipped languages are discarded.
+    @Test func clearHesitationSoundsAreFiller() {
+        for text in ["Hmm", "hm", "uh", "Um...", "er", "erm", "oh", "Ah",
+                     "嗯", "啊", "哦", "噢", "呃"] {
             #expect(!TurnSubstance.isSubstantive(text), "expected filler: \(text)")
         }
     }
@@ -23,17 +13,54 @@ import Testing
     /// Elongation/repetition variants normalize onto their base form — the reason the closed-class
     /// list doesn't need to enumerate "hmmm", "mmmm", "嗯嗯", …
     @Test func elongationsCollapseOntoTheList() {
-        for text in ["Hmmmm.", "mmm", "uhhh", "ummmm", "嗯嗯", "好的好的" == "好的好的" ? "嗯嗯嗯" : "嗯嗯",
-                     "okaaay", "yeahhh"] {
+        for text in ["Hmmmm.", "mmm", "uhhh", "ummmm", "ohhh", "ahhh", "嗯嗯嗯"] {
             #expect(!TurnSubstance.isSubstantive(text), "expected filler: \(text)")
         }
     }
 
-    /// Short fragments are filler in ANY language — the zero-maintenance fallback for back-channels
-    /// the list has never heard of.
-    @Test func shortFragmentsAreFillerInAnyLanguage() {
-        for text in ["m", "の", "え", "네", "ja", "!!", "…", ""] {
+    /// One transcription completion can contain several separated hesitation sounds.
+    @Test func compositeHesitationSoundsAreFiller() {
+        for text in ["Oh. Hmm.", "Uh. Hmm. Oh, oh.", "uh um hmm", "Hmm. 嗯，呃。"] {
             #expect(!TurnSubstance.isSubstantive(text), "expected filler: \(text)")
+        }
+    }
+
+    /// Short replies can change the conversation. Preserve them for either speaker and let the
+    /// model interpret their meaning from context.
+    @Test func contextDependentTerseRepliesFailOpenForEitherSpeaker() {
+        let replies = [
+            "OK", "Okay", "Yes", "Yeah", "No", "Nope", "Right", "Sure", "So", "Wow",
+            "Cool", "Got it", "I see", "Alright", "Mhm", "Mm-hmm", "Uh-huh",
+            "好", "好的", "对", "对的", "是", "是的", "明白", "可以", "行", "了解",
+            "No. Okay.", "Yes. Hmm.", "对。嗯。",
+        ]
+        for speaker in [Speaker.me, .them] {
+            for text in replies {
+                let line = TranscriptLine(speaker: speaker, text: text, at: 1)
+                #expect(TurnSubstance.isSubstantive(line), "expected substance: \(text)")
+            }
+        }
+    }
+
+    /// Unknown short fragments fail open. A length rule would discard technical terms and terse
+    /// answers merely because they are short; pure punctuation remains content-free.
+    @Test func unknownShortFragmentsFailOpen() {
+        for text in ["の", "え", "네", "ja", "R", "Go", "C++", "B.F.S."] {
+            #expect(TurnSubstance.isSubstantive(text), "expected substance: \(text)")
+        }
+        for text in ["!!", "…", ""] {
+            #expect(!TurnSubstance.isSubstantive(text), "expected noise: \(text)")
+        }
+    }
+
+    /// Capitalization can distinguish a technical identifier from an otherwise identical vocal
+    /// sound. Ambiguous all-uppercase forms fail open; normal sentence-cased fillers stay filtered.
+    @Test func acronymLikeSoundSpellingsFailOpen() {
+        for text in ["M", "ER", "UM", "OH", "U.M.", "UM. Oh."] {
+            #expect(TurnSubstance.isSubstantive(text), "expected acronym-like substance: \(text)")
+        }
+        for text in ["m", "Er", "Um", "Oh"] {
+            #expect(!TurnSubstance.isSubstantive(text), "expected vocal sound: \(text)")
         }
     }
 
@@ -42,15 +69,6 @@ import Testing
     @Test func questionsAndAddressesAlwaysSubstantive() {
         for text in ["那你是怎么做的?", "ok?", "嗯？", "Jarvis", "jarvis help me", "Hey Jarvis..."] {
             #expect(TurnSubstance.isSubstantive(text), "expected substance: \(text)")
-        }
-    }
-
-    /// A terse interviewer rejection changes the requirements immediately. It must not wait for the
-    /// next long utterance, while the same one-word response from the user remains a back-channel.
-    @Test func interviewerRejectionIsImmediateSubstance() {
-        for text in ["No.", "nope"] {
-            #expect(TurnSubstance.isSubstantive(.init(speaker: .them, text: text, at: 1)))
-            #expect(!TurnSubstance.isSubstantive(.init(speaker: .me, text: text, at: 1)))
         }
     }
 
