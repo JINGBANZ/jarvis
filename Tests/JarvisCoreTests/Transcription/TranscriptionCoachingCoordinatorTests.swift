@@ -43,18 +43,19 @@ import Testing
         let transcript = RollingTranscript()
         let clock = ManualClock(now: 10)
         let events = CoachingEvents()
+        let turnDebounce: TimeInterval = 0.02
         let coordinator = makeCoordinator(
             transcript: transcript,
             clock: clock,
             sessionStart: 10,
-            turnDebounce: 0,
+            turnDebounce: turnDebounce,
             events: events)
 
         let accepted = await recordAndStopBeforeQueuedDebounceRuns(coordinator)
         #expect(!accepted.empty)
         #expect(accepted.usable)
 
-        await drainMainQueue()
+        await waitForMainQueue(after: turnDebounce * 2)
         #expect(events.turnCount == 0)
         #expect(events.activity == [true, false])
         #expect(transcript.renderFrom(index: 0).text == "[00:00] me: usable")
@@ -162,12 +163,12 @@ private func waitUntil(
     return condition()
 }
 
-/// The zero-delay debounce has already submitted its work to this serial queue. A later sentinel
-/// proves that the scheduled turn had a chance to run, without guessing how many milliseconds the
-/// main actor needs under the parallel suite.
-private func drainMainQueue() async {
+/// Production scheduled its debounce before this later-deadline marker on the same serial queue.
+/// Reaching the marker proves the invalidated `fireTurn` callback was dequeued first, even when
+/// parallel test load delays both callbacks beyond their deadlines.
+private func waitForMainQueue(after delay: TimeInterval) async {
     await withCheckedContinuation { continuation in
-        DispatchQueue.main.async {
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
             continuation.resume()
         }
     }
@@ -194,8 +195,8 @@ private struct PendingTurnProbe: Sendable {
     }
 }
 
-/// Running the complete start/record/stop sequence in one main-actor turn guarantees the
-/// zero-delay debounce is genuinely queued but cannot execute until after `stop()` invalidates it.
+/// Running the complete start/record/stop sequence in one main-actor turn guarantees the debounce
+/// is genuinely queued but cannot execute until after `stop()` invalidates it.
 @MainActor
 private func recordAndStopBeforeQueuedDebounceRuns(
     _ coordinator: TranscriptionCoachingCoordinator
