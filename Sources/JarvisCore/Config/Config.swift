@@ -16,8 +16,7 @@ public struct Config: Sendable {
     /// When the client-managed session memory (`CoachHistory`) grows past this many estimated tokens,
     /// the driver condenses its oldest span into a short summary (see `CoachDriver.compactIfNeeded`).
     /// Sized to industry practice for conversational loads (~5–20k): big enough that compaction is
-    /// rare (a few times an hour), small enough that per-request input stays cheap. The estimator is
-    /// conservative for non-ASCII scripts so this boundary is useful in multilingual sessions.
+    /// rare (a few times an hour), small enough that per-request input stays cheap.
     public var historyCompactionTokenThreshold: Int
     /// Fixed time added to every overlay line before its reading time. Unlike a movie viewer (eyes on
     /// the screen, audio reinforcing the text), our user is mid-conversation and only *glances* at the

@@ -14,6 +14,18 @@ public final class CoachHistory: @unchecked Sendable {
     private let lock = NSLock()
     private var messages: [ChatMessage] = []
 
+    // Deliberately not an instruction: a session-audit showed the earlier "call capture_screen for
+    // a fresh look" phrasing, repeated once per stubbed screenshot in user-role history, biased the
+    // model toward capturing on every quiet turn (stay_silent was never chosen).
+    static let imageStub = "[an earlier screenshot was here — no longer available]"
+
+    /// The opening line of every OCR block the driver commits (see `CoachDriver.recognizedTextBlock`,
+    /// which builds on this constant so the two can't drift). Matched at commit time: a new capture's
+    /// OCR supersedes every earlier one, which then collapses to `ocrStub`.
+    static let ocrHeader = "Text recognized on the captured window (on-device OCR — may contain "
+        + "errors; the screenshot image is ground truth):"
+    static let ocrStub = "[an earlier screen's OCR text was here — superseded by a newer capture]"
+
     public init() {}
 
     /// The full memory, oldest first. Callers prepend the system prompt and append the new turn.
@@ -50,32 +62,23 @@ public final class CoachHistory: @unchecked Sendable {
         guard !turn.isEmpty else { return }
         lock.lock(); defer { lock.unlock() }
         var turn = turn
-        let ocrHeader = JarvisPrompts.Coach.recognizedTextHeader
-        if let newest = turn.lastIndex(where: { $0.text?.contains(ocrHeader) == true }) {
+        if let newest = turn.lastIndex(where: { $0.text?.contains(Self.ocrHeader) == true }) {
             messages = messages.map(Self.collapsingSupersededOCR)
             // One tool loop may capture more than once — only the turn's newest OCR stays verbatim.
             for i in turn.indices where i < newest { turn[i] = Self.collapsingSupersededOCR(turn[i]) }
         }
         messages.append(contentsOf: turn.compactMap { m in
             if let raw = m.rawItemsJSON { return Self.convertRawItems(raw) }
-            return m.imageBase64JPEG != nil
-                ? .user(JarvisPrompts.Coach.earlierImageStub)
-                : m
+            return m.imageBase64JPEG != nil ? .user(Self.imageStub) : m
         })
     }
 
-    /// Rewrite one committed message so its OCR block becomes the catalog's superseded marker.
-    /// Text before the block — e.g. a successful capture result — survives.
+    /// Rewrite one committed message so its OCR block (if any) becomes `ocrStub`. Text before the
+    /// block — e.g. a tool result's "screenshot captured" line — survives.
     private static func collapsingSupersededOCR(_ m: ChatMessage) -> ChatMessage {
-        guard let text = m.text,
-              let header = text.range(of: JarvisPrompts.Coach.recognizedTextHeader)
-        else { return m }
-        return ChatMessage(
-            role: m.role,
-            text: String(text[..<header.lowerBound])
-                + JarvisPrompts.Coach.supersededRecognizedTextStub,
-            toolCallId: m.toolCallId
-        )
+        guard let text = m.text, let header = text.range(of: ocrHeader) else { return m }
+        return ChatMessage(role: m.role, text: String(text[..<header.lowerBound]) + ocrStub,
+                           toolCallId: m.toolCallId)
     }
 
     /// The commit-time conversion of a verbatim passthrough message: keep its `function_call` items
@@ -93,9 +96,8 @@ public final class CoachHistory: @unchecked Sendable {
         return calls.isEmpty ? nil : .assistantToolCalls(calls)
     }
 
-    /// Rough size of the memory in tokens — used only to decide WHEN to compact. ASCII text uses the
-    /// common chars/4 heuristic; every non-ASCII scalar counts as one so Chinese and other scripts do
-    /// not wait several times too long. No image term: screenshots are stubbed to text at commit.
+    /// Rough size of the memory in tokens (chars/4) — used only to decide WHEN to compact, so
+    /// precision doesn't matter. No image term: screenshots are stubbed to text at commit.
     public var estimatedTokens: Int {
         lock.lock(); defer { lock.unlock() }
         return Self.estimate(messages)
@@ -103,25 +105,10 @@ public final class CoachHistory: @unchecked Sendable {
 
     private static func estimate(_ messages: [ChatMessage]) -> Int {
         messages.reduce(0) { total, m in
-            var t = total + (m.text.map(estimatedTextTokens) ?? 0)
-            if let calls = m.toolCalls {
-                t += calls.reduce(0) { $0 + estimatedTextTokens($1.argumentsJSON) + 8 }
-            }
+            var t = total + ((m.text?.count ?? 0) / 4)
+            if let calls = m.toolCalls { t += calls.reduce(0) { $0 + ($1.argumentsJSON.count / 4) + 8 } }
             return t
         }
-    }
-
-    private static func estimatedTextTokens(_ text: String) -> Int {
-        var asciiCount = 0
-        var nonASCIICount = 0
-        for scalar in text.unicodeScalars {
-            if scalar.value < 128 {
-                asciiCount += 1
-            } else {
-                nonASCIICount += 1
-            }
-        }
-        return ((asciiCount + 3) / 4) + nonASCIICount
     }
 
     /// The oldest span to summarize: the longest message prefix holding roughly `fraction` of the
@@ -148,7 +135,7 @@ public final class CoachHistory: @unchecked Sendable {
     public func compact(prefixCount: Int, summary: String) {
         lock.lock(); defer { lock.unlock() }
         guard prefixCount > 0, prefixCount <= messages.count else { return }
-        let head = ChatMessage.user(JarvisPrompts.Coach.condensedHistory(summary))
+        let head = ChatMessage.user("[session so far, condensed — earlier turns were summarized]\n\(summary)")
         messages.replaceSubrange(0..<prefixCount, with: [head])
     }
 }

@@ -331,7 +331,7 @@ import Testing
         #expect(start["sandbox"] as? String == "read-only")
         #expect(start["ephemeral"] as? Bool == true)
         #expect((start["baseInstructions"] as? String)?
-            .hasPrefix(JarvisPrompts.LocalAgent.codexDirectResponse) == true)
+            .hasPrefix(CLIBrainClient.codexDirectResponseInstruction) == true)
         let config = try #require(start["config"] as? [String: Any])
         #expect((config["mcp_servers"] as? [String: Any])?.isEmpty == true)
         #expect((config["project_root_markers"] as? [Any])?.isEmpty == true)

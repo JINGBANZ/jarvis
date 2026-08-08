@@ -68,6 +68,9 @@ public final class CoachDriver: @unchecked Sendable {
         /// or call/result linkage.
         var observations: [ChatMessage] = []
         var manualHintPrepared = false
+        /// Distinguishes a fresh natural event from a failed attempt whose automatic wake was
+        /// coalesced with that event. Filler suppression must never cancel the latter.
+        var hasFailedAttempt = false
     }
 
     private enum AttemptResult {
@@ -701,6 +704,7 @@ public final class CoachDriver: @unchecked Sendable {
                 if let reason = wake.reason {
                     failedWork.reason = Self.coalescing(failedWork.reason, with: reason)
                 }
+                failedWork.hasFailedAttempt = true
                 work = failedWork
                 automaticSequence += 1
 
@@ -765,29 +769,25 @@ public final class CoachDriver: @unchecked Sendable {
             reason: reason,
             sessionElapsedSeconds: now - sessionStart)
         let delta = transcript.renderFrom(index: currentCommittedTranscriptCount())
-        let substantiveLines = delta.lines.filter(TurnSubstance.isSubstantive)
-        let substantiveDeltaText = RollingTranscript.render(substantiveLines)
 
-        let userText = [
-            substantiveDeltaText.isEmpty
-                ? nil
-                : JarvisPrompts.Coach.newSpeech(substantiveDeltaText),
-            context.promptLine,
-        ].compactMap { $0 }.joined(separator: "\n\n")
-        var turnMessages = userText.isEmpty ? work.observations : [.user(userText)] + work.observations
-
-        // A request needs meaningful speech, a trigger instruction, or a provider-neutral
-        // observation completed by the failed attempt. Activity has already retained finalized
-        // filler, so an empty fresh attempt has no value to send and needs no synthetic placeholder.
-        if turnMessages.isEmpty {
+        // Filler-only natural events do not spend a provider attempt. A natural wake may also
+        // coalesce with failed pending work whose transcript delta is empty (for example, a silence
+        // attempt); that automatic attempt must still run.
+        if reason == .turnEnd && !work.hasFailedAttempt
+            && !delta.lines.contains(where: TurnSubstance.isSubstantive) {
             let preview = delta.lines.isEmpty
                 ? "nothing new"
                 : String(delta.lines.map(\.text).joined(separator: " · ").prefix(80))
             jlog("… skipped as filler (\(preview)) — not calling the brain")
-            commitTranscript(through: delta.upTo)
             return .skipped(.skippedFillerOnly)
         }
-        let historyBase: [ChatMessage] = [.system(JarvisPrompts.Coach.system)] + history.snapshot()
+
+        let historyBase: [ChatMessage] = [.system(coachSystemPrompt)] + history.snapshot()
+        let userText = [
+            delta.text.isEmpty ? nil : "New since last turn:\n\(delta.text)",
+            context.promptLine,
+        ].compactMap { $0 }.joined(separator: "\n\n")
+        var turnMessages: [ChatMessage] = [.user(userText)] + work.observations
 
         if reason == .manualHint && !work.manualHintPrepared {
             if let prompt = context.promptLine {
@@ -807,7 +807,7 @@ public final class CoachDriver: @unchecked Sendable {
                 turnMessages.append(.userImage(shot.imageBase64))
                 if let text = shot.recognizedText {
                     jlog("🔤 read \(text.count(where: { $0 == "\n" }) + 1) lines of on-screen text")
-                    let observation = ChatMessage.user(JarvisPrompts.Coach.recognizedText(text))
+                    let observation = ChatMessage.user(Self.recognizedTextBlock(text))
                     observations.append(observation)
                     turnMessages.append(observation)
                 }
@@ -816,7 +816,7 @@ public final class CoachDriver: @unchecked Sendable {
                 jlog("👁 screenshot failed")
                 ActivityLog.shared.record(.screenViewFailed)
                 work.observations = [
-                    .user(JarvisPrompts.Coach.manualHintCaptureFailed),
+                    .user("The screen capture requested for the manual hint failed."),
                 ]
             }
             work.manualHintPrepared = true
@@ -903,16 +903,14 @@ public final class CoachDriver: @unchecked Sendable {
                             jlog("🔤 read \(text.count(where: { $0 == "\n" }) + 1) lines of on-screen text")
                         }
                         work.observations = [
-                            .user(JarvisPrompts.Coach.captureResult(
-                                recognizedText: shot.recognizedText
-                            )),
+                            .user(Self.captureResultText(shot)),
                             .userImage(shot.imageBase64),
                         ]
                     } else {
                         jlog("👁 screenshot failed")
                         ActivityLog.shared.record(.screenViewFailed)
                         work.observations = [
-                            .user(JarvisPrompts.Coach.earlierCaptureFailed),
+                            .user("A screen capture requested earlier in this turn failed."),
                         ]
                     }
 
@@ -925,15 +923,13 @@ public final class CoachDriver: @unchecked Sendable {
                     if let shot {
                         turnMessages.append(.init(
                             role: .tool,
-                            text: JarvisPrompts.Coach.captureResult(
-                                recognizedText: shot.recognizedText
-                            ),
+                            text: Self.captureResultText(shot),
                             toolCallId: callID))
                         turnMessages.append(.userImage(shot.imageBase64))
                     } else {
                         turnMessages.append(.init(
                             role: .tool,
-                            text: JarvisPrompts.Coach.captureFailed,
+                            text: "screenshot failed",
                             toolCallId: callID))
                     }
 
@@ -952,7 +948,7 @@ public final class CoachDriver: @unchecked Sendable {
                     turnMessages.append(.assistantToolCalls(response.rawToolCalls))
                     turnMessages.append(.init(
                         role: .tool,
-                        text: JarvisPrompts.Coach.tipShown,
+                        text: "shown to the user",
                         toolCallId: callID))
                     history.commit(turnMessages)
                     commitTranscript(through: delta.upTo)
@@ -965,7 +961,7 @@ public final class CoachDriver: @unchecked Sendable {
                     }
                     jlog("… nothing useful to add, staying silent")
                     ActivityLog.shared.record(.stayedSilent)
-                    commitIfWorthKeeping(turnMessages, deltaText: substantiveDeltaText)
+                    commitIfWorthKeeping(turnMessages, deltaText: delta.text)
                     commitTranscript(through: delta.upTo)
                     return .completed(.silentByModel)
                 }
@@ -992,6 +988,11 @@ public final class CoachDriver: @unchecked Sendable {
         history.commit(turn)
     }
 
+    private static func captureResultText(_ shot: ScreenSnapshot) -> String {
+        guard let text = shot.recognizedText else { return "screenshot captured" }
+        return "screenshot captured\n\n\(recognizedTextBlock(text))"
+    }
+
     /// Screen capture is an OS-bound synchronous edge, so run it off the cooperative executor.
     /// Cancellation asks the capture adapter to terminate its helper, then waits for `capture()` to
     /// return so the attempt cannot outlive cleanup of screen-derived files.
@@ -1010,6 +1011,10 @@ public final class CoachDriver: @unchecked Sendable {
         }
     }
 
+    private static func recognizedTextBlock(_ text: String) -> String {
+        "\(CoachHistory.ocrHeader)\n\(text)"
+    }
+
     // MARK: - History compaction
 
     /// Auxiliary compaction fails soft and never counts against provider route health.
@@ -1018,10 +1023,7 @@ public final class CoachDriver: @unchecked Sendable {
         guard let (oldest, count) = history.compactionPrefix() else { return }
         do {
             let response = try await (attempt.summarizer ?? attempt.brain).respond(
-                messages: [
-                    .system(JarvisPrompts.HistorySummary.system),
-                    .user(JarvisPrompts.HistorySummary.input(oldest)),
-                ],
+                messages: [.system(Self.summaryInstructions), .user(Self.renderForSummary(oldest))],
                 tools: [],
                 toolChoice: .auto)
             guard let summary = response.outputText, !summary.isEmpty else {
@@ -1035,6 +1037,24 @@ public final class CoachDriver: @unchecked Sendable {
         }
     }
 
+    public static let summaryInstructions = """
+    You condense a live coding-interview coaching session's history into a briefing the coach will \
+    rely on for the rest of the session. Keep, in this order: the interview problem statement (all \
+    load-bearing details); the user's current approach and how far they've got; every tip the coach \
+    already gave (so it isn't repeated); any open questions or requirements from the interviewer. \
+    Plain text, under 250 words. Output only the briefing.
+    """
+
+    private static func renderForSummary(_ messages: [ChatMessage]) -> String {
+        messages.map { message in
+            if let calls = message.toolCalls {
+                return calls.map { "coach called \($0.name)" }.joined(separator: "\n")
+            }
+            if message.imageBase64JPEG != nil { return "[screenshot]" }
+            let text = message.text ?? ""
+            return message.role == .tool ? "tool result: \(text)" : text
+        }.joined(separator: "\n")
+    }
 }
 
 /// Observable outcome of the trigger-coordination call. Provider failures may lead to more than one

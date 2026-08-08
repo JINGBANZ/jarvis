@@ -101,7 +101,6 @@ into one module, so moving a file between subfolders never changes access contro
 | `Sources/JarvisCore/Overlay/` | Overlay text model (the rendered tip; not the window) |
 | `Sources/JarvisCore/Config/` | Config + secrets (owner-only file) |
 | `Sources/JarvisCore/Diagnostics/` | Logging, the activity log, session-history store |
-| `Sources/JarvisCore/Prompts/` | All predefined model-facing prompt text (`JarvisPrompts`) |
 | `Sources/JarvisCore/Support/` | Small primitives (`Clock`, `TurnTaskBox`) |
 | `Sources/JarvisOverlay/` | The on-screen `NSPanel` overlay surfaces (caption + box; no subfolders) |
 | `Sources/JarvisApp/App/` | Entry point, `AppDelegate` |

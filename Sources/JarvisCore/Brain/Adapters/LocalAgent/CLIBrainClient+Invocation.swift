@@ -17,6 +17,13 @@ extension CLIBrainClient {
         "unified_exec",
     ]
 
+    /// App-server `baseInstructions` replaces the coding task with Jarvis's direct decision role.
+    static let codexDirectResponseInstruction = """
+        Answer this decision request immediately without inspecting files, running commands,
+        browsing, planning, delegating, or invoking any Codex built-in tool. The capture_screen,
+        speak, and stay_silent names below are an output JSON protocol, not callable Codex tools.
+        """
+
     /// Codex's current catalog starts at `low`; Jarvis's `none` clamps to that floor.
     static func codexEffort(_ effort: String) -> String {
         effort == ReasoningEffort.none.rawValue ? ReasoningEffort.low.rawValue : effort

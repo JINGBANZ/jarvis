@@ -144,7 +144,7 @@ public struct CLIBrainClient: BrainClient, Sendable {
         let rendered = renderConversation(inputMessages)
         var input: [LocalAgentInput] = []
         var auditInput: [[String: Any]] = []
-        var textRun = [JarvisPrompts.LocalAgent.conversationHeading(isFirstTurn: isFirst)]
+        var textRun = [isFirst ? "## Conversation" : "## New input"]
 
         func flushText() {
             guard !textRun.isEmpty else { return }
@@ -159,7 +159,7 @@ public struct CLIBrainClient: BrainClient, Sendable {
             case .text(let text):
                 textRun.append(text)
             case .imageJPEG(let base64):
-                textRun.append(JarvisPrompts.LocalAgent.screenshotPlaceholder)
+                textRun.append("[user]\n(screenshot below)")
                 flushText()
                 input.append(.imageJPEG(base64: base64))
                 auditInput.append([
@@ -169,15 +169,11 @@ public struct CLIBrainClient: BrainClient, Sendable {
             }
         }
         if !tools.isEmpty {
-            let forcedToolName: String?
-            if case .force(let name) = toolChoice {
-                forcedToolName = name
-            } else {
-                forcedToolName = nil
+            var trailer = "Answer now, following the tool protocol."
+            if let forced = Self.forcedToolDirective(toolChoice) {
+                trailer += " \(forced)"
             }
-            textRun.append(JarvisPrompts.LocalAgent.answerTrailer(
-                forcedToolName: forcedToolName
-            ))
+            textRun.append(trailer)
         }
         flushText()
 

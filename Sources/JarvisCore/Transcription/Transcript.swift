@@ -68,7 +68,7 @@ public final class RollingTranscript: @unchecked Sendable {
     /// sockets (mic/"me", system audio/"them") append independently and a slow utterance can complete
     /// — and so be appended — after a later one, so insertion order isn't time order. We sort by `.at`
     /// (stable on ties via the original index) so the coach always sees the order things were said.
-    static func render<S: Sequence>(_ lines: S) -> String where S.Element == TranscriptLine {
+    private static func render<S: Sequence>(_ lines: S) -> String where S.Element == TranscriptLine {
         lines.enumerated()
             .sorted { $0.element.at != $1.element.at ? $0.element.at < $1.element.at : $0.offset < $1.offset }
             .map { "[\(stamp($0.element.at))] \($0.element.speaker.rawValue): \($0.element.text)" }
