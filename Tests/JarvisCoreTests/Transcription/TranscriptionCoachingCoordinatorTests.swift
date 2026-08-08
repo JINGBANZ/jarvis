@@ -13,6 +13,10 @@ import Testing
             sessionStart: 100,
             turnDebounce: 0,
             events: events)
+        guard let pendingTurn = PendingTurnProbe(coordinator) else {
+            Issue.record("Could not inspect the coordinator's pending utterance buffer")
+            return
+        }
 
         coordinator.start()
         coordinator.updateActivity(true)
@@ -21,7 +25,9 @@ import Testing
         #expect(coordinator.recordFinalizedTranscript(
             "second fragment", spokenAt: 2, source: "test"))
 
-        await drainMainQueue()
+        #expect(await waitUntil {
+            pendingTurn.observeAndRestoreWaitingState()
+        })
         #expect(events.turnCount == 0)
         #expect(events.activity == [true])
 
@@ -164,6 +170,27 @@ private func drainMainQueue() async {
         DispatchQueue.main.async {
             continuation.resume()
         }
+    }
+}
+
+/// `fireTurn` has no externally visible callback while transcription remains active. This
+/// test-local probe observes the exact `UtteranceBuffer` transition instead of adding a production
+/// hook, then restores the state so `updateActivity(false)` still exercises the normal resume path.
+private struct PendingTurnProbe: Sendable {
+    private let pending: UtteranceBuffer
+
+    init?(_ coordinator: TranscriptionCoachingCoordinator) {
+        guard let pending = Mirror(reflecting: coordinator).descendant("pending")
+            as? UtteranceBuffer else { return nil }
+        self.pending = pending
+    }
+
+    func observeAndRestoreWaitingState() -> Bool {
+        guard pending.shouldResumeAfterPendingTranscriptionsSettle(
+            hasPendingTranscriptions: false
+        ) else { return false }
+        return pending.drainIfSettled(hasPendingTranscriptions: true)
+            == .waitingForPendingTranscriptions
     }
 }
 
