@@ -4,8 +4,10 @@ import JarvisCore
 
 /// The activity viewer view: an in-app `WKWebView` that live-appends log rows pushed from
 /// `ActivityLog` (no reload), shows screenshots in an in-page lightbox, and lets you browse and clear
-/// past sessions via `SessionStore`. Thin by design — the rendering logic and its tests live in
-/// JarvisCore (`htmlShell`/`rowScript`) and `JarvisViewerTests`. See wiki/build-and-run.md.
+/// past sessions via `SessionStore`. Its compact header badge renders the same live
+/// `JarvisReadiness.Status` as the menu without appending an Activity row. Thin by design — the
+/// rendering logic and its tests live in JarvisCore (`htmlShell`/`rowScript`) and
+/// `JarvisViewerTests`. See wiki/build-and-run.md.
 @MainActor
 final class ActivityViewer: NSObject, WKNavigationDelegate {
     private let log: ActivityLog
@@ -35,6 +37,8 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
     private var snapshotRows: [String] = [] // rows to inject once the shell has loaded
     private var pendingMeta = ""           // header text to set after the shell loads
     private var viewingCurrent = true
+    /// Current UI state only. It is injected into the in-memory page and never written to Activity.
+    private var readinessStatus: JarvisReadiness.Status = .stopped
 
     // Runaway backstop only — high enough that a whole multi-hour session replays in full (cutting a
     // session's head off is worse than a big DOM; text rows are cheap and screenshots are bounded).
@@ -200,6 +204,13 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         refreshEvaluateButtonState()
     }
 
+    /// Render the Core composition result for the current session. Past sessions intentionally show
+    /// only Ended rather than reconstructing transient readiness history that was never persisted.
+    func readinessDidChange(_ status: JarvisReadiness.Status) {
+        readinessStatus = status
+        refreshReadinessBadge()
+    }
+
     /// A dev-side evaluator may also have written a report while Settings was on another tab.
     func didBecomeActive() {
         refreshEvaluateButtonState()
@@ -300,6 +311,16 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         snapshotRows = []
         pending = []
         webView.evaluateJavaScript("setMeta(\(jsString(pendingMeta)));", completionHandler: nil)
+        refreshReadinessBadge()
+    }
+
+    private func refreshReadinessBadge() {
+        guard loaded else { return }
+        let badge = viewingCurrent
+            ? readinessStatus.activityBadge
+            : (label: "Ended", state: "stopped")
+        let script = "setReadiness(\(jsString(badge.label)),\(jsString(badge.state)));"
+        webView?.evaluateJavaScript(script, completionHandler: nil)
     }
 
     // MARK: - Session evaluation
@@ -408,5 +429,24 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
     /// Encode a Swift string as a JS string literal (for `setMeta`).
     private func jsString(_ s: String) -> String {
         (try? String(data: JSONEncoder().encode(s), encoding: .utf8)) ?? "\"\""
+    }
+}
+
+private extension JarvisReadiness.Status {
+    var activityBadge: (label: String, state: String) {
+        switch self {
+        case .checking:
+            ("Starting", "starting")
+        case .blocked:
+            ("Blocked", "blocked")
+        case .recovering:
+            ("Recovering", "recovering")
+        case .ready(.full):
+            ("Ready", "ready")
+        case .ready(.microphoneOnly):
+            ("Microphone only", "microphone-only")
+        case .stopped:
+            ("Stopped", "stopped")
+        }
     }
 }

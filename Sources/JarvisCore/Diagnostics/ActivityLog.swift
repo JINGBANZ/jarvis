@@ -355,10 +355,10 @@ public final class ActivityLog: @unchecked Sendable {
             || m.hasPrefix("⚠️ brain change failed")
     }
 
-    /// The empty page shell: an adaptive Settings-style activity feed, a header with a live count,
-    /// the lightbox overlay, and the JS that `appendRow`/`openShot`/`closeShot`/`clearRows`/`setMeta`
-    /// drive. Rows are injected at runtime via `evaluateJavaScript`; no row HTML is rendered
-    /// server-side, so the page never embeds untrusted text and there is no reload.
+    /// The empty page shell: an adaptive Settings-style activity feed, a header with a live count and
+    /// non-persisted readiness badge, the lightbox overlay, and the JS that the App viewer drives.
+    /// Rows are injected at runtime via `evaluateJavaScript`; no row HTML is rendered server-side, so
+    /// the page never embeds untrusted text and there is no reload.
     public static func htmlShell() -> String {
         """
         <!doctype html><html lang="en"><head>
@@ -395,11 +395,18 @@ public final class ActivityLog: @unchecked Sendable {
           body { margin: 0; background: var(--background); color: var(--text);
                  font: 12px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text",
                        "Helvetica Neue", sans-serif; }
-          header { position: sticky; top: 0; padding: 9px 14px; background: var(--surface);
+          header { position: sticky; top: 0; display: flex; align-items: center; gap: 8px;
+                   padding: 9px 14px; background: var(--surface);
                    border-bottom: 1px solid var(--line); color: var(--muted);
                    font-size: 10px; font-weight: 700; letter-spacing: .045em;
                    text-transform: uppercase; z-index: 10; }
-          header .count { font-weight: 500; letter-spacing: 0; text-transform: none; }
+          header .count { flex: 1; font-weight: 500; letter-spacing: 0; text-transform: none; }
+          header .readiness { padding: 2px 7px; border: 1px solid var(--line); border-radius: 999px;
+                              font-weight: 600; letter-spacing: 0; text-transform: none; }
+          header .readiness[data-state="ready"] { color: var(--say); }
+          header .readiness[data-state="microphone-only"],
+          header .readiness[data-state="recovering"] { color: var(--see); }
+          header .readiness[data-state="blocked"] { color: var(--error); }
           main { padding: 0 0 28px; }
           .row { display: grid; grid-template-columns: 66px minmax(0, 1fr); gap: 12px;
                  padding: 10px 14px; border-bottom: 1px solid var(--line);
@@ -421,7 +428,9 @@ public final class ActivityLog: @unchecked Sendable {
           .lightbox img { max-width: 92vw; max-height: 92vh; border: 1px solid var(--line);
                           border-radius: 8px; box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6); }
         </style></head><body>
-        <header>Jarvis — activity log <span class="count" id="count"></span></header>
+        <header>Jarvis — activity log <span class="count" id="count"></span>
+          <span class="readiness" id="readiness" data-state="stopped">Stopped</span>
+        </header>
         <main id="log"></main>
         <div class="lightbox" id="lightbox"><img id="lightbox-img" alt="full-size screenshot"></div>
         <script>
@@ -447,6 +456,8 @@ public final class ActivityLog: @unchecked Sendable {
             b.classList.remove('open'); document.getElementById('lightbox-img').removeAttribute('src'); }
           function clearRows(){ document.getElementById('log').innerHTML=''; }
           function setMeta(s){ document.getElementById('count').textContent=s; }
+          function setReadiness(label,state){ var badge=document.getElementById('readiness');
+            badge.textContent=label||''; badge.dataset.state=state||'stopped'; }
           document.addEventListener('keydown',function(e){ if(e.key==='Escape') closeShot(); });
           document.getElementById('lightbox').addEventListener('click',closeShot);
         </script>
