@@ -9,7 +9,9 @@ import AppKit
 /// Like `OverlayInvisibilityTests`, the synchronous checks are `@MainActor @Test` (the async +
 /// @MainActor @Test combination miscompiles on the bundled swift-testing toolchain), while anything
 /// that needs `render`'s main-actor hop to run is a nonisolated `@Test` awaiting a `@MainActor` helper.
-@Suite struct OverlayBoxPanelTests {
+// NSPanel and its AppKit layout live on the one main actor. Keep this OS-bound suite sequential while
+// Foundation-only suites continue to use Swift Testing's default parallel execution.
+@Suite(.serialized) struct OverlayBoxPanelTests {
 
     @MainActor @Test
     func excludedFromScreenCaptureAtInit() {

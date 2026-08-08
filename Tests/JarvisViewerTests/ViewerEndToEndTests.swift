@@ -5,7 +5,9 @@ import WebKit
 /// End-to-end: a real `WKWebView` loads the shipped page shell and runs the *actual shipped JS*
 /// (`appendRow`, the lightbox handlers) driven through `ActivityLog`'s real `rowScript` output —
 /// the exact code path the production viewer uses.
-@Suite struct ViewerEndToEndTests {
+// WKWebView instances share AppKit's main loop and WebKit process resources. A single viewer case at
+// a time avoids starving unrelated main-actor timer tests while the rest of the suite stays parallel.
+@Suite(.serialized) struct ViewerEndToEndTests {
     @MainActor @Test func appendRowRendersTextSafely() async throws {
         let h = WebViewHarness()
         try await h.load(ActivityLog.htmlShell())

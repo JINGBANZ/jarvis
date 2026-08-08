@@ -176,6 +176,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
                             screen: ScreenCapturing = FakeScreen(),
                             overlay: OverlayRendering = FakeOverlay(),
                             clock: Clock, config: Config = .default,
+                            automaticAttemptDelay: @escaping CoachDriver.AutomaticAttemptDelay = { _ in },
                             onBrainFailure: (@MainActor @Sendable (BrainFailure) -> Void)? = nil)
         -> (CoachDriver, RollingTranscript) {
         let transcript = RollingTranscript()
@@ -191,7 +192,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let driver = CoachDriver(
             config: config, transcript: transcript,
             route: route, screen: screen, overlay: overlay, clock: clock,
-            automaticAttemptDelay: { _ in }
+            automaticAttemptDelay: automaticAttemptDelay
         )
         return (driver, transcript)
     }
@@ -1672,51 +1673,73 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
     @Test func automaticPendingAttemptWaitsForBothSpeakersToStop() async {
         let gate = AsyncGate()
+        let delayGate = AsyncGate()
         let brain = GatedFailureThenSpeakingBrain(gate: gate)
-        let (driver, transcript) = makeDriver(brain: brain, clock: ManualClock())
+        let (driver, transcript) = makeDriver(
+            brain: brain,
+            clock: ManualClock(),
+            automaticAttemptDelay: { _ in await delayGate.enter() })
         driver.updateSpeechActivity(true, for: .me)
         driver.updateSpeechActivity(true, for: .them)
         transcript.append(.init(speaker: .me, text: "wait for quiet", at: 0))
-        async let outcome = driver.handleTrigger(.turnEnd)
+        let outcome = Task {
+            await turnOutcomeBeforeTimeout {
+                await driver.handleTrigger(.turnEnd)
+            }
+        }
+        defer { outcome.cancel() }
         await gate.waitUntilEntered()
         await gate.release()
-        try? await Task.sleep(nanoseconds: 10_000_000)
+        #expect(await waitUntilAsync { await delayGate.hasEntered })
         #expect(brain.calls.count == 1)
 
         driver.updateSpeechActivity(false, for: .me)
-        try? await Task.sleep(nanoseconds: 10_000_000)
         #expect(brain.calls.count == 1)
 
+        await delayGate.release()
+        // Give a broken retry a bounded chance to make the forbidden second call. While `.them`
+        // remains active, the pending attempt must stay parked instead.
+        #expect(!(await waitUntil {
+            brain.calls.count == 2
+        }))
         driver.updateSpeechActivity(false, for: .them)
-        #expect(await outcome == .spoke)
+        #expect(await outcome.value == .spoke)
         #expect(brain.calls.count == 2)
     }
 
-    @Test func lateManualHintInterruptsSpeechWaitAndJoinsPendingAttempt() async {
+    @Test func lateManualHintInterruptsSpeechWaitAndJoinsPendingAttempt() async throws {
         let gate = AsyncGate()
+        let delayProbe = AutomaticDelayProbe()
         let brain = GatedFailureThenSpeakingBrain(gate: gate)
         let screen = FakeScreen()
         let (driver, transcript) = makeDriver(
             brain: brain,
             screen: screen,
-            clock: ManualClock())
+            clock: ManualClock(),
+            automaticAttemptDelay: { _ in
+                try await delayProbe.waitForCancellation()
+            })
         driver.updateSpeechActivity(true, for: .them)
         transcript.append(.init(speaker: .me, text: "failed pending thought", at: 0))
 
-        async let outcome = driver.handleTrigger(.turnEnd)
+        let outcome = Task {
+            await turnOutcomeBeforeTimeout {
+                await driver.handleTrigger(.turnEnd)
+            }
+        }
+        defer {
+            outcome.cancel()
+            driver.updateSpeechActivity(false, for: .them)
+        }
         await gate.waitUntilEntered()
         await gate.release()
-        try? await Task.sleep(nanoseconds: 20_000_000)
+        #expect(await waitUntilAsync { await delayProbe.hasEntered })
         #expect(brain.calls.count == 1)
 
         transcript.append(.init(speaker: .me, text: "latest words for the hint", at: 1))
         #expect(await driver.handleTrigger(.manualHint) == .busy)
-        try? await Task.sleep(nanoseconds: 20_000_000)
-        #expect(brain.calls.count == 2)
-
-        // Cleanup also prevents a regression from parking the test forever after the expectation.
-        driver.updateSpeechActivity(false, for: .them)
-        #expect(await outcome == .spoke)
+        #expect(await outcome.value == .spoke)
+        try #require(brain.calls.count == 2)
         #expect(screen.captureCount == 1)
         #expect(brain.calls[1].contains {
             ($0.text ?? "").contains("latest words for the hint")
@@ -1744,20 +1767,36 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
     @Test func automaticRetryOfFailedManualHintWaitsForUnsettledSpeech() async {
         let gate = AsyncGate()
+        let delayGate = AsyncGate()
         let brain = GatedFailureThenSpeakingBrain(gate: gate)
         let (driver, _) = makeDriver(
             brain: brain,
-            clock: ManualClock())
+            clock: ManualClock(),
+            automaticAttemptDelay: { _ in await delayGate.enter() })
         driver.updateSpeechActivity(true, for: .them)
 
-        async let outcome = driver.handleTrigger(.manualHint)
+        let outcome = Task {
+            await turnOutcomeBeforeTimeout {
+                await driver.handleTrigger(.manualHint)
+            }
+        }
+        defer {
+            outcome.cancel()
+            driver.updateSpeechActivity(false, for: .them)
+        }
         await gate.waitUntilEntered()
         await gate.release()
-        try? await Task.sleep(nanoseconds: 10_000_000)
+        #expect(await waitUntilAsync { await delayGate.hasEntered })
         #expect(brain.calls.count == 1)
 
+        await delayGate.release()
+        // A broken manual-hint retry would make its second call while `.them` is still active.
+        // Keep speech unsettled long enough to prove the retry reached the speech gate first.
+        #expect(!(await waitUntil {
+            brain.calls.count == 2
+        }))
         driver.updateSpeechActivity(false, for: .them)
-        #expect(await outcome == .spoke)
+        #expect(await outcome.value == .spoke)
         #expect(brain.calls.count == 2)
     }
 
@@ -2104,15 +2143,20 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
                 try await delayProbe.waitForCancellation()
             })
         transcript.append(.init(speaker: .me, text: "first pending thought", at: 0))
-        async let first = driver.handleTrigger(.turnEnd)
+        let first = Task {
+            await turnOutcomeBeforeTimeout {
+                await driver.handleTrigger(.turnEnd)
+            }
+        }
+        defer { first.cancel() }
         await brainGate.waitUntilEntered()
         await brainGate.release()
-        await delayProbe.waitUntilEntered()
+        #expect(await waitUntilAsync { await delayProbe.hasEntered })
 
         transcript.append(.init(speaker: .me, text: "wake with this new thought", at: 1))
         #expect(await driver.handleTrigger(.turnEnd) == .busy)
 
-        #expect(await first == .spoke)
+        #expect(await first.value == .spoke)
         #expect(brain.calls.count == 2)
         #expect(brain.calls[1].contains {
             ($0.text ?? "").contains("wake with this new thought")
@@ -2542,18 +2586,55 @@ actor AsyncGate {
 
 private actor AutomaticDelayProbe {
     private var entered = false
-    private var enteredWaiters: [CheckedContinuation<Void, Never>] = []
+
+    var hasEntered: Bool { entered }
 
     func waitForCancellation() async throws {
         entered = true
-        enteredWaiters.forEach { $0.resume() }
-        enteredWaiters.removeAll()
         try await Task.sleep(nanoseconds: 60_000_000_000)
     }
+}
 
-    func waitUntilEntered() async {
-        if entered { return }
-        await withCheckedContinuation { enteredWaiters.append($0) }
+private func waitUntil(
+    timeoutNanoseconds: UInt64 = 200_000_000,
+    condition: @escaping @Sendable () -> Bool
+) async -> Bool {
+    let startedAt = DispatchTime.now().uptimeNanoseconds
+    while DispatchTime.now().uptimeNanoseconds - startedAt < timeoutNanoseconds {
+        if condition() { return true }
+        try? await Task.sleep(nanoseconds: 1_000_000)
+    }
+    return condition()
+}
+
+private func waitUntilAsync(
+    timeoutNanoseconds: UInt64 = 5_000_000_000,
+    condition: @escaping @Sendable () async -> Bool
+) async -> Bool {
+    let startedAt = DispatchTime.now().uptimeNanoseconds
+    while DispatchTime.now().uptimeNanoseconds - startedAt < timeoutNanoseconds {
+        if await condition() { return true }
+        if Task.isCancelled { return false }
+        try? await Task.sleep(nanoseconds: 1_000_000)
+    }
+    return await condition()
+}
+
+private func turnOutcomeBeforeTimeout(
+    timeoutNanoseconds: UInt64 = 5_000_000_000,
+    operation: @escaping @Sendable () async -> TurnOutcome
+) async -> TurnOutcome? {
+    await withTaskGroup(of: TurnOutcome?.self) { group in
+        group.addTask {
+            await operation()
+        }
+        group.addTask {
+            try? await Task.sleep(nanoseconds: timeoutNanoseconds)
+            return nil
+        }
+        let outcome = await group.next() ?? nil
+        group.cancelAll()
+        return outcome
     }
 }
 

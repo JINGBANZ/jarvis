@@ -2,7 +2,10 @@ import Foundation
 import Testing
 @testable import JarvisCore
 
-@Suite struct AgentRuntimeProcessTests {
+// These tests deliberately saturate pipes and terminate whole process groups. Running all of those
+// OS-level stress cases at once makes the assertion depend on scheduler pressure rather than the
+// process boundary under test; the rest of the Swift Testing suite remains parallel.
+@Suite(.serialized) struct AgentRuntimeProcessTests {
     @Test func keepsOneProcessAliveAcrossMultipleJSONLines() async throws {
         let process = try AgentRuntimeProcess(
             executable: URL(fileURLWithPath: "/bin/sh"),
@@ -113,7 +116,7 @@ import Testing
             workingDirectory: FileManager.default.temporaryDirectory)
         defer { process.terminateNow() }
 
-        try await Task.sleep(nanoseconds: 300_000_000)
+        #expect(await waitUntilStopped(process), "stdout overflow should stop the runtime")
         do {
             _ = try await process.nextLine(timeout: 2)
             Issue.record("expected stdout buffer overflow")
@@ -133,7 +136,7 @@ import Testing
             workingDirectory: FileManager.default.temporaryDirectory)
         defer { process.terminateNow() }
 
-        try await Task.sleep(nanoseconds: 300_000_000)
+        #expect(await waitUntilStopped(process), "line-buffer overflow should stop the runtime")
         do {
             _ = try await process.nextLine(timeout: 2)
             Issue.record("expected stdout line buffer overflow")
@@ -165,18 +168,16 @@ import Testing
             workingDirectory: directory)
         defer { process.terminateNow() }
 
-        let childDeadline = Date().addingTimeInterval(2)
-        while !FileManager.default.fileExists(atPath: childFile.path),
-              Date() < childDeadline {
-            try await Task.sleep(nanoseconds: 20_000_000)
-        }
-        let child = try #require(pid_t(
-            String(contentsOf: childFile, encoding: .utf8)
-                .trimmingCharacters(in: .whitespacesAndNewlines)))
+        let childIdentifier = try await waitForProcessIdentifier(
+            in: childFile,
+            timeout: 2)
+        let child = try #require(
+            childIdentifier,
+            "timed out waiting for the helper PID")
 
-        // Let the handler drain the already-buffered burst; reading immediately could consume one
-        // empty line before the configured line-count limit is crossed.
-        try await Task.sleep(nanoseconds: 300_000_000)
+        // Wait for the handler to observe the configured limit. Reading before that event could
+        // consume an empty line and prevent the buffer from ever crossing the limit.
+        #expect(await waitUntilStopped(process), "line-buffer overflow should stop the runtime")
         do {
             _ = try await process.nextLine(timeout: 2)
             Issue.record("expected stdout line buffer overflow")
@@ -317,14 +318,12 @@ import Testing
         _ = try await process.nextLine(timeout: 2)
 
         process.terminateNow()
-        let childDeadline = Date().addingTimeInterval(3)
-        while !FileManager.default.fileExists(atPath: childFile.path),
-              Date() < childDeadline {
-            try await Task.sleep(nanoseconds: 20_000_000)
-        }
-        let child = try #require(pid_t(
-            String(contentsOf: childFile, encoding: .utf8)
-                .trimmingCharacters(in: .whitespacesAndNewlines)))
+        let childIdentifier = try await waitForProcessIdentifier(
+            in: childFile,
+            timeout: 3)
+        let child = try #require(
+            childIdentifier,
+            "timed out waiting for the helper PID")
 
         let terminationDeadline = Date().addingTimeInterval(4)
         while processState(child) == "running", Date() < terminationDeadline {
@@ -352,5 +351,33 @@ import Testing
             .trimmingCharacters(in: .whitespacesAndNewlines)
         if state.isEmpty { return "absent" }
         return state.hasPrefix("Z") ? "zombie" : "running"
+    }
+
+    private func waitUntilStopped(
+        _ process: AgentRuntimeProcess,
+        timeout: TimeInterval = 5
+    ) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while process.isRunning, Date() < deadline {
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+        return !process.isRunning
+    }
+
+    private func waitForProcessIdentifier(
+        in file: URL,
+        timeout: TimeInterval
+    ) async throws -> pid_t? {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if let contents = try? String(contentsOf: file, encoding: .utf8),
+               let processIdentifier = pid_t(
+                   contents.trimmingCharacters(in: .whitespacesAndNewlines)),
+               processIdentifier > 0 {
+                return processIdentifier
+            }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        return nil
     }
 }
