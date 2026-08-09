@@ -13,20 +13,27 @@ final class TranscriptionBenchmarkEventRecorder: @unchecked Sendable {
     enum Failure: Error, CustomStringConvertible {
         case timedOut(String)
         case terminal(TranscriptionFailureReason)
+        case aborted
 
         var description: String {
             switch self {
             case .timedOut(let boundary): "Timed out waiting for \(boundary)"
             case .terminal(let reason): "Transcription failed: \(reason.activityDescription)"
+            case .aborted: "Reconnect benchmark aborted by the operator"
             }
         }
     }
 
     private let lock = NSLock()
+    private let abortMarker: URL?
     private var events: [TranscriptionDiagnosticEvent] = []
     private var captureObservations: [TranscriptionBenchmark.CaptureObservation] = []
     private var states: [TranscriptionConnectionState] = []
     private var terminalFailure: TranscriptionFailureReason?
+
+    init(abortMarker: URL? = nil) {
+        self.abortMarker = abortMarker
+    }
 
     func record(_ event: TranscriptionDiagnosticEvent) {
         lock.lock(); events.append(event); lock.unlock()
@@ -82,6 +89,24 @@ final class TranscriptionBenchmarkEventRecorder: @unchecked Sendable {
         } as Bool
     }
 
+    func waitForRecognizedReconnectPhrases(
+        _ phraseIDs: [String],
+        afterGeneration generation: Int,
+        timeout: TimeInterval
+    ) async throws {
+        let expected = Set(phraseIDs)
+        _ = try await wait(
+            timeout: timeout,
+            boundary: "all expected reconnect phrases"
+        ) { snapshot in
+            let recognized = Set(TranscriptionBenchmark.recognizedReconnectPhraseIDs(
+                phraseIDs,
+                in: snapshot.events,
+                afterGeneration: generation))
+            return recognized.isSuperset(of: expected) ? true : nil
+        } as Bool
+    }
+
     private func wait<Value: Sendable>(
         timeout: TimeInterval,
         boundary: String,
@@ -90,6 +115,10 @@ final class TranscriptionBenchmarkEventRecorder: @unchecked Sendable {
         let deadline = Date().timeIntervalSince1970 + timeout
         while Date().timeIntervalSince1970 < deadline {
             try Task.checkCancellation()
+            if let abortMarker,
+               FileManager.default.fileExists(atPath: abortMarker.path) {
+                throw Failure.aborted
+            }
             let current = snapshot()
             if let terminalFailure = current.terminalFailure {
                 throw Failure.terminal(terminalFailure)

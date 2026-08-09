@@ -39,6 +39,10 @@ final class TranscriptionBenchmarkRunner {
 
     func run() async throws {
         try TranscriptionBenchmarkFiles.prepareOutputDirectory(options.outputDirectory)
+        try TranscriptionBenchmarkRunStore(
+            base: options.outputDirectory.deletingLastPathComponent(),
+            current: options.outputDirectory
+        ).pruneToMostRecent(TranscriptionBenchmark.retainedRunCount)
         JarvisLog.enableFileLogging(directory: options.outputDirectory)
         networkDiagnostics.start()
         TranscriptionBenchmarkFiles.writeProgress(
@@ -51,16 +55,15 @@ final class TranscriptionBenchmarkRunner {
         }
         try player.prepare(try fixtures.fixture(for: first).fileURL)
 
-        let capture = SystemAudioBenchmarkCapture(
-            onCaptured: { [relay] sequence, samples, timestamp in
-                relay.recordCapture(sequence: sequence, samples: samples, at: timestamp)
-            },
-            onAudio: { [relay] data, sequence, timestamp in
-                relay.send(data, sequence: sequence, at: timestamp)
-            },
-            onSpeechEvent: { [relay] event, sequence in
-                relay.recordSpeech(event, through: sequence)
-            })
+        let capture = SystemAudioBenchmarkCapture {
+            [relay] data, sequence, samples, timestamp, events in
+            relay.deliver(
+                data,
+                sequence: sequence,
+                samples: samples,
+                capturedAt: timestamp,
+                speechEvents: events)
+        }
         try capture.start()
         defer {
             relay.install(nil)

@@ -157,11 +157,14 @@ exactly once and in order, with buffered audio replayed, no replay eviction, and
 fallback. This command is never part of the build or test gate.
 
 Each run writes owner-only `summary.json`, `jarvis-debug.log`, progress, and reconnect handshake files
-under `.jarvis/transcription-benchmarks/<run>/`. No captured PCM is written. The synthesized fixture
-files are temporary, live inside that same run directory, and are deleted before exit; a failed
-cleanup is explicit in the debug log. Standard mode can request System Audio Recording permission but
-does not require microphone permission. A live standard run and especially a reconnect run remain
-explicit operator actions, never autonomous validation steps.
+under `.jarvis/transcription-benchmarks/<run>/`; the hidden runner prunes that tree before capture
+starts to the bounded limit in
+[`TranscriptionBenchmark.retainedRunCount`](../Sources/JarvisCore/Benchmark/TranscriptionBenchmark.swift).
+No captured PCM is written. The synthesized fixture files are temporary, live inside that same run
+directory, and are deleted before exit; a failed cleanup is explicit in the debug log. Standard mode
+can request System Audio Recording permission but does not require microphone permission. A live
+standard run and especially a reconnect run remain explicit operator actions, never autonomous
+validation steps.
 
 ## Live smoke checklist
 

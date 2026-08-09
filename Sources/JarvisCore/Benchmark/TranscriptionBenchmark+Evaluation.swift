@@ -97,25 +97,20 @@ public extension TranscriptionBenchmark {
         captureObservations: [CaptureObservation] = [],
         failure: String? = nil
     ) -> ReconnectSummary {
-        let expectedPhrases = phraseIDs.compactMap { id in
-            phrases.first { $0.id == id }
-        }
         let readyEvents = events.filter { $0.kind == .ready }.sorted {
             $0.observedAt < $1.observedAt
         }
         let initialGeneration = readyEvents.first?.generation
-        let finals = events.filter { event in
-            event.kind == .finalized
-                && event.text?.isEmpty == false
-                && initialGeneration.map { event.generation > $0 } == true
-        }.sorted {
-            ($0.spokenAt ?? $0.observedAt) < ($1.spokenAt ?? $1.observedAt)
-        }
+        let finals = initialGeneration.map {
+            reconnectFinals(in: events, afterGeneration: $0)
+        } ?? []
         let finalTexts = finals.compactMap(\.text)
-        let finalPhraseIDs = finals.compactMap { event -> String? in
-            guard let text = event.text else { return nil }
-            return recognizedPhraseID(for: text, among: expectedPhrases)
-        }
+        let finalPhraseIDs = initialGeneration.map {
+            recognizedReconnectPhraseIDs(
+                phraseIDs,
+                in: events,
+                afterGeneration: $0)
+        } ?? []
         let exactlyOnce = phraseIDs.allSatisfy { expected in
             finalPhraseIDs.count(where: { $0 == expected }) == 1
         } && finalPhraseIDs.count == phraseIDs.count
@@ -196,6 +191,23 @@ public extension TranscriptionBenchmark {
         return previous[right.count]
     }
 
+    /// Returns the fixed reconnect phrases recognized by replacement-generation final events, in
+    /// spoken order. Both the live waiter and final evaluator use this function so extra,
+    /// unavailable, or duplicate finals cannot make the runner stop before every expected phrase.
+    static func recognizedReconnectPhraseIDs(
+        _ phraseIDs: [String],
+        in events: [TranscriptionDiagnosticEvent],
+        afterGeneration generation: Int
+    ) -> [String] {
+        let expectedPhrases = phraseIDs.compactMap { id in
+            phrases.first { $0.id == id }
+        }
+        return reconnectFinals(in: events, afterGeneration: generation).compactMap { event in
+            guard let text = event.text else { return nil }
+            return recognizedPhraseID(for: text, among: expectedPhrases)
+        }
+    }
+
     /// Reconnect verification is about recognizing the fixed outage phrases, not merely receiving
     /// any two final events. A transcript must stay within this fixed normalized CER threshold to
     /// count as the corresponding phrase; standard-mode results still report the unbounded CER.
@@ -216,6 +228,19 @@ public extension TranscriptionBenchmark {
         guard let closest = matches.min(by: { $0.errorRate < $1.errorRate }),
               closest.errorRate <= reconnectMaximumCharacterErrorRate else { return nil }
         return closest.phrase.id
+    }
+
+    private static func reconnectFinals(
+        in events: [TranscriptionDiagnosticEvent],
+        afterGeneration generation: Int
+    ) -> [TranscriptionDiagnosticEvent] {
+        events.filter { event in
+            event.kind == .finalized
+                && event.text?.isEmpty == false
+                && event.generation > generation
+        }.sorted {
+            ($0.spokenAt ?? $0.observedAt) < ($1.spokenAt ?? $1.observedAt)
+        }
     }
 
     private static func sequenceGapCount(_ observations: [CaptureObservation]) -> Int {

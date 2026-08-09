@@ -4,6 +4,7 @@ import Foundation
 /// playback, provider sessions, and reconnect control stay in the app shell.
 public enum TranscriptionBenchmark {
     public static let schemaVersion = 1
+    public static let retainedRunCount = 10
 
     public enum Language: String, Codable, CaseIterable, Sendable {
         case english

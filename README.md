@@ -118,7 +118,8 @@ captures that process's system audio without opening a microphone. Standard mode
 selectable transcription path with at least three identical repetitions. Reconnect mode is separate:
 it requires an interactive confirmation and asks the operator to disable and restore networking; the
 script never changes a network interface itself. Owner-only summaries land under
-`.jarvis/transcription-benchmarks/`, and the temporary synthetic audio files are removed at exit. See
+`.jarvis/transcription-benchmarks/`, which retains only the ten most recent runs, and the temporary
+synthetic audio files are removed at exit. See
 the [benchmark operating contract](./wiki/build-and-run.md#system-audio-transcription-benchmark).
 
 The package boundaries are intentionally small:

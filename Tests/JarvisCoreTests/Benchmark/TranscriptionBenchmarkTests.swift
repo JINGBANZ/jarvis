@@ -244,6 +244,59 @@ struct TranscriptionBenchmarkTests {
         #expect(result.finalPhraseIDs == expected)
     }
 
+    @Test("reconnect recognition waits past duplicate and unavailable finals for every phrase")
+    func reconnectPhraseRecognition() {
+        let model = OpenAITranscriptionModel.gpt4oTranscribe
+        let expected = ["english-technical", "mandarin-technical"]
+        let phrases = expected.map { id in
+            TranscriptionBenchmark.phrases.first { $0.id == id }!
+        }
+        var events = [
+            event(.ready, observedAt: 1, model: model.rawValue, generation: 1),
+            event(.ready, observedAt: 2, model: model.rawValue, generation: 2),
+            event(
+                .finalized,
+                observedAt: 3,
+                model: model.rawValue,
+                itemID: "english-one",
+                text: phrases[0].text,
+                generation: 2),
+            event(
+                .finalized,
+                observedAt: 4,
+                model: model.rawValue,
+                itemID: "unavailable",
+                unavailable: true,
+                generation: 2),
+            event(
+                .finalized,
+                observedAt: 5,
+                model: model.rawValue,
+                itemID: "english-two",
+                text: phrases[0].text,
+                generation: 2),
+        ]
+
+        #expect(TranscriptionBenchmark.recognizedReconnectPhraseIDs(
+            expected,
+            in: events,
+            afterGeneration: 1
+        ) == [expected[0], expected[0]])
+
+        events.append(event(
+            .finalized,
+            observedAt: 6,
+            model: model.rawValue,
+            itemID: "mandarin",
+            text: phrases[1].text,
+            generation: 2))
+        #expect(Set(TranscriptionBenchmark.recognizedReconnectPhraseIDs(
+            expected,
+            in: events,
+            afterGeneration: 1
+        )) == Set(expected))
+    }
+
     @Test("reconnect evaluation rejects duplicate replay and model fallback")
     func reconnectRejection() {
         let model = OpenAITranscriptionModel.gpt4oTranscribe

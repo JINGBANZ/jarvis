@@ -3,8 +3,17 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 capture_source="Sources/JarvisApp/Capture/AggregateEchoCapture.swift"
+benchmark_capture_source="Sources/JarvisApp/Benchmark/SystemAudioBenchmarkCapture.swift"
 if [ ! -f "$capture_source" ]; then
     echo "Audio capture guard: $capture_source not found; refusing to pass." >&2
+    exit 1
+fi
+if [ ! -f "$benchmark_capture_source" ]; then
+    echo "Audio capture guard: $benchmark_capture_source not found; refusing to pass." >&2
+    exit 1
+fi
+if ! /usr/bin/grep -Eq 'muteBehavior[[:space:]]*=[[:space:]]*CATapMuteBehavior\.muted[[:space:]]*$' "$benchmark_capture_source"; then
+    echo "Transcription benchmark playback must be captured with hardware output muted." >&2
     exit 1
 fi
 if /usr/bin/grep -Eq '^[[:space:]]*kAudioAggregateDeviceTapAutoStartKey[[:space:]]*:' "$capture_source"; then

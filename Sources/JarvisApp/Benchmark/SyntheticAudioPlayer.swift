@@ -28,7 +28,10 @@ final class SyntheticAudioPlayer {
     }
 
     @discardableResult
-    func play(_ url: URL) async throws -> (startedAt: TimeInterval, endedAt: TimeInterval) {
+    func play(
+        _ url: URL,
+        abortingWhen isAborted: () -> Bool = { false }
+    ) async throws -> (startedAt: TimeInterval, endedAt: TimeInterval) {
         let player: AVAudioPlayer
         if let prepared = self.player, prepared.url?.standardizedFileURL == url.standardizedFileURL {
             player = prepared
@@ -40,9 +43,15 @@ final class SyntheticAudioPlayer {
             self.player = player
         }
         let startedAt = Date().timeIntervalSince1970
-        // ghost-mode-allowed: an explicit benchmark command plays its fixed synthetic fixture
+        if isAborted() { throw CancellationError() }
+        // ghost-mode-allowed: the explicit benchmark's process tap captures this fixed fixture while
+        // muting its hardware output, so no autonomous sound reaches the operator.
         guard player.play() else { throw Failure.playbackFailed(url.lastPathComponent) }
         while player.isPlaying {
+            if isAborted() {
+                player.stop()
+                throw CancellationError()
+            }
             try Task.checkCancellation()
             try await Task.sleep(for: .milliseconds(20))
         }

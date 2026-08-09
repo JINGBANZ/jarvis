@@ -116,15 +116,24 @@ if [[ "$MODE" == "standard" ]]; then
 else
   COMMON_ARGS+=(--benchmark-network-interruption-confirmed)
   echo "▶ launching opt-in reconnect validation"
-  open -n ./Jarvis.app --args "${COMMON_ARGS[@]}"
+  APP_WAITER_PID=""
 
   abort_run() {
+    trap - INT TERM
     touch "$RUN_DIR/abort"
     echo >&2
     echo "Reconnect benchmark aborted. Restore networking manually if it is still disabled." >&2
+    if [[ -n "$APP_WAITER_PID" ]]; then
+      wait "$APP_WAITER_PID" || true
+    fi
     exit 130
   }
   trap abort_run INT TERM
+
+  # `open -W` keeps a waitable launcher alive until the hidden app exits. The signal trap writes the
+  # app's abort marker, then reaps this waiter so the command cannot return while capture continues.
+  open -W -n ./Jarvis.app --args "${COMMON_ARGS[@]}" &
+  APP_WAITER_PID=$!
 
   MODELS=(gpt-4o-transcribe gpt-transcribe gpt-live-transcribe)
   for MODEL in "${MODELS[@]}"; do
@@ -141,14 +150,9 @@ else
     read -r -p "Press Return only after networking is restored: " _
     touch "$RUN_DIR/ack-restore-network--$MODEL"
   done
+  wait "$APP_WAITER_PID"
+  APP_WAITER_PID=""
   trap - INT TERM
-
-  while [[ ! -f "$RUN_DIR/benchmark-finished" ]]; do
-    if show_failure_if_present; then
-      exit 1
-    fi
-    sleep 0.2
-  done
 fi
 
 if show_failure_if_present; then

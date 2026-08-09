@@ -43,9 +43,7 @@ final class SystemAudioBenchmarkCapture: @unchecked Sendable {
         let speechEvents: [LocalSpeechEvent]
     }
 
-    private let onCaptured: @Sendable (UInt64, Int, TimeInterval) -> Void
-    private let onAudio: @Sendable (Data, UInt64, TimeInterval) -> Void
-    private let onSpeechEvent: @Sendable (LocalSpeechEvent, UInt64) -> Void
+    private let onChunk: @Sendable (Data, UInt64, Int, TimeInterval, [LocalSpeechEvent]) -> Void
     private let lock = NSLock()
     private let deliveryQueue = DispatchQueue(
         label: "jarvis.benchmark.system-audio.delivery",
@@ -62,13 +60,11 @@ final class SystemAudioBenchmarkCapture: @unchecked Sendable {
     private var sequence: UInt64 = 0
 
     init(
-        onCaptured: @escaping @Sendable (UInt64, Int, TimeInterval) -> Void,
-        onAudio: @escaping @Sendable (Data, UInt64, TimeInterval) -> Void,
-        onSpeechEvent: @escaping @Sendable (LocalSpeechEvent, UInt64) -> Void
+        onChunk: @escaping @Sendable (
+            Data, UInt64, Int, TimeInterval, [LocalSpeechEvent]
+        ) -> Void
     ) {
-        self.onCaptured = onCaptured
-        self.onAudio = onAudio
-        self.onSpeechEvent = onSpeechEvent
+        self.onChunk = onChunk
     }
 
     func start() throws {
@@ -101,7 +97,8 @@ final class SystemAudioBenchmarkCapture: @unchecked Sendable {
             monoMixdownOfProcesses: [processObjectID])
         tapDescription.name = "Jarvis transcription benchmark"
         tapDescription.isPrivate = true
-        tapDescription.muteBehavior = CATapMuteBehavior.unmuted
+        // Capture the fixture without sending its synthetic speech to the hardware output.
+        tapDescription.muteBehavior = CATapMuteBehavior.muted
 
         var tap = AudioObjectID(kAudioObjectUnknown)
         let tapStatus = AudioHardwareCreateProcessTap(tapDescription, &tap)
@@ -227,12 +224,13 @@ final class SystemAudioBenchmarkCapture: @unchecked Sendable {
             sampleCount: sampleCount,
             capturedAt: capturedAt,
             speechEvents: speechEvents)
-        deliveryQueue.async { [onCaptured, onAudio, onSpeechEvent] in
-            onCaptured(chunk.sequence, chunk.sampleCount, chunk.capturedAt)
-            onAudio(chunk.data, chunk.sequence, chunk.capturedAt)
-            for event in chunk.speechEvents {
-                onSpeechEvent(event, chunk.sequence)
-            }
+        deliveryQueue.async { [onChunk] in
+            onChunk(
+                chunk.data,
+                chunk.sequence,
+                chunk.sampleCount,
+                chunk.capturedAt,
+                chunk.speechEvents)
         }
     }
 

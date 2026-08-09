@@ -19,22 +19,24 @@ final class TranscriptionBenchmarkSessionRelay: @unchecked Sendable {
         lock.unlock()
     }
 
-    func recordCapture(sequence: UInt64, samples: Int, at timestamp: TimeInterval) {
+    func deliver(
+        _ data: Data,
+        sequence: UInt64,
+        samples: Int,
+        capturedAt: TimeInterval,
+        speechEvents: [LocalSpeechEvent]
+    ) {
+        // One lock snapshot keeps continuity evidence, PCM, and speech edges on the same session
+        // even when the runner installs the next repetition concurrently.
         lock.lock(); let session = session; let onCapture = onCapture; lock.unlock()
         onCapture?(sequence, samples)
         session?.recordCapturedAudio(
             sequenceNumber: sequence,
             sampleCount: samples,
-            capturedAt: timestamp)
-    }
-
-    func send(_ data: Data, sequence: UInt64, at timestamp: TimeInterval) {
-        lock.lock(); let session = session; lock.unlock()
-        session?.sendAudio(data, sequenceNumber: sequence, capturedAt: timestamp)
-    }
-
-    func recordSpeech(_ event: LocalSpeechEvent, through sequence: UInt64) {
-        lock.lock(); let session = session; lock.unlock()
-        session?.recordLocalSpeechEvent(event, throughSequenceNumber: sequence)
+            capturedAt: capturedAt)
+        session?.sendAudio(data, sequenceNumber: sequence, capturedAt: capturedAt)
+        for event in speechEvents {
+            session?.recordLocalSpeechEvent(event, throughSequenceNumber: sequence)
+        }
     }
 }
