@@ -41,8 +41,16 @@ enum Permissions {
         }
     }
 
-    /// True when both permissions are in place (used for a menu-bar status hint).
-    static func allGranted() -> Bool {
-        AVCaptureDevice.authorizationStatus(for: .audio) == .authorized && CGPreflightScreenCaptureAccess()
+    /// Content-free permission snapshot for `JarvisReadiness`. The Core reducer owns which members
+    /// the selected configuration requires; this OS adapter only reports current TCC state.
+    static func grantedReadinessPermissions() -> Set<JarvisReadiness.Permission> {
+        var granted: Set<JarvisReadiness.Permission> = []
+        if AVCaptureDevice.authorizationStatus(for: .audio) == .authorized {
+            granted.insert(.microphone)
+        }
+        if CGPreflightScreenCaptureAccess() {
+            granted.insert(.screenRecording)
+        }
+        return granted
     }
 }
