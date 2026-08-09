@@ -6,12 +6,14 @@ import Foundation
     /// One traffic line in the on-disk shape `BrainTrafficLog` writes.
     private func line(tag: String = "coach", request: [String: Any],
                       response: [String: Any]? = nil, error: String? = nil,
-                      coachAttempt: [String: Any]? = nil) throws -> String {
+                      coachAttempt: [String: Any]? = nil,
+                      recordKind: String? = nil) throws -> String {
         var entry: [String: Any] = ["t": "10:00:00", "tag": tag, "ms": 500, "request": request]
         if response != nil { entry["status"] = 200 }
         entry["response"] = response
         entry["error"] = error
         entry["coach_attempt"] = coachAttempt
+        entry["record_kind"] = recordKind
         return try #require(String(data: JSONSerialization.data(withJSONObject: entry), encoding: .utf8))
     }
 
@@ -209,6 +211,30 @@ import Foundation
         #expect(output.contains("them: Open LeetCode and share your screen"))
         #expect(output.contains("Jarvis brain output:"))
         #expect(output.contains("I opened LeetCode."))
+    }
+
+    @Test func malformedTrafficIsVisibleAndDoesNotRenumberLaterCalls() throws {
+        let first = try line(request: ["model": "gpt-5.5", "input": [userItem("one")]])
+        let third = try line(request: ["model": "gpt-5.5", "input": [userItem("three")]])
+
+        let output = EvaluationTranscript.render(jsonl: "\(first)\n{truncated\n\(third)")
+
+        #expect(output.contains("=== record #2 · malformed traffic entry"))
+        #expect(output.contains("=== call #3"))
+        #expect(output.contains("all session totals below are partial"))
+    }
+
+    @Test func preRequestFailureIsNotLabeledAsAProviderCall() throws {
+        let setupFailure = try line(
+            request: ["provider": "codex-cli", "runtime": "app-server"],
+            error: "app-server unavailable",
+            recordKind: BrainTrafficLog.RecordKind.preRequestFailure.rawValue)
+
+        let output = EvaluationTranscript.render(jsonl: setupFailure)
+
+        #expect(output.contains("=== record #1 · coach"))
+        #expect(output.contains("pre-request failure (no provider call)"))
+        #expect(!output.contains("=== call #1 · coach"))
     }
 
 }

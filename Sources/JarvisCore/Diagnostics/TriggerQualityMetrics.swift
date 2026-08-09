@@ -14,19 +14,32 @@ enum TriggerQualityMetrics {
         attemptsJSONL: String?,
         activityJSONL: String?
     ) -> String {
-        let calls = trafficEntries(trafficJSONL)
+        let trafficRecords = JSONLRecords.parse(trafficJSONL)
+        let trafficMalformed = trafficRecords.malformedCount
+        let trafficEntries = trafficRecords.objects.filter { $0["request"] != nil }
+        let calls = trafficEntries.filter(isProviderCall)
         let coachCalls = calls.filter { ($0["tag"] as? String) == "coach" }
+        let coachPreRequestFailures = trafficEntries.count(where: {
+            ($0["tag"] as? String) == "coach" && !isProviderCall($0)
+        })
         let calledAttemptIDs = Set(coachCalls.compactMap {
             ($0["coach_attempt"] as? [String: Any])?["id"] as? Int
         })
-        let attemptEvents = attemptsJSONL.map(jsonEntries)
+        let unavailableCallJoins = trafficMalformed + coachCalls.count(where: {
+            (($0["coach_attempt"] as? [String: Any])?["id"] as? Int) == nil
+        })
+        let attemptRecords = attemptsJSONL.map(JSONLRecords.parse)
+        let attemptEvents = attemptRecords?.objects
         let recognizedAttemptEvents = attemptEvents?.filter {
             $0["attempt"] as? Int != nil
                 && (($0["event"] as? String) == "started"
                     || ($0["event"] as? String) == "finished")
         } ?? []
+        let attemptUnavailableRecords = (attemptRecords?.malformedCount ?? 0)
+            + ((attemptEvents?.count ?? 0) - recognizedAttemptEvents.count)
         let attemptsAvailable = attemptsJSONL != nil
-            && (coachCalls.isEmpty || !recognizedAttemptEvents.isEmpty)
+            && (!recognizedAttemptEvents.isEmpty
+                || ((attemptRecords?.lines.isEmpty ?? false) && coachCalls.isEmpty))
 
         var triggerCounts: [String: Int] = [:]
         var phaseCounts: [String: Int] = [:]
@@ -92,7 +105,12 @@ enum TriggerQualityMetrics {
             }
         }
 
-        let activityKinds = activityJSONL.map { jsonEntries($0).compactMap { $0["k"] as? String } }
+        let activityRecords = activityJSONL.map(JSONLRecords.parse)
+        let activityKinds = activityRecords.map { records in
+            records.objects.compactMap { $0["k"] as? String }
+        }
+        let activityUnavailableRecords = (activityRecords?.malformedCount ?? 0)
+            + ((activityRecords?.objects.count ?? 0) - (activityKinds?.count ?? 0))
         let heardCount = activityKinds.map { kinds in
             kinds.count(where: { $0 == ActivityLog.EventKind.heard.rawValue })
         }
@@ -112,14 +130,26 @@ enum TriggerQualityMetrics {
 
         var lines: [String] = [
             "=== transcription and trigger quality (computed; do NOT infer causality from prose) ===",
+        ]
+        if trafficMalformed + attemptUnavailableRecords + activityUnavailableRecords > 0 {
+            lines.append(
+                "Evidence warning: malformed or unrecognized JSONL records are unavailable evidence, not zeros; affected values below are explicitly partial.")
+        }
+        let preRequestFailureValue = knownValue(
+            coachPreRequestFailures,
+            limitations: trafficMalformed == 0
+                ? []
+                : ["\(trafficMalformed) malformed traffic record(s)"])
+        lines += [
             "",
             "| measure | value |",
             "|---|---:|",
-            "| finalized heard lines | \(heardCount.map(String.init) ?? "—") |",
-            "| known filler lines | \(classifiedValue(knownFillerCount, classified: classifiedCount, heard: heardCount, attemptsAvailable: attemptsAvailable)) |",
-            "| filler-only turn ends skipped before a provider call | \(terminalValue(skippedFillerTurns, unfinished: unfinishedAttempts, attemptsAvailable: attemptsAvailable)) |",
-            "| composite-filler misses that reached the brain | \(classifiedValue(compositeMisses, classified: classifiedCount, heard: heardCount, attemptsAvailable: attemptsAvailable)) |",
-            "| model `stay_silent` decisions | \(activityStaySilent.map(String.init) ?? terminalValue(attemptStaySilent, unfinished: unfinishedAttempts, attemptsAvailable: attemptsAvailable)) |",
+            "| finalized heard lines | \(activityValue(heardCount, unavailableRecords: activityUnavailableRecords)) |",
+            "| known filler lines | \(classifiedValue(knownFillerCount, classified: classifiedCount, heard: heardCount, attemptsAvailable: attemptsAvailable, unavailableRecords: attemptUnavailableRecords)) |",
+            "| filler-only turn ends skipped before a provider call | \(terminalValue(skippedFillerTurns, unfinished: unfinishedAttempts, attemptsAvailable: attemptsAvailable, unavailableRecords: attemptUnavailableRecords)) |",
+            "| composite-filler misses that reached the brain | \(classifiedValue(compositeMisses, classified: classifiedCount, heard: heardCount, attemptsAvailable: attemptsAvailable, unavailableRecords: attemptUnavailableRecords, unavailableCallJoins: unavailableCallJoins)) |",
+            "| model `stay_silent` decisions | \(activityStaySilent.map { activityValue($0, unavailableRecords: activityUnavailableRecords) } ?? terminalValue(attemptStaySilent, unfinished: unfinishedAttempts, attemptsAvailable: attemptsAvailable, unavailableRecords: attemptUnavailableRecords)) |",
+            "| CLI setup/pre-request failures before a provider call | \(preRequestFailureValue) |",
             "",
             "`stay_silent` is a terminal model-decision count, never an avoidable-call count.",
             "",
@@ -138,6 +168,9 @@ enum TriggerQualityMetrics {
         if unavailableTriggerCalls > 0 {
             lines.append("| unavailable | \(unavailableTriggerCalls) |")
         }
+        if trafficMalformed > 0 {
+            lines.append("| malformed traffic record (call type unavailable) | \(trafficMalformed) |")
+        }
 
         lines += [
             "",
@@ -150,8 +183,13 @@ enum TriggerQualityMetrics {
         if unavailablePhaseCalls > 0 {
             lines.append("| unavailable | \(unavailablePhaseCalls) |")
         }
+        if trafficMalformed > 0 {
+            lines.append("| malformed traffic record (phase unavailable) | \(trafficMalformed) |")
+        }
 
-        let metricCalls = SessionMetrics.parse(jsonl: trafficJSONL)
+        let metricCalls = SessionMetrics.parse(jsonl: trafficJSONL).filter {
+            $0.recordKind == .providerCall
+        }
         lines += [
             "",
             "telemetry availability (all provider calls):",
@@ -163,6 +201,10 @@ enum TriggerQualityMetrics {
             availabilityRow("output tokens", values: metricCalls.map(\.output)),
             availabilityRow("cost", values: metricCalls.map(\.cost)),
         ]
+        if trafficMalformed > 0 {
+            lines.append(
+                "\(trafficMalformed) malformed traffic record(s) could not be classified; telemetry totals are partial.")
+        }
         return lines.joined(separator: "\n")
     }
 
@@ -170,12 +212,31 @@ enum TriggerQualityMetrics {
         _ value: Int,
         classified: Int,
         heard: Int?,
-        attemptsAvailable: Bool
+        attemptsAvailable: Bool,
+        unavailableRecords: Int,
+        unavailableCallJoins: Int = 0
     ) -> String {
         guard attemptsAvailable else { return "—" }
-        guard let heard else { return "\(value) known (total heard unavailable)" }
+        var limitations: [String] = []
+        guard let heard else {
+            limitations.append("total heard unavailable")
+            if unavailableRecords > 0 {
+                limitations.append("\(unavailableRecords) unavailable attempt record(s)")
+            }
+            if unavailableCallJoins > 0 {
+                limitations.append("\(unavailableCallJoins) unavailable traffic join(s)")
+            }
+            return knownValue(value, limitations: limitations)
+        }
         let unavailable = max(0, heard - classified)
-        return unavailable == 0 ? String(value) : "\(value) known (\(unavailable) unavailable)"
+        if unavailable > 0 { limitations.append("\(unavailable) heard line(s) unclassified") }
+        if unavailableRecords > 0 {
+            limitations.append("\(unavailableRecords) unavailable attempt record(s)")
+        }
+        if unavailableCallJoins > 0 {
+            limitations.append("\(unavailableCallJoins) unavailable traffic join(s)")
+        }
+        return knownValue(value, limitations: limitations)
     }
 
     private static func availabilityRow<T>(_ name: String, values: [T?]) -> String {
@@ -186,19 +247,32 @@ enum TriggerQualityMetrics {
     private static func terminalValue(
         _ value: Int,
         unfinished: Int,
-        attemptsAvailable: Bool
+        attemptsAvailable: Bool,
+        unavailableRecords: Int
     ) -> String {
         guard attemptsAvailable else { return "—" }
-        return unfinished == 0 ? String(value) : "\(value) known (\(unfinished) unfinished)"
-    }
-
-    private static func trafficEntries(_ jsonl: String) -> [[String: Any]] {
-        jsonEntries(jsonl).filter { $0["request"] != nil }
-    }
-
-    private static func jsonEntries(_ jsonl: String) -> [[String: Any]] {
-        jsonl.split(separator: "\n", omittingEmptySubsequences: true).compactMap {
-            try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any]
+        var limitations: [String] = []
+        if unfinished > 0 { limitations.append("\(unfinished) unfinished attempt(s)") }
+        if unavailableRecords > 0 {
+            limitations.append("\(unavailableRecords) unavailable attempt record(s)")
         }
+        return knownValue(value, limitations: limitations)
+    }
+
+    private static func activityValue(_ value: Int?, unavailableRecords: Int) -> String {
+        guard let value else { return "—" }
+        let limitations = unavailableRecords == 0
+            ? []
+            : ["\(unavailableRecords) unavailable Activity record(s)"]
+        return knownValue(value, limitations: limitations)
+    }
+
+    private static func knownValue(_ value: Int, limitations: [String]) -> String {
+        limitations.isEmpty ? String(value) : "\(value) known (\(limitations.joined(separator: "; ")))"
+    }
+
+    private static func isProviderCall(_ entry: [String: Any]) -> Bool {
+        entry["record_kind"] as? String
+            != BrainTrafficLog.RecordKind.preRequestFailure.rawValue
     }
 }

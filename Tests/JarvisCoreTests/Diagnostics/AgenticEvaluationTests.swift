@@ -12,6 +12,7 @@ import Foundation
                        request: Data(#"{"model":"gpt-5.5","input":[]}"#.utf8),
                        response: Data(#"{"status":"completed","output":[]}"#.utf8),
                        status: 200, latencyMs: 300)
+        traffic.flush()
         let activityJSONL = [
             #"{"t":"10:00:00","m":"heard question","k":"heard"}"#,
             #"{"t":"10:00:20","m":"coaching tip","k":"tip"}"#,
@@ -73,6 +74,7 @@ import Foundation
                        request: Data(#"{"model":"gpt-5.5","input":[]}"#.utf8),
                        response: Data(#"{"status":"completed","output":[]}"#.utf8),
                        status: 200, latencyMs: 300)
+        traffic.flush()
         try Data().write(to: dir.appendingPathComponent(ActivityLog.filename))
 
         _ = try AgenticEvaluation.prepare(sessionDir: dir)
@@ -105,6 +107,10 @@ import Foundation
         #expect(prompt.contains("response.runtime"))
         #expect(prompt.contains("unavailable, not zero"))
         #expect(prompt.contains("known (N unavailable)"))
+        #expect(prompt.contains("malformed-record warning"))
+        #expect(prompt.contains("NOT provider calls"))
+        #expect(prompt.contains("actual `brain_facing` request inclusion"))
+        #expect(prompt.contains("do not recompute one from the other"))
         #expect(prompt.contains("preinitialized query"))
         #expect(prompt.contains("incremental input"))
         #expect(prompt.contains("ClaudeCodeRuntime.swift"))
@@ -177,6 +183,21 @@ import Foundation
             atPath: dir.appendingPathComponent(AgenticEvaluation.transcriptFilename).path))
     }
 
+    @Test func preparePreservesMalformedOnlyTrafficAsUnavailableEvidence() throws {
+        let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
+        try Data("{truncated\n".utf8).write(
+            to: dir.appendingPathComponent(BrainTrafficLog.filename))
+        try Data().write(to: dir.appendingPathComponent(ActivityLog.filename))
+
+        _ = try AgenticEvaluation.prepare(sessionDir: dir)
+
+        let transcript = try String(
+            contentsOf: dir.appendingPathComponent(AgenticEvaluation.transcriptFilename),
+            encoding: .utf8)
+        #expect(transcript.contains("malformed traffic entry"))
+        #expect(transcript.contains("total unavailable"))
+    }
+
     @Test func prepareRequiresTheCompleteActivityFile() throws {
         let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         let traffic = BrainTrafficLog(); traffic.enable(directory: dir)
@@ -184,6 +205,7 @@ import Foundation
                        request: Data(#"{"model":"gpt-5.5","input":[]}"#.utf8),
                        response: Data(#"{"status":"completed","output":[]}"#.utf8),
                        status: 200, latencyMs: 300)
+        traffic.flush()
 
         #expect(throws: AgenticEvaluation.EvaluationError.missingActivityLog) {
             try AgenticEvaluation.prepare(sessionDir: dir)
@@ -201,6 +223,7 @@ import Foundation
                        request: Data(#"{"model":"gpt-5.5","input":[]}"#.utf8),
                        response: Data(#"{"status":"completed","output":[]}"#.utf8),
                        status: 200, latencyMs: 300)
+        traffic.flush()
         try Data().write(to: dir.appendingPathComponent(ActivityLog.filename))
         // A directory squatting on the transcript path makes createFile fail.
         try FileManager.default.createDirectory(

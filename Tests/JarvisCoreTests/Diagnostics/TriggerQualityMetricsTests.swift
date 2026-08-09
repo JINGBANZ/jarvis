@@ -37,9 +37,15 @@ import Testing
         func finished(_ attempt: Int, terminal: String) throws -> String {
             try json(["event": "finished", "attempt": attempt, "terminal": terminal])
         }
-        func traffic(_ attempt: Int, trigger: String, phase: String) throws -> String {
+        func traffic(
+            _ attempt: Int,
+            trigger: String,
+            phase: String,
+            recordKind: String = BrainTrafficLog.RecordKind.providerCall.rawValue
+        ) throws -> String {
             try json([
                 "tag": "coach",
+                "record_kind": recordKind,
                 "request": ["provider": "codex-cli", "model": "gpt-5.6-codex", "input": []],
                 "response": ["reply": "{}", "runtime": ["status": "completed"]],
                 "coach_attempt": [
@@ -59,12 +65,19 @@ import Testing
             finished(3, terminal: "speak"),
             started(4, trigger: "pending_work", index: nil),
             finished(4, terminal: "failure"),
+            started(5, trigger: "turn_end", index: nil),
+            finished(5, terminal: "failure"),
         ].joined(separator: "\n")
         let trafficJSONL = try [
             traffic(2, trigger: "turn_end", phase: "initial"),
             traffic(3, trigger: "turn_end", phase: "initial"),
             traffic(3, trigger: "turn_end", phase: "capture_screen_continuation"),
             traffic(4, trigger: "pending_work", phase: "initial"),
+            traffic(
+                5,
+                trigger: "turn_end",
+                phase: "initial",
+                recordKind: BrainTrafficLog.RecordKind.preRequestFailure.rawValue),
         ].joined(separator: "\n")
         let activity = [
             #"{"k":"heard"}"#,
@@ -87,6 +100,7 @@ import Testing
         #expect(output.contains("| pending-work wake | 1 |"))
         #expect(output.contains("| initial coaching request | 3 |"))
         #expect(output.contains("| `capture_screen` continuation | 1 |"))
+        #expect(output.contains("| CLI setup/pre-request failures before a provider call | 1 |"))
         #expect(output.contains("never an avoidable-call count"))
         #expect(output.contains("| cost | 0 | 4 |"))
     }
@@ -101,5 +115,34 @@ import Testing
         #expect(output.contains("| known filler lines | — |"))
         #expect(output.contains("| filler-only turn ends skipped before a provider call | — |"))
         #expect(output.contains("| unavailable | 1 |"))
+    }
+
+    @Test func malformedSourcesMakeAffectedCountsExplicitlyPartial() {
+        let traffic = """
+            {"tag":"coach","request":{"model":"gpt-5.5"},"coach_attempt":{"id":1,"trigger":"turn_end","phase":"initial"}}
+            {truncated
+            """
+        let attempts = """
+            {"event":"started","attempt":1,"transcript":[{"index":0,"classification":"substantive","brain_facing":true}]}
+            {"event":"finished","attempt":1,"terminal":"stay_silent"}
+            {truncated
+            """
+        let activity = """
+            {"k":"heard"}
+            {"k":"stayedSilent"}
+            {truncated
+            """
+
+        let output = TriggerQualityMetrics.render(
+            trafficJSONL: traffic,
+            attemptsJSONL: attempts,
+            activityJSONL: activity)
+
+        #expect(output.contains("Evidence warning:"))
+        #expect(output.contains("| finalized heard lines | 1 known (1 unavailable Activity record(s)) |"))
+        #expect(output.contains("1 unavailable attempt record(s)"))
+        #expect(output.contains("1 unavailable traffic join(s)"))
+        #expect(output.contains("| malformed traffic record (call type unavailable) | 1 |"))
+        #expect(output.contains("telemetry totals are partial"))
     }
 }

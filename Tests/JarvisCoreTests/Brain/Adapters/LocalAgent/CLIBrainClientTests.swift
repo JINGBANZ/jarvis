@@ -204,6 +204,7 @@ import Testing
             messages: [.system("coach prompt"), .user("look"), .userImage(base64)],
             tools: coachTools,
             toolChoice: .required)
+        traffic.flush()
 
         let turns = await backend.turns
         #expect(turns.first?.imageCount == 1)
@@ -228,6 +229,7 @@ import Testing
             messages: [.system("coach prompt"), .user("hi")],
             tools: coachTools,
             toolChoice: .required)
+        traffic.flush()
 
         let jsonl = try String(
             contentsOf: workDir.appendingPathComponent(BrainTrafficLog.filename),
@@ -279,6 +281,7 @@ import Testing
             #expect(BrainFailure(error).disposition == .temporary)
             #expect(error.localizedDescription.contains("app-server unavailable"))
         }
+        traffic.flush()
         let openCount = await backend.openCount
         let turns = await backend.turns
         #expect(openCount == 1)
@@ -289,6 +292,7 @@ import Testing
         let lines = jsonl.split(separator: "\n")
         #expect(lines.count == 1)
         #expect(jsonl.contains(#""runtime":"app-server""#))
+        #expect(jsonl.contains(#""record_kind":"pre_request_failure""#))
         #expect(jsonl.contains("app-server unavailable"))
     }
 

@@ -67,7 +67,7 @@ public enum AgenticEvaluation {
         try CodexRuntimeHome.removeLegacyHomes(from: sessionDir)
         let trafficURL = sessionDir.appendingPathComponent(BrainTrafficLog.filename)
         let jsonl = (try? String(contentsOf: trafficURL, encoding: .utf8)) ?? ""
-        guard !SessionMetrics.parse(jsonl: jsonl).isEmpty else {
+        guard !JSONLRecords.parse(jsonl).lines.isEmpty else {
             throw EvaluationError.noTraffic
         }
         let activityURL = sessionDir.appendingPathComponent(ActivityLog.filename)

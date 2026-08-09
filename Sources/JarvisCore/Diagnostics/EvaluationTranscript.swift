@@ -6,9 +6,9 @@ import Foundation
 /// complete un-elided `brain-traffic.jsonl` remains available to the agent for exact counts.
 enum EvaluationTranscript {
 
-    /// Render the recorded traffic as a readable transcript, one block per round trip, eliding
+    /// Render the recorded traffic as a readable transcript, one block per traffic record, eliding
     /// request content that is byte-identical to the previous call with the same tag (see the type
-    /// comment). Malformed lines are skipped; an empty/blank file renders as "".
+    /// comment). Malformed and pre-request records stay explicit; an empty/blank file renders as "".
     static func render(
         jsonl: String,
         attemptsJSONL: String? = nil,
@@ -20,16 +20,20 @@ enum EvaluationTranscript {
         var prevTools: [String: String] = [:]
         var prevInput: [String: [String]] = [:]
         var prevInputText: [String: [String?]] = [:]
-        var callNumber = 0
-
-        for raw in jsonl.split(separator: "\n", omittingEmptySubsequences: true) {
-            guard let entry = (try? JSONSerialization.jsonObject(with: Data(raw.utf8))) as? [String: Any]
-            else { continue }
-            callNumber += 1
+        let records = JSONLRecords.parse(jsonl)
+        for record in records.lines {
+            guard let entry = record.object else {
+                blocks.append(
+                    "=== record #\(record.number) · malformed traffic entry · evidence unavailable; inspect \(BrainTrafficLog.filename) ===")
+                continue
+            }
+            let callNumber = record.number
             let tag = entry["tag"] as? String ?? "?"
             let request = entry["request"] as? [String: Any]
             let response = entry["response"] as? [String: Any]
             let provider = SessionMetrics.providerName(request: request, response: response)
+            let isPreRequestFailure = entry["record_kind"] as? String
+                == BrainTrafficLog.RecordKind.preRequestFailure.rawValue
             // A session can fail over while keeping the same logical client tag. Prefix-elision state
             // must not cross provider/model targets: their wire schemas, cache behavior, and
             // tool-loop state can differ.
@@ -37,7 +41,8 @@ enum EvaluationTranscript {
             let streamKey = "\(tag)\u{1F}\(provider)\u{1F}\(model)"
             var lines: [String] = []
 
-            var header = "=== call #\(callNumber) · \(tag) · \(entry["t"] as? String ?? "?")"
+            let recordLabel = isPreRequestFailure ? "record" : "call"
+            var header = "=== \(recordLabel) #\(callNumber) · \(tag) · \(entry["t"] as? String ?? "?")"
             header += " · \(provider)"
             if let status = entry["status"] as? Int { header += " · HTTP \(status)" }
             if let ms = entry["ms"] as? Int { header += " · \(ms) ms" }
@@ -51,6 +56,9 @@ enum EvaluationTranscript {
                 }
             } else if tag == "coach" {
                 header += " · trigger=unavailable"
+            }
+            if isPreRequestFailure {
+                header += " · pre-request failure (no provider call)"
             }
             lines.append(header)
             if let error = entry["error"] as? String { lines.append("TRANSPORT ERROR: \(error)") }

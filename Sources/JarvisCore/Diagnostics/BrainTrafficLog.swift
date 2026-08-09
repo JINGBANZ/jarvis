@@ -1,8 +1,9 @@
 import Foundation
 
-/// Per-session wire-level record of every brain (LLM provider) round trip — the exact request body
-/// the harness sent and the exact response body it got back, as `brain-traffic.jsonl` in the session
-/// directory. This is raw material for `AgenticEvaluation`: judging context engineering needs the
+/// Per-session wire-level record of every brain (LLM provider) round trip, plus failures before a
+/// local provider request can be prepared, as `brain-traffic.jsonl` in the session directory. For a
+/// provider call it preserves the exact request body sent and response body received. This is raw
+/// material for `AgenticEvaluation`: judging context engineering needs the
 /// *actual* bytes on the wire (instructions, message order, tool schemas, usage/cached-token counts),
 /// not a paraphrase — and having it locally replaces pulling the same data by hand from the OpenAI
 /// dashboard logs.
@@ -14,16 +15,27 @@ import Foundation
 /// Base64 screenshot payloads are redacted before persisting (the pixels already live in the session
 /// dir as `shot-N.jpg`), so the file stays reviewable and owner-only text.
 ///
+/// Recording is enqueue-only on the provider response path. JSON parsing, redaction, serialization,
+/// and file I/O run on the private serial queue; session teardown calls `flush()` before evaluation.
+///
 /// `@unchecked Sendable`: all mutable state is confined to the serial `queue`.
 public final class BrainTrafficLog: @unchecked Sendable {
     public static let filename = "brain-traffic.jsonl"
 
-    /// On-disk line: one round trip. `request`/`response` are the parsed JSON bodies (nested, not
-    /// string-escaped) so the file is directly readable; a body that isn't valid JSON is kept as a
-    /// string. `response` is nil when the transport threw (see `error`).
+    enum RecordKind: String, Sendable {
+        case providerCall = "provider_call"
+        case preRequestFailure = "pre_request_failure"
+    }
+
+    /// On-disk line: one provider round trip or one explicit pre-request failure. For provider calls,
+    /// `request`/`response` are parsed JSON bodies (nested, not string-escaped) so the file is directly
+    /// readable; a body that isn't valid JSON is kept as a string. `response` is nil when the
+    /// transport threw (see `error`).
     /// Keys: t=time, tag=which client (coach/summarizer), ms=latency, status=HTTP status,
     /// phases=named sub-phase latencies in ms (local-CLI turns only; omitted otherwise).
-    private let queue = DispatchQueue(label: "jarvis.braintraffic")   // serializes state + disk writes
+    private let queue = DispatchQueue(
+        label: "jarvis.braintraffic",
+        qos: .utility)   // lower-priority, ordered state + disk writes
     private var dir: URL?         // nil ⇒ disabled (no disk writes)
     private let df: DateFormatter
 
@@ -48,23 +60,41 @@ public final class BrainTrafficLog: @unchecked Sendable {
     }
 
     /// Record one round trip. `response`/`status` are nil when the transport threw (then `error`
-    /// carries why). Synchronous by design: the caller is already off the main thread (the brain's
-    /// async request path), the redacted bodies are small, and a strict write order keeps the file an
-    /// exact chronology of the session's calls.
+    /// carries why). The serial queue retains strict call order without putting audit work between a
+    /// provider response and the coach's handling of that response.
     public func record(tag: String, request: Data, response: Data?, status: Int?,
                        latencyMs: Int, error: String? = nil, phases: [String: Int]? = nil,
                        at date: Date = Date()) {
-        queue.sync { [self] in
+        record(
+            tag: tag,
+            request: request,
+            response: response,
+            status: status,
+            latencyMs: latencyMs,
+            error: error,
+            phases: phases,
+            kind: .providerCall,
+            at: date)
+    }
+
+    func record(tag: String, request: Data, response: Data?, status: Int?,
+                latencyMs: Int, error: String? = nil, phases: [String: Int]? = nil,
+                kind: RecordKind, at date: Date = Date()) {
+        // Task-local values do not cross a DispatchQueue hop. Snapshot the request context while the
+        // provider call's task is still inside `withRequestContext`, then enqueue all expensive work.
+        let requestContext = tag == "coach" ? CoachingAttemptLog.currentRequest : nil
+        queue.async { [self] in
             guard let dir else { return }
             var line: [String: Any] = [
                 "t": df.string(from: date),
                 "tag": tag,
                 "ms": latencyMs,
+                "record_kind": kind.rawValue,
             ]
             line["status"] = status
             line["error"] = error
             if let phases, !phases.isEmpty { line["phases"] = phases }
-            if tag == "coach", let context = CoachingAttemptLog.currentRequest {
+            if let context = requestContext {
                 line["coach_attempt"] = [
                     "id": context.attemptID,
                     "trigger": context.trigger,
@@ -78,6 +108,12 @@ public final class BrainTrafficLog: @unchecked Sendable {
             guard let data = try? JSONSerialization.data(withJSONObject: line) else { return }
             append(data, in: dir)
         }
+    }
+
+    /// Wait until every record enqueued before this call is durable. This belongs at session
+    /// teardown/evaluation boundaries, never between a provider response and coaching output.
+    public func flush() {
+        queue.sync {}
     }
 
     /// Parse a body into a JSON value for nesting; a non-JSON body degrades to its UTF-8 string.

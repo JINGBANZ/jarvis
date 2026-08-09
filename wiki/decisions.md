@@ -1299,3 +1299,28 @@
   `Sources/JarvisCore/Diagnostics/CoachingAttemptLog.swift`,
   `Sources/JarvisCore/Diagnostics/TriggerQualityMetrics.swift`,
   `Sources/JarvisCore/Diagnostics/EvaluationTranscript.swift`.
+
+### 2026-08-09 — Session audit persistence stays off the coaching latency path
+
+- **Chose:** Make coaching-attempt and brain-traffic recording enqueue-only while a session is live.
+  Their session-bound serial queues perform request/response parsing, image redaction, JSON
+  serialization, and file I/O in order. Stop captures the old session's recorders, waits for cancelled
+  coaching work to unwind, and flushes every evidence queue before making that session evaluable.
+- **Chose:** Persist actual transcript inclusion separately from its filler classification, label CLI
+  failures that happen before inference as pre-request failures rather than provider calls, and surface
+  malformed JSONL as unavailable evidence with stable record-number gaps and partial totals.
+- **Why:** Synchronous audit writes can sit between a provider response and Jarvis handling or showing
+  the coaching result. Moving them behind ordered queues removes that disk/serialization latency while
+  the Stop-time durability barrier retains a complete audit. Independent inclusion and explicit
+  unavailable records keep the evaluator capable of detecting the very gate/logging failures it audits.
+- **Rejected:** (a) Synchronous per-record durability on the coaching path—it makes local filesystem
+  behavior part of response latency. (b) A timing-threshold unit test—wall-clock assertions are flaky
+  and cannot prove the absence of blocking I/O; the queue boundary and teardown flush are structural.
+  (c) Dropping damaged or pre-request records—they would turn missing evidence into exact-looking call
+  and telemetry totals.
+- **Extends:** 2026-08-08 — Session evaluation uses persisted coaching-attempt provenance.
+- **Detail:** [architecture.md → Latency](./architecture.md#latency),
+  `Sources/JarvisCore/Diagnostics/BrainTrafficLog.swift`,
+  `Sources/JarvisCore/Diagnostics/CoachingAttemptLog.swift`,
+  `Sources/JarvisCore/Diagnostics/JSONLRecords.swift`,
+  `Sources/JarvisApp/App/AppDelegate.swift`.

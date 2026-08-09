@@ -234,7 +234,8 @@ public struct CLIBrainClient: BrainClient, Sendable {
             status: nil,
             latencyMs: totalMs,
             error: error.localizedDescription,
-            phases: phases)
+            phases: phases,
+            kind: requestRecord == nil ? .preRequestFailure : .providerCall)
     }
 
     private func responseRecord(_ result: LocalAgentTurnResult) -> Data {

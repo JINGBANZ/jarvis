@@ -818,9 +818,13 @@ public final class CoachDriver: @unchecked Sendable {
         let transcriptStartIndex = currentCommittedTranscriptCount()
         let delta = transcript.renderFrom(index: transcriptStartIndex)
         let classifications = delta.lines.map { TurnSubstance.classification(of: $0.text) }
-        let substantiveLines = zip(delta.lines, classifications).compactMap {
-            $0.1.isSubstantive ? $0.0 : nil
+        let brainFacingOffsets = classifications.indices.filter {
+            classifications[$0].isSubstantive
         }
+        let substantiveLines = brainFacingOffsets.map { delta.lines[$0] }
+        let brainFacingTranscriptIndices = Set(brainFacingOffsets.map {
+            transcriptStartIndex + $0
+        })
         let substantiveDeltaText = RollingTranscript.render(substantiveLines)
         let attemptID = takeNextAttemptID()
         coachingAttempts?.recordStarted(
@@ -830,7 +834,8 @@ public final class CoachDriver: @unchecked Sendable {
             target: attempt.target,
             transcriptStartIndex: transcriptStartIndex,
             transcriptLines: delta.lines,
-            classifications: classifications)
+            classifications: classifications,
+            brainFacingTranscriptIndices: brainFacingTranscriptIndices)
 
         let userText = [
             substantiveDeltaText.isEmpty

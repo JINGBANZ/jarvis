@@ -25,9 +25,12 @@ extension JarvisPrompts {
             `=== deterministic metrics ===` usage/cost table followed by deterministic \
             transcription/trigger-quality counts. Trust their \
             known numbers and availability labels: `—` means unavailable, not zero, and a \
-            `known (N unavailable)` value is partial, not a session total. Quote only what these sections \
+            `known (N unavailable)` value is partial, not a session total. A malformed-record warning \
+            likewise makes the affected totals partial. CLI `pre_request_failure` records describe setup \
+            failures before inference and are NOT provider calls or telemetry samples. Quote only what these sections \
             support; never recompute a total by eye. The rest is \
-            one block per API call, in order — your PRIMARY narrative input. To keep it compact, content \
+            one block per traffic record, in order — provider calls are labeled `call`, while malformed \
+            and pre-request evidence is labeled `record`. This is your PRIMARY narrative input. To keep it compact, content \
             byte-identical to the previous same-tag call is elided and marked "(unchanged)"; a growing \
             single CLI text item also elides its exact common prefix with an explicit marker. Those markers \
             are exactly where the prompt cache SHOULD be hitting. Coach call headers name the trigger and \
@@ -37,7 +40,8 @@ extension JarvisPrompts {
             MUST be counted here, not from the elided transcript.
               - `\(attemptsFilename)` — coaching-attempt provenance: trigger vs pending-work wake, \
             source trigger, indexed finalized transcript lines and their runtime filler classification, and \
-            terminal action. It may be absent for sessions recorded before provenance shipped; then the \
+            actual `brain_facing` request inclusion, plus terminal action. Classification and inclusion are \
+            separate evidence: do not recompute one from the other. It may be absent for sessions recorded before provenance shipped; then the \
             corresponding values are unavailable and MUST NOT be inferred from prose logs. Use the matching \
             attempt id on each coach traffic call to attribute causality. A line's presence in accumulated \
             history does not prove that it triggered the call.

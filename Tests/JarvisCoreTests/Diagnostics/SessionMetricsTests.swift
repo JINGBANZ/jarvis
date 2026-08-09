@@ -6,17 +6,25 @@ import Foundation
     /// One traffic line in the on-disk shape `BrainTrafficLog` writes.
     private func line(tag: String = "coach", status: Int? = 200, ms: Int = 500,
                       request: [String: Any], response: [String: Any]? = nil,
-                      error: String? = nil) throws -> String {
+                      error: String? = nil, recordKind: String? = nil) throws -> String {
         var entry: [String: Any] = ["t": "10:00:00", "tag": tag, "ms": ms, "request": request]
         entry["status"] = status
         entry["response"] = response
         entry["error"] = error
+        entry["record_kind"] = recordKind
         return try #require(String(data: JSONSerialization.data(withJSONObject: entry), encoding: .utf8))
     }
 
     @Test func emptyTrafficRendersNothing() {
         #expect(SessionMetrics.render(jsonl: "") == "")
-        #expect(SessionMetrics.render(jsonl: "not json\n{bad}") == "")
+    }
+
+    @Test func malformedOnlyTrafficRendersUnavailableEvidence() {
+        let out = SessionMetrics.render(jsonl: "not json\n{bad}")
+
+        #expect(out.contains("WARNING: 2 malformed traffic record(s)"))
+        #expect(out.contains("session totals: 0 known provider calls"))
+        #expect(out.contains("total unavailable"))
     }
 
     /// OpenAI Responses usage keeps an explicit zero distinct from unavailable telemetry and reads
@@ -141,5 +149,39 @@ import Foundation
         let out = SessionMetrics.render(jsonl: "\(first)\n\(second)")
 
         #expect(out.contains("cache-write 25 known (1 unavailable)"))
+    }
+
+    @Test func excludesCLISetupFailureFromProviderCallAndTelemetryTotals() throws {
+        let setupFailure = try line(
+            status: nil,
+            request: ["provider": "codex-cli", "runtime": "app-server"],
+            error: "app-server unavailable",
+            recordKind: BrainTrafficLog.RecordKind.preRequestFailure.rawValue)
+        let providerCall = try line(
+            request: ["provider": "codex-cli", "model": "gpt-5.4"],
+            response: ["reply": "done"])
+
+        let out = SessionMetrics.render(jsonl: "\(setupFailure)\n\(providerCall)")
+
+        #expect(out.contains("CLI setup/pre-request failures: 1"))
+        #expect(out.contains("| 2 | coach | Codex CLI | gpt-5.4"))
+        #expect(!out.contains("| 1 | coach |"))
+        #expect(out.contains("session totals: 1 calls"))
+    }
+
+    @Test func malformedTrafficMakesTotalsPartialAndPreservesRecordNumbers() throws {
+        let first = try line(
+            request: ["model": "gpt-5.5"],
+            response: ["usage": ["input_tokens": 10, "output_tokens": 2]])
+        let third = try line(
+            request: ["model": "gpt-5.5"],
+            response: ["usage": ["input_tokens": 20, "output_tokens": 3]])
+
+        let out = SessionMetrics.render(jsonl: "\(first)\n{truncated\n\(third)")
+
+        #expect(out.contains("WARNING: 1 malformed traffic record"))
+        #expect(out.contains("| 1 | coach | OpenAI API |"))
+        #expect(out.contains("| 3 | coach | OpenAI API |"))
+        #expect(out.contains("session totals: 2 known calls (1 malformed record(s); total unavailable)"))
     }
 }

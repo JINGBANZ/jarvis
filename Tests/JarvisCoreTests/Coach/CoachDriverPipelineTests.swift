@@ -665,6 +665,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
         #expect(await driver.handleTrigger(.turnEnd) == .skippedFillerOnly)
         #expect(brain.calls.isEmpty)
+        attempts.flush()
         let jsonl = try String(
             contentsOf: dir.appendingPathComponent(CoachingAttemptLog.filename),
             encoding: .utf8)

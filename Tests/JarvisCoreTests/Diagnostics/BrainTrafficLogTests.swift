@@ -25,6 +25,7 @@ import Foundation
         ])
         let response = Data(#"{"status":"completed","usage":{"input_tokens":10}}"#.utf8)
         log.record(tag: "coach", request: request, response: response, status: 200, latencyMs: 812)
+        log.flush()
 
         let entry = try #require(try lines(in: dir).first)
         #expect(entry["tag"] as? String == "coach")
@@ -48,6 +49,7 @@ import Foundation
         let log = BrainTrafficLog(); log.enable(directory: dir)
         log.record(tag: "coach", request: Data(#"{"model":"gpt-5.5"}"#.utf8),
                    response: nil, status: nil, latencyMs: 60_000, error: "timed out")
+        log.flush()
 
         let entry = try #require(try lines(in: dir).first)
         #expect(entry["error"] as? String == "timed out")
@@ -69,6 +71,7 @@ import Foundation
         let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         let log = BrainTrafficLog()                     // never enabled
         log.record(tag: "coach", request: Data("{}".utf8), response: nil, status: nil, latencyMs: 1)
+        log.flush()
         #expect(!FileManager.default.fileExists(atPath: dir.appendingPathComponent(BrainTrafficLog.filename).path))
     }
 
@@ -106,6 +109,7 @@ import Foundation
                 status: 200,
                 latencyMs: 8)
         }
+        log.flush()
 
         let entries = try lines(in: dir)
         let entry = try #require(entries.first)
@@ -115,6 +119,7 @@ import Foundation
         #expect(provenance["source_trigger"] as? String == "turn_end")
         #expect(provenance["phase"] as? String == "capture_screen_continuation")
         #expect(provenance["sequence"] as? Int == 2)
+        #expect(entry["record_kind"] as? String == "provider_call")
         #expect(entries[1]["coach_attempt"] == nil)
     }
 }
