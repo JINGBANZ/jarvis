@@ -68,6 +68,28 @@ public extension UserFacingError {
               severity: .degraded)
     }
 
+    /// A permission required by the selected session is unavailable. This is distinct from capture
+    /// construction: Screen Recording may be optional, and a TCC refusal has its own recovery path.
+    static func permissionsMissing(
+        _ missing: Set<JarvisReadiness.Permission>
+    ) -> UserFacingError {
+        let message = switch (missing.contains(.microphone), missing.contains(.screenRecording)) {
+        case (true, true):
+            "Enable Microphone and Screen Recording in System Settings → Privacy & Security, then press Start again."
+        case (true, false):
+            "Enable Microphone in System Settings → Privacy & Security, then press Start again."
+        case (false, true):
+            "Enable Screen Recording in System Settings → Privacy & Security, then press Start again."
+        case (false, false):
+            "Check Jarvis permissions in System Settings → Privacy & Security, then press Start again."
+        }
+        return .init(
+            title: missing.count == 1 ? "Permission needed" : "Permissions needed",
+            message: message,
+            severity: .fatal,
+            sessionEndReason: .permissionsMissing)
+    }
+
     /// The finite user-authorized brain route was exhausted. Individual target failures never use
     /// this terminal path; their raw detail stays diagnostic while pending work moves forward.
     static func brainRouteExhausted(

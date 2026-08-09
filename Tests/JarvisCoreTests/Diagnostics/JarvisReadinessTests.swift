@@ -170,6 +170,15 @@ import Testing
         #expect(readiness.status == .blocked(.permissions([.screenRecording])))
     }
 
+    @Test func unselectedScreenRecordingPermissionDoesNotBlockAudioReadiness() {
+        let readiness = JarvisReadiness()
+        let start = readiness.begin(configuration: .init(requiredPermissions: [.microphone]))
+
+        _ = readiness.observe(.permissions(granted: [.microphone]), for: start.session)
+
+        #expect(readiness.status == .checking(.brainPreparation))
+    }
+
     @Test func credentialBrainAndTranscriptionFailuresStayTyped() {
         let credentials = JarvisReadiness()
         let credentialStart = credentials.begin(configuration: allRequirements)

@@ -496,6 +496,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let requiresOpenAIKey = transcriptionProvider.requiresOpenAIAPIKey(for: brainRoute)
         let preparesAppleSpeech = transcriptionProvider == .appleSpeech
         let readinessConfiguration = JarvisReadiness.Configuration(
+            requiredPermissions: [.microphone],
             requiredCredentials: requiresOpenAIKey ? [.openAIAPIKey] : [],
             requiresTranscriptionPreparation: preparesAppleSpeech)
         let readinessStart = readiness.begin(configuration: readinessConfiguration)
@@ -514,7 +515,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 ActivityLog.shared.record(.settingsChangeNotApplied)
             }
             errorReporter.reportImmediately(
-                .captureFailed(reason: permissionRecoveryMessage(for: missingPermissions)),
+                .permissionsMissing(missingPermissions),
                 context: reportContext)
             return false
         }
@@ -1045,21 +1046,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard readinessSession == session else { return }
         applyReadinessEffects(readiness.stop(session: session))
         readinessSession = nil
-    }
-
-    private func permissionRecoveryMessage(
-        for missing: Set<JarvisReadiness.Permission>
-    ) -> String {
-        switch (missing.contains(.microphone), missing.contains(.screenRecording)) {
-        case (true, true):
-            "Enable Microphone and Screen Recording in System Settings → Privacy & Security, then press Start again."
-        case (true, false):
-            "Enable Microphone in System Settings → Privacy & Security, then press Start again."
-        case (false, true):
-            "Enable Screen Recording in System Settings → Privacy & Security, then press Start again."
-        case (false, false):
-            "Check Jarvis permissions in System Settings → Privacy & Security, then press Start again."
-        }
     }
 
     /// Keep endpoint connection bookkeeping focused on seeding `CaptureReadinessMonitor`; Core owns

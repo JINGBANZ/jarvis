@@ -8,6 +8,7 @@ public enum SessionEndReason: Sendable, Equatable {
     case replacedByNewSession
     case openAIAPIKeyMissing
     case brainProviderNotConfigured
+    case permissionsMissing
     case brainRouteExhausted(lastProvider: BrainProvider)
     case transcriptionStopped(reason: TranscriptionFailureReason)
     case audioCaptureUnavailable
@@ -25,6 +26,8 @@ public enum SessionEndReason: Sendable, Equatable {
             "session ended by error — the OpenAI API key is missing; check Settings → Brain"
         case .brainProviderNotConfigured:
             "session ended by error — no Primary brain provider is configured; check Settings → Brain"
+        case .permissionsMissing:
+            "session ended by error — a required permission is missing; check System Settings → Privacy & Security"
         case .brainRouteExhausted(let lastProvider):
             "session ended by error — all configured provider targets were exhausted; last target: \(lastProvider.displayName)"
         case .transcriptionStopped(let reason):
