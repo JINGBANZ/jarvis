@@ -18,7 +18,7 @@ public final class TranscriptionBenchmarkEventRecorder: @unchecked Sendable {
             switch self {
             case .timedOut(let boundary): "Timed out waiting for \(boundary)"
             case .terminal(let reason): "Transcription failed: \(reason.activityDescription)"
-            case .aborted: "Reconnect benchmark aborted"
+            case .aborted: "Transcription benchmark aborted"
             }
         }
     }

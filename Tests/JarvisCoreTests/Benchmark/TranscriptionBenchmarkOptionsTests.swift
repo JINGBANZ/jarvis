@@ -39,6 +39,49 @@ struct TranscriptionBenchmarkOptionsTests {
         }
     }
 
+    @Test("output must be an immediate benchmark run directory")
+    func rejectsNestedOutputTree() throws {
+        let repository = try makeRepository()
+        defer { try? FileManager.default.removeItem(at: repository) }
+        let output = repository.appendingPathComponent(
+            ".jarvis/transcription-benchmarks/nested/run")
+
+        #expect(throws: (any Error).self) {
+            try TranscriptionBenchmarkOptions(arguments: arguments(
+                mode: "standard",
+                output: output,
+                repository: repository,
+                repetitions: "3"))
+        }
+    }
+
+    @Test("a symlink cannot redirect benchmark output")
+    func rejectsSymlinkedOutput() throws {
+        let repository = try makeRepository()
+        let outside = ActivityLogTests.tmp()
+        defer {
+            try? FileManager.default.removeItem(at: repository)
+            try? FileManager.default.removeItem(at: outside)
+        }
+        let base = repository.appendingPathComponent(
+            ".jarvis/transcription-benchmarks", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: base,
+            withIntermediateDirectories: true)
+        let output = base.appendingPathComponent("redirected-run")
+        try FileManager.default.createSymbolicLink(
+            at: output,
+            withDestinationURL: outside)
+
+        #expect(throws: (any Error).self) {
+            try TranscriptionBenchmarkOptions(arguments: arguments(
+                mode: "standard",
+                output: output,
+                repository: repository,
+                repetitions: "3"))
+        }
+    }
+
     @Test("reconnect mode is scoped and keeps the repetition floor")
     func validatesReconnectSafetyArguments() throws {
         let repository = try makeRepository()

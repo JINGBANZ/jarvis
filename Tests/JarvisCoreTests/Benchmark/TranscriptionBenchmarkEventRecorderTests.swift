@@ -64,6 +64,35 @@ struct TranscriptionBenchmarkEventRecorderTests {
         #expect(snapshot.terminalFailure == .connectionLost)
     }
 
+    @Test("an abort marker interrupts a standard benchmark wait")
+    func abortMarkerInterruptsWait() async throws {
+        let directory = ActivityLogTests.tmp()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let marker = directory.appendingPathComponent("abort")
+        let recorder = TranscriptionBenchmarkEventRecorder(abortMarker: marker)
+        let waiter = Task {
+            try await recorder.waitForFinalStreamToSettle(
+                minimumCount: 1,
+                quietPeriod: 0.1,
+                timeout: 1)
+        }
+
+        try await Task.sleep(for: .milliseconds(50))
+        try Data().write(to: marker)
+
+        do {
+            try await waiter.value
+            Issue.record("expected the abort marker to interrupt the wait")
+        } catch let failure as TranscriptionBenchmarkEventRecorder.Failure {
+            guard case .aborted = failure else {
+                Issue.record("expected an aborted failure, got \(failure)")
+                return
+            }
+        } catch {
+            Issue.record("expected a benchmark-recorder failure, got \(error)")
+        }
+    }
+
     private func event(text: String, observedAt: TimeInterval) -> TranscriptionDiagnosticEvent {
         .init(
             kind: .finalized,

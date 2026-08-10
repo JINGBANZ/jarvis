@@ -8,6 +8,7 @@ extension TranscriptionBenchmarkRunner {
         var summaries: [TranscriptionBenchmark.ArmSummary] = []
         for (armIndex, arm) in TranscriptionBenchmark.standardArms.enumerated() {
             try Task.checkCancellation()
+            guard !isAbortRequested else { throw Failure.benchmarkAborted }
             TranscriptionBenchmarkFiles.writeProgress(
                 phase: "standard-arm",
                 detail: "\(armIndex + 1)/\(TranscriptionBenchmark.standardArms.count): \(arm.id)",
@@ -40,6 +41,7 @@ extension TranscriptionBenchmarkRunner {
             var repetitions: [TranscriptionBenchmark.RepetitionResult] = []
             for repetition in 1...options.repetitions {
                 try Task.checkCancellation()
+                guard !isAbortRequested else { throw Failure.benchmarkAborted }
                 TranscriptionBenchmarkFiles.writeProgress(
                     phase: "standard-repetition",
                     detail: "\(arm.id) \(repetition)/\(options.repetitions)",
@@ -50,6 +52,7 @@ extension TranscriptionBenchmarkRunner {
                     fixture: fixture,
                     silenceURL: fixtures.silenceURL,
                     appleLocale: appleLocale))
+                guard !isAbortRequested else { throw Failure.benchmarkAborted }
             }
             summaries.append(.init(arm: arm, repetitions: repetitions))
         }
@@ -66,7 +69,7 @@ extension TranscriptionBenchmarkRunner {
         silenceURL: URL,
         appleLocale: Locale?
     ) async -> TranscriptionBenchmark.RepetitionResult {
-        let recorder = TranscriptionBenchmarkEventRecorder()
+        let recorder = TranscriptionBenchmarkEventRecorder(abortMarker: abortMarker)
         let session = makeSession(arm: arm, appleLocale: appleLocale, recorder: recorder)
         let connectStartedAt = clock.now()
         var speechEndedAt = connectStartedAt
@@ -79,8 +82,16 @@ extension TranscriptionBenchmarkRunner {
             _ = try await recorder.waitForReady(
                 timeout: arm.provider == .appleSpeech ? 60 : 20)
             try await Task.sleep(for: .milliseconds(150))
-            speechEndedAt = try await player.play(fixture.fileURL).endedAt
-            _ = try await player.play(silenceURL)
+            speechEndedAt = try await player.play(
+                fixture.fileURL,
+                abortingWhen: { [abortMarker] in
+                    FileManager.default.fileExists(atPath: abortMarker.path)
+                }).endedAt
+            _ = try await player.play(
+                silenceURL,
+                abortingWhen: { [abortMarker] in
+                    FileManager.default.fileExists(atPath: abortMarker.path)
+                })
             try await recorder.waitForFinalStreamToSettle(
                 minimumCount: 1,
                 quietPeriod: 1,

@@ -47,8 +47,7 @@ extension TranscriptionBenchmarkRunner {
         let session = makeSession(
             arm: arm,
             appleLocale: nil,
-            recorder: recorder,
-            reconnectTiming: true)
+            recorder: recorder)
         relay.install(session) { [recorder] sequence, samples in
             recorder.recordCapture(sequence: sequence, samples: samples)
         }
@@ -117,14 +116,6 @@ extension TranscriptionBenchmarkRunner {
             events: snapshot.events,
             captureObservations: snapshot.captureObservations,
             failure: failure)
-    }
-
-    private var abortMarker: URL {
-        options.outputDirectory.appendingPathComponent("abort")
-    }
-
-    private var isAbortRequested: Bool {
-        FileManager.default.fileExists(atPath: abortMarker.path)
     }
 
     private func failedReconnect(

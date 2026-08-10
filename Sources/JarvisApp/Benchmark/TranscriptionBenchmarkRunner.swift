@@ -17,7 +17,7 @@ final class TranscriptionBenchmarkRunner {
                 "OpenAI API key unavailable in the owner-only key file or OPENAI_API_KEY"
             case .appleSpeechUnavailable(let detail): "Apple Speech unavailable: \(detail)"
             case .missingFixture(let id): "Missing benchmark fixture \(id)"
-            case .benchmarkAborted: "Reconnect benchmark aborted"
+            case .benchmarkAborted: "Transcription benchmark aborted"
             case .transportInterruptionUnavailable:
                 "Could not interrupt the active transcription transport"
             case .acceptanceFailed(let detail): "Benchmark acceptance failed: \(detail)"
@@ -33,6 +33,14 @@ final class TranscriptionBenchmarkRunner {
     let apiKey = ChainedSecretStore([FileSecretStore(), EnvSecretStore()]).apiKey()
     var preparedAppleLocales: [String: Locale] = [:]
     var appleLocaleFailures: [String: String] = [:]
+
+    var abortMarker: URL {
+        options.outputDirectory.appendingPathComponent("abort")
+    }
+
+    var isAbortRequested: Bool {
+        FileManager.default.fileExists(atPath: abortMarker.path)
+    }
 
     init(options: TranscriptionBenchmarkOptions) {
         self.options = options
@@ -119,14 +127,15 @@ final class TranscriptionBenchmarkRunner {
     func makeSession(
         arm: TranscriptionBenchmark.Arm,
         appleLocale: Locale?,
-        recorder: TranscriptionBenchmarkEventRecorder,
-        reconnectTiming: Bool = false
+        recorder: TranscriptionBenchmarkEventRecorder
     ) -> any TranscriptionSession {
         let configuration = TranscriptionConfiguration(
             provider: arm.provider,
             openAIModel: arm.model ?? .gpt4oTranscribe,
             openAILanguageProfile: arm.languageProfile ?? .automatic,
             appleSpeechLocaleIdentifier: arm.localeIdentifier ?? "en_US")
+        // Keep production ping/pong timing. The benchmark trips the transport failure path directly;
+        // accelerated probes can add a second artificial fault while the provider processes replay.
         let config = Config(
             silenceTimeoutSeconds: 120,
             silenceMaxIntervalSeconds: 960,
@@ -139,9 +148,7 @@ final class TranscriptionBenchmarkRunner {
             audioNoiseReduction: .off,
             turnDebounceSeconds: 0,
             maxBufferedAudioSeconds: 120,
-            realtimeReadyTimeoutSeconds: 15,
-            realtimePingIntervalSeconds: reconnectTiming ? 2 : 20,
-            realtimePongTimeoutSeconds: reconnectTiming ? 2 : 10)
+            realtimeReadyTimeoutSeconds: 15)
         let session = TranscriptionSessionFactory.make(
             configuration: configuration,
             apiKey: apiKey ?? "",

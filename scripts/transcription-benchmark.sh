@@ -77,31 +77,31 @@ show_failure_if_present() {
 
 if [[ "$MODE" == "standard" ]]; then
   echo "▶ running fixed system-audio matrix ($REPETITIONS repetitions per arm)"
-  open -W -n ./Jarvis.app --args "${COMMON_ARGS[@]}"
 else
   echo "▶ running scoped reconnect validation (host networking remains online)"
-  APP_WAITER_PID=""
-
-  abort_run() {
-    trap - INT TERM
-    touch "$RUN_DIR/abort"
-    echo >&2
-    echo "Reconnect benchmark aborted." >&2
-    if [[ -n "$APP_WAITER_PID" ]]; then
-      wait "$APP_WAITER_PID" || true
-    fi
-    exit 130
-  }
-  trap abort_run INT TERM
-
-  # `open -W` keeps a waitable launcher alive until the hidden app exits. The signal trap writes the
-  # app's abort marker, then reaps this waiter so capture cannot outlive the command.
-  open -W -n ./Jarvis.app --args "${COMMON_ARGS[@]}" &
-  APP_WAITER_PID=$!
-  wait "$APP_WAITER_PID"
-  APP_WAITER_PID=""
-  trap - INT TERM
 fi
+
+APP_WAITER_PID=""
+
+abort_run() {
+  trap - INT TERM
+  touch "$RUN_DIR/abort"
+  echo >&2
+  echo "Transcription benchmark aborted." >&2
+  if [[ -n "$APP_WAITER_PID" ]]; then
+    wait "$APP_WAITER_PID" || true
+  fi
+  exit 130
+}
+trap abort_run INT TERM
+
+# `open -W` keeps a waitable launcher alive until the hidden app exits. Both modes observe the abort
+# marker; the signal trap then reaps this waiter so capture cannot outlive the command.
+open -W -n ./Jarvis.app --args "${COMMON_ARGS[@]}" &
+APP_WAITER_PID=$!
+wait "$APP_WAITER_PID"
+APP_WAITER_PID=""
+trap - INT TERM
 
 if show_failure_if_present; then
   exit 1

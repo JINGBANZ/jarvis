@@ -38,14 +38,30 @@ public struct TranscriptionBenchmarkOptions: Sendable {
         guard let rawRepository = Self.value(after: "--benchmark-repo-dir", in: arguments) else {
             throw Failure.missing("--benchmark-repo-dir")
         }
-        let output = URL(fileURLWithPath: rawOutput).standardizedFileURL
-        let repository = URL(fileURLWithPath: rawRepository).standardizedFileURL
+        let requestedOutput = URL(fileURLWithPath: rawOutput).standardizedFileURL
+        let requestedRepository = URL(fileURLWithPath: rawRepository).standardizedFileURL
+        guard requestedOutput.pathComponents.starts(
+            with: requestedRepository.pathComponents
+        ) else {
+            throw Failure.invalid("output must be inside the repository directory")
+        }
+        guard !Self.containsSymbolicLink(
+            in: requestedOutput,
+            relativeTo: requestedRepository
+        ) else {
+            throw Failure.invalid("output path must not contain symbolic links")
+        }
+        let output = requestedOutput.resolvingSymlinksInPath().standardizedFileURL
+        let repository = requestedRepository.resolvingSymlinksInPath().standardizedFileURL
         let benchmarkBase = repository
             .appendingPathComponent(".jarvis", isDirectory: true)
             .appendingPathComponent("transcription-benchmarks", isDirectory: true)
+            .resolvingSymlinksInPath()
             .standardizedFileURL
-        guard output.path.hasPrefix(benchmarkBase.path + "/") else {
-            throw Failure.invalid("output must be a run directory under \(benchmarkBase.path)")
+        guard output.deletingLastPathComponent() == benchmarkBase,
+              !output.lastPathComponent.isEmpty else {
+            throw Failure.invalid(
+                "output must be an immediate run directory under \(benchmarkBase.path)")
         }
         guard FileManager.default.fileExists(
             atPath: repository.appendingPathComponent("Package.swift").path
@@ -67,5 +83,19 @@ public struct TranscriptionBenchmarkOptions: Sendable {
             return nil
         }
         return arguments[index + 1]
+    }
+
+    private static func containsSymbolicLink(in url: URL, relativeTo base: URL) -> Bool {
+        var current = base
+        for component in url.pathComponents.dropFirst(base.pathComponents.count) {
+            current.appendPathComponent(component)
+            guard let attributes = try? FileManager.default.attributesOfItem(
+                atPath: current.path
+            ) else { continue }
+            if attributes[.type] as? FileAttributeType == .typeSymbolicLink {
+                return true
+            }
+        }
+        return false
     }
 }

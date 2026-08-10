@@ -4,6 +4,7 @@ cd "$(dirname "$0")/.."
 
 capture_source="Sources/JarvisApp/Capture/AggregateEchoCapture.swift"
 benchmark_capture_source="Sources/JarvisApp/Benchmark/SystemAudioBenchmarkCapture.swift"
+benchmark_standard_source="Sources/JarvisApp/Benchmark/TranscriptionBenchmarkRunner+Standard.swift"
 benchmark_reconnect_source="Sources/JarvisApp/Benchmark/TranscriptionBenchmarkRunner+Reconnect.swift"
 benchmark_script="scripts/transcription-benchmark.sh"
 if [ ! -f "$capture_source" ]; then
@@ -14,8 +15,15 @@ if [ ! -f "$benchmark_capture_source" ]; then
     echo "Audio capture guard: $benchmark_capture_source not found; refusing to pass." >&2
     exit 1
 fi
-if [ ! -f "$benchmark_reconnect_source" ] || [ ! -f "$benchmark_script" ]; then
-    echo "Audio capture guard: reconnect benchmark sources not found; refusing to pass." >&2
+if [ ! -f "$benchmark_standard_source" ] || [ ! -f "$benchmark_reconnect_source" ] \
+    || [ ! -f "$benchmark_script" ]; then
+    echo "Audio capture guard: transcription benchmark sources not found; refusing to pass." >&2
+    exit 1
+fi
+if ! /usr/bin/grep -Fq 'TranscriptionBenchmarkEventRecorder(abortMarker: abortMarker)' \
+    "$benchmark_standard_source" \
+    || ! /usr/bin/grep -Fq 'trap abort_run INT TERM' "$benchmark_script"; then
+    echo "Every transcription benchmark mode must stop capture when its command is interrupted." >&2
     exit 1
 fi
 if ! /usr/bin/grep -Eq 'muteBehavior[[:space:]]*=[[:space:]]*CATapMuteBehavior\.muted[[:space:]]*$' "$benchmark_capture_source"; then
