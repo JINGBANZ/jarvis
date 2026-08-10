@@ -58,7 +58,7 @@ public struct TranscriptionBenchmarkOptions: Sendable {
             .appendingPathComponent("transcription-benchmarks", isDirectory: true)
             .resolvingSymlinksInPath()
             .standardizedFileURL
-        guard output.deletingLastPathComponent() == benchmarkBase,
+        guard output.deletingLastPathComponent().pathComponents == benchmarkBase.pathComponents,
               !output.lastPathComponent.isEmpty else {
             throw Failure.invalid(
                 "output must be an immediate run directory under \(benchmarkBase.path)")
