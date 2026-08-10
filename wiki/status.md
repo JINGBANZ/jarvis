@@ -90,8 +90,10 @@ versus unavailable provider telemetry. The dedicated
 [session-audit component](./session-audit.md) gives the coach and brain clients only narrow optional
 observer ports, then contains parsing, redaction, serialization, and file I/O behind one bounded
 process worker. Regular Stop closes old evidence asynchronously so the next Start does not wait;
-application Quit defers AppKit termination while a bounded asynchronous drain keeps main-actor cleanup
-available before exit, including a session still closing after Stop. Overflow, persistence failure,
+application Quit defers AppKit termination while a bounded turn drain keeps main-actor cleanup
+available. An audit whose close never starts before that bound retains its partial open marker; once
+close starts, Quit waits for its final/corrective marker to settle before approving process exit,
+including a session already closing after Stop. Overflow, persistence failure,
 late work, or a close deadline miss makes the versioned health evidence explicitly partial. Evaluate
 for the selected session remains disabled until its worker has persisted a final or corrective marker,
 or safely invalidated a rejected marker. A callback rejected after close immediately reopens only that

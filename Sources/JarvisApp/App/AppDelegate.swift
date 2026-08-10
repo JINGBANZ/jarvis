@@ -83,6 +83,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// than only counting them, so Application Quit can include a just-stopped session in its bounded
     /// termination drain. The keyed set also keeps rapid Stop → Start → Stop sessions independent.
     private var stopDrainTasks: [UUID: Task<Void, Never>] = [:]
+    /// Strong audit ownership parallel to `stopDrainTasks`, plus the subset whose close has begun.
+    /// Quit uses this to distinguish a safely open marker from a close that must settle before exit.
+    private var stopDrainAudits: [UUID: FileSessionAudit] = [:]
+    private var closingStopDrainIDs: Set<UUID> = []
     /// Only cancelled coaching work extends the global ghost lifecycle. Audit persistence is scoped
     /// to its own session: Activity can use settled history while an unrelated marker is repaired.
     private var pendingTurnDrainIDs: Set<UUID> = []
@@ -217,6 +221,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         activityViewer?.cancelEvaluation()
         let drain = stop(reason: .applicationQuit)
         let pendingStops = Array(stopDrainTasks.values)
+        let pendingAudits = stopDrainAudits.map { id, audit in
+            PendingStopAudit(audit: audit, closeStarted: closingStopDrainIDs.contains(id))
+        }
+        // A pending Stop that has not begun close must leave its canonical marker open if its turns
+        // miss the termination bound. Cancellation is observed immediately after those turns drain.
+        pendingStops.forEach { $0.cancel() }
         guard drain.audit != nil || !drain.cancelledTurns.isEmpty || !pendingStops.isEmpty else {
             return .terminateNow
         }
@@ -226,7 +236,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 sender.reply(toApplicationShouldTerminate: true)
                 return
             }
-            await self.finishApplicationTermination(drain, pendingStops: pendingStops)
+            await self.finishApplicationTermination(
+                drain,
+                pendingStops: pendingStops,
+                pendingAudits: pendingAudits)
             sender.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater
@@ -240,6 +253,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private struct SessionAuditDrain: Sendable {
         let audit: FileSessionAudit?
         let cancelledTurns: [Task<Void, Never>]
+    }
+
+    private struct PendingStopAudit: Sendable {
+        let audit: FileSessionAudit
+        let closeStarted: Bool
     }
 
     /// The two clients that move together with one provider/model route target.
@@ -1037,13 +1055,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 ActivityLog.shared.flush()
                 self?.pendingTurnDrainIDs.remove(drainID)
                 self?.activityViewer?.coachingStateDidChange()
+                guard !Task.isCancelled else {
+                    self?.finishStopDrain(drainID)
+                    return
+                }
+                self?.closingStopDrainIDs.insert(drainID)
                 _ = await audit?.close(deadline: FileSessionAudit.defaultCloseDeadline)
                 await audit?.waitForPersistenceToStop()
-                guard let self else { return }
-                self.stopDrainTasks[drainID] = nil
-                self.activityViewer?.coachingStateDidChange()
+                self?.finishStopDrain(drainID)
             }
             stopDrainTasks[drainID] = drainTask
+            if let audit { stopDrainAudits[drainID] = audit }
         }
         activityViewer?.coachingStateDidChange()
         return SessionAuditDrain(audit: audit, cancelledTurns: cancelled)
@@ -1078,19 +1100,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func finishApplicationTermination(
         _ drain: SessionAuditDrain,
-        pendingStops: [Task<Void, Never>]
+        pendingStops: [Task<Void, Never>],
+        pendingAudits: [PendingStopAudit]
     ) async {
         let work = pendingStops + drain.cancelledTurns
         guard await Self.waitForCancelledTurnsBeforeTermination(work) else {
+            // A close already in progress may have renamed a complete marker before discovering its
+            // deadline miss. Do not approve process exit until that marker is stable or invalidated.
+            for pending in pendingAudits where pending.closeStarted {
+                await pending.audit.waitForPersistenceToStop()
+            }
             jlog("Jarvis: application-quit turn drain timed out; session audit remains partial.")
             return
         }
         ActivityLog.shared.flush()
+
+        // Cancelled pending-Stop tasks stopped at the turn boundary. Finish their audits here now
+        // that every turn drained; an audit whose close had already begun only needs its settlement.
+        for pending in pendingAudits {
+            if !pending.closeStarted {
+                _ = await pending.audit.close(
+                    deadline: FileSessionAudit.defaultCloseDeadline)
+            }
+            await pending.audit.waitForPersistenceToStop()
+        }
+
         if await drain.audit?.close(
             deadline: FileSessionAudit.defaultCloseDeadline
         ) == .partial {
             jlog("Jarvis: application-quit session audit closed with partial evidence.")
         }
+        await drain.audit?.waitForPersistenceToStop()
+    }
+
+    private func finishStopDrain(_ drainID: UUID) {
+        stopDrainTasks[drainID] = nil
+        stopDrainAudits[drainID] = nil
+        closingStopDrainIDs.remove(drainID)
+        activityViewer?.coachingStateDidChange()
     }
 
     /// Deduplicate endpoint failures: either side can fail first, but Activity should show one reason

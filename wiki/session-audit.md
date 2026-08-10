@@ -57,7 +57,7 @@ the replacement, so work still unwinding from the old session cannot contaminate
 | Transition | Behavior |
 |---|---|
 | Regular Stop or runtime teardown | Cancel active turns, wait for their final audit admissions asynchronously, then close the old audit under its deadline. A replacement Start does not wait. Once coaching work ends, only that session's Evaluate/Open report actions remain unavailable until its worker establishes a trustworthy final state. |
-| Application Quit | Ask AppKit to defer termination, cancel active turns, and await a bounded drain without blocking the main actor. Include any audit still closing after an immediately preceding Stop, then close the current audit before replying that termination may continue; if work cannot drain, its open marker remains deliberately partial. |
+| Application Quit | Ask AppKit to defer termination and cancel active turns without blocking the main actor. If the bounded turn drain expires, audits whose close never began keep their deliberately partial open marker. Any close that did begin must settle or invalidate its marker before Jarvis approves process exit; drained audits are closed before replying. |
 | Evaluate | Read the selected stopped session only when its own persistence gate is settled; interpret the health marker before presenting deterministic totals. Other settled history remains usable while an unrelated session is unavailable. |
 
 Closing seals the session against later events, drains events already ahead of the close envelope,
@@ -66,8 +66,9 @@ replacement privately, then checks the close deadline and current health immedia
 after its atomic rename. If preparation or the rename crosses the deadline, the worker replaces the
 candidate with partial evidence. If that correction fails, it removes the rejected marker so the
 evaluator sees a missing completion marker instead of stale “complete” evidence. Application Quit
-uses this same asynchronous close while AppKit holds termination, so main-actor cleanup can continue
-and the process does not exit early.
+uses this same asynchronous close while AppKit holds termination, so main-actor cleanup can continue.
+It may abandon a close that never started after the bounded turn drain, leaving its open marker, but
+never approves exit while an already-started close can still expose a marker awaiting correction.
 
 The close deadline bounds how long its caller waits for a complete result; it cannot stop a filesystem
 operation already in progress. A separate settlement signal fires only after the serial worker has
@@ -76,6 +77,7 @@ invalidation fails, settlement remains pending and Evaluate stays unavailable ra
 ambiguous evidence. Regular Stop retains that settlement task until the session directory is safe
 to read. Clear history and automatic pruning preserve every directory with a live audit handle,
 including a settled handle that a delayed producer could reopen, so a worker can never race deletion.
+Quit also awaits this gate for the current audit and every earlier Stop whose close already began.
 
 A callback rejected after sealing increments `late_event` and immediately reopens that session's
 persistence gate. The worker schedules at most one serial correction to invalidate any already

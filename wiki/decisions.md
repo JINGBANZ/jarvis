@@ -1408,11 +1408,13 @@
   that removes any already-published complete marker. A durable partial close can satisfy the same
   correction. Activity gates Evaluate/Open report by the selected session, while Clear history and
   automatic pruning preserve every directory with a live audit handle; unrelated settled history
-  stays usable.
+  stays usable. Application Quit may abandon an unstarted close after its bounded turn drain, leaving
+  the open marker partial, but it waits for every close already in progress before approving exit.
 - **Why:** Finalization and observer callbacks can race. Merely incrementing an in-memory late-event
   counter after a complete marker is on disk lets the evaluator accept stale exact-looking evidence.
   Conversely, treating any retained drain as globally active coaching lets one unrecoverable disk
-  failure disable every historical session forever.
+  failure disable every historical session forever. Exiting while a timed-out close is still
+  correcting a renamed complete marker would recreate the same stale-exact evidence after restart.
 - **Rejected:** (a) Ignore post-close callbacks because they are rare—the complete marker would then
   make missing evidence look exact. (b) Keep the global Activity lockout—it contains the ambiguity but
   spreads one session's diagnostic failure to unrelated data. (c) Block the callback on marker I/O—it
