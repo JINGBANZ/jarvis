@@ -30,6 +30,7 @@ enum SessionMetrics {
         let model: String
         let status: Int?
         let ms: Int?
+        let recordKind: BrainTrafficLog.RecordKind
         var input: Int?
         var cacheRead: Int?
         var cacheWrite: Int?
@@ -64,15 +65,25 @@ enum SessionMetrics {
     // MARK: - Rendering
 
     /// The metrics block that leads the transcript, or "" when there is no traffic (so callers'
-    /// empty-transcript guards still fire). Call numbering matches `EvaluationTranscript.render`
-    /// exactly — both count one call per JSON-parseable line, in file order.
+    /// empty-transcript guards still fire). Record numbering matches `EvaluationTranscript.render`
+    /// exactly and retains gaps for malformed or non-call records in file order.
     static func render(jsonl: String) -> String {
-        let calls = parse(jsonl: jsonl)
-        guard !calls.isEmpty else { return "" }
+        let parsed = parseDetailed(jsonl: jsonl)
+        guard parsed.totalRecords > 0 else { return "" }
+        let calls = parsed.calls.filter { $0.recordKind == .providerCall }
+        let preRequestFailures = parsed.calls.count(where: {
+            $0.recordKind == .preRequestFailure
+        })
 
         var lines: [String] = []
         lines.append(
             "=== deterministic metrics (computed from \(BrainTrafficLog.filename); interpret these — do NOT recompute totals by eye) ===")
+        if parsed.malformedCount > 0 {
+            lines.append("WARNING: \(parsed.malformedCount) malformed traffic record(s) could not be parsed; all session totals below are partial, not exact.")
+        }
+        if preRequestFailures > 0 {
+            lines.append("CLI setup/pre-request failures: \(preRequestFailures) (excluded from provider-call and telemetry totals).")
+        }
         lines.append("")
         lines.append("| call | tag | provider | model | HTTP | ms | input | cache read | cache write | output | cost |")
         lines.append("|--:|---|---|---|--:|--:|--:|--:|--:|--:|--:|")
@@ -84,13 +95,24 @@ enum SessionMetrics {
         }
 
         lines.append("")
+        if calls.isEmpty {
+            if parsed.malformedCount > 0 {
+                lines.append("session totals: 0 known provider calls (\(parsed.malformedCount) malformed record(s); total unavailable)")
+            } else {
+                lines.append("session totals: 0 provider calls")
+            }
+            return lines.joined(separator: "\n")
+        }
         let providers = Dictionary(grouping: calls, by: \.provider)
+        let callCount = parsed.malformedCount == 0
+            ? "\(calls.count) calls"
+            : "\(calls.count) known calls (\(parsed.malformedCount) malformed record(s); total unavailable)"
         if providers.count == 1 {
-            lines.append("session totals: \(calls.count) calls · \(totals(calls))")
+            lines.append("session totals: \(callCount) · \(totals(calls))")
         } else {
             // OpenAI input includes cached input while Anthropic reports uncached input separately.
             // Do not manufacture a cross-provider token total from fields with different semantics.
-            lines.append("session totals: \(calls.count) calls · cost \(totalMoney(calls, \.cost))")
+            lines.append("session totals: \(callCount) · cost \(totalMoney(calls, \.cost))")
             lines.append("")
             lines.append("provider totals (token meanings differ; do not sum across providers):")
             lines.append("| provider | calls | input | cache read | cache write | output | cost |")
@@ -125,24 +147,35 @@ enum SessionMetrics {
 
     // MARK: - Parsing (pure)
 
-    /// Parse every JSON-parseable line into a `Call`. Malformed lines are skipped but still advance
-    /// nothing (they aren't counted), so numbering stays aligned with the rendered transcript.
+    /// Parse every valid record into a `Call`. Record numbers retain gaps for malformed JSONL so the
+    /// metrics table and rendered transcript keep stable anchors into the untouched source file.
     static func parse(jsonl: String) -> [Call] {
+        parseDetailed(jsonl: jsonl).calls
+    }
+
+    private struct ParsedCalls {
+        let calls: [Call]
+        let malformedCount: Int
+        let totalRecords: Int
+    }
+
+    private static func parseDetailed(jsonl: String) -> ParsedCalls {
         var calls: [Call] = []
-        var number = 0
-        for raw in jsonl.split(separator: "\n", omittingEmptySubsequences: true) {
-            guard let entry = (try? JSONSerialization.jsonObject(with: Data(raw.utf8))) as? [String: Any]
-            else { continue }
-            number += 1
+        let records = JSONLRecords.parse(jsonl)
+        for record in records.lines {
+            guard let entry = record.object else { continue }
             let request = entry["request"] as? [String: Any]
             let response = entry["response"] as? [String: Any]
             let model = request?["model"] as? String ?? "?"
-            var call = Call(number: number,
+            let recordKind = (entry["record_kind"] as? String)
+                .flatMap(BrainTrafficLog.RecordKind.init(rawValue:)) ?? .providerCall
+            var call = Call(number: record.number,
                             tag: entry["tag"] as? String ?? "?",
                             provider: providerName(request: request, response: response),
                             model: model,
                             status: entry["status"] as? Int,
-                            ms: entry["ms"] as? Int)
+                            ms: entry["ms"] as? Int,
+                            recordKind: recordKind)
 
             if let cli = response?["cli"] as? [String: Any] {
                 call.cost = double(cli["total_cost_usd"])
@@ -187,7 +220,10 @@ enum SessionMetrics {
             }
             calls.append(call)
         }
-        return calls
+        return ParsedCalls(
+            calls: calls,
+            malformedCount: records.malformedCount,
+            totalRecords: records.lines.count)
     }
 
     // MARK: - Small helpers

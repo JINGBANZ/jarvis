@@ -346,7 +346,8 @@ actor CodexAppServerRuntime: LocalAgentRuntimeBackend {
     fileprivate func respond(
         threadID: String,
         configuration: LocalAgentConversationConfiguration,
-        turn: LocalAgentTurn
+        turn: LocalAgentTurn,
+        onRequestDispatched: @Sendable () -> Void
     ) async throws -> LocalAgentTurnResult {
         guard let server, server.isRunning else {
             throw Self.error("Codex app-server stopped before the turn")
@@ -386,6 +387,7 @@ actor CodexAppServerRuntime: LocalAgentRuntimeBackend {
                 ],
                 id: requestID,
                 timeout: try Self.remainingTimeout(until: deadline))
+            onRequestDispatched()
 
             var firstAssistantAt: UInt64?
             var completedText: String?
@@ -721,11 +723,15 @@ private final class CodexAppServerConversation: LocalAgentConversation, @uncheck
         }
     }
 
-    func respond(to turn: LocalAgentTurn) async throws -> LocalAgentTurnResult {
+    func respond(
+        to turn: LocalAgentTurn,
+        onRequestDispatched: @Sendable () -> Void
+    ) async throws -> LocalAgentTurnResult {
         try await runtime.respond(
             threadID: threadID,
             configuration: configuration,
-            turn: turn)
+            turn: turn,
+            onRequestDispatched: onRequestDispatched)
     }
 
     func finish() async {

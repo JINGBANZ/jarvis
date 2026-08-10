@@ -114,8 +114,13 @@ private final class ClaudeCodeConversation: LocalAgentConversation, Sendable {
         self.query = query
     }
 
-    func respond(to turn: LocalAgentTurn) async throws -> LocalAgentTurnResult {
-        try await query.respond(to: turn)
+    func respond(
+        to turn: LocalAgentTurn,
+        onRequestDispatched: @Sendable () -> Void
+    ) async throws -> LocalAgentTurnResult {
+        try await query.respond(
+            to: turn,
+            onRequestDispatched: onRequestDispatched)
     }
 
     func finish() async {
@@ -203,7 +208,10 @@ private final class ClaudeCodeQuery: @unchecked Sendable {
         }
     }
 
-    func respond(to turn: LocalAgentTurn) async throws -> LocalAgentTurnResult {
+    func respond(
+        to turn: LocalAgentTurn,
+        onRequestDispatched: @Sendable () -> Void
+    ) async throws -> LocalAgentTurnResult {
         try Task.checkCancellation()
         let content: [[String: Any]] = turn.input.map { item in
             switch item {
@@ -229,6 +237,7 @@ private final class ClaudeCodeQuery: @unchecked Sendable {
                 "content": content,
             ],
         ], timeout: max(0.01, deadline.timeIntervalSinceNow))
+        onRequestDispatched()
 
         var firstAssistantAt: UInt64?
         var assistantText: String?

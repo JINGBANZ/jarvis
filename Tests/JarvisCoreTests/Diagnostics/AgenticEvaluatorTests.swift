@@ -108,6 +108,7 @@ import Testing
             response: Data(#"{"status":"completed","output":[]}"#.utf8),
             status: 200,
             latencyMs: 100)
+        traffic.flush()
         try Data(#"{"t":"10:00:00","m":"heard question","k":"heard"}\n"#.utf8)
             .write(to: session.appendingPathComponent(ActivityLog.filename))
     }

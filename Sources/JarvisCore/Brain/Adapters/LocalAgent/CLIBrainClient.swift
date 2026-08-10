@@ -77,7 +77,11 @@ public struct CLIBrainClient: BrainClient, Sendable {
                 responseDeadline: responseDeadline)
         } catch {
             if Task.isCancelled || error is CancellationError { throw error }
-            recordFailure(error, requestRecord: nil, respondEntered: openEntered)
+            recordFailure(
+                error,
+                requestRecord: nil,
+                respondEntered: openEntered,
+                kind: .preRequestFailure)
             throw BrainFailure(error)
         }
     }
@@ -219,7 +223,12 @@ public struct CLIBrainClient: BrainClient, Sendable {
         return response
     }
 
-    func recordFailure(_ error: Error, requestRecord: Data?, respondEntered: UInt64) {
+    func recordFailure(
+        _ error: Error,
+        requestRecord: Data?,
+        respondEntered: UInt64,
+        kind: BrainTrafficLog.RecordKind
+    ) {
         let totalMs = Int(
             (DispatchTime.now().uptimeNanoseconds - respondEntered) / 1_000_000)
         let phases = ["totalMs": totalMs]
@@ -234,7 +243,8 @@ public struct CLIBrainClient: BrainClient, Sendable {
             status: nil,
             latencyMs: totalMs,
             error: error.localizedDescription,
-            phases: phases)
+            phases: phases,
+            kind: kind)
     }
 
     private func responseRecord(_ result: LocalAgentTurnResult) -> Data {
@@ -331,6 +341,21 @@ public struct CLIBrainClient: BrainClient, Sendable {
 }
 
 private actor CLIBrainConversation: BrainConversation {
+    /// The transport callback can cross an actor boundary. The lock makes this one-bit dispatch
+    /// witness safe to mark synchronously without adding an await between dispatch and response I/O.
+    private final class DispatchWitness: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value = false
+
+        var wasDispatched: Bool {
+            lock.withLock { value }
+        }
+
+        func markDispatched() {
+            lock.withLock { value = true }
+        }
+    }
+
     let client: CLIBrainClient
     let transport: any LocalAgentConversation
     let responseDeadline: Date?
@@ -354,6 +379,7 @@ private actor CLIBrainConversation: BrainConversation {
         }
         let respondEntered = DispatchTime.now().uptimeNanoseconds
         var requestRecord: Data?
+        let dispatchWitness = DispatchWitness()
         do {
             let remainingTimeout: TimeInterval?
             if let responseDeadline {
@@ -374,7 +400,9 @@ private actor CLIBrainConversation: BrainConversation {
                 timeout: remainingTimeout)
             requestRecord = prepared.requestRecord
             previousMessageIdentities = prepared.identities
-            let result = try await transport.respond(to: prepared.turn)
+            let result = try await transport.respond(
+                to: prepared.turn,
+                onRequestDispatched: dispatchWitness.markDispatched)
             return client.finishResponse(
                 result,
                 tools: tools,
@@ -385,7 +413,8 @@ private actor CLIBrainConversation: BrainConversation {
             client.recordFailure(
                 error,
                 requestRecord: requestRecord,
-                respondEntered: respondEntered)
+                respondEntered: respondEntered,
+                kind: dispatchWitness.wasDispatched ? .providerCall : .preRequestFailure)
             if Task.isCancelled || error is CancellationError { throw error }
             throw BrainFailure(error)
         }

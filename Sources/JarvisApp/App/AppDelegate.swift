@@ -74,6 +74,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// unwinding when Stop → Start rotates sessions must record into the session that made it, not
     /// contaminate the new session's audit data.
     private var sessionTraffic: BrainTrafficLog?
+    private var sessionCoachingAttempts: CoachingAttemptLog?
     /// The current session's log directory (set by `beginNewSession`) — also where `CLIBrainClient`
     /// materializes screenshots for a CLI brain, keeping all screen-derived bytes in one owner-only place.
     private var currentSessionDir: URL?
@@ -729,7 +730,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 preferences: screenPreferences,
                 captureDirectory: sessionDirectory),
             overlay: overlaySink,
-            clock: clock)
+            clock: clock,
+            coachingAttempts: sessionCoachingAttempts)
 
         // CoachDriver is @unchecked Sendable; capture it (not @MainActor self) in the callbacks.
         // Route turns through TurnTaskBox so Stop can cancel an in-flight one. Concurrent triggers are
@@ -952,6 +954,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let endedLiveSession = sessionIsLive
         sessionIsLive = false
         requestManualHint = nil              // hotkey beeps again once there's no live session
+        // Capture these session-bound recorders before a quick Start replaces the properties. Their
+        // queues must drain only at teardown, never on the coaching request path.
+        let traffic = sessionTraffic
+        let coachingAttempts = sessionCoachingAttempts
         let cancelled = turns?.cancelAll() ?? []; turns = nil   // cancel any in-flight coaching turn
         coachDriver = nil
         activeBrainTarget = nil
@@ -979,9 +985,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if endedLiveSession {
             ActivityLog.shared.record(.sessionEnded(reason: reason))
         }
-        // Activity writes are asynchronous during live capture. Persist every fixed failure outcome
-        // before this session can become evaluable, or an immediate Evaluate could miss why it ended.
+        // Session evidence writes are asynchronous during live coaching. Persist every completed
+        // event before this session can become evaluable; this teardown barrier keeps JSON work and
+        // disk I/O out of request latency without letting Evaluate see incomplete evidence.
         ActivityLog.shared.flush()
+        traffic?.flush()
+        coachingAttempts?.flush()
         // The just-stopped session becomes evaluable only once any cancelled turn has actually
         // finished unwinding — its brain request records a final traffic line on the way out, and an
         // Evaluate click before that line lands would audit an incomplete brain-traffic.jsonl.
@@ -991,6 +1000,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 for task in cancelled { await task.value }
                 guard let self else { return }
                 ActivityLog.shared.flush()
+                traffic?.flush()
+                coachingAttempts?.flush()
                 self.drainingStops -= 1
                 self.activityViewer?.coachingStateDidChange()
             }
@@ -1185,6 +1196,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let traffic = BrainTrafficLog()                  // fresh recorder BOUND to this session's dir
         traffic.enable(directory: dir)                   // <dir>/brain-traffic.jsonl, 0600, fresh
         sessionTraffic = traffic
+        let attempts = CoachingAttemptLog()
+        attempts.enable(directory: dir)                  // <dir>/coaching-attempts.jsonl, 0600, fresh
+        sessionCoachingAttempts = attempts
         currentSessionDir = dir
         // Now that logging is always on, sessions accumulate every launch. Bound it: keep only the most
         // recent few (the just-created one is current, so it's always spared).

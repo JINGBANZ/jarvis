@@ -108,6 +108,7 @@ import Testing
         }
 
         let total = attemptStarted.duration(to: .now)
+        traffic.flush()
         print(
             "ISSUE110_LIVE provider=\(provider.rawValue) "
             + "first_ms=\(milliseconds(firstElapsed)) "
