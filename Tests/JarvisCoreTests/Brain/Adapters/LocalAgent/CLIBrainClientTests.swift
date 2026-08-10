@@ -18,11 +18,13 @@ import Testing
         toolChoice: ToolChoice = .required,
         timeout: TimeInterval = BrainWorkloadTimeout.liveCoaching,
         traffic: BrainTrafficLog? = nil,
-        openDelay: TimeInterval = 0
+        openDelay: TimeInterval = 0,
+        failBeforeDispatch: Bool = false
     ) -> (CLIBrainClient, FakeLocalAgentRuntime) {
         let backend = FakeLocalAgentRuntime(
             replies: replies,
-            openDelay: openDelay)
+            openDelay: openDelay,
+            failBeforeDispatch: failBeforeDispatch)
         let runtime = CLIBrainRuntime(backend: backend)
         let client = CLIBrainClient(
             provider: provider,
@@ -296,6 +298,66 @@ import Testing
         #expect(jsonl.contains("app-server unavailable"))
     }
 
+    @Test func preparedTurnFailureBeforeDispatchIsNotAProviderCall() async throws {
+        let workDir = try makeWorkDir()
+        let traffic = BrainTrafficLog()
+        traffic.enable(directory: workDir)
+        let (client, backend) = client(
+            .codexCLI,
+            workDir: workDir,
+            replies: [#"{"tool":"stay_silent","arguments":{}}"#],
+            traffic: traffic,
+            failBeforeDispatch: true)
+
+        do {
+            _ = try await client.respond(
+                messages: [.system("coach prompt"), .user("prepared but unsent")],
+                tools: coachTools,
+                toolChoice: .required)
+            Issue.record("expected the transport to reject the prepared turn")
+        } catch {
+            #expect(error.localizedDescription.contains("before dispatch"))
+        }
+        traffic.flush()
+
+        let turns = await backend.turns
+        #expect(turns.count == 1)
+        let jsonl = try String(
+            contentsOf: workDir.appendingPathComponent(BrainTrafficLog.filename),
+            encoding: .utf8)
+        #expect(jsonl.contains("prepared but unsent"))
+        #expect(jsonl.contains(#""record_kind":"pre_request_failure""#))
+        #expect(!jsonl.contains(#""record_kind":"provider_call""#))
+    }
+
+    @Test func failureAfterDispatchRemainsAProviderCall() async throws {
+        let workDir = try makeWorkDir()
+        let traffic = BrainTrafficLog()
+        traffic.enable(directory: workDir)
+        let (client, _) = client(
+            .codexCLI,
+            workDir: workDir,
+            replies: [],
+            traffic: traffic)
+
+        do {
+            _ = try await client.respond(
+                messages: [.system("coach prompt"), .user("sent without a reply")],
+                tools: coachTools,
+                toolChoice: .required)
+            Issue.record("expected the dispatched turn to fail")
+        } catch {
+            #expect(error.localizedDescription.contains("no fake reply"))
+        }
+        traffic.flush()
+
+        let jsonl = try String(
+            contentsOf: workDir.appendingPathComponent(BrainTrafficLog.filename),
+            encoding: .utf8)
+        #expect(jsonl.contains(#""record_kind":"provider_call""#))
+        #expect(!jsonl.contains(#""record_kind":"pre_request_failure""#))
+    }
+
     @Test func sharedRuntimeStaysAliveUntilEveryReachableClientReleasesIt() async throws {
         let workDir = try makeWorkDir()
         let backend = FakeLocalAgentRuntime(
@@ -476,6 +538,7 @@ private actor FakeLocalAgentRuntime: LocalAgentRuntimeBackend {
     private var replies: [String]
     private let openError: (any Error)?
     private let openDelay: TimeInterval
+    private let failBeforeDispatch: Bool
     private(set) var configurations: [LocalAgentConversationConfiguration] = []
     private(set) var turns: [RecordedTurn] = []
     private(set) var openCount = 0
@@ -486,11 +549,13 @@ private actor FakeLocalAgentRuntime: LocalAgentRuntimeBackend {
     init(
         replies: [String],
         openError: (any Error)? = nil,
-        openDelay: TimeInterval = 0
+        openDelay: TimeInterval = 0,
+        failBeforeDispatch: Bool = false
     ) {
         self.replies = replies
         self.openError = openError
         self.openDelay = openDelay
+        self.failBeforeDispatch = failBeforeDispatch
     }
 
     func prepare(for configuration: LocalAgentConversationConfiguration) async throws {
@@ -522,7 +587,10 @@ private actor FakeLocalAgentRuntime: LocalAgentRuntimeBackend {
         termination.record()
     }
 
-    fileprivate func answer(_ turn: LocalAgentTurn) throws -> LocalAgentTurnResult {
+    fileprivate func answer(
+        _ turn: LocalAgentTurn,
+        onRequestDispatched: @Sendable () -> Void
+    ) throws -> LocalAgentTurnResult {
         let text = turn.input.compactMap { item -> String? in
             guard case .text(let text) = item else { return nil }
             return text
@@ -535,6 +603,14 @@ private actor FakeLocalAgentRuntime: LocalAgentRuntimeBackend {
             text: text,
             imageCount: imageCount,
             timeout: turn.timeout))
+        if failBeforeDispatch {
+            throw NSError(
+                domain: "FakeLocalAgentRuntime",
+                code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "turn rejected before dispatch"])
+        }
+        let dispatched = DispatchTime.now().uptimeNanoseconds
+        onRequestDispatched()
         guard !replies.isEmpty else {
             throw NSError(
                 domain: "FakeLocalAgentRuntime",
@@ -542,7 +618,6 @@ private actor FakeLocalAgentRuntime: LocalAgentRuntimeBackend {
                 userInfo: [NSLocalizedDescriptionKey: "no fake reply"])
         }
         let reply = replies.removeFirst()
-        let dispatched = DispatchTime.now().uptimeNanoseconds
         return LocalAgentTurnResult(
             reply: reply,
             metadata: nil,
@@ -577,8 +652,13 @@ private final class FakeLocalAgentConversation: LocalAgentConversation, @uncheck
         self.runtime = runtime
     }
 
-    func respond(to turn: LocalAgentTurn) async throws -> LocalAgentTurnResult {
-        try await runtime.answer(turn)
+    func respond(
+        to turn: LocalAgentTurn,
+        onRequestDispatched: @Sendable () -> Void
+    ) async throws -> LocalAgentTurnResult {
+        try await runtime.answer(
+            turn,
+            onRequestDispatched: onRequestDispatched)
     }
 
     func finish() async {

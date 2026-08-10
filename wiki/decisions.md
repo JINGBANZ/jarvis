@@ -1265,6 +1265,29 @@
   `Sources/JarvisCore/Coach/CoachHistory.swift`,
   `Sources/JarvisCore/Prompts/JarvisPrompts+HistorySummary.swift`.
 
+### 2026-08-08 — Overall readiness is a composition of focused subsystem state
+
+- **Chose:** Add one Foundation-only `JarvisReadiness` reducer that consumes typed snapshots of the
+  selected session's permissions, credentials, brain and transcription preparation, endpoint
+  connections, capture health, and capture recovery. It emits one typed checking, blocked,
+  recovering, fully ready, microphone-only ready, or stopped status plus effects for the app to
+  render. Each Start owns an opaque generation, so stale, cancelled, and post-Stop observations
+  cannot make a replacement session ready. Existing focused components, including
+  `CaptureReadinessMonitor`, continue to own their mechanics.
+- **Why:** Readiness had become a second state machine in `AppDelegate` and a separate presentation
+  model in the menu, leaving startup dependencies outside capture health and making Activity unable
+  to report the same live answer. One pure composition gives every surface the same authoritative
+  state without moving timers, provider objects, logging, permissions, or OS behavior into Core.
+- **Rejected:** (a) Expanding `CaptureReadinessMonitor` into a session god object — permission,
+  credential, and provider preparation are not capture policy. (b) Keeping independent menu and
+  Activity checks — they can drift and accept stale callbacks differently. (c) Persisting readiness
+  transitions as Activity rows — readiness is current UI state, while Activity remains the durable
+  coaching and lifecycle record.
+- **Detail:** [architecture.md → Components](./architecture.md#3-components),
+  `Sources/JarvisCore/Diagnostics/JarvisReadiness.swift`,
+  `Sources/JarvisCore/Diagnostics/CaptureReadinessMonitor.swift`,
+  `Sources/JarvisApp/App/AppDelegate.swift`.
+
 ### 2026-08-08 — Session evaluation uses persisted coaching-attempt provenance
 
 - **Chose:** Persist one owner-only coaching-attempt companion beside Activity and brain traffic.
@@ -1307,7 +1330,7 @@
   serialization, and file I/O in order. Stop captures the old session's recorders, waits for cancelled
   coaching work to unwind, and flushes every evidence queue before making that session evaluable.
 - **Chose:** Persist actual transcript inclusion separately from its filler classification, label CLI
-  failures that happen before inference as pre-request failures rather than provider calls, and surface
+  failures before actual transport dispatch as pre-request failures rather than provider calls, and surface
   malformed JSONL as unavailable evidence with stable record-number gaps and partial totals.
 - **Why:** Synchronous audit writes can sit between a provider response and Jarvis handling or showing
   the coaching result. Moving them behind ordered queues removes that disk/serialization latency while

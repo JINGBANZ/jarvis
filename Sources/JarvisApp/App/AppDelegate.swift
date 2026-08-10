@@ -28,9 +28,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Two provider sessions feeding one shared transcript: mic → `.me`, system audio → `.them`.
     private var transcriber: (any TranscriptionSession)?       // "me" (mic)
     private var themTranscriber: (any TranscriptionSession)?   // "them" (system audio)
+    /// Overall readiness is composed in Core. The App owns only the active generation token and the
+    /// OS/provider observations it feeds into that reducer.
+    private let readiness = JarvisReadiness()
+    private var readinessSession: JarvisReadiness.Session?
     private var micConnectionState: TranscriptionConnectionState = .stopped
     private var systemConnectionState: TranscriptionConnectionState = .stopped
-    private var reportedCoachingReady = false
     private var reportedTranscriptionFailure = false
     /// Proves audio frames are actually flowing before Jarvis claims readiness, and turns a sustained
     /// capture stall into a typed consequence. Recreated per session; observations and its poll clock
@@ -136,6 +139,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         overlayBox.setEnabled(appearance.boxEnabled)   // on by default — shows the history box at launch
 
         menuBar = MenuBarController()
+        renderReadinessStatus(readiness.status)
 
         // Unified Settings window: brain (provider + model + API key) + overlay appearance + the
         // activity log. A pasted key is stored but does not auto-start. While running, it updates
@@ -491,6 +495,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let brainRoute = brainPreferences.configuredRoute
         let key = secrets.apiKey() ?? ""
         let requiresOpenAIKey = transcriptionProvider.requiresOpenAIAPIKey(for: brainRoute)
+        let preparesAppleSpeech = transcriptionProvider == .appleSpeech
+        let readinessConfiguration = JarvisReadiness.Configuration(
+            requiredPermissions: [.microphone],
+            requiredCredentials: requiresOpenAIKey ? [.openAIAPIKey] : [],
+            requiresTranscriptionPreparation: preparesAppleSpeech)
+        let readinessStart = readiness.begin(configuration: readinessConfiguration)
+        let readinessSession = readinessStart.session
+        self.readinessSession = readinessSession
+        applyReadinessEffects(readinessStart.effects)
+
+        let grantedPermissions = Permissions.grantedReadinessPermissions()
+        observeReadiness(.permissions(granted: grantedPermissions), for: readinessSession)
+        let missingPermissions = readinessConfiguration.requiredPermissions
+            .subtracting(grantedPermissions)
+        guard missingPermissions.isEmpty else {
+            jlog("Jarvis: can't start — required permissions are missing: "
+                 + missingPermissions.map(\.rawValue).sorted().joined(separator: ", "))
+            if wasRunning {
+                ActivityLog.shared.record(.settingsChangeNotApplied)
+            }
+            errorReporter.reportImmediately(
+                .permissionsMissing(missingPermissions),
+                context: reportContext)
+            return false
+        }
+
+        let availableCredentials: Set<JarvisReadiness.Credential> = key.isEmpty
+            ? [] : [.openAIAPIKey]
+        observeReadiness(.credentials(available: availableCredentials), for: readinessSession)
         guard !requiresOpenAIKey || !key.isEmpty else {
             jlog("Jarvis: can't start — no API key.")
             if wasRunning {
@@ -500,6 +533,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return false
         }
         guard let brainRoute else {
+            observeReadiness(
+                .brainPreparation(.blocked(.providerNotConfigured)),
+                for: readinessSession)
             jlog("Jarvis: can't start — no primary provider.")
             if wasRunning {
                 ActivityLog.shared.record(.settingsChangeNotApplied)
@@ -514,7 +550,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         pendingStartTask?.cancel()
         pendingStartTask = nil
         let cliProviders = brainRoute.targets.map(\.provider).filter(\.usesLocalCLI)
-        let preparesAppleSpeech = transcriptionProvider == .appleSpeech
         guard preparesAppleSpeech || !cliProviders.isEmpty else {
             return installPreparedStart(
                 apiKey: key,
@@ -523,10 +558,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 appleSpeechLocale: nil,
                 detectedCLIs: [:],
                 wasRunning: wasRunning,
-                reportContext: reportContext)
+                reportContext: reportContext,
+                readinessSession: readinessSession)
         }
 
-        menuBar.setState(.starting)
         let detector = AgentCLIDetector()
         pendingStartTask = Task { [weak self] in
             guard let self else { return }
@@ -538,7 +573,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         diagnostic: "Apple Speech requires macOS 26 or later.",
                         revision: revision,
                         wasRunning: wasRunning,
-                        context: reportContext)
+                        context: reportContext,
+                        readinessSession: readinessSession,
+                        blocker: .unavailable)
                     return
                 }
                 do {
@@ -560,12 +597,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         diagnostic: "Apple Speech preparation failed: \(error)",
                         revision: revision,
                         wasRunning: wasRunning,
-                        context: reportContext)
+                        context: reportContext,
+                        readinessSession: readinessSession,
+                        blocker: error is AppleSpeechModelPreparation.Failure
+                            ? .unavailable : .preparationFailed)
                     return
                 }
+                guard !Task.isCancelled,
+                      self.pendingStartRevision == revision,
+                      self.readinessSession == readinessSession else { return }
+                self.observeReadiness(
+                    .transcriptionPreparation(.ready), for: readinessSession)
             }
             let detected = await detector.detectAllAsync(cliProviders)
-            guard !Task.isCancelled, self.pendingStartRevision == revision else {
+            guard !Task.isCancelled,
+                  self.pendingStartRevision == revision,
+                  self.readinessSession == readinessSession else {
                 return
             }
             let credentialIsCurrent = !requiresOpenAIKey
@@ -574,7 +621,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                   self.transcriptionPreferences.configuration == transcriptionConfiguration,
                   self.brainPreferences.configuredRoute == brainRoute else {
                 self.pendingStartTask = nil
-                self.refreshConnectionUI()
+                self.cancelReadinessAttempt(readinessSession)
                 return
             }
             self.pendingStartTask = nil
@@ -587,7 +634,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 appleSpeechLocale: appleSpeechLocale,
                 detectedCLIs: detectedCLIs,
                 wasRunning: wasRunning,
-                reportContext: reportContext)
+                reportContext: reportContext,
+                readinessSession: readinessSession)
         }
         return true
     }
@@ -597,16 +645,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         diagnostic: String,
         revision: UInt,
         wasRunning: Bool,
-        context: UserFacingError.PresentationContext
+        context: UserFacingError.PresentationContext,
+        readinessSession: JarvisReadiness.Session,
+        blocker: JarvisReadiness.TranscriptionBlocker
     ) {
-        guard pendingStartRevision == revision else { return }
+        guard pendingStartRevision == revision,
+              self.readinessSession == readinessSession else { return }
         pendingStartTask = nil
+        observeReadiness(
+            .transcriptionPreparation(.blocked(blocker)), for: readinessSession)
         jlog("Jarvis: can't start — \(diagnostic)")
         if wasRunning {
             ActivityLog.shared.record(.settingsChangeNotApplied)
         }
         errorReporter.reportImmediately(error, context: context)
-        refreshConnectionUI()
     }
 
     /// Install a fully prepared route on the main actor. The primary preflight still happens before
@@ -618,8 +670,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appleSpeechLocale: Locale?,
         detectedCLIs initialDetectedCLIs: [BrainProvider: DetectedAgentCLI],
         wasRunning: Bool,
-        reportContext: UserFacingError.PresentationContext
+        reportContext: UserFacingError.PresentationContext,
+        readinessSession: JarvisReadiness.Session
     ) -> Bool {
+        guard self.readinessSession == readinessSession else { return false }
         let brainProvider = brainRoute.primary.provider
         var detectedCLIs = initialDetectedCLIs
         let preflight = preflightBrainProvider(
@@ -627,13 +681,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                                context: reportContext,
                                                recordSettingsFailure: wasRunning)
         guard preflight.isReady else {
-            refreshConnectionUI()
+            observeReadiness(
+                .brainPreparation(.blocked(.providerUnavailable)),
+                for: readinessSession)
             return false
         }
         if let primaryCLI = preflight.cli {
             detectedCLIs[brainProvider] = primaryCLI
         }
-        stop(reason: .replacedByNewSession) // tear down any existing pipeline so we start cleanly
+        stop(reason: .replacedByNewSession, preserving: readinessSession)
         reportedTranscriptionFailure = false
         // A fresh transcript for the fresh pipeline. Reusing the old one would re-send a dead run's
         // lines as "new since last turn" — their [mm:ss] stamps minted against the previous
@@ -663,6 +719,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             apiKey: key,
             effort: brainPreferences.effort,
             sessionDirectory: sessionDirectory)
+        observeReadiness(.brainPreparation(.ready), for: readinessSession)
         // Fan each spoken tip out to both the Overlay Caption and the persistent Overlay Box.
         let overlaySink = BroadcastOverlay([overlayCaption, overlayBox])
         let driver = CoachDriver(
@@ -743,7 +800,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.systemConnectionState = .failed
                 // Stop expecting system frames so a capture first-frame/stall timeout can't also fire.
                 self.captureReadiness?.systemBecameUnavailable()
-                self.refreshConnectionUI()
+                self.observeEndpointAndCaptureReadiness(
+                    stream: .system, state: .failed, for: readinessSession)
                 ActivityLog.shared.record(.systemAudioStopped)
                 self.errorReporter.reportImmediately(.systemAudioStopped, context: .runtime)
             }
@@ -790,6 +848,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let capture else { return }
             Task { @MainActor [weak self] in
                 guard let self, self.aggregateCapture === capture else { return }
+                self.observeReadiness(.capture(.stopped), for: readinessSession)
                 self.errorReporter.reportImmediately(
                     .captureStopped(reason: reason), context: .runtime)
             }
@@ -801,6 +860,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                       let monitor = self.captureReadiness else { return }
                 monitor.setCaptureRecoveryInProgress(
                     inProgress, at: self.clock.now() - self.captureReadinessStart)
+                self.observeReadiness([
+                    .captureRecovery(inProgress: inProgress),
+                    .capture(monitor.readiness),
+                ], for: readinessSession)
             }
         }
         self.transcriber = transcriber
@@ -813,40 +876,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         brainSection.setActiveTarget(brainRoute.primary)
         micConnectionState = .connecting
         systemConnectionState = .connecting
-        reportedCoachingReady = false
+        observeReadiness([
+            .transcriptionEndpoint(stream: .microphone, state: .connecting),
+            .transcriptionEndpoint(stream: .system, state: .connecting),
+        ], for: readinessSession)
         transcriber.onCaptureContinuity = { [weak self, weak transcriber] signal in
             guard let transcriber else { return }
             Task { @MainActor [weak self] in
                 guard let self, self.transcriber === transcriber else { return }
-                self.handleCaptureContinuity(signal, for: .microphone)
+                self.handleCaptureContinuity(
+                    signal, for: .microphone, readinessSession: readinessSession)
             }
         }
         themTranscriber.onCaptureContinuity = { [weak self, weak themTranscriber] signal in
             guard let themTranscriber else { return }
             Task { @MainActor [weak self] in
                 guard let self, self.themTranscriber === themTranscriber else { return }
-                self.handleCaptureContinuity(signal, for: .system)
+                self.handleCaptureContinuity(
+                    signal, for: .system, readinessSession: readinessSession)
             }
         }
-        menuBar.setState(.starting)
         transcriber.onConnectionStateChange = { [weak self, weak transcriber] state in
             guard let transcriber else { return }
             Task { @MainActor [weak self] in
                 guard let self, self.transcriber === transcriber else { return }
-                self.micConnectionState = state
-                self.captureReadiness?.setProviderReady(
-                    state == .ready, for: .microphone)
-                self.refreshConnectionUI()
+                self.handleTranscriptionConnectionState(
+                    state, for: .microphone, readinessSession: readinessSession)
             }
         }
         themTranscriber.onConnectionStateChange = { [weak self, weak themTranscriber] state in
             guard let themTranscriber else { return }
             Task { @MainActor [weak self] in
                 guard let self, self.themTranscriber === themTranscriber else { return }
-                self.systemConnectionState = state
-                self.captureReadiness?.setProviderReady(
-                    state == .ready, for: .system)
-                self.refreshConnectionUI()
+                self.handleTranscriptionConnectionState(
+                    state, for: .system, readinessSession: readinessSession)
             }
         }
         // Arm the hint hotkey for this session: capture the screen and force a one-trip hint, routed
@@ -855,6 +918,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         transcriber.connect()
         themTranscriber.connect()
         if let reason = capture.start() {
+            observeReadiness(.capture(.stopped), for: readinessSession)
             errorReporter.reportImmediately(
                 .captureFailed(reason: reason), context: reportContext)
             return false
@@ -862,7 +926,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Capture setup is synchronous and can legitimately take longer than the first-frame
         // deadline. Arm that deadline only after AudioDeviceStart succeeds; callbacks were installed
         // above, so any frame already queued on the main actor is still observed by this monitor.
-        startCaptureReadiness()
+        startCaptureReadiness(readinessSession: readinessSession)
         sessionIsLive = true
         jlog("Jarvis: coaching starting — verifying transcription endpoints.")
         jlog("Jarvis network path at start: \(networkDiagnostics.currentSummary)")
@@ -875,11 +939,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// transcribers must go: otherwise a turn-end trigger from a still-live socket could drive a
     /// coaching turn on a torn-down driver — the exact "speak after Stop" failure the turns box exists
     /// to prevent — and a subsequent Start would leak the orphaned IOProc/endpoints.
-    private func stop(reason: SessionEndReason) {
+    private func stop(
+        reason: SessionEndReason,
+        preserving readinessToPreserve: JarvisReadiness.Session? = nil
+    ) {
         pendingStartRevision &+= 1
         pendingStartTask?.cancel()
         pendingStartTask = nil
         let hadAllocatedPipeline = transcriber != nil || themTranscriber != nil
+        let preservesReplacementReadiness = readinessToPreserve == readinessSession
+        let preservesStartupBlock = !hadAllocatedPipeline
+            && reason != .applicationQuit
+            && readiness.status.isBlocked
         let endedLiveSession = sessionIsLive
         sessionIsLive = false
         requestManualHint = nil              // hotkey beeps again once there's no live session
@@ -903,8 +974,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         stopCaptureReadiness()
         micConnectionState = .stopped
         systemConnectionState = .stopped
-        reportedCoachingReady = false
-        menuBar?.setState(.stopped)
+        if !preservesReplacementReadiness && !preservesStartupBlock,
+           let readinessSession {
+            applyReadinessEffects(readiness.stop(session: readinessSession))
+            self.readinessSession = nil
+        }
         if hadAllocatedPipeline {
             jlog("Jarvis: stopped.")
         }
@@ -947,58 +1021,97 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .transcriptionStopped(reason: reason), context: .runtime)
     }
 
-    /// The mic endpoint is the truth for whether Jarvis is listening. System audio may reconnect or
-    /// fail independently; that degrades the other side of a call without pretending the mic is down.
-    private func refreshConnectionUI() {
-        guard transcriber != nil else {
-            menuBar.setState(.stopped)
-            return
-        }
-        switch micConnectionState {
-        case .connecting:
-            menuBar.setState(.starting)
-        case .reconnecting(let attempt):
-            menuBar.setState(.reconnecting(attempt: attempt))
-        case .ready:
-            // Core combines provider readiness with capture-frame health; AppKit only maps the
-            // deterministic result onto the menu and the one-time human lifecycle milestone.
-            switch captureReadiness?.readiness ?? .waitingForMicrophone {
-            case .waitingForMicrophone, .stopped:
-                menuBar.setState(.starting)
-            case .waitingForSystem:
-                menuBar.setState(.systemAudioConnecting)
-            case .ready:
-                menuBar.setState(.listening)
-                if !reportedCoachingReady {
-                    reportedCoachingReady = true
-                    jlog("Jarvis: coaching ready (mic + system audio).")
-                }
-            case .microphoneOnly:
-                menuBar.setState(.microphoneOnly)
+    private func observeReadiness(
+        _ observation: JarvisReadiness.Observation,
+        for session: JarvisReadiness.Session
+    ) {
+        applyReadinessEffects(readiness.observe(observation, for: session))
+    }
+
+    private func observeReadiness(
+        _ observations: [JarvisReadiness.Observation],
+        for session: JarvisReadiness.Session
+    ) {
+        applyReadinessEffects(readiness.observe(observations, for: session))
+    }
+
+    private func applyReadinessEffects(_ effects: [JarvisReadiness.Effect]) {
+        for effect in effects {
+            switch effect {
+            case .statusChanged(let status):
+                renderReadinessStatus(status)
+            case .readinessEstablished(.full):
+                jlog("Jarvis: coaching ready (mic + system audio).")
+            case .readinessEstablished(.microphoneOnly):
+                jlog("Jarvis: coaching ready (microphone only).")
             }
-        case .failed:
-            // `onTerminalFailure` immediately routes through ErrorReporter and stops the session.
-            menuBar.setState(.reconnecting(attempt: 6))
-        case .stopped:
-            menuBar.setState(.stopped)
         }
+    }
+
+    private func renderReadinessStatus(_ status: JarvisReadiness.Status) {
+        menuBar?.setStatus(status)
+        activityViewer?.readinessDidChange(status)
+    }
+
+    private func cancelReadinessAttempt(_ session: JarvisReadiness.Session) {
+        guard readinessSession == session else { return }
+        applyReadinessEffects(readiness.stop(session: session))
+        readinessSession = nil
+    }
+
+    /// Keep endpoint connection bookkeeping focused on seeding `CaptureReadinessMonitor`; Core owns
+    /// every cross-subsystem status decision and both UI surfaces consume that result.
+    private func handleTranscriptionConnectionState(
+        _ state: TranscriptionConnectionState,
+        for stream: CaptureReadinessMonitor.Stream,
+        readinessSession: JarvisReadiness.Session
+    ) {
+        guard self.readinessSession == readinessSession else { return }
+        switch stream {
+        case .microphone:
+            micConnectionState = state
+        case .system:
+            systemConnectionState = state
+        }
+        captureReadiness?.setProviderReady(state == .ready, for: stream)
+        observeEndpointAndCaptureReadiness(
+            stream: stream, state: state, for: readinessSession)
+    }
+
+    private func observeEndpointAndCaptureReadiness(
+        stream: CaptureReadinessMonitor.Stream,
+        state: TranscriptionConnectionState,
+        for session: JarvisReadiness.Session
+    ) {
+        var observations: [JarvisReadiness.Observation] = [
+            .transcriptionEndpoint(stream: stream, state: state),
+        ]
+        if let captureReadiness {
+            observations.append(.capture(captureReadiness.readiness))
+        }
+        observeReadiness(observations, for: session)
     }
 
     /// Begin capture-frame readiness tracking for the session being installed. The 1s poll owns the
     /// initial first-frame deadline and the sustained-stall deadline after frame flow begins;
     /// observations arrive through `handleCaptureContinuity`.
-    private func startCaptureReadiness() {
+    private func startCaptureReadiness(readinessSession: JarvisReadiness.Session) {
         captureReadinessTimer?.invalidate()
         captureReadinessStart = clock.now()
         let monitor = CaptureReadinessMonitor(startedAt: 0)
         monitor.setProviderReady(micConnectionState == .ready, for: .microphone)
         monitor.setProviderReady(systemConnectionState == .ready, for: .system)
         captureReadiness = monitor
+        observeReadiness(.capture(monitor.readiness), for: readinessSession)
         captureReadinessTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
-                guard let self, let monitor = self.captureReadiness else { return }
+                guard let self, let monitor = self.captureReadiness,
+                      self.readinessSession == readinessSession else { return }
+                let effects = monitor.poll(
+                    at: self.clock.now() - self.captureReadinessStart)
+                self.observeReadiness(.capture(monitor.readiness), for: readinessSession)
                 self.applyCaptureReadinessEffects(
-                    monitor.poll(at: self.clock.now() - self.captureReadinessStart))
+                    effects, readinessSession: readinessSession)
             }
         }
     }
@@ -1009,11 +1122,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         captureReadiness = nil
     }
 
-    /// Fold one capture observation into the readiness monitor and apply any consequence. Positive
-    /// sample progress can be the edge that flips the menu from starting to listening, so refresh on it.
-    private func handleCaptureContinuity(_ signal: CaptureReadinessMonitor.Signal,
-                                         for stream: CaptureReadinessMonitor.Stream) {
-        guard let captureReadiness else { return }
+    /// Fold one content-free capture observation into the focused monitor, then publish only its typed
+    /// output to the overall composition reducer.
+    private func handleCaptureContinuity(
+        _ signal: CaptureReadinessMonitor.Signal,
+        for stream: CaptureReadinessMonitor.Stream,
+        readinessSession: JarvisReadiness.Session
+    ) {
+        guard self.readinessSession == readinessSession, let captureReadiness else { return }
         let observedAt = clock.now() - captureReadinessStart
         let hadFirstFrame = captureReadiness.hasFirstFrame(stream)
         let effects = captureReadiness.note(
@@ -1023,15 +1139,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 jlog("Jarvis capture readiness [\(stream.rawValue)]: "
                      + "capture=1/\(sampleCount), first=\(String(format: "%.3fs", observedAt))")
             }
-            refreshConnectionUI()
         }
-        applyCaptureReadinessEffects(effects)
+        observeReadiness(.capture(captureReadiness.readiness), for: readinessSession)
+        applyCaptureReadinessEffects(effects, readinessSession: readinessSession)
     }
 
     /// Turn readiness consequences into lifecycle effects. A microphone capture failure is terminal; a
     /// system capture failure degrades to microphone-only. Fixed copy goes to Activity; the cause and
     /// counters stay in `jarvis-debug.log`.
-    private func applyCaptureReadinessEffects(_ effects: [CaptureReadinessMonitor.Effect]) {
+    private func applyCaptureReadinessEffects(
+        _ effects: [CaptureReadinessMonitor.Effect],
+        readinessSession: JarvisReadiness.Session
+    ) {
+        guard self.readinessSession == readinessSession else { return }
         for effect in effects {
             switch effect {
             case .microphoneCaptureFailed(let cause):
@@ -1047,7 +1167,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 themTranscriber?.stop()
                 themTranscriber = nil
                 systemConnectionState = .failed
-                refreshConnectionUI()
+                observeEndpointAndCaptureReadiness(
+                    stream: .system, state: .failed, for: readinessSession)
                 ActivityLog.shared.record(.systemAudioStopped)
                 errorReporter.reportImmediately(.systemAudioStopped, context: .runtime)
             }
@@ -1138,5 +1259,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 && FileManager.default.fileExists(
                     atPath: root.appendingPathComponent("Sources/JarvisCore").path)
         }?.standardizedFileURL
+    }
+}
+
+private extension JarvisReadiness.Status {
+    var isBlocked: Bool {
+        if case .blocked = self { return true }
+        return false
     }
 }

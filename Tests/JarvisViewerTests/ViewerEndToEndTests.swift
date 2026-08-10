@@ -46,6 +46,23 @@ import WebKit
         #expect(border == "solid")
     }
 
+    @MainActor @Test func readinessBadgeIsLivePageStateNotAnActivityRow() async throws {
+        let h = WebViewHarness()
+        try await h.load(ActivityLog.htmlShell())
+        try await h.eval("setReadiness('<Ready & listening>','ready'); null")
+
+        let text = try await h.eval(
+            "document.getElementById('readiness').textContent"
+        ) as? String
+        let state = try await h.eval(
+            "document.getElementById('readiness').dataset.state"
+        ) as? String
+        let rows = try await h.eval("document.querySelectorAll('#log .row').length") as? Int
+        #expect(text == "<Ready & listening>")
+        #expect(state == "ready")
+        #expect(rows == 0)
+    }
+
     @MainActor @Test func thumbnailClickOpensLightboxAndEscapeCloses() async throws {
         let h = WebViewHarness()
         try await h.load(ActivityLog.htmlShell())

@@ -29,7 +29,10 @@ struct LocalAgentConversationConfiguration: Sendable, Equatable {
 }
 
 protocol LocalAgentConversation: Sendable {
-    func respond(to turn: LocalAgentTurn) async throws -> LocalAgentTurnResult
+    func respond(
+        to turn: LocalAgentTurn,
+        onRequestDispatched: @Sendable () -> Void
+    ) async throws -> LocalAgentTurnResult
     func finish() async
 }
 
