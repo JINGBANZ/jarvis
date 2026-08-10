@@ -112,9 +112,9 @@ machine-specific instructions were generalized instead of rewriting repository i
 ## Next action
 
 The four agent workflows are temporarily disabled in GitHub Actions while their base-branch copies
-still target the removed self-hosted runner. Merge this hardening PR, create the `agent-ready` label,
-then re-enable the workflows so their hosted, owner-gated definitions take effect. Before changing
-repository visibility, delete the historical self-hosted runs and artifacts after owner approval:
+still target the removed self-hosted runner; the `agent-ready` approval label now exists. Merge this
+hardening PR, then re-enable the workflows so their hosted, owner-gated definitions take effect.
+Before changing repository visibility, delete the historical self-hosted runs and artifacts after owner approval:
 the audit found no credential leak, but those logs expose runner, account, and installed-tool paths.
 Replace release-please's `GITHUB_TOKEN` with a GitHub App token
 before making CI a required check, because token-authored Release PRs do not trigger `pull_request`
