@@ -1023,6 +1023,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 for task in cancelled { await task.value }
                 ActivityLog.shared.flush()
                 _ = await audit?.close(deadline: FileSessionAudit.defaultCloseDeadline)
+                await audit?.waitForPersistenceToStop()
                 guard let self else { return }
                 self.stopDrainTasks[drainID] = nil
                 self.activityViewer?.coachingStateDidChange()

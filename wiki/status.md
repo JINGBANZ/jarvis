@@ -92,8 +92,9 @@ observer ports, then contains parsing, redaction, serialization, and file I/O be
 process worker. Regular Stop closes old evidence asynchronously so the next Start does not wait;
 application Quit defers AppKit termination while a bounded asynchronous drain keeps main-actor cleanup
 available before exit, including a session still closing after Stop. Overflow, persistence failure,
-late work, or a close deadline miss makes the versioned health evidence explicitly partial, and the
-evaluator renders surviving totals as lower bounds. CLI failures before actual transport dispatch
+late work, or a close deadline miss makes the versioned health evidence explicitly partial. Evaluate
+remains disabled until the worker stops mutating a timed-out session, then renders surviving totals as
+lower bounds. CLI failures before actual transport dispatch
 remain separate from provider-call totals, and malformed JSONL likewise makes affected values
 explicitly partial rather than exact-looking. Historical sessions without provenance remain explicitly
 unavailable; `stay_silent` is never treated as an avoidable-call proxy. The compact transcript also

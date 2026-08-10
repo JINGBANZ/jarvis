@@ -14,8 +14,40 @@ public final class FileSessionAudit: BrainTrafficAuditing, CoachingAttemptAuditi
         case timedOut
     }
 
+    /// A close deadline bounds the caller's wait, not the serial worker's filesystem operation. Keep
+    /// a separate one-shot settlement so UI consumers can refuse mutable evidence until the worker's
+    /// close envelope has actually finished, including a corrective partial-marker write.
+    private final class PersistenceSettlement: @unchecked Sendable {
+        private let lock = NSLock()
+        private var settled = false
+        private var waiters: [CheckedContinuation<Void, Never>] = []
+
+        func markSettled() {
+            let continuations = lock.withLock {
+                guard !settled else { return [CheckedContinuation<Void, Never>]() }
+                settled = true
+                let continuations = waiters
+                waiters.removeAll()
+                return continuations
+            }
+            continuations.forEach { $0.resume() }
+        }
+
+        func wait() async {
+            await withCheckedContinuation { continuation in
+                let shouldResume = lock.withLock {
+                    if settled { return true }
+                    waiters.append(continuation)
+                    return false
+                }
+                if shouldResume { continuation.resume() }
+            }
+        }
+    }
+
     private let worker: SessionAuditWorker
     private let session: SessionAuditWorker.Session
+    private let persistenceSettlement = PersistenceSettlement()
 
     public convenience init(directory: URL) {
         self.init(directory: directory, worker: .shared)
@@ -42,7 +74,11 @@ public final class FileSessionAudit: BrainTrafficAuditing, CoachingAttemptAuditi
         let streamPair = AsyncStream<SessionAuditCloseResult>.makeStream(
             bufferingPolicy: .bufferingNewest(1))
         let closeDeadline = ContinuousClock.now.advanced(by: deadline)
-        let accepted = worker.close(session, deadline: closeDeadline) { result in
+        let accepted = worker.close(
+            session,
+            deadline: closeDeadline
+        ) { [persistenceSettlement] result in
+            persistenceSettlement.markSettled()
             streamPair.continuation.yield(result)
             streamPair.continuation.finish()
         }
@@ -71,6 +107,13 @@ public final class FileSessionAudit: BrainTrafficAuditing, CoachingAttemptAuditi
                 return .partial
             }
         }
+    }
+
+    /// Wait until this sealed session's worker envelope has stopped touching its files. This is
+    /// intentionally separate from the bounded close result: a deadline miss returns partial promptly,
+    /// while Activity keeps Evaluate disabled until the corrective marker is durable.
+    public func waitForPersistenceToStop() async {
+        await persistenceSettlement.wait()
     }
 
     var healthSnapshot: SessionAuditWorker.HealthSnapshot {

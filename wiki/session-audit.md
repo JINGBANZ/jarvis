@@ -56,7 +56,7 @@ the replacement, so work still unwinding from the old session cannot contaminate
 
 | Transition | Behavior |
 |---|---|
-| Regular Stop or runtime teardown | Cancel active turns, wait for their final audit admissions asynchronously, then close the old audit under its deadline. A replacement Start does not wait. |
+| Regular Stop or runtime teardown | Cancel active turns, wait for their final audit admissions asynchronously, then close the old audit under its deadline. A replacement Start does not wait, while Evaluate remains disabled until the worker has stopped mutating that session even when the close deadline reports partial. |
 | Application Quit | Ask AppKit to defer termination, cancel active turns, and await a bounded drain without blocking the main actor. Include any audit still closing after an immediately preceding Stop, then close the current audit before replying that termination may continue; if work cannot drain, its open marker remains deliberately partial. |
 | Evaluate | Read a stopped session only after its regular close finishes; interpret the health marker before presenting deterministic totals. |
 
@@ -66,6 +66,11 @@ replacement privately, then checks the close deadline and current health immedia
 after its atomic rename. If preparation or the rename crosses the deadline, the worker replaces the
 candidate with partial evidence. Application Quit uses this same asynchronous close while AppKit
 holds termination, so main-actor cleanup can continue and the process does not exit early.
+
+The close deadline bounds how long its caller waits for a complete result; it cannot stop a filesystem
+operation already in progress. A separate settlement signal fires only after the serial worker has
+finished the final or corrective marker write. Regular Stop retains that settlement task, keeping
+Evaluate unavailable until the session directory is stable.
 
 ## Failure Semantics
 

@@ -587,9 +587,10 @@ The always-on legs are built to survive transient failure rather than die on it:
 - **The audit edge** is isolated, bounded, and completeness-aware. Regular Stop closes an old session
   asynchronously after cancelled coaching work unwinds; application Quit defers AppKit termination
   while a bounded asynchronous drain keeps the main actor available and includes any preceding Stop
-  still closing. Overload, persistence failure, late work, or a close timeout degrades only the
-  evidence and makes evaluator totals explicit lower bounds. The complete observer, lifecycle,
-  privacy, and evaluator contract lives in
+  still closing. Evaluate remains gated until the old session's worker has stopped mutating its
+  artifacts, even when the close deadline has already classified them partial. Overload, persistence
+  failure, late work, or a close timeout degrades only the evidence and makes evaluator totals explicit
+  lower bounds. The complete observer, lifecycle, privacy, and evaluator contract lives in
   [session-audit.md](./session-audit.md).
 
 ## 5. Safety Model

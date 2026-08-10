@@ -27,6 +27,19 @@ import Testing
         }
     }
 
+    private final class CompletionFlag: @unchecked Sendable {
+        private let lock = NSLock()
+        private var storage = false
+
+        func mark() {
+            lock.withLock { storage = true }
+        }
+
+        var isMarked: Bool {
+            lock.withLock { storage }
+        }
+    }
+
     /// Holds the worker inside its first file operation while leaving mailbox admission available.
     private final class BlockingWriter: SessionAuditWriting, @unchecked Sendable {
         let openEntered = DispatchSemaphore(value: 0)
@@ -307,7 +320,7 @@ import Testing
         defer { try? FileManager.default.removeItem(at: directory) }
         let writer = BlockingWriter()
         let worker = SessionAuditWorker(
-            limits: .production,
+            limits: .init(maxEventCount: 1, maxRetainedBytes: 4_096),
             writer: writer)
         let audit = FileSessionAudit(directory: directory, worker: worker)
         await wait(for: writer.openEntered)
@@ -315,7 +328,9 @@ import Testing
         #expect(await audit.close(deadline: .zero) == .partial)
         #expect(audit.healthSnapshot.closeTimeout > 0)
 
+        let settlement = Task { await audit.waitForPersistenceToStop() }
         writer.releaseOpen()
+        await settlement.value
         await waitUntilIdle(worker)
         let marker = try healthMarker(in: directory)
         #expect(marker["state"] as? String == "partial")
@@ -359,7 +374,19 @@ import Testing
         let close = Task { await audit.close(deadline: .milliseconds(20)) }
         await wait(for: writer.completeMarkerRenamed)
         #expect(await close.value == .partial)
+        let settlementStarted = DispatchSemaphore(value: 0)
+        let settlementFinished = CompletionFlag()
+        let settlement = Task.detached {
+            settlementStarted.signal()
+            await audit.waitForPersistenceToStop()
+            settlementFinished.mark()
+        }
+        await wait(for: settlementStarted)
+        await Task.yield()
+        #expect(!settlementFinished.isMarked)
         writer.releaseRenamedHealth()
+        await settlement.value
+        #expect(settlementFinished.isMarked)
         await waitUntilIdle(worker)
         let marker = try healthMarker(in: directory)
         #expect(marker["state"] as? String == "partial")

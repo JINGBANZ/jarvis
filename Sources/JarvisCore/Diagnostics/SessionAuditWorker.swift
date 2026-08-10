@@ -221,13 +221,22 @@ final class SessionAuditWorker: @unchecked Sendable {
         deadline: ContinuousClock.Instant,
         completion: @escaping @Sendable (SessionAuditCloseResult) -> Void
     ) -> Bool {
-        enqueue(
+        let accepted = enqueue(
             Envelope(
                 session: session,
                 payload: .close(deadline: deadline, completion: completion),
                 retainedBytes: 256),
             allowingSealedSession: true,
             admission: .lifecycle)
+        if !accepted {
+            // A full bounded ring must not strand lifecycle settlement. This barrier runs behind the
+            // current drain on the same serial queue, after all earlier envelopes for the now-sealed
+            // session, and installs the necessarily partial marker before signaling stability.
+            queue.async { [self] in
+                finalize(session, deadline: deadline, completion: completion)
+            }
+        }
+        return accepted
     }
 
     func retainedSnapshot() -> RetainedSnapshot {

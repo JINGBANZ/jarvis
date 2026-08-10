@@ -1373,7 +1373,9 @@
   older session's parked writer. Application Quit instead asks AppKit to defer termination while a
   bounded asynchronous cancellation drain and close continue without blocking the main actor. It
   also joins any drain retained from an immediately preceding Stop; if work cannot drain, the
-  still-open marker remains explicitly partial.
+  still-open marker remains explicitly partial. A close deadline may classify evidence before a
+  blocked filesystem operation returns, so regular Stop keeps Evaluate disabled until the worker's
+  separate settlement signal confirms that the final or corrective marker is stable.
 - **Why:** Moving work to a per-session serial queue removed JSON and disk work from most callbacks but
   did not bound retained payloads, make admission structurally nonblocking, contain a failed writer, or
   let Stop distinguish complete evidence from a timeout. Coaching latency and restart availability
