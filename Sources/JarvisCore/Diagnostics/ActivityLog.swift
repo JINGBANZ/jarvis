@@ -51,8 +51,8 @@ public final class ActivityLog: @unchecked Sendable {
         /// The single terminal lifecycle event for a live coaching session. The reason is a closed,
         /// sanitized set so raw errors cannot leak into Activity.
         case sessionEnded(reason: SessionEndReason)
-        /// One coaching turn failed temporarily while capture and transcription remain live. The
-        /// provider identity is enough for fixed recovery copy; raw error detail stays in debug.
+        /// One coaching response failed temporarily and a fresh attempt will retry while capture and
+        /// transcription remain live. Provider identity is enough; raw error detail stays in debug.
         case coachingTurnFailed(provider: BrainProvider)
         /// The secondary system-audio transcription stopped while microphone coaching continued.
         case systemAudioStopped
@@ -92,7 +92,7 @@ public final class ActivityLog: @unchecked Sendable {
             case .coachingTurnFailed(let provider):
                 return (
                     .coachingTurnFailed,
-                    "⚠️ \(provider.displayName) couldn't respond this turn — listening continues",
+                    "⚠️ \(provider.displayName) couldn't finish the response — retrying while listening continues",
                     nil
                 )
             case .systemAudioStopped:
@@ -345,8 +345,9 @@ public final class ActivityLog: @unchecked Sendable {
             || m.hasPrefix("👁 looking at your screen") || m.hasPrefix("👁 couldn't view your screen")
             || m.hasPrefix("💬") || m.hasPrefix("🤫 stayed silent")
             || m.hasPrefix("⏹ session ended")
-            || (m.hasPrefix("⚠️") && m.contains("couldn't respond this turn")
-                && m.hasSuffix("listening continues"))
+            || (m.hasPrefix("⚠️") && m.hasSuffix("listening continues")
+                && (m.contains("couldn't respond this turn")
+                    || m.contains("couldn't finish the response — retrying while")))
             || m.hasPrefix("⚠️ system audio stopped")
             || m.hasPrefix("⚠️ settings change wasn't applied")
             || m.hasPrefix("🧠 brain switch applied")

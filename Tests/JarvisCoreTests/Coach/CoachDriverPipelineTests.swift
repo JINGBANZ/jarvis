@@ -439,9 +439,11 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
         let snapshot = ActivityLog.shared.attach { _ in }
         #expect(snapshot.rows.count == 3)
-        #expect(snapshot.rows[0].contains("couldn't respond this turn"))
+        #expect(snapshot.rows[0].contains("couldn't finish the response"))
+        #expect(snapshot.rows[0].contains("retrying"))
         #expect(snapshot.rows[0].contains("listening continues"))
-        #expect(snapshot.rows[1].contains("couldn't respond this turn"))
+        #expect(snapshot.rows[1].contains("couldn't finish the response"))
+        #expect(snapshot.rows[1].contains("retrying"))
         #expect(snapshot.rows[1].contains("listening continues"))
         #expect(snapshot.rows[2].contains("recovered coaching"))
         #expect(!snapshot.rows.joined().contains("test"))
