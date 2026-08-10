@@ -159,16 +159,21 @@ import Foundation
         ))
     }
 
-    @Test func temporaryBrainFailureSaysListeningContinuesWithoutDiagnosticDetail() throws {
+    @Test func temporaryBrainFailureSaysRetryingWithoutDiagnosticDetail() throws {
         let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         let log = ActivityLog(); log.enable(directory: dir)
         log.record(.coachingTurnFailed(provider: .codexCLI))
         let snapshot = log.attach { _ in }
 
         let row = try #require(snapshot.rows.first)
-        #expect(row.contains("Codex CLI couldn't respond this turn"))
+        #expect(row.contains("Codex CLI couldn't finish the response"))
+        #expect(row.contains("retrying"))
         #expect(row.contains("listening continues"))
         #expect(!row.contains("timed out"))
+        #expect(ActivityLog.isHumanFacing(
+            message: "⚠️ Codex CLI couldn't finish the response — retrying while listening continues",
+            imageFile: nil
+        ))
         #expect(ActivityLog.isHumanFacing(
             message: "⚠️ Codex CLI couldn't respond this turn — listening continues",
             imageFile: nil
