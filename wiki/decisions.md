@@ -306,8 +306,9 @@
 - **Why:** Tuning the harness previously meant pulling request logs from the OpenAI dashboard by hand and pasting them into a chat for diagnosis. The wire body is the ground truth a context-engineering audit needs (instructions, message order, tool schemas, `usage.cached_tokens` per call); recording it locally and auditing it in one click closes that loop. The elision markers double as signal: they show the auditor exactly where the prompt cache should be hitting, and keep the audit prompt itself from re-billing every repeated prefix.
 - **Rejected:** (a) Staying on the dashboard as the source — manual, and it dies the day `store:true` is flipped off (see the 2026-07-07 memory entry's privacy item). (b) Recording at the `ChatMessage` level — provider-agnostic but a paraphrase: it can't show cache-busting prefix changes or tool-schema bloat, which are the audit's main quarry. (c) Recording the evaluator's own traffic — it would pollute the very session it audits (its client keeps `traffic: nil`).
 - **Superseded in part by:** 2026-07-24 — Session evaluation is agentic-only and reads complete source logs. Wire recording and delta-aware rendering stand; the in-app one-click model call does not.
-- **Detail:** `Sources/JarvisCore/Diagnostics/BrainTrafficLog.swift`,
-  `Sources/JarvisCore/Diagnostics/EvaluationTranscript.swift`; current report discovery lives in
+- **Detail:** [session-audit.md](./session-audit.md),
+  `Sources/JarvisCore/Diagnostics/EvaluationTranscript.swift`; the historical recorder is preserved
+  in [the pre-supersession source](https://github.com/JINGBANZ/jarvis/blob/249c2e9cc946c3009b0af079cdb2017152f9c8df/Sources/JarvisCore/Diagnostics/BrainTrafficLog.swift); current report discovery lives in
   `ActivityViewer` ([settings-window.md → Sections](./settings-window.md#sections)); retention
   posture in [sandbox.md](./sandbox.md).
 
@@ -1317,9 +1318,9 @@
   privacy posture for an evaluator convenience.
 - **Extends:** 2026-07-15 — Brain traffic is recorded per session; one-click LLM audit, and
   2026-07-24 — Session evaluation is agentic-only and reads complete source logs.
-- **Detail:** [architecture.md → Resilience](./architecture.md#resilience),
+- **Detail:** [session-audit.md](./session-audit.md),
   [sandbox.md → Data Egress](./sandbox.md#data-egress),
-  `Sources/JarvisCore/Diagnostics/CoachingAttemptLog.swift`,
+  `Sources/JarvisCore/Diagnostics/CoachingAttemptAuditing.swift`,
   `Sources/JarvisCore/Diagnostics/TriggerQualityMetrics.swift`,
   `Sources/JarvisCore/Diagnostics/EvaluationTranscript.swift`.
 
@@ -1345,9 +1346,9 @@
 - **Superseded by:** 2026-08-10 — Session audit persistence is bounded and failure-contained. The
   off-latency-path goal and evaluator classifications stand; per-session queues, complete Stop-time
   draining, and exact-by-default new-format evidence do not.
-- **Detail:** [architecture.md → Latency](./architecture.md#latency),
-  `Sources/JarvisCore/Diagnostics/BrainTrafficLog.swift`,
-  `Sources/JarvisCore/Diagnostics/CoachingAttemptLog.swift`,
+- **Detail:** [session-audit.md](./session-audit.md),
+  [historical `BrainTrafficLog.swift`](https://github.com/JINGBANZ/jarvis/blob/249c2e9cc946c3009b0af079cdb2017152f9c8df/Sources/JarvisCore/Diagnostics/BrainTrafficLog.swift),
+  [historical `CoachingAttemptLog.swift`](https://github.com/JINGBANZ/jarvis/blob/249c2e9cc946c3009b0af079cdb2017152f9c8df/Sources/JarvisCore/Diagnostics/CoachingAttemptLog.swift),
   `Sources/JarvisCore/Diagnostics/JSONLRecords.swift`,
   `Sources/JarvisApp/App/AppDelegate.swift`.
 
@@ -1366,10 +1367,12 @@
   write, close-timeout, late-event, and serialization-failure counts when possible. The evaluator
   renders surviving new-format counts as lower bounds or unavailable when health is partial, while
   retaining the historical interpretation for legacy sessions without a marker.
-- **Chose:** Keep lifecycle ownership in the app. One Start creates one `FileSessionAudit`; Stop
-  captures and clears it, requests turn cancellation, then closes the old handle asynchronously after
-  those tasks unwind. Close has a short deadline, and a replacement Start never waits for an older
-  session's parked writer.
+- **Chose:** Keep lifecycle ownership in the app. One Start creates one `FileSessionAudit`; regular
+  Stop captures and clears it, requests turn cancellation, then closes the old handle asynchronously
+  after those tasks unwind. Close has a short deadline, and a replacement Start never waits for an
+  older session's parked writer. Application Quit instead performs a bounded synchronous cancellation
+  drain and close before its termination callback returns; if cancelled work cannot drain, the
+  still-open marker remains explicitly partial.
 - **Why:** Moving work to a per-session serial queue removed JSON and disk work from most callbacks but
   did not bound retained payloads, make admission structurally nonblocking, contain a failed writer, or
   let Stop distinguish complete evidence from a timeout. Coaching latency and restart availability
@@ -1383,7 +1386,7 @@
   isolation without scheduler-dependent thresholds.
 - **Supersedes:** 2026-08-09 — Session audit persistence stays off the coaching latency path.
 - **Extends:** 2026-08-08 — Session evaluation uses persisted coaching-attempt provenance.
-- **Detail:** [architecture.md → Latency](./architecture.md#latency),
+- **Detail:** [session-audit.md](./session-audit.md),
   `Sources/JarvisCore/Diagnostics/BrainTrafficAuditing.swift`,
   `Sources/JarvisCore/Diagnostics/CoachingAttemptAuditing.swift`,
   `Sources/JarvisCore/Diagnostics/FileSessionAudit.swift`,

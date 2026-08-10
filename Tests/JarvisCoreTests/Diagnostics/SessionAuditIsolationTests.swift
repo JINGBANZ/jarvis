@@ -43,8 +43,12 @@ import Testing
             try backing.append(data, filename: filename, in: directory)
         }
 
-        func replaceHealth(_ data: Data, in directory: URL) throws {
-            try backing.replaceHealth(data, in: directory)
+        func replaceHealth(
+            _ data: Data,
+            in directory: URL,
+            shouldCommit: @Sendable () -> Bool
+        ) throws -> Bool {
+            try backing.replaceHealth(data, in: directory, shouldCommit: shouldCommit)
         }
 
         func releaseOpen() {
@@ -75,8 +79,12 @@ import Testing
             throw Failure.injected
         }
 
-        func replaceHealth(_ data: Data, in directory: URL) throws {
-            try backing.replaceHealth(data, in: directory)
+        func replaceHealth(
+            _ data: Data,
+            in directory: URL,
+            shouldCommit: @Sendable () -> Bool
+        ) throws -> Bool {
+            try backing.replaceHealth(data, in: directory, shouldCommit: shouldCommit)
         }
     }
 
@@ -96,8 +104,59 @@ import Testing
             Issue.record("append must not run after session open fails")
         }
 
-        func replaceHealth(_ data: Data, in directory: URL) throws {
-            try backing.replaceHealth(data, in: directory)
+        func replaceHealth(
+            _ data: Data,
+            in directory: URL,
+            shouldCommit: @Sendable () -> Bool
+        ) throws -> Bool {
+            try backing.replaceHealth(data, in: directory, shouldCommit: shouldCommit)
+        }
+    }
+
+    /// Parks the final health replacement after the worker has already snapshotted complete state.
+    private final class BlockingFinalHealthWriter: SessionAuditWriting, @unchecked Sendable {
+        let finalHealthEntered = DispatchSemaphore(value: 0)
+        private let release = DispatchSemaphore(value: 0)
+        private let lock = NSLock()
+        private let backing = SessionAuditFileWriter()
+        private var hasBlocked = false
+        private var storedBlockedHealth: Data?
+
+        var blockedHealth: Data? {
+            lock.withLock { storedBlockedHealth }
+        }
+
+        func openSession(at directory: URL, initialHealth: Data) throws {
+            try backing.openSession(at: directory, initialHealth: initialHealth)
+        }
+
+        func append(_ data: Data, filename: String, in directory: URL) throws {
+            try backing.append(data, filename: filename, in: directory)
+        }
+
+        func replaceHealth(
+            _ data: Data,
+            in directory: URL,
+            shouldCommit: @Sendable () -> Bool
+        ) throws -> Bool {
+            let shouldBlock = lock.withLock {
+                guard !hasBlocked else { return false }
+                hasBlocked = true
+                storedBlockedHealth = data
+                return true
+            }
+            if shouldBlock {
+                finalHealthEntered.signal()
+                release.wait()
+            }
+            return try backing.replaceHealth(
+                data,
+                in: directory,
+                shouldCommit: shouldCommit)
+        }
+
+        func releaseFinalHealth() {
+            release.signal()
         }
     }
 
@@ -219,6 +278,46 @@ import Testing
         let marker = try healthMarker(in: directory)
         #expect(marker["state"] as? String == "partial")
         #expect((marker["close_timeout"] as? Int ?? 0) > 0)
+    }
+
+    @Test func finalHealthWriteCrossingDeadlineCannotLeaveCompleteMarker() async throws {
+        let directory = ActivityLogTests.tmp()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let writer = BlockingFinalHealthWriter()
+        let worker = SessionAuditWorker(limits: .production, writer: writer)
+        let audit = FileSessionAudit(directory: directory, worker: worker)
+        await waitUntilIdle(worker)
+
+        let close = Task { await audit.close(deadline: .milliseconds(20)) }
+        await wait(for: writer.finalHealthEntered)
+        let blockedMarker = try #require(writer.blockedHealth)
+        let blockedObject = try #require(
+            JSONSerialization.jsonObject(with: blockedMarker) as? [String: Any])
+        #expect(blockedObject["state"] as? String == "complete")
+        #expect(await close.value == .partial)
+        let markerWhileBlocked = try healthMarker(in: directory)
+        #expect(markerWhileBlocked["state"] as? String == "open")
+        #expect(markerWhileBlocked["closed"] as? Bool == false)
+
+        writer.releaseFinalHealth()
+        await waitUntilIdle(worker)
+        let marker = try healthMarker(in: directory)
+        #expect(marker["state"] as? String == "partial")
+        #expect((marker["close_timeout"] as? Int ?? 0) > 0)
+    }
+
+    @Test func synchronousCloseWaitsForDurableCompleteMarker() throws {
+        let directory = ActivityLogTests.tmp()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let worker = SessionAuditWorker(
+            limits: .production,
+            writer: SessionAuditFileWriter())
+        let audit = FileSessionAudit(directory: directory, worker: worker)
+
+        #expect(audit.closeSynchronously(deadline: .seconds(5)) == .complete)
+        let marker = try healthMarker(in: directory)
+        #expect(marker["state"] as? String == "complete")
+        #expect(marker["closed"] as? Bool == true)
     }
 
     @Test func openFailureDisablesCaptureAndIsVisibleInHealthMarker() async throws {

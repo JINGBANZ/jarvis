@@ -88,6 +88,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// of any one session — a very long single run still grows its (append-only) logs + screenshots.
     /// Clear all but the current via the viewer's "Clear history".
     private static let retainedSessions = 10
+    /// Application Quit may briefly wait for a cancelled turn to finish its final audit admission.
+    /// If it cannot, the still-open health marker truthfully leaves that session partial.
+    private static let terminationTurnDrainTimeout: TimeInterval = 1
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory) // ghost-mode-allowed: launch configuration
@@ -984,9 +987,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ActivityLog.shared.record(.sessionEnded(reason: reason))
         }
         // Activity remains its separate human-facing failure domain. Session audit sealing waits for
-        // cancelled coaching tasks below, then drains asynchronously with a bounded deadline.
+        // cancelled coaching tasks below. Normal Stop drains asynchronously so Start stays instant;
+        // application Quit uses a bounded synchronous barrier because the process is about to exit.
         ActivityLog.shared.flush()
-        if audit != nil || !cancelled.isEmpty {
+        if reason == .applicationQuit {
+            if Self.waitForCancelledTurnsBeforeTermination(cancelled) {
+                ActivityLog.shared.flush()
+                if audit?.closeSynchronously(
+                    deadline: FileSessionAudit.defaultCloseDeadline
+                ) == .partial {
+                    jlog("Jarvis: application-quit session audit closed with partial evidence.")
+                }
+            } else {
+                jlog("Jarvis: application-quit turn drain timed out; session audit remains partial.")
+            }
+        } else if audit != nil || !cancelled.isEmpty {
             drainingStops += 1
             Task { @MainActor [weak self] in
                 for task in cancelled { await task.value }
@@ -998,6 +1013,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         activityViewer?.coachingStateDidChange()
+    }
+
+    /// Bridge task completion into the synchronous AppKit termination callback. The wait is bounded;
+    /// on timeout the audit is deliberately left with its initial open marker instead of claiming
+    /// complete evidence while a cancelled turn may still be producing its final traffic record.
+    private static func waitForCancelledTurnsBeforeTermination(
+        _ cancelled: [Task<Void, Never>]
+    ) -> Bool {
+        guard !cancelled.isEmpty else { return true }
+        let completion = DispatchSemaphore(value: 0)
+        Task.detached(priority: .userInitiated) {
+            for task in cancelled { await task.value }
+            completion.signal()
+        }
+        return completion.wait(
+            timeout: .now() + terminationTurnDrainTimeout) == .success
     }
 
     /// Deduplicate endpoint failures: either side can fail first, but Activity should show one reason

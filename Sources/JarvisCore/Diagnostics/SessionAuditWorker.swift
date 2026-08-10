@@ -398,20 +398,39 @@ final class SessionAuditWorker: @unchecked Sendable {
             session.health.markCloseTimeout()
         }
         var snapshot = session.health.snapshot
+        if snapshot.isComplete {
+            let completeSnapshot = snapshot
+            do {
+                let committed = try writer.replaceHealth(
+                    try healthData(state: "complete", closed: true, snapshot: completeSnapshot),
+                    in: session.directory
+                ) {
+                    ContinuousClock.now < deadline
+                        && session.health.snapshot == completeSnapshot
+                }
+                if committed {
+                    completion(.complete)
+                    return
+                }
+            } catch {
+                session.health.markWriteFailure()
+                completion(.partial)
+                return
+            }
+        }
+
+        if ContinuousClock.now >= deadline {
+            session.health.markCloseTimeout()
+        }
+        snapshot = session.health.snapshot
         do {
-            try writer.replaceHealth(
-                try healthData(
-                    state: snapshot.isComplete ? "complete" : "partial",
-                    closed: true,
-                    snapshot: snapshot),
-                in: session.directory)
+            _ = try writer.replaceHealth(
+                try healthData(state: "partial", closed: true, snapshot: snapshot),
+                in: session.directory) { true }
         } catch {
             session.health.markWriteFailure()
-            snapshot = session.health.snapshot
-            completion(.partial)
-            return
         }
-        completion(snapshot.isComplete ? .complete : .partial)
+        completion(.partial)
     }
 
     private func encodeTraffic(_ event: BrainTrafficAuditEvent) throws -> Data {

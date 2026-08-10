@@ -12,7 +12,7 @@ struct SessionAuditFileWriter: SessionAuditWriting {
             directory.appendingPathComponent(FileSessionAudit.brainTrafficFilename))
         try createOwnerOnlyFile(
             directory.appendingPathComponent(FileSessionAudit.coachingAttemptsFilename))
-        try replaceHealth(initialHealth, in: directory)
+        _ = try replaceHealth(initialHealth, in: directory) { true }
     }
 
     func append(_ data: Data, filename: String, in directory: URL) throws {
@@ -29,7 +29,12 @@ struct SessionAuditFileWriter: SessionAuditWriting {
         }
     }
 
-    func replaceHealth(_ data: Data, in directory: URL) throws {
+    @discardableResult
+    func replaceHealth(
+        _ data: Data,
+        in directory: URL,
+        shouldCommit: @Sendable () -> Bool
+    ) throws -> Bool {
         let destination = directory.appendingPathComponent(FileSessionAudit.healthFilename)
         let temporary = directory.appendingPathComponent(
             ".\(FileSessionAudit.healthFilename).\(UUID().uuidString).tmp")
@@ -40,9 +45,12 @@ struct SessionAuditFileWriter: SessionAuditWriting {
             attributes: [.posixPermissions: 0o600]
         ) else { throw CocoaError(.fileWriteUnknown) }
 
+        guard shouldCommit() else { return false }
+
         guard rename(temporary.path, destination.path) == 0 else {
             throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
         }
+        return true
     }
 
     private func createOwnerOnlyFile(_ url: URL) throws {
