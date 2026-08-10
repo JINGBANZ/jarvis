@@ -368,6 +368,113 @@ struct TranscriptionBenchmarkTests {
         ) == expected)
     }
 
+    @Test("reconnect evaluation rejects an unavailable replacement final")
+    func reconnectRejectsUnavailableFinal() {
+        let model = OpenAITranscriptionModel.gptLiveTranscribe
+        let expected = ["english-technical", "mandarin-technical"]
+        let phrases = expected.map { id in
+            TranscriptionBenchmark.phrases.first { $0.id == id }!
+        }
+        let events = [
+            event(.ready, observedAt: 1, model: model.rawValue, generation: 1),
+            event(
+                .ready,
+                observedAt: 2,
+                model: model.rawValue,
+                generation: 2,
+                replayedChunks: 40),
+            event(
+                .finalized,
+                observedAt: 3,
+                model: model.rawValue,
+                itemID: "english",
+                text: phrases[0].text,
+                generation: 2),
+            event(
+                .finalized,
+                observedAt: 4,
+                model: model.rawValue,
+                itemID: "unavailable",
+                unavailable: true,
+                generation: 2),
+            event(
+                .finalized,
+                observedAt: 5,
+                model: model.rawValue,
+                itemID: "mandarin",
+                text: phrases[1].text,
+                generation: 2),
+        ]
+
+        let result = TranscriptionBenchmark.evaluateReconnect(
+            model: model,
+            phraseIDs: expected,
+            events: events,
+            captureObservations: [.init(sequenceNumber: 1, sampleCount: 2_400)])
+
+        #expect(!result.passed)
+        #expect(!result.exactlyOnce)
+        #expect(result.finalTexts == phrases.map(\.text))
+        #expect(result.finalPhraseIDs == expected)
+    }
+
+    @Test("segmented reconnect phrases cannot absorb an unrelated final")
+    func reconnectSegmentedFinalsRejectExtraFinal() {
+        let model = OpenAITranscriptionModel.gptLiveTranscribe
+        let expected = ["english-technical", "mandarin-technical"]
+        let mandarin = TranscriptionBenchmark.phrases.first {
+            $0.id == expected[1]
+        }!
+        let events = [
+            event(.ready, observedAt: 1, model: model.rawValue, generation: 1),
+            event(
+                .ready,
+                observedAt: 2,
+                model: model.rawValue,
+                generation: 2,
+                replayedChunks: 40),
+            event(
+                .finalized,
+                observedAt: 3,
+                model: model.rawValue,
+                itemID: "english-one",
+                text: "The actor preserves ordered audio",
+                generation: 2),
+            event(
+                .finalized,
+                observedAt: 4,
+                model: model.rawValue,
+                itemID: "english-two",
+                text: "while the socket reconnects.",
+                generation: 2),
+            event(
+                .finalized,
+                observedAt: 5,
+                model: model.rawValue,
+                itemID: "unrelated",
+                text: "Please continue with the interview.",
+                generation: 2),
+            event(
+                .finalized,
+                observedAt: 6,
+                model: model.rawValue,
+                itemID: "mandarin",
+                text: mandarin.text,
+                generation: 2),
+        ]
+
+        let result = TranscriptionBenchmark.evaluateReconnect(
+            model: model,
+            phraseIDs: expected,
+            events: events,
+            captureObservations: [.init(sequenceNumber: 1, sampleCount: 2_400)])
+
+        #expect(!result.passed)
+        #expect(!result.exactlyOnce)
+        #expect(result.finalTexts.count == 4)
+        #expect(result.finalPhraseIDs == expected)
+    }
+
     @Test("reconnect recognition waits past duplicate and unavailable finals for every phrase")
     func reconnectPhraseRecognition() {
         let model = OpenAITranscriptionModel.gpt4oTranscribe

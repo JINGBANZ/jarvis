@@ -110,13 +110,19 @@ public extension TranscriptionBenchmark {
         let replacementGeneration = initialGeneration.flatMap { initialGeneration in
             readyEvents.first { $0.generation > initialGeneration }?.generation
         }
+        let replacementFinalCount = replacementGeneration.map { generation in
+            events.count {
+                $0.kind == .finalized && $0.generation == generation
+            }
+        } ?? 0
         let finals = replacementGeneration.map {
             reconnectFinals(in: events, generation: $0)
         } ?? []
         let finalTexts = finals.compactMap(\.text)
         let recognition = reconnectPhraseRecognition(phraseIDs, in: finals)
         let finalPhraseIDs = recognition.phraseIDs
-        let exactlyOnce = recognition.consumesEveryFinal
+        let exactlyOnce = replacementFinalCount == finals.count
+            && recognition.consumesEveryFinal
             && duplicateDeliveryCount(in: finals) == 0
             && phraseIDs.allSatisfy { expected in
             finalPhraseIDs.count(where: { $0 == expected }) == 1
@@ -295,9 +301,9 @@ public extension TranscriptionBenchmark {
     }
 
     /// Finds the lowest-error partition that reconstructs the expected number of phrases from all
-    /// replacement-generation finals. A multi-event group must improve on every fragment alone;
-    /// this lets legitimate segmentation join while preventing an exact phrase from absorbing an
-    /// unrelated extra final merely because the combined text remains under the recognition limit.
+    /// usable replacement-generation finals. Every item in a multi-event group must improve the
+    /// reconstruction: the group must beat each fragment alone and removing any member must make
+    /// the match worse. This permits real segmentation without absorbing an unrelated extra final.
     private static func bestReconnectPartition(
         _ finals: [TranscriptionDiagnosticEvent],
         groupCount: Int,
@@ -365,11 +371,22 @@ public extension TranscriptionBenchmark {
         }) else { return false }
         let expected = normalize(phrase.text)
         let denominator = max(1, expected.count)
-        return group.allSatisfy { event in
-            guard let text = event.text else { return false }
-            let fragmentErrorRate = Double(editDistance(expected, normalize(text)))
+        let texts = group.compactMap(\.text)
+        guard texts.count == group.count,
+              texts.allSatisfy({ text in
+                  let fragmentErrorRate = Double(editDistance(expected, normalize(text)))
+                      / Double(denominator)
+                  return combinedMatch.errorRate < fragmentErrorRate
+              })
+        else { return false }
+        return texts.indices.allSatisfy { excludedIndex in
+            let withoutText = texts.enumerated()
+                .filter { $0.offset != excludedIndex }
+                .map(\.element)
+                .joined(separator: " ")
+            let withoutErrorRate = Double(editDistance(expected, normalize(withoutText)))
                 / Double(denominator)
-            return combinedMatch.errorRate < fragmentErrorRate
+            return combinedMatch.errorRate < withoutErrorRate
         }
     }
 
@@ -379,7 +396,8 @@ public extension TranscriptionBenchmark {
     ) -> [TranscriptionDiagnosticEvent] {
         events.enumerated().filter { _, event in
             event.kind == .finalized
-                && event.text?.isEmpty == false
+                && !event.transcriptUnavailable
+                && event.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
                 && event.generation == generation
         }.sorted {
             let lhsTime = $0.element.spokenAt ?? $0.element.observedAt
