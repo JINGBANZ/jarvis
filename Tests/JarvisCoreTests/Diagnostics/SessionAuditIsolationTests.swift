@@ -115,10 +115,12 @@ import Testing
             limits: .production,
             writer: SessionAuditFileWriter())
         let enabled = FileSessionAudit(directory: enabledDirectory, worker: enabledWorker)
-        let enabledSnapshot = await runCoaching(audit: enabled)
+        let enabledSnapshot = await runCoaching(
+            traffic: enabled,
+            coachingAttempts: enabled)
         #expect(await enabled.close(deadline: .seconds(5)) == .complete)
 
-        let disabledSnapshot = await runCoaching(audit: DisabledSessionAudit())
+        let noAuditSnapshot = await runCoaching()
 
         let failingWriter = FailingAppendWriter()
         let failingWorker = SessionAuditWorker(
@@ -127,7 +129,9 @@ import Testing
         let failing = FileSessionAudit(directory: failingDirectory, worker: failingWorker)
         await wait(for: failingWriter.openCompleted)
         await waitUntilIdle(failingWorker)
-        let failingSnapshot = await runCoaching(audit: failing)
+        let failingSnapshot = await runCoaching(
+            traffic: failing,
+            coachingAttempts: failing)
         #expect(await failing.close(deadline: .seconds(5)) == .partial)
         #expect(failingWriter.appendCount == 1)
         #expect(failing.healthSnapshot.writeFailure == 1)
@@ -140,14 +144,16 @@ import Testing
             directory: overloadedDirectory,
             worker: overloadedWorker)
         await wait(for: blockingWriter.openEntered)
-        let overloadedSnapshot = await runCoaching(audit: overloaded)
+        let overloadedSnapshot = await runCoaching(
+            traffic: overloaded,
+            coachingAttempts: overloaded)
         #expect(overloadedWorker.retainedSnapshot().eventCount == 1)
         #expect(overloaded.healthSnapshot.queueOverflow > 0)
         blockingWriter.releaseOpen()
         await waitUntilIdle(overloadedWorker)
         #expect(await overloaded.close(deadline: .seconds(5)) == .partial)
 
-        #expect(enabledSnapshot == disabledSnapshot)
+        #expect(enabledSnapshot == noAuditSnapshot)
         #expect(enabledSnapshot == overloadedSnapshot)
         #expect(enabledSnapshot == failingSnapshot)
     }
@@ -261,15 +267,17 @@ import Testing
         #expect(marker["serialization_failure"] as? Int == 1)
     }
 
-    private func runCoaching<A>(audit: A) async -> CoachingSnapshot
-    where A: BrainTrafficAuditing & CoachingAttemptAuditing {
+    private func runCoaching(
+        traffic: (any BrainTrafficAuditing)? = nil,
+        coachingAttempts: (any CoachingAttemptAuditing)? = nil
+    ) async -> CoachingSnapshot {
         let requests = RequestCapture()
         let response = Data(
             #"{"status":"completed","output":[{"type":"function_call","call_id":"s1","name":"speak","arguments":"{\"lines\":[\"same tip\"]}"}]}"#.utf8)
         let client = OpenAIBrainClient(
             apiKey: "test-key",
             model: "gpt-5.5",
-            traffic: audit,
+            traffic: traffic,
             send: { request in
                 let body = request.httpBody ?? Data()
                 let object = try JSONSerialization.jsonObject(with: body)
@@ -296,7 +304,7 @@ import Testing
             screen: FakeScreen(),
             overlay: overlay,
             clock: ManualClock(),
-            coachingAttempts: audit,
+            coachingAttempts: coachingAttempts,
             automaticAttemptDelay: { _ in })
         transcript.append(.init(
             speaker: .me,

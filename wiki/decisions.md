@@ -1356,9 +1356,10 @@
 - **Chose:** Give `CoachDriver` and brain clients only the narrow `CoachingAttemptAuditing` and
   `BrainTrafficAuditing` observer ports. They submit typed `Sendable` events, with attempt attribution
   carried through a neutral task local. `FileSessionAudit` admits provider/coach events through a
-  nonblocking try-lock into one process-level ring bounded by event count and retained bytes;
-  `DisabledSessionAudit` is the behaviorally neutral no-persistence implementation. Only the worker
-  parses request/response JSON, redacts images, serializes records, and performs file I/O.
+  nonblocking try-lock into one process-level ring bounded by event count and retained bytes. Callers
+  outside a persisted live session omit the optional observer instead of constructing a second no-op
+  implementation. Only the worker parses request/response JSON, redacts images, serializes records,
+  and performs file I/O.
 - **Chose:** Treat persisted audit evidence as best-effort and self-describing. Overload and oversize
   records are dropped; open, write, or serialization failure disables further persistence for that
   session. A versioned `audit-health.json` records completeness and queue-overflow, oversize, open,

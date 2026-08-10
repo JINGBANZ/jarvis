@@ -78,13 +78,6 @@ import Foundation
         }
     }
 
-    @Test func recordIsNoOpWhenDisabled() {
-        let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
-        let log = DisabledSessionAudit()
-        log.record(tag: "coach", request: Data("{}".utf8), response: nil, status: nil, latencyMs: 1)
-        #expect(!FileManager.default.fileExists(atPath: dir.appendingPathComponent(FileSessionAudit.brainTrafficFilename).path))
-    }
-
     @Test func redactionWalksNestedStructuresAndLeavesOtherStringsAlone() {
         let redacted = SessionAuditWorker.redactingImages([
             "plain": "data-driven text",
