@@ -8,8 +8,8 @@ import FoundationNetworking   // URLSession/URLRequest live here on non-Darwin (
 /// `function_call` / `function_call_output`. Every call is self-contained: session memory is
 /// client-managed
 /// (`CoachHistory`) and arrives in `messages`, built in stable append-only order so OpenAI's prompt
-/// cache keeps hitting. `store:true` keeps each request/response inspectable in the OpenAI dashboard
-/// logs for debugging (a documented retention tradeoff; see wiki/sandbox.md).
+/// cache keeps hitting. Requests set `store:false`; encrypted reasoning is returned and replayed only
+/// within the current tool loop so a screen continuation remains stateless (see wiki/sandbox.md).
 public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
     /// Injected transport; returns the body and the HTTP response (for status + headers).
     public typealias Sender = @Sendable (URLRequest) async throws -> (Data, HTTPURLResponse?)
@@ -209,10 +209,11 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
             "parallel_tool_calls": false,      // the coach loop consumes one tool call per turn
             "reasoning": ["effort": reasoningEffort],
             "max_output_tokens": maxOutputTokens,
-            // store:true keeps each request/response inspectable in the OpenAI dashboard logs for
-            // debugging. This DOES retain transcripts/screenshots server-side — a deliberate
-            // debuggability-over-retention choice; see wiki/sandbox.md.
-            "store": true,
+            // Client-managed history makes application-state retention unnecessary. Encrypted
+            // reasoning is requested explicitly so a store:false capture continuation can replay
+            // the model's complete output without relying on a retained response.
+            "store": false,
+            "include": ["reasoning.encrypted_content"],
             "prompt_cache_key": promptCacheKey, // stable system prompt → better cache routing
         ]
         if !instructions.isEmpty {

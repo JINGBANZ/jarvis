@@ -11,6 +11,13 @@ screen-aware hint.
 > [`wiki/status.md`](./wiki/status.md). Start at the [`wiki index`](./wiki/index.md) for the design
 > documentation.
 
+> [!WARNING]
+> Jarvis is experimental software, not a production security boundary. The current app is not
+> App-Sandboxed, so it runs with the filesystem authority of the signed-in macOS account. It also
+> captures microphone and system audio and may send transcripts or requested screenshots to the
+> providers you select. Use it only where every required participant has authorized the capture and
+> where applicable law, workplace policy, and platform terms permit it.
+
 ## How it works
 
 ```text
@@ -51,7 +58,7 @@ For the full loop and its design rationale, see
 - Apple silicon Mac running macOS 14 or later
 - Swift 6 and the macOS Command Line Tools; full Xcode is not required
 - An OpenAI API key when using OpenAI transcription or an OpenAI brain target
-- Microphone and Screen Recording permission
+- Microphone, System Audio Recording, and Screen Recording permission
 
 ## Quick start
 
@@ -92,7 +99,9 @@ The history is pruned to the ten most recent sessions. Raw audio and the rolling
 are not archived, although finalized `heard:` lines are part of the activity record. The selected
 OpenAI transcription model receives audio when OpenAI is the provider; Apple Speech
 keeps raw audio on-device after its selected locale model is installed. Coaching text and any
-requested screenshot go to the selected brain provider. See
+requested screenshot go to the selected brain provider. OpenAI Responses requests set
+`store:false`, so Jarvis does not request server-side application-state retention for those calls;
+provider abuse-monitoring and account-tier retention policies can still apply. See
 [`wiki/sandbox.md`](./wiki/sandbox.md) for the complete local-persistence, egress, and retention model.
 
 ## Development
@@ -122,4 +131,11 @@ The package boundaries are intentionally small:
 | `EvalPrep` | Foundation-only helper used by the developer-side session audit |
 
 Contributor workflow, subsystem placement, and testing rules live in
-[`CLAUDE.md`](./CLAUDE.md).
+[`CONTRIBUTING.md`](./CONTRIBUTING.md) and [`CLAUDE.md`](./CLAUDE.md). Please report security issues
+through the private process in [`SECURITY.md`](./SECURITY.md), not a public issue.
+
+## License
+
+Jarvis is licensed under the [Apache License 2.0](./LICENSE). The bundled WebRTC AEC/VAD archive
+includes additional attribution in [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md); release app
+bundles include both files under `Contents/Resources/`.

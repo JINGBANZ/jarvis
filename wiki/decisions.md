@@ -1347,3 +1347,53 @@
   `Sources/JarvisCore/Diagnostics/CoachingAttemptLog.swift`,
   `Sources/JarvisCore/Diagnostics/JSONLRecords.swift`,
   `Sources/JarvisApp/App/AppDelegate.swift`.
+
+### 2026-08-10 — Public launch preserves repository history
+
+- **Chose:** Publish the existing Git, issue, pull-request, and review history without rewriting
+  commits. Generalize machine-specific instructions in the current tree, but retain contributor
+  identity and project provenance. Treat historical Actions logs and artifacts as a separate manual
+  review before visibility changes.
+- **Why:** A full Git history secret scan and high-signal review of GitHub discussion content found
+  no credential leak. The existing contributor address is already exposed through the maintainer's
+  public profile, so rewriting every commit would add little privacy while invalidating commit ids,
+  review links, tags, and downstream clones.
+- **Rejected:** (a) Squashing or filtering the complete history as a default precaution—high
+  provenance cost without an identified secret. (b) Publishing Actions logs without review—they can
+  contain execution context that source/history scans do not cover.
+- **Changes this decision:** A newly discovered credential, private artifact, or personal identifier
+  whose removal materially improves privacy.
+- **Detail:** [status.md → Next action](./status.md#next-action).
+
+### 2026-08-10 — Public repositories start without agent automation
+
+- **Chose:** Remove the four repository-agent workflows that delegated pull requests, reviews,
+  issues, and comments to the persistent `vps` runner. Keep only hosted CI and release automation,
+  pin every retained third-party Action to a full commit SHA, and let Dependabot maintain those pins.
+  Disable the legacy workflows in GitHub before opening this PR so the base-branch copies cannot run.
+- **Why:** Public issue, comment, and fork input must not reach a persistent machine or privileged
+  agent by default. Removing the caller definitions is a fail-closed source state, while hosted CI
+  and release jobs have narrow triggers and permissions that remain useful for contributors.
+- **Rejected:** (a) Leaving the workflows present but relying on repository visibility or runner
+  availability—they become dangerous through a settings change. (b) Migrating agent automation in
+  the same PR—a public-safe trust and approval design deserves a separate review.
+- **Detail:** `.github/workflows/ci.yml`, `.github/workflows/release.yml`,
+  `.github/dependabot.yml`, [SECURITY.md](../SECURITY.md).
+
+### 2026-08-10 — OpenAI Responses calls do not retain application state
+
+- **Chose:** Send OpenAI Responses requests with `store:false`. Continue managing conversation
+  history locally and request `reasoning.encrypted_content` explicitly so the current attempt can
+  replay the complete reasoning/function-call output across a screen-tool continuation without a
+  stored response.
+- **Why:** Owner-only brain traffic already provides the intended debugging record, so retaining
+  transcript and screenshot application state at the provider is unnecessary. Stateless reasoning
+  preserves the existing tool-loop contract without that retention dependency.
+- **Rejected:** (a) Keeping `store:true` for dashboard debugging—the public default should minimize
+  provider retention. (b) Dropping reasoning items on continuation—it can change tool-loop quality
+  and violates the provider's manual-context contract. (c) Describing `store:false` as Zero Data
+  Retention—default provider abuse-monitoring logs can still retain content.
+- **Supersedes in part:** 2026-07-07 — Session memory moved client-side, with compaction. Its
+  client-owned memory and compaction policy stand; the dashboard-retention choice does not.
+- **Detail:** [sandbox.md → Data Egress](./sandbox.md#data-egress),
+  `Sources/JarvisCore/Brain/Adapters/OpenAI/OpenAIBrainClient.swift`.

@@ -98,10 +98,27 @@ and opens its saved report; the standalone script calls the same Core implementa
 covers microphone transcription, audio-route loss, in-place CLI preflight, and Activity-audit
 completion: no runtime error autonomously activates Jarvis, opens a browser, or presents a modal;
 fixed notices remain available in Activity. The gate statically rejects unreviewed presentation APIs.
+The source tree is prepared for a public launch: repository agent workflows are absent by default,
+while hosted CI and release automation remain; retained third-party Actions are SHA-pinned and
+Dependabot-managed. OpenAI Responses calls disable application-state storage while preserving
+stateless encrypted reasoning across a tool continuation. Public docs disclose the current
+unsandboxed boundary, contribution and private-reporting paths are present, and release app bundles
+carry the Apache license plus third-party notices. The existing Git/PR history is intentionally
+preserved after the full-history secret scan found no credential leak; current-tree machine-specific
+instructions were generalized instead of rewriting repository identity and provenance.
 
 ## Next action
 
-Finish the remaining transcription configuration smoke without expanding the performance benchmark:
+The four legacy agent workflows are already disabled in GitHub Actions, so this hardening PR cannot
+invoke their base-branch definitions. Before changing repository visibility, delete their historical
+runs and artifacts after owner approval: the audit found no credential leak, but those logs expose
+runner, account, and installed-tool paths. Then merge the hardening PR. Replace release-please's `GITHUB_TOKEN` with a GitHub App token
+before making CI a required check, because token-authored Release PRs do not trigger `pull_request`
+workflows. At visibility change, enable private vulnerability reporting, secret scanning and push
+protection, Dependabot security updates, fork-workflow approval, and a `main` ruleset requiring pull
+requests and the CI check. Keep self-hosted runners unavailable to public forks.
+
+Then finish the remaining transcription configuration smoke without expanding the performance benchmark:
 confirm Apple Speech plus a CLI-only brain route starts without an API key, while any OpenAI
 transcription or brain target still requires one. Change a transcription setting during a live run
 and confirm the current snapshot remains active until the next Start; force an Apple analyzer failure
@@ -159,7 +176,7 @@ thin OS shell, verified by the smoke run.
 - `Sources/JarvisApp/Viewer/ActivityViewer.swift` — the in-app `WKWebView` activity viewer, with the current non-persisted readiness badge, an exact selectable/copyable session ID, and one-click **Evaluate** / **Open report** agentic audit flow.
 - `Sources/EvalPrep/main.swift` — the Foundation-only terminal entry point for the same `AgenticEvaluator` Activity invokes; `scripts/eval-session.sh` runs it over the repo + session dir.
 - `Sources/CJarvisAEC/lib/libjarvis-aec.a` — the prebuilt, zero-dylib WebRTC AEC3 + classic VAD native edge (the `CJarvisAEC` target; rebuilt by `scripts/build-aec.sh`).
-- `.github/workflows/release.yml` + `scripts/package-app.sh` — automated releases: release-please Release PR → Developer ID-signed, notarized, stapled `Jarvis-<version>.zip` attached to a GitHub Release ([build-and-run.md → Distribution](./build-and-run.md#distribution--signed-notarized-releases-from-ci)).
+- `.github/workflows/ci.yml` + `.github/workflows/release.yml` + `scripts/package-app.sh` — SHA-pinned hosted automation only: the repository gate on pull requests, then release-please Release PR → Developer ID-signed, notarized, stapled `Jarvis-<version>.zip` with Apache and third-party notices attached to a GitHub Release ([build-and-run.md → Distribution](./build-and-run.md#distribution--signed-notarized-releases-from-ci)).
 
 ## Not yet built
 

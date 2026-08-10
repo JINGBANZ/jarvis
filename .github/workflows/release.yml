@@ -32,7 +32,7 @@ jobs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
-      - uses: googleapis/release-please-action@v5
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         id: release
         with:
           config-file: release-please-config.json
@@ -57,10 +57,10 @@ jobs:
     permissions:
       contents: write # upload the release asset
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - name: Run tests (gate)
-        run: ./scripts/run-tests.sh
+      - name: Run repository gate
+        run: swift build && ./scripts/run-tests.sh
 
       # GitHub's documented recipe for signing on a hosted runner: decode the Developer ID
       # certificate into a fresh temporary keychain. set-key-partition-list is what lets codesign
