@@ -1265,6 +1265,89 @@
   `Sources/JarvisCore/Coach/CoachHistory.swift`,
   `Sources/JarvisCore/Prompts/JarvisPrompts+HistorySummary.swift`.
 
+### 2026-08-08 — Overall readiness is a composition of focused subsystem state
+
+- **Chose:** Add one Foundation-only `JarvisReadiness` reducer that consumes typed snapshots of the
+  selected session's permissions, credentials, brain and transcription preparation, endpoint
+  connections, capture health, and capture recovery. It emits one typed checking, blocked,
+  recovering, fully ready, microphone-only ready, or stopped status plus effects for the app to
+  render. Each Start owns an opaque generation, so stale, cancelled, and post-Stop observations
+  cannot make a replacement session ready. Existing focused components, including
+  `CaptureReadinessMonitor`, continue to own their mechanics.
+- **Why:** Readiness had become a second state machine in `AppDelegate` and a separate presentation
+  model in the menu, leaving startup dependencies outside capture health and making Activity unable
+  to report the same live answer. One pure composition gives every surface the same authoritative
+  state without moving timers, provider objects, logging, permissions, or OS behavior into Core.
+- **Rejected:** (a) Expanding `CaptureReadinessMonitor` into a session god object — permission,
+  credential, and provider preparation are not capture policy. (b) Keeping independent menu and
+  Activity checks — they can drift and accept stale callbacks differently. (c) Persisting readiness
+  transitions as Activity rows — readiness is current UI state, while Activity remains the durable
+  coaching and lifecycle record.
+- **Detail:** [architecture.md → Components](./architecture.md#3-components),
+  `Sources/JarvisCore/Diagnostics/JarvisReadiness.swift`,
+  `Sources/JarvisCore/Diagnostics/CaptureReadinessMonitor.swift`,
+  `Sources/JarvisApp/App/AppDelegate.swift`.
+
+### 2026-08-08 — Session evaluation uses persisted coaching-attempt provenance
+
+- **Chose:** Persist one owner-only coaching-attempt companion beside Activity and brain traffic.
+  It records the natural trigger versus a pending-work wake, the indexed finalized delta and the
+  substance gate's decision, the initial-versus-screen-continuation boundary, and the terminal
+  outcome. Every coach wire call carries the matching attempt identity. The evaluator joins those
+  records to compute trigger/filler/call-phase counts; absent historical provenance and absent
+  provider telemetry remain unavailable rather than zero.
+- **Chose:** Keep Activity human-facing and keep raw wire traffic untouched. The derived evaluation
+  transcript safely elides the exact shared prefix inside a growing one-item CLI request and removes
+  exact reply duplicates from runtime envelopes, with explicit source pointers and stable call
+  numbering. Reports separate transcript input, Jarvis output, Activity consequence, and trigger;
+  they never use total `stay_silent` actions as an avoidable-call estimate. Recommendations are
+  limited to three and distinguish session evidence, source verification, hypotheses, and behavior
+  to preserve. Without retained audio, ASR error claims remain hypotheses.
+- **Why:** Session `2026-08-07_11-15-48_B24D` proved that traffic plus prose could not recover which
+  finalized lines actually caused a call: the evaluator missed local filler skips, over-attributed
+  model silence, blurred request speech with generated output, and expanded a growing CLI history
+  into a multi-megabyte derived input. Capturing provenance at the attempt boundary makes causal
+  accounting deterministic without turning Activity into an engineering log or weakening the
+  session's owner-only retention boundary.
+- **Rejected:** (a) Inferring triggers from Activity/debug prose—the missing local skips and
+  pending-work wakes are not reconstructible. (b) Treating every accumulated filler line as causal,
+  or every `stay_silent` as avoidable. (c) Copying diagnostics into Activity—it mixes human history
+  with scheduler detail. (d) Rewriting or discarding raw traffic—the complete source remains the
+  cardinality and wire-contract authority. (e) Archiving audio to validate ASR—it reverses the
+  privacy posture for an evaluator convenience.
+- **Extends:** 2026-07-15 — Brain traffic is recorded per session; one-click LLM audit, and
+  2026-07-24 — Session evaluation is agentic-only and reads complete source logs.
+- **Detail:** [architecture.md → Resilience](./architecture.md#resilience),
+  [sandbox.md → Data Egress](./sandbox.md#data-egress),
+  `Sources/JarvisCore/Diagnostics/CoachingAttemptLog.swift`,
+  `Sources/JarvisCore/Diagnostics/TriggerQualityMetrics.swift`,
+  `Sources/JarvisCore/Diagnostics/EvaluationTranscript.swift`.
+
+### 2026-08-09 — Session audit persistence stays off the coaching latency path
+
+- **Chose:** Make coaching-attempt and brain-traffic recording enqueue-only while a session is live.
+  Their session-bound serial queues perform request/response parsing, image redaction, JSON
+  serialization, and file I/O in order. Stop captures the old session's recorders, waits for cancelled
+  coaching work to unwind, and flushes every evidence queue before making that session evaluable.
+- **Chose:** Persist actual transcript inclusion separately from its filler classification, label CLI
+  failures before actual transport dispatch as pre-request failures rather than provider calls, and surface
+  malformed JSONL as unavailable evidence with stable record-number gaps and partial totals.
+- **Why:** Synchronous audit writes can sit between a provider response and Jarvis handling or showing
+  the coaching result. Moving them behind ordered queues removes that disk/serialization latency while
+  the Stop-time durability barrier retains a complete audit. Independent inclusion and explicit
+  unavailable records keep the evaluator capable of detecting the very gate/logging failures it audits.
+- **Rejected:** (a) Synchronous per-record durability on the coaching path—it makes local filesystem
+  behavior part of response latency. (b) A timing-threshold unit test—wall-clock assertions are flaky
+  and cannot prove the absence of blocking I/O; the queue boundary and teardown flush are structural.
+  (c) Dropping damaged or pre-request records—they would turn missing evidence into exact-looking call
+  and telemetry totals.
+- **Extends:** 2026-08-08 — Session evaluation uses persisted coaching-attempt provenance.
+- **Detail:** [architecture.md → Latency](./architecture.md#latency),
+  `Sources/JarvisCore/Diagnostics/BrainTrafficLog.swift`,
+  `Sources/JarvisCore/Diagnostics/CoachingAttemptLog.swift`,
+  `Sources/JarvisCore/Diagnostics/JSONLRecords.swift`,
+  `Sources/JarvisApp/App/AppDelegate.swift`.
+
 ### 2026-08-10 — The reconnect benchmark faults only Jarvis's transcription transport
 
 - **Chose:** Make the explicit reconnect benchmark close only the active Jarvis transcription

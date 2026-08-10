@@ -398,6 +398,7 @@ private func speakResponseBody(arguments: String) -> Data {
                                        traffic: traffic, trafficTag: "coach",
                                        send: { _ in (Data(#"{"output":[]}"#.utf8), http(200)) })
         _ = try await client.respond(messages: [.user("hi")], tools: coachTools)
+        traffic.flush()
 
         let text = try String(contentsOf: dir.appendingPathComponent(BrainTrafficLog.filename),
                               encoding: .utf8)
@@ -419,6 +420,7 @@ private func speakResponseBody(arguments: String) -> Data {
         await #expect(throws: (any Error).self) {
             try await client.respond(messages: [.user("hi")], tools: coachTools)
         }
+        traffic.flush()
         let text = try String(contentsOf: dir.appendingPathComponent(BrainTrafficLog.filename),
                               encoding: .utf8)
         let entry = try #require(try JSONSerialization.jsonObject(

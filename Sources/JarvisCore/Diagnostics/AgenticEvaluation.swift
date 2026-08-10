@@ -67,12 +67,21 @@ public enum AgenticEvaluation {
         try CodexRuntimeHome.removeLegacyHomes(from: sessionDir)
         let trafficURL = sessionDir.appendingPathComponent(BrainTrafficLog.filename)
         let jsonl = (try? String(contentsOf: trafficURL, encoding: .utf8)) ?? ""
-        let transcript = EvaluationTranscript.render(jsonl: jsonl)
-        guard !transcript.isEmpty else { throw EvaluationError.noTraffic }
+        guard !JSONLRecords.parse(jsonl).lines.isEmpty else {
+            throw EvaluationError.noTraffic
+        }
         let activityURL = sessionDir.appendingPathComponent(ActivityLog.filename)
         guard FileManager.default.isReadableFile(atPath: activityURL.path) else {
             throw EvaluationError.missingActivityLog
         }
+        let activityJSONL = try String(contentsOf: activityURL, encoding: .utf8)
+        let attemptsURL = sessionDir.appendingPathComponent(CoachingAttemptLog.filename)
+        let attemptsJSONL = try? String(contentsOf: attemptsURL, encoding: .utf8)
+        let transcript = EvaluationTranscript.render(
+            jsonl: jsonl,
+            attemptsJSONL: attemptsJSONL,
+            activityJSONL: activityJSONL)
+        guard !transcript.isEmpty else { throw EvaluationError.noTraffic }
 
         // A failed write must abort: the prompt tells the agent the transcript is its primary
         // input, so silently proceeding would spend a whole agentic run on a missing/stale file.
@@ -89,7 +98,8 @@ public enum AgenticEvaluation {
         guard !body.isEmpty else { throw EvaluationError.emptyReport }
         let stamp = """
             > _Produced by the agentic evaluator (`\(agentName)` over the repo + session); the auditor \
-            was instructed to check recommendations labelled [confirmed] against the code._
+            was instructed to separate session evidence, source-confirmed mechanisms, hypotheses, and \
+            behavior to preserve._
             """
         let report = "\(stamp)\n\n\(body)\n"
         try replaceOwnerOnlyFile(
@@ -131,6 +141,7 @@ public enum AgenticEvaluation {
             sessionDirectoryPath: sessionDirPath,
             transcriptFilename: transcriptFilename,
             trafficFilename: BrainTrafficLog.filename,
+            attemptsFilename: CoachingAttemptLog.filename,
             activityFilename: ActivityLog.filename,
             reportFilename: reportFilename
         )

@@ -6,12 +6,14 @@ import Testing
 final class ScriptedBrain: BrainClient, @unchecked Sendable {
     private(set) var calls: [[ChatMessage]] = []
     private(set) var toolChoices: [ToolChoice] = []
+    private(set) var requestContexts: [CoachingAttemptLog.RequestContext?] = []
     private(set) var preparationCount = 0
     let script: [BrainResponse]
     init(script: [BrainResponse]) { self.script = script }
     func respond(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice) async throws -> BrainResponse {
         calls.append(messages)
         toolChoices.append(toolChoice)
+        requestContexts.append(CoachingAttemptLog.currentRequest)
         return script[min(calls.count - 1, script.count - 1)]
     }
     func prepare() { preparationCount += 1 }
@@ -21,11 +23,13 @@ final class ScriptedBrain: BrainClient, @unchecked Sendable {
 /// to verify what survives a failed turn and reaches the next one.
 final class ScriptedThrowBrain: BrainClient, @unchecked Sendable {
     private(set) var calls: [[ChatMessage]] = []
+    private(set) var requestContexts: [CoachingAttemptLog.RequestContext?] = []
     private var idx = 0
     let script: [BrainResponse?]
     init(script: [BrainResponse?]) { self.script = script }
     func respond(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice) async throws -> BrainResponse {
         calls.append(messages)
+        requestContexts.append(CoachingAttemptLog.currentRequest)
         let r = script[min(idx, script.count - 1)]; idx += 1
         guard let r else { throw NSError(domain: "test", code: 500) }
         return r
@@ -176,6 +180,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
                             screen: ScreenCapturing = FakeScreen(),
                             overlay: OverlayRendering = FakeOverlay(),
                             clock: Clock, config: Config = .default,
+                            coachingAttempts: CoachingAttemptLog? = nil,
                             automaticAttemptDelay: @escaping CoachDriver.AutomaticAttemptDelay = { _ in },
                             onBrainFailure: (@MainActor @Sendable (BrainFailure) -> Void)? = nil)
         -> (CoachDriver, RollingTranscript) {
@@ -192,6 +197,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let driver = CoachDriver(
             config: config, transcript: transcript,
             route: route, screen: screen, overlay: overlay, clock: clock,
+            coachingAttempts: coachingAttempts,
             automaticAttemptDelay: automaticAttemptDelay
         )
         return (driver, transcript)
@@ -279,6 +285,10 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(brain.calls[1].contains { $0.imageBase64JPEG != nil })
         // No OCR text on this snapshot → the tool result stays the plain marker.
         #expect(brain.calls[1].first { $0.role == .tool }?.text == "screenshot captured")
+        #expect(brain.requestContexts.compactMap { $0 }.map(\.phase) == [
+            .initial, .captureScreenContinuation,
+        ])
+        #expect(Set(brain.requestContexts.compactMap { $0 }.map(\.attemptID)).count == 1)
     }
 
     /// D2 (OCR sidecar): when the capture carries recognized text, it rides in the capture_screen
@@ -429,9 +439,11 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
         let snapshot = ActivityLog.shared.attach { _ in }
         #expect(snapshot.rows.count == 3)
-        #expect(snapshot.rows[0].contains("couldn't respond this turn"))
+        #expect(snapshot.rows[0].contains("couldn't finish the response"))
+        #expect(snapshot.rows[0].contains("retrying"))
         #expect(snapshot.rows[0].contains("listening continues"))
-        #expect(snapshot.rows[1].contains("couldn't respond this turn"))
+        #expect(snapshot.rows[1].contains("couldn't finish the response"))
+        #expect(snapshot.rows[1].contains("retrying"))
         #expect(snapshot.rows[1].contains("listening continues"))
         #expect(snapshot.rows[2].contains("recovered coaching"))
         #expect(!snapshot.rows.joined().contains("test"))
@@ -639,6 +651,30 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         transcript.append(.init(speaker: .me, text: "嗯嗯", at: 2))
         #expect(await driver.handleTrigger(.turnEnd) == .skippedFillerOnly)
         #expect(brain.calls.isEmpty)
+    }
+
+    @Test func fillerOnlySkipIsPersistedWithoutAProviderCall() async throws {
+        let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
+        let attempts = CoachingAttemptLog(); attempts.enable(directory: dir)
+        let brain = ScriptedBrain(script: [
+            .init(toolCalls: [.staySilent(callId: "unused")]),
+        ])
+        let (driver, transcript) = makeDriver(
+            brain: brain,
+            clock: ManualClock(now: 0),
+            coachingAttempts: attempts)
+        transcript.append(.init(speaker: .them, text: "Uh. Hmm.", at: 1))
+
+        #expect(await driver.handleTrigger(.turnEnd) == .skippedFillerOnly)
+        #expect(brain.calls.isEmpty)
+        attempts.flush()
+        let jsonl = try String(
+            contentsOf: dir.appendingPathComponent(CoachingAttemptLog.filename),
+            encoding: .utf8)
+        #expect(jsonl.contains(#""event":"started""#))
+        #expect(jsonl.contains(#""classification":"composite_filler""#))
+        #expect(jsonl.contains(#""brain_facing":false"#))
+        #expect(jsonl.contains(#""terminal":"skipped_filler""#))
     }
 
     /// Several clear hesitation sounds in one transcription completion are still one filler-only
@@ -1842,6 +1878,10 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(await driver.handleTrigger(.turnEnd) == .silentByModel)
         #expect(brain.calls.count == 2)
         #expect(brain.calls.last!.contains { ($0.text ?? "").contains("important words") })   // re-sent
+        let provenance = brain.requestContexts.compactMap { $0 }
+        #expect(provenance.map(\.trigger) == ["turn_end", "pending_work"])
+        #expect(provenance.map(\.sourceTrigger) == ["turn_end", "turn_end"])
+        #expect(provenance.map(\.phase) == [.initial, .initial])
     }
 
     /// Reasoning passthrough: a capture_screen response's WHOLE output (reasoning + the function_call

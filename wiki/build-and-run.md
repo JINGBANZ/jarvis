@@ -102,8 +102,10 @@ runtime). It also sidesteps the `file://` `fetch()` restriction that forced the 
 
 - New events stream in live (no reload, no flicker); thumbnails open in an in-page lightbox.
 - Each Start opens a fresh session (a Stop→Start gets a new log, never resuming the previous run),
-  persisted as owner-only `jarvis-activity.jsonl` + `shot-N.jpg`, so past runs can be browsed and the
-  history cleared from the viewer. Old sessions are pruned to the most recent few at each Start.
+  persisted as owner-only `jarvis-activity.jsonl` + `shot-N.jpg`; the same directory contains
+  `coaching-attempts.jsonl` for evaluator-only trigger/delta/outcome provenance and
+  `brain-traffic.jsonl` for redacted wire evidence. Past runs can be browsed and the history cleared
+  from the viewer. Old sessions are pruned to the most recent few at each Start.
 - **The viewer and its file logging are always on** (they used to be `--dev`-gated; that flag is gone).
   On every Start, `ActivityLog` writes the coaching exchange to `jarvis-activity.jsonl` while `jlog`
   writes agent-facing diagnostics to the unified log (Console.app) and `jarvis-debug.log`. Both files
@@ -116,9 +118,13 @@ runtime). It also sidesteps the `file://` `fetch()` restriction that forced the 
   `JarvisCore` so they're unit/WebKit-tested; `ActivityViewer` in `JarvisApp` is the thin window.
 - Session evaluation is agentic only. After Stop, select a session and click **Evaluate**: the
   read-only Claude Code / Codex agent receives the source checkout plus the complete session
-  directory, reads the full `jarvis-activity.jsonl` itself alongside raw brain traffic and
-  screenshots, writes owner-only `eval-report.md`, and opens the rendered page. A saved session shows
-  **Open report** instead, avoiding another agent run. The local app locates its checkout from the
+  directory, reads the full `jarvis-activity.jsonl` itself, and correlates first-class attempt
+  provenance with raw brain traffic and screenshots. Its compact input opens with deterministic
+  trigger/filler/telemetry availability counts; older sessions without provenance say unavailable
+  instead of inventing a zero. Growing CLI request history is common-prefix elided with an explicit
+  pointer back to untouched traffic. The agent writes owner-only `eval-report.md` and opens the
+  rendered page. A saved session shows **Open report** instead, avoiding another agent run. The local
+  app locates its checkout from the
   workspace `.jarvis/`, a `--repo-dir` launch argument, or the directory containing a locally built
   `Jarvis.app`; without live source it refuses to run a weaker audit. `./scripts/eval-session.sh
   [session-dir]` is the terminal launcher for the same Core evaluator.
@@ -197,3 +203,6 @@ the human-facing coaching record. The current validation priority lives in
   transcription or coaching events.
 - In Activity, choose the stopped session and click **Evaluate**. Confirm the button shows
   **Evaluating…**, the report opens when the agent finishes, and the button then shows **Open report**.
+  Confirm the report separates transcript input from Jarvis output, attributes coach calls to their
+  trigger and initial/screen-continuation phase, and never presents `stay_silent` as an avoidable-call
+  count.

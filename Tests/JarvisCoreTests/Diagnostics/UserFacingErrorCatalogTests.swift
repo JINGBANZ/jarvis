@@ -32,6 +32,20 @@ import Testing
         }
     }
 
+    @Test func missingPermissionsAreNotClassifiedAsCaptureFailure() {
+        let microphone = UserFacingError.permissionsMissing([.microphone])
+        #expect(microphone.title == "Permission needed")
+        #expect(microphone.message.contains("Enable Microphone"))
+        #expect(!microphone.message.contains("Screen Recording"))
+        #expect(microphone.severity == .fatal)
+        #expect(microphone.sessionEndReason == .permissionsMissing)
+
+        let both = UserFacingError.permissionsMissing([.microphone, .screenRecording])
+        #expect(both.title == "Permissions needed")
+        #expect(both.message.contains("Microphone and Screen Recording"))
+        #expect(both.sessionEndReason == .permissionsMissing)
+    }
+
     @Test func captureFailedIsFatalAndCarriesReason() {
         let e = UserFacingError.captureFailed(reason: "no input device")
         #expect(e.severity == .fatal)

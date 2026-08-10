@@ -5,11 +5,15 @@ import Foundation
 @Suite struct EvaluationTranscriptTests {
     /// One traffic line in the on-disk shape `BrainTrafficLog` writes.
     private func line(tag: String = "coach", request: [String: Any],
-                      response: [String: Any]? = nil, error: String? = nil) throws -> String {
+                      response: [String: Any]? = nil, error: String? = nil,
+                      coachAttempt: [String: Any]? = nil,
+                      recordKind: String? = nil) throws -> String {
         var entry: [String: Any] = ["t": "10:00:00", "tag": tag, "ms": 500, "request": request]
         if response != nil { entry["status"] = 200 }
         entry["response"] = response
         entry["error"] = error
+        entry["coach_attempt"] = coachAttempt
+        entry["record_kind"] = recordKind
         return try #require(String(data: JSONSerialization.data(withJSONObject: entry), encoding: .utf8))
     }
 
@@ -143,6 +147,94 @@ import Foundation
         #expect(out.ranges(of: "instructions (3 chars):\nSYS").count == 2)
         #expect(out.ranges(of: "user: same conversation").count == 2)
         #expect(!out.contains("previous coach call"))
+    }
+
+    @Test func growingCLITextItemElidesItsSubstantialCommonPrefix() throws {
+        let stable = String(repeating: "stable history line\n", count: 500)
+        let firstText = "full conversation\n\(stable)old turn trailer"
+        let secondText = "full conversation\n\(stable)new transcript delta"
+        let first = try line(request: [
+            "provider": "codex-cli", "model": "gpt-5.6-codex",
+            "input": [["type": "text", "text": firstText]],
+        ])
+        let second = try line(request: [
+            "provider": "codex-cli", "model": "gpt-5.6-codex",
+            "input": [["type": "text", "text": secondText]],
+        ])
+
+        let output = EvaluationTranscript.render(jsonl: "\(first)\n\(second)")
+
+        #expect(output.contains("within this CLI text item"))
+        #expect(output.contains("full input remains in \(BrainTrafficLog.filename)"))
+        #expect(output.ranges(of: "stable history line").count == 500)
+        #expect(output.contains("new transcript delta"))
+        #expect(output.utf8.count * 4 < (firstText.utf8.count + secondText.utf8.count) * 3)
+        #expect(output.contains("=== call #2"))
+    }
+
+    @Test func CLIReplyAppearsOnceWhenRuntimeEnvelopeRepeatsIt() throws {
+        let reply = #"{"tool":"stay_silent","arguments":{}}"#
+        let call = try line(
+            request: ["provider": "codex-cli", "model": "gpt-5.6-codex", "input": []],
+            response: [
+                "reply": reply,
+                "runtime": [
+                    "status": "completed",
+                    "items": [["type": "agentMessage", "text": reply]],
+                    "itemsView": [["type": "agentMessage", "text": reply]],
+                ],
+            ])
+
+        let output = EvaluationTranscript.render(jsonl: call)
+
+        #expect(output.ranges(of: reply).count == 1)
+        #expect(output.ranges(of: "[duplicate of response.reply omitted]").count == 2)
+    }
+
+    @Test func callLabelsTranscriptInputJarvisOutputAndTriggerUnambiguously() throws {
+        let reply = #"{"tool":"speak","arguments":{"lines":["I opened LeetCode."]}}"#
+        let call = try line(
+            request: [
+                "provider": "codex-cli", "model": "gpt-5.6-codex",
+                "input": [["type": "text", "text": "[00:01] them: Open LeetCode and share your screen"]],
+            ],
+            response: ["reply": reply],
+            coachAttempt: [
+                "id": 12, "trigger": "turn_end", "source_trigger": "turn_end",
+                "phase": "initial", "sequence": 1,
+            ])
+
+        let output = EvaluationTranscript.render(jsonl: call)
+
+        #expect(output.contains("attempt #12 · trigger=turn_end · phase=initial"))
+        #expect(output.contains("brain request input (1 items):"))
+        #expect(output.contains("them: Open LeetCode and share your screen"))
+        #expect(output.contains("Jarvis brain output:"))
+        #expect(output.contains("I opened LeetCode."))
+    }
+
+    @Test func malformedTrafficIsVisibleAndDoesNotRenumberLaterCalls() throws {
+        let first = try line(request: ["model": "gpt-5.5", "input": [userItem("one")]])
+        let third = try line(request: ["model": "gpt-5.5", "input": [userItem("three")]])
+
+        let output = EvaluationTranscript.render(jsonl: "\(first)\n{truncated\n\(third)")
+
+        #expect(output.contains("=== record #2 · malformed traffic entry"))
+        #expect(output.contains("=== call #3"))
+        #expect(output.contains("all session totals below are partial"))
+    }
+
+    @Test func preRequestFailureIsNotLabeledAsAProviderCall() throws {
+        let setupFailure = try line(
+            request: ["provider": "codex-cli", "runtime": "app-server"],
+            error: "app-server unavailable",
+            recordKind: BrainTrafficLog.RecordKind.preRequestFailure.rawValue)
+
+        let output = EvaluationTranscript.render(jsonl: setupFailure)
+
+        #expect(output.contains("=== record #1 · coach"))
+        #expect(output.contains("pre-request failure (no provider call)"))
+        #expect(!output.contains("=== call #1 · coach"))
     }
 
 }

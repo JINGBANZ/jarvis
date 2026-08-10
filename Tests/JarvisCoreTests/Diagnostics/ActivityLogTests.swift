@@ -159,16 +159,21 @@ import Foundation
         ))
     }
 
-    @Test func temporaryBrainFailureSaysListeningContinuesWithoutDiagnosticDetail() throws {
+    @Test func temporaryBrainFailureSaysRetryingWithoutDiagnosticDetail() throws {
         let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         let log = ActivityLog(); log.enable(directory: dir)
         log.record(.coachingTurnFailed(provider: .codexCLI))
         let snapshot = log.attach { _ in }
 
         let row = try #require(snapshot.rows.first)
-        #expect(row.contains("Codex CLI couldn't respond this turn"))
+        #expect(row.contains("Codex CLI couldn't finish the response"))
+        #expect(row.contains("retrying"))
         #expect(row.contains("listening continues"))
         #expect(!row.contains("timed out"))
+        #expect(ActivityLog.isHumanFacing(
+            message: "⚠️ Codex CLI couldn't finish the response — retrying while listening continues",
+            imageFile: nil
+        ))
         #expect(ActivityLog.isHumanFacing(
             message: "⚠️ Codex CLI couldn't respond this turn — listening continues",
             imageFile: nil
@@ -284,6 +289,7 @@ import Foundation
             .replacedByNewSession,
             .openAIAPIKeyMissing,
             .brainProviderNotConfigured,
+            .permissionsMissing,
             .brainRouteExhausted(lastProvider: .claudeCode),
             .transcriptionStopped(reason: .quotaExceeded),
             .audioCaptureUnavailable,
@@ -298,10 +304,11 @@ import Foundation
         #expect(messages[2].contains("session ended because a new session started"))
         #expect(messages[3].contains("API key is missing"))
         #expect(messages[4].contains("no Primary brain provider"))
-        #expect(messages[5].contains("last target: Claude Code"))
-        #expect(messages[6].contains("API quota is exhausted"))
-        #expect(messages[7].contains("audio capture became unavailable"))
-        #expect(messages[8].contains("check jarvis-debug.log"))
+        #expect(messages[5].contains("required permission is missing"))
+        #expect(messages[6].contains("last target: Claude Code"))
+        #expect(messages[7].contains("API quota is exhausted"))
+        #expect(messages[8].contains("audio capture became unavailable"))
+        #expect(messages[9].contains("check jarvis-debug.log"))
         #expect(!messages.joined().contains("OAuth"))
         #expect(!messages.joined().contains("AirPods"))
         #expect(!messages.joined().contains("item_"))
