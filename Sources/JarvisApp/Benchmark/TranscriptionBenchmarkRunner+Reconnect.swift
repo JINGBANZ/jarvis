@@ -95,11 +95,11 @@ extension TranscriptionBenchmarkRunner {
             let replacementReady = try await recorder.waitForReady(
                 minimumGeneration: firstReady.generation + 1,
                 timeout: 60)
-            try await recorder.waitForRecognizedReconnectPhrases(
+            try await recorder.waitForRecognizedReconnectFinalStreamToSettle(
                 phraseIDs,
                 inGeneration: replacementReady.generation,
+                quietPeriod: 1,
                 timeout: 40)
-            try await Task.sleep(for: .milliseconds(250))
         } catch {
             let aborted = isAbortRequested
             failure = aborted

@@ -9,6 +9,7 @@ public extension TranscriptionBenchmark {
         public let speechEndedAt: TimeInterval
         public let events: [TranscriptionDiagnosticEvent]
         public let captureObservations: [CaptureObservation]
+        public let connectionStates: [TranscriptionConnectionState]
         public let failure: String?
 
         public init(
@@ -19,6 +20,7 @@ public extension TranscriptionBenchmark {
             speechEndedAt: TimeInterval,
             events: [TranscriptionDiagnosticEvent],
             captureObservations: [CaptureObservation] = [],
+            connectionStates: [TranscriptionConnectionState] = [],
             failure: String? = nil
         ) {
             self.arm = arm
@@ -28,6 +30,7 @@ public extension TranscriptionBenchmark {
             self.speechEndedAt = speechEndedAt
             self.events = events
             self.captureObservations = captureObservations
+            self.connectionStates = connectionStates
             self.failure = failure
         }
     }

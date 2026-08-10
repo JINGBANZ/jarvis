@@ -437,11 +437,15 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
         diagnosticFinalSequence &+= 1
         let diagnosticItemID = "apple-\(generation)-\(diagnosticFinalSequence)"
         lock.unlock()
-        guard coachingCoordinator.recordFinalizedTranscript(
+        let accepted = coachingCoordinator.recordFinalizedTranscript(
             raw,
             spokenAt: spokenAt,
             source: "Apple Speech"
-        ) else { return }
+        )
+        // A false result while this generation is still live means the provider returned a final
+        // with no usable language. Keep it out of Activity and coaching context, but preserve its
+        // terminal provider lifecycle as an explicitly unavailable benchmark result.
+        guard accepted || isLive(generation: generation) else { return }
         emitDiagnostic(.init(
             kind: .providerFinal,
             provider: TranscriptionProvider.appleSpeech.rawValue,
@@ -452,7 +456,8 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
             text: raw,
             spokenAt: sessionStart + spokenAt,
             spokenEndAt: sessionStart + spokenEnd,
-            observedAt: clock.now()))
+            observedAt: clock.now(),
+            transcriptUnavailable: !accepted))
         continuityReporter.recordServerSpeech(
             .speechStarted,
             audioTimeMilliseconds: Int(max(0, spokenAt) * 1_000),
@@ -470,10 +475,11 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
             speaker: speaker.rawValue,
             generation: generation,
             itemID: diagnosticItemID,
-            text: raw,
+            text: accepted ? raw : nil,
             spokenAt: sessionStart + spokenAt,
             spokenEndAt: sessionStart + spokenEnd,
-            observedAt: clock.now()))
+            observedAt: clock.now(),
+            transcriptUnavailable: !accepted))
         continuityReporter.recordServerSpeech(
             .transcriptionCompleted,
             audioTimeMilliseconds: Int(max(0, spokenEnd) * 1_000),

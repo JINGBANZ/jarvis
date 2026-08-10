@@ -100,6 +100,7 @@ extension TranscriptionBenchmarkRunner {
             speechEndedAt: speechEndedAt,
             events: snapshot.events,
             captureObservations: snapshot.captureObservations,
+            connectionStates: snapshot.states,
             failure: failure))
     }
 

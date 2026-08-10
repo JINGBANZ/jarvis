@@ -33,10 +33,9 @@ public extension TranscriptionBenchmark {
             textsByItem[itemID, default: []].insert(normalize(text))
         }
         let revisionCount = textsByItem.values.reduce(0) { $0 + max(0, $1.count - 1) }
-        // One repetition plays exactly one fixture. More than one accepted final is a duplicate
-        // delivery from the benchmark's perspective, whether the provider reused or replaced its
-        // item ID during replay.
-        let duplicateCount = max(0, usableFinals.count - 1)
+        // A provider may legitimately split one fixture across distinct finalized items. Count only
+        // repeated item identities or repeated normalized text, not every fragment after the first.
+        let duplicateCount = duplicateDeliveryCount(in: usableFinals)
         let providerDuplicateCount = max(
             0,
             rawFinalsForRevision.count
@@ -50,6 +49,13 @@ public extension TranscriptionBenchmark {
         }
         let unavailableItemIDs = Set(unavailableEvents.compactMap(\.itemID))
         let unavailableWithoutItemID = unavailableEvents.count(where: { $0.itemID == nil })
+        let reconnected = input.connectionStates.contains { state in
+            if case .reconnecting = state { return true }
+            return false
+        }
+        let failure = input.failure ?? (reconnected
+            ? "Transcription reconnected during a standard benchmark repetition"
+            : nil)
 
         return RepetitionResult(
             armID: input.arm.id,
@@ -87,7 +93,7 @@ public extension TranscriptionBenchmark {
                 && capturedSampleCount > 0
                 && captureSequenceGapCount == 0
                 && evictedChunkCount == 0,
-            failure: input.failure)
+            failure: failure)
     }
 
     static func evaluateReconnect(
@@ -259,6 +265,19 @@ public extension TranscriptionBenchmark {
                 && event.generation == generation
         }.sorted {
             ($0.spokenAt ?? $0.observedAt) < ($1.spokenAt ?? $1.observedAt)
+        }
+    }
+
+    private static func duplicateDeliveryCount(
+        in events: [TranscriptionDiagnosticEvent]
+    ) -> Int {
+        var seenItemIDs: Set<String> = []
+        var seenTexts: Set<String> = []
+        return events.count { event in
+            let repeatedItem = event.itemID.map { !seenItemIDs.insert($0).inserted } ?? false
+            let text = event.text.map(normalize) ?? ""
+            let repeatedText = !text.isEmpty && !seenTexts.insert(text).inserted
+            return repeatedItem || repeatedText
         }
     }
 

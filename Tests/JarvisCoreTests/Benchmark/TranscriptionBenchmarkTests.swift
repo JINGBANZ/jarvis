@@ -64,6 +64,62 @@ struct TranscriptionBenchmarkTests {
         #expect(result.continuityPassed)
     }
 
+    @Test("split finalized fragments are not duplicate deliveries")
+    func splitFragments() {
+        let arm = TranscriptionBenchmark.standardArms.first {
+            $0.model == .gpt4oTranscribe && $0.phrase.language == .english
+        }!
+        let result = TranscriptionBenchmark.evaluate(.init(
+            arm: arm,
+            repetition: 1,
+            fixtureSHA256: "hash",
+            connectStartedAt: 1,
+            speechEndedAt: 3,
+            events: [
+                event(
+                    .finalized,
+                    observedAt: 4,
+                    model: arm.model?.rawValue,
+                    itemID: "fragment-1",
+                    text: "The actor preserves ordered audio"),
+                event(
+                    .finalized,
+                    observedAt: 4.1,
+                    model: arm.model?.rawValue,
+                    itemID: "fragment-2",
+                    text: "while the socket reconnects."),
+            ]))
+
+        #expect(result.normalizedCharacterEditDistance == 0)
+        #expect(result.duplicateCount == 0)
+        #expect(result.finalTexts.count == 2)
+    }
+
+    @Test("a reconnect contaminates a standard repetition")
+    func standardReconnectIsFailure() {
+        let arm = TranscriptionBenchmark.standardArms.first {
+            $0.model == .gptTranscribe && $0.phrase.language == .english
+        }!
+        let result = TranscriptionBenchmark.evaluate(.init(
+            arm: arm,
+            repetition: 1,
+            fixtureSHA256: "hash",
+            connectStartedAt: 1,
+            speechEndedAt: 3,
+            events: [
+                event(
+                    .finalized,
+                    observedAt: 4,
+                    model: arm.model?.rawValue,
+                    itemID: "final",
+                    text: arm.phrase.text),
+            ],
+            connectionStates: [.ready, .reconnecting(attempt: 1), .ready]))
+
+        #expect(result.failure ==
+            "Transcription reconnected during a standard benchmark repetition")
+    }
+
     @Test("evaluation reports missing unavailable duplicate and revised finals")
     func anomalies() {
         let arm = TranscriptionBenchmark.standardArms.first {
@@ -132,7 +188,7 @@ struct TranscriptionBenchmarkTests {
         #expect(abs((result.finalLatencySeconds ?? 0) - 0.4) < 0.000_001)
     }
 
-    @Test("accepted unavailable final is counted when the raw completion was empty")
+    @Test("rejected provider final is counted as unavailable")
     func unavailableAfterEmptyCompletion() {
         let arm = TranscriptionBenchmark.standardArms.first {
             $0.model == .gpt4oTranscribe && $0.phrase.language == .english
@@ -149,7 +205,8 @@ struct TranscriptionBenchmarkTests {
                     observedAt: 3.1,
                     model: arm.model?.rawValue,
                     itemID: "empty",
-                    text: ""),
+                    text: " … ",
+                    unavailable: true),
                 event(
                     .finalized,
                     observedAt: 3.2,

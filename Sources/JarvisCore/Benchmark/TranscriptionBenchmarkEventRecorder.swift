@@ -121,22 +121,42 @@ public final class TranscriptionBenchmarkEventRecorder: @unchecked Sendable {
         throw Failure.timedOut("a settled finalized transcript stream")
     }
 
-    public func waitForRecognizedReconnectPhrases(
+    /// Waits for every expected phrase in one replacement generation, then keeps observing that
+    /// generation until its final stream has stayed quiet. Late duplicate or unrelated finals are
+    /// therefore included in the acceptance snapshot rather than hidden by an early session stop.
+    public func waitForRecognizedReconnectFinalStreamToSettle(
         _ phraseIDs: [String],
         inGeneration generation: Int,
+        quietPeriod: TimeInterval,
         timeout: TimeInterval
     ) async throws {
         let expected = Set(phraseIDs)
-        _ = try await wait(
-            timeout: timeout,
-            boundary: "all expected reconnect phrases"
-        ) { snapshot in
+        let deadline = Date().timeIntervalSince1970 + timeout
+        var observedFinalCount: Int?
+        var lastChangeAt: TimeInterval?
+        while Date().timeIntervalSince1970 < deadline {
+            try Task.checkCancellation()
+            let snapshot = try checkedSnapshot()
+            let now = Date().timeIntervalSince1970
+            let finalCount = snapshot.events.count {
+                $0.kind == .finalized && $0.generation == generation
+            }
+            if finalCount != observedFinalCount {
+                observedFinalCount = finalCount
+                lastChangeAt = now
+            }
             let recognized = Set(TranscriptionBenchmark.recognizedReconnectPhraseIDs(
                 phraseIDs,
                 in: snapshot.events,
                 generation: generation))
-            return recognized.isSuperset(of: expected) ? true : nil
-        } as Bool
+            if recognized.isSuperset(of: expected),
+               let lastChangeAt,
+               now - lastChangeAt >= quietPeriod {
+                return
+            }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        throw Failure.timedOut("a settled reconnect final stream containing all expected phrases")
     }
 
     private func wait<Value: Sendable>(

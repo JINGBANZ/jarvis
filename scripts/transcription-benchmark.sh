@@ -106,6 +106,11 @@ fi
 if show_failure_if_present; then
   exit 1
 fi
+if [[ ! -f "$RUN_DIR/benchmark-finished" ]]; then
+  echo "Benchmark exited without its successful-completion marker; inspect " \
+    "$RUN_DIR/jarvis-debug.log" >&2
+  exit 1
+fi
 if [[ ! -f "$RUN_DIR/summary.json" ]]; then
   echo "Benchmark exited without summary.json; inspect $RUN_DIR/jarvis-debug.log" >&2
   exit 1

@@ -22,6 +22,30 @@ struct TranscriptionBenchmarkEventRecorderTests {
         #expect(try await waiter.value == 2)
     }
 
+    @Test("reconnect settlement includes finals after both expected phrases")
+    func reconnectSettlementIncludesLateFinals() async throws {
+        let phraseIDs = ["english-technical", "mandarin-technical"]
+        let phrases = phraseIDs.map { id in
+            TranscriptionBenchmark.phrases.first { $0.id == id }!
+        }
+        let recorder = TranscriptionBenchmarkEventRecorder()
+        let waiter = Task {
+            try await recorder.waitForRecognizedReconnectFinalStreamToSettle(
+                phraseIDs,
+                inGeneration: 1,
+                quietPeriod: 0.12,
+                timeout: 1)
+            return recorder.snapshot().events.filter { $0.kind == .finalized }.count
+        }
+
+        recorder.record(event(text: phrases[0].text, observedAt: 1))
+        recorder.record(event(text: phrases[1].text, observedAt: 2))
+        try await Task.sleep(for: .milliseconds(60))
+        recorder.record(event(text: "Unrelated late final", observedAt: 3))
+
+        #expect(try await waiter.value == 3)
+    }
+
     @Test("snapshot returns all content-free benchmark observations")
     func snapshot() {
         let recorder = TranscriptionBenchmarkEventRecorder()
