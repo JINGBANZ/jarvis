@@ -138,14 +138,14 @@ session directory (never `/tmp`) and deleted —
 with its absence verified — before the capture returns. The one thing persisted *on this machine* is
 the **per-session log directory** — owner-only and bounded; see below.
 
-> **OpenAI application-state retention is disabled.** Session memory is client-managed
-> (`CoachHistory` — nothing at OpenAI is needed for continuity), and Responses requests set
-> `store:false`. They explicitly request encrypted reasoning content so the current tool loop can
-> replay it without relying on a retained response. This is **not Zero Data Retention**: under
-> OpenAI's default API data controls, abuse-monitoring logs may contain request/response content and
-> be retained for up to 30 days. Eligible accounts can separately arrange Modified Abuse Monitoring
-> or Zero Data Retention. See OpenAI's
-> [data-controls documentation](https://developers.openai.com/api/docs/guides/your-data#default-usage-policies-by-endpoint).
+> **Server-side retention for debuggability (current behavior).** Session memory is client-managed
+> (`CoachHistory` — nothing at OpenAI is needed for continuity), but requests are still sent
+> `store:true` (`OpenAIBrainClient.swift`) so each request/response remains inspectable in the OpenAI
+> dashboard logs while the harness is being tuned. This **does** retain the transcript and the
+> screenshots sent to the model server-side at OpenAI (≈30-day TTL), so the no-local-retention
+> guarantee above does **not** extend to OpenAI's servers. This remains a deliberate
+> *debuggability-over-retention* choice. A future `store:false` change must also preserve stateless
+> tool-loop reasoning continuity; it is not part of the public-launch hardening.
 
 **The per-session log directory is the one bounded form of disk persistence, hardened to stay
 owner-only.** It holds the **activity log** (the in-app `WKWebView` viewer's `jarvis-activity.jsonl` +

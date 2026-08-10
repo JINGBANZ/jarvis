@@ -1365,35 +1365,20 @@
   whose removal materially improves privacy.
 - **Detail:** [status.md → Next action](./status.md#next-action).
 
-### 2026-08-10 — Public repositories start without agent automation
+### 2026-08-10 — Public repositories keep hosted, owner-gated agent automation
 
-- **Chose:** Remove the four repository-agent workflows that delegated pull requests, reviews,
-  issues, and comments to the persistent `vps` runner. Keep only hosted CI and release automation,
-  pin every retained third-party Action to a full commit SHA, and let Dependabot maintain those pins.
-  Disable the legacy workflows in GitHub before opening this PR so the base-branch copies cannot run.
-- **Why:** Public issue, comment, and fork input must not reach a persistent machine or privileged
-  agent by default. Removing the caller definitions is a fail-closed source state, while hosted CI
-  and release jobs have narrow triggers and permissions that remain useful for contributors.
-- **Rejected:** (a) Leaving the workflows present but relying on repository visibility or runner
-  availability—they become dangerous through a settings change. (b) Migrating agent automation in
-  the same PR—a public-safe trust and approval design deserves a separate review.
-- **Detail:** `.github/workflows/ci.yml`, `.github/workflows/release.yml`,
-  `.github/dependabot.yml`, [SECURITY.md](../SECURITY.md).
-
-### 2026-08-10 — OpenAI Responses calls do not retain application state
-
-- **Chose:** Send OpenAI Responses requests with `store:false`. Continue managing conversation
-  history locally and request `reasoning.encrypted_content` explicitly so the current attempt can
-  replay the complete reasoning/function-call output across a screen-tool continuation without a
-  stored response.
-- **Why:** Owner-only brain traffic already provides the intended debugging record, so retaining
-  transcript and screenshot application state at the provider is unnecessary. Stateless reasoning
-  preserves the existing tool-loop contract without that retention dependency.
-- **Rejected:** (a) Keeping `store:true` for dashboard debugging—the public default should minimize
-  provider retention. (b) Dropping reasoning items on continuation—it can change tool-loop quality
-  and violates the provider's manual-context contract. (c) Describing `store:false` as Zero Data
-  Retention—default provider abuse-monitoring logs can still retain content.
-- **Supersedes in part:** 2026-07-07 — Session memory moved client-side, with compaction. Its
-  client-owned memory and compaction policy stand; the dashboard-retention choice does not.
-- **Detail:** [sandbox.md → Data Egress](./sandbox.md#data-egress),
-  `Sources/JarvisCore/Brain/Adapters/OpenAI/OpenAIBrainClient.swift`.
+- **Chose:** Remove the persistent repository-level `vps` runner, but retain the four development
+  agent workflows on GitHub-hosted runners. Limit automatic review to same-repository PR branches;
+  accept `@claude` only from the repository owner; run issue discovery only by manual dispatch; and
+  require the owner-applied `agent-ready` label plus the central reusable workflow's write-access
+  check before an issue worker receives write authority. Pin reusable workflow calls to a full commit
+  SHA. Keep the workflows disabled until this caller hardening lands on the default branch.
+- **Why:** Ephemeral hosted runners remove the persistent-machine exposure without discarding useful
+  development automation. Trigger gates separately prevent arbitrary public issues, comments, and
+  fork code from launching a credential-bearing or write-capable agent.
+- **Rejected:** (a) Deleting all agent workflows—safe but unnecessarily removes the development
+  loop. (b) Changing only `runs-on`—that protects the old VPS but leaves public-input credential and
+  prompt-injection risks. (c) Automatically implementing every newly opened issue—the explicit label
+  is a cheap human approval boundary.
+- **Detail:** `.github/workflows/claude-code-review.yml`, `.github/workflows/claude.yml`,
+  `.github/workflows/issue-opener.yml`, `.github/workflows/issue-worker.yml`.

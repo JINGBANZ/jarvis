@@ -339,10 +339,9 @@ rather than a per-turn screenshot.
   treats non-ASCII scripts conservatively; the exact retention and topic-retirement policy lives in
   [`JarvisPrompts.HistorySummary.system`](../Sources/JarvisCore/Prompts/JarvisPrompts+HistorySummary.swift).
   Compaction uses one Core-owned workload deadline across providers and fails soft: a slow or failed
-  summary leaves the full history intact for a later attempt. Responses requests set `store:false`;
-  encrypted reasoning content is returned explicitly and replayed only inside the current tool loop,
-  so screen continuations do not depend on retained application state. OpenAI's separate default
-  abuse-monitoring retention still applies; see [sandbox.md](./sandbox.md).
+  summary leaves the full history intact for a later attempt. Requests are sent `store:true`
+  so they stay inspectable in the OpenAI dashboard for debugging — the retention tradeoff is
+  documented in [sandbox.md](./sandbox.md).
 - **Transcription has its own provider, model, and language settings.** OpenAI remains the provider
   default and `gpt-4o-transcribe` remains its model default; `gpt-transcribe` and
   `gpt-live-transcribe` are opt-in comparison choices. All use the GA Realtime API, but keep their
@@ -620,9 +619,9 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
   is the owner-only, bounded per-session record: Activity (spoken tips, deliberate-silence outcomes,
   fixed failed-action and stop/degrade notices, transcribed lines, and the screenshots the model
   saw), the coaching-attempt provenance needed to attribute those finalized lines, and redacted wire
-  traffic. Raw mic audio and a separate live-transcript archive are never persisted. OpenAI Responses
-  requests set `store:false`, avoiding application-state retention for those calls; default provider
-  abuse-monitoring retention is a separate boundary (see [sandbox.md](./sandbox.md)).
+  traffic. Raw mic audio and a separate live-transcript archive are never persisted. Requests
+  are sent `store:true`, so what the model saw does remain inspectable (and retained) server-side at
+  OpenAI for debugging (see [sandbox.md](./sandbox.md)).
 - **Behavioral restraint (model-governed):** there is **no cooldown or rate cap** in code. Every
   substantive utterance — from either speaker; only clear non-semantic hesitation sounds are removed
   as pure cost — reaches the brain, and the brain decides whether it has anything worth

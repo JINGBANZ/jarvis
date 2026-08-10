@@ -1,0 +1,23 @@
+name: Claude Code Review
+
+# Review logic lives in the pinned reusable workflow at JINGBANZ/workflows. Automatic reviews are
+# limited to branches in this repository: fork PRs do not receive repository secrets and remain on
+# the normal human-review path unless the owner deliberately invokes @claude.
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review, reopened]
+
+jobs:
+  review:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]'
+    uses: JINGBANZ/workflows/.github/workflows/claude-code-review.yml@0576cdaa7c17a5125960b68918f7d1e9ab0e7619
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+      id-token: write
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+    with:
+      runs-on: ubuntu-latest
+      # model: claude-opus-4-7  # optional: override the driver model (default: claude-sonnet-4-6)

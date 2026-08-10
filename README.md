@@ -99,9 +99,7 @@ The history is pruned to the ten most recent sessions. Raw audio and the rolling
 are not archived, although finalized `heard:` lines are part of the activity record. The selected
 OpenAI transcription model receives audio when OpenAI is the provider; Apple Speech
 keeps raw audio on-device after its selected locale model is installed. Coaching text and any
-requested screenshot go to the selected brain provider. OpenAI Responses requests set
-`store:false`, so Jarvis does not request server-side application-state retention for those calls;
-provider abuse-monitoring and account-tier retention policies can still apply. See
+requested screenshot go to the selected brain provider. See
 [`wiki/sandbox.md`](./wiki/sandbox.md) for the complete local-persistence, egress, and retention model.
 
 ## Development
