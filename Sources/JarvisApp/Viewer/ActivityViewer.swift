@@ -20,6 +20,12 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
     /// Whether a coaching session is currently running (wired by AppDelegate). Evaluation and report
     /// opening are explicit user actions, but their presentation stays outside the ghost lifecycle.
     var isCoachingRunning: (@MainActor () -> Bool)?
+    /// Per-session persistence gate. A late observer call can temporarily make one historical
+    /// session unsafe to evaluate without disabling unrelated settled sessions.
+    var isSessionEvidenceAvailable: (@MainActor (URL) -> Bool)?
+    /// Directories whose audit handles remain live must survive Clear history because a delayed
+    /// producer can reopen a currently settled handle.
+    var protectedSessionDirectories: (@MainActor () -> Set<URL>)?
 
     private var webView: WKWebView?
     private var picker: NSPopUpButton?
@@ -204,6 +210,11 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         refreshEvaluateButtonState()
     }
 
+    /// Refresh a selected session after its worker settles or a late event makes it mutable again.
+    func auditStateDidChange() {
+        refreshEvaluateButtonState()
+    }
+
     /// Render the Core composition result for the current session. Past sessions intentionally show
     /// only Ended rather than reconstructing transient readiness history that was never persisted.
     func readinessDidChange(_ status: JarvisReadiness.Status) {
@@ -239,6 +250,13 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
             button.title = AgenticEvaluation.savedReport(in: session.url) == nil
                 ? "Evaluate" : "Open report"
             button.toolTip = "Stop Jarvis before evaluating or opening a report"
+            button.isEnabled = false
+            return
+        }
+        guard isSessionEvidenceAvailable?(session.url) != false else {
+            button.title = AgenticEvaluation.savedReport(in: session.url) == nil
+                ? "Evaluate" : "Open report"
+            button.toolTip = "This session's audit evidence is still settling"
             button.isEnabled = false
             return
         }
@@ -334,6 +352,10 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         }
         guard let idx = picker?.indexOfSelectedItem, sessions.indices.contains(idx) else { return }
         let session = sessions[idx]
+        guard isSessionEvidenceAvailable?(session.url) != false else {
+            jlog("Jarvis: suppressed evaluation while the selected session audit is unsettled.")
+            return
+        }
         if let report = AgenticEvaluation.savedReport(in: session.url) {
             openReport(report, for: session)
             return
@@ -387,6 +409,11 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
             jlog("Jarvis: suppressed Activity report presentation while coaching is running.")
             return
         }
+        guard isSessionEvidenceAvailable?(session.url) != false else {
+            jlog(
+                "Jarvis: suppressed report presentation while the selected session audit is unsettled.")
+            return
+        }
         do {
             let url = try EvalReportPage.write(markdown: report, in: session.url,
                                                title: "Session evaluation — \(session.label)")
@@ -416,12 +443,13 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         }
         let alert = NSAlert() // ghost-mode-allowed: guarded explicit Activity action
         alert.messageText = "Clear session history?"
-        alert.informativeText = "This permanently deletes all previous sessions (logs and screenshots). The current session is kept."
+        alert.informativeText = "This permanently deletes all previous sessions (logs and "
+            + "screenshots). The current session and any session still owned by audit work are kept."
         alert.alertStyle = .warning
         alert.addButton(withTitle: "Clear")
         alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return } // ghost-mode-allowed: guarded explicit Activity action
-        store.clearHistory()
+        store.clearHistory(preserving: protectedSessionDirectories?() ?? [])
         populatePicker()
         loadCurrent()   // the viewed session may be gone; fall back to the live one
     }

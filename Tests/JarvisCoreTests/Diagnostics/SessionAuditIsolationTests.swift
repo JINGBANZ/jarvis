@@ -14,6 +14,7 @@ import Testing
         let renderedTips: [[String]]
     }
 
+    /// `@unchecked Sendable`: `lock` protects every read and write of `storage`.
     private final class RequestCapture: @unchecked Sendable {
         private let lock = NSLock()
         private var storage: [Data] = []
@@ -27,6 +28,7 @@ import Testing
         }
     }
 
+    /// `@unchecked Sendable`: `lock` protects the sole mutable flag.
     private final class CompletionFlag: @unchecked Sendable {
         private let lock = NSLock()
         private var storage = false
@@ -41,6 +43,8 @@ import Testing
     }
 
     /// Holds the worker inside its first file operation while leaving mailbox admission available.
+    /// `@unchecked Sendable`: semaphores provide the test gate; `backing` is touched only by the
+    /// worker's serial queue.
     private final class BlockingWriter: SessionAuditWriting, @unchecked Sendable {
         let openEntered = DispatchSemaphore(value: 0)
         private let release = DispatchSemaphore(value: 0)
@@ -74,6 +78,8 @@ import Testing
     }
 
     /// Opens normally, then fails the first append. A correct session stops calling it afterward.
+    /// `@unchecked Sendable`: `lock` protects the append count and the backing writer is confined to
+    /// the worker's serial queue.
     private final class FailingAppendWriter: SessionAuditWriting, @unchecked Sendable {
         enum Failure: Error { case injected }
 
@@ -110,6 +116,8 @@ import Testing
     }
 
     /// Fails before either JSONL file exists, but still permits the close marker to be installed.
+    /// `@unchecked Sendable`: configuration is immutable, the semaphore is thread-safe, and the
+    /// backing writer is confined to the worker's serial queue.
     private final class FailingOpenWriter: SessionAuditWriting, @unchecked Sendable {
         enum Failure: Error { case injected }
 
@@ -139,6 +147,8 @@ import Testing
     }
 
     /// Parks the final health replacement after the worker has already snapshotted complete state.
+    /// `@unchecked Sendable`: `lock` protects the block state and captured data; semaphores gate the
+    /// test while the backing writer remains confined to the worker queue.
     private final class BlockingFinalHealthWriter: SessionAuditWriting, @unchecked Sendable {
         let finalHealthEntered = DispatchSemaphore(value: 0)
         private let release = DispatchSemaphore(value: 0)
@@ -190,6 +200,8 @@ import Testing
     }
 
     /// Parks the writer's second commit check, which occurs only after the atomic rename returned.
+    /// `@unchecked Sendable`: `lock` protects every mutable field; immutable failure flags and
+    /// semaphores are safe across tasks, and the backing writer runs only on the worker queue.
     private final class BlockingRenamedHealthWriter: SessionAuditWriting, @unchecked Sendable {
         enum Failure: Error { case injected }
 
@@ -249,6 +261,50 @@ import Testing
         }
 
         func releaseRenamedHealth() {
+            release.signal()
+        }
+    }
+
+    /// Parks the first marker invalidation after a session has already finalized complete.
+    /// `@unchecked Sendable`: `lock` protects the one-shot block flag; semaphores provide the test
+    /// gate, and the backing writer is confined to the worker's serial queue.
+    private final class BlockingInvalidationWriter: SessionAuditWriting, @unchecked Sendable {
+        let invalidationEntered = DispatchSemaphore(value: 0)
+        private let release = DispatchSemaphore(value: 0)
+        private let lock = NSLock()
+        private let backing = SessionAuditFileWriter()
+        private var hasBlocked = false
+
+        func openSession(at directory: URL, initialHealth: Data) throws {
+            try backing.openSession(at: directory, initialHealth: initialHealth)
+        }
+
+        func append(_ data: Data, filename: String, in directory: URL) throws {
+            try backing.append(data, filename: filename, in: directory)
+        }
+
+        func replaceHealth(
+            _ data: Data,
+            in directory: URL,
+            shouldCommit: @Sendable () -> Bool
+        ) throws -> Bool {
+            try backing.replaceHealth(data, in: directory, shouldCommit: shouldCommit)
+        }
+
+        func invalidateHealth(in directory: URL) throws {
+            let shouldBlock = lock.withLock {
+                guard !hasBlocked else { return false }
+                hasBlocked = true
+                return true
+            }
+            if shouldBlock {
+                invalidationEntered.signal()
+                release.wait()
+            }
+            try backing.invalidateHealth(in: directory)
+        }
+
+        func releaseInvalidation() {
             release.signal()
         }
     }
@@ -502,6 +558,39 @@ import Testing
         #expect(marker["state"] as? String == "complete")
     }
 
+    @Test func eventAfterCompleteMakesOnlyThatSessionUnavailableUntilMarkerIsInvalidated() async throws {
+        let directory = ActivityLogTests.tmp()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let writer = BlockingInvalidationWriter()
+        let worker = SessionAuditWorker(limits: .production, writer: writer)
+        let audit = FileSessionAudit(directory: directory, worker: worker)
+        await waitUntilIdle(worker)
+
+        #expect(await audit.close(deadline: .seconds(5)) == .complete)
+        #expect(audit.isPersistenceSettled)
+        #expect(try healthMarker(in: directory)["state"] as? String == "complete")
+
+        audit.record(
+            tag: "late-coach",
+            request: Data("{}".utf8),
+            response: nil,
+            status: nil,
+            latencyMs: 1)
+        await wait(for: writer.invalidationEntered)
+
+        #expect(!audit.isPersistenceSettled)
+        #expect(audit.healthSnapshot.lateEvent == 1)
+        // The old marker may remain on disk while invalidation is parked, so the in-memory gate is
+        // the protection that prevents the evaluator from accepting stale complete evidence.
+        #expect(try healthMarker(in: directory)["state"] as? String == "complete")
+
+        writer.releaseInvalidation()
+        await audit.waitForPersistenceToStop()
+        #expect(audit.isPersistenceSettled)
+        let healthURL = directory.appendingPathComponent(FileSessionAudit.healthFilename)
+        #expect(!FileManager.default.fileExists(atPath: healthURL.path))
+    }
+
     @Test func openFailureDisablesCaptureAndIsVisibleInHealthMarker() async throws {
         let directory = ActivityLogTests.tmp()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -532,6 +621,7 @@ import Testing
             limits: .production,
             writer: SessionAuditFileWriter())
         let audit = FileSessionAudit(directory: directory, worker: worker)
+        await waitUntilIdle(worker)
         audit.recordStarted(
             attemptID: 1,
             wake: .trigger,

@@ -10,6 +10,9 @@ import Synchronization
 /// The fixed-size ring and byte budget bound retained evidence even when disk access parks forever.
 /// Mailbox admission uses `NSLock.try()` and drops immediately on contention or pressure; the worker
 /// never holds that lock while parsing JSON or touching a file.
+///
+/// `@unchecked Sendable`: `mailboxLock` protects the ring and all queue counters. The writer and date
+/// formatter are used only by the private serial queue; immutable limits may be read from any caller.
 final class SessionAuditWorker: @unchecked Sendable {
     struct Limits: Sendable {
         let maxEventCount: Int
@@ -25,16 +28,27 @@ final class SessionAuditWorker: @unchecked Sendable {
         let approximateBytes: Int
     }
 
-    final class Session: @unchecked Sendable {
+    /// Compiler-checked `Sendable`: every mutable field is an atomic reference and both callbacks are
+    /// immutable `@Sendable` values supplied by the owning `FileSessionAudit`.
+    final class Session: Sendable {
         let id = UUID()
         let directory: URL
         let health = HealthCounters()
         private let sealed = AtomicCounter()
         private let opened = AtomicCounter()
         private let persistenceDisabled = AtomicCounter()
+        private let lateCorrectionState = AtomicCounter()
+        private let persistenceMutationBegan: @Sendable () -> Void
+        private let persistenceMutationFinished: @Sendable () -> Void
 
-        init(directory: URL) {
+        init(
+            directory: URL,
+            persistenceMutationBegan: @escaping @Sendable () -> Void,
+            persistenceMutationFinished: @escaping @Sendable () -> Void
+        ) {
             self.directory = directory
+            self.persistenceMutationBegan = persistenceMutationBegan
+            self.persistenceMutationFinished = persistenceMutationFinished
         }
 
         var isSealed: Bool { sealed.load() > 0 }
@@ -44,6 +58,23 @@ final class SessionAuditWorker: @unchecked Sendable {
         func seal() { sealed.mark() }
         func markOpened() { opened.mark() }
         func disablePersistence() { persistenceDisabled.mark() }
+
+        /// Reserve the session's sole post-seal correction. The initializing state prevents a
+        /// concurrent finalizer from finishing the mutation before its begin callback has run.
+        func beginLateCorrection() -> Bool {
+            guard lateCorrectionState.compareExchange(expected: 0, desired: -1) else {
+                return false
+            }
+            persistenceMutationBegan()
+            _ = lateCorrectionState.compareExchange(expected: -1, desired: 1)
+            return true
+        }
+
+        /// A durable partial marker or successful invalidation makes any late correction stable.
+        func finishLateCorrectionIfPending() {
+            guard lateCorrectionState.compareExchange(expected: 1, desired: 2) else { return }
+            persistenceMutationFinished()
+        }
     }
 
     struct HealthSnapshot: Sendable, Equatable {
@@ -66,7 +97,8 @@ final class SessionAuditWorker: @unchecked Sendable {
         }
     }
 
-    final class HealthCounters: @unchecked Sendable {
+    /// Compiler-checked `Sendable`: all counters are immutable atomic references.
+    final class HealthCounters: Sendable {
         private let queueOverflow = AtomicCounter()
         private let oversizeRecord = AtomicCounter()
         private let openFailure = AtomicCounter()
@@ -95,6 +127,8 @@ final class SessionAuditWorker: @unchecked Sendable {
         }
     }
 
+    /// `@unchecked Sendable`: every access to `storage` goes through an OS atomic primitive; callers
+    /// never receive the address or a non-atomic view of the value.
     private final class AtomicCounter: @unchecked Sendable {
         #if canImport(Darwin)
         private var storage: Int32 = 0
@@ -105,6 +139,10 @@ final class SessionAuditWorker: @unchecked Sendable {
 
         func mark() {
             _ = OSAtomicOr32Barrier(1, &storage)
+        }
+
+        func compareExchange(expected: Int32, desired: Int32) -> Bool {
+            OSAtomicCompareAndSwap32Barrier(expected, desired, &storage)
         }
 
         func load() -> Int {
@@ -119,6 +157,14 @@ final class SessionAuditWorker: @unchecked Sendable {
 
         func mark() {
             storage.store(1, ordering: .relaxed)
+        }
+
+        func compareExchange(expected: Int32, desired: Int32) -> Bool {
+            storage.compareExchange(
+                expected: expected,
+                desired: desired,
+                ordering: .acquiringAndReleasing
+            ).exchanged
         }
 
         func load() -> Int {
@@ -188,8 +234,15 @@ final class SessionAuditWorker: @unchecked Sendable {
         self.timestampFormatter = formatter
     }
 
-    func openSession(at directory: URL) -> Session {
-        let session = Session(directory: directory)
+    func openSession(
+        at directory: URL,
+        persistenceMutationBegan: @escaping @Sendable () -> Void = {},
+        persistenceMutationFinished: @escaping @Sendable () -> Void = {}
+    ) -> Session {
+        let session = Session(
+            directory: directory,
+            persistenceMutationBegan: persistenceMutationBegan,
+            persistenceMutationFinished: persistenceMutationFinished)
         let accepted = enqueue(
             Envelope(session: session, payload: .open, retainedBytes: 256),
             allowingSealedSession: false,
@@ -199,6 +252,10 @@ final class SessionAuditWorker: @unchecked Sendable {
     }
 
     func record(_ event: BrainTrafficAuditEvent, for session: Session) {
+        guard !session.isSealed else {
+            rejectLateEvent(for: session)
+            return
+        }
         guard !session.isPersistenceDisabled else { return }
         _ = enqueue(
             Envelope(
@@ -210,6 +267,10 @@ final class SessionAuditWorker: @unchecked Sendable {
     }
 
     func record(_ event: CoachingAttemptAuditEvent, for session: Session) {
+        guard !session.isSealed else {
+            rejectLateEvent(for: session)
+            return
+        }
         guard !session.isPersistenceDisabled else { return }
         _ = enqueue(
             Envelope(
@@ -258,12 +319,18 @@ final class SessionAuditWorker: @unchecked Sendable {
     ) -> Bool {
         if envelope.retainedBytes > limits.maxRetainedBytes {
             envelope.session.health.markOversizeRecord()
+            if !allowingSealedSession, envelope.session.isSealed {
+                rejectLateEvent(for: envelope.session)
+            }
             return false
         }
         switch admission {
         case .bestEffortRecord:
             guard mailboxLock.try() else {
                 envelope.session.health.markQueueOverflow()
+                if !allowingSealedSession, envelope.session.isSealed {
+                    rejectLateEvent(for: envelope.session)
+                }
                 return false
             }
         case .lifecycle:
@@ -272,7 +339,7 @@ final class SessionAuditWorker: @unchecked Sendable {
 
         if envelope.session.isSealed && !allowingSealedSession {
             mailboxLock.unlock()
-            envelope.session.health.markLateEvent()
+            rejectLateEvent(for: envelope.session)
             return false
         }
         guard retainedCount < limits.maxEventCount,
@@ -280,6 +347,9 @@ final class SessionAuditWorker: @unchecked Sendable {
         else {
             mailboxLock.unlock()
             envelope.session.health.markQueueOverflow()
+            if !allowingSealedSession, envelope.session.isSealed {
+                rejectLateEvent(for: envelope.session)
+            }
             return false
         }
 
@@ -296,6 +366,25 @@ final class SessionAuditWorker: @unchecked Sendable {
             queue.async { [self] in drain() }
         }
         return true
+    }
+
+    /// A post-seal observer call cannot be appended without violating close ordering. Make the
+    /// session unavailable synchronously, then use one serial worker operation to ensure an earlier
+    /// complete marker is no longer canonical. Repeated late calls only increment health evidence.
+    private func rejectLateEvent(for session: Session) {
+        let shouldCorrect = session.beginLateCorrection()
+        session.health.markLateEvent()
+        guard shouldCorrect else { return }
+        queue.async { [self] in
+            do {
+                try writer.invalidateHealth(in: session.directory)
+                session.finishLateCorrectionIfPending()
+            } catch {
+                session.health.markWriteFailure()
+                // Keep this session unavailable. A later successful partial finalization can still
+                // repair the marker and finish the pending mutation.
+            }
+        }
     }
 
     private func drain() {
@@ -441,11 +530,13 @@ final class SessionAuditWorker: @unchecked Sendable {
                 try healthData(state: "partial", closed: true, snapshot: snapshot),
                 in: session.directory) { true }
             guard committed else { throw HealthPersistenceError.rejectedReplacement }
+            session.finishLateCorrectionIfPending()
             completion(.partial)
         } catch {
             session.health.markWriteFailure()
             do {
                 try writer.invalidateHealth(in: session.directory)
+                session.finishLateCorrectionIfPending()
                 completion(.partial)
             } catch {
                 // Do not signal settlement while a rejected complete marker might still be canonical.

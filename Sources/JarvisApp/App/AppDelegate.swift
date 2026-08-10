@@ -83,6 +83,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// than only counting them, so Application Quit can include a just-stopped session in its bounded
     /// termination drain. The keyed set also keeps rapid Stop → Start → Stop sessions independent.
     private var stopDrainTasks: [UUID: Task<Void, Never>] = [:]
+    /// Only cancelled coaching work extends the global ghost lifecycle. Audit persistence is scoped
+    /// to its own session: Activity can use settled history while an unrelated marker is repaired.
+    private var pendingTurnDrainIDs: Set<UUID> = []
+    /// Weak lookup keeps a session discoverable while any producer or drain still owns its audit,
+    /// without retaining every session handle for the lifetime of the app.
+    private var sessionAuditsByPath: [String: WeakSessionAudit] = [:]
 
     /// How many past session log *directories* to keep on disk; older ones are pruned at each Start so
     /// the always-on activity log stays bounded across launches. This caps session count, not the size
@@ -116,7 +122,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // ghost lifecycle.
         activityViewer.isCoachingRunning = { [weak self] in
             guard let self else { return false }
-            return self.transcriber != nil || !self.stopDrainTasks.isEmpty
+            return self.transcriber != nil || !self.pendingTurnDrainIDs.isEmpty
+        }
+        activityViewer.isSessionEvidenceAvailable = { [weak self] directory in
+            self?.audit(for: directory)?.isPersistenceSettled ?? true
+        }
+        activityViewer.protectedSessionDirectories = { [weak self] in
+            self?.protectedAuditDirectories() ?? []
         }
         // The button launches the same sole agentic evaluator as scripts/eval-session.sh. Resolve the
         // checkout at click time and read the current provider preference then, so Settings changes
@@ -1019,9 +1031,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ActivityLog.shared.flush()
         if reason != .applicationQuit, audit != nil || !cancelled.isEmpty {
             let drainID = UUID()
+            if !cancelled.isEmpty { pendingTurnDrainIDs.insert(drainID) }
             let drainTask = Task { @MainActor [weak self] in
                 for task in cancelled { await task.value }
                 ActivityLog.shared.flush()
+                self?.pendingTurnDrainIDs.remove(drainID)
+                self?.activityViewer?.coachingStateDidChange()
                 _ = await audit?.close(deadline: FileSessionAudit.defaultCloseDeadline)
                 await audit?.waitForPersistenceToStop()
                 guard let self else { return }
@@ -1264,15 +1279,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ActivityLog.shared.enable(directory: dir)        // <dir>/jarvis-activity.jsonl, 0600, fresh
         // File creation and every later write run on the shared bounded audit worker. Start only
         // creates a lightweight session handle and never waits for an older session's disk access.
-        sessionAudit = FileSessionAudit(directory: dir)
+        let audit = FileSessionAudit(
+            directory: dir,
+            onPersistenceStateChange: { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.activityViewer?.auditStateDidChange()
+                }
+            })
+        sessionAudit = audit
+        sessionAuditsByPath[dir.standardizedFileURL.path] = WeakSessionAudit(audit)
         currentSessionDir = dir
         // Now that logging is always on, sessions accumulate every launch. Bound it: keep only the most
         // recent few (the just-created one is current, so it's always spared).
-        SessionStore(base: base, current: dir).pruneToMostRecent(Self.retainedSessions)
+        SessionStore(base: base, current: dir).pruneToMostRecent(
+            Self.retainedSessions,
+            preserving: protectedAuditDirectories())
         // Point the viewer's history browser at the new current session and show it live; clear-history
         // spares whichever session is current.
         activityViewer.sessionDidChange(base: base, current: dir)
         jlog("Jarvis: session \(dir.lastPathComponent) (\(dir.path)).")
+    }
+
+    private func audit(for directory: URL) -> FileSessionAudit? {
+        let path = directory.standardizedFileURL.path
+        guard let reference = sessionAuditsByPath[path] else { return nil }
+        guard let audit = reference.value else {
+            sessionAuditsByPath[path] = nil
+            return nil
+        }
+        return audit
+    }
+
+    /// Protect every directory whose audit handle is still alive, including a currently settled
+    /// handle that a delayed producer could make unsettled immediately after this snapshot.
+    private func protectedAuditDirectories() -> Set<URL> {
+        var stalePaths: [String] = []
+        var directories: Set<URL> = []
+        for (path, reference) in sessionAuditsByPath {
+            guard reference.value != nil else {
+                stalePaths.append(path)
+                continue
+            }
+            directories.insert(URL(fileURLWithPath: path, isDirectory: true))
+        }
+        for path in stalePaths { sessionAuditsByPath[path] = nil }
+        return directories
     }
 
     /// A unique id for a session (one per Start), used as its log subdirectory name. Sortable
@@ -1325,6 +1376,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 && FileManager.default.fileExists(
                     atPath: root.appendingPathComponent("Sources/JarvisCore").path)
         }?.standardizedFileURL
+    }
+}
+
+private final class WeakSessionAudit {
+    weak var value: FileSessionAudit?
+
+    init(_ value: FileSessionAudit) {
+        self.value = value
     }
 }
 

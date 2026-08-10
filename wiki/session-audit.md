@@ -56,9 +56,9 @@ the replacement, so work still unwinding from the old session cannot contaminate
 
 | Transition | Behavior |
 |---|---|
-| Regular Stop or runtime teardown | Cancel active turns, wait for their final audit admissions asynchronously, then close the old audit under its deadline. A replacement Start does not wait, while Evaluate remains disabled until the worker has established a trustworthy final state even when the close deadline reports partial. |
+| Regular Stop or runtime teardown | Cancel active turns, wait for their final audit admissions asynchronously, then close the old audit under its deadline. A replacement Start does not wait. Once coaching work ends, only that session's Evaluate/Open report actions remain unavailable until its worker establishes a trustworthy final state. |
 | Application Quit | Ask AppKit to defer termination, cancel active turns, and await a bounded drain without blocking the main actor. Include any audit still closing after an immediately preceding Stop, then close the current audit before replying that termination may continue; if work cannot drain, its open marker remains deliberately partial. |
-| Evaluate | Read a stopped session only after its regular close finishes; interpret the health marker before presenting deterministic totals. |
+| Evaluate | Read the selected stopped session only when its own persistence gate is settled; interpret the health marker before presenting deterministic totals. Other settled history remains usable while an unrelated session is unavailable. |
 
 Closing seals the session against later events, drains events already ahead of the close envelope,
 and durably replaces the health marker before reporting success. The filesystem edge prepares the
@@ -74,7 +74,13 @@ operation already in progress. A separate settlement signal fires only after the
 finished the final or corrective marker write, or has safely invalidated a rejected marker. If even
 invalidation fails, settlement remains pending and Evaluate stays unavailable rather than trusting
 ambiguous evidence. Regular Stop retains that settlement task until the session directory is safe
-to read.
+to read. Clear history and automatic pruning preserve every directory with a live audit handle,
+including a settled handle that a delayed producer could reopen, so a worker can never race deletion.
+
+A callback rejected after sealing increments `late_event` and immediately reopens that session's
+persistence gate. The worker schedules at most one serial correction to invalidate any already
+published complete marker. A successful partial close can satisfy the same correction; if neither a
+partial marker nor invalidation becomes durable, only that session stays unavailable.
 
 ## Failure Semantics
 
@@ -84,7 +90,8 @@ Audit persistence is deliberately weaker than coaching:
   delaying provider handling or overlay delivery.
 - An open, write, or serialization failure disables further persistence for that session instead of
   repeatedly exercising a broken edge.
-- A late event or close deadline miss makes evidence partial.
+- A late event or close deadline miss makes evidence partial. A post-seal event also invalidates an
+  earlier complete marker before the session becomes evaluable again.
 - A failed corrective health write removes the rejected marker; new-format records without that
   marker are partial. If the marker cannot be removed, the session remains unevaluable.
 - The health marker records the surviving failure facts when the filesystem is still usable, and
@@ -118,6 +125,6 @@ from prose, `stay_silent`, or Activity copy.
 
 Deterministic parked and failing writers exercise overload, blocked I/O, deadline crossing, open and
 write failure, serialization failure, both final-commit deadline crossings, failed correction
-invalidation, and behavioral equivalence in
+invalidation, post-close marker correction, protected-session retention, and behavioral equivalence in
 [`SessionAuditIsolationTests`](../Tests/JarvisCoreTests/Diagnostics/SessionAuditIsolationTests.swift).
 The repository gate remains `swift build && ./scripts/run-tests.sh`.

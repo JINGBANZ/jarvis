@@ -1391,6 +1391,8 @@
   isolation without scheduler-dependent thresholds.
 - **Supersedes:** 2026-08-09 — Session audit persistence stays off the coaching latency path.
 - **Extends:** 2026-08-08 — Session evaluation uses persisted coaching-attempt provenance.
+- **Superseded in part by:** 2026-08-11 — Audit availability is session-scoped and reopens for late
+  events. Per-session settlement stands; an unresolved drain no longer locks unrelated history.
 - **Detail:** [session-audit.md](./session-audit.md),
   `Sources/JarvisCore/Diagnostics/BrainTrafficAuditing.swift`,
   `Sources/JarvisCore/Diagnostics/CoachingAttemptAuditing.swift`,
@@ -1398,3 +1400,26 @@
   `Sources/JarvisCore/Diagnostics/SessionAuditWorker.swift`,
   `Sources/JarvisCore/Diagnostics/SessionAuditEvidence.swift`,
   `Sources/JarvisApp/App/AppDelegate.swift`.
+
+### 2026-08-11 — Audit availability is session-scoped and reopens for late events
+
+- **Chose:** Treat persistence settlement as a reversible, per-session gate. A record rejected after
+  sealing marks that session unavailable synchronously and schedules at most one serial correction
+  that removes any already-published complete marker. A durable partial close can satisfy the same
+  correction. Activity gates Evaluate/Open report by the selected session, while Clear history and
+  automatic pruning preserve every directory with a live audit handle; unrelated settled history
+  stays usable.
+- **Why:** Finalization and observer callbacks can race. Merely incrementing an in-memory late-event
+  counter after a complete marker is on disk lets the evaluator accept stale exact-looking evidence.
+  Conversely, treating any retained drain as globally active coaching lets one unrecoverable disk
+  failure disable every historical session forever.
+- **Rejected:** (a) Ignore post-close callbacks because they are rare—the complete marker would then
+  make missing evidence look exact. (b) Keep the global Activity lockout—it contains the ambiguity but
+  spreads one session's diagnostic failure to unrelated data. (c) Block the callback on marker I/O—it
+  would put diagnostics back on the coaching latency path.
+- **Extends:** 2026-08-10 — Session audit persistence is bounded and failure-contained.
+- **Detail:** [session-audit.md](./session-audit.md),
+  `Sources/JarvisCore/Diagnostics/FileSessionAudit.swift`,
+  `Sources/JarvisCore/Diagnostics/SessionAuditWorker.swift`,
+  `Sources/JarvisCore/Diagnostics/SessionStore.swift`,
+  `Sources/JarvisApp/Viewer/ActivityViewer.swift`.

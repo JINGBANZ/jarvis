@@ -133,6 +133,23 @@ import Foundation
         #expect(FileManager.default.fileExists(atPath: base.path))     // base spared
     }
 
+    @Test func deletionKeepsCallerProtectedAuditSession() throws {
+        let base = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: base) }
+        let protected = base.appendingPathComponent("2026-06-16_09-00-00_aaaa")
+        let deletable = base.appendingPathComponent("2026-06-16_10-00-00_bbbb")
+        let current = base.appendingPathComponent("2026-06-16_11-00-00_cccc")
+        for url in [protected, deletable, current] {
+            try makeSession(base, url.lastPathComponent, lines: ["{\"t\":\"1\",\"m\":\"x\"}"])
+        }
+
+        let store = SessionStore(base: base, current: current)
+        store.clearHistory(preserving: [protected])
+
+        #expect(FileManager.default.fileExists(atPath: protected.path))
+        #expect(!FileManager.default.fileExists(atPath: deletable.path))
+        #expect(FileManager.default.fileExists(atPath: current.path))
+    }
+
     @Test func pruneKeepsNewestNDeletesOlderAndSparesCurrent() throws {
         let base = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: base) }
         let exists = { (id: String) in
@@ -162,5 +179,23 @@ import Foundation
         let cur = base.appendingPathComponent("2026-06-16_10-00-00_aaaa")
         SessionStore(base: base, current: cur).pruneToMostRecent(0)
         #expect(FileManager.default.fileExists(atPath: cur.path))   // never deletes the session being written
+    }
+
+    @Test func pruneKeepsProtectedAuditOutsideNewestLimit() throws {
+        let base = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: base) }
+        let oldest = base.appendingPathComponent("2026-06-16_09-00-00_aaaa")
+        let newest = base.appendingPathComponent("2026-06-16_11-00-00_cccc")
+        try makeSession(base, oldest.lastPathComponent, lines: [])
+        try makeSession(base, "2026-06-16_10-00-00_bbbb", lines: [])
+        try makeSession(base, newest.lastPathComponent, lines: [])
+
+        SessionStore(base: base, current: newest).pruneToMostRecent(
+            1,
+            preserving: [oldest])
+
+        #expect(FileManager.default.fileExists(atPath: oldest.path))
+        #expect(FileManager.default.fileExists(atPath: newest.path))
+        #expect(!FileManager.default.fileExists(
+            atPath: base.appendingPathComponent("2026-06-16_10-00-00_bbbb").path))
     }
 }

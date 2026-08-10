@@ -93,8 +93,11 @@ process worker. Regular Stop closes old evidence asynchronously so the next Star
 application Quit defers AppKit termination while a bounded asynchronous drain keeps main-actor cleanup
 available before exit, including a session still closing after Stop. Overflow, persistence failure,
 late work, or a close deadline miss makes the versioned health evidence explicitly partial. Evaluate
-remains disabled until the worker has persisted a final or corrective marker, or safely invalidated a
-rejected marker; if no trustworthy state can be established, the session stays unavailable. Surviving
+for the selected session remains disabled until its worker has persisted a final or corrective marker,
+or safely invalidated a rejected marker. A callback rejected after close immediately reopens only that
+session's persistence gate and schedules one marker correction; if no trustworthy state can be
+established, that session stays unavailable while unrelated settled history remains usable and Clear
+history/pruning preserve directories still owned by audit work. Surviving
 partial totals render as lower bounds. CLI failures before actual transport dispatch
 remain separate from provider-call totals, and malformed JSONL likewise makes affected values
 explicitly partial rather than exact-looking. Historical sessions without provenance remain explicitly

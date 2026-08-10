@@ -1,8 +1,11 @@
 import Foundation
 
 /// File-backed session audit with bounded, nonblocking admission and deadline-bound lifecycle close.
+///
+/// `Sendable` is compiler-checked: the handle stores only immutable references. The worker owns all
+/// file mutation, `Session` owns only atomic state, and `PersistenceSettlement` locks its waiters.
 public final class FileSessionAudit: BrainTrafficAuditing, CoachingAttemptAuditing,
-    SessionAuditLifecycle, @unchecked Sendable {
+    SessionAuditLifecycle, Sendable {
     public static let brainTrafficFilename = "brain-traffic.jsonl"
     public static let coachingAttemptsFilename = "coaching-attempts.jsonl"
     public static let healthFilename = "audit-health.json"
@@ -15,28 +18,56 @@ public final class FileSessionAudit: BrainTrafficAuditing, CoachingAttemptAuditi
     }
 
     /// A close deadline bounds the caller's wait, not the serial worker's filesystem operation. Keep
-    /// a separate one-shot settlement so UI consumers can refuse mutable evidence until the worker's
+    /// a separate settlement gate so UI consumers can refuse mutable evidence until the worker's
     /// close envelope has actually finished, including a corrective partial-marker write.
+    /// `@unchecked Sendable`: `lock` protects the mutation count and continuation array; the state
+    /// callback is immutable and always invoked after releasing that lock.
     private final class PersistenceSettlement: @unchecked Sendable {
         private let lock = NSLock()
-        private var settled = false
+        private let onStateChange: (@Sendable (Bool) -> Void)?
+        /// The initial mutation is the close envelope. A rejected post-seal record temporarily adds
+        /// another mutation until the worker has made the canonical marker safely partial.
+        private var pendingMutations = 1
         private var waiters: [CheckedContinuation<Void, Never>] = []
 
-        func markSettled() {
-            let continuations = lock.withLock {
-                guard !settled else { return [CheckedContinuation<Void, Never>]() }
-                settled = true
+        init(onStateChange: (@Sendable (Bool) -> Void)?) {
+            self.onStateChange = onStateChange
+        }
+
+        var isSettled: Bool {
+            lock.withLock { pendingMutations == 0 }
+        }
+
+        func beginMutation() {
+            let becameUnsettled = lock.withLock {
+                let wasSettled = pendingMutations == 0
+                pendingMutations += 1
+                return wasSettled
+            }
+            if becameUnsettled { onStateChange?(false) }
+        }
+
+        func finishMutation() {
+            let result = lock.withLock {
+                guard pendingMutations > 0 else {
+                    return (false, [CheckedContinuation<Void, Never>]())
+                }
+                pendingMutations -= 1
+                guard pendingMutations == 0 else {
+                    return (false, [CheckedContinuation<Void, Never>]())
+                }
                 let continuations = waiters
                 waiters.removeAll()
-                return continuations
+                return (true, continuations)
             }
-            continuations.forEach { $0.resume() }
+            result.1.forEach { $0.resume() }
+            if result.0 { onStateChange?(true) }
         }
 
         func wait() async {
             await withCheckedContinuation { continuation in
                 let shouldResume = lock.withLock {
-                    if settled { return true }
+                    if pendingMutations == 0 { return true }
                     waiters.append(continuation)
                     return false
                 }
@@ -47,15 +78,30 @@ public final class FileSessionAudit: BrainTrafficAuditing, CoachingAttemptAuditi
 
     private let worker: SessionAuditWorker
     private let session: SessionAuditWorker.Session
-    private let persistenceSettlement = PersistenceSettlement()
+    private let persistenceSettlement: PersistenceSettlement
 
-    public convenience init(directory: URL) {
-        self.init(directory: directory, worker: .shared)
+    public convenience init(
+        directory: URL,
+        onPersistenceStateChange: (@Sendable (Bool) -> Void)? = nil
+    ) {
+        self.init(
+            directory: directory,
+            worker: .shared,
+            onPersistenceStateChange: onPersistenceStateChange)
     }
 
-    init(directory: URL, worker: SessionAuditWorker) {
+    init(
+        directory: URL,
+        worker: SessionAuditWorker,
+        onPersistenceStateChange: (@Sendable (Bool) -> Void)? = nil
+    ) {
+        let settlement = PersistenceSettlement(onStateChange: onPersistenceStateChange)
         self.worker = worker
-        self.session = worker.openSession(at: directory)
+        self.persistenceSettlement = settlement
+        self.session = worker.openSession(
+            at: directory,
+            persistenceMutationBegan: { settlement.beginMutation() },
+            persistenceMutationFinished: { settlement.finishMutation() })
     }
 
     public func record(_ event: BrainTrafficAuditEvent) {
@@ -78,7 +124,7 @@ public final class FileSessionAudit: BrainTrafficAuditing, CoachingAttemptAuditi
             session,
             deadline: closeDeadline
         ) { [persistenceSettlement] result in
-            persistenceSettlement.markSettled()
+            persistenceSettlement.finishMutation()
             streamPair.continuation.yield(result)
             streamPair.continuation.finish()
         }
@@ -114,6 +160,12 @@ public final class FileSessionAudit: BrainTrafficAuditing, CoachingAttemptAuditi
     /// while Activity keeps Evaluate disabled until the corrective marker is durable.
     public func waitForPersistenceToStop() async {
         await persistenceSettlement.wait()
+    }
+
+    /// Whether the session directory is currently safe for the evaluator to read. A late observer
+    /// call can make a previously settled session unavailable again until its marker is invalidated.
+    public var isPersistenceSettled: Bool {
+        persistenceSettlement.isSettled
     }
 
     var healthSnapshot: SessionAuditWorker.HealthSnapshot {
