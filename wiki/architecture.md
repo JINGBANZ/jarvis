@@ -585,10 +585,11 @@ The always-on legs are built to survive transient failure rather than die on it:
   uncertain protocol cleanup still invalidates the server. Memory **compaction** fails soft outside
   this route: a failed summary simply leaves the full history for the next attempt.
 - **The audit edge** is isolated, bounded, and completeness-aware. Regular Stop closes an old session
-  asynchronously after cancelled coaching work unwinds; application Quit performs a bounded
-  synchronous drain before the process can exit. Overload, persistence failure, late work, or a close
-  timeout degrades only the evidence and makes evaluator totals explicit lower bounds. The complete
-  observer, lifecycle, privacy, and evaluator contract lives in
+  asynchronously after cancelled coaching work unwinds; application Quit defers AppKit termination
+  while a bounded asynchronous drain keeps the main actor available and includes any preceding Stop
+  still closing. Overload, persistence failure, late work, or a close timeout degrades only the
+  evidence and makes evaluator totals explicit lower bounds. The complete observer, lifecycle,
+  privacy, and evaluator contract lives in
   [session-audit.md](./session-audit.md).
 
 ## 5. Safety Model

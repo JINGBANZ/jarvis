@@ -160,6 +160,48 @@ import Testing
         }
     }
 
+    /// Parks the writer's second commit check, which occurs only after the atomic rename returned.
+    private final class BlockingRenamedHealthWriter: SessionAuditWriting, @unchecked Sendable {
+        let completeMarkerRenamed = DispatchSemaphore(value: 0)
+        private let release = DispatchSemaphore(value: 0)
+        private let lock = NSLock()
+        private let backing = SessionAuditFileWriter()
+        private var checkCount = 0
+        private var hasBlocked = false
+
+        func openSession(at directory: URL, initialHealth: Data) throws {
+            try backing.openSession(at: directory, initialHealth: initialHealth)
+        }
+
+        func append(_ data: Data, filename: String, in directory: URL) throws {
+            try backing.append(data, filename: filename, in: directory)
+        }
+
+        func replaceHealth(
+            _ data: Data,
+            in directory: URL,
+            shouldCommit: @Sendable () -> Bool
+        ) throws -> Bool {
+            try backing.replaceHealth(data, in: directory) { [self] in
+                let shouldBlock = lock.withLock {
+                    checkCount += 1
+                    guard checkCount == 2, !hasBlocked else { return false }
+                    hasBlocked = true
+                    return true
+                }
+                if shouldBlock {
+                    completeMarkerRenamed.signal()
+                    release.wait()
+                }
+                return shouldCommit()
+            }
+        }
+
+        func releaseRenamedHealth() {
+            release.signal()
+        }
+    }
+
     @Test func coachingIsIdenticalWhenAuditIsEnabledDisabledOverloadedOrFailing() async throws {
         let enabledDirectory = ActivityLogTests.tmp()
         let overloadedDirectory = ActivityLogTests.tmp()
@@ -306,18 +348,22 @@ import Testing
         #expect((marker["close_timeout"] as? Int ?? 0) > 0)
     }
 
-    @Test func synchronousCloseWaitsForDurableCompleteMarker() throws {
+    @Test func finalHealthRenameCrossingDeadlineIsCorrectedToPartial() async throws {
         let directory = ActivityLogTests.tmp()
         defer { try? FileManager.default.removeItem(at: directory) }
-        let worker = SessionAuditWorker(
-            limits: .production,
-            writer: SessionAuditFileWriter())
+        let writer = BlockingRenamedHealthWriter()
+        let worker = SessionAuditWorker(limits: .production, writer: writer)
         let audit = FileSessionAudit(directory: directory, worker: worker)
+        await waitUntilIdle(worker)
 
-        #expect(audit.closeSynchronously(deadline: .seconds(5)) == .complete)
+        let close = Task { await audit.close(deadline: .milliseconds(20)) }
+        await wait(for: writer.completeMarkerRenamed)
+        #expect(await close.value == .partial)
+        writer.releaseRenamedHealth()
+        await waitUntilIdle(worker)
         let marker = try healthMarker(in: directory)
-        #expect(marker["state"] as? String == "complete")
-        #expect(marker["closed"] as? Bool == true)
+        #expect(marker["state"] as? String == "partial")
+        #expect((marker["close_timeout"] as? Int ?? 0) > 0)
     }
 
     @Test func openFailureDisablesCaptureAndIsVisibleInHealthMarker() async throws {

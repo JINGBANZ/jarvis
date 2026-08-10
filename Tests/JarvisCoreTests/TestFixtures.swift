@@ -36,4 +36,27 @@ extension FileSessionAudit {
     func closeForTesting() async -> SessionAuditCloseResult {
         await close(deadline: .seconds(5))
     }
+
+    /// Persistence tests sometimes submit events faster than the intentionally nonblocking mailbox
+    /// can admit them under a loaded parallel run. Retry only after the session's drop counter proves
+    /// the prior test event was not accepted; an accepted event is awaited by its durable line.
+    func recordForTesting(
+        file: URL,
+        expectedLineCount: Int,
+        _ record: () -> Void
+    ) async -> Bool {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(1))
+        while ContinuousClock.now < deadline {
+            let droppedBefore = healthSnapshot.queueOverflow
+            record()
+            while ContinuousClock.now < deadline {
+                let lineCount = (try? String(contentsOf: file, encoding: .utf8))?
+                    .split(separator: "\n").count ?? 0
+                if lineCount >= expectedLineCount { return true }
+                if healthSnapshot.queueOverflow > droppedBefore { break }
+                await Task.yield()
+            }
+        }
+        return false
+    }
 }

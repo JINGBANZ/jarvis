@@ -63,6 +63,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// prepared runtime can be installed on the main actor.
     private var pendingStartTask: Task<Void, Never>?
     private var pendingStartRevision: UInt = 0
+    /// Retained while AppKit has deferred termination so cancelled turns and the audit can drain
+    /// without blocking the main actor they may still need for final delivery bookkeeping.
+    private var terminationDrainTask: Task<Void, Never>?
     /// The global hint hotkey. Lives for the whole app run; its callback beeps when no session runs.
     private var hotkeys: HotkeyController?
     /// Fires an on-demand hint for the running session. Non-nil only while running — set in `start()`,
@@ -76,12 +79,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The current session's log directory (set by `beginNewSession`) — also where `CLIBrainClient`
     /// materializes screenshots for a CLI brain, keeping all screen-derived bytes in one owner-only place.
     private var currentSessionDir: URL?
-    /// Stops whose cancelled turns haven't finished unwinding yet. Cancellation only *requests* the
-    /// stop — an in-flight brain request unwinds asynchronously and records its final traffic line on
-    /// the way out — so a just-stopped session isn't evaluable until its drain completes, or a quick
-    /// Evaluate click would audit an incomplete `brain-traffic.jsonl`. A count (not a Bool) so a rapid
-    /// Stop → Start → Stop can't have the first drain's completion unmask the second's.
-    private var drainingStops = 0
+    /// Stops whose cancelled turns and audits have not finished draining. Retain the tasks, rather
+    /// than only counting them, so Application Quit can include a just-stopped session in its bounded
+    /// termination drain. The keyed set also keeps rapid Stop → Start → Stop sessions independent.
+    private var stopDrainTasks: [UUID: Task<Void, Never>] = [:]
 
     /// How many past session log *directories* to keep on disk; older ones are pruned at each Start so
     /// the always-on activity log stays bounded across launches. This caps session count, not the size
@@ -90,7 +91,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private static let retainedSessions = 10
     /// Application Quit may briefly wait for a cancelled turn to finish its final audit admission.
     /// If it cannot, the still-open health marker truthfully leaves that session partial.
-    private static let terminationTurnDrainTimeout: TimeInterval = 1
+    private static let terminationTurnDrainTimeout: Duration = .seconds(1)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory) // ghost-mode-allowed: launch configuration
@@ -115,7 +116,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // ghost lifecycle.
         activityViewer.isCoachingRunning = { [weak self] in
             guard let self else { return false }
-            return self.transcriber != nil || self.drainingStops > 0
+            return self.transcriber != nil || !self.stopDrainTasks.isEmpty
         }
         // The button launches the same sole agentic evaluator as scripts/eval-session.sh. Resolve the
         // checkout at click time and read the current provider preference then, so Settings changes
@@ -199,9 +200,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    func applicationWillTerminate(_ notification: Notification) {
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if terminationDrainTask != nil { return .terminateLater }
         activityViewer?.cancelEvaluation()
-        stop(reason: .applicationQuit)
+        let drain = stop(reason: .applicationQuit)
+        let pendingStops = Array(stopDrainTasks.values)
+        guard drain.audit != nil || !drain.cancelledTurns.isEmpty || !pendingStops.isEmpty else {
+            return .terminateNow
+        }
+
+        terminationDrainTask = Task { @MainActor [weak self] in
+            guard let self else {
+                sender.reply(toApplicationShouldTerminate: true)
+                return
+            }
+            await self.finishApplicationTermination(drain, pendingStops: pendingStops)
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        terminationDrainTask?.cancel()
+        terminationDrainTask = nil
+    }
+
+    private struct SessionAuditDrain: Sendable {
+        let audit: FileSessionAudit?
+        let cancelledTurns: [Task<Void, Never>]
     }
 
     /// The two clients that move together with one provider/model route target.
@@ -940,10 +966,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// transcribers must go: otherwise a turn-end trigger from a still-live socket could drive a
     /// coaching turn on a torn-down driver — the exact "speak after Stop" failure the turns box exists
     /// to prevent — and a subsequent Start would leak the orphaned IOProc/endpoints.
+    @discardableResult
     private func stop(
         reason: SessionEndReason,
         preserving readinessToPreserve: JarvisReadiness.Session? = nil
-    ) {
+    ) -> SessionAuditDrain {
         pendingStartRevision &+= 1
         pendingStartTask?.cancel()
         pendingStartTask = nil
@@ -988,47 +1015,66 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         // Activity remains its separate human-facing failure domain. Session audit sealing waits for
         // cancelled coaching tasks below. Normal Stop drains asynchronously so Start stays instant;
-        // application Quit uses a bounded synchronous barrier because the process is about to exit.
+        // application Quit returns its drain to AppKit's deferred-termination task.
         ActivityLog.shared.flush()
-        if reason == .applicationQuit {
-            if Self.waitForCancelledTurnsBeforeTermination(cancelled) {
-                ActivityLog.shared.flush()
-                if audit?.closeSynchronously(
-                    deadline: FileSessionAudit.defaultCloseDeadline
-                ) == .partial {
-                    jlog("Jarvis: application-quit session audit closed with partial evidence.")
-                }
-            } else {
-                jlog("Jarvis: application-quit turn drain timed out; session audit remains partial.")
-            }
-        } else if audit != nil || !cancelled.isEmpty {
-            drainingStops += 1
-            Task { @MainActor [weak self] in
+        if reason != .applicationQuit, audit != nil || !cancelled.isEmpty {
+            let drainID = UUID()
+            let drainTask = Task { @MainActor [weak self] in
                 for task in cancelled { await task.value }
                 ActivityLog.shared.flush()
                 _ = await audit?.close(deadline: FileSessionAudit.defaultCloseDeadline)
                 guard let self else { return }
-                self.drainingStops -= 1
+                self.stopDrainTasks[drainID] = nil
                 self.activityViewer?.coachingStateDidChange()
             }
+            stopDrainTasks[drainID] = drainTask
         }
         activityViewer?.coachingStateDidChange()
+        return SessionAuditDrain(audit: audit, cancelledTurns: cancelled)
     }
 
-    /// Bridge task completion into the synchronous AppKit termination callback. The wait is bounded;
-    /// on timeout the audit is deliberately left with its initial open marker instead of claiming
-    /// complete evidence while a cancelled turn may still be producing its final traffic record.
+    /// AppKit has returned `.terminateLater` before this runs, so awaiting here keeps the main actor
+    /// available to a cancelled turn's final deliveries. The independent timeout wins without making
+    /// termination wait forever on a provider that did not unwind.
     private static func waitForCancelledTurnsBeforeTermination(
         _ cancelled: [Task<Void, Never>]
-    ) -> Bool {
+    ) async -> Bool {
         guard !cancelled.isEmpty else { return true }
-        let completion = DispatchSemaphore(value: 0)
-        Task.detached(priority: .userInitiated) {
+        let result = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingOldest(1))
+        let completion = Task.detached(priority: .userInitiated) {
             for task in cancelled { await task.value }
-            completion.signal()
+            result.continuation.yield(true)
+            result.continuation.finish()
         }
-        return completion.wait(
-            timeout: .now() + terminationTurnDrainTimeout) == .success
+        let timeout = terminationTurnDrainTimeout
+        let timer = Task.detached {
+            try? await Task.sleep(for: timeout)
+            guard !Task.isCancelled else { return }
+            result.continuation.yield(false)
+            result.continuation.finish()
+        }
+        var iterator = result.stream.makeAsyncIterator()
+        let didDrain = await iterator.next() ?? false
+        completion.cancel()
+        timer.cancel()
+        return didDrain
+    }
+
+    private func finishApplicationTermination(
+        _ drain: SessionAuditDrain,
+        pendingStops: [Task<Void, Never>]
+    ) async {
+        let work = pendingStops + drain.cancelledTurns
+        guard await Self.waitForCancelledTurnsBeforeTermination(work) else {
+            jlog("Jarvis: application-quit turn drain timed out; session audit remains partial.")
+            return
+        }
+        ActivityLog.shared.flush()
+        if await drain.audit?.close(
+            deadline: FileSessionAudit.defaultCloseDeadline
+        ) == .partial {
+            jlog("Jarvis: application-quit session audit closed with partial evidence.")
+        }
     }
 
     /// Deduplicate endpoint failures: either side can fail first, but Activity should show one reason

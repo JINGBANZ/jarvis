@@ -14,19 +14,6 @@ public final class FileSessionAudit: BrainTrafficAuditing, CoachingAttemptAuditi
         case timedOut
     }
 
-    private final class SynchronousCloseResult: @unchecked Sendable {
-        private let lock = NSLock()
-        private var stored: SessionAuditCloseResult?
-
-        func store(_ result: SessionAuditCloseResult) {
-            lock.withLock { stored = result }
-        }
-
-        var value: SessionAuditCloseResult? {
-            lock.withLock { stored }
-        }
-    }
-
     private let worker: SessionAuditWorker
     private let session: SessionAuditWorker.Session
 
@@ -84,37 +71,6 @@ public final class FileSessionAudit: BrainTrafficAuditing, CoachingAttemptAuditi
                 return .partial
             }
         }
-    }
-
-    public func closeSynchronously(
-        deadline: Duration = FileSessionAudit.defaultCloseDeadline
-    ) -> SessionAuditCloseResult {
-        let deadline = max(.zero, deadline)
-        session.seal()
-        let completion = DispatchSemaphore(value: 0)
-        let result = SynchronousCloseResult()
-        let closeDeadline = ContinuousClock.now.advanced(by: deadline)
-        let accepted = worker.close(session, deadline: closeDeadline) { value in
-            result.store(value)
-            completion.signal()
-        }
-        guard accepted else {
-            session.health.markCloseTimeout()
-            return .partial
-        }
-
-        let components = deadline.components
-        let seconds = max(
-            0,
-            Double(components.seconds)
-                + Double(components.attoseconds) / 1_000_000_000_000_000_000)
-        guard completion.wait(timeout: .now() + seconds) == .success,
-              let result = result.value
-        else {
-            session.health.markCloseTimeout()
-            return .partial
-        }
-        return result
     }
 
     var healthSnapshot: SessionAuditWorker.HealthSnapshot {

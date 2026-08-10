@@ -11,19 +11,23 @@ import Testing
             TranscriptLine(speaker: .them, text: "Uh. Hmm.", at: 1),
             TranscriptLine(speaker: .them, text: "Explain the tradeoff", at: 2),
         ]
-        log.recordStarted(
-            attemptID: 3,
-            wake: .trigger,
-            reason: .silence(secondsQuiet: 45),
-            target: target,
-            transcriptStartIndex: 8,
-            transcriptLines: transcript,
-            classifications: transcript.map { TurnSubstance.classification(of: $0.text) },
-            brainFacingTranscriptIndices: [9])
-        log.recordFinished(attemptID: 3, terminal: .staySilent, outcome: .silentByModel)
+        let url = dir.appendingPathComponent(FileSessionAudit.coachingAttemptsFilename)
+        #expect(await log.recordForTesting(file: url, expectedLineCount: 1) {
+            log.recordStarted(
+                attemptID: 3,
+                wake: .trigger,
+                reason: .silence(secondsQuiet: 45),
+                target: target,
+                transcriptStartIndex: 8,
+                transcriptLines: transcript,
+                classifications: transcript.map { TurnSubstance.classification(of: $0.text) },
+                brainFacingTranscriptIndices: [9])
+        })
+        #expect(await log.recordForTesting(file: url, expectedLineCount: 2) {
+            log.recordFinished(attemptID: 3, terminal: .staySilent, outcome: .silentByModel)
+        })
         _ = await log.closeForTesting()
 
-        let url = dir.appendingPathComponent(FileSessionAudit.coachingAttemptsFilename)
         let permissions = try FileManager.default.attributesOfItem(
             atPath: url.path)[.posixPermissions] as? NSNumber
         #expect(permissions?.int16Value == 0o600)

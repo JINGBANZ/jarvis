@@ -1370,8 +1370,9 @@
 - **Chose:** Keep lifecycle ownership in the app. One Start creates one `FileSessionAudit`; regular
   Stop captures and clears it, requests turn cancellation, then closes the old handle asynchronously
   after those tasks unwind. Close has a short deadline, and a replacement Start never waits for an
-  older session's parked writer. Application Quit instead performs a bounded synchronous cancellation
-  drain and close before its termination callback returns; if cancelled work cannot drain, the
+  older session's parked writer. Application Quit instead asks AppKit to defer termination while a
+  bounded asynchronous cancellation drain and close continue without blocking the main actor. It
+  also joins any drain retained from an immediately preceding Stop; if work cannot drain, the
   still-open marker remains explicitly partial.
 - **Why:** Moving work to a per-session serial queue removed JSON and disk work from most callbacks but
   did not bound retained payloads, make admission structurally nonblocking, contain a failed writer, or

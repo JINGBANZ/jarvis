@@ -90,7 +90,8 @@ versus unavailable provider telemetry. The dedicated
 [session-audit component](./session-audit.md) gives the coach and brain clients only narrow optional
 observer ports, then contains parsing, redaction, serialization, and file I/O behind one bounded
 process worker. Regular Stop closes old evidence asynchronously so the next Start does not wait;
-application Quit performs a bounded synchronous drain before exit. Overflow, persistence failure,
+application Quit defers AppKit termination while a bounded asynchronous drain keeps main-actor cleanup
+available before exit, including a session still closing after Stop. Overflow, persistence failure,
 late work, or a close deadline miss makes the versioned health evidence explicitly partial, and the
 evaluator renders surviving totals as lower bounds. CLI failures before actual transport dispatch
 remain separate from provider-call totals, and malformed JSONL likewise makes affected values

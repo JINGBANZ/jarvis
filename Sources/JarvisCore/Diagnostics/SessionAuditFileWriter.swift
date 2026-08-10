@@ -50,7 +50,7 @@ struct SessionAuditFileWriter: SessionAuditWriting {
         guard rename(temporary.path, destination.path) == 0 else {
             throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
         }
-        return true
+        return shouldCommit()
     }
 
     private func createOwnerOnlyFile(_ url: URL) throws {

@@ -408,7 +408,9 @@ final class SessionAuditWorker: @unchecked Sendable {
                     ContinuousClock.now < deadline
                         && session.health.snapshot == completeSnapshot
                 }
-                if committed {
+                if committed,
+                   ContinuousClock.now < deadline,
+                   session.health.snapshot == completeSnapshot {
                     completion(.complete)
                     return
                 }
