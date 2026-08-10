@@ -438,15 +438,23 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
 
         let snapshot = ActivityLog.shared.attach { _ in }
-        #expect(snapshot.rows.count == 3)
-        #expect(snapshot.rows[0].contains("couldn't finish the response"))
-        #expect(snapshot.rows[0].contains("retrying"))
-        #expect(snapshot.rows[0].contains("listening continues"))
-        #expect(snapshot.rows[1].contains("couldn't finish the response"))
-        #expect(snapshot.rows[1].contains("retrying"))
-        #expect(snapshot.rows[1].contains("listening continues"))
-        #expect(snapshot.rows[2].contains("recovered coaching"))
-        #expect(!snapshot.rows.joined().contains("test"))
+        // Activity is process-global: another suite can emit while this test owns the enabled log.
+        // Anchor on our unique recovery, then inspect the two relevant failures before it instead of
+        // assuming the global snapshot has only our rows.
+        let recoveryIndex = try #require(
+            snapshot.rows.firstIndex { $0.contains("recovered coaching") })
+        let failureRows = snapshot.rows[..<recoveryIndex].filter {
+            $0.contains("couldn't finish the response")
+        }
+        #expect(failureRows.count >= 2)
+        let relevantFailures = failureRows.suffix(2)
+        for row in relevantFailures {
+            #expect(row.contains("retrying"))
+            #expect(row.contains("listening continues"))
+        }
+        let recovery = snapshot.rows[recoveryIndex]
+        #expect(recovery.contains("recovered coaching"))
+        #expect(!(relevantFailures + [recovery]).joined().contains("test"))
     }
 
     /// Stop cancelling a turn while the screenshot is being captured must cancel the capture edge,
