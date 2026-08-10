@@ -27,6 +27,8 @@ extension TranscriptionBenchmarkRunner {
                     appleLocale = try await prepareAppleLocale(
                         arm.localeIdentifier ?? "")
                 } catch {
+                    try Task.checkCancellation()
+                    guard !isAbortRequested else { throw Failure.benchmarkAborted }
                     summaries.append(.init(
                         arm: arm,
                         repetitions: [],
@@ -126,10 +128,16 @@ extension TranscriptionBenchmarkRunner {
             throw Failure.appleSpeechUnavailable(detail)
         }
         do {
-            let locale = try await AppleSpeechModelPreparation.prepare(
-                localeIdentifier: identifier)
+            let locale = try await TranscriptionBenchmarkAbortMonitor.run(
+                marker: abortMarker
+            ) {
+                try await AppleSpeechModelPreparation.prepare(
+                    localeIdentifier: identifier)
+            }
             preparedAppleLocales[identifier] = locale
             return locale
+        } catch TranscriptionBenchmarkAbortMonitor.Failure.aborted {
+            throw Failure.benchmarkAborted
         } catch {
             let detail = String(describing: error)
             appleLocaleFailures[identifier] = detail

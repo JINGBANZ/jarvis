@@ -114,13 +114,10 @@ public extension TranscriptionBenchmark {
             reconnectFinals(in: events, generation: $0)
         } ?? []
         let finalTexts = finals.compactMap(\.text)
-        let finalPhraseIDs = replacementGeneration.map {
-            recognizedReconnectPhraseIDs(
-                phraseIDs,
-                in: events,
-                generation: $0)
-        } ?? []
-        let exactlyOnce = finals.count == phraseIDs.count
+        let recognition = reconnectPhraseRecognition(phraseIDs, in: finals)
+        let finalPhraseIDs = recognition.phraseIDs
+        let exactlyOnce = recognition.consumesEveryFinal
+            && duplicateDeliveryCount(in: finals) == 0
             && phraseIDs.allSatisfy { expected in
             finalPhraseIDs.count(where: { $0 == expected }) == 1
         } && finalPhraseIDs.count == phraseIDs.count
@@ -227,7 +224,15 @@ public extension TranscriptionBenchmark {
         let expectedPhrases = phraseIDs.compactMap { id in
             phrases.first { $0.id == id }
         }
-        return reconnectFinals(in: events, generation: generation).compactMap { event in
+        let finals = reconnectFinals(in: events, generation: generation)
+        if let partition = bestReconnectPartition(
+            finals,
+            groupCount: phraseIDs.count,
+            expectedPhrases: expectedPhrases)
+        {
+            return partition.phraseIDs
+        }
+        return finals.compactMap { event in
             guard let text = event.text else { return nil }
             return recognizedPhraseID(for: text, among: expectedPhrases)
         }
@@ -242,6 +247,13 @@ public extension TranscriptionBenchmark {
         for transcript: String,
         among phrases: [Phrase]
     ) -> String? {
+        recognizedPhraseMatch(for: transcript, among: phrases)?.phraseID
+    }
+
+    private static func recognizedPhraseMatch(
+        for transcript: String,
+        among phrases: [Phrase]
+    ) -> ReconnectPhraseMatch? {
         let actual = normalize(transcript)
         guard !actual.isEmpty else { return nil }
         let matches = phrases.map { phrase -> (phrase: Phrase, errorRate: Double) in
@@ -252,20 +264,147 @@ public extension TranscriptionBenchmark {
         }
         guard let closest = matches.min(by: { $0.errorRate < $1.errorRate }),
               closest.errorRate <= reconnectMaximumCharacterErrorRate else { return nil }
-        return closest.phrase.id
+        return ReconnectPhraseMatch(
+            phraseID: closest.phrase.id,
+            errorRate: closest.errorRate)
+    }
+
+    private static func reconnectPhraseRecognition(
+        _ phraseIDs: [String],
+        in finals: [TranscriptionDiagnosticEvent]
+    ) -> ReconnectPhraseRecognition {
+        let expectedPhrases = phraseIDs.compactMap { id in
+            phrases.first { $0.id == id }
+        }
+        if let partition = bestReconnectPartition(
+            finals,
+            groupCount: phraseIDs.count,
+            expectedPhrases: expectedPhrases)
+        {
+            return ReconnectPhraseRecognition(
+                phraseIDs: partition.phraseIDs,
+                consumesEveryFinal: true)
+        }
+        let independentlyRecognized: [String] = finals.compactMap { event in
+            guard let text = event.text else { return nil }
+            return recognizedPhraseID(for: text, among: expectedPhrases)
+        }
+        return ReconnectPhraseRecognition(
+            phraseIDs: independentlyRecognized,
+            consumesEveryFinal: false)
+    }
+
+    /// Finds the lowest-error partition that reconstructs the expected number of phrases from all
+    /// replacement-generation finals. A multi-event group must improve on every fragment alone;
+    /// this lets legitimate segmentation join while preventing an exact phrase from absorbing an
+    /// unrelated extra final merely because the combined text remains under the recognition limit.
+    private static func bestReconnectPartition(
+        _ finals: [TranscriptionDiagnosticEvent],
+        groupCount: Int,
+        expectedPhrases: [Phrase]
+    ) -> ReconnectPartition? {
+        guard groupCount > 0,
+              expectedPhrases.count == groupCount,
+              finals.count >= groupCount else { return nil }
+        var best: ReconnectPartition?
+
+        func search(
+            finalIndex: Int,
+            groupIndex: Int,
+            phraseIDs: [String],
+            totalErrorRate: Double
+        ) {
+            if groupIndex == groupCount {
+                guard finalIndex == finals.count else { return }
+                let candidate = ReconnectPartition(
+                    phraseIDs: phraseIDs,
+                    totalErrorRate: totalErrorRate)
+                if best.map({ candidate.totalErrorRate < $0.totalErrorRate }) ?? true {
+                    best = candidate
+                }
+                return
+            }
+
+            let remainingGroups = groupCount - groupIndex
+            let maximumEnd = finals.count - (remainingGroups - 1)
+            guard finalIndex < maximumEnd else { return }
+            for end in (finalIndex + 1)...maximumEnd {
+                let group = finals[finalIndex..<end]
+                let text = group.compactMap(\.text).joined(separator: " ")
+                guard let match = recognizedPhraseMatch(
+                    for: text,
+                    among: expectedPhrases)
+                else { continue }
+                if group.count > 1,
+                   !groupImprovesRecognition(
+                       group,
+                       combinedMatch: match,
+                       expectedPhrases: expectedPhrases)
+                {
+                    continue
+                }
+                search(
+                    finalIndex: end,
+                    groupIndex: groupIndex + 1,
+                    phraseIDs: phraseIDs + [match.phraseID],
+                    totalErrorRate: totalErrorRate + match.errorRate)
+            }
+        }
+
+        search(finalIndex: 0, groupIndex: 0, phraseIDs: [], totalErrorRate: 0)
+        return best
+    }
+
+    private static func groupImprovesRecognition(
+        _ group: ArraySlice<TranscriptionDiagnosticEvent>,
+        combinedMatch: ReconnectPhraseMatch,
+        expectedPhrases: [Phrase]
+    ) -> Bool {
+        guard let phrase = expectedPhrases.first(where: {
+            $0.id == combinedMatch.phraseID
+        }) else { return false }
+        let expected = normalize(phrase.text)
+        let denominator = max(1, expected.count)
+        return group.allSatisfy { event in
+            guard let text = event.text else { return false }
+            let fragmentErrorRate = Double(editDistance(expected, normalize(text)))
+                / Double(denominator)
+            return combinedMatch.errorRate < fragmentErrorRate
+        }
     }
 
     private static func reconnectFinals(
         in events: [TranscriptionDiagnosticEvent],
         generation: Int
     ) -> [TranscriptionDiagnosticEvent] {
-        events.filter { event in
+        events.enumerated().filter { _, event in
             event.kind == .finalized
                 && event.text?.isEmpty == false
                 && event.generation == generation
         }.sorted {
-            ($0.spokenAt ?? $0.observedAt) < ($1.spokenAt ?? $1.observedAt)
-        }
+            let lhsTime = $0.element.spokenAt ?? $0.element.observedAt
+            let rhsTime = $1.element.spokenAt ?? $1.element.observedAt
+            if lhsTime != rhsTime { return lhsTime < rhsTime }
+            if $0.element.observedAt != $1.element.observedAt {
+                return $0.element.observedAt < $1.element.observedAt
+            }
+            return $0.offset < $1.offset
+        }.map(\.element)
+    }
+
+    private struct ReconnectPhraseMatch {
+        let phraseID: String
+        let errorRate: Double
+    }
+
+    private struct ReconnectPhraseRecognition {
+        let phraseIDs: [String]
+        let consumesEveryFinal: Bool
+    }
+
+    private struct ReconnectPartition {
+        let phraseIDs: [String]
+        let totalErrorRate: Double
     }
 
     private static func duplicateDeliveryCount(

@@ -301,6 +301,73 @@ struct TranscriptionBenchmarkTests {
         #expect(result.finalPhraseIDs == expected)
     }
 
+    @Test("reconnect evaluation reconstructs phrases split across finalized items")
+    func reconnectAcceptanceWithSegmentedFinals() {
+        let model = OpenAITranscriptionModel.gptLiveTranscribe
+        let expected = ["english-technical", "mandarin-technical"]
+        let events = [
+            event(.ready, observedAt: 1, model: model.rawValue, generation: 1),
+            event(
+                .ready,
+                observedAt: 2,
+                model: model.rawValue,
+                generation: 2,
+                replayedChunks: 40),
+            event(
+                .finalized,
+                observedAt: 3,
+                model: model.rawValue,
+                itemID: "english-one",
+                text: "The actor preserves ordered audio",
+                spokenAt: 3,
+                generation: 2),
+            event(
+                .finalized,
+                observedAt: 4,
+                model: model.rawValue,
+                itemID: "english-two",
+                text: "while the socket reconnects.",
+                spokenAt: 3.1,
+                generation: 2),
+            event(
+                .finalized,
+                observedAt: 5,
+                model: model.rawValue,
+                itemID: "mandarin-one",
+                text: "系统在网络恢复后",
+                spokenAt: 4,
+                generation: 2),
+            event(
+                .finalized,
+                observedAt: 6,
+                model: model.rawValue,
+                itemID: "mandarin-two",
+                text: "按顺序提交音频。",
+                spokenAt: 4.1,
+                generation: 2),
+        ]
+
+        let result = TranscriptionBenchmark.evaluateReconnect(
+            model: model,
+            phraseIDs: expected,
+            events: events,
+            captureObservations: [
+                .init(sequenceNumber: 20, sampleCount: 2_400),
+                .init(sequenceNumber: 21, sampleCount: 2_400),
+            ])
+
+        #expect(result.passed)
+        #expect(result.exactlyOnce)
+        #expect(result.ordered)
+        #expect(result.finalTexts.count == 4)
+        #expect(result.finalPhraseIDs == expected)
+        #expect(TranscriptionBenchmark.recognizedReconnectPhraseIDs(
+            expected,
+            in: events,
+            generation: 2
+        ) == expected)
+    }
+
     @Test("reconnect recognition waits past duplicate and unavailable finals for every phrase")
     func reconnectPhraseRecognition() {
         let model = OpenAITranscriptionModel.gpt4oTranscribe

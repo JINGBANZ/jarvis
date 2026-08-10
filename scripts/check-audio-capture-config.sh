@@ -22,6 +22,8 @@ if [ ! -f "$benchmark_standard_source" ] || [ ! -f "$benchmark_reconnect_source"
 fi
 if ! /usr/bin/grep -Fq 'TranscriptionBenchmarkEventRecorder(abortMarker: abortMarker)' \
     "$benchmark_standard_source" \
+    || ! /usr/bin/grep -Fq 'TranscriptionBenchmarkAbortMonitor.run' \
+    "$benchmark_standard_source" \
     || ! /usr/bin/grep -Fq 'trap abort_run INT TERM' "$benchmark_script"; then
     echo "Every transcription benchmark mode must stop capture when its command is interrupted." >&2
     exit 1
