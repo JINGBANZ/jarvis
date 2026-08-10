@@ -14,14 +14,7 @@ public enum TurnSubstance {
     /// Audit-visible classification of the same conservative gate used at runtime. Keeping the
     /// reason alongside the Boolean decision lets session evaluation distinguish one known filler
     /// sound from a punctuation-separated filler sequence without re-implementing this policy.
-    enum Classification: String, Sendable {
-        case substantive
-        case knownFiller = "known_filler"
-        case compositeFiller = "composite_filler"
-        case empty
-
-        var isSubstantive: Bool { self == .substantive }
-    }
+    typealias Classification = CoachingAttemptAuditEvent.Classification
 
     /// Human-readable non-semantic vocal sounds, kept in natural spelling. Each is run through
     /// `normalized` when the set is built so it matches normalized input. Keep semantic

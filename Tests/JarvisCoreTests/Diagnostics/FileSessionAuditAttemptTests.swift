@@ -2,10 +2,10 @@ import Foundation
 import Testing
 @testable import JarvisCore
 
-@Suite struct CoachingAttemptLogTests {
-    @Test func recordsOwnerOnlyAttemptStartAndTerminalEvents() throws {
+@Suite struct FileSessionAuditAttemptTests {
+    @Test func recordsOwnerOnlyAttemptStartAndTerminalEvents() async throws {
         let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
-        let log = CoachingAttemptLog(); log.enable(directory: dir)
+        let log = await FileSessionAudit.readyForTesting(directory: dir)
         let target = BrainTarget(provider: .codexCLI, modelID: "gpt-5.6-codex")
         let transcript = [
             TranscriptLine(speaker: .them, text: "Uh. Hmm.", at: 1),
@@ -21,9 +21,9 @@ import Testing
             classifications: transcript.map { TurnSubstance.classification(of: $0.text) },
             brainFacingTranscriptIndices: [9])
         log.recordFinished(attemptID: 3, terminal: .staySilent, outcome: .silentByModel)
-        log.flush()
+        _ = await log.closeForTesting()
 
-        let url = dir.appendingPathComponent(CoachingAttemptLog.filename)
+        let url = dir.appendingPathComponent(FileSessionAudit.coachingAttemptsFilename)
         let permissions = try FileManager.default.attributesOfItem(
             atPath: url.path)[.posixPermissions] as? NSNumber
         #expect(permissions?.int16Value == 0o600)
@@ -46,9 +46,9 @@ import Testing
         #expect(events[1]["outcome"] as? String == "silent_by_model")
     }
 
-    @Test func recordsActualRequestInclusionIndependentlyFromClassification() throws {
+    @Test func recordsActualRequestInclusionIndependentlyFromClassification() async throws {
         let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
-        let log = CoachingAttemptLog(); log.enable(directory: dir)
+        let log = await FileSessionAudit.readyForTesting(directory: dir)
         let line = TranscriptLine(speaker: .them, text: "Uh. Hmm.", at: 1)
         log.recordStarted(
             attemptID: 1,
@@ -61,10 +61,10 @@ import Testing
             // Simulate a gate regression: diagnostics must retain the actual inclusion fact rather
             // than recomputing it from the classification under audit.
             brainFacingTranscriptIndices: [4])
-        log.flush()
+        _ = await log.closeForTesting()
 
         let data = try Data(
-            contentsOf: dir.appendingPathComponent(CoachingAttemptLog.filename))
+            contentsOf: dir.appendingPathComponent(FileSessionAudit.coachingAttemptsFilename))
         let event = try #require(
             JSONSerialization.jsonObject(with: data) as? [String: Any])
         let recorded = try #require((event["transcript"] as? [[String: Any]])?.first)

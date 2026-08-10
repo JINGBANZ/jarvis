@@ -1342,8 +1342,50 @@
   (c) Dropping damaged or pre-request records—they would turn missing evidence into exact-looking call
   and telemetry totals.
 - **Extends:** 2026-08-08 — Session evaluation uses persisted coaching-attempt provenance.
+- **Superseded by:** 2026-08-10 — Session audit persistence is bounded and failure-contained. The
+  off-latency-path goal and evaluator classifications stand; per-session queues, complete Stop-time
+  draining, and exact-by-default new-format evidence do not.
 - **Detail:** [architecture.md → Latency](./architecture.md#latency),
   `Sources/JarvisCore/Diagnostics/BrainTrafficLog.swift`,
   `Sources/JarvisCore/Diagnostics/CoachingAttemptLog.swift`,
   `Sources/JarvisCore/Diagnostics/JSONLRecords.swift`,
+  `Sources/JarvisApp/App/AppDelegate.swift`.
+
+### 2026-08-10 — Session audit persistence is bounded and failure-contained
+
+- **Chose:** Give `CoachDriver` and brain clients only the narrow `CoachingAttemptAuditing` and
+  `BrainTrafficAuditing` observer ports. They submit typed `Sendable` events, with attempt attribution
+  carried through a neutral task local. `FileSessionAudit` admits provider/coach events through a
+  nonblocking try-lock into one process-level ring bounded by event count and retained bytes;
+  `DisabledSessionAudit` is the behaviorally neutral no-persistence implementation. Only the worker
+  parses request/response JSON, redacts images, serializes records, and performs file I/O.
+- **Chose:** Treat persisted audit evidence as best-effort and self-describing. Overload and oversize
+  records are dropped; open, write, or serialization failure disables further persistence for that
+  session. A versioned `audit-health.json` records completeness and queue-overflow, oversize, open,
+  write, close-timeout, late-event, and serialization-failure counts when possible. The evaluator
+  renders surviving new-format counts as lower bounds or unavailable when health is partial, while
+  retaining the historical interpretation for legacy sessions without a marker.
+- **Chose:** Keep lifecycle ownership in the app. One Start creates one `FileSessionAudit`; Stop
+  captures and clears it, requests turn cancellation, then closes the old handle asynchronously after
+  those tasks unwind. Close has a short deadline, and a replacement Start never waits for an older
+  session's parked writer.
+- **Why:** Moving work to a per-session serial queue removed JSON and disk work from most callbacks but
+  did not bound retained payloads, make admission structurally nonblocking, contain a failed writer, or
+  let Stop distinguish complete evidence from a timeout. Coaching latency and restart availability
+  must not depend on audit persistence, while an evaluator must not present dropped evidence as an
+  exact total.
+- **Rejected:** (a) Synchronous or backpressured audit durability—diagnostics cannot delay provider
+  response handling or overlay delivery. (b) One unbounded queue per session—it moves rather than
+  bounds the failure. (c) Retrying or blocking when the mailbox is full—this couples coaching to a
+  diagnostic outage. (d) Silently omitting damaged evidence—the health marker makes uncertainty part
+  of the audit contract. (e) Wall-clock latency assertions—deterministic parked/failing writers prove
+  isolation without scheduler-dependent thresholds.
+- **Supersedes:** 2026-08-09 — Session audit persistence stays off the coaching latency path.
+- **Extends:** 2026-08-08 — Session evaluation uses persisted coaching-attempt provenance.
+- **Detail:** [architecture.md → Latency](./architecture.md#latency),
+  `Sources/JarvisCore/Diagnostics/BrainTrafficAuditing.swift`,
+  `Sources/JarvisCore/Diagnostics/CoachingAttemptAuditing.swift`,
+  `Sources/JarvisCore/Diagnostics/FileSessionAudit.swift`,
+  `Sources/JarvisCore/Diagnostics/SessionAuditWorker.swift`,
+  `Sources/JarvisCore/Diagnostics/SessionAuditEvidence.swift`,
   `Sources/JarvisApp/App/AppDelegate.swift`.

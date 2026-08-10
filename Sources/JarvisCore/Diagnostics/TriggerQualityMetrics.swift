@@ -12,7 +12,8 @@ enum TriggerQualityMetrics {
     static func render(
         trafficJSONL: String,
         attemptsJSONL: String?,
-        activityJSONL: String?
+        activityJSONL: String?,
+        auditEvidence: SessionAuditEvidence = .legacy
     ) -> String {
         let trafficRecords = JSONLRecords.parse(trafficJSONL)
         let trafficMalformed = trafficRecords.malformedCount
@@ -92,9 +93,9 @@ enum TriggerQualityMetrics {
                 case "finished":
                     finishedAttemptIDs.insert(attemptID)
                     switch event["terminal"] as? String {
-                    case CoachingAttemptLog.TerminalAction.skippedFiller.rawValue:
+                    case CoachingAttemptAuditEvent.TerminalAction.skippedFiller.rawValue:
                         skippedFillerTurns += 1
-                    case CoachingAttemptLog.TerminalAction.staySilent.rawValue:
+                    case CoachingAttemptAuditEvent.TerminalAction.staySilent.rawValue:
                         attemptStaySilent += 1
                     default:
                         break
@@ -130,6 +131,7 @@ enum TriggerQualityMetrics {
 
         var lines: [String] = [
             "=== transcription and trigger quality (computed; do NOT infer causality from prose) ===",
+            auditEvidence.summary,
         ]
         if trafficMalformed + attemptUnavailableRecords + activityUnavailableRecords > 0 {
             lines.append(
@@ -137,18 +139,18 @@ enum TriggerQualityMetrics {
         }
         let preRequestFailureValue = knownValue(
             coachPreRequestFailures,
-            limitations: trafficMalformed == 0
+            limitations: auditEvidence.limitations + (trafficMalformed == 0
                 ? []
-                : ["\(trafficMalformed) malformed traffic record(s)"])
+                : ["\(trafficMalformed) malformed traffic record(s)"]))
         lines += [
             "",
             "| measure | value |",
             "|---|---:|",
             "| finalized heard lines | \(activityValue(heardCount, unavailableRecords: activityUnavailableRecords)) |",
-            "| known filler lines | \(classifiedValue(knownFillerCount, classified: classifiedCount, heard: heardCount, attemptsAvailable: attemptsAvailable, unavailableRecords: attemptUnavailableRecords)) |",
-            "| filler-only turn ends skipped before a provider call | \(terminalValue(skippedFillerTurns, unfinished: unfinishedAttempts, attemptsAvailable: attemptsAvailable, unavailableRecords: attemptUnavailableRecords)) |",
-            "| composite-filler misses that reached the brain | \(classifiedValue(compositeMisses, classified: classifiedCount, heard: heardCount, attemptsAvailable: attemptsAvailable, unavailableRecords: attemptUnavailableRecords, unavailableCallJoins: unavailableCallJoins)) |",
-            "| model `stay_silent` decisions | \(activityStaySilent.map { activityValue($0, unavailableRecords: activityUnavailableRecords) } ?? terminalValue(attemptStaySilent, unfinished: unfinishedAttempts, attemptsAvailable: attemptsAvailable, unavailableRecords: attemptUnavailableRecords)) |",
+            "| known filler lines | \(classifiedValue(knownFillerCount, classified: classifiedCount, heard: heardCount, attemptsAvailable: attemptsAvailable, unavailableRecords: attemptUnavailableRecords, auditLimitations: auditEvidence.limitations)) |",
+            "| filler-only turn ends skipped before a provider call | \(terminalValue(skippedFillerTurns, unfinished: unfinishedAttempts, attemptsAvailable: attemptsAvailable, unavailableRecords: attemptUnavailableRecords, auditLimitations: auditEvidence.limitations)) |",
+            "| composite-filler misses that reached the brain | \(classifiedValue(compositeMisses, classified: classifiedCount, heard: heardCount, attemptsAvailable: attemptsAvailable, unavailableRecords: attemptUnavailableRecords, unavailableCallJoins: unavailableCallJoins, auditLimitations: auditEvidence.limitations)) |",
+            "| model `stay_silent` decisions | \(activityStaySilent.map { activityValue($0, unavailableRecords: activityUnavailableRecords) } ?? terminalValue(attemptStaySilent, unfinished: unfinishedAttempts, attemptsAvailable: attemptsAvailable, unavailableRecords: attemptUnavailableRecords, auditLimitations: auditEvidence.limitations)) |",
             "| CLI setup/pre-request failures before a provider call | \(preRequestFailureValue) |",
             "",
             "`stay_silent` is a terminal model-decision count, never an avoidable-call count.",
@@ -163,7 +165,7 @@ enum TriggerQualityMetrics {
             ("manual_hint", "manual hint"),
             ("pending_work", "pending-work wake"),
         ] {
-            lines.append("| \(label) | \(triggerCounts[key, default: 0]) |")
+            lines.append("| \(label) | \(knownValue(triggerCounts[key, default: 0], limitations: auditEvidence.limitations)) |")
         }
         if unavailableTriggerCalls > 0 {
             lines.append("| unavailable | \(unavailableTriggerCalls) |")
@@ -177,8 +179,8 @@ enum TriggerQualityMetrics {
             "coach-call phase:",
             "| phase | known calls |",
             "|---|--:|",
-            "| initial coaching request | \(phaseCounts[CoachingAttemptLog.RequestPhase.initial.rawValue, default: 0]) |",
-            "| `capture_screen` continuation | \(phaseCounts[CoachingAttemptLog.RequestPhase.captureScreenContinuation.rawValue, default: 0]) |",
+            "| initial coaching request | \(knownValue(phaseCounts[CoachingAttemptAuditEvent.RequestPhase.initial.rawValue, default: 0], limitations: auditEvidence.limitations)) |",
+            "| `capture_screen` continuation | \(knownValue(phaseCounts[CoachingAttemptAuditEvent.RequestPhase.captureScreenContinuation.rawValue, default: 0], limitations: auditEvidence.limitations)) |",
         ]
         if unavailablePhaseCalls > 0 {
             lines.append("| unavailable | \(unavailablePhaseCalls) |")
@@ -195,11 +197,11 @@ enum TriggerQualityMetrics {
             "telemetry availability (all provider calls):",
             "| field | known calls | unavailable calls |",
             "|---|--:|--:|",
-            availabilityRow("input tokens", values: metricCalls.map(\.input)),
-            availabilityRow("cache read", values: metricCalls.map(\.cacheRead)),
-            availabilityRow("cache write", values: metricCalls.map(\.cacheWrite)),
-            availabilityRow("output tokens", values: metricCalls.map(\.output)),
-            availabilityRow("cost", values: metricCalls.map(\.cost)),
+            availabilityRow("input tokens", values: metricCalls.map(\.input), auditLimitations: auditEvidence.limitations),
+            availabilityRow("cache read", values: metricCalls.map(\.cacheRead), auditLimitations: auditEvidence.limitations),
+            availabilityRow("cache write", values: metricCalls.map(\.cacheWrite), auditLimitations: auditEvidence.limitations),
+            availabilityRow("output tokens", values: metricCalls.map(\.output), auditLimitations: auditEvidence.limitations),
+            availabilityRow("cost", values: metricCalls.map(\.cost), auditLimitations: auditEvidence.limitations),
         ]
         if trafficMalformed > 0 {
             lines.append(
@@ -214,10 +216,11 @@ enum TriggerQualityMetrics {
         heard: Int?,
         attemptsAvailable: Bool,
         unavailableRecords: Int,
-        unavailableCallJoins: Int = 0
+        unavailableCallJoins: Int = 0,
+        auditLimitations: [String] = []
     ) -> String {
         guard attemptsAvailable else { return "—" }
-        var limitations: [String] = []
+        var limitations = auditLimitations
         guard let heard else {
             limitations.append("total heard unavailable")
             if unavailableRecords > 0 {
@@ -239,8 +242,15 @@ enum TriggerQualityMetrics {
         return knownValue(value, limitations: limitations)
     }
 
-    private static func availabilityRow<T>(_ name: String, values: [T?]) -> String {
+    private static func availabilityRow<T>(
+        _ name: String,
+        values: [T?],
+        auditLimitations: [String] = []
+    ) -> String {
         let known = values.compactMap { $0 }.count
+        guard auditLimitations.isEmpty else {
+            return "| \(name) | \(known) known | \(values.count - known) known unavailable; session total unavailable |"
+        }
         return "| \(name) | \(known) | \(values.count - known) |"
     }
 
@@ -248,10 +258,11 @@ enum TriggerQualityMetrics {
         _ value: Int,
         unfinished: Int,
         attemptsAvailable: Bool,
-        unavailableRecords: Int
+        unavailableRecords: Int,
+        auditLimitations: [String] = []
     ) -> String {
         guard attemptsAvailable else { return "—" }
-        var limitations: [String] = []
+        var limitations = auditLimitations
         if unfinished > 0 { limitations.append("\(unfinished) unfinished attempt(s)") }
         if unavailableRecords > 0 {
             limitations.append("\(unavailableRecords) unavailable attempt record(s)")
@@ -273,6 +284,6 @@ enum TriggerQualityMetrics {
 
     private static func isProviderCall(_ entry: [String: Any]) -> Bool {
         entry["record_kind"] as? String
-            != BrainTrafficLog.RecordKind.preRequestFailure.rawValue
+            != BrainTrafficAuditEvent.Kind.preRequestFailure.rawValue
     }
 }

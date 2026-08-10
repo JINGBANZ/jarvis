@@ -8,7 +8,7 @@ import Foundation
 /// runtime failure is a failed provider attempt and is handled by the ordered route.
 public struct CLIBrainClient: BrainClient, Sendable {
     let provider: BrainProvider
-    let traffic: BrainTrafficLog?
+    let traffic: (any BrainTrafficAuditing)?
     let trafficTag: String
     let expectedInstructions: String
     let configuration: LocalAgentConversationConfiguration
@@ -22,7 +22,7 @@ public struct CLIBrainClient: BrainClient, Sendable {
         reasoningEffort: String = ReasoningEffort.default.rawValue,
         workDirectory: URL,
         timeout: TimeInterval = BrainWorkloadTimeout.liveCoaching,
-        traffic: BrainTrafficLog? = nil,
+        traffic: (any BrainTrafficAuditing)? = nil,
         trafficTag: String = "coach",
         systemPrompt: String,
         tools: [ToolDef],
@@ -227,7 +227,7 @@ public struct CLIBrainClient: BrainClient, Sendable {
         _ error: Error,
         requestRecord: Data?,
         respondEntered: UInt64,
-        kind: BrainTrafficLog.RecordKind
+        kind: BrainTrafficAuditEvent.Kind
     ) {
         let totalMs = Int(
             (DispatchTime.now().uptimeNanoseconds - respondEntered) / 1_000_000)

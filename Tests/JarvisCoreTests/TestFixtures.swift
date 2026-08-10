@@ -1,4 +1,5 @@
 import Foundation
+@testable import JarvisCore
 
 /// Shared test fixtures.
 enum TestFixtures {
@@ -11,4 +12,28 @@ enum TestFixtures {
 
     /// Decoded bytes of `tinyJpegBase64`.
     static var tinyJpeg: Data { Data(base64Encoded: tinyJpegBase64)! }
+}
+
+extension FileSessionAudit {
+    /// Persistence tests get an isolated worker so parallel test execution does not intentionally
+    /// exercise the production mailbox's drop-on-contention policy. Wait for the worker's open event
+    /// before sending the record under test; production naturally has a much longer Start-to-record
+    /// interval, while the tests otherwise race those operations back-to-back.
+    static func readyForTesting(directory: URL) async -> FileSessionAudit {
+        let audit = FileSessionAudit(
+            directory: directory,
+            worker: SessionAuditWorker(
+                limits: .production,
+                writer: SessionAuditFileWriter()))
+        let marker = directory.appendingPathComponent(FileSessionAudit.healthFilename)
+        while !FileManager.default.fileExists(atPath: marker.path) {
+            await Task.yield()
+        }
+        return audit
+    }
+
+    /// Persistence assertions await the real asynchronous lifecycle with a generous test deadline.
+    func closeForTesting() async -> SessionAuditCloseResult {
+        await close(deadline: .seconds(5))
+    }
 }

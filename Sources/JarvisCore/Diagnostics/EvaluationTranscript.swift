@@ -12,7 +12,8 @@ enum EvaluationTranscript {
     static func render(
         jsonl: String,
         attemptsJSONL: String? = nil,
-        activityJSONL: String? = nil
+        activityJSONL: String? = nil,
+        healthJSON: String? = nil
     ) -> String {
         var blocks: [String] = []
         // Elision state, per logical client and provider/model destination.
@@ -24,7 +25,7 @@ enum EvaluationTranscript {
         for record in records.lines {
             guard let entry = record.object else {
                 blocks.append(
-                    "=== record #\(record.number) · malformed traffic entry · evidence unavailable; inspect \(BrainTrafficLog.filename) ===")
+                    "=== record #\(record.number) · malformed traffic entry · evidence unavailable; inspect \(FileSessionAudit.brainTrafficFilename) ===")
                 continue
             }
             let callNumber = record.number
@@ -33,7 +34,7 @@ enum EvaluationTranscript {
             let response = entry["response"] as? [String: Any]
             let provider = SessionMetrics.providerName(request: request, response: response)
             let isPreRequestFailure = entry["record_kind"] as? String
-                == BrainTrafficLog.RecordKind.preRequestFailure.rawValue
+                == BrainTrafficAuditEvent.Kind.preRequestFailure.rawValue
             // A session can fail over while keeping the same logical client tag. Prefix-elision state
             // must not cross provider/model targets: their wire schemas, cache behavior, and
             // tool-loop state can differ.
@@ -80,11 +81,17 @@ enum EvaluationTranscript {
         // interprets numbers instead of summing usage blobs by hand — the source of the 2026-07-19
         // audit's cost/cache arithmetic errors. Empty traffic still renders "" (callers guard on it).
         let body = blocks.joined(separator: "\n\n")
+        let auditEvidence = SessionAuditEvidence.assess(
+            trafficJSONL: jsonl,
+            attemptsJSONL: attemptsJSONL,
+            healthJSON: healthJSON)
         let triggerMetrics = TriggerQualityMetrics.render(
             trafficJSONL: jsonl,
             attemptsJSONL: attemptsJSONL,
-            activityJSONL: activityJSONL)
-        return SessionMetrics.render(jsonl: jsonl) + "\n\n" + triggerMetrics + "\n\n" + body
+            activityJSONL: activityJSONL,
+            auditEvidence: auditEvidence)
+        return SessionMetrics.render(jsonl: jsonl, auditEvidence: auditEvidence)
+            + "\n\n" + triggerMetrics + "\n\n" + body
     }
 
     private static func renderRequest(_ request: [String: Any], tag: String, streamKey: String,
@@ -244,7 +251,7 @@ enum EvaluationTranscript {
             return text
         }
         let count = text.distance(from: text.startIndex, to: safeEnd)
-        let marker = "[first \(count) chars unchanged from the previous \(tag) call within this CLI text item — full input remains in \(BrainTrafficLog.filename)]"
+        let marker = "[first \(count) chars unchanged from the previous \(tag) call within this CLI text item — full input remains in \(FileSessionAudit.brainTrafficFilename)]"
         return marker + "\n" + text[safeEnd...]
     }
 

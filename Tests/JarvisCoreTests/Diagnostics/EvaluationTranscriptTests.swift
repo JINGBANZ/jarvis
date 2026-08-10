@@ -3,17 +3,19 @@ import Foundation
 @testable import JarvisCore
 
 @Suite struct EvaluationTranscriptTests {
-    /// One traffic line in the on-disk shape `BrainTrafficLog` writes.
+    /// One traffic line in the on-disk shape `FileSessionAudit` writes.
     private func line(tag: String = "coach", request: [String: Any],
                       response: [String: Any]? = nil, error: String? = nil,
                       coachAttempt: [String: Any]? = nil,
-                      recordKind: String? = nil) throws -> String {
+                      recordKind: String? = nil,
+                      auditVersion: Int? = nil) throws -> String {
         var entry: [String: Any] = ["t": "10:00:00", "tag": tag, "ms": 500, "request": request]
         if response != nil { entry["status"] = 200 }
         entry["response"] = response
         entry["error"] = error
         entry["coach_attempt"] = coachAttempt
         entry["record_kind"] = recordKind
+        entry["audit_version"] = auditVersion
         return try #require(String(data: JSONSerialization.data(withJSONObject: entry), encoding: .utf8))
     }
 
@@ -165,7 +167,7 @@ import Foundation
         let output = EvaluationTranscript.render(jsonl: "\(first)\n\(second)")
 
         #expect(output.contains("within this CLI text item"))
-        #expect(output.contains("full input remains in \(BrainTrafficLog.filename)"))
+        #expect(output.contains("full input remains in \(FileSessionAudit.brainTrafficFilename)"))
         #expect(output.ranges(of: "stable history line").count == 500)
         #expect(output.contains("new transcript delta"))
         #expect(output.utf8.count * 4 < (firstText.utf8.count + secondText.utf8.count) * 3)
@@ -228,13 +230,70 @@ import Foundation
         let setupFailure = try line(
             request: ["provider": "codex-cli", "runtime": "app-server"],
             error: "app-server unavailable",
-            recordKind: BrainTrafficLog.RecordKind.preRequestFailure.rawValue)
+            recordKind: BrainTrafficAuditEvent.Kind.preRequestFailure.rawValue)
 
         let output = EvaluationTranscript.render(jsonl: setupFailure)
 
         #expect(output.contains("=== record #1 · coach"))
         #expect(output.contains("pre-request failure (no provider call)"))
         #expect(!output.contains("=== call #1 · coach"))
+    }
+
+    @Test func incompleteAuditMarkerMakesEveryAuditCountAnExplicitLowerBound() throws {
+        let traffic = try line(
+            request: ["model": "gpt-5.5", "input": [userItem("hi")]],
+            response: ["usage": ["input_tokens": 10, "output_tokens": 2]],
+            coachAttempt: [
+                "id": 1, "trigger": "turn_end", "source_trigger": "turn_end",
+                "phase": "initial", "sequence": 1,
+            ],
+            auditVersion: FileSessionAudit.formatVersion)
+        let attempts =
+            #"{"audit_version":1,"event":"started","attempt":1,"transcript":[]}"#
+            + "\n"
+            + #"{"audit_version":1,"event":"finished","attempt":1,"terminal":"speak"}"#
+        let health = #"{"version":1,"state":"partial","closed":true,"queue_overflow":2,"oversize_record":0,"open_failure":0,"write_failure":0,"close_timeout":0,"late_event":0,"serialization_failure":0}"#
+
+        let output = EvaluationTranscript.render(
+            jsonl: traffic,
+            attemptsJSONL: attempts,
+            activityJSONL: #"{"k":"heard"}"#,
+            healthJSON: health)
+
+        #expect(output.contains("session audit evidence is partial"))
+        #expect(output.contains("queue overflow: 2"))
+        #expect(output.contains(
+            "known recorded totals: 1 known calls (session total unavailable)"))
+        #expect(output.contains("| turn end | 1 known ("))
+        #expect(output.contains("health marker reports partial evidence; queue overflow: 2"))
+        #expect(output.contains("session total unavailable"))
+    }
+
+    @Test func missingMarkerIsPartialOnlyForTheVersionedFormat() throws {
+        let newTraffic = try line(
+            request: ["model": "gpt-5.5", "input": []],
+            auditVersion: FileSessionAudit.formatVersion)
+        let oldTraffic = try line(request: ["model": "gpt-5.5", "input": []])
+
+        let newOutput = EvaluationTranscript.render(jsonl: newTraffic)
+        let oldOutput = EvaluationTranscript.render(jsonl: oldTraffic)
+
+        #expect(newOutput.contains("completion marker missing"))
+        #expect(newOutput.contains("known recorded totals"))
+        #expect(oldOutput.contains("historical format without a completion marker"))
+        #expect(oldOutput.contains("session totals: 1 calls"))
+    }
+
+    @Test func incompleteHealthSchemaCannotBeMistakenForCompleteEvidence() {
+        let evidence = SessionAuditEvidence.assess(
+            trafficJSONL: "",
+            attemptsJSONL: "",
+            healthJSON: #"{"version":1,"state":"complete","closed":true}"#)
+
+        #expect(evidence.state == .partial)
+        #expect(evidence.limitations.contains {
+            $0.contains("health marker field queue_overflow missing or invalid")
+        })
     }
 
 }

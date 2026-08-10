@@ -95,14 +95,16 @@ moments the model judges worthwhile.
    (see [decisions.md](./decisions.md)).
 6. `ActivityLog` records every brain action: successful or failed `capture_screen`, `speak`, and
    `stay_silent`. The deliberate-silence entry is human-facing but stays out of model memory.
-7. `CoachingAttemptLog` separately records the audit facts around the decision: the natural trigger
-   or pending-work wake, the indexed finalized lines considered by the substance gate, whether a
-   provider call is the initial request or a screen continuation, and the terminal outcome. Coach
-   traffic carries the matching attempt identity. Runtime classification and actual request inclusion
-   are persisted separately so the evaluator can observe a gate miss instead of recomputing the fact
-   under audit. These records are queued for background serialization and disk I/O; Stop drains their
-   session-bound queues before evaluation. This stays diagnostics-only; Activity remains the
-   human-facing record and provider scheduling detail remains out of it.
+7. `CoachDriver` reports the audit facts around the decision through the narrow
+   `CoachingAttemptAuditing` port: the natural trigger or pending-work wake, the indexed finalized
+   lines considered by the substance gate, whether a provider call is the initial request or a screen
+   continuation, and the terminal outcome. Brain clients report matching traffic through
+   `BrainTrafficAuditing`; a typed task-local request attribution carries the attempt identity.
+   Runtime classification and actual request inclusion are recorded separately so the evaluator can
+   observe a gate miss instead of recomputing the fact under audit. `FileSessionAudit` admits these
+   typed events best-effort to the bounded process worker; `DisabledSessionAudit` preserves identical
+   execution with no persistence. This stays diagnostics-only; Activity remains the human-facing
+   record and provider scheduling detail remains out of it.
 8. `speak` renders to the **Overlay**, one line at a time (per-line display time set in `Config`).
    A newer tip never interrupts one still showing — tips queue and play in order, so no hint is lost.
 
@@ -150,7 +152,7 @@ plugins ship only with full Xcode, and Jarvis builds **CLT-only** (see
 | **JarvisReadiness** | Compose the selected session's permission, credential, brain preparation, transcription preparation, endpoint, and capture-health snapshots into one typed status: checking, blocked, recovering, fully ready, microphone-only ready, or stopped. An opaque Start generation rejects stale callbacks. Focused subsystems keep owning their own mechanics; this Foundation-only component emits effects that the app renders in both the menu and Activity. | Foundation-only state reduction over `CaptureReadinessMonitor` and typed app observations. |
 | **Transcriber** | Maintain a rolling, speaker-labeled, **spoken-time timestamped** transcript; emit speech-activity, turn-end, and backing-off silence events (with quiet duration). Two instances run in parallel — one per side — tagging lines `me`/`them` into one shared transcript through the provider-neutral `TranscriptionSession` port. The default OpenAI adapter keeps its per-`item_id` reconciliation, delta salvage, acknowledged readiness, ping/pong health, and transactional reconnect path. GPT-4o Transcribe remains its default model and uses tuned server VAD. GPT Transcribe and GPT Live Transcribe remain opt-in with local WebRTC VAD: a bounded pre-roll opens at confirmed speech onset, active speech and trailing silence enter the ordered audio FIFO, and indefinite idle silence stays off the wire. Endpoints commit only after that FIFO reaches their boundary, and the server's commit acknowledgement binds each boundary to its `item_id`. GPT Transcribe also reports detected completion languages to debug diagnostics. Both new models receive fixed context for the captured speaker role, and GPT Live additionally requests low transcription delay. The opt-in macOS 26+ Apple adapter prepares one selected-locale asset before capture, converts the existing 24 kHz PCM to `SpeechAnalyzer`'s preferred format, and commits final results only. Its content-free local activity tracker delays coaching but never gates transcription or retains PCM. Every path keeps unusable words diagnostic-only and records content-free boundary evidence. | OpenAI Realtime transcription (model-compatible server or local turn detection) or Apple `SpeechAnalyzer` / `SpeechTranscriber` (on-device). |
 | **CoachDriver** | Coordinate one single-flighted coaching attempt from a natural trigger or pending-work wake-up: snapshot one route target plus the latest conversation, route its tool calls, commit only a complete terminal action, and report one outcome to the scheduler. No speaking cooldown/rate cap — restraint is the model's; `TurnSubstance` removes only clear hesitation sounds from mixed deltas and skips a turn-end when no substantive text or saved observation remains. | The selected OpenAI Responses API, Claude Code, or Codex route target; See [§4 Local CLI brain providers](#local-cli-brain-providers). Provider-specific summary tiers are defined in `BrainModelCatalog`. |
-| **CoachingAttemptLog** | Persist the causal seam that wire traffic cannot reconstruct: trigger versus pending-work wake, the indexed transcript delta, runtime substance decision, actual request inclusion, provider-call phase, and terminal attempt outcome. Each coach traffic call carries the same attempt identity, so evaluation joins evidence instead of inferring it from prose or model silence. Serialization and file I/O stay on a session-bound serial queue. | Foundation-only owner-only JSONL beside Activity and brain traffic. |
+| **Session audit** | Expose narrow `BrainTrafficAuditing` and `CoachingAttemptAuditing` observer ports to execution code. `FileSessionAudit` admits typed `Sendable` events without waiting on disk, parsing, redaction, or serialization; one process-level `SessionAuditWorker` keeps a fixed count/byte ring and writes the owner-only traffic, attempt, and versioned health files. Overload or persistence failure drops evidence, disables further writes when necessary, and marks the session partial. `DisabledSessionAudit` is the no-persistence implementation. | Foundation-only owner-only JSONL plus `audit-health.json` beside Activity. |
 | **Local agent runtime** | Keep provider startup outside the coaching latency path while preserving the attempt boundary: a `BrainConversation` lease owns every model turn in one attempt, including a `capture_screen` continuation, then is explicitly finished. Claude leases one initialized safe-mode query; Codex prepares the first target-specific ephemeral thread at Session Start and opens a fresh thread for each later attempt on one session-scoped app-server. A runtime failure fails the attempt; it never switches to a one-shot transport. | Claude Code stream-json control protocol; Codex app-server JSON-RPC over stdio. |
 | **ScreenTool** | Fulfill `capture_screen`: silently shoot the **active window** (default scope) — the window-server frontmost, on whichever display, clean even when partially covered — and attach an **on-device OCR** of the shot to the tool result so the model reads exact text instead of pixels. Falls back to a full-display capture (no OCR) — the Settings-chosen display in Entire-display scope, the main display when no window is eligible; the overlay window is excluded either way. See [settings-window.md](./settings-window.md#capture-scope). | macOS `screencapture` CLI + Apple Vision (`VNRecognizeTextRequest`). |
 | **Overlay Caption** | Render `speak` output: up to ~3 short lines (model-split), shown one at a time and queued so a newer tip never cuts off the current one; non-activating, always-on-top, excluded from capture. Switchable from Settings — **off by default**; when off, tips are suppressed. | AppKit NSPanel; `OverlayCaptionPanel`. |
@@ -490,9 +492,12 @@ the provider, model, and network. Claude keeps query startup off the attempt pat
 app-server and first target-thread preparation at Session Start. Both make a capture follow-up
 incremental, but neither promises the direct API target. The overlay reveals the already-returned
 lines one at a time (paced by `Config`); the brain response itself is not streamed to the overlay.
-Session auditing adds only ordered queue submissions to the live path: request/response parsing,
-image redaction, JSON serialization, and file writes run asynchronously, then Stop flushes them after
-cancelled coaching work drains and before the session becomes evaluable.
+Session auditing adds only best-effort admission of typed events to the live path. Provider and coach
+callbacks use a nonblocking try-lock and drop immediately on contention, count pressure, or byte
+pressure; they never parse JSON, redact images, serialize records, or touch files. One bounded
+process-level worker performs that work in order. After cancelled coaching work unwinds, Stop starts a
+short-deadline asynchronous close for the old handle; a new Start can install its own handle without
+waiting for old disk access.
 
 ### Resilience
 
@@ -580,17 +585,22 @@ The always-on legs are built to survive transient failure rather than die on it:
   session-scoped app-server when the matching terminal state confirms the stream is healthy;
   uncertain protocol cleanup still invalidates the server. Memory **compaction** fails soft outside
   this route: a failed summary simply leaves the full history for the next attempt.
-- **The audit edge** drains Activity, coaching-attempt, and brain-traffic writers as Stop completes,
-  after any cancelled coaching task has unwound. All JSON parsing, redaction, serialization, and file
-  I/O are queued off the provider request/response path, while the teardown barrier preserves complete
-  per-session evidence for an immediate evaluation. An explicit
+- **The audit edge** flushes Activity as Stop completes, then closes the old `FileSessionAudit`
+  asynchronously after any cancelled coaching task has unwound. The close has a short deadline and
+  never blocks a replacement Start. One process-level worker bounds retained audit events by count and
+  bytes; provider and coach ingress drops rather than waiting for its lock or work. The worker alone
+  parses, redacts, serializes, and writes. Queue overflow, oversize records, open/write/serialization
+  failure, late events, or close timeout are persisted in versioned `audit-health.json` when possible;
+  a persistence failure disables that session without affecting coaching. An explicit
   Activity → **Evaluate** click then runs the read-only agentic evaluator over the source checkout
   plus the completed session directory. It reads `jarvis-activity.jsonl` itself in full, joins the
   attempt-provenance companion with coach traffic for deterministic trigger/filler/call-phase
   counts, and treats absent historical provenance or provider telemetry as unavailable rather than
-  zero. Pre-request CLI setup failures are not counted as provider calls, actual request inclusion is
-  independent from its diagnostic classification, and malformed JSONL makes affected totals partial
-  instead of silently disappearing. A model `stay_silent` action is never treated as proof that its
+  zero. The health marker decides whether audit-derived counts are exact or explicit lower bounds;
+  legacy sessions without that versioned marker keep their historical interpretation. Pre-request CLI
+  setup failures are not counted as provider calls, actual request inclusion is independent from its
+  diagnostic classification, and malformed JSONL makes affected totals partial instead of silently
+  disappearing. A model `stay_silent` action is never treated as proof that its
   request was avoidable. The
   compact transcript also elides the exact shared prefix inside a growing one-item CLI request and
   removes response-envelope reply duplicates while preserving call numbers and pointers to the

@@ -7,6 +7,7 @@ extension JarvisPrompts {
             transcriptFilename: String,
             trafficFilename: String,
             attemptsFilename: String,
+            healthFilename: String,
             activityFilename: String,
             reportFilename: String
         ) -> String {
@@ -45,6 +46,10 @@ extension JarvisPrompts {
             corresponding values are unavailable and MUST NOT be inferred from prose logs. Use the matching \
             attempt id on each coach traffic call to attribute causality. A line's presence in accumulated \
             history does not prove that it triggered the call.
+              - `\(healthFilename)` — versioned session-audit completion and loss evidence. If the \
+            deterministic tables label the audit partial, every audit-derived count is only a known \
+            lower bound; never report it as an exact session total. Historical sessions without this file \
+            remain subject to the availability labels in the compact transcript.
               - `\(activityFilename)` — the COMPLETE sanitized human-facing coaching record: heard \
             speech, manual hints, every brain action, and every fixed stop/degrade notice, with stable \
             event kinds in `k`. Read the file itself in full; it is deliberately NOT filtered, summarized, \
@@ -80,7 +85,7 @@ extension JarvisPrompts {
             `Sources/JarvisCore/Coach/CoachHistory.swift` (client-managed memory: append-only prefix, \
             screenshot stubbing, compaction), `Sources/JarvisCore/Coach/CoachDriver.swift` (the event loop, \
             the filler substance gate, trigger provenance, compaction trigger), \
-            `Sources/JarvisCore/Diagnostics/CoachingAttemptLog.swift` and \
+            `Sources/JarvisCore/Diagnostics/CoachingAttemptAuditEvent.swift` and \
             `TriggerQualityMetrics.swift` (the persisted provenance schema and deterministic counts), \
             `Sources/JarvisCore/Brain/ReasoningEffort.swift` (`max_output_tokens` is a COMBINED \
             reasoning+output budget — a tight cap recreates the documented `status:"incomplete"` \

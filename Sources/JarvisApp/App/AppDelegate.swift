@@ -69,12 +69,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// cleared in `stop()` — so the hotkey beeps when there's no session. Captures the Sendable driver
     /// + turn box (not `@MainActor` self), like the transcriber callbacks do.
     private var requestManualHint: (() -> Void)?
-    /// The current session's brain-traffic recorder, rotated by `beginNewSession` and handed to the
-    /// clients built in `start()`. Per-session (not a shared singleton) on purpose: a request still
-    /// unwinding when Stop → Start rotates sessions must record into the session that made it, not
-    /// contaminate the new session's audit data.
-    private var sessionTraffic: BrainTrafficLog?
-    private var sessionCoachingAttempts: CoachingAttemptLog?
+    /// One per-session handle over the process-level audit worker. Brain clients and `CoachDriver`
+    /// retain only its narrow observer ports, so late work remains attributed to the session that
+    /// created it while Stop → Start can rotate immediately to a fresh handle.
+    private var sessionAudit: FileSessionAudit?
     /// The current session's log directory (set by `beginNewSession`) — also where `CLIBrainClient`
     /// materializes screenshots for a CLI brain, keeping all screen-derived bytes in one owner-only place.
     private var currentSessionDir: URL?
@@ -265,7 +263,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                        reasoningEffort: effort.rawValue,
                                        workDirectory: sessionDir,
                                        timeout: BrainWorkloadTimeout.liveCoaching,
-                                       traffic: sessionTraffic, trafficTag: "coach",
+                                       traffic: sessionAudit, trafficTag: "coach",
                                        systemPrompt: JarvisPrompts.Coach.system,
                                        tools: coachTools,
                                        toolChoice: .required,
@@ -276,7 +274,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                         reasoningEffort: ReasoningEffort.low.rawValue,
                                         workDirectory: sessionDir,
                                         timeout: BrainWorkloadTimeout.historyCompaction,
-                                        traffic: sessionTraffic, trafficTag: "summarizer",
+                                        traffic: sessionAudit, trafficTag: "summarizer",
                                         systemPrompt: JarvisPrompts.HistorySummary.system,
                                         tools: [],
                                         toolChoice: .auto,
@@ -288,12 +286,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 reasoningEffort: effort.rawValue,
                 timeout: BrainWorkloadTimeout.liveCoaching,
                 maxOutputTokens: effort.maxOutputTokens,
-                traffic: sessionTraffic, trafficTag: "coach")
+                traffic: sessionAudit, trafficTag: "coach")
             summarizer = OpenAIBrainClient(
                 apiKey: key, model: BrainModelCatalog.summarizerModelID(for: .openAI),
                 reasoningEffort: ReasoningEffort.low.rawValue,
                 timeout: BrainWorkloadTimeout.historyCompaction, maxOutputTokens: 2_048,
-                traffic: sessionTraffic, trafficTag: "summarizer")
+                traffic: sessionAudit, trafficTag: "summarizer")
         }
         return BrainRuntime(coach: coachBase, summarizer: summarizer)
     }
@@ -731,7 +729,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 captureDirectory: sessionDirectory),
             overlay: overlaySink,
             clock: clock,
-            coachingAttempts: sessionCoachingAttempts)
+            coachingAttempts: sessionAudit)
 
         // CoachDriver is @unchecked Sendable; capture it (not @MainActor self) in the callbacks.
         // Route turns through TurnTaskBox so Stop can cancel an in-flight one. Concurrent triggers are
@@ -954,10 +952,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let endedLiveSession = sessionIsLive
         sessionIsLive = false
         requestManualHint = nil              // hotkey beeps again once there's no live session
-        // Capture these session-bound recorders before a quick Start replaces the properties. Their
-        // queues must drain only at teardown, never on the coaching request path.
-        let traffic = sessionTraffic
-        let coachingAttempts = sessionCoachingAttempts
+        // Capture and clear this session handle before a quick Start installs another. The cancelled
+        // tasks retain only its observer ports and can finish enqueueing into the old session.
+        let audit = sessionAudit
+        sessionAudit = nil
         let cancelled = turns?.cancelAll() ?? []; turns = nil   // cancel any in-flight coaching turn
         coachDriver = nil
         activeBrainTarget = nil
@@ -985,23 +983,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if endedLiveSession {
             ActivityLog.shared.record(.sessionEnded(reason: reason))
         }
-        // Session evidence writes are asynchronous during live coaching. Persist every completed
-        // event before this session can become evaluable; this teardown barrier keeps JSON work and
-        // disk I/O out of request latency without letting Evaluate see incomplete evidence.
+        // Activity remains its separate human-facing failure domain. Session audit sealing waits for
+        // cancelled coaching tasks below, then drains asynchronously with a bounded deadline.
         ActivityLog.shared.flush()
-        traffic?.flush()
-        coachingAttempts?.flush()
-        // The just-stopped session becomes evaluable only once any cancelled turn has actually
-        // finished unwinding — its brain request records a final traffic line on the way out, and an
-        // Evaluate click before that line lands would audit an incomplete brain-traffic.jsonl.
-        if !cancelled.isEmpty {
+        if audit != nil || !cancelled.isEmpty {
             drainingStops += 1
             Task { @MainActor [weak self] in
                 for task in cancelled { await task.value }
-                guard let self else { return }
                 ActivityLog.shared.flush()
-                traffic?.flush()
-                coachingAttempts?.flush()
+                _ = await audit?.close(deadline: FileSessionAudit.defaultCloseDeadline)
+                guard let self else { return }
                 self.drainingStops -= 1
                 self.activityViewer?.coachingStateDidChange()
             }
@@ -1193,12 +1184,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: base.path)
         JarvisLog.enableFileLogging(directory: dir)     // <dir>/jarvis-debug.log, 0600, fresh
         ActivityLog.shared.enable(directory: dir)        // <dir>/jarvis-activity.jsonl, 0600, fresh
-        let traffic = BrainTrafficLog()                  // fresh recorder BOUND to this session's dir
-        traffic.enable(directory: dir)                   // <dir>/brain-traffic.jsonl, 0600, fresh
-        sessionTraffic = traffic
-        let attempts = CoachingAttemptLog()
-        attempts.enable(directory: dir)                  // <dir>/coaching-attempts.jsonl, 0600, fresh
-        sessionCoachingAttempts = attempts
+        // File creation and every later write run on the shared bounded audit worker. Start only
+        // creates a lightweight session handle and never waits for an older session's disk access.
+        sessionAudit = FileSessionAudit(directory: dir)
         currentSessionDir = dir
         // Now that logging is always on, sessions accumulate every launch. Bound it: keep only the most
         // recent few (the just-created one is current, so it's always spared).

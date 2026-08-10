@@ -6,14 +6,14 @@ import Testing
 final class ScriptedBrain: BrainClient, @unchecked Sendable {
     private(set) var calls: [[ChatMessage]] = []
     private(set) var toolChoices: [ToolChoice] = []
-    private(set) var requestContexts: [CoachingAttemptLog.RequestContext?] = []
+    private(set) var requestContexts: [CoachingRequestContext?] = []
     private(set) var preparationCount = 0
     let script: [BrainResponse]
     init(script: [BrainResponse]) { self.script = script }
     func respond(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice) async throws -> BrainResponse {
         calls.append(messages)
         toolChoices.append(toolChoice)
-        requestContexts.append(CoachingAttemptLog.currentRequest)
+        requestContexts.append(CoachingRequestAttribution.current)
         return script[min(calls.count - 1, script.count - 1)]
     }
     func prepare() { preparationCount += 1 }
@@ -23,13 +23,13 @@ final class ScriptedBrain: BrainClient, @unchecked Sendable {
 /// to verify what survives a failed turn and reaches the next one.
 final class ScriptedThrowBrain: BrainClient, @unchecked Sendable {
     private(set) var calls: [[ChatMessage]] = []
-    private(set) var requestContexts: [CoachingAttemptLog.RequestContext?] = []
+    private(set) var requestContexts: [CoachingRequestContext?] = []
     private var idx = 0
     let script: [BrainResponse?]
     init(script: [BrainResponse?]) { self.script = script }
     func respond(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice) async throws -> BrainResponse {
         calls.append(messages)
-        requestContexts.append(CoachingAttemptLog.currentRequest)
+        requestContexts.append(CoachingRequestAttribution.current)
         let r = script[min(idx, script.count - 1)]; idx += 1
         guard let r else { throw NSError(domain: "test", code: 500) }
         return r
@@ -180,7 +180,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
                             screen: ScreenCapturing = FakeScreen(),
                             overlay: OverlayRendering = FakeOverlay(),
                             clock: Clock, config: Config = .default,
-                            coachingAttempts: CoachingAttemptLog? = nil,
+                            coachingAttempts: (any CoachingAttemptAuditing)? = nil,
                             automaticAttemptDelay: @escaping CoachDriver.AutomaticAttemptDelay = { _ in },
                             onBrainFailure: (@MainActor @Sendable (BrainFailure) -> Void)? = nil)
         -> (CoachDriver, RollingTranscript) {
@@ -653,7 +653,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
     @Test func fillerOnlySkipIsPersistedWithoutAProviderCall() async throws {
         let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
-        let attempts = CoachingAttemptLog(); attempts.enable(directory: dir)
+        let attempts = await FileSessionAudit.readyForTesting(directory: dir)
         let brain = ScriptedBrain(script: [
             .init(toolCalls: [.staySilent(callId: "unused")]),
         ])
@@ -665,9 +665,9 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
         #expect(await driver.handleTrigger(.turnEnd) == .skippedFillerOnly)
         #expect(brain.calls.isEmpty)
-        attempts.flush()
+        _ = await attempts.closeForTesting()
         let jsonl = try String(
-            contentsOf: dir.appendingPathComponent(CoachingAttemptLog.filename),
+            contentsOf: dir.appendingPathComponent(FileSessionAudit.coachingAttemptsFilename),
             encoding: .utf8)
         #expect(jsonl.contains(#""event":"started""#))
         #expect(jsonl.contains(#""classification":"composite_filler""#))

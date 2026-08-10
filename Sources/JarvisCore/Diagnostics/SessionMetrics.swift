@@ -30,7 +30,7 @@ enum SessionMetrics {
         let model: String
         let status: Int?
         let ms: Int?
-        let recordKind: BrainTrafficLog.RecordKind
+        let recordKind: BrainTrafficAuditEvent.Kind
         var input: Int?
         var cacheRead: Int?
         var cacheWrite: Int?
@@ -67,7 +67,10 @@ enum SessionMetrics {
     /// The metrics block that leads the transcript, or "" when there is no traffic (so callers'
     /// empty-transcript guards still fire). Record numbering matches `EvaluationTranscript.render`
     /// exactly and retains gaps for malformed or non-call records in file order.
-    static func render(jsonl: String) -> String {
+    static func render(
+        jsonl: String,
+        auditEvidence: SessionAuditEvidence = .legacy
+    ) -> String {
         let parsed = parseDetailed(jsonl: jsonl)
         guard parsed.totalRecords > 0 else { return "" }
         let calls = parsed.calls.filter { $0.recordKind == .providerCall }
@@ -77,7 +80,8 @@ enum SessionMetrics {
 
         var lines: [String] = []
         lines.append(
-            "=== deterministic metrics (computed from \(BrainTrafficLog.filename); interpret these — do NOT recompute totals by eye) ===")
+            "=== deterministic metrics (computed from \(FileSessionAudit.brainTrafficFilename); interpret these — do NOT recompute totals by eye) ===")
+        lines.append(auditEvidence.summary)
         if parsed.malformedCount > 0 {
             lines.append("WARNING: \(parsed.malformedCount) malformed traffic record(s) could not be parsed; all session totals below are partial, not exact.")
         }
@@ -98,21 +102,29 @@ enum SessionMetrics {
         if calls.isEmpty {
             if parsed.malformedCount > 0 {
                 lines.append("session totals: 0 known provider calls (\(parsed.malformedCount) malformed record(s); total unavailable)")
+            } else if auditEvidence.isPartial {
+                lines.append("session totals: 0 known provider calls (total unavailable)")
             } else {
                 lines.append("session totals: 0 provider calls")
             }
             return lines.joined(separator: "\n")
         }
         let providers = Dictionary(grouping: calls, by: \.provider)
-        let callCount = parsed.malformedCount == 0
-            ? "\(calls.count) calls"
-            : "\(calls.count) known calls (\(parsed.malformedCount) malformed record(s); total unavailable)"
+        let callCount: String
+        if parsed.malformedCount > 0 {
+            callCount = "\(calls.count) known calls (\(parsed.malformedCount) malformed record(s); total unavailable)"
+        } else if auditEvidence.isPartial {
+            callCount = "\(calls.count) known calls (session total unavailable)"
+        } else {
+            callCount = "\(calls.count) calls"
+        }
+        let totalsLabel = auditEvidence.isPartial ? "known recorded totals" : "session totals"
         if providers.count == 1 {
-            lines.append("session totals: \(callCount) · \(totals(calls))")
+            lines.append("\(totalsLabel): \(callCount) · \(totals(calls))")
         } else {
             // OpenAI input includes cached input while Anthropic reports uncached input separately.
             // Do not manufacture a cross-provider token total from fields with different semantics.
-            lines.append("session totals: \(callCount) · cost \(totalMoney(calls, \.cost))")
+            lines.append("\(totalsLabel): \(callCount) · cost \(totalMoney(calls, \.cost))")
             lines.append("")
             lines.append("provider totals (token meanings differ; do not sum across providers):")
             lines.append("| provider | calls | input | cache read | cache write | output | cost |")
@@ -168,7 +180,7 @@ enum SessionMetrics {
             let response = entry["response"] as? [String: Any]
             let model = request?["model"] as? String ?? "?"
             let recordKind = (entry["record_kind"] as? String)
-                .flatMap(BrainTrafficLog.RecordKind.init(rawValue:)) ?? .providerCall
+                .flatMap(BrainTrafficAuditEvent.Kind.init(rawValue:)) ?? .providerCall
             var call = Call(number: record.number,
                             tag: entry["tag"] as? String ?? "?",
                             provider: providerName(request: request, response: response),

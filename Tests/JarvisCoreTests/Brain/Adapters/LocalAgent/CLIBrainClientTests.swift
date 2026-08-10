@@ -17,7 +17,7 @@ import Testing
         tools: [ToolDef] = coachTools,
         toolChoice: ToolChoice = .required,
         timeout: TimeInterval = BrainWorkloadTimeout.liveCoaching,
-        traffic: BrainTrafficLog? = nil,
+        traffic: (any BrainTrafficAuditing)? = nil,
         openDelay: TimeInterval = 0,
         failBeforeDispatch: Bool = false
     ) -> (CLIBrainClient, FakeLocalAgentRuntime) {
@@ -194,8 +194,7 @@ import Testing
 
     @Test func screenshotStaysInlineAndTrafficRecordRedactsItsBytes() async throws {
         let workDir = try makeWorkDir()
-        let traffic = BrainTrafficLog()
-        traffic.enable(directory: workDir)
+        let traffic = await FileSessionAudit.readyForTesting(directory: workDir)
         let base64 = Data("fake-jpeg-payload".utf8).base64EncodedString()
         let (client, backend) = client(
             workDir: workDir,
@@ -206,12 +205,12 @@ import Testing
             messages: [.system("coach prompt"), .user("look"), .userImage(base64)],
             tools: coachTools,
             toolChoice: .required)
-        traffic.flush()
+        _ = await traffic.closeForTesting()
 
         let turns = await backend.turns
         #expect(turns.first?.imageCount == 1)
         let jsonl = try String(
-            contentsOf: workDir.appendingPathComponent(BrainTrafficLog.filename),
+            contentsOf: workDir.appendingPathComponent(FileSessionAudit.brainTrafficFilename),
             encoding: .utf8)
         #expect(!jsonl.contains(base64))
         #expect(jsonl.contains("redacted"))
@@ -220,8 +219,7 @@ import Testing
 
     @Test func successfulTrafficCarriesPersistentRuntimePhasesWithoutSpawnPhase() async throws {
         let workDir = try makeWorkDir()
-        let traffic = BrainTrafficLog()
-        traffic.enable(directory: workDir)
+        let traffic = await FileSessionAudit.readyForTesting(directory: workDir)
         let (client, _) = client(
             workDir: workDir,
             replies: [#"{"tool":"stay_silent","arguments":{}}"#],
@@ -231,10 +229,10 @@ import Testing
             messages: [.system("coach prompt"), .user("hi")],
             tools: coachTools,
             toolChoice: .required)
-        traffic.flush()
+        _ = await traffic.closeForTesting()
 
         let jsonl = try String(
-            contentsOf: workDir.appendingPathComponent(BrainTrafficLog.filename),
+            contentsOf: workDir.appendingPathComponent(FileSessionAudit.brainTrafficFilename),
             encoding: .utf8)
         let line = try #require(jsonl.split(separator: "\n").first)
         let entry = try #require(
@@ -252,8 +250,7 @@ import Testing
 
     @Test func runtimeFailureIsTemporaryAndNeverOpensAColdFallback() async throws {
         let workDir = try makeWorkDir()
-        let traffic = BrainTrafficLog()
-        traffic.enable(directory: workDir)
+        let traffic = await FileSessionAudit.readyForTesting(directory: workDir)
         let backend = FakeLocalAgentRuntime(
             replies: [],
             openError: NSError(
@@ -283,13 +280,13 @@ import Testing
             #expect(BrainFailure(error).disposition == .temporary)
             #expect(error.localizedDescription.contains("app-server unavailable"))
         }
-        traffic.flush()
+        _ = await traffic.closeForTesting()
         let openCount = await backend.openCount
         let turns = await backend.turns
         #expect(openCount == 1)
         #expect(turns.isEmpty)
         let jsonl = try String(
-            contentsOf: workDir.appendingPathComponent(BrainTrafficLog.filename),
+            contentsOf: workDir.appendingPathComponent(FileSessionAudit.brainTrafficFilename),
             encoding: .utf8)
         let lines = jsonl.split(separator: "\n")
         #expect(lines.count == 1)
@@ -300,8 +297,7 @@ import Testing
 
     @Test func preparedTurnFailureBeforeDispatchIsNotAProviderCall() async throws {
         let workDir = try makeWorkDir()
-        let traffic = BrainTrafficLog()
-        traffic.enable(directory: workDir)
+        let traffic = await FileSessionAudit.readyForTesting(directory: workDir)
         let (client, backend) = client(
             .codexCLI,
             workDir: workDir,
@@ -318,12 +314,12 @@ import Testing
         } catch {
             #expect(error.localizedDescription.contains("before dispatch"))
         }
-        traffic.flush()
+        _ = await traffic.closeForTesting()
 
         let turns = await backend.turns
         #expect(turns.count == 1)
         let jsonl = try String(
-            contentsOf: workDir.appendingPathComponent(BrainTrafficLog.filename),
+            contentsOf: workDir.appendingPathComponent(FileSessionAudit.brainTrafficFilename),
             encoding: .utf8)
         #expect(jsonl.contains("prepared but unsent"))
         #expect(jsonl.contains(#""record_kind":"pre_request_failure""#))
@@ -332,8 +328,7 @@ import Testing
 
     @Test func failureAfterDispatchRemainsAProviderCall() async throws {
         let workDir = try makeWorkDir()
-        let traffic = BrainTrafficLog()
-        traffic.enable(directory: workDir)
+        let traffic = await FileSessionAudit.readyForTesting(directory: workDir)
         let (client, _) = client(
             .codexCLI,
             workDir: workDir,
@@ -349,10 +344,10 @@ import Testing
         } catch {
             #expect(error.localizedDescription.contains("no fake reply"))
         }
-        traffic.flush()
+        _ = await traffic.closeForTesting()
 
         let jsonl = try String(
-            contentsOf: workDir.appendingPathComponent(BrainTrafficLog.filename),
+            contentsOf: workDir.appendingPathComponent(FileSessionAudit.brainTrafficFilename),
             encoding: .utf8)
         #expect(jsonl.contains(#""record_kind":"provider_call""#))
         #expect(!jsonl.contains(#""record_kind":"pre_request_failure""#))
