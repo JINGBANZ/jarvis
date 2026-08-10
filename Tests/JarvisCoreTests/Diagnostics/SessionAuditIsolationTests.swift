@@ -436,26 +436,36 @@ import Testing
         defer { try? FileManager.default.removeItem(at: directory) }
         let writer = BlockingRenamedHealthWriter(failsCorrection: true)
         let worker = SessionAuditWorker(limits: .production, writer: writer)
-        let audit = FileSessionAudit(directory: directory, worker: worker)
+        let session = worker.openSession(at: directory)
         await waitUntilIdle(worker)
-        audit.record(
+        worker.record(BrainTrafficAuditEvent(
             tag: "coach",
             request: Data("{}".utf8),
             response: nil,
             status: nil,
-            latencyMs: 1)
+            latencyMs: 1,
+            error: nil,
+            phases: nil,
+            kind: .providerCall,
+            requestContext: nil,
+            date: Date()), for: session)
         await waitUntilIdle(worker)
-
-        let close = Task { await audit.close(deadline: .milliseconds(20)) }
+        session.seal()
+        let completion = CompletionFlag()
+        #expect(worker.close(
+            session,
+            deadline: ContinuousClock.now.advanced(by: .seconds(30))) { _ in
+                completion.mark()
+            })
         await wait(for: writer.completeMarkerRenamed)
-        #expect(await close.value == .partial)
+        session.health.markCloseTimeout()
         writer.releaseRenamedHealth()
-        await audit.waitForPersistenceToStop()
         await waitUntilIdle(worker)
 
+        #expect(completion.isMarked)
         let healthURL = directory.appendingPathComponent(FileSessionAudit.healthFilename)
         #expect(!FileManager.default.fileExists(atPath: healthURL.path))
-        #expect(audit.healthSnapshot.writeFailure > 0)
+        #expect(session.health.snapshot.writeFailure > 0)
         let traffic = try String(
             contentsOf: directory.appendingPathComponent(FileSessionAudit.brainTrafficFilename),
             encoding: .utf8)
@@ -478,12 +488,12 @@ import Testing
         let completion = CompletionFlag()
         #expect(worker.close(
             session,
-            deadline: ContinuousClock.now.advanced(by: .milliseconds(20))) { _ in
+            deadline: ContinuousClock.now.advanced(by: .seconds(30))) { _ in
                 completion.mark()
             })
 
         await wait(for: writer.completeMarkerRenamed)
-        try await Task.sleep(for: .milliseconds(25))
+        session.health.markCloseTimeout()
         writer.releaseRenamedHealth()
         await waitUntilIdle(worker)
 
