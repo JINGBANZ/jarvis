@@ -1264,3 +1264,22 @@
 - **Detail:** [architecture.md → Models and APIs](./architecture.md#models-and-apis),
   `Sources/JarvisCore/Coach/CoachHistory.swift`,
   `Sources/JarvisCore/Prompts/JarvisPrompts+HistorySummary.swift`.
+
+### 2026-08-10 — The reconnect benchmark faults only Jarvis's transcription transport
+
+- **Chose:** Make the explicit reconnect benchmark close only the active Jarvis transcription
+  WebSocket through `RealtimeTranscriber`'s normal failure path, hold its replacement while fixed
+  synthetic phrases enter the real replay buffer, then release it. Host Wi-Fi, Ethernet, VPNs, and
+  other processes stay online. Keep this live provider regression outside the normal test gate.
+- **Why:** The acceptance target is Jarvis's reconnect generation, buffering, replay, ordering, and
+  provider identity. A machine-wide outage adds manual coordination and disrupts unrelated work
+  without improving evidence for those boundaries. Starting at the transport-failure funnel keeps
+  the meaningful application path real while making the run repeatable and safe to automate.
+- **Rejected:** (a) Disabling a host interface or asking an operator to do so—too broad and
+  disruptive. (b) Firewall or proxy rules—still mutate shared machine networking and add cleanup
+  risk. (c) A mock-only test—it cannot prove the signed app's process tap, PCM replay, replacement
+  WebSocket, and live provider finalization work together. (d) Claiming this tests macOS outage
+  detection—the scoped trigger deliberately begins after that boundary.
+- **Detail:** [build-and-run.md → System-audio transcription benchmark](./build-and-run.md#system-audio-transcription-benchmark),
+  `Sources/JarvisApp/Capture/RealtimeTranscriber.swift`,
+  `Sources/JarvisApp/Benchmark/TranscriptionBenchmarkRunner+Reconnect.swift`.

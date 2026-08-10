@@ -148,23 +148,24 @@ commit latency. Apple owns its endpoint internally and reports readiness plus fi
 machine-readable contract and scoring stay in the Core source above rather than being duplicated in
 the wiki.
 
-`./scripts/transcription-benchmark.sh reconnect --confirm-network-interruption` is a separate,
-interactive validation for the OpenAI paths. It requires the operator to type a confirmation, then
-pauses for the operator to disable and restore networking for each model. The script never toggles an
-interface. Jarvis waits until the live session actually enters reconnecting, captures two ordered
-synthetic phrases during the outage, and passes only when the replacement generation produces both
-exactly once and in order, with buffered audio replayed, no replay eviction, and no provider/model
-fallback. This command is never part of the build or test gate.
+`./scripts/transcription-benchmark.sh reconnect` is a separate automated live validation for the
+OpenAI paths. For each model, the hidden runner closes only the current Jarvis transcription
+WebSocket through the normal transport-failure path and holds its replacement while two ordered
+synthetic phrases fill the real replay buffer. It then releases the hold and passes only when the
+replacement generation produces both phrases exactly once and in order, with buffered audio
+replayed, no replay eviction, and no provider/model fallback. Host Wi-Fi, Ethernet, VPNs, and every
+other process remain online. The scoped trigger starts at the transport-failure boundary, so this is
+an end-to-end regression of Jarvis's reconnect and replay behavior, not a test of macOS network-outage
+detection. This command makes real OpenAI requests and is never part of the build or test gate.
 
-Each run writes owner-only `summary.json`, `jarvis-debug.log`, progress, and reconnect handshake files
+Each run writes owner-only `summary.json`, `jarvis-debug.log`, and progress files
 under `.jarvis/transcription-benchmarks/<run>/`; the hidden runner prunes that tree before capture
 starts to the bounded limit in
 [`TranscriptionBenchmark.retainedRunCount`](../Sources/JarvisCore/Benchmark/TranscriptionBenchmark.swift).
 No captured PCM is written. The synthesized fixture files are temporary, live inside that same run
 directory, and are deleted before exit; a failed cleanup is explicit in the debug log. Standard mode
-can request System Audio Recording permission but does not require microphone permission. A live
-standard run and especially a reconnect run remain explicit operator actions, never autonomous
-validation steps.
+can request System Audio Recording permission but does not require microphone permission. Both live
+modes remain explicit commands, never autonomous validation steps.
 
 ## Live smoke checklist
 
@@ -190,8 +191,8 @@ the human-facing coaching record. The current validation priority lives in
   Activity.
 - Confirm saved screenshots exclude both overlay surfaces. Toggle each overlay in Settings, verify its
   controls and preview follow the toggle, and confirm the choice survives relaunch.
-- If validating realtime recovery, disconnect the network, say a unique phrase, reconnect, and confirm
-  the debug log reports buffered replay and the phrase appears exactly once after recovery.
+- Validate realtime recovery with `./scripts/transcription-benchmark.sh reconnect`; do not disable the
+  Mac's network connection. Confirm its summary reports both scoped-interruption phrases exactly once.
 - Choose **Stop Jarvis** and confirm Activity ends with `session ended by user`, with no later
   transcription or coaching events.
 - In Activity, choose the stopped session and click **Evaluate**. Confirm the button shows

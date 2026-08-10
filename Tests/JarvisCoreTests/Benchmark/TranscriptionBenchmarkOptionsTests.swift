@@ -39,20 +39,18 @@ struct TranscriptionBenchmarkOptionsTests {
         }
     }
 
-    @Test("reconnect mode requires both the repetition floor and explicit consent")
+    @Test("reconnect mode is scoped and keeps the repetition floor")
     func validatesReconnectSafetyArguments() throws {
         let repository = try makeRepository()
         defer { try? FileManager.default.removeItem(at: repository) }
         let output = repository.appendingPathComponent(
             ".jarvis/transcription-benchmarks/reconnect-run")
 
-        #expect(throws: (any Error).self) {
-            try TranscriptionBenchmarkOptions(arguments: arguments(
-                mode: "reconnect",
-                output: output,
-                repository: repository,
-                repetitions: "3"))
-        }
+        #expect(try TranscriptionBenchmarkOptions(arguments: arguments(
+            mode: "reconnect",
+            output: output,
+            repository: repository,
+            repetitions: "3")).mode == .reconnect)
         #expect(throws: (any Error).self) {
             try TranscriptionBenchmarkOptions(arguments: arguments(
                 mode: "standard",
@@ -60,14 +58,6 @@ struct TranscriptionBenchmarkOptionsTests {
                 repository: repository,
                 repetitions: "2"))
         }
-
-        var confirmed = arguments(
-            mode: "reconnect",
-            output: output,
-            repository: repository,
-            repetitions: "3")
-        confirmed.append("--benchmark-network-interruption-confirmed")
-        #expect(try TranscriptionBenchmarkOptions(arguments: confirmed).mode == .reconnect)
     }
 
     private func makeRepository() throws -> URL {

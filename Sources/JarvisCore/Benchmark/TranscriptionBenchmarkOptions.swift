@@ -56,12 +56,6 @@ public struct TranscriptionBenchmarkOptions: Sendable {
         guard repetitions >= 3 else {
             throw Failure.invalid("--benchmark-repetitions must be at least 3")
         }
-        if mode == .reconnect,
-           !arguments.contains("--benchmark-network-interruption-confirmed") {
-            throw Failure.invalid(
-                "reconnect mode requires --benchmark-network-interruption-confirmed")
-        }
-
         self.mode = mode
         outputDirectory = output
         repositoryDirectory = repository

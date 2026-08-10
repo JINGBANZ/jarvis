@@ -117,7 +117,8 @@ final class SyntheticSpeechFixtures {
             "--voice", phrase.voice,
             "--rate", "175",
             "--output-file", url.path,
-            "--data-format=LEI16@48000",
+            // AIFF stores linear PCM in big-endian order; `say` rejects a little-endian format.
+            "--data-format=BEI16@48000",
             phrase.text,
         ]
         process.standardOutput = FileHandle.nullDevice
@@ -131,17 +132,18 @@ final class SyntheticSpeechFixtures {
 
     private static func writeSilence(duration: TimeInterval, to url: URL) throws {
         guard let format = AVAudioFormat(
-            commonFormat: .pcmFormatInt16,
-            sampleRate: 48_000,
-            channels: 1,
-            interleaved: false),
+            standardFormatWithSampleRate: 48_000,
+            channels: 1),
               let buffer = AVAudioPCMBuffer(
                 pcmFormat: format,
-                frameCapacity: AVAudioFrameCount(duration * format.sampleRate)) else {
+                frameCapacity: AVAudioFrameCount(duration * format.sampleRate)),
+              let samples = buffer.floatChannelData?[0] else {
             throw Failure.invalidAudioFormat
         }
         buffer.frameLength = buffer.frameCapacity
-        buffer.int16ChannelData?[0].initialize(repeating: 0, count: Int(buffer.frameLength))
+        // Match AVAudioFile's standard float processing format. Passing an integer buffer to the
+        // writer's float conversion path aborts inside AudioToolbox on macOS 26 instead of throwing.
+        samples.initialize(repeating: 0, count: Int(buffer.frameLength))
         let file = try AVAudioFile(forWriting: url, settings: format.settings)
         try file.write(from: buffer)
     }

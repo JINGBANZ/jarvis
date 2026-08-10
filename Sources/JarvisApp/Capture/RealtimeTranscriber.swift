@@ -69,6 +69,9 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
     private var jarvisManagedSpeechBuffer: SpeechGatedAudioBuffer?
     private var reconnectAttempt = 0
     private var isReconnecting = false
+    /// The explicit benchmark may hold only this transcription transport offline while it fills the
+    /// real replay buffer. Host Wi-Fi, Ethernet, VPNs, and every other process remain untouched.
+    private var benchmarkTransportInterruptionHeld = false
     private var stopped = false
     private var connected = false        // true only between "session ready" and the next drop/close
     private var everConnected = false    // distinguishes the first connect from a reconnect
@@ -180,6 +183,7 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         // Start clean: clear the stopped flag AND any stale backoff state from a prior session.
         lock.lock()
         stopped = false; reconnectAttempt = 0; isReconnecting = false; rotating = false
+        benchmarkTransportInterruptionHeld = false
         terminalFailureReported = false
         pendingAudioTimelineOrigin = 0; activeAudioTimelineOrigin = 0
         jarvisManagedTurnCoordinator?.clear()
@@ -227,7 +231,7 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
 
     func stop() {
         lock.lock()
-        stopped = true; connected = false
+        stopped = true; connected = false; benchmarkTransportInterruptionHeld = false
         let pt = pingTimer; pingTimer = nil
         let rt = readyTimer; readyTimer = nil
         let pot = pongTimer; pongTimer = nil
@@ -834,6 +838,33 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
 
     // MARK: - Reconnect / keepalive
 
+    /// Trips only this transcription WebSocket through the same failure path used by real transport
+    /// errors. Reconnection stays held until the benchmark has captured its fixed replay fixtures;
+    /// this never changes host network state or affects another process.
+    @discardableResult
+    func beginBenchmarkTransportInterruption() -> Bool {
+        lock.lock()
+        guard let currentTask = task, connected, !stopped, !isReconnecting else {
+            lock.unlock()
+            return false
+        }
+        benchmarkTransportInterruptionHeld = true
+        let socketGeneration = generation
+        lock.unlock()
+
+        failConnection(
+            task: currentTask,
+            generation: socketGeneration,
+            diagnostic: "benchmark interrupted this transcription transport")
+        return true
+    }
+
+    func endBenchmarkTransportInterruption() {
+        lock.lock()
+        benchmarkTransportInterruptionHeld = false
+        lock.unlock()
+    }
+
     func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask,
                     didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
         lock.lock()
@@ -943,14 +974,32 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         emitState(.reconnecting(attempt: attempt + 1))
 
         DispatchQueue.main.asyncAfter(deadline: .now() + retryDelay) { [weak self] in
-            guard let self else { return }
-            self.lock.lock()
-            let shouldReconnect = !self.stopped && self.generation == failedGeneration
-            self.lock.unlock()
-            guard shouldReconnect else { return }
-            jlog("Jarvis realtime [\(self.speaker.rawValue)]: reconnecting (attempt \(attempt + 1))")
-            self.openSocket()
+            self?.openReplacementSocketWhenAllowed(
+                failedGeneration: failedGeneration,
+                attempt: attempt)
         }
+    }
+
+    private func openReplacementSocketWhenAllowed(
+        failedGeneration: Int,
+        attempt: Int
+    ) {
+        lock.lock()
+        let heldForBenchmark = benchmarkTransportInterruptionHeld
+        let shouldReconnect = !stopped && generation == failedGeneration
+            && task == nil && isReconnecting
+        lock.unlock()
+        guard shouldReconnect else { return }
+        if heldForBenchmark {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+                self?.openReplacementSocketWhenAllowed(
+                    failedGeneration: failedGeneration,
+                    attempt: attempt)
+            }
+            return
+        }
+        jlog("Jarvis realtime [\(speaker.rawValue)]: reconnecting (attempt \(attempt + 1))")
+        openSocket()
     }
 
     private func armReadyTimeout(task: URLSessionWebSocketTask, generation socketGeneration: Int) {

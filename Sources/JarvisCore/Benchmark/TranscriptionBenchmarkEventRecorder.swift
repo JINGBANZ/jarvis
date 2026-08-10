@@ -18,7 +18,7 @@ public final class TranscriptionBenchmarkEventRecorder: @unchecked Sendable {
             switch self {
             case .timedOut(let boundary): "Timed out waiting for \(boundary)"
             case .terminal(let reason): "Transcription failed: \(reason.activityDescription)"
-            case .aborted: "Reconnect benchmark aborted by the operator"
+            case .aborted: "Reconnect benchmark aborted"
             }
         }
     }
@@ -74,7 +74,10 @@ public final class TranscriptionBenchmarkEventRecorder: @unchecked Sendable {
     }
 
     public func waitForReconnect(timeout: TimeInterval) async throws {
-        _ = try await wait(timeout: timeout, boundary: "the observed network outage") { snapshot in
+        _ = try await wait(
+            timeout: timeout,
+            boundary: "the scoped transcription transport interruption"
+        ) { snapshot in
             snapshot.states.contains {
                 if case .reconnecting = $0 { return true }
                 return false

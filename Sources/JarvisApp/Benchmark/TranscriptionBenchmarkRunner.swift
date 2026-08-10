@@ -7,8 +7,8 @@ final class TranscriptionBenchmarkRunner {
         case apiKeyUnavailable
         case appleSpeechUnavailable(String)
         case missingFixture(String)
-        case operatorAborted
-        case operatorTimedOut(String)
+        case benchmarkAborted
+        case transportInterruptionUnavailable
         case acceptanceFailed(String)
 
         var description: String {
@@ -17,8 +17,9 @@ final class TranscriptionBenchmarkRunner {
                 "OpenAI API key unavailable in the owner-only key file or OPENAI_API_KEY"
             case .appleSpeechUnavailable(let detail): "Apple Speech unavailable: \(detail)"
             case .missingFixture(let id): "Missing benchmark fixture \(id)"
-            case .operatorAborted: "Reconnect benchmark aborted by the operator"
-            case .operatorTimedOut(let phase): "Timed out waiting for operator confirmation: \(phase)"
+            case .benchmarkAborted: "Reconnect benchmark aborted"
+            case .transportInterruptionUnavailable:
+                "Could not interrupt the active transcription transport"
             case .acceptanceFailed(let detail): "Benchmark acceptance failed: \(detail)"
             }
         }
