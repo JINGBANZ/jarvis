@@ -53,6 +53,13 @@ struct SessionAuditFileWriter: SessionAuditWriting {
         return shouldCommit()
     }
 
+    func invalidateHealth(in directory: URL) throws {
+        let path = directory.appendingPathComponent(FileSessionAudit.healthFilename).path
+        guard unlink(path) == 0 || errno == ENOENT else {
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+        }
+    }
+
     private func createOwnerOnlyFile(_ url: URL) throws {
         guard FileManager.default.createFile(
             atPath: url.path,

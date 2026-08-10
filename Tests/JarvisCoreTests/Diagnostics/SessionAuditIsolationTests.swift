@@ -64,6 +64,10 @@ import Testing
             try backing.replaceHealth(data, in: directory, shouldCommit: shouldCommit)
         }
 
+        func invalidateHealth(in directory: URL) throws {
+            try backing.invalidateHealth(in: directory)
+        }
+
         func releaseOpen() {
             release.signal()
         }
@@ -99,6 +103,10 @@ import Testing
         ) throws -> Bool {
             try backing.replaceHealth(data, in: directory, shouldCommit: shouldCommit)
         }
+
+        func invalidateHealth(in directory: URL) throws {
+            try backing.invalidateHealth(in: directory)
+        }
     }
 
     /// Fails before either JSONL file exists, but still permits the close marker to be installed.
@@ -123,6 +131,10 @@ import Testing
             shouldCommit: @Sendable () -> Bool
         ) throws -> Bool {
             try backing.replaceHealth(data, in: directory, shouldCommit: shouldCommit)
+        }
+
+        func invalidateHealth(in directory: URL) throws {
+            try backing.invalidateHealth(in: directory)
         }
     }
 
@@ -168,6 +180,10 @@ import Testing
                 shouldCommit: shouldCommit)
         }
 
+        func invalidateHealth(in directory: URL) throws {
+            try backing.invalidateHealth(in: directory)
+        }
+
         func releaseFinalHealth() {
             release.signal()
         }
@@ -175,12 +191,22 @@ import Testing
 
     /// Parks the writer's second commit check, which occurs only after the atomic rename returned.
     private final class BlockingRenamedHealthWriter: SessionAuditWriting, @unchecked Sendable {
+        enum Failure: Error { case injected }
+
         let completeMarkerRenamed = DispatchSemaphore(value: 0)
         private let release = DispatchSemaphore(value: 0)
         private let lock = NSLock()
         private let backing = SessionAuditFileWriter()
+        private let failsCorrection: Bool
+        private let failsInvalidation: Bool
         private var checkCount = 0
         private var hasBlocked = false
+        private var didFailCorrection = false
+
+        init(failsCorrection: Bool = false, failsInvalidation: Bool = false) {
+            self.failsCorrection = failsCorrection
+            self.failsInvalidation = failsInvalidation
+        }
 
         func openSession(at directory: URL, initialHealth: Data) throws {
             try backing.openSession(at: directory, initialHealth: initialHealth)
@@ -195,7 +221,14 @@ import Testing
             in directory: URL,
             shouldCommit: @Sendable () -> Bool
         ) throws -> Bool {
-            try backing.replaceHealth(data, in: directory) { [self] in
+            let shouldFail = lock.withLock {
+                guard failsCorrection, hasBlocked, !didFailCorrection else { return false }
+                didFailCorrection = true
+                return true
+            }
+            if shouldFail { throw Failure.injected }
+
+            return try backing.replaceHealth(data, in: directory) { [self] in
                 let shouldBlock = lock.withLock {
                     checkCount += 1
                     guard checkCount == 2, !hasBlocked else { return false }
@@ -208,6 +241,11 @@ import Testing
                 }
                 return shouldCommit()
             }
+        }
+
+        func invalidateHealth(in directory: URL) throws {
+            if failsInvalidation { throw Failure.injected }
+            try backing.invalidateHealth(in: directory)
         }
 
         func releaseRenamedHealth() {
@@ -391,6 +429,67 @@ import Testing
         let marker = try healthMarker(in: directory)
         #expect(marker["state"] as? String == "partial")
         #expect((marker["close_timeout"] as? Int ?? 0) > 0)
+    }
+
+    @Test func failedCorrectiveHealthWriteInvalidatesRejectedCompleteMarker() async throws {
+        let directory = ActivityLogTests.tmp()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let writer = BlockingRenamedHealthWriter(failsCorrection: true)
+        let worker = SessionAuditWorker(limits: .production, writer: writer)
+        let audit = FileSessionAudit(directory: directory, worker: worker)
+        await waitUntilIdle(worker)
+        audit.record(
+            tag: "coach",
+            request: Data("{}".utf8),
+            response: nil,
+            status: nil,
+            latencyMs: 1)
+        await waitUntilIdle(worker)
+
+        let close = Task { await audit.close(deadline: .milliseconds(20)) }
+        await wait(for: writer.completeMarkerRenamed)
+        #expect(await close.value == .partial)
+        writer.releaseRenamedHealth()
+        await audit.waitForPersistenceToStop()
+        await waitUntilIdle(worker)
+
+        let healthURL = directory.appendingPathComponent(FileSessionAudit.healthFilename)
+        #expect(!FileManager.default.fileExists(atPath: healthURL.path))
+        #expect(audit.healthSnapshot.writeFailure > 0)
+        let traffic = try String(
+            contentsOf: directory.appendingPathComponent(FileSessionAudit.brainTrafficFilename),
+            encoding: .utf8)
+        #expect(SessionAuditEvidence.assess(
+            trafficJSONL: traffic,
+            attemptsJSONL: "",
+            healthJSON: nil).isPartial)
+    }
+
+    @Test func failedHealthInvalidationWithholdsSettlement() async throws {
+        let directory = ActivityLogTests.tmp()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let writer = BlockingRenamedHealthWriter(
+            failsCorrection: true,
+            failsInvalidation: true)
+        let worker = SessionAuditWorker(limits: .production, writer: writer)
+        let session = worker.openSession(at: directory)
+        await waitUntilIdle(worker)
+        session.seal()
+        let completion = CompletionFlag()
+        #expect(worker.close(
+            session,
+            deadline: ContinuousClock.now.advanced(by: .milliseconds(20))) { _ in
+                completion.mark()
+            })
+
+        await wait(for: writer.completeMarkerRenamed)
+        try await Task.sleep(for: .milliseconds(25))
+        writer.releaseRenamedHealth()
+        await waitUntilIdle(worker)
+
+        #expect(!completion.isMarked)
+        let marker = try healthMarker(in: directory)
+        #expect(marker["state"] as? String == "complete")
     }
 
     @Test func openFailureDisablesCaptureAndIsVisibleInHealthMarker() async throws {

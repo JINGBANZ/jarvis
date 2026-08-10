@@ -1375,7 +1375,9 @@
   also joins any drain retained from an immediately preceding Stop; if work cannot drain, the
   still-open marker remains explicitly partial. A close deadline may classify evidence before a
   blocked filesystem operation returns, so regular Stop keeps Evaluate disabled until the worker's
-  separate settlement signal confirms that the final or corrective marker is stable.
+  separate settlement signal confirms that the final or corrective marker is stable, or that a
+  rejected marker has been safely invalidated. Failed invalidation withholds settlement instead of
+  exposing ambiguous evidence.
 - **Why:** Moving work to a per-session serial queue removed JSON and disk work from most callbacks but
   did not bound retained payloads, make admission structurally nonblocking, contain a failed writer, or
   let Stop distinguish complete evidence from a timeout. Coaching latency and restart availability

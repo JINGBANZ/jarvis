@@ -56,7 +56,7 @@ the replacement, so work still unwinding from the old session cannot contaminate
 
 | Transition | Behavior |
 |---|---|
-| Regular Stop or runtime teardown | Cancel active turns, wait for their final audit admissions asynchronously, then close the old audit under its deadline. A replacement Start does not wait, while Evaluate remains disabled until the worker has stopped mutating that session even when the close deadline reports partial. |
+| Regular Stop or runtime teardown | Cancel active turns, wait for their final audit admissions asynchronously, then close the old audit under its deadline. A replacement Start does not wait, while Evaluate remains disabled until the worker has established a trustworthy final state even when the close deadline reports partial. |
 | Application Quit | Ask AppKit to defer termination, cancel active turns, and await a bounded drain without blocking the main actor. Include any audit still closing after an immediately preceding Stop, then close the current audit before replying that termination may continue; if work cannot drain, its open marker remains deliberately partial. |
 | Evaluate | Read a stopped session only after its regular close finishes; interpret the health marker before presenting deterministic totals. |
 
@@ -64,13 +64,17 @@ Closing seals the session against later events, drains events already ahead of t
 and durably replaces the health marker before reporting success. The filesystem edge prepares the
 replacement privately, then checks the close deadline and current health immediately before and
 after its atomic rename. If preparation or the rename crosses the deadline, the worker replaces the
-candidate with partial evidence. Application Quit uses this same asynchronous close while AppKit
-holds termination, so main-actor cleanup can continue and the process does not exit early.
+candidate with partial evidence. If that correction fails, it removes the rejected marker so the
+evaluator sees a missing completion marker instead of stale “complete” evidence. Application Quit
+uses this same asynchronous close while AppKit holds termination, so main-actor cleanup can continue
+and the process does not exit early.
 
 The close deadline bounds how long its caller waits for a complete result; it cannot stop a filesystem
 operation already in progress. A separate settlement signal fires only after the serial worker has
-finished the final or corrective marker write. Regular Stop retains that settlement task, keeping
-Evaluate unavailable until the session directory is stable.
+finished the final or corrective marker write, or has safely invalidated a rejected marker. If even
+invalidation fails, settlement remains pending and Evaluate stays unavailable rather than trusting
+ambiguous evidence. Regular Stop retains that settlement task until the session directory is safe
+to read.
 
 ## Failure Semantics
 
@@ -81,6 +85,8 @@ Audit persistence is deliberately weaker than coaching:
 - An open, write, or serialization failure disables further persistence for that session instead of
   repeatedly exercising a broken edge.
 - A late event or close deadline miss makes evidence partial.
+- A failed corrective health write removes the rejected marker; new-format records without that
+  marker are partial. If the marker cannot be removed, the session remains unevaluable.
 - The health marker records the surviving failure facts when the filesystem is still usable, and
   the evaluator labels affected totals as lower bounds rather than silently treating missing records
   as zero.
@@ -111,7 +117,7 @@ from prose, `stay_silent`, or Activity copy.
 | Evaluator completeness interpretation | `SessionAuditEvidence.swift`, `EvaluationTranscript.swift`, `SessionMetrics.swift`, `TriggerQualityMetrics.swift` |
 
 Deterministic parked and failing writers exercise overload, blocked I/O, deadline crossing, open and
-write failure, serialization failure, both final-commit deadline crossings, and behavioral
-equivalence in
+write failure, serialization failure, both final-commit deadline crossings, failed correction
+invalidation, and behavioral equivalence in
 [`SessionAuditIsolationTests`](../Tests/JarvisCoreTests/Diagnostics/SessionAuditIsolationTests.swift).
 The repository gate remains `swift build && ./scripts/run-tests.sh`.

@@ -146,6 +146,10 @@ final class SessionAuditWorker: @unchecked Sendable {
         case mismatchedAttemptEvidence
     }
 
+    private enum HealthPersistenceError: Error {
+        case rejectedReplacement
+    }
+
     private enum Admission {
         /// Provider and coach callbacks must drop immediately if another ingress owns the ring.
         case bestEffortRecord
@@ -425,8 +429,6 @@ final class SessionAuditWorker: @unchecked Sendable {
                 }
             } catch {
                 session.health.markWriteFailure()
-                completion(.partial)
-                return
             }
         }
 
@@ -435,13 +437,22 @@ final class SessionAuditWorker: @unchecked Sendable {
         }
         snapshot = session.health.snapshot
         do {
-            _ = try writer.replaceHealth(
+            let committed = try writer.replaceHealth(
                 try healthData(state: "partial", closed: true, snapshot: snapshot),
                 in: session.directory) { true }
+            guard committed else { throw HealthPersistenceError.rejectedReplacement }
+            completion(.partial)
         } catch {
             session.health.markWriteFailure()
+            do {
+                try writer.invalidateHealth(in: session.directory)
+                completion(.partial)
+            } catch {
+                // Do not signal settlement while a rejected complete marker might still be canonical.
+                // Regular Stop deliberately keeps Evaluate disabled in this unrecoverable disk state.
+                session.health.markWriteFailure()
+            }
         }
-        completion(.partial)
     }
 
     private func encodeTraffic(_ event: BrainTrafficAuditEvent) throws -> Data {

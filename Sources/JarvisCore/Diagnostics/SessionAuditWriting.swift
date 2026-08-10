@@ -13,4 +13,7 @@ protocol SessionAuditWriting: Sendable {
         in directory: URL,
         shouldCommit: @Sendable () -> Bool
     ) throws -> Bool
+    /// Remove a marker that can no longer be trusted. A missing marker is evaluator-visible partial
+    /// evidence, so this is the safe fallback when a corrective replacement cannot be persisted.
+    func invalidateHealth(in directory: URL) throws
 }
