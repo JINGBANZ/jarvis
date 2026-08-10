@@ -101,17 +101,21 @@ public extension TranscriptionBenchmark {
             $0.observedAt < $1.observedAt
         }
         let initialGeneration = readyEvents.first?.generation
-        let finals = initialGeneration.map {
-            reconnectFinals(in: events, afterGeneration: $0)
+        let replacementGeneration = initialGeneration.flatMap { initialGeneration in
+            readyEvents.first { $0.generation > initialGeneration }?.generation
+        }
+        let finals = replacementGeneration.map {
+            reconnectFinals(in: events, generation: $0)
         } ?? []
         let finalTexts = finals.compactMap(\.text)
-        let finalPhraseIDs = initialGeneration.map {
+        let finalPhraseIDs = replacementGeneration.map {
             recognizedReconnectPhraseIDs(
                 phraseIDs,
                 in: events,
-                afterGeneration: $0)
+                generation: $0)
         } ?? []
-        let exactlyOnce = phraseIDs.allSatisfy { expected in
+        let exactlyOnce = finals.count == phraseIDs.count
+            && phraseIDs.allSatisfy { expected in
             finalPhraseIDs.count(where: { $0 == expected }) == 1
         } && finalPhraseIDs.count == phraseIDs.count
         let ordered = finalPhraseIDs == phraseIDs
@@ -120,13 +124,28 @@ public extension TranscriptionBenchmark {
                 && $0.model == model.rawValue
         }
         let readyGenerations = Array(Set(readyEvents.map(\.generation))).sorted()
-        let replayEvents = events.filter {
-            $0.kind == .reconnectPrepared || $0.kind == .ready
-        }
+        // The successful replacement-ready event reports the FIFO actually replayed into the
+        // generation whose finals are scored. Earlier or later reconnect hops cannot lend evidence
+        // to this one acceptance result.
+        let replayEvents = replacementGeneration.map { replacementGeneration in
+            events.filter {
+                $0.kind == .ready && $0.generation == replacementGeneration
+            }
+        } ?? []
+        let reconnectPreparedEvents = initialGeneration.map { initialGeneration in
+            events.filter {
+                $0.kind == .reconnectPrepared && $0.generation == initialGeneration
+            }
+        } ?? []
         let replayedChunks = replayEvents.compactMap(\.replayedChunks).max() ?? 0
-        let bufferEvictionEvents = events.filter { $0.kind == .bufferEviction }
+        let bufferEvictionEvents = events.filter { event in
+            guard let initialGeneration, let replacementGeneration else { return false }
+            return event.kind == .bufferEviction
+                && event.generation >= initialGeneration
+                && event.generation <= replacementGeneration
+        }
         let evictedChunks = bufferEvictionEvents.isEmpty
-            ? replayEvents.compactMap(\.evictedChunks).reduce(0, +)
+            ? reconnectPreparedEvents.compactMap(\.evictedChunks).reduce(0, +)
             : bufferEvictionEvents.compactMap(\.evictedChunks).reduce(0, +)
         let captureSequenceGapCount = sequenceGapCount(captureObservations)
         let capturedSampleCount = captureObservations.reduce(0) { $0 + $1.sampleCount }
@@ -136,7 +155,7 @@ public extension TranscriptionBenchmark {
             && replayedChunks > 0
             && evictedChunks == 0
         let passed = failure == nil
-            && readyGenerations.count >= 2
+            && readyGenerations.count == 2
             && exactlyOnce
             && ordered
             && noFallback
@@ -197,12 +216,12 @@ public extension TranscriptionBenchmark {
     static func recognizedReconnectPhraseIDs(
         _ phraseIDs: [String],
         in events: [TranscriptionDiagnosticEvent],
-        afterGeneration generation: Int
+        generation: Int
     ) -> [String] {
         let expectedPhrases = phraseIDs.compactMap { id in
             phrases.first { $0.id == id }
         }
-        return reconnectFinals(in: events, afterGeneration: generation).compactMap { event in
+        return reconnectFinals(in: events, generation: generation).compactMap { event in
             guard let text = event.text else { return nil }
             return recognizedPhraseID(for: text, among: expectedPhrases)
         }
@@ -232,12 +251,12 @@ public extension TranscriptionBenchmark {
 
     private static func reconnectFinals(
         in events: [TranscriptionDiagnosticEvent],
-        afterGeneration generation: Int
+        generation: Int
     ) -> [TranscriptionDiagnosticEvent] {
         events.filter { event in
             event.kind == .finalized
                 && event.text?.isEmpty == false
-                && event.generation > generation
+                && event.generation == generation
         }.sorted {
             ($0.spokenAt ?? $0.observedAt) < ($1.spokenAt ?? $1.observedAt)
         }

@@ -1,17 +1,16 @@
 import Foundation
-import JarvisCore
 
-struct TranscriptionBenchmarkOptions: Sendable {
-    enum Mode: String, Sendable {
+public struct TranscriptionBenchmarkOptions: Sendable {
+    public enum Mode: String, Sendable {
         case standard
         case reconnect
     }
 
-    enum Failure: Error, CustomStringConvertible {
+    public enum Failure: Error, CustomStringConvertible {
         case missing(String)
         case invalid(String)
 
-        var description: String {
+        public var description: String {
             switch self {
             case .missing(let name): "Missing benchmark argument: \(name)"
             case .invalid(let detail): "Invalid benchmark arguments: \(detail)"
@@ -19,16 +18,16 @@ struct TranscriptionBenchmarkOptions: Sendable {
         }
     }
 
-    let mode: Mode
-    let outputDirectory: URL
-    let repositoryDirectory: URL
-    let repetitions: Int
+    public let mode: Mode
+    public let outputDirectory: URL
+    public let repositoryDirectory: URL
+    public let repetitions: Int
 
-    static var isRequested: Bool {
+    public static var isRequested: Bool {
         CommandLine.arguments.contains("--transcription-benchmark")
     }
 
-    init(arguments: [String] = CommandLine.arguments) throws {
+    public init(arguments: [String] = CommandLine.arguments) throws {
         guard let rawMode = Self.value(after: "--benchmark-mode", in: arguments),
               let mode = Mode(rawValue: rawMode) else {
             throw Failure.missing("--benchmark-mode standard|reconnect")

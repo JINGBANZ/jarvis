@@ -95,6 +95,8 @@ show_failure_if_present() {
   return 1
 }
 
+APP_EXIT_STATUS="$RUN_DIR/app-launcher-exit"
+
 wait_for_file() {
   local expected="$1"
   while [[ ! -f "$expected" ]]; do
@@ -104,6 +106,11 @@ wait_for_file() {
     if [[ -f "$RUN_DIR/summary.json" ]]; then
       echo "Reconnect run ended before requesting $(basename "$expected")." >&2
       echo "Inspect $RUN_DIR/summary.json for the recorded failure." >&2
+      return 1
+    fi
+    if [[ -f "$APP_EXIT_STATUS" ]]; then
+      echo "Benchmark app exited before requesting $(basename "$expected") " \
+        "(launcher status $(sed -n '1p' "$APP_EXIT_STATUS"))." >&2
       return 1
     fi
     sleep 0.2
@@ -130,9 +137,18 @@ else
   }
   trap abort_run INT TERM
 
-  # `open -W` keeps a waitable launcher alive until the hidden app exits. The signal trap writes the
-  # app's abort marker, then reaps this waiter so the command cannot return while capture continues.
-  open -W -n ./Jarvis.app --args "${COMMON_ARGS[@]}" &
+  # `open -W` keeps a waitable launcher alive until the hidden app exits. Its wrapper publishes the
+  # exit status atomically so a failed app cannot strand an operator-marker wait. The signal trap
+  # writes the app's abort marker, then reaps this waiter so capture cannot outlive the command.
+  (
+    set +e
+    open -W -n ./Jarvis.app --args "${COMMON_ARGS[@]}"
+    LAUNCH_STATUS=$?
+    set -e
+    printf '%s\n' "$LAUNCH_STATUS" > "$APP_EXIT_STATUS.tmp"
+    mv "$APP_EXIT_STATUS.tmp" "$APP_EXIT_STATUS"
+    exit "$LAUNCH_STATUS"
+  ) &
   APP_WAITER_PID=$!
 
   MODELS=(gpt-4o-transcribe gpt-transcribe gpt-live-transcribe)

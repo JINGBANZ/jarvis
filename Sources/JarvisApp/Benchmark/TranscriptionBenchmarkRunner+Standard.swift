@@ -81,10 +81,10 @@ extension TranscriptionBenchmarkRunner {
             try await Task.sleep(for: .milliseconds(150))
             speechEndedAt = try await player.play(fixture.fileURL).endedAt
             _ = try await player.play(silenceURL)
-            try await recorder.waitForFinals(count: 1, timeout: 20)
-            // Diagnostic callbacks have their own queue; let the final callback already observed by
-            // the waiter settle before taking the one immutable repetition snapshot.
-            try await Task.sleep(for: .milliseconds(100))
+            try await recorder.waitForFinalStreamToSettle(
+                minimumCount: 1,
+                quietPeriod: 1,
+                timeout: 20)
         } catch {
             failure = String(describing: error)
             jlog("Jarvis benchmark: repetition failed (\(arm.id) #\(repetition)): \(error)")

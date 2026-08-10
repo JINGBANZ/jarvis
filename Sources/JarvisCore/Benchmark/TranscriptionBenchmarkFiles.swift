@@ -1,7 +1,7 @@
 import Foundation
 
-enum TranscriptionBenchmarkFiles {
-    static func prepareOutputDirectory(_ directory: URL) throws {
+public enum TranscriptionBenchmarkFiles {
+    public static func prepareOutputDirectory(_ directory: URL) throws {
         try FileManager.default.createDirectory(
             at: directory,
             withIntermediateDirectories: true,
@@ -11,11 +11,11 @@ enum TranscriptionBenchmarkFiles {
             ofItemAtPath: directory.path)
     }
 
-    static func write(_ data: Data, named name: String, to directory: URL) throws {
+    public static func write(_ data: Data, named name: String, to directory: URL) throws {
         let directory = directory.standardizedFileURL
         let url = directory.appendingPathComponent(name).standardizedFileURL
         guard !name.isEmpty,
-              url.deletingLastPathComponent() == directory,
+              url.deletingLastPathComponent().path == directory.path,
               url.lastPathComponent == name else {
             throw CocoaError(.fileWriteInvalidFileName)
         }
@@ -34,11 +34,11 @@ enum TranscriptionBenchmarkFiles {
         }
     }
 
-    static func writeText(_ text: String, named name: String, to directory: URL) throws {
+    public static func writeText(_ text: String, named name: String, to directory: URL) throws {
         try write(Data(text.utf8), named: name, to: directory)
     }
 
-    static func writeFailure(_ message: String, to directory: URL) {
+    public static func writeFailure(_ message: String, to directory: URL) {
         let object: [String: Any] = [
             "schemaVersion": 1,
             "status": "failed",
@@ -51,7 +51,7 @@ enum TranscriptionBenchmarkFiles {
         try? write(data, named: "benchmark-error.json", to: directory)
     }
 
-    static func writeProgress(
+    public static func writeProgress(
         phase: String,
         model: String? = nil,
         detail: String? = nil,
@@ -66,7 +66,7 @@ enum TranscriptionBenchmarkFiles {
         try? write(data, named: "progress.json", to: directory)
     }
 
-    static func createMarker(named name: String, in directory: URL) throws {
+    public static func createMarker(named name: String, in directory: URL) throws {
         try write(Data(), named: name, to: directory)
     }
 }

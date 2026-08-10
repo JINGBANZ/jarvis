@@ -1,21 +1,20 @@
 import Foundation
-import JarvisCore
 
 /// `@unchecked Sendable`: every mutable observation array and terminal state is guarded by `lock`.
-final class TranscriptionBenchmarkEventRecorder: @unchecked Sendable {
-    struct Snapshot: Sendable {
-        let events: [TranscriptionDiagnosticEvent]
-        let captureObservations: [TranscriptionBenchmark.CaptureObservation]
-        let states: [TranscriptionConnectionState]
-        let terminalFailure: TranscriptionFailureReason?
+public final class TranscriptionBenchmarkEventRecorder: @unchecked Sendable {
+    public struct Snapshot: Sendable {
+        public let events: [TranscriptionDiagnosticEvent]
+        public let captureObservations: [TranscriptionBenchmark.CaptureObservation]
+        public let states: [TranscriptionConnectionState]
+        public let terminalFailure: TranscriptionFailureReason?
     }
 
-    enum Failure: Error, CustomStringConvertible {
+    public enum Failure: Error, CustomStringConvertible {
         case timedOut(String)
         case terminal(TranscriptionFailureReason)
         case aborted
 
-        var description: String {
+        public var description: String {
             switch self {
             case .timedOut(let boundary): "Timed out waiting for \(boundary)"
             case .terminal(let reason): "Transcription failed: \(reason.activityDescription)"
@@ -31,30 +30,30 @@ final class TranscriptionBenchmarkEventRecorder: @unchecked Sendable {
     private var states: [TranscriptionConnectionState] = []
     private var terminalFailure: TranscriptionFailureReason?
 
-    init(abortMarker: URL? = nil) {
+    public init(abortMarker: URL? = nil) {
         self.abortMarker = abortMarker
     }
 
-    func record(_ event: TranscriptionDiagnosticEvent) {
+    public func record(_ event: TranscriptionDiagnosticEvent) {
         lock.lock(); events.append(event); lock.unlock()
     }
 
-    func record(_ state: TranscriptionConnectionState) {
+    public func record(_ state: TranscriptionConnectionState) {
         lock.lock(); states.append(state); lock.unlock()
     }
 
-    func recordCapture(sequence: UInt64, samples: Int) {
+    public func recordCapture(sequence: UInt64, samples: Int) {
         lock.lock()
         captureObservations.append(.init(
             sequenceNumber: sequence, sampleCount: samples))
         lock.unlock()
     }
 
-    func record(_ failure: TranscriptionFailureReason) {
+    public func record(_ failure: TranscriptionFailureReason) {
         lock.lock(); terminalFailure = failure; lock.unlock()
     }
 
-    func snapshot() -> Snapshot {
+    public func snapshot() -> Snapshot {
         lock.lock(); defer { lock.unlock() }
         return Snapshot(
             events: events,
@@ -63,7 +62,7 @@ final class TranscriptionBenchmarkEventRecorder: @unchecked Sendable {
             terminalFailure: terminalFailure)
     }
 
-    func waitForReady(
+    public func waitForReady(
         minimumGeneration: Int = 0,
         timeout: TimeInterval
     ) async throws -> TranscriptionDiagnosticEvent {
@@ -74,7 +73,7 @@ final class TranscriptionBenchmarkEventRecorder: @unchecked Sendable {
         }
     }
 
-    func waitForReconnect(timeout: TimeInterval) async throws {
+    public func waitForReconnect(timeout: TimeInterval) async throws {
         _ = try await wait(timeout: timeout, boundary: "the observed network outage") { snapshot in
             snapshot.states.contains {
                 if case .reconnecting = $0 { return true }
@@ -83,15 +82,45 @@ final class TranscriptionBenchmarkEventRecorder: @unchecked Sendable {
         } as Bool
     }
 
-    func waitForFinals(count: Int, timeout: TimeInterval) async throws {
+    public func waitForFinals(count: Int, timeout: TimeInterval) async throws {
         _ = try await wait(timeout: timeout, boundary: "\(count) finalized transcript(s)") { snapshot in
             snapshot.events.count(where: { $0.kind == .finalized }) >= count ? true : nil
         } as Bool
     }
 
-    func waitForRecognizedReconnectPhrases(
+    /// Waits until at least `minimumCount` finals have arrived and no additional final has been
+    /// observed for `quietPeriod`. Providers may split one fixture across multiple finalized items,
+    /// so the standard benchmark cannot treat the first callback as the complete transcript.
+    public func waitForFinalStreamToSettle(
+        minimumCount: Int,
+        quietPeriod: TimeInterval,
+        timeout: TimeInterval
+    ) async throws {
+        let deadline = Date().timeIntervalSince1970 + timeout
+        var observedFinalCount: Int?
+        var lastChangeAt: TimeInterval?
+        while Date().timeIntervalSince1970 < deadline {
+            try Task.checkCancellation()
+            let current = try checkedSnapshot()
+            let now = Date().timeIntervalSince1970
+            let finalCount = current.events.count(where: { $0.kind == .finalized })
+            if finalCount != observedFinalCount {
+                observedFinalCount = finalCount
+                lastChangeAt = now
+            }
+            if finalCount >= minimumCount,
+               let lastChangeAt,
+               now - lastChangeAt >= quietPeriod {
+                return
+            }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        throw Failure.timedOut("a settled finalized transcript stream")
+    }
+
+    public func waitForRecognizedReconnectPhrases(
         _ phraseIDs: [String],
-        afterGeneration generation: Int,
+        inGeneration generation: Int,
         timeout: TimeInterval
     ) async throws {
         let expected = Set(phraseIDs)
@@ -102,7 +131,7 @@ final class TranscriptionBenchmarkEventRecorder: @unchecked Sendable {
             let recognized = Set(TranscriptionBenchmark.recognizedReconnectPhraseIDs(
                 phraseIDs,
                 in: snapshot.events,
-                afterGeneration: generation))
+                generation: generation))
             return recognized.isSuperset(of: expected) ? true : nil
         } as Bool
     }
@@ -115,17 +144,22 @@ final class TranscriptionBenchmarkEventRecorder: @unchecked Sendable {
         let deadline = Date().timeIntervalSince1970 + timeout
         while Date().timeIntervalSince1970 < deadline {
             try Task.checkCancellation()
-            if let abortMarker,
-               FileManager.default.fileExists(atPath: abortMarker.path) {
-                throw Failure.aborted
-            }
-            let current = snapshot()
-            if let terminalFailure = current.terminalFailure {
-                throw Failure.terminal(terminalFailure)
-            }
+            let current = try checkedSnapshot()
             if let value = predicate(current) { return value }
             try await Task.sleep(for: .milliseconds(50))
         }
         throw Failure.timedOut(boundary)
+    }
+
+    private func checkedSnapshot() throws -> Snapshot {
+        if let abortMarker,
+           FileManager.default.fileExists(atPath: abortMarker.path) {
+            throw Failure.aborted
+        }
+        let current = snapshot()
+        if let terminalFailure = current.terminalFailure {
+            throw Failure.terminal(terminalFailure)
+        }
+        return current
     }
 }

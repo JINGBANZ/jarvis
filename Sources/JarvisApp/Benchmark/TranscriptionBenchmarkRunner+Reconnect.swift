@@ -82,12 +82,12 @@ extension TranscriptionBenchmarkRunner {
             restoreRequested = true
             try await waitForOperator(
                 action: "restore-network", model: model, timeout: 600)
-            _ = try await recorder.waitForReady(
+            let replacementReady = try await recorder.waitForReady(
                 minimumGeneration: firstReady.generation + 1,
                 timeout: 60)
             try await recorder.waitForRecognizedReconnectPhrases(
                 phraseIDs,
-                afterGeneration: firstReady.generation,
+                inGeneration: replacementReady.generation,
                 timeout: 40)
             try await Task.sleep(for: .milliseconds(250))
         } catch {

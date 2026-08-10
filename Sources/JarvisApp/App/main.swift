@@ -1,4 +1,5 @@
 import AppKit
+import JarvisCore
 
 let app = NSApplication.shared
 let delegate: any NSApplicationDelegate

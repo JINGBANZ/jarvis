@@ -1,15 +1,16 @@
 import Foundation
-import JarvisCore
 
 /// Atomically switches one capture stream between benchmark repetitions without rebuilding the tap.
 /// `@unchecked Sendable`: `lock` guards both mutable callback references and they are copied before
 /// invocation, so client code never runs while the relay is locked.
-final class TranscriptionBenchmarkSessionRelay: @unchecked Sendable {
+public final class TranscriptionBenchmarkSessionRelay: @unchecked Sendable {
     private let lock = NSLock()
     private var session: (any TranscriptionSession)?
     private var onCapture: (@Sendable (UInt64, Int) -> Void)?
 
-    func install(
+    public init() {}
+
+    public func install(
         _ session: (any TranscriptionSession)?,
         onCapture: (@Sendable (UInt64, Int) -> Void)? = nil
     ) {
@@ -19,7 +20,7 @@ final class TranscriptionBenchmarkSessionRelay: @unchecked Sendable {
         lock.unlock()
     }
 
-    func deliver(
+    public func deliver(
         _ data: Data,
         sequence: UInt64,
         samples: Int,

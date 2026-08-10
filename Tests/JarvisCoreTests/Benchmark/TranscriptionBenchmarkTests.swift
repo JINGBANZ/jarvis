@@ -280,7 +280,7 @@ struct TranscriptionBenchmarkTests {
         #expect(TranscriptionBenchmark.recognizedReconnectPhraseIDs(
             expected,
             in: events,
-            afterGeneration: 1
+            generation: 2
         ) == [expected[0], expected[0]])
 
         events.append(event(
@@ -293,8 +293,102 @@ struct TranscriptionBenchmarkTests {
         #expect(Set(TranscriptionBenchmark.recognizedReconnectPhraseIDs(
             expected,
             in: events,
-            afterGeneration: 1
+            generation: 2
         )) == Set(expected))
+    }
+
+    @Test("reconnect evaluation cannot combine finals from multiple replacement generations")
+    func reconnectRejectsCrossGenerationPhrases() {
+        let model = OpenAITranscriptionModel.gpt4oTranscribe
+        let expected = ["english-technical", "mandarin-technical"]
+        let phrases = expected.map { id in
+            TranscriptionBenchmark.phrases.first { $0.id == id }!
+        }
+        let events = [
+            event(.ready, observedAt: 1, model: model.rawValue, generation: 1),
+            event(
+                .ready,
+                observedAt: 2,
+                model: model.rawValue,
+                generation: 2,
+                replayedChunks: 10),
+            event(
+                .finalized,
+                observedAt: 3,
+                model: model.rawValue,
+                text: phrases[0].text,
+                generation: 2),
+            event(
+                .ready,
+                observedAt: 4,
+                model: model.rawValue,
+                generation: 3,
+                replayedChunks: 10),
+            event(
+                .finalized,
+                observedAt: 5,
+                model: model.rawValue,
+                text: phrases[1].text,
+                generation: 3),
+        ]
+
+        let result = TranscriptionBenchmark.evaluateReconnect(
+            model: model,
+            phraseIDs: expected,
+            events: events,
+            captureObservations: [.init(sequenceNumber: 1, sampleCount: 2_400)])
+
+        #expect(!result.passed)
+        #expect(!result.exactlyOnce)
+        #expect(result.finalPhraseIDs == [expected[0]])
+        #expect(result.readyGenerations == [1, 2, 3])
+    }
+
+    @Test("reconnect evaluation rejects an unrelated extra final")
+    func reconnectRejectsExtraFinal() {
+        let model = OpenAITranscriptionModel.gpt4oTranscribe
+        let expected = ["english-technical", "mandarin-technical"]
+        let phrases = expected.map { id in
+            TranscriptionBenchmark.phrases.first { $0.id == id }!
+        }
+        let events = [
+            event(.ready, observedAt: 1, model: model.rawValue, generation: 1),
+            event(
+                .ready,
+                observedAt: 2,
+                model: model.rawValue,
+                generation: 2,
+                replayedChunks: 10),
+            event(
+                .finalized,
+                observedAt: 3,
+                model: model.rawValue,
+                text: phrases[0].text,
+                generation: 2),
+            event(
+                .finalized,
+                observedAt: 4,
+                model: model.rawValue,
+                text: phrases[1].text,
+                generation: 2),
+            event(
+                .finalized,
+                observedAt: 5,
+                model: model.rawValue,
+                text: "Unrelated extra transcript.",
+                generation: 2),
+        ]
+
+        let result = TranscriptionBenchmark.evaluateReconnect(
+            model: model,
+            phraseIDs: expected,
+            events: events,
+            captureObservations: [.init(sequenceNumber: 1, sampleCount: 2_400)])
+
+        #expect(!result.passed)
+        #expect(!result.exactlyOnce)
+        #expect(result.finalTexts.count == 3)
+        #expect(result.finalPhraseIDs == expected)
     }
 
     @Test("reconnect evaluation rejects duplicate replay and model fallback")
