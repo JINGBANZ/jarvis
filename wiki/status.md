@@ -2,7 +2,7 @@
 
 > Snapshot of what is true *right now*. This is the entry point for picking the project up mid-stream:
 > read [`index.md`](./index.md) first, then this page, then the relevant core page. Edited in place at
-> the close of every change, per [`CLAUDE.md`](./CLAUDE.md) → "Keep-in-sync checklist". Every file
+> the close of every change, per [`AGENTS.md`](./AGENTS.md) → "Keep-in-sync checklist". Every file
 > pointer below either resolves to a real file or this page is wrong — fix the page. The load-bearing
 > design decisions live in [`decisions.md`](./decisions.md).
 
@@ -188,6 +188,9 @@ thin OS shell, verified by the smoke run.
 - `Sources/EvalPrep/main.swift` — the Foundation-only terminal entry point for the same `AgenticEvaluator` Activity invokes; `scripts/eval-session.sh` runs it over the repo + session dir.
 - `Sources/CJarvisAEC/lib/libjarvis-aec.a` — the prebuilt, zero-dylib WebRTC AEC3 + classic VAD native edge (the `CJarvisAEC` target; rebuilt by `scripts/build-aec.sh`).
 - `.github/workflows/release.yml` + `scripts/package-app.sh` — automated releases: release-please Release PR → Developer ID-signed, notarized, stapled `Jarvis-<version>.zip` attached to a GitHub Release ([build-and-run.md → Distribution](./build-and-run.md#distribution--signed-notarized-releases-from-ci)).
+- `AGENTS.md` + `.github/workflows/sync-shared-rules.yml` — project-specific agent guidance with a
+  machine-managed shared-rules block that syncs weekly from `JINGBANZ/rules`; `CLAUDE.md` imports the
+  same canonical file.
 
 ## Not yet built
 

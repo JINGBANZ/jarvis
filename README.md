@@ -134,4 +134,4 @@ The package boundaries are intentionally small:
 | `EvalPrep` | Foundation-only helper used by the developer-side session audit |
 
 Contributor workflow, subsystem placement, and testing rules live in
-[`CLAUDE.md`](./CLAUDE.md).
+[`AGENTS.md`](./AGENTS.md).
