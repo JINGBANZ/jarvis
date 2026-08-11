@@ -21,14 +21,15 @@ Start snapshots the provider, OpenAI model/profile, or Apple locale for both `me
 is no automatic provider or model fallback. An initial same-input macOS 26 system-audio comparison
 keeps GPT-4o Transcribe as the default: among the tested GPT-4o, GPT Live, and Apple Speech arms, it
 alone preserved the English, Mandarin, and within-sentence language-switching inputs. This is
-directional evidence rather than a full benchmark because it does not include GPT Transcribe. A
-repeatable hidden-app harness now covers all OpenAI models and single-locale Apple Speech with fixed
-synthetic English, Mandarin, and bilingual system audio, at least three byte-identical repetitions
+directional evidence rather than a full benchmark because it does not include GPT Transcribe. The
+[transcription benchmark](./transcription-benchmark.md) now covers all OpenAI models and
+single-locale Apple Speech with fixed synthetic English, Mandarin, and bilingual system audio, at
+least three byte-identical repetitions
 per arm, audio-free structured lifecycle evidence, and a deterministic summary. Its separate
 reconnect mode interrupts only Jarvis's transcription WebSocket, fills the real replay buffer while
 the replacement is held, then exercises the ordinary replacement path without changing host network
 state. Neither mode changes defaults or runs in the gate. The first complete standard run finished
-35 of 36 repetitions; one GPT Transcribe bilingual repetition timed out waiting for its finalized
+35 of 36 repetitions; one GPT Live Transcribe bilingual repetition timed out waiting for its finalized
 stream while capture and delivery continuity remained intact. The automated reconnect run passes all
 three OpenAI models: both scoped-interruption phrases return exactly once and in order, every model
 replays buffered chunks without eviction or capture gaps, and provider identity remains unchanged.
@@ -110,7 +111,7 @@ fixed notices remain available in Activity. The gate statically rejects unreview
 
 ## Next action
 
-Repeat `./scripts/transcription-benchmark.sh standard` to classify the single GPT Transcribe
+Repeat `./scripts/transcription-benchmark.sh standard` to classify the single GPT Live Transcribe
 bilingual final-stream timeout from the first 36-repetition run. The automated scoped reconnect run
 is complete and passes all three OpenAI models without changing host networking. These live runs are
 not part of the gate and do not use the microphone.
@@ -155,7 +156,7 @@ thin OS shell, verified by the smoke run.
 
 - `Sources/JarvisCore/Audio/` — transactional PCM + utterance buffering, bounded speech pre-roll, adaptive content-free activity detection, stable frame-decision endpoints, non-destructive AEC reference alignment, and system-audio timeline preservation (`PCMBuffer`, `SpeechGatedAudioBuffer`, `UtteranceBuffer`, `PCM16Framer`, `SpeechEndpointDetector`, `AudioDownmix`, `AdaptiveAudioActivityDetector`, `PCM16SpeechActivityTracker`, `EchoReferenceAlignment`, `SystemAudioTimeline`).
 - `Sources/JarvisCore/Transcription/` — provider-neutral session/provider contracts and immutable Start configuration, selectable OpenAI model/language-profile values, the OpenAI Realtime wire contract, reconnect-safe Jarvis-managed turn coordinator, per-item ledger, and rolling transcript (`TranscriptionSession`, `TranscriptionProvider`, `TranscriptionConfiguration`, `OpenAITranscriptionModel`, `OpenAITranscriptionLanguageProfile`, `RealtimeSession`, `RealtimeJarvisManagedTurnCoordinator`, `RealtimeTranscriptionLedger`, `Transcript`, `NoiseReduction`).
-- `Sources/JarvisCore/Benchmark/` + `Sources/JarvisApp/Benchmark/` — the Foundation-only fixed transcription matrix, scoring and deterministic summary contract, plus the hidden signed-app runner, process-scoped synthetic system-audio tap, and automated transcription-transport reconnect regression (`TranscriptionBenchmark`, `TranscriptionDiagnosticEvent`, `TranscriptionBenchmarkRunner`, `SystemAudioBenchmarkCapture`; operational contract in [build-and-run.md](./build-and-run.md#system-audio-transcription-benchmark)).
+- `Sources/JarvisCore/Benchmark/` + `Sources/JarvisApp/Benchmark/` — the Foundation-only fixed transcription matrix, scoring and deterministic summary contract, plus the hidden signed-app runner, process-scoped synthetic system-audio tap, and automated transcription-transport reconnect regression (`TranscriptionBenchmark`, `TranscriptionDiagnosticEvent`, `TranscriptionBenchmarkRunner`, `SystemAudioBenchmarkCapture`; operating and scoring contract in [transcription-benchmark.md](./transcription-benchmark.md)).
 - `Sources/JarvisCore/Brain/` — provider-neutral `BrainClient`/attempt-scoped `BrainConversation` contracts and models stay at the root. `Adapters/OpenAI/` owns the Responses transport; `Adapters/LocalAgent/` owns CLI detection, `CLIBrainClient`, the Claude Code and Codex runtimes, and the bounded shared process edge. `LocalAgentRuntimeSet` encapsulates provider-specific coach/summarizer ownership. `AgentCLIProcessRunner` remains only for the explicit completed-session evaluator. The subsystem also owns provider-boundary failure classification (`BrainFailure`), immutable `BrainTarget`/`BrainRoute`, `BrainProvider`, `BrainModelCatalog` (first per-provider entry is the default), and `ReasoningEffort`.
 - `Sources/JarvisCore/Coach/` — the event loop: `CoachDriver` (fresh-attempt scheduling and one-target tool-loop orchestration), the pure forward-only `BrainRouteSession`, `SpeechActivityGate`, `CoachHistory` (client-managed session memory), and `ToolDefs` (coach tool schemas).
 - `Sources/JarvisCore/Triggers/` — turn/silence trigger detection, substance classification, and silence backoff (`Trigger`, `TurnSubstance`, `SilenceBackoff`).

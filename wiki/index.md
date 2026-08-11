@@ -12,6 +12,7 @@
 
 - **[architecture.md](./architecture.md)** — the vision, the harness loop, components, data flow, the models/APIs rationale, resilience, safety, and design principles. The design *why*; the *what* lives in `Sources/`.
 - **[build-and-run.md](./build-and-run.md)** — the operational *how*: toolchain (SwiftPM + CLT), the three-target split (Core/Overlay/App), swift-testing, packaging/signing and why TCC grants persist, running, and the activity viewer.
+- **[transcription-benchmark.md](./transcription-benchmark.md)** — the explicit signed-app transcription regression harness: fixed synthetic inputs, standard and scoped-reconnect modes, deterministic scoring, privacy boundaries, result interpretation, and when to run it.
 - **[sandbox.md](./sandbox.md)** — the security/isolation model (file-access restriction, entitlements, egress, server-side retention tradeoff).
 - **[overlay-invisibility.md](./overlay-invisibility.md)** — how the coaching overlay stays out of screen recordings and screen shares (the `sharingType = .none` mechanism), with empirical verification on macOS 26.5 and the limits.
 - **[overlay-timing.md](./overlay-timing.md)** — how long each coaching line stays on screen: a hybrid of the captioning reading-speed standard and our glance-not-watch situation (length-proportional time + a fixed notice buffer + an inter-line blank gap).

@@ -131,47 +131,13 @@ runtime). It also sidesteps the `file://` `fetch()` restriction that forced the 
 
 ## System-audio transcription benchmark
 
-`./scripts/transcription-benchmark.sh standard` launches a hidden mode of the signed app and runs the
-fixed matrix in
-[`TranscriptionBenchmark`](../Sources/JarvisCore/Benchmark/TranscriptionBenchmark.swift). The matrix
-covers every selectable OpenAI transcription model with its matching English, Mandarin, and bilingual
-language profile, plus Apple Speech with one locale at a time. Each arm replays one synthesized,
-non-user fixture at least three times. Synthesis happens once per run, the summary records the byte
-hash, and every repetition replays those same bytes. The tap includes only Jarvis's own playback
-process, so the benchmark neither opens the microphone nor captures unrelated system audio.
+The benchmark is an explicit hidden mode of the signed app. Standard mode runs fixed synthetic audio
+through every selectable transcription path; reconnect mode interrupts only Jarvis's active
+transcription WebSocket and exercises the real buffer/replay path. Neither mode opens the microphone,
+changes host networking, or runs in the normal build/test gate.
 
-The Foundation-only evaluator reports recognition quality, final heard order, missing results,
-duplicate finals, revised provider items, unavailable transcripts, and four distinct latency
-boundaries:
-
-- readiness: session `connect()` to the provider's acknowledged ready state;
-- server endpoint: the end of fixture speech to an accepted server speech-stop event;
-- client commit: the end of fixture speech to successful local commit transmission;
-- final: the end of fixture speech to the accepted final or diagnostic-only unavailable result.
-
-GPT-4o's server-VAD path therefore reports endpoint latency, while the client-commit models report
-commit latency. Apple owns its endpoint internally and reports readiness plus final latency. The
-machine-readable contract and scoring stay in the Core source above rather than being duplicated in
-the wiki.
-
-`./scripts/transcription-benchmark.sh reconnect` is a separate automated live validation for the
-OpenAI paths. For each model, the hidden runner closes only the current Jarvis transcription
-WebSocket through the normal transport-failure path and holds its replacement while two ordered
-synthetic phrases fill the real replay buffer. It then releases the hold and passes only when the
-replacement generation produces both phrases exactly once and in order, with buffered audio
-replayed, no replay eviction, and no provider/model fallback. Host Wi-Fi, Ethernet, VPNs, and every
-other process remain online. The scoped trigger starts at the transport-failure boundary, so this is
-an end-to-end regression of Jarvis's reconnect and replay behavior, not a test of macOS network-outage
-detection. This command makes real OpenAI requests and is never part of the build or test gate.
-
-Each run writes owner-only `summary.json`, `jarvis-debug.log`, and progress files
-under `.jarvis/transcription-benchmarks/<run>/`; the hidden runner prunes that tree before capture
-starts to the bounded limit in
-[`TranscriptionBenchmark.retainedRunCount`](../Sources/JarvisCore/Benchmark/TranscriptionBenchmark.swift).
-No captured PCM is written. The synthesized fixture files are temporary, live inside that same run
-directory, and are deleted before exit; a failed cleanup is explicit in the debug log. Standard mode
-can request System Audio Recording permission but does not require microphone permission. Both live
-modes remain explicit commands, never autonomous validation steps.
+See [transcription-benchmark.md](./transcription-benchmark.md) for commands, architecture, scoring,
+acceptance, privacy, result interpretation, and when each mode should be run.
 
 ## Live smoke checklist
 

@@ -120,8 +120,8 @@ it automatically closes and holds only Jarvis's transcription connection while t
 fill the real replay buffer, then allows the normal reconnect path to replace that connection. Host
 Wi-Fi, Ethernet, VPNs, and every other process remain online. Owner-only summaries land under
 `.jarvis/transcription-benchmarks/`, which retains only the ten most recent runs, and the temporary
-synthetic audio files are removed at exit. See
-the [benchmark operating contract](./wiki/build-and-run.md#system-audio-transcription-benchmark).
+synthetic audio files are removed at exit. See the
+[benchmark operating and scoring contract](./wiki/transcription-benchmark.md).
 
 The package boundaries are intentionally small:
 
