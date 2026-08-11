@@ -57,6 +57,24 @@ public enum AgenticEvaluation {
         return report
     }
 
+    /// Remove every evaluator-derived view of a session. Audit evidence can become partial again
+    /// after a late observer call, so a transcript or report produced under the earlier complete
+    /// marker must not be offered as current. `unlink` keeps this narrowly file-only and idempotent.
+    public static func invalidateDerivedArtifacts(in sessionDir: URL) throws {
+        let filenames = [transcriptFilename, reportFilename, EvalReportPage.filename]
+        var firstError: Error?
+        for filename in filenames {
+            let path = sessionDir.appendingPathComponent(filename).path
+            guard unlink(path) != 0 else { continue }
+            let code = errno
+            guard code != ENOENT else { continue }
+            if firstError == nil {
+                firstError = NSError(domain: NSPOSIXErrorDomain, code: Int(code))
+            }
+        }
+        if let firstError { throw firstError }
+    }
+
     /// Prepare the agent's workspace for one session and return the task prompt to feed the CLI.
     ///
     /// Renders the session's recorded traffic to the compact transcript, writes it owner-only into the

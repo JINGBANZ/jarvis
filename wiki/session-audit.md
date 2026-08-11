@@ -82,7 +82,10 @@ Quit also awaits this gate for the current audit and every earlier Stop whose cl
 A callback rejected after sealing increments `late_event` and immediately reopens that session's
 persistence gate. The worker schedules at most one serial correction to invalidate any already
 published complete marker. A successful partial close can satisfy the same correction; if neither a
-partial marker nor invalidation becomes durable, only that session stays unavailable.
+partial marker nor invalidation becomes durable, only that session stays unavailable. Reopening the
+gate also cancels an evaluator reading that session and removes its derived transcript, Markdown
+report, and HTML view. Once correction settles, the user can run a fresh evaluation over the new
+partial-evidence state; an unrelated session's evaluator and saved report remain intact.
 
 ## Failure Semantics
 

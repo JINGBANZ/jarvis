@@ -143,6 +143,29 @@ import Foundation
         #expect(AgenticEvaluation.savedReport(in: dir) == nil)
     }
 
+    @Test func invalidatingChangedEvidenceRemovesOnlyEvaluatorDerivedArtifacts() throws {
+        let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
+        let derivedFilenames = [
+            AgenticEvaluation.transcriptFilename,
+            AgenticEvaluation.reportFilename,
+            EvalReportPage.filename,
+        ]
+        for filename in derivedFilenames {
+            try Data("stale".utf8).write(to: dir.appendingPathComponent(filename))
+        }
+        let evidenceURL = dir.appendingPathComponent(FileSessionAudit.brainTrafficFilename)
+        try Data("{}\n".utf8).write(to: evidenceURL)
+
+        try AgenticEvaluation.invalidateDerivedArtifacts(in: dir)
+        try AgenticEvaluation.invalidateDerivedArtifacts(in: dir)
+
+        for filename in derivedFilenames {
+            #expect(!FileManager.default.fileExists(
+                atPath: dir.appendingPathComponent(filename).path))
+        }
+        #expect(FileManager.default.fileExists(atPath: evidenceURL.path))
+    }
+
     @Test func hasTrafficRequiresANonemptyTrafficFile() throws {
         let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         #expect(!AgenticEvaluation.hasTraffic(in: dir))

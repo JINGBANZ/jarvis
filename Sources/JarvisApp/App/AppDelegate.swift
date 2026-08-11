@@ -1328,9 +1328,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // creates a lightweight session handle and never waits for an older session's disk access.
         let audit = FileSessionAudit(
             directory: dir,
-            onPersistenceStateChange: { [weak self] _ in
+            onPersistenceStateChange: { [weak self] isSettled in
                 Task { @MainActor [weak self] in
-                    self?.activityViewer?.auditStateDidChange()
+                    self?.activityViewer?.auditStateDidChange(
+                        for: dir,
+                        isSettled: isSettled)
                 }
             })
         sessionAudit = audit

@@ -69,8 +69,16 @@ public struct AgenticEvaluator: Sendable {
                  + String(diagnostic.suffix(2_000)))
             throw EvaluationError.agentFailed(cli.provider.displayName)
         }
-        return try AgenticEvaluation.saveReport(
+        try Task.checkCancellation()
+        let report = try AgenticEvaluation.saveReport(
             output.stdout, agentName: cli.executableURL.lastPathComponent, in: sessionDirectory)
+        do {
+            try Task.checkCancellation()
+        } catch is CancellationError {
+            try? AgenticEvaluation.invalidateDerivedArtifacts(in: sessionDirectory)
+            throw CancellationError()
+        }
+        return report
     }
 
     /// Traffic rendering can read a long session, so keep it off the main actor used by Activity.
