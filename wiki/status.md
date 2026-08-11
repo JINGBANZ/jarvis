@@ -120,9 +120,9 @@ machine-specific instructions were generalized instead of rewriting repository i
 
 ## Next action
 
-The four agent workflows are temporarily disabled in GitHub Actions while their base-branch copies
-still target the removed self-hosted runner. Merge this hardening PR, then re-enable the workflows so
-their hosted definitions and existing source-level gates take effect.
+Re-enable the four agent workflows. Their hosted definitions and existing source-level gates are
+ready on `main`; they were disabled during rollout so the old base-branch copies could not target the
+removed self-hosted runner.
 Before changing repository visibility, delete the historical self-hosted runs and artifacts after
 owner approval: the audit found no credential leak, but those logs expose runner, account, and
 installed-tool paths.
