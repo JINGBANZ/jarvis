@@ -87,7 +87,9 @@ published complete marker. A successful partial close can satisfy the same corre
 partial marker nor invalidation becomes durable, only that session stays unavailable. Reopening the
 gate also cancels an evaluator reading that session and removes its derived transcript, Markdown
 report, and HTML view. Once correction settles, the user can run a fresh evaluation over the new
-partial-evidence state; an unrelated session's evaluator and saved report remain intact.
+partial-evidence state; an unrelated session's evaluator and saved report remain intact. Each saved
+report carries the exact health-evidence stamp it read, so a separate evaluator that finishes after
+the correction cannot republish a stale report as current.
 
 ## Failure Semantics
 

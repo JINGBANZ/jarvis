@@ -40,7 +40,9 @@ public struct AgenticEvaluator: Sendable {
     }
 
     public func evaluate(sessionDirectory: URL) async throws -> String {
+        let evidenceStamp = try AgenticEvaluation.evidenceStamp(in: sessionDirectory)
         let prompt = try await prepare(sessionDirectory: sessionDirectory)
+        try requireStableEvidence(evidenceStamp, in: sessionDirectory)
         try Task.checkCancellation()
         let providers = preferredProvider.map { [$0] } ?? [.claudeCode, .codexCLI]
         let detected = await detector.detectFirstAsync(providers).map { [$0] } ?? []
@@ -70,15 +72,29 @@ public struct AgenticEvaluator: Sendable {
             throw EvaluationError.agentFailed(cli.provider.displayName)
         }
         try Task.checkCancellation()
+        try requireStableEvidence(evidenceStamp, in: sessionDirectory)
         let report = try AgenticEvaluation.saveReport(
-            output.stdout, agentName: cli.executableURL.lastPathComponent, in: sessionDirectory)
+            output.stdout,
+            agentName: cli.executableURL.lastPathComponent,
+            evidenceStamp: evidenceStamp,
+            in: sessionDirectory)
         do {
             try Task.checkCancellation()
+            try requireStableEvidence(evidenceStamp, in: sessionDirectory)
         } catch is CancellationError {
             try? AgenticEvaluation.invalidateDerivedArtifacts(in: sessionDirectory)
             throw CancellationError()
         }
         return report
+    }
+
+    private func requireStableEvidence(_ expected: Data, in sessionDirectory: URL) throws {
+        guard let current = try? AgenticEvaluation.evidenceStamp(in: sessionDirectory),
+              current == expected
+        else {
+            try? AgenticEvaluation.invalidateDerivedArtifacts(in: sessionDirectory)
+            throw AgenticEvaluation.EvaluationError.evidenceChanged
+        }
     }
 
     /// Traffic rendering can read a long session, so keep it off the main actor used by Activity.

@@ -41,8 +41,8 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
     /// was handed back to Activity.
     private var evaluatingSessionPath: String?
     private var evaluationEvidenceGeneration: UInt = 0
-    /// Normally invalidation unlinks every derived artifact immediately. Keep a runtime block only
-    /// when that unlink fails, so a stale report can never become an enabled "Open report" action.
+    /// Tracks the interval from evidence reopening through settlement so cleanup runs at both ends;
+    /// an unlink failure keeps the block afterward rather than exposing a stale "Open report" action.
     private var invalidEvaluationArtifactPaths: Set<String> = []
     private var sessions: [SessionStore.Session] = []
 
@@ -224,14 +224,20 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
     func auditStateDidChange(for directory: URL, isSettled: Bool) {
         let path = directory.standardizedFileURL.path
         if !isSettled {
+            invalidEvaluationArtifactPaths.insert(path)
             if evaluatingSessionPath == path {
                 evaluationEvidenceGeneration &+= 1
                 evaluationTask?.cancel()
             }
-            invalidateEvaluationArtifacts(in: directory)
+            // State callbacks cross onto the main actor. If correction already settled while this
+            // callback was queued, this cleanup itself is the settlement-side second pass.
+            let alreadySettled = isSessionEvidenceAvailable?(directory) != false
+            invalidateEvaluationArtifacts(
+                in: directory,
+                clearTombstoneOnSuccess: alreadySettled)
         } else if invalidEvaluationArtifactPaths.contains(path) {
-            // A transient unlink failure must not strand the session forever after correction.
-            invalidateEvaluationArtifacts(in: directory)
+            // Repeat cleanup at settlement in case a separate evaluator raced the first unlink.
+            invalidateEvaluationArtifacts(in: directory, clearTombstoneOnSuccess: true)
         }
         refreshEvaluateButtonState()
     }
@@ -411,14 +417,18 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
                       self.evaluationEvidenceGeneration == evidenceGeneration,
                       self.isSessionEvidenceAvailable?(session.url) != false
                 else {
-                    self.invalidateEvaluationArtifacts(in: session.url)
+                    self.invalidateEvaluationArtifacts(
+                        in: session.url,
+                        clearTombstoneOnSuccess: false)
                     return
                 }
                 self.invalidEvaluationArtifactPaths.remove(sessionPath)
                 self.openReport(report, for: session)
             } catch is CancellationError {
                 if let self, self.evaluationEvidenceGeneration != evidenceGeneration {
-                    self.invalidateEvaluationArtifacts(in: session.url)
+                    self.invalidateEvaluationArtifacts(
+                        in: session.url,
+                        clearTombstoneOnSuccess: false)
                 }
                 jlog("Jarvis: Activity evaluation was cancelled.")
             } catch {
@@ -471,13 +481,18 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         return AgenticEvaluation.savedReport(in: session.url)
     }
 
-    private func invalidateEvaluationArtifacts(in directory: URL) {
+    private func invalidateEvaluationArtifacts(
+        in directory: URL,
+        clearTombstoneOnSuccess: Bool
+    ) {
         let path = directory.standardizedFileURL.path
-        invalidEvaluationArtifactPaths.insert(path)
         do {
             try AgenticEvaluation.invalidateDerivedArtifacts(in: directory)
-            invalidEvaluationArtifactPaths.remove(path)
+            if clearTombstoneOnSuccess {
+                invalidEvaluationArtifactPaths.remove(path)
+            }
         } catch {
+            invalidEvaluationArtifactPaths.insert(path)
             jlog("Jarvis: couldn't invalidate stale evaluation artifacts — \(error.localizedDescription)")
         }
     }
