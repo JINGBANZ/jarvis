@@ -33,6 +33,7 @@ import Testing
 
         coordinator.updateTranscriptionWork(false)
         #expect(await waitUntil { events.turnCount == 1 })
+        #expect(events.firstTurnBoundary == 2)
         #expect(events.activity == [true, false])
         #expect(transcript.renderFrom(index: 0).text
             == "[00:01] me: first fragment\n[00:02] me: second fragment")
@@ -99,7 +100,7 @@ import Testing
             silenceTimeout: silenceTimeout,
             silenceMaxInterval: silenceTimeout,
             silenceEnabled: silenceEnabled,
-            onTurnEnd: { events.recordTurn() },
+            onTurnEnd: { events.recordTurn(boundary: $0) },
             onSilence: { events.recordSilence($0) },
             onTranscriptionWorkChanged: { events.recordActivity($0) })
     }
@@ -109,12 +110,18 @@ import Testing
 private final class CoachingEvents: @unchecked Sendable {
     private let lock = NSLock()
     private var turns = 0
+    private var turnBoundaries: [Int] = []
     private var silences: [TimeInterval] = []
     private var activityValues: [Bool] = []
 
     var turnCount: Int {
         lock.lock(); defer { lock.unlock() }
         return turns
+    }
+
+    var firstTurnBoundary: Int? {
+        lock.lock(); defer { lock.unlock() }
+        return turnBoundaries.first
     }
 
     var silenceCount: Int {
@@ -132,9 +139,10 @@ private final class CoachingEvents: @unchecked Sendable {
         return activityValues
     }
 
-    func recordTurn() {
+    func recordTurn(boundary: Int) {
         lock.lock()
         turns += 1
+        turnBoundaries.append(boundary)
         lock.unlock()
     }
 

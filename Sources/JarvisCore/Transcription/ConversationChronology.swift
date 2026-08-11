@@ -69,11 +69,14 @@ public struct ConversationChronology<Element: Sendable>: Sendable {
 
     /// Activity uses this only as a runaway memory backstop. Ordering keys remain monotonic even
     /// when old insertion records are discarded.
-    public mutating func keepMostRecentInsertions(_ maximumCount: Int) {
+    @discardableResult
+    public mutating func keepMostRecentInsertions(_ maximumCount: Int) -> [Item] {
         let maximumCount = max(0, maximumCount)
-        if items.count > maximumCount {
-            items.removeFirst(items.count - maximumCount)
-        }
+        guard items.count > maximumCount else { return [] }
+        let removalCount = items.count - maximumCount
+        let removed = Array(items.prefix(removalCount))
+        items.removeFirst(removalCount)
+        return removed
     }
 
     /// Order an arbitrary sequence with the same event-time/insertion-time rule. The sequence's

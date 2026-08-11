@@ -11,7 +11,7 @@ public final class TranscriptionCoachingCoordinator: @unchecked Sendable {
     private let sessionStart: TimeInterval
     private let turnDebounce: TimeInterval
     private let silenceEnabled: Bool
-    private let onTurnEnd: @Sendable () -> Void
+    private let onTurnEnd: @Sendable (_ transcriptBoundary: Int) -> Void
     private let onSilence: @Sendable (TimeInterval) -> Void
     private let onTranscriptionWorkChanged: @Sendable (Bool) -> Void
 
@@ -21,6 +21,7 @@ public final class TranscriptionCoachingCoordinator: @unchecked Sendable {
     private var stopped = true
     private var generation = 0
     private var hasPendingTranscriptionWork = false
+    private var pendingTranscriptBoundary: Int?
     private var debounceRevision = 0
     private var silenceRevision = 0
     private var silencePausedLogged = false
@@ -35,7 +36,7 @@ public final class TranscriptionCoachingCoordinator: @unchecked Sendable {
         silenceMaxInterval: TimeInterval,
         silenceIdleCutoff: TimeInterval = .infinity,
         silenceEnabled: Bool,
-        onTurnEnd: @escaping @Sendable () -> Void,
+        onTurnEnd: @escaping @Sendable (_ transcriptBoundary: Int) -> Void,
         onSilence: @escaping @Sendable (TimeInterval) -> Void,
         onTranscriptionWorkChanged: @escaping @Sendable (Bool) -> Void
     ) {
@@ -62,6 +63,7 @@ public final class TranscriptionCoachingCoordinator: @unchecked Sendable {
         let reportSettled = hasPendingTranscriptionWork
         stopped = false
         hasPendingTranscriptionWork = false
+        pendingTranscriptBoundary = nil
         debounceRevision &+= 1
         silenceRevision &+= 1
         pending.clear()
@@ -80,6 +82,7 @@ public final class TranscriptionCoachingCoordinator: @unchecked Sendable {
         silenceRevision &+= 1
         let reportSettled = hasPendingTranscriptionWork
         hasPendingTranscriptionWork = false
+        pendingTranscriptBoundary = nil
         pending.clear()
         lock.unlock()
 
@@ -101,8 +104,10 @@ public final class TranscriptionCoachingCoordinator: @unchecked Sendable {
 
         lock.lock()
         guard !stopped else { lock.unlock(); return false }
-        transcript.append(.init(speaker: speaker, text: text, at: at))
+        let transcriptBoundary = transcript.append(
+            .init(speaker: speaker, text: text, at: at))
         pending.append(text)
+        pendingTranscriptBoundary = max(pendingTranscriptBoundary ?? 0, transcriptBoundary)
         let generation = generation
         // Activity and model context share the same speech-time chronology. Transcript completion
         // time remains visible in debug, but it must not decide conversation order.
@@ -155,6 +160,13 @@ public final class TranscriptionCoachingCoordinator: @unchecked Sendable {
               debounceRevision == revision else { lock.unlock(); return }
         let result = pending.drainIfSettled(
             hasPendingTranscriptions: hasPendingTranscriptionWork)
+        let transcriptBoundary: Int?
+        if case .ready = result {
+            transcriptBoundary = pendingTranscriptBoundary
+            pendingTranscriptBoundary = nil
+        } else {
+            transcriptBoundary = nil
+        }
         lock.unlock()
 
         switch result {
@@ -164,7 +176,11 @@ public final class TranscriptionCoachingCoordinator: @unchecked Sendable {
             jlog("… coaching turn waiting for transcription to settle")
         case .ready(_, let fragments):
             if fragments > 1 { jlog("🧩 coalesced \(fragments) fragments into one turn") }
-            onTurnEnd()
+            guard let transcriptBoundary else {
+                jlog("Jarvis transcription coordinator: dropped turn without transcript boundary")
+                return
+            }
+            onTurnEnd(transcriptBoundary)
         }
     }
 

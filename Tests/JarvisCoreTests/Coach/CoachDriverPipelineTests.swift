@@ -2328,6 +2328,31 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         _ = await first
         #expect(brain.callCount >= 2)                      // the original AND the coalesced turn ran
     }
+
+    /// The settling speaker's debounce callback can arrive after a parked attempt has already
+    /// admitted and included that speaker's final line. Its boundary identifies the callback as
+    /// already consumed, so it cannot buy a duplicate request.
+    @Test func deferredTurnForCommittedTranscriptDoesNotStartAnotherAttempt() async {
+        let gate = AsyncGate()
+        let brain = GatedBrain(
+            gate: gate,
+            response: .init(toolCalls: [.staySilent(callId: "quiet")]))
+        let (driver, transcript) = makeDriver(
+            brain: brain,
+            clock: ManualClock(now: 0))
+        let boundary = transcript.append(
+            .init(speaker: .them, text: "settling speaker's final question", at: 1))
+
+        async let first = driver.handleTrigger(.turnEnd)
+        await gate.waitUntilEntered()
+        #expect(await driver.handleTrigger(
+            .turnEnd,
+            transcriptBoundary: boundary) == .busy)
+        await gate.release()
+
+        #expect(await first == .silentByModel)
+        #expect(brain.callCount == 1)
+    }
 }
 
 /// Synchronous on purpose: it holds main-actor delivery at a deterministic point while the test

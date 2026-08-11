@@ -24,9 +24,13 @@ public final class RollingTranscript: @unchecked Sendable {
 
     public init() {}
 
-    public func append(_ line: TranscriptLine) {
+    /// Append one line and return its exclusive insertion boundary. A turn trigger carries this
+    /// identity so the coach can suppress a deferred wake after that same line is already committed.
+    @discardableResult
+    public func append(_ line: TranscriptLine) -> Int {
         lock.lock(); defer { lock.unlock() }
         chronology.append(line, occurredAt: line.at)
+        return chronology.count
     }
 
     /// Number of lines recorded — used as the index boundary for server-side delta sending.

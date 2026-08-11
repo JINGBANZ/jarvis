@@ -17,11 +17,15 @@ public struct RealtimeReconnectTranscriptionRecovery: Sendable {
     private var replayAvailable = false
     private var replacementReady = false
     private var coverageLost = false
+    /// Audio captured without a server item has no terminal-event identity to count. Keep one
+    /// conservative barrier until replay is abandoned or its bounded recovery deadline expires.
+    private var hasUntrackedReplayAudio = false
 
     public init() {}
 
     public var isActive: Bool {
         duplicateRiskCount > 0 || !interruptedFallbackItems.isEmpty
+            || hasUntrackedReplayAudio
     }
 
     public var blocksCoaching: Bool {
@@ -35,14 +39,23 @@ public struct RealtimeReconnectTranscriptionRecovery: Sendable {
     public mutating func begin(
         interruptedItems: [RealtimeTranscriptionLedger.FinalizedItem],
         duplicateRiskItemCount: Int,
-        replayAvailable: Bool
+        replayAvailable: Bool,
+        hasUntrackedReplayAudio: Bool = false
     ) {
         guard !isActive else { return }
         duplicateRiskCount = max(0, duplicateRiskItemCount)
         interruptedFallbackItems = interruptedItems
         self.replayAvailable = replayAvailable
+        self.hasUntrackedReplayAudio = hasUntrackedReplayAudio
         replacementReady = false
         coverageLost = false
+    }
+
+    /// Audio accepted while a replacement connection is unavailable can later create an earlier
+    /// transcript even though no server VAD item exists yet. It must therefore hold coaching.
+    public mutating func recordUntrackedReplayAudio() {
+        hasUntrackedReplayAudio = true
+        replayAvailable = true
     }
 
     /// Returns fallback items immediately when no authoritative replacement can arrive.
@@ -88,6 +101,7 @@ public struct RealtimeReconnectTranscriptionRecovery: Sendable {
         replayAvailable = false
         replacementReady = false
         coverageLost = false
+        hasUntrackedReplayAudio = false
     }
 
     private mutating func abandonReplay() -> [RealtimeTranscriptionLedger.FinalizedItem] {
@@ -97,7 +111,8 @@ public struct RealtimeReconnectTranscriptionRecovery: Sendable {
     }
 
     private mutating func finishIfSettled() {
-        guard duplicateRiskCount == 0, interruptedFallbackItems.isEmpty else { return }
+        guard duplicateRiskCount == 0, interruptedFallbackItems.isEmpty,
+              !hasUntrackedReplayAudio else { return }
         clear()
     }
 }

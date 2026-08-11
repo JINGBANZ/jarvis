@@ -39,8 +39,9 @@ replays buffered chunks without eviction or capture gaps, the replacement stays 
 settled snapshot, and provider identity remains unchanged.
 Apple Speech prepares
 the selected supported locale before replacing a running pipeline, submits every captured sample to
-`SpeechAnalyzer`, records only final results, and uses content-free local activity solely to keep
-coaching from waking mid-utterance. An OpenAI key is required only when OpenAI supplies
+`SpeechAnalyzer`, records only final results, and uses content-free local activity to request
+analyzer finalization; coaching stays gated until the analyzer completes and matching module-result
+progress is consumed, including setup and resumed-speech races. An OpenAI key is required only when OpenAI supplies
 transcription or appears in the brain route. The detailed model, language, turn-detection, context,
 and completion contracts live in [architecture.md](./architecture.md#models-and-apis).
 The shared transcription path reconciles provider item lifecycles, preserves reconnectable audio
@@ -54,7 +55,11 @@ model deltas and Activity rows, with stable insertion order only for ties. Every
 attempt waits for both providers to report settled transcription work, so a faster later reply cannot
 cross an earlier utterance into immutable model history. The manual hint remains the explicit
 immediate exception. The client debounce still groups rapid final fragments; it is not the ordering
-guarantee. The app combines provider connection state with content-free capture health from the
+guarantee. A finalized turn carries its transcript boundary, so its deferred debounce callback is
+consumed if another admitted attempt already committed that line. Reconnect-buffered OpenAI audio is
+pending work even before replacement server VAD creates an item. Activity trims its live DOM and
+bounded in-memory chronology by the same insertion identities. The app combines provider connection
+state with content-free capture health from the
 Foundation-only
 [`CaptureReadinessMonitor`](../Sources/JarvisCore/Diagnostics/CaptureReadinessMonitor.swift): each
 stream's first positive sample-count callback establishes frame health, so valid digital silence
@@ -205,7 +210,7 @@ Tested `JarvisCore` + `JarvisOverlay` harness is green (`./scripts/run-tests.sh`
 thin OS shell, verified by the smoke run.
 
 - `Sources/JarvisCore/Audio/` — transactional PCM + utterance buffering, bounded speech pre-roll, adaptive content-free activity detection, stable frame-decision endpoints, non-destructive AEC reference alignment, and system-audio timeline preservation (`PCMBuffer`, `SpeechGatedAudioBuffer`, `UtteranceBuffer`, `PCM16Framer`, `SpeechEndpointDetector`, `AudioDownmix`, `AdaptiveAudioActivityDetector`, `PCM16SpeechActivityTracker`, `EchoReferenceAlignment`, `SystemAudioTimeline`).
-- `Sources/JarvisCore/Transcription/` — provider-neutral session/provider contracts and immutable Start configuration, selectable OpenAI model/language-profile values, the OpenAI Realtime wire contract, reconnect-safe Jarvis-managed turn coordinator, per-item ledger, and the single spoken-time ordering policy used by the rolling transcript and Activity (`TranscriptionSession`, `TranscriptionProvider`, `TranscriptionConfiguration`, `OpenAITranscriptionModel`, `OpenAITranscriptionLanguageProfile`, `RealtimeSession`, `RealtimeJarvisManagedTurnCoordinator`, `RealtimeTranscriptionLedger`, `ConversationChronology`, `Transcript`, `NoiseReduction`).
+- `Sources/JarvisCore/Transcription/` — provider-neutral session/provider contracts and immutable Start configuration, selectable OpenAI model/language-profile values, the OpenAI Realtime wire contract, reconnect-safe Jarvis-managed turn coordinator and recovery state, per-item ledger, analyzer-finalization state, and the single spoken-time ordering policy used by the rolling transcript and Activity (`TranscriptionSession`, `TranscriptionProvider`, `TranscriptionConfiguration`, `OpenAITranscriptionModel`, `OpenAITranscriptionLanguageProfile`, `RealtimeSession`, `RealtimeJarvisManagedTurnCoordinator`, `RealtimeReconnectTranscriptionRecovery`, `RealtimeTranscriptionLedger`, `TranscriptionFinalizationState`, `ConversationChronology`, `Transcript`, `NoiseReduction`).
 - `Sources/JarvisCore/Benchmark/` + `Sources/JarvisApp/Benchmark/` — the Foundation-only fixed transcription matrix, optional absence-means-disabled instrumentation, scoring and deterministic summary contract, plus the hidden signed-app runner, process-scoped synthetic system-audio tap, and automated transcription-transport reconnect regression (`TranscriptionBenchmark`, `TranscriptionBenchmarkEvent`, `TranscriptionBenchmarkInstrumentation`, `TranscriptionBenchmarkRunner`, `SystemAudioBenchmarkCapture`; operating, isolation, and scoring contract in [transcription-benchmark.md](./transcription-benchmark.md)).
 - `Sources/JarvisCore/Brain/` — provider-neutral `BrainClient`/attempt-scoped `BrainConversation` contracts and models stay at the root. `Adapters/OpenAI/` owns the Responses transport; `Adapters/LocalAgent/` owns CLI detection, `CLIBrainClient`, the Claude Code and Codex runtimes, and the bounded shared process edge. `LocalAgentRuntimeSet` encapsulates provider-specific coach/summarizer ownership. `AgentCLIProcessRunner` remains only for the explicit completed-session evaluator. The subsystem also owns provider-boundary failure classification (`BrainFailure`), immutable `BrainTarget`/`BrainRoute`, `BrainProvider`, `BrainModelCatalog` (first per-provider entry is the default), and `ReasoningEffort`.
 - `Sources/JarvisCore/Coach/` — the event loop: `CoachDriver` (fresh-attempt scheduling, transcription-settlement admission, and one-target tool-loop orchestration), the pure forward-only `BrainRouteSession`, `TranscriptionSettlementGate`, `CoachHistory` (client-managed session memory), and `ToolDefs` (coach tool schemas).

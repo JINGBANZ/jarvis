@@ -11,9 +11,9 @@ private final class BenchmarkSessionSpy: TranscriptionSession, @unchecked Sendab
         let speechEvents: [LocalSpeechEvent]
     }
 
-    var onTurnEnd: (@Sendable () -> Void)?
+    var onTurnEnd: (@Sendable (_ transcriptBoundary: Int) -> Void)?
     var onSilence: (@Sendable (TimeInterval) -> Void)?
-    var onSpeechActivityChanged: (@Sendable (Bool) -> Void)?
+    var onTranscriptionWorkChanged: (@Sendable (Bool) -> Void)?
     var onConnectionStateChange: (@Sendable (TranscriptionConnectionState) -> Void)?
     var onTerminalFailure: (@Sendable (TranscriptionFailureReason) -> Void)?
     var onCaptureContinuity: (@Sendable (CaptureReadinessMonitor.Signal) -> Void)?

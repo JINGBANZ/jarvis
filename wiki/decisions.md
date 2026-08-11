@@ -1553,10 +1553,17 @@
   remains diagnosable without making completion order authoritative.
 - **Chose:** Route every automatic coaching attempt—the first trigger, a trigger queued behind an
   in-flight attempt, and a pending-work retry—through one aggregate `TranscriptionSettlementGate`.
-  It waits while either provider can still produce an earlier transcript line. The manual hint is
-  the explicit immediate exception. The existing transcript-batching delay remains only a
+  It waits while either provider can still produce an earlier transcript line. OpenAI PCM captured
+  during reconnect remains pending before replay has a server item; Apple PCM inactivity explicitly
+  finalizes `SpeechAnalyzer` input and does not settle the stream until matching final-result progress
+  is consumed from the module stream. A finalized turn also carries its transcript boundary, making
+  a delayed transcript-batch callback idempotent after the same line was committed. The manual hint
+  is the explicit immediate exception. The existing transcript-batching delay remains only a
   rapid-final-fragment grouping mechanism; it is not extended or treated as proof that both streams
   are settled.
+- **Chose:** Keep Activity's bounded in-memory chronology and live DOM as two views of the same
+  retained set. When the cap removes insertion records, the renderer removes those exact stable
+  identities before applying the next Core-computed chronological index.
 - **Why:** The mic and system-audio transcribers finish independently. A short reply can finalize
   before the longer question it answers, so completion order can invert Activity and, once the reply
   enters committed model history, make the semantic order impossible to repair in a later delta.
@@ -1569,6 +1576,8 @@
   the provider already exposes unfinished-work state.
 - **Detail:** [architecture.md → The turn](./architecture.md#the-turn),
   `Sources/JarvisCore/Transcription/ConversationChronology.swift`,
+  `Sources/JarvisCore/Transcription/TranscriptionFinalizationState.swift`,
+  `Sources/JarvisCore/Transcription/RealtimeReconnectTranscriptionRecovery.swift`,
   `Sources/JarvisCore/Coach/TranscriptionSettlementGate.swift`,
   `Sources/JarvisCore/Diagnostics/ActivityLog.swift`.
 

@@ -758,7 +758,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             networkStatus: { [networkDiagnostics] in
                 networkDiagnostics.currentSummary
             })
-        transcriber.onTurnEnd = { turns.run { await driver.handleTrigger(.turnEnd) } }
+        transcriber.onTurnEnd = { boundary in
+            turns.run {
+                await driver.handleTrigger(.turnEnd, transcriptBoundary: boundary)
+            }
+        }
         transcriber.onSilence = { secs in turns.run { await driver.handleTrigger(.silence(secondsQuiet: secs)) } }
         transcriber.onTranscriptionWorkChanged = {
             driver.updateTranscriptionWork($0, for: .me)
@@ -779,7 +783,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             networkStatus: { [networkDiagnostics] in
                 networkDiagnostics.currentSummary
             })
-        themTranscriber.onTurnEnd = { turns.run { await driver.handleTrigger(.turnEnd) } }
+        themTranscriber.onTurnEnd = { boundary in
+            turns.run {
+                await driver.handleTrigger(.turnEnd, transcriptBoundary: boundary)
+            }
+        }
         themTranscriber.onTranscriptionWorkChanged = {
             driver.updateTranscriptionWork($0, for: .them)
         }

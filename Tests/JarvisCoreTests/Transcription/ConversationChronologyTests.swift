@@ -28,4 +28,20 @@ import Testing
         #expect(delta.chronologicalItems.map(\.element) == ["question", "reply"])
         #expect(delta.upToInsertionIndex == 3)
     }
+
+    @Test func capReturnsTheInsertionIdentitiesItRemoved() {
+        var chronology = ConversationChronology<String>()
+        chronology.append("oldest insertion", occurredAt: 30)
+        chronology.append("middle insertion", occurredAt: 10)
+        chronology.append("newest insertion", occurredAt: 20)
+
+        let removed = chronology.keepMostRecentInsertions(2)
+
+        #expect(removed.map(\.element) == ["oldest insertion"])
+        #expect(removed.map(\.insertionOrder) == [0])
+        #expect(chronology.chronologicalItems.map(\.element) == [
+            "middle insertion",
+            "newest insertion",
+        ])
+    }
 }

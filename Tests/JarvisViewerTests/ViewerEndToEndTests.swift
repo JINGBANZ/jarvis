@@ -45,6 +45,29 @@ import WebKit
         #expect(messages == "🗣 heard (them): Did you see it?|🗣 heard (me): Yep.")
     }
 
+    @MainActor @Test func liveCapRemovalKeepsFollowingInsertionIndexAligned() async throws {
+        let h = WebViewHarness()
+        try await h.load(ActivityLog.htmlShell())
+        try await h.eval(ActivityLog.rowScript(
+            time: "1", message: "old", imageBase64: nil, insertionOrder: 0))
+        try await h.eval(ActivityLog.rowScript(
+            time: "2", message: "kept", imageBase64: nil, insertionOrder: 1))
+        try await h.eval(ActivityLog.rowScript(
+            time: "3", message: "new", imageBase64: nil,
+            insertionIndex: 1,
+            insertionOrder: 2,
+            removedInsertionOrders: [0]))
+
+        let messages = try await h.eval(
+            "Array.from(document.querySelectorAll('#log .m')).map(x=>x.textContent).join('|')"
+        ) as? String
+        let identities = try await h.eval(
+            "Array.from(document.querySelectorAll('#log .row')).map(x=>x.dataset.insertionOrder).join('|')"
+        ) as? String
+        #expect(messages == "kept|new")
+        #expect(identities == "1|2")
+    }
+
     @MainActor @Test func activityFeedUsesAdaptiveSettingsRowLayout() async throws {
         let h = WebViewHarness()
         try await h.load(ActivityLog.htmlShell())

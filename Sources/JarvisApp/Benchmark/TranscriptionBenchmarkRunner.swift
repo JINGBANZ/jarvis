@@ -166,6 +166,7 @@ final class TranscriptionBenchmarkRunner {
             turnDebounceSeconds: 0,
             maxBufferedAudioSeconds: 120,
             realtimeReadyTimeoutSeconds: 15)
+        let sessionStart = clock.now()
         let session = TranscriptionSessionFactory.make(
             configuration: configuration,
             apiKey: apiKey ?? "",
@@ -173,6 +174,7 @@ final class TranscriptionBenchmarkRunner {
             speaker: .them,
             transcript: RollingTranscript(),
             clock: clock,
+            sessionStart: sessionStart,
             config: config,
             networkStatus: { [networkDiagnostics] in
                 networkDiagnostics.currentSummary

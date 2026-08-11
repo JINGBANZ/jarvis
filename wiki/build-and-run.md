@@ -120,7 +120,9 @@ runtime). It also sidesteps the `file://` `fetch()` restriction that forced the 
   insertion, and record times. Live and reopened views apply the shared Core chronology rule rather
   than treating file append order as speech order. Historical files without complete chronology
   metadata keep their original file order; second-resolution display strings are not precise enough
-  to reconstruct it safely.
+  to reconstruct it safely. The in-memory/live-page backstop remains 10,000 rows: Core reports the
+  exact discarded insertion identities and the page removes those DOM rows before applying the next
+  Core-computed insertion index.
 - The viewer's rendering logic (`htmlShell`/`rowScript`) and history reader (`SessionStore`) live in
   `JarvisCore` so they're unit/WebKit-tested; `ActivityViewer` in `JarvisApp` is the thin window.
 - Session evaluation is agentic only. After Stop, select a session and click **Evaluate**: the

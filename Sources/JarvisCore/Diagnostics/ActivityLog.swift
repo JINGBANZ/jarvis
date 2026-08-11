@@ -257,13 +257,15 @@ public final class ActivityLog: @unchecked Sendable {
             if rendered.kind == .sessionEnded {
                 sessionHasEnded = true
             }
+            let removedItems = entries.keepMostRecentInsertions(maxLines)
             let chronologicalIndex = entries.chronologicalIndex(
                 forInsertionOrder: item.insertionOrder)
-            entries.keepMostRecentInsertions(maxLines)
             // Push with the live bytes in hand (no disk read on the hot path).
             onAppend?(Self.rowScript(time: entry.time, message: entry.message,
                                      imageBase64: rendered.imageBase64,
-                                     insertionIndex: chronologicalIndex))
+                                     insertionIndex: chronologicalIndex,
+                                     insertionOrder: item.insertionOrder,
+                                     removedInsertionOrders: removedItems.map(\.insertionOrder)))
         }
     }
 
@@ -282,7 +284,8 @@ public final class ActivityLog: @unchecked Sendable {
                 return Self.rowScript(
                     time: e.time,
                     message: e.message,
-                    imageBase64: b64)
+                    imageBase64: b64,
+                    insertionOrder: item.insertionOrder)
             }
             return Snapshot(shellHTML: Self.htmlShell(), rows: rows, shown: entries.count, total: totalCount)
         }
@@ -345,7 +348,9 @@ public final class ActivityLog: @unchecked Sendable {
         time: String,
         message: String,
         imageBase64: String?,
-        insertionIndex: Int? = nil
+        insertionIndex: Int? = nil,
+        insertionOrder: UInt64? = nil,
+        removedInsertionOrders: [UInt64] = []
     ) -> String {
         struct Row: Encodable {
             let time: String
@@ -353,10 +358,17 @@ public final class ActivityLog: @unchecked Sendable {
             let cls: String
             let img: String?
             let insertionIndex: Int?
+            /// Encode UInt64 identities as strings; JavaScript numbers cannot represent all of them.
+            let insertionOrder: String?
+            let removedInsertionOrders: [String]?
         }
         let row = Row(time: time, message: message, cls: cssClass(for: message),
                       img: imageBase64.map { "data:image/jpeg;base64,\($0)" },
-                      insertionIndex: insertionIndex)
+                      insertionIndex: insertionIndex,
+                      insertionOrder: insertionOrder.map(String.init),
+                      removedInsertionOrders: removedInsertionOrders.isEmpty
+                        ? nil
+                        : removedInsertionOrders.map(String.init))
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.withoutEscapingSlashes]   // keep data: URIs readable (no \/ )
         guard let data = try? encoder.encode(row), let json = String(data: data, encoding: .utf8) else {
@@ -492,7 +504,16 @@ public final class ActivityLog: @unchecked Sendable {
           function appendRow(p){
             var log=document.getElementById('log');
             var near=(window.innerHeight+window.scrollY)>=(document.body.scrollHeight-60);
+            if(Array.isArray(p.removedInsertionOrders)){
+              var removed=new Set(p.removedInsertionOrders);
+              Array.from(log.children).forEach(function(existing){
+                if(removed.has(existing.dataset.insertionOrder)) existing.remove();
+              });
+            }
             var row=document.createElement('div'); row.className='row '+(p.cls||'');
+            if(typeof p.insertionOrder==='string'){
+              row.dataset.insertionOrder=p.insertionOrder;
+            }
             var t=document.createElement('span'); t.className='t'; t.textContent=p.time||'';
             var m=document.createElement('span'); m.className='m'; m.textContent=p.message||'';
             if(p.img){

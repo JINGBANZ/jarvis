@@ -67,6 +67,50 @@ import Testing
         #expect(!recovery.blocksCoaching)
     }
 
+    @Test func untrackedReconnectAudioBlocksUntilTheBoundedRecoveryDeadline() {
+        var recovery = RealtimeReconnectTranscriptionRecovery()
+        recovery.begin(
+            interruptedItems: [],
+            duplicateRiskItemCount: 0,
+            replayAvailable: true,
+            hasUntrackedReplayAudio: true)
+
+        #expect(recovery.blocksCoaching)
+        #expect(recovery.markReplacementReady().isEmpty)
+        #expect(recovery.blocksCoaching)
+        #expect(recovery.timeout().isEmpty)
+        #expect(!recovery.blocksCoaching)
+    }
+
+    @Test func audioCapturedAfterRecoveryBeginsAddsAnUntrackedBarrier() {
+        var recovery = RealtimeReconnectTranscriptionRecovery()
+        let partial = fallback("known item")
+        recovery.begin(
+            interruptedItems: [partial],
+            duplicateRiskItemCount: 0,
+            replayAvailable: true)
+        recovery.recordUntrackedReplayAudio()
+        _ = recovery.markReplacementReady()
+
+        #expect(recovery.resolveReplacement(hasUsableText: true) == .appendReplacement)
+        #expect(recovery.blocksCoaching)
+        #expect(recovery.timeout().isEmpty)
+        #expect(!recovery.blocksCoaching)
+    }
+
+    @Test func coverageLossReleasesUntrackedReplayAudioAfterReplacementIsReady() {
+        var recovery = RealtimeReconnectTranscriptionRecovery()
+        recovery.begin(
+            interruptedItems: [],
+            duplicateRiskItemCount: 0,
+            replayAvailable: true,
+            hasUntrackedReplayAudio: true)
+        _ = recovery.markReplacementReady()
+
+        #expect(recovery.recordCoverageLoss().isEmpty)
+        #expect(!recovery.blocksCoaching)
+    }
+
     private func fallback(_ text: String) -> RealtimeTranscriptionLedger.FinalizedItem {
         .init(itemID: text, text: text, spokenAt: 1, spokenEndAt: nil,
               recoveredFromDeltas: true, isTranscriptUnavailable: false)

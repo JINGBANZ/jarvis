@@ -13,14 +13,16 @@ import JarvisCore
 /// On-device macOS 26+ transcription session backed by `SpeechAnalyzer`. Final results enter the
 /// shared Core coaching coordinator; volatile results are deliberately disabled so provisional
 /// revisions never reach Activity or model context. Transcription itself stays ungated for accuracy.
-/// A transient local PCM activity tracker only reports whether provider work is unsettled.
+/// A transient local PCM activity tracker requests analyzer finalization. The provider reports
+/// settled only after the analyzer publishes finalization and this adapter consumes result progress
+/// through the same submitted-audio boundary.
 ///
 /// `@unchecked Sendable`: `lock` guards lifecycle, callback eligibility, and analyzer ownership;
 /// `audioQueue` exclusively owns conversion, buffering, stream submission, and PCM activity state.
 /// Callbacks are configured before `connect()` and remain immutable for the live session.
 @available(macOS 26.0, *)
 final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
-    var onTurnEnd: (@Sendable () -> Void)?
+    var onTurnEnd: (@Sendable (_ transcriptBoundary: Int) -> Void)?
     var onSilence: (@Sendable (TimeInterval) -> Void)?
     var onTranscriptionWorkChanged: (@Sendable (Bool) -> Void)?
     var onConnectionStateChange: (@Sendable (TranscriptionConnectionState) -> Void)?
@@ -31,6 +33,12 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
         let data: Data
         let sequenceNumber: UInt64
         let capturedAt: TimeInterval
+    }
+
+    private struct ActiveFinalization {
+        let token: TranscriptionFinalizationState.Token
+        /// Exclusive analyzer time through which module results must have been consumed.
+        let resultBoundary: CMTime
     }
 
     /// `AVAudioConverter` requires a Sendable input block. The block and this flag are confined to
@@ -44,6 +52,7 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
     private let clock: Clock
     private let sessionStart: TimeInterval
     private let maximumBufferedBytes: Int
+    private let finalizationResultTimeout: TimeInterval
     private let continuityReporter: RealtimeContinuityReporter
     /// `nil` for every normal coaching session. Optional chaining then skips event construction.
     private let benchmark: TranscriptionBenchmarkInstrumentation?
@@ -70,6 +79,12 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
     private var bufferedAudio: [BufferedAudio] = []
     private var bufferedByteCount = 0
     private var activityTracker = PCM16SpeechActivityTracker()
+    private var finalizationState = TranscriptionFinalizationState()
+    private var analyzerReadyForFinalization = false
+    private var analyzerTimeScale: CMTimeScale = 1
+    private var submittedAnalyzerFrameCount: Int64 = 0
+    private var activeFinalization: ActiveFinalization?
+    private var latestConsumedResultsFinalizationTime: CMTime?
 
     init(
         locale: Locale,
@@ -82,6 +97,7 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
         silenceIdleCutoff: TimeInterval = .infinity,
         turnDebounce: TimeInterval,
         maxBufferedAudioSeconds: TimeInterval,
+        finalizationResultTimeout: TimeInterval = 8,
         benchmark: TranscriptionBenchmarkInstrumentation? = nil
     ) {
         self.locale = locale
@@ -89,6 +105,7 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
         self.clock = clock
         self.sessionStart = sessionStart
         self.benchmark = benchmark
+        self.finalizationResultTimeout = finalizationResultTimeout
         maximumBufferedBytes = TranscriptionAudioFormat.pcm16Mono.byteCount(
             forDuration: maxBufferedAudioSeconds)
         continuityReporter = RealtimeContinuityReporter(
@@ -109,7 +126,7 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
             silenceMaxInterval: silenceMaxInterval,
             silenceIdleCutoff: silenceIdleCutoff,
             silenceEnabled: speaker == .me,
-            onTurnEnd: { [weak self] in self?.onTurnEnd?() },
+            onTurnEnd: { [weak self] boundary in self?.onTurnEnd?(boundary) },
             onSilence: { [weak self] quiet in self?.onSilence?(quiet) },
             onTranscriptionWorkChanged: { [weak self] hasPendingWork in
                 self?.onTranscriptionWorkChanged?(hasPendingWork)
@@ -120,6 +137,15 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
     }
 
     func connect() {
+        audioQueue.sync {
+            _ = finalizationState.reset()
+            analyzerReadyForFinalization = false
+            analyzerTimeScale = 1
+            submittedAnalyzerFrameCount = 0
+            activeFinalization = nil
+            latestConsumedResultsFinalizationTime = nil
+            _ = activityTracker.reset()
+        }
         lock.lock()
         stopped = false
         terminalFailureReported = false
@@ -169,6 +195,12 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
             self?.bufferedAudio.removeAll(keepingCapacity: false)
             self?.bufferedByteCount = 0
             _ = self?.activityTracker.reset()
+            _ = self?.finalizationState.reset()
+            self?.analyzerReadyForFinalization = false
+            self?.analyzerTimeScale = 1
+            self?.submittedAnalyzerFrameCount = 0
+            self?.activeFinalization = nil
+            self?.latestConsumedResultsFinalizationTime = nil
         }
         if let analyzer {
             Task { await analyzer.cancelAndFinishNow() }
@@ -291,11 +323,16 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
         let configured = audioQueue.sync { () -> Bool in
             guard isLive(generation: generation),
                   let inputFormat = Self.inputFormat,
-                  let converter = AVAudioConverter(from: inputFormat, to: format) else {
+                  let converter = AVAudioConverter(from: inputFormat, to: format),
+                  format.sampleRate.isFinite,
+                  format.sampleRate.rounded() > 0,
+                  format.sampleRate.rounded() <= Double(Int32.max) else {
                 return false
             }
             self.converter = converter
             self.inputContinuation = inputContinuation
+            analyzerTimeScale = CMTimeScale(format.sampleRate.rounded())
+            submittedAnalyzerFrameCount = 0
             let pending = bufferedAudio
             bufferedAudio.removeAll(keepingCapacity: false)
             bufferedByteCount = 0
@@ -306,6 +343,9 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
                     capturedAt: chunk.capturedAt,
                     generation: generation)
             }
+            analyzerReadyForFinalization = true
+            let effects = finalizationState.analyzerBecameAvailable()
+            applyFinalizationEffects(effects, generation: generation)
             return isLive(generation: generation)
         }
         guard configured else {
@@ -360,8 +400,16 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
         continuityReporter.recordSendAttempt(
             sequence: sequenceNumber,
             socketGeneration: generation)
-        switch continuation.yield(AnalyzerInput(buffer: converted)) {
+        let frameCount = Int64(converted.frameLength)
+        let bufferStartTime = CMTime(
+            value: submittedAnalyzerFrameCount,
+            timescale: analyzerTimeScale)
+        switch continuation.yield(AnalyzerInput(
+            buffer: converted,
+            bufferStartTime: bufferStartTime
+        )) {
         case .enqueued:
+            submittedAnalyzerFrameCount += frameCount
             continuityReporter.recordSendSuccess(
                 sequence: sequenceNumber,
                 socketGeneration: generation)
@@ -419,6 +467,17 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
     }
 
     private func handle(_ result: SpeechTranscriber.Result, generation: Int) {
+        guard isLive(generation: generation) else { return }
+        let resultsFinalizationTime = result.resultsFinalizationTime
+        // Run this only after any accepted text below has entered the shared transcript. Apple
+        // documents that `finalize` may return before the app consumes already-published results.
+        defer {
+            audioQueue.async { [weak self] in
+                self?.recordConsumedFinalResults(
+                    through: resultsFinalizationTime,
+                    generation: generation)
+            }
+        }
         guard result.isFinal else { return }
         let raw = String(result.text.characters)
 
@@ -521,7 +580,113 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
 
     private func setSpeechActivity(_ active: Bool, generation: Int) {
         guard isLive(generation: generation) else { return }
-        coachingCoordinator.updateTranscriptionWork(active)
+        let effects = active
+            ? finalizationState.recordSpeechStarted()
+            : finalizationState.recordSpeechEnded(
+                analyzerAvailable: analyzerReadyForFinalization)
+        applyFinalizationEffects(effects, generation: generation)
+    }
+
+    private func applyFinalizationEffects(
+        _ effects: TranscriptionFinalizationState.Effects,
+        generation: Int
+    ) {
+        if let completed = effects.completedFinalization,
+           activeFinalization?.token == completed {
+            activeFinalization = nil
+        }
+        if let pendingWork = effects.pendingWork {
+            coachingCoordinator.updateTranscriptionWork(pendingWork)
+        }
+        guard let token = effects.finalization else { return }
+        guard submittedAnalyzerFrameCount > 0 else {
+            fail(
+                generation: generation,
+                diagnostic: "could not finalize before analyzer audio was submitted")
+            return
+        }
+        let resultBoundary = CMTime(
+            value: submittedAnalyzerFrameCount,
+            timescale: analyzerTimeScale)
+        let finalSampleTime = CMTime(
+            value: submittedAnalyzerFrameCount - 1,
+            timescale: analyzerTimeScale)
+        lock.lock()
+        guard !stopped, !terminalFailureReported, self.generation == generation,
+              let analyzer else {
+            lock.unlock()
+            return
+        }
+        lock.unlock()
+        activeFinalization = .init(token: token, resultBoundary: resultBoundary)
+        if let latestConsumedResultsFinalizationTime,
+           CMTimeCompare(latestConsumedResultsFinalizationTime, resultBoundary) >= 0 {
+            let consumed = finalizationState.finalResultsConsumed(
+                token,
+                analyzerAvailable: analyzerReadyForFinalization)
+            applyFinalizationEffects(consumed, generation: generation)
+        }
+        scheduleFinalizationResultDeadline(token: token, generation: generation)
+
+        Task { [weak self, analyzer] in
+            do {
+                try await analyzer.finalize(through: finalSampleTime)
+            } catch {
+                self?.fail(
+                    generation: generation,
+                    diagnostic: "input finalization failed: \(error)")
+                return
+            }
+            guard let self else { return }
+            self.audioQueue.async { [weak self] in
+                guard let self, self.isLive(generation: generation) else { return }
+                let effects = self.finalizationState.analyzerFinalizationCompleted(
+                    token,
+                    analyzerAvailable: self.analyzerReadyForFinalization)
+                self.applyFinalizationEffects(effects, generation: generation)
+            }
+        }
+    }
+
+    private func recordConsumedFinalResults(
+        through resultsFinalizationTime: CMTime,
+        generation: Int
+    ) {
+        guard isLive(generation: generation),
+              resultsFinalizationTime.isValid,
+              resultsFinalizationTime.isNumeric else { return }
+        if latestConsumedResultsFinalizationTime.map({
+            CMTimeCompare(resultsFinalizationTime, $0) > 0
+        }) ?? true {
+            latestConsumedResultsFinalizationTime = resultsFinalizationTime
+        }
+        guard let activeFinalization,
+              CMTimeCompare(
+                resultsFinalizationTime,
+                activeFinalization.resultBoundary) >= 0 else { return }
+        let effects = finalizationState.finalResultsConsumed(
+            activeFinalization.token,
+            analyzerAvailable: analyzerReadyForFinalization)
+        applyFinalizationEffects(effects, generation: generation)
+    }
+
+    /// Correctness is state-based. This deadline only converts a provider/result-stream stall into
+    /// the adapter's normal terminal failure instead of leaving coaching parked forever.
+    private func scheduleFinalizationResultDeadline(
+        token: TranscriptionFinalizationState.Token,
+        generation: Int
+    ) {
+        let timeout = finalizationResultTimeout
+        DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { [weak self] in
+            guard let self else { return }
+            self.audioQueue.async { [weak self] in
+                guard let self, self.isLive(generation: generation),
+                      self.activeFinalization?.token == token else { return }
+                self.fail(
+                    generation: generation,
+                    diagnostic: "finalized results were not consumed after \(timeout)s")
+            }
+        }
     }
 
     private func fail(generation: Int, diagnostic: String) {
