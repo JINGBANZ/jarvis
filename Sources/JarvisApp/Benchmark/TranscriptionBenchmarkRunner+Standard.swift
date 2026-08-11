@@ -114,7 +114,9 @@ extension TranscriptionBenchmarkRunner {
             events: snapshot.events,
             captureObservations: snapshot.captureObservations,
             connectionStates: snapshot.states,
-            failure: failure))
+            failure: failure ?? snapshot.terminalFailure.map {
+                TranscriptionBenchmarkEventRecorder.Failure.terminal($0).description
+            }))
     }
 
     private func prepareAppleLocale(_ identifier: String) async throws -> Locale {

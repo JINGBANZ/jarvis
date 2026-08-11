@@ -22,6 +22,24 @@ struct TranscriptionBenchmarkEventRecorderTests {
         #expect(try await waiter.value == 2)
     }
 
+    @Test("a terminal failure after settlement remains in the final snapshot")
+    func terminalFailureAfterSettlement() async throws {
+        let recorder = TranscriptionBenchmarkEventRecorder()
+        recorder.record(event(text: "complete", observedAt: 1))
+
+        try await recorder.waitForFinalStreamToSettle(
+            minimumCount: 1,
+            quietPeriod: 0.01,
+            timeout: 1)
+        recorder.record(.connectionLost)
+
+        let failure = recorder.snapshot().terminalFailure.map {
+            TranscriptionBenchmarkEventRecorder.Failure.terminal($0).description
+        }
+        #expect(failure ==
+            "Transcription failed: \(TranscriptionFailureReason.connectionLost.activityDescription)")
+    }
+
     @Test("reconnect settlement includes finals after both expected phrases")
     func reconnectSettlementIncludesLateFinals() async throws {
         let phraseIDs = ["english-technical", "mandarin-technical"]
