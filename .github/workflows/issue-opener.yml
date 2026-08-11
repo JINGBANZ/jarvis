@@ -1,9 +1,11 @@
-# Runs only when the owner starts it from the Actions UI. Its central reusable workflow receives a
-# repository-scoped token so it can file one proposed issue for later human approval.
+# The scheduled/manual caller delegates to a pinned reusable workflow whose runner default is
+# `ubuntu-latest`. Its repository-scoped token lets a filed issue trigger Issue Worker.
 name: Issue Opener
 
 on:
-  workflow_dispatch: {}
+  schedule:
+    - cron: '7 19 * * *' # daily 03:07 Beijing (UTC+8); off-the-hour minute dodges peak cron delays
+  workflow_dispatch: {} # manual runs; also re-enables the schedule after 60-day repo inactivity
 
 jobs:
   open-issue:
@@ -14,7 +16,3 @@ jobs:
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
       BOT_PAT: ${{ secrets.BOT_PAT }}
-    with:
-      runs-on: ubuntu-latest
-      # engine: claude           # optional (default: claude)
-      # model: claude-sonnet-4-6 # optional (default: claude-opus-4-8)

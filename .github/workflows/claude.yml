@@ -30,5 +30,3 @@ jobs:
       actions: read
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-    with:
-      runs-on: ubuntu-latest

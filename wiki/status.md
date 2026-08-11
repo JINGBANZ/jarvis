@@ -101,8 +101,8 @@ fixed notices remain available in Activity. The gate statically rejects unreview
 The source tree is prepared for a public launch without giving public input a direct privileged-agent
 path. CI, release, and agent automation use hosted runners; no self-hosted runner remains registered.
 Automatic agent review is limited to same-repository PR branches, `@claude` is owner-invoked, issue
-discovery is manually dispatched, and issue implementation requires an owner-applied `agent-ready`
-label plus the central workflow's existing write-access check. Reusable agent workflows and retained
+discovery keeps its scheduled/manual triggers, and automatic issue implementation relies on the
+central workflow's existing author write-access check. Reusable agent workflows and retained
 third-party Actions are SHA-pinned; hosted CI/release Actions are Dependabot-managed. Public docs
 disclose the current unsandboxed boundary, contribution and private-reporting paths are present, and
 release app bundles carry the Apache license plus third-party notices. The existing Git/PR history is
@@ -112,10 +112,11 @@ machine-specific instructions were generalized instead of rewriting repository i
 ## Next action
 
 The four agent workflows are temporarily disabled in GitHub Actions while their base-branch copies
-still target the removed self-hosted runner; the `agent-ready` approval label now exists. Merge this
-hardening PR, then re-enable the workflows so their hosted, owner-gated definitions take effect.
-Before changing repository visibility, delete the historical self-hosted runs and artifacts after owner approval:
-the audit found no credential leak, but those logs expose runner, account, and installed-tool paths.
+still target the removed self-hosted runner. Merge this hardening PR, then re-enable the workflows so
+their hosted definitions and existing source-level gates take effect.
+Before changing repository visibility, delete the historical self-hosted runs and artifacts after
+owner approval: the audit found no credential leak, but those logs expose runner, account, and
+installed-tool paths.
 Replace release-please's `GITHUB_TOKEN` with a GitHub App token
 before making CI a required check, because token-authored Release PRs do not trigger `pull_request`
 workflows. At visibility change, enable private vulnerability reporting, secret scanning and push

@@ -1369,16 +1369,18 @@
 
 - **Chose:** Remove the persistent repository-level `vps` runner, but retain the four development
   agent workflows on GitHub-hosted runners. Limit automatic review to same-repository PR branches;
-  accept `@claude` only from the repository owner; run issue discovery only by manual dispatch; and
-  require the owner-applied `agent-ready` label plus the central reusable workflow's write-access
-  check before an issue worker receives write authority. Pin reusable workflow calls to a full commit
-  SHA. Keep the workflows disabled until this caller hardening lands on the default branch.
+  accept `@claude` only from the repository owner; retain Issue Opener's scheduled/manual triggers;
+  and rely on Issue Worker's central gate, which requires the issue author to have admin, maintain,
+  or write permission before its agent job receives write authority. Pin reusable workflow calls to
+  a full commit SHA. Keep the workflows disabled until this caller hardening lands on the default
+  branch.
 - **Why:** Ephemeral hosted runners remove the persistent-machine exposure without discarding useful
   development automation. Trigger gates separately prevent arbitrary public issues, comments, and
   fork code from launching a credential-bearing or write-capable agent.
 - **Rejected:** (a) Deleting all agent workflows—safe but unnecessarily removes the development
   loop. (b) Changing only `runs-on`—that protects the old VPS but leaves public-input credential and
-  prompt-injection risks. (c) Automatically implementing every newly opened issue—the explicit label
-  is a cheap human approval boundary.
+  prompt-injection risks in the review/comment callers that lack a permission gate. (c) Adding a
+  second label gate to Issue Worker—the central author-permission gate already provides the intended
+  trust boundary and the duplicate gate breaks the automatic Opener → Worker chain.
 - **Detail:** `.github/workflows/claude-code-review.yml`, `.github/workflows/claude.yml`,
   `.github/workflows/issue-opener.yml`, `.github/workflows/issue-worker.yml`.
