@@ -45,12 +45,15 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
     private let sessionStart: TimeInterval
     private let maximumBufferedBytes: Int
     private let continuityReporter: RealtimeContinuityReporter
+    /// `nil` for every normal coaching session. Optional chaining then skips event construction.
+    private let benchmark: TranscriptionBenchmarkInstrumentation?
 
     private let lock = NSLock()
     private let audioQueue: DispatchQueue
     private var stopped = true
     private var generation = 0
     private var terminalFailureReported = false
+    private var benchmarkFinalSequence: UInt64 = 0
     /// Session-relative time of the first buffer accepted by this analyzer. SpeechAnalyzer ranges
     /// start at zero; adding this offset keeps the two independently prepared endpoints on the
     /// shared transcript/continuity clock without injecting wall-clock jitter into every buffer.
@@ -77,13 +80,15 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
         silenceMaxInterval: TimeInterval,
         silenceIdleCutoff: TimeInterval = .infinity,
         turnDebounce: TimeInterval,
-        maxBufferedAudioSeconds: TimeInterval
+        maxBufferedAudioSeconds: TimeInterval,
+        benchmark: TranscriptionBenchmarkInstrumentation? = nil
     ) {
         self.locale = locale
         self.speaker = speaker
         self.clock = clock
         let sessionStart = clock.now()
         self.sessionStart = sessionStart
+        self.benchmark = benchmark
         maximumBufferedBytes = TranscriptionAudioFormat.pcm16Mono.byteCount(
             forDuration: maxBufferedAudioSeconds)
         continuityReporter = RealtimeContinuityReporter(
@@ -118,6 +123,7 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
         lock.lock()
         stopped = false
         terminalFailureReported = false
+        benchmarkFinalSequence = 0
         analyzerTimelineOffset = nil
         generation += 1
         let generation = generation
@@ -310,6 +316,13 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
 
         jlog("Jarvis Apple Speech [\(speaker.rawValue)]: ready "
              + "(\(locale.identifier), \(Int(format.sampleRate)) Hz).")
+        benchmark?.observer.record(.init(
+            kind: .ready,
+            provider: TranscriptionProvider.appleSpeech.rawValue,
+            localeIdentifier: locale.identifier,
+            speaker: speaker.rawValue,
+            generation: generation,
+            observedAt: clock.now()))
         emitState(.ready)
     }
 
@@ -423,12 +436,60 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
         let spokenEnd = resultEnd.isFinite && resultEnd >= resultStart
             ? timelineOffset + resultEnd
             : spokenAt
+        let benchmarkItemID: String?
+        if benchmark == nil {
+            benchmarkItemID = nil
+        } else {
+            benchmarkFinalSequence &+= 1
+            benchmarkItemID = "apple-\(generation)-\(benchmarkFinalSequence)"
+        }
         lock.unlock()
-        guard coachingCoordinator.recordFinalizedTranscript(
+        let accepted = coachingCoordinator.recordFinalizedTranscript(
             raw,
             spokenAt: spokenAt,
             source: "Apple Speech"
-        ) else { return }
+        )
+        guard accepted else {
+            // Preserve the normal adapter behavior: unusable language reaches neither coaching nor
+            // continuity. An explicit benchmark alone records the provider's unavailable terminal.
+            guard let benchmarkItemID, isLive(generation: generation) else { return }
+            benchmark?.observer.record(.init(
+                kind: .providerFinal,
+                provider: TranscriptionProvider.appleSpeech.rawValue,
+                localeIdentifier: locale.identifier,
+                speaker: speaker.rawValue,
+                generation: generation,
+                itemID: benchmarkItemID,
+                text: raw,
+                spokenAt: sessionStart + spokenAt,
+                spokenEndAt: sessionStart + spokenEnd,
+                observedAt: clock.now(),
+                transcriptUnavailable: true))
+            benchmark?.observer.record(.init(
+                kind: .finalized,
+                provider: TranscriptionProvider.appleSpeech.rawValue,
+                localeIdentifier: locale.identifier,
+                speaker: speaker.rawValue,
+                generation: generation,
+                itemID: benchmarkItemID,
+                spokenAt: sessionStart + spokenAt,
+                spokenEndAt: sessionStart + spokenEnd,
+                observedAt: clock.now(),
+                transcriptUnavailable: true))
+            return
+        }
+        benchmark?.observer.record(.init(
+            kind: .providerFinal,
+            provider: TranscriptionProvider.appleSpeech.rawValue,
+            localeIdentifier: locale.identifier,
+            speaker: speaker.rawValue,
+            generation: generation,
+            itemID: benchmarkItemID,
+            text: raw,
+            spokenAt: sessionStart + spokenAt,
+            spokenEndAt: sessionStart + spokenEnd,
+            observedAt: clock.now(),
+            transcriptUnavailable: false))
         continuityReporter.recordServerSpeech(
             .speechStarted,
             audioTimeMilliseconds: Int(max(0, spokenAt) * 1_000),
@@ -439,6 +500,18 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
             audioTimeMilliseconds: Int(max(0, spokenEnd) * 1_000),
             sessionAudioTime: spokenEnd,
             socketGeneration: generation)
+        benchmark?.observer.record(.init(
+            kind: .finalized,
+            provider: TranscriptionProvider.appleSpeech.rawValue,
+            localeIdentifier: locale.identifier,
+            speaker: speaker.rawValue,
+            generation: generation,
+            itemID: benchmarkItemID,
+            text: raw,
+            spokenAt: sessionStart + spokenAt,
+            spokenEndAt: sessionStart + spokenEnd,
+            observedAt: clock.now(),
+            transcriptUnavailable: false))
         continuityReporter.recordServerSpeech(
             .transcriptionCompleted,
             audioTimeMilliseconds: Int(max(0, spokenEnd) * 1_000),

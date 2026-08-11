@@ -12,7 +12,8 @@ enum TranscriptionSessionFactory {
         transcript: RollingTranscript,
         clock: Clock,
         config: Config,
-        networkStatus: @escaping @Sendable () -> String
+        networkStatus: @escaping @Sendable () -> String,
+        benchmark: TranscriptionBenchmarkInstrumentation? = nil
     ) -> any TranscriptionSession {
         switch configuration.provider {
         case .openAI:
@@ -35,7 +36,8 @@ enum TranscriptionSessionFactory {
                 readyTimeout: config.realtimeReadyTimeoutSeconds,
                 pingInterval: config.realtimePingIntervalSeconds,
                 pongTimeout: config.realtimePongTimeoutSeconds,
-                networkStatus: networkStatus)
+                networkStatus: networkStatus,
+                benchmark: benchmark)
         case .appleSpeech:
             // Reaching here means preparation already succeeded, which only happens on the macOS 26
             // SDK path. On older SDKs `AppleSpeechModelPreparation.prepare` reports the provider
@@ -53,7 +55,8 @@ enum TranscriptionSessionFactory {
                         ? config.silenceIdleCutoffSeconds
                         : .infinity,
                     turnDebounce: config.turnDebounceSeconds,
-                    maxBufferedAudioSeconds: config.maxBufferedAudioSeconds)
+                    maxBufferedAudioSeconds: config.maxBufferedAudioSeconds,
+                    benchmark: benchmark)
             } else {
                 preconditionFailure("Apple Speech must be prepared before constructing its session")
             }

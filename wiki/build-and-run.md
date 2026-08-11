@@ -129,6 +129,16 @@ runtime). It also sidesteps the `file://` `fetch()` restriction that forced the 
   `Jarvis.app`; without live source it refuses to run a weaker audit. `./scripts/eval-session.sh
   [session-dir]` is the terminal launcher for the same Core evaluator.
 
+## System-audio transcription benchmark
+
+The benchmark is an explicit hidden mode of the signed app. Standard mode runs fixed synthetic audio
+through every selectable transcription path; reconnect mode interrupts only Jarvis's active
+transcription WebSocket and exercises the real buffer/replay path. Neither mode opens the microphone,
+changes host networking, or runs in the normal build/test gate.
+
+See [transcription-benchmark.md](./transcription-benchmark.md) for commands, architecture, scoring,
+acceptance, privacy, result interpretation, and when each mode should be run.
+
 ## Live smoke checklist
 
 Some behavior can only be verified with a real key, a mic, and granted permissions. Run
@@ -153,8 +163,8 @@ the human-facing coaching record. The current validation priority lives in
   Activity.
 - Confirm saved screenshots exclude both overlay surfaces. Toggle each overlay in Settings, verify its
   controls and preview follow the toggle, and confirm the choice survives relaunch.
-- If validating realtime recovery, disconnect the network, say a unique phrase, reconnect, and confirm
-  the debug log reports buffered replay and the phrase appears exactly once after recovery.
+- Validate realtime recovery with `./scripts/transcription-benchmark.sh reconnect`; do not disable the
+  Mac's network connection. Confirm its summary reports both scoped-interruption phrases exactly once.
 - Choose **Stop Jarvis** and confirm Activity ends with `session ended by user`, with no later
   transcription or coaching events.
 - In Activity, choose the stopped session and click **Evaluate**. Confirm the button shows

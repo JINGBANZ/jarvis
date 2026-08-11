@@ -13,7 +13,6 @@ public protocol TranscriptionSession: AnyObject, Sendable {
     /// They let Core combine positive sample-count progress with provider readiness without exposing
     /// amplitude or PCM. See `CaptureReadinessMonitor`.
     var onCaptureContinuity: (@Sendable (CaptureReadinessMonitor.Signal) -> Void)? { get set }
-
     func connect()
     func stop()
     func recordCapturedAudio(

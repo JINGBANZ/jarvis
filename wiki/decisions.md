@@ -1352,6 +1352,25 @@
   `Sources/JarvisCore/Diagnostics/JSONLRecords.swift`,
   `Sources/JarvisApp/App/AppDelegate.swift`.
 
+### 2026-08-10 — The reconnect benchmark faults only Jarvis's transcription transport
+
+- **Chose:** Make the explicit reconnect benchmark close only the active Jarvis transcription
+  WebSocket through `RealtimeTranscriber`'s normal failure path, hold its replacement while fixed
+  synthetic phrases enter the real replay buffer, then release it. Host Wi-Fi, Ethernet, VPNs, and
+  other processes stay online. Keep this live provider regression outside the normal test gate.
+- **Why:** The acceptance target is Jarvis's reconnect generation, buffering, replay, ordering, and
+  provider identity. A machine-wide outage adds manual coordination and disrupts unrelated work
+  without improving evidence for those boundaries. Starting at the transport-failure funnel keeps
+  the meaningful application path real while making the run repeatable and safe to automate.
+- **Rejected:** (a) Disabling a host interface or asking an operator to do so—too broad and
+  disruptive. (b) Firewall or proxy rules—still mutate shared machine networking and add cleanup
+  risk. (c) A mock-only test—it cannot prove the signed app's process tap, PCM replay, replacement
+  WebSocket, and live provider finalization work together. (d) Claiming this tests macOS outage
+  detection—the scoped trigger deliberately begins after that boundary.
+- **Detail:** [transcription-benchmark.md → Scoped Reconnect Regression](./transcription-benchmark.md#scoped-reconnect-regression),
+  `Sources/JarvisApp/Capture/RealtimeTranscriber.swift`,
+  `Sources/JarvisApp/Benchmark/TranscriptionBenchmarkRunner+Reconnect.swift`.
+
 ### 2026-08-10 — Session audit persistence is bounded and failure-contained
 
 - **Chose:** Give `CoachDriver` and brain clients only the narrow `CoachingAttemptAuditing` and
@@ -1459,3 +1478,28 @@
   `Sources/JarvisCore/Diagnostics/FileSessionAudit.swift`,
   `Sources/JarvisCore/Diagnostics/SessionAuditWorker.swift`,
   `Sources/JarvisApp/App/AppDelegate.swift`.
+
+### 2026-08-11 — Transcription benchmark capabilities are absent from normal sessions
+
+- **Chose:** Remove benchmark observation from the provider-neutral `TranscriptionSession` contract.
+  Only the explicit runner supplies one immutable optional `TranscriptionBenchmarkInstrumentation`
+  bundle. Its best-effort observer records typed benchmark events, while its transport controller
+  owns the scoped interruption and deferred replacement connection. Normal app wiring omits the
+  bundle, skips event construction, and keeps the direct production reconnect schedule. Apple Speech
+  also keeps its ordinary unusable-final and continuity behavior when the bundle is absent.
+- **Why:** The benchmark must observe private production provider boundaries to remain end to end,
+  but its measurement and fault-injection lifecycle must not become normal session reporting, session
+  audit input, or capture behavior. Absence as the disabled state makes that boundary structural and
+  matches the session audit's optional-port shape without combining their data or ownership.
+- **Rejected:** (a) A mutable diagnostic callback on every transcription session—it puts benchmark
+  capability on the normal contract and still constructs events before discovering no listener.
+  (b) An always-present reconnect hold flag and polling loop—it changes the ordinary reconnect path.
+  (c) Sending benchmark events to `FileSessionAudit`—real sessions have no fixed ground truth and the
+  two reports answer different questions. (d) A wrapper around the public session API—it cannot see
+  provider endpoint, commit, reconciliation, or replay boundaries and would reduce the test to a
+  simulation.
+- **Extends:** 2026-08-10 — The reconnect benchmark faults only Jarvis's transcription transport.
+- **Detail:** [transcription-benchmark.md → Isolation From Normal Use](./transcription-benchmark.md#isolation-from-normal-use),
+  `Sources/JarvisCore/Benchmark/TranscriptionBenchmarkInstrumentation.swift`,
+  `Sources/JarvisCore/Benchmark/TranscriptionBenchmarkObserving.swift`,
+  `Sources/JarvisCore/Benchmark/TranscriptionBenchmarkTransportControl.swift`.
