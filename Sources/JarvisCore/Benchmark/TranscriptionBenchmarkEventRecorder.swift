@@ -1,9 +1,10 @@
 import Foundation
 
 /// `@unchecked Sendable`: every mutable observation array and terminal state is guarded by `lock`.
-public final class TranscriptionBenchmarkEventRecorder: @unchecked Sendable {
+public final class TranscriptionBenchmarkEventRecorder: TranscriptionBenchmarkObserving,
+    @unchecked Sendable {
     public struct Snapshot: Sendable {
-        public let events: [TranscriptionDiagnosticEvent]
+        public let events: [TranscriptionBenchmarkEvent]
         public let captureObservations: [TranscriptionBenchmark.CaptureObservation]
         public let states: [TranscriptionConnectionState]
         public let terminalFailure: TranscriptionFailureReason?
@@ -25,7 +26,7 @@ public final class TranscriptionBenchmarkEventRecorder: @unchecked Sendable {
 
     private let lock = NSLock()
     private let abortMarker: URL?
-    private var events: [TranscriptionDiagnosticEvent] = []
+    private var events: [TranscriptionBenchmarkEvent] = []
     private var captureObservations: [TranscriptionBenchmark.CaptureObservation] = []
     private var states: [TranscriptionConnectionState] = []
     private var terminalFailure: TranscriptionFailureReason?
@@ -34,7 +35,7 @@ public final class TranscriptionBenchmarkEventRecorder: @unchecked Sendable {
         self.abortMarker = abortMarker
     }
 
-    public func record(_ event: TranscriptionDiagnosticEvent) {
+    public func record(_ event: TranscriptionBenchmarkEvent) {
         lock.lock(); events.append(event); lock.unlock()
     }
 
@@ -65,7 +66,7 @@ public final class TranscriptionBenchmarkEventRecorder: @unchecked Sendable {
     public func waitForReady(
         minimumGeneration: Int = 0,
         timeout: TimeInterval
-    ) async throws -> TranscriptionDiagnosticEvent {
+    ) async throws -> TranscriptionBenchmarkEvent {
         try await wait(timeout: timeout, boundary: "transcription readiness") { snapshot in
             snapshot.events.first {
                 $0.kind == .ready && $0.generation >= minimumGeneration

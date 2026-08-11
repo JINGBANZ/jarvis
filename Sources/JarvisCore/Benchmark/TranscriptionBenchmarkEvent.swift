@@ -1,9 +1,10 @@
 import Foundation
 
-/// Structured lifecycle evidence exposed by a transcription session for repeatable diagnostics.
-/// An event may contain transcript text, but never audio; callers may persist it only inside
-/// Jarvis's owner-only session tree.
-public struct TranscriptionDiagnosticEvent: Codable, Equatable, Sendable {
+/// One benchmark-only observation from a real transcription provider lifecycle.
+///
+/// Events may contain transcript text but never audio. They exist only while an explicit benchmark
+/// run supplies `TranscriptionBenchmarkInstrumentation`; normal coaching constructs and records none.
+public struct TranscriptionBenchmarkEvent: Codable, Equatable, Sendable {
     public enum Kind: String, Codable, Sendable {
         case ready
         case serverEndpoint = "server-endpoint"

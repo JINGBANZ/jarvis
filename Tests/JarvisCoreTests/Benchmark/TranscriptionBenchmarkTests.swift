@@ -717,7 +717,7 @@ struct TranscriptionBenchmarkTests {
     }
 
     private func event(
-        _ kind: TranscriptionDiagnosticEvent.Kind,
+        _ kind: TranscriptionBenchmarkEvent.Kind,
         observedAt: TimeInterval,
         model: String?,
         itemID: String? = nil,
@@ -727,8 +727,8 @@ struct TranscriptionBenchmarkTests {
         generation: Int = 1,
         replayedChunks: Int? = nil,
         evictedChunks: Int? = nil
-    ) -> TranscriptionDiagnosticEvent {
-        TranscriptionDiagnosticEvent(
+    ) -> TranscriptionBenchmarkEvent {
+        TranscriptionBenchmarkEvent(
             kind: kind,
             provider: TranscriptionProvider.openAI.rawValue,
             model: model,

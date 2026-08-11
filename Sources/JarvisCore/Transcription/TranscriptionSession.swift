@@ -13,10 +13,6 @@ public protocol TranscriptionSession: AnyObject, Sendable {
     /// They let Core combine positive sample-count progress with provider readiness without exposing
     /// amplitude or PCM. See `CaptureReadinessMonitor`.
     var onCaptureContinuity: (@Sendable (CaptureReadinessMonitor.Signal) -> Void)? { get set }
-    /// Optional structured lifecycle evidence for diagnostics such as the transcription benchmark.
-    /// It may include transcript text but never audio. Normal coaching does not install it.
-    var onDiagnosticEvent: (@Sendable (TranscriptionDiagnosticEvent) -> Void)? { get set }
-
     func connect()
     func stop()
     func recordCapturedAudio(

@@ -93,7 +93,7 @@ struct TranscriptionBenchmarkEventRecorderTests {
         }
     }
 
-    private func event(text: String, observedAt: TimeInterval) -> TranscriptionDiagnosticEvent {
+    private func event(text: String, observedAt: TimeInterval) -> TranscriptionBenchmarkEvent {
         .init(
             kind: .finalized,
             provider: TranscriptionProvider.openAI.rawValue,

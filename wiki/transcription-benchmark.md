@@ -45,6 +45,29 @@ They share only the repository's owner-only `.jarvis/` privacy posture and the a
 that deterministic logic belongs in Core. Benchmark scoring neither writes session-audit evidence
 nor participates in coaching.
 
+## Isolation From Normal Use
+
+The normal app constructs transcription sessions without benchmark instrumentation. Its
+[`TranscriptionSession`](../Sources/JarvisCore/Transcription/TranscriptionSession.swift) contract and
+`AppDelegate` wiring expose no benchmark callback or transport-fault capability. Only
+[`TranscriptionBenchmarkRunner`](../Sources/JarvisApp/Benchmark/TranscriptionBenchmarkRunner.swift)
+supplies the optional
+[`TranscriptionBenchmarkInstrumentation`](../Sources/JarvisCore/Benchmark/TranscriptionBenchmarkInstrumentation.swift)
+bundle.
+
+When that bundle is absent:
+
+- provider adapters do not construct or record benchmark events;
+- no benchmark recorder, scorer, artifact writer, or session-audit integration exists;
+- Realtime uses its direct production reconnect schedule, with no fault hold or polling; and
+- Apple Speech keeps its normal finalized-result and continuity behavior.
+
+The small optional probe points remain inside the provider adapters because readiness, endpoint,
+commit, provider-final, reconciled-final, and replay evidence exists only at those private production
+boundaries. The injected observer follows the same absence-means-disabled shape as the session-audit
+ports, but it is a separate benchmark-owned contract. The reconnect controller likewise exists only
+for an explicit reconnect run and owns the hold outside `RealtimeTranscriber`'s normal state.
+
 ## Running It
 
 The launcher builds the signed app and opens a hidden benchmark mode so macOS attributes System Audio

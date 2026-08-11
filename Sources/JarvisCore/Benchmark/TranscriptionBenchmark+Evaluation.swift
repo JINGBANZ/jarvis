@@ -99,7 +99,7 @@ public extension TranscriptionBenchmark {
     static func evaluateReconnect(
         model: OpenAITranscriptionModel,
         phraseIDs: [String],
-        events: [TranscriptionDiagnosticEvent],
+        events: [TranscriptionBenchmarkEvent],
         captureObservations: [CaptureObservation] = [],
         failure: String? = nil
     ) -> ReconnectSummary {
@@ -224,7 +224,7 @@ public extension TranscriptionBenchmark {
     /// unavailable, or duplicate finals cannot make the runner stop before every expected phrase.
     static func recognizedReconnectPhraseIDs(
         _ phraseIDs: [String],
-        in events: [TranscriptionDiagnosticEvent],
+        in events: [TranscriptionBenchmarkEvent],
         generation: Int
     ) -> [String] {
         let expectedPhrases = phraseIDs.compactMap { id in
@@ -277,7 +277,7 @@ public extension TranscriptionBenchmark {
 
     private static func reconnectPhraseRecognition(
         _ phraseIDs: [String],
-        in finals: [TranscriptionDiagnosticEvent]
+        in finals: [TranscriptionBenchmarkEvent]
     ) -> ReconnectPhraseRecognition {
         let expectedPhrases = phraseIDs.compactMap { id in
             phrases.first { $0.id == id }
@@ -305,7 +305,7 @@ public extension TranscriptionBenchmark {
     /// reconstruction: the group must beat each fragment alone and removing any member must make
     /// the match worse. This permits real segmentation without absorbing an unrelated extra final.
     private static func bestReconnectPartition(
-        _ finals: [TranscriptionDiagnosticEvent],
+        _ finals: [TranscriptionBenchmarkEvent],
         groupCount: Int,
         expectedPhrases: [Phrase]
     ) -> ReconnectPartition? {
@@ -362,7 +362,7 @@ public extension TranscriptionBenchmark {
     }
 
     private static func groupImprovesRecognition(
-        _ group: ArraySlice<TranscriptionDiagnosticEvent>,
+        _ group: ArraySlice<TranscriptionBenchmarkEvent>,
         combinedMatch: ReconnectPhraseMatch,
         expectedPhrases: [Phrase]
     ) -> Bool {
@@ -391,9 +391,9 @@ public extension TranscriptionBenchmark {
     }
 
     private static func reconnectFinals(
-        in events: [TranscriptionDiagnosticEvent],
+        in events: [TranscriptionBenchmarkEvent],
         generation: Int
-    ) -> [TranscriptionDiagnosticEvent] {
+    ) -> [TranscriptionBenchmarkEvent] {
         events.enumerated().filter { _, event in
             event.kind == .finalized
                 && !event.transcriptUnavailable
@@ -426,7 +426,7 @@ public extension TranscriptionBenchmark {
     }
 
     private static func duplicateDeliveryCount(
-        in events: [TranscriptionDiagnosticEvent]
+        in events: [TranscriptionBenchmarkEvent]
     ) -> Int {
         var seenItemIDs: Set<String> = []
         var seenTexts: Set<String> = []

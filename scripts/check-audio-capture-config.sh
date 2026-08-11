@@ -7,6 +7,9 @@ benchmark_capture_source="Sources/JarvisApp/Benchmark/SystemAudioBenchmarkCaptur
 benchmark_standard_source="Sources/JarvisApp/Benchmark/TranscriptionBenchmarkRunner+Standard.swift"
 benchmark_reconnect_source="Sources/JarvisApp/Benchmark/TranscriptionBenchmarkRunner+Reconnect.swift"
 benchmark_script="scripts/transcription-benchmark.sh"
+normal_session_contract="Sources/JarvisCore/Transcription/TranscriptionSession.swift"
+normal_app_wiring="Sources/JarvisApp/App/AppDelegate.swift"
+session_factory="Sources/JarvisApp/Capture/TranscriptionSessionFactory.swift"
 if [ ! -f "$capture_source" ]; then
     echo "Audio capture guard: $capture_source not found; refusing to pass." >&2
     exit 1
@@ -48,9 +51,19 @@ if /usr/bin/grep -Eq \
     echo "Reconnect benchmark must not change host network state." >&2
     exit 1
 fi
-if ! /usr/bin/grep -Fq 'beginBenchmarkTransportInterruption' "$benchmark_reconnect_source" \
-    || ! /usr/bin/grep -Fq 'endBenchmarkTransportInterruption' "$benchmark_reconnect_source"; then
+if ! /usr/bin/grep -Fq 'transportControl.beginInterruption()' "$benchmark_reconnect_source" \
+    || ! /usr/bin/grep -Fq 'transportControl.endInterruption()' "$benchmark_reconnect_source"; then
     echo "Reconnect benchmark must scope interruption to Jarvis's transcription transport." >&2
+    exit 1
+fi
+if /usr/bin/grep -Fq 'TranscriptionBenchmark' "$normal_session_contract" \
+    || /usr/bin/grep -Fq 'TranscriptionBenchmark' "$normal_app_wiring"; then
+    echo "Normal transcription contracts and app wiring must not expose benchmark capabilities." >&2
+    exit 1
+fi
+if ! /usr/bin/grep -Fq 'benchmark: TranscriptionBenchmarkInstrumentation? = nil' \
+    "$session_factory"; then
+    echo "Transcription benchmark instrumentation must remain absent by default." >&2
     exit 1
 fi
 

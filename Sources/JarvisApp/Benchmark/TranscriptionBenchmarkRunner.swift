@@ -127,7 +127,8 @@ final class TranscriptionBenchmarkRunner {
     func makeSession(
         arm: TranscriptionBenchmark.Arm,
         appleLocale: Locale?,
-        recorder: TranscriptionBenchmarkEventRecorder
+        recorder: TranscriptionBenchmarkEventRecorder,
+        transportControl: TranscriptionBenchmarkTransportControl? = nil
     ) -> any TranscriptionSession {
         let configuration = TranscriptionConfiguration(
             provider: arm.provider,
@@ -159,10 +160,12 @@ final class TranscriptionBenchmarkRunner {
             config: config,
             networkStatus: { [networkDiagnostics] in
                 networkDiagnostics.currentSummary
-            })
+            },
+            benchmark: .init(
+                observer: recorder,
+                transportControl: transportControl))
         session.onConnectionStateChange = { [recorder] in recorder.record($0) }
         session.onTerminalFailure = { [recorder] in recorder.record($0) }
-        session.onDiagnosticEvent = { [recorder] in recorder.record($0) }
         return session
     }
 }

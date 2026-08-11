@@ -21,7 +21,9 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
     private let isCurrentGeneration: @Sendable (Int) -> Bool
     private let isReady: @Sendable (Int) -> Bool
     private let discardConfirmedAudio: @Sendable (TimeInterval) -> Void
-    private let onFinalizedItem: @Sendable (RealtimeTranscriptionLedger.FinalizedItem) -> Void
+    private let onFinalizedItem: (@Sendable (
+        RealtimeTranscriptionLedger.FinalizedItem
+    ) -> Void)?
 
     private let lock = NSLock()
     private let ledger = RealtimeTranscriptionLedger()
@@ -39,9 +41,9 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
          isCurrentGeneration: @escaping @Sendable (Int) -> Bool,
          isReady: @escaping @Sendable (Int) -> Bool,
          discardConfirmedAudio: @escaping @Sendable (TimeInterval) -> Void,
-         onFinalizedItem: @escaping @Sendable (
+         onFinalizedItem: (@Sendable (
             RealtimeTranscriptionLedger.FinalizedItem
-         ) -> Void) {
+         ) -> Void)? = nil) {
         self.speaker = speaker
         self.coachingCoordinator = coachingCoordinator
         self.terminalTimeout = terminalTimeout
@@ -391,7 +393,7 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
         _ item: RealtimeTranscriptionLedger.FinalizedItem, reason: String?
     ) {
         guard !stopped else { return }
-        onFinalizedItem(item)
+        onFinalizedItem?(item)
         guard let text = item.text else {
             let detail = reason.map { ", after \($0)" } ?? ""
             jlog("⚠️ transcription unavailable (\(speaker.rawValue), item \(item.itemID)\(detail)); "

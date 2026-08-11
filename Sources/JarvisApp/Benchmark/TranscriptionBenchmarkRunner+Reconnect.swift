@@ -37,6 +37,7 @@ extension TranscriptionBenchmarkRunner {
             TranscriptionBenchmark.phrases.first { $0.id == id }
         }
         let recorder = TranscriptionBenchmarkEventRecorder(abortMarker: abortMarker)
+        let transportControl = TranscriptionBenchmarkTransportControl()
         let arm = TranscriptionBenchmark.Arm(
             id: "reconnect--\(model.rawValue)",
             provider: .openAI,
@@ -47,7 +48,8 @@ extension TranscriptionBenchmarkRunner {
         let session = makeSession(
             arm: arm,
             appleLocale: nil,
-            recorder: recorder)
+            recorder: recorder,
+            transportControl: transportControl)
         relay.install(session) { [recorder] sequence, samples in
             recorder.recordCapture(sequence: sequence, samples: samples)
         }
@@ -55,14 +57,13 @@ extension TranscriptionBenchmarkRunner {
         var failure: String?
         do {
             let firstReady = try await recorder.waitForReady(timeout: 20)
-            guard let realtimeSession = session as? RealtimeTranscriber,
-                  realtimeSession.beginBenchmarkTransportInterruption() else {
+            guard transportControl.beginInterruption() else {
                 throw Failure.transportInterruptionUnavailable
             }
             var transportInterruptionHeld = true
             defer {
                 if transportInterruptionHeld {
-                    realtimeSession.endBenchmarkTransportInterruption()
+                    transportControl.endInterruption()
                 }
             }
             TranscriptionBenchmarkFiles.writeProgress(
@@ -89,7 +90,7 @@ extension TranscriptionBenchmarkRunner {
                 phase: "releasing-scoped-transport-interruption",
                 model: model.rawValue,
                 to: options.outputDirectory)
-            realtimeSession.endBenchmarkTransportInterruption()
+            transportControl.endInterruption()
             transportInterruptionHeld = false
             let replacementReady = try await recorder.waitForReady(
                 minimumGeneration: firstReady.generation + 1,

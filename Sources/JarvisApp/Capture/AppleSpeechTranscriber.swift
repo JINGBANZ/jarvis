@@ -26,7 +26,6 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
     var onConnectionStateChange: (@Sendable (TranscriptionConnectionState) -> Void)?
     var onTerminalFailure: (@Sendable (TranscriptionFailureReason) -> Void)?
     var onCaptureContinuity: (@Sendable (CaptureReadinessMonitor.Signal) -> Void)?
-    var onDiagnosticEvent: (@Sendable (TranscriptionDiagnosticEvent) -> Void)?
 
     private struct BufferedAudio {
         let data: Data
@@ -46,14 +45,15 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
     private let sessionStart: TimeInterval
     private let maximumBufferedBytes: Int
     private let continuityReporter: RealtimeContinuityReporter
-    private let diagnosticQueue = DispatchQueue(label: "jarvis.apple-speech.diagnostics")
+    /// `nil` for every normal coaching session. Optional chaining then skips event construction.
+    private let benchmark: TranscriptionBenchmarkInstrumentation?
 
     private let lock = NSLock()
     private let audioQueue: DispatchQueue
     private var stopped = true
     private var generation = 0
     private var terminalFailureReported = false
-    private var diagnosticFinalSequence: UInt64 = 0
+    private var benchmarkFinalSequence: UInt64 = 0
     /// Session-relative time of the first buffer accepted by this analyzer. SpeechAnalyzer ranges
     /// start at zero; adding this offset keeps the two independently prepared endpoints on the
     /// shared transcript/continuity clock without injecting wall-clock jitter into every buffer.
@@ -80,13 +80,15 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
         silenceMaxInterval: TimeInterval,
         silenceIdleCutoff: TimeInterval = .infinity,
         turnDebounce: TimeInterval,
-        maxBufferedAudioSeconds: TimeInterval
+        maxBufferedAudioSeconds: TimeInterval,
+        benchmark: TranscriptionBenchmarkInstrumentation? = nil
     ) {
         self.locale = locale
         self.speaker = speaker
         self.clock = clock
         let sessionStart = clock.now()
         self.sessionStart = sessionStart
+        self.benchmark = benchmark
         maximumBufferedBytes = TranscriptionAudioFormat.pcm16Mono.byteCount(
             forDuration: maxBufferedAudioSeconds)
         continuityReporter = RealtimeContinuityReporter(
@@ -121,7 +123,7 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
         lock.lock()
         stopped = false
         terminalFailureReported = false
-        diagnosticFinalSequence = 0
+        benchmarkFinalSequence = 0
         analyzerTimelineOffset = nil
         generation += 1
         let generation = generation
@@ -314,7 +316,7 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
 
         jlog("Jarvis Apple Speech [\(speaker.rawValue)]: ready "
              + "(\(locale.identifier), \(Int(format.sampleRate)) Hz).")
-        emitDiagnostic(.init(
+        benchmark?.observer.record(.init(
             kind: .ready,
             provider: TranscriptionProvider.appleSpeech.rawValue,
             localeIdentifier: locale.identifier,
@@ -434,30 +436,60 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
         let spokenEnd = resultEnd.isFinite && resultEnd >= resultStart
             ? timelineOffset + resultEnd
             : spokenAt
-        diagnosticFinalSequence &+= 1
-        let diagnosticItemID = "apple-\(generation)-\(diagnosticFinalSequence)"
+        let benchmarkItemID: String?
+        if benchmark == nil {
+            benchmarkItemID = nil
+        } else {
+            benchmarkFinalSequence &+= 1
+            benchmarkItemID = "apple-\(generation)-\(benchmarkFinalSequence)"
+        }
         lock.unlock()
         let accepted = coachingCoordinator.recordFinalizedTranscript(
             raw,
             spokenAt: spokenAt,
             source: "Apple Speech"
         )
-        // A false result while this generation is still live means the provider returned a final
-        // with no usable language. Keep it out of Activity and coaching context, but preserve its
-        // terminal provider lifecycle as an explicitly unavailable benchmark result.
-        guard accepted || isLive(generation: generation) else { return }
-        emitDiagnostic(.init(
+        guard accepted else {
+            // Preserve the normal adapter behavior: unusable language reaches neither coaching nor
+            // continuity. An explicit benchmark alone records the provider's unavailable terminal.
+            guard let benchmarkItemID, isLive(generation: generation) else { return }
+            benchmark?.observer.record(.init(
+                kind: .providerFinal,
+                provider: TranscriptionProvider.appleSpeech.rawValue,
+                localeIdentifier: locale.identifier,
+                speaker: speaker.rawValue,
+                generation: generation,
+                itemID: benchmarkItemID,
+                text: raw,
+                spokenAt: sessionStart + spokenAt,
+                spokenEndAt: sessionStart + spokenEnd,
+                observedAt: clock.now(),
+                transcriptUnavailable: true))
+            benchmark?.observer.record(.init(
+                kind: .finalized,
+                provider: TranscriptionProvider.appleSpeech.rawValue,
+                localeIdentifier: locale.identifier,
+                speaker: speaker.rawValue,
+                generation: generation,
+                itemID: benchmarkItemID,
+                spokenAt: sessionStart + spokenAt,
+                spokenEndAt: sessionStart + spokenEnd,
+                observedAt: clock.now(),
+                transcriptUnavailable: true))
+            return
+        }
+        benchmark?.observer.record(.init(
             kind: .providerFinal,
             provider: TranscriptionProvider.appleSpeech.rawValue,
             localeIdentifier: locale.identifier,
             speaker: speaker.rawValue,
             generation: generation,
-            itemID: diagnosticItemID,
+            itemID: benchmarkItemID,
             text: raw,
             spokenAt: sessionStart + spokenAt,
             spokenEndAt: sessionStart + spokenEnd,
             observedAt: clock.now(),
-            transcriptUnavailable: !accepted))
+            transcriptUnavailable: false))
         continuityReporter.recordServerSpeech(
             .speechStarted,
             audioTimeMilliseconds: Int(max(0, spokenAt) * 1_000),
@@ -468,18 +500,18 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
             audioTimeMilliseconds: Int(max(0, spokenEnd) * 1_000),
             sessionAudioTime: spokenEnd,
             socketGeneration: generation)
-        emitDiagnostic(.init(
+        benchmark?.observer.record(.init(
             kind: .finalized,
             provider: TranscriptionProvider.appleSpeech.rawValue,
             localeIdentifier: locale.identifier,
             speaker: speaker.rawValue,
             generation: generation,
-            itemID: diagnosticItemID,
-            text: accepted ? raw : nil,
+            itemID: benchmarkItemID,
+            text: raw,
             spokenAt: sessionStart + spokenAt,
             spokenEndAt: sessionStart + spokenEnd,
             observedAt: clock.now(),
-            transcriptUnavailable: !accepted))
+            transcriptUnavailable: false))
         continuityReporter.recordServerSpeech(
             .transcriptionCompleted,
             audioTimeMilliseconds: Int(max(0, spokenEnd) * 1_000),
@@ -541,12 +573,6 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
 
     private func emitState(_ state: TranscriptionConnectionState) {
         onConnectionStateChange?(state)
-    }
-
-    private func emitDiagnostic(_ event: TranscriptionDiagnosticEvent) {
-        diagnosticQueue.async { [weak self] in
-            self?.onDiagnosticEvent?(event)
-        }
     }
 
     private static var inputFormat: AVAudioFormat? {

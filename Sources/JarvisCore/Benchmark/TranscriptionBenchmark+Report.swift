@@ -7,7 +7,7 @@ public extension TranscriptionBenchmark {
         public let fixtureSHA256: String
         public let connectStartedAt: TimeInterval
         public let speechEndedAt: TimeInterval
-        public let events: [TranscriptionDiagnosticEvent]
+        public let events: [TranscriptionBenchmarkEvent]
         public let captureObservations: [CaptureObservation]
         public let connectionStates: [TranscriptionConnectionState]
         public let failure: String?
@@ -18,7 +18,7 @@ public extension TranscriptionBenchmark {
             fixtureSHA256: String,
             connectStartedAt: TimeInterval,
             speechEndedAt: TimeInterval,
-            events: [TranscriptionDiagnosticEvent],
+            events: [TranscriptionBenchmarkEvent],
             captureObservations: [CaptureObservation] = [],
             connectionStates: [TranscriptionConnectionState] = [],
             failure: String? = nil
