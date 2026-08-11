@@ -215,9 +215,14 @@ import Testing
         private let backing = SessionAuditFileWriter()
         private var hasBlocked = false
         private var storedBlockedHealth: Data?
+        private var storedInvalidationCount = 0
 
         var blockedHealth: Data? {
             lock.withLock { storedBlockedHealth }
+        }
+
+        var invalidationCount: Int {
+            lock.withLock { storedInvalidationCount }
         }
 
         func openSession(at directory: URL, initialHealth: Data) throws {
@@ -250,11 +255,44 @@ import Testing
         }
 
         func invalidateHealth(in directory: URL) throws {
+            lock.withLock { storedInvalidationCount += 1 }
             try backing.invalidateHealth(in: directory)
         }
 
         func releaseFinalHealth() {
             release.signal()
+        }
+    }
+
+    /// Leaves the initial open marker canonical by failing both partial replacement and invalidation.
+    /// `@unchecked Sendable`: configuration is immutable and the backing writer remains confined to
+    /// the worker's serial queue.
+    private final class FailingPartialAndInvalidationWriter:
+        SessionAuditWriting, @unchecked Sendable {
+        enum Failure: Error { case injected }
+
+        private let backing = SessionAuditFileWriter()
+
+        func openSession(at directory: URL, initialHealth: Data) throws {
+            try backing.openSession(at: directory, initialHealth: initialHealth)
+        }
+
+        func append(_ data: Data, filename: String, in directory: URL) throws {
+            try backing.append(data, filename: filename, in: directory)
+        }
+
+        func replaceHealth(
+            _ data: Data,
+            in directory: URL,
+            shouldCommit: @Sendable () -> Bool
+        ) throws -> Bool {
+            let marker = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            if marker?["state"] as? String == "partial" { throw Failure.injected }
+            return try backing.replaceHealth(data, in: directory, shouldCommit: shouldCommit)
+        }
+
+        func invalidateHealth(in directory: URL) throws {
+            throw Failure.injected
         }
     }
 
@@ -601,6 +639,35 @@ import Testing
         #expect((marker["close_timeout"] as? Int ?? 0) > 0)
     }
 
+    @Test func partialFinalizationSatisfiesQueuedLateCorrectionWithoutDeletingMarker() async throws {
+        let directory = ActivityLogTests.tmp()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let writer = BlockingFinalHealthWriter()
+        let worker = SessionAuditWorker(limits: .production, writer: writer)
+        let audit = FileSessionAudit(directory: directory, worker: worker)
+        await waitUntilIdle(worker)
+
+        let close = Task { await audit.close(deadline: .seconds(5)) }
+        await wait(for: writer.finalHealthEntered)
+        audit.record(
+            tag: "late-coach",
+            request: Data("{}".utf8),
+            response: nil,
+            status: nil,
+            latencyMs: 1)
+        #expect(!audit.isPersistenceSettled)
+
+        writer.releaseFinalHealth()
+        #expect(await close.value == .partial)
+        await audit.waitForPersistenceToStop()
+        await waitUntilIdle(worker)
+
+        let marker = try healthMarker(in: directory)
+        #expect(marker["state"] as? String == "partial")
+        #expect(marker["late_event"] as? Int == 1)
+        #expect(writer.invalidationCount == 0)
+    }
+
     @Test func finalHealthRenameCrossingDeadlineIsCorrectedToPartial() async throws {
         let directory = ActivityLogTests.tmp()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -702,6 +769,31 @@ import Testing
         #expect(marker["state"] as? String == "complete")
     }
 
+    @Test func failedPartialWriteAndInvalidationSettleAKnownOpenMarker() async throws {
+        let directory = ActivityLogTests.tmp()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let writer = FailingPartialAndInvalidationWriter()
+        let worker = SessionAuditWorker(limits: .production, writer: writer)
+        let session = worker.openSession(at: directory)
+        await waitUntilIdle(worker)
+        session.health.markQueueOverflow()
+        session.seal()
+        let completion = CompletionFlag()
+
+        #expect(worker.close(
+            session,
+            deadline: ContinuousClock.now.advanced(by: .seconds(30))) { _ in
+                completion.mark()
+            } == .enqueued)
+        await waitUntilIdle(worker)
+
+        #expect(completion.isMarked)
+        let marker = try healthMarker(in: directory)
+        #expect(marker["state"] as? String == "open")
+        #expect(marker["closed"] as? Bool == false)
+        #expect(session.health.snapshot.writeFailure == 2)
+    }
+
     @Test func eventAfterCompleteMakesOnlyThatSessionUnavailableUntilMarkerIsInvalidated() async throws {
         let directory = ActivityLogTests.tmp()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -733,6 +825,54 @@ import Testing
         #expect(audit.isPersistenceSettled)
         let healthURL = directory.appendingPathComponent(FileSessionAudit.healthFilename)
         #expect(!FileManager.default.fileExists(atPath: healthURL.path))
+    }
+
+    @Test func lateMarkerCorrectionsStayBoundedWhileInvalidationIsBlocked() async throws {
+        let base = ActivityLogTests.tmp()
+        defer { try? FileManager.default.removeItem(at: base) }
+        let writer = BlockingInvalidationWriter()
+        let limits = SessionAuditWorker.Limits(
+            maxEventCount: 1,
+            maxRetainedBytes: 4_096)
+        let worker = SessionAuditWorker(limits: limits, writer: writer)
+        var audits: [FileSessionAudit] = []
+
+        for index in 0..<20 {
+            let directory = base.appendingPathComponent("session-\(index)")
+            try FileManager.default.createDirectory(
+                at: directory,
+                withIntermediateDirectories: false)
+            let audit = FileSessionAudit(directory: directory, worker: worker)
+            await waitUntilIdle(worker)
+            #expect(await audit.close(deadline: .seconds(5)) == .complete)
+            audits.append(audit)
+        }
+
+        audits[0].record(
+            tag: "late-coach",
+            request: Data("{}".utf8),
+            response: nil,
+            status: nil,
+            latencyMs: 1)
+        await wait(for: writer.invalidationEntered)
+        for audit in audits.dropFirst() {
+            audit.record(
+                tag: "late-coach",
+                request: Data("{}".utf8),
+                response: nil,
+                status: nil,
+                latencyMs: 1)
+        }
+
+        let retained = worker.retainedSnapshot()
+        #expect(retained.lateCorrectionCount == limits.maxEventCount)
+        #expect(retained.lateCorrectionApproximateBytes == 256)
+        #expect(audits.dropFirst().allSatisfy { !$0.isPersistenceSettled })
+
+        writer.releaseInvalidation()
+        await audits[0].waitForPersistenceToStop()
+        await waitUntilIdle(worker)
+        #expect(worker.retainedSnapshot().lateCorrectionCount == 0)
     }
 
     @Test func openFailureDisablesCaptureAndIsVisibleInHealthMarker() async throws {

@@ -46,6 +46,10 @@ traffic admitted later for a replacement session. Prioritized closes have their 
 bound. A rejected close whose session has no unfinished worker envelope settles immediately against
 its already-stable non-complete state; if the prioritized table is full, one fallback is coalesced
 onto a session already represented by the bounded ring and released with that session's last envelope.
+Late-marker corrections use a separate fixed-count admission table that includes the operation in
+progress; they cannot accumulate as untracked serial-queue closures. If that table is full or its
+lock is contended, the worker retains nothing for the rejected correction and that session remains
+unevaluable instead of trusting its old complete marker.
 
 The worker writes the traffic, coaching-attempt, and health artifacts named by `FileSessionAudit` in
 the same owner-only session directory as Activity and the screenshots deliberately shown to the
@@ -108,8 +112,12 @@ Audit persistence is deliberately weaker than coaching:
   repeatedly exercising a broken edge.
 - A late event or close deadline miss makes evidence partial. A post-seal event also invalidates an
   earlier complete marker before the session becomes evaluable again.
-- A failed corrective health write removes the rejected marker; new-format records without that
-  marker are partial. If the marker cannot be removed, the session remains unevaluable.
+- A queued late-marker invalidation is skipped when partial finalization already satisfied that
+  correction, so settlement is the last filesystem mutation for the session.
+- A failed corrective health write removes a possibly canonical complete candidate; new-format
+  records without that marker are partial. If that ambiguous marker cannot be removed, the session
+  remains unevaluable. When no complete candidate was attempted, a surviving open/missing marker is
+  already known-partial, so failed cleanup does not strand settlement after all I/O has ended.
 - The health marker records the surviving failure facts when the filesystem is still usable, and
   the evaluator labels affected totals as lower bounds rather than silently treating missing records
   as zero.
@@ -141,7 +149,7 @@ from prose, `stay_silent`, or Activity copy.
 
 Deterministic parked and failing writers exercise overload, blocked I/O, deadline crossing, open and
 write failure, serialization failure, both final-commit deadline crossings, failed correction
-invalidation, post-close marker correction, bounded rejected-close retention, protected-session
-retention, and behavioral equivalence in
+invalidation, post-close marker correction, partial-finalization/correction races, bounded rejected
+close and late-correction retention, protected-session retention, and behavioral equivalence in
 [`SessionAuditIsolationTests`](../Tests/JarvisCoreTests/Diagnostics/SessionAuditIsolationTests.swift).
 The repository gate remains `swift build && ./scripts/run-tests.sh`.

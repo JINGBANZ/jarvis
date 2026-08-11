@@ -11,9 +11,9 @@ import Synchronization
 /// Mailbox admission uses `NSLock.try()` and drops immediately on contention or pressure; the worker
 /// never holds that lock while parsing JSON or touching a file.
 ///
-/// `@unchecked Sendable`: `mailboxLock` protects the ring, deferred lifecycle closes, and all queue
-/// counters. The writer and date formatter are used only by the private serial queue; immutable
-/// limits may be read from any caller.
+/// `@unchecked Sendable`: `mailboxLock` protects the ring, deferred lifecycle closes, late-marker
+/// corrections, and all queue counters. The writer and date formatter are used only by the private
+/// serial queue; immutable limits may be read from any caller.
 final class SessionAuditWorker: @unchecked Sendable {
     struct Limits: Sendable {
         let maxEventCount: Int
@@ -29,6 +29,8 @@ final class SessionAuditWorker: @unchecked Sendable {
         let approximateBytes: Int
         let deferredCloseCount: Int
         let deferredCloseApproximateBytes: Int
+        let lateCorrectionCount: Int
+        let lateCorrectionApproximateBytes: Int
     }
 
     enum CloseAdmission: Sendable, Equatable {
@@ -64,6 +66,7 @@ final class SessionAuditWorker: @unchecked Sendable {
         var isSealed: Bool { sealed.load() > 0 }
         var isOpened: Bool { opened.load() > 0 }
         var isPersistenceDisabled: Bool { persistenceDisabled.load() > 0 }
+        var isLateCorrectionPending: Bool { lateCorrectionState.load() == 1 }
 
         func seal() { sealed.mark() }
         func markOpened() { opened.mark() }
@@ -85,8 +88,17 @@ final class SessionAuditWorker: @unchecked Sendable {
 
         /// A durable partial marker or successful invalidation makes any late correction stable.
         func finishLateCorrectionIfPending() {
-            guard lateCorrectionState.compareExchange(expected: 1, desired: 2) else { return }
+            let finished = lateCorrectionState.compareExchange(expected: 1, desired: 2)
+                || lateCorrectionState.compareExchange(expected: 3, desired: 2)
+            guard finished else { return }
             persistenceMutationFinished()
+        }
+
+        /// Capacity rejection cannot safely make an old complete marker evaluable again. Stop
+        /// retrying this correction without releasing its unavailable persistence gate; importantly,
+        /// the worker no longer retains the session, callback, or directory.
+        func abandonLateCorrectionIfPending() {
+            _ = lateCorrectionState.compareExchange(expected: 1, desired: 3)
         }
     }
 
@@ -220,6 +232,7 @@ final class SessionAuditWorker: @unchecked Sendable {
     private enum Work {
         case envelope(Envelope)
         case deferredClose(DeferredClose)
+        case lateCorrection(Session)
     }
 
     private enum EventEncodingError: Error {
@@ -262,6 +275,10 @@ final class SessionAuditWorker: @unchecked Sendable {
     /// one coalesced stable-partial completion may be attached to each still-retained session instead.
     private var deferredCloses: [DeferredClose] = []
     private var coalescedPartialCloses: [UUID: CoalescedPartialClose] = [:]
+    /// Includes the correction currently executing. Admission is best-effort and capped at the same
+    /// count as the ring, so direct serial-queue work cannot become an unbounded side channel.
+    private var lateCorrections: [Session] = []
+    private var retainedLateCorrectionCount = 0
     private let timestampFormatter: DateFormatter
 
     init(limits: Limits, writer: any SessionAuditWriting) {
@@ -386,7 +403,9 @@ final class SessionAuditWorker: @unchecked Sendable {
             approximateBytes: retainedBytes,
             deferredCloseCount: deferredCloses.count + coalescedPartialCloses.count,
             deferredCloseApproximateBytes:
-                (deferredCloses.count + coalescedPartialCloses.count) * 256)
+                (deferredCloses.count + coalescedPartialCloses.count) * 256,
+            lateCorrectionCount: retainedLateCorrectionCount,
+            lateCorrectionApproximateBytes: retainedLateCorrectionCount * 256)
     }
 
     private func enqueue(
@@ -481,15 +500,25 @@ final class SessionAuditWorker: @unchecked Sendable {
         let shouldCorrect = session.beginLateCorrection()
         session.health.markLateEvent()
         guard shouldCorrect else { return }
-        queue.async { [self] in
-            do {
-                try writer.invalidateHealth(in: session.directory)
-                session.finishLateCorrectionIfPending()
-            } catch {
-                session.health.markWriteFailure()
-                // Keep this session unavailable. A later successful partial finalization can still
-                // repair the marker and finish the pending mutation.
-            }
+        guard mailboxLock.try() else {
+            session.health.markQueueOverflow()
+            session.abandonLateCorrectionIfPending()
+            return
+        }
+        guard retainedLateCorrectionCount < limits.maxEventCount else {
+            mailboxLock.unlock()
+            session.health.markQueueOverflow()
+            session.abandonLateCorrectionIfPending()
+            return
+        }
+        lateCorrections.append(session)
+        retainedLateCorrectionCount += 1
+        let shouldSchedule = !drainScheduled
+        if shouldSchedule { drainScheduled = true }
+        mailboxLock.unlock()
+
+        if shouldSchedule {
+            queue.async { [self] in drain() }
         }
     }
 
@@ -504,6 +533,9 @@ final class SessionAuditWorker: @unchecked Sendable {
                     close.session,
                     deadline: close.deadline,
                     completion: close.completion)
+            case .lateCorrection(let session):
+                correctLateMarker(for: session)
+                finishLateCorrectionWork()
             }
         }
     }
@@ -515,6 +547,9 @@ final class SessionAuditWorker: @unchecked Sendable {
            close.afterFinishedEnvelopeCount <= finishedEnvelopeCount {
             deferredCloses.removeFirst()
             return .deferredClose(close)
+        }
+        if !lateCorrections.isEmpty {
+            return .lateCorrection(lateCorrections.removeFirst())
         }
         guard queuedCount > 0 else {
             drainScheduled = false
@@ -543,6 +578,26 @@ final class SessionAuditWorker: @unchecked Sendable {
         }
         mailboxLock.unlock()
         coalescedCompletion?(.partial)
+    }
+
+    private func correctLateMarker(for session: Session) {
+        // A partial finalization ahead of this queued correction may already have persisted the late
+        // evidence and satisfied its mutation. Never unlink that newly trustworthy partial marker.
+        guard session.isLateCorrectionPending else { return }
+        do {
+            try writer.invalidateHealth(in: session.directory)
+            session.finishLateCorrectionIfPending()
+        } catch {
+            session.health.markWriteFailure()
+            // Keep this session unavailable. A later successful partial finalization can still
+            // repair the marker and finish the pending mutation.
+        }
+    }
+
+    private func finishLateCorrectionWork() {
+        mailboxLock.lock()
+        retainedLateCorrectionCount -= 1
+        mailboxLock.unlock()
     }
 
     private func process(_ envelope: Envelope) {
@@ -630,6 +685,10 @@ final class SessionAuditWorker: @unchecked Sendable {
             session.health.markCloseTimeout()
         }
         var snapshot = session.health.snapshot
+        // Once a complete replacement is attempted, a writer failure can leave that candidate
+        // canonical (for example, after rename but before the post-commit check returns). Only that
+        // ambiguous path requires successful invalidation before settlement can be reported.
+        let completeCandidateCouldBeCanonical = snapshot.isComplete
         if snapshot.isComplete {
             let completeSnapshot = snapshot
             do {
@@ -669,9 +728,17 @@ final class SessionAuditWorker: @unchecked Sendable {
                 session.finishLateCorrectionIfPending()
                 completion(.partial)
             } catch {
-                // Do not signal settlement while a rejected complete marker might still be canonical.
-                // Regular Stop deliberately keeps Evaluate disabled in this unrecoverable disk state.
                 session.health.markWriteFailure()
+                guard !completeCandidateCouldBeCanonical else {
+                    // Do not signal settlement while a rejected complete marker might still be
+                    // canonical. Regular Stop keeps Evaluate disabled in this ambiguous disk state.
+                    return
+                }
+                // No complete replacement was attempted, so the only surviving canonical state is
+                // the initial open marker or no marker. Both are already evaluator-partial; all I/O
+                // has ended even though the best-effort partial rewrite and unlink failed.
+                session.finishLateCorrectionIfPending()
+                completion(.partial)
             }
         }
     }
