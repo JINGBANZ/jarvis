@@ -306,8 +306,9 @@
 - **Why:** Tuning the harness previously meant pulling request logs from the OpenAI dashboard by hand and pasting them into a chat for diagnosis. The wire body is the ground truth a context-engineering audit needs (instructions, message order, tool schemas, `usage.cached_tokens` per call); recording it locally and auditing it in one click closes that loop. The elision markers double as signal: they show the auditor exactly where the prompt cache should be hitting, and keep the audit prompt itself from re-billing every repeated prefix.
 - **Rejected:** (a) Staying on the dashboard as the source — manual, and it dies the day `store:true` is flipped off (see the 2026-07-07 memory entry's privacy item). (b) Recording at the `ChatMessage` level — provider-agnostic but a paraphrase: it can't show cache-busting prefix changes or tool-schema bloat, which are the audit's main quarry. (c) Recording the evaluator's own traffic — it would pollute the very session it audits (its client keeps `traffic: nil`).
 - **Superseded in part by:** 2026-07-24 — Session evaluation is agentic-only and reads complete source logs. Wire recording and delta-aware rendering stand; the in-app one-click model call does not.
-- **Detail:** `Sources/JarvisCore/Diagnostics/BrainTrafficLog.swift`,
-  `Sources/JarvisCore/Diagnostics/EvaluationTranscript.swift`; current report discovery lives in
+- **Detail:** [session-audit.md](./session-audit.md),
+  `Sources/JarvisCore/Diagnostics/EvaluationTranscript.swift`; the historical recorder is preserved
+  in [the pre-supersession source](https://github.com/JINGBANZ/jarvis/blob/249c2e9cc946c3009b0af079cdb2017152f9c8df/Sources/JarvisCore/Diagnostics/BrainTrafficLog.swift); current report discovery lives in
   `ActivityViewer` ([settings-window.md → Sections](./settings-window.md#sections)); retention
   posture in [sandbox.md](./sandbox.md).
 
@@ -1317,9 +1318,9 @@
   privacy posture for an evaluator convenience.
 - **Extends:** 2026-07-15 — Brain traffic is recorded per session; one-click LLM audit, and
   2026-07-24 — Session evaluation is agentic-only and reads complete source logs.
-- **Detail:** [architecture.md → Resilience](./architecture.md#resilience),
+- **Detail:** [session-audit.md](./session-audit.md),
   [sandbox.md → Data Egress](./sandbox.md#data-egress),
-  `Sources/JarvisCore/Diagnostics/CoachingAttemptLog.swift`,
+  `Sources/JarvisCore/Diagnostics/CoachingAttemptAuditing.swift`,
   `Sources/JarvisCore/Diagnostics/TriggerQualityMetrics.swift`,
   `Sources/JarvisCore/Diagnostics/EvaluationTranscript.swift`.
 
@@ -1342,9 +1343,12 @@
   (c) Dropping damaged or pre-request records—they would turn missing evidence into exact-looking call
   and telemetry totals.
 - **Extends:** 2026-08-08 — Session evaluation uses persisted coaching-attempt provenance.
-- **Detail:** [architecture.md → Latency](./architecture.md#latency),
-  `Sources/JarvisCore/Diagnostics/BrainTrafficLog.swift`,
-  `Sources/JarvisCore/Diagnostics/CoachingAttemptLog.swift`,
+- **Superseded by:** 2026-08-10 — Session audit persistence is bounded and failure-contained. The
+  off-latency-path goal and evaluator classifications stand; per-session queues, complete Stop-time
+  draining, and exact-by-default new-format evidence do not.
+- **Detail:** [session-audit.md](./session-audit.md),
+  [historical `BrainTrafficLog.swift`](https://github.com/JINGBANZ/jarvis/blob/249c2e9cc946c3009b0af079cdb2017152f9c8df/Sources/JarvisCore/Diagnostics/BrainTrafficLog.swift),
+  [historical `CoachingAttemptLog.swift`](https://github.com/JINGBANZ/jarvis/blob/249c2e9cc946c3009b0af079cdb2017152f9c8df/Sources/JarvisCore/Diagnostics/CoachingAttemptLog.swift),
   `Sources/JarvisCore/Diagnostics/JSONLRecords.swift`,
   `Sources/JarvisApp/App/AppDelegate.swift`.
 
@@ -1366,3 +1370,110 @@
 - **Detail:** [build-and-run.md → System-audio transcription benchmark](./build-and-run.md#system-audio-transcription-benchmark),
   `Sources/JarvisApp/Capture/RealtimeTranscriber.swift`,
   `Sources/JarvisApp/Benchmark/TranscriptionBenchmarkRunner+Reconnect.swift`.
+### 2026-08-10 — Session audit persistence is bounded and failure-contained
+
+- **Chose:** Give `CoachDriver` and brain clients only the narrow `CoachingAttemptAuditing` and
+  `BrainTrafficAuditing` observer ports. They submit typed `Sendable` events, with attempt attribution
+  carried through a neutral task local. `FileSessionAudit` admits provider/coach events through a
+  nonblocking try-lock into one process-level ring bounded by event count and retained bytes. Callers
+  outside a persisted live session omit the optional observer instead of constructing a second no-op
+  implementation. Only the worker parses request/response JSON, redacts images, serializes records,
+  and performs file I/O.
+- **Chose:** Treat persisted audit evidence as best-effort and self-describing. Overload and oversize
+  records are dropped; open, write, or serialization failure disables further persistence for that
+  session. A versioned `audit-health.json` records completeness and queue-overflow, oversize, open,
+  write, close-timeout, late-event, and serialization-failure counts when possible. The evaluator
+  renders surviving new-format counts as lower bounds or unavailable when health is partial, while
+  retaining the historical interpretation for legacy sessions without a marker.
+- **Chose:** Keep lifecycle ownership in the app. One Start creates one `FileSessionAudit`; regular
+  Stop captures and clears it, requests turn cancellation, then closes the old handle asynchronously
+  after those tasks unwind. Close has a short deadline, and a replacement Start never waits for an
+  older session's parked writer. Application Quit instead asks AppKit to defer termination while a
+  bounded asynchronous cancellation drain and close continue without blocking the main actor. It
+  also joins any drain retained from an immediately preceding Stop; if work cannot drain, the
+  still-open marker remains explicitly partial. A close deadline may classify evidence before a
+  blocked filesystem operation returns, so regular Stop keeps Evaluate disabled until the worker's
+  separate settlement signal confirms that the final or corrective marker is stable, or that a
+  rejected marker has been safely invalidated. Failed invalidation withholds settlement instead of
+  exposing ambiguous evidence.
+- **Why:** Moving work to a per-session serial queue removed JSON and disk work from most callbacks but
+  did not bound retained payloads, make admission structurally nonblocking, contain a failed writer, or
+  let Stop distinguish complete evidence from a timeout. Coaching latency and restart availability
+  must not depend on audit persistence, while an evaluator must not present dropped evidence as an
+  exact total.
+- **Rejected:** (a) Synchronous or backpressured audit durability—diagnostics cannot delay provider
+  response handling or overlay delivery. (b) One unbounded queue per session—it moves rather than
+  bounds the failure. (c) Retrying or blocking when the mailbox is full—this couples coaching to a
+  diagnostic outage. (d) Silently omitting damaged evidence—the health marker makes uncertainty part
+  of the audit contract. (e) Wall-clock latency assertions—deterministic parked/failing writers prove
+  isolation without scheduler-dependent thresholds.
+- **Supersedes:** 2026-08-09 — Session audit persistence stays off the coaching latency path.
+- **Extends:** 2026-08-08 — Session evaluation uses persisted coaching-attempt provenance.
+- **Superseded in part by:** 2026-08-11 — Session audits close once and never reopen. The bounded
+  worker and self-describing evidence stand; try-lock drops, session-wide persistence disablement,
+  close deadlines, deferred Quit, and reversible settlement do not.
+- **Detail:** [session-audit.md](./session-audit.md),
+  `Sources/JarvisCore/Diagnostics/BrainTrafficAuditing.swift`,
+  `Sources/JarvisCore/Diagnostics/CoachingAttemptAuditing.swift`,
+  `Sources/JarvisCore/Diagnostics/FileSessionAudit.swift`,
+  `Sources/JarvisCore/Diagnostics/SessionAuditWorker.swift`,
+  `Sources/JarvisCore/Diagnostics/SessionAuditEvidence.swift`,
+  `Sources/JarvisApp/App/AppDelegate.swift`.
+
+### 2026-08-11 — Audit availability is session-scoped and reopens for late events
+
+- **Chose:** Treat persistence settlement as a reversible, per-session gate. A record rejected after
+  sealing marks that session unavailable synchronously and schedules at most one serial correction
+  that removes any already-published complete marker. A durable partial close can satisfy the same
+  correction. Activity gates Evaluate/Open report by the selected session, while Clear history and
+  automatic pruning preserve every directory with a live audit handle; unrelated settled history
+  stays usable. Application Quit may abandon an unstarted close after its bounded turn drain, leaving
+  the open marker partial, but it waits for every close already in progress before approving exit.
+- **Why:** Finalization and observer callbacks can race. Merely incrementing an in-memory late-event
+  counter after a complete marker is on disk lets the evaluator accept stale exact-looking evidence.
+  Conversely, treating any retained drain as globally active coaching lets one unrecoverable disk
+  failure disable every historical session forever. Exiting while a timed-out close is still
+  correcting a renamed complete marker would recreate the same stale-exact evidence after restart.
+- **Rejected:** (a) Ignore post-close callbacks because they are rare—the complete marker would then
+  make missing evidence look exact. (b) Keep the global Activity lockout—it contains the ambiguity but
+  spreads one session's diagnostic failure to unrelated data. (c) Block the callback on marker I/O—it
+  would put diagnostics back on the coaching latency path.
+- **Extends:** 2026-08-10 — Session audit persistence is bounded and failure-contained.
+- **Superseded by:** 2026-08-11 — Session audits close once and never reopen.
+- **Detail:** [session-audit.md](./session-audit.md),
+  `Sources/JarvisCore/Diagnostics/FileSessionAudit.swift`,
+  `Sources/JarvisCore/Diagnostics/SessionAuditWorker.swift`,
+  `Sources/JarvisCore/Diagnostics/SessionStore.swift`,
+  `Sources/JarvisApp/Viewer/ActivityViewer.swift`.
+
+### 2026-08-11 — Session audits close once and never reopen
+
+- **Chose:** Keep one process-level queue bounded by record count and retained bytes. Admission uses
+  a short memory-only lock, so ordinary producer concurrency does not discard evidence. Only actual
+  capacity pressure or an oversize record is dropped; each loss increments a sticky health counter,
+  and every later record still gets an independent admission and persistence attempt. Open,
+  serialization, or write failure likewise affects the available evidence without disabling the
+  remainder of the session.
+- **Chose:** Make health state monotonic: `in_progress` becomes exactly one terminal `complete` or
+  `partial` marker. Regular Stop waits for that session's producer tasks and closes the audit in a
+  background task, while a replacement Start proceeds with a new directory. A post-seal callback is
+  rejected and logged as a lifecycle defect; it never mutates a terminal audit. This removes
+  corrective marker writes, reversible settlement, evaluation-report evidence stamps, and derived-
+  artifact invalidation.
+- **Chose:** Quit never waits for diagnostics. It cancels live work, seals the current audit, requests
+  a best-effort partial close, and lets termination continue. A crash, fast Quit, or unavailable close
+  slot can leave `in_progress`; the evaluator already treats that state as incomplete evidence.
+- **Why:** Diagnostics must preserve as much evidence as practical without delaying coaching, Start,
+  or Quit. Immutable terminal state gives the evaluator a simple trustworthy boundary. The earlier
+  correction and termination protocols optimized rare ordering failures by expanding lifecycle state
+  across the app, viewer, evaluator, and filesystem edge.
+- **Rejected:** (a) Dropping on a brief lock collision—it is not queue pressure. (b) Disabling an
+  entire session after one dropped or failed record—it increases avoidable evidence loss. (c)
+  Reopening a closed audit for late callbacks—it makes every derived artifact mutable. (d) Deferring
+  application termination for audit durability—diagnostics do not own Quit.
+- **Supersedes in part:** 2026-08-10 — Session audit persistence is bounded and failure-contained.
+- **Supersedes:** 2026-08-11 — Audit availability is session-scoped and reopens for late events.
+- **Detail:** [session-audit.md](./session-audit.md),
+  `Sources/JarvisCore/Diagnostics/FileSessionAudit.swift`,
+  `Sources/JarvisCore/Diagnostics/SessionAuditWorker.swift`,
+  `Sources/JarvisApp/App/AppDelegate.swift`.

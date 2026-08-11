@@ -69,28 +69,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// cleared in `stop()` — so the hotkey beeps when there's no session. Captures the Sendable driver
     /// + turn box (not `@MainActor` self), like the transcriber callbacks do.
     private var requestManualHint: (() -> Void)?
-    /// The current session's brain-traffic recorder, rotated by `beginNewSession` and handed to the
-    /// clients built in `start()`. Per-session (not a shared singleton) on purpose: a request still
-    /// unwinding when Stop → Start rotates sessions must record into the session that made it, not
-    /// contaminate the new session's audit data.
-    private var sessionTraffic: BrainTrafficLog?
-    private var sessionCoachingAttempts: CoachingAttemptLog?
+    /// One per-session handle over the process-level audit worker. Brain clients and `CoachDriver`
+    /// retain only its narrow observer ports, so late work remains attributed to the session that
+    /// created it while Stop → Start can rotate immediately to a fresh handle.
+    private var sessionAudit: FileSessionAudit?
     /// The current session's log directory (set by `beginNewSession`) — also where `CLIBrainClient`
     /// materializes screenshots for a CLI brain, keeping all screen-derived bytes in one owner-only place.
     private var currentSessionDir: URL?
-    /// Stops whose cancelled turns haven't finished unwinding yet. Cancellation only *requests* the
-    /// stop — an in-flight brain request unwinds asynchronously and records its final traffic line on
-    /// the way out — so a just-stopped session isn't evaluable until its drain completes, or a quick
-    /// Evaluate click would audit an incomplete `brain-traffic.jsonl`. A count (not a Bool) so a rapid
-    /// Stop → Start → Stop can't have the first drain's completion unmask the second's.
-    private var drainingStops = 0
+    /// Only cancelled coaching work extends the global ghost lifecycle. Audit persistence is scoped
+    /// to its own session: Activity can use closed history while an unrelated audit drains.
+    private var pendingTurnDrainIDs: Set<UUID> = []
+    /// Normal Stop protects and gates only the directory whose immutable terminal marker is pending.
+    /// The path leaves this set after `close()` returns; closed audits never become mutable again.
+    private var closingAuditPaths: Set<String> = []
 
     /// How many past session log *directories* to keep on disk; older ones are pruned at each Start so
     /// the always-on activity log stays bounded across launches. This caps session count, not the size
     /// of any one session — a very long single run still grows its (append-only) logs + screenshots.
     /// Clear all but the current via the viewer's "Clear history".
     private static let retainedSessions = 10
-
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory) // ghost-mode-allowed: launch configuration
         MainMenu.install() // an Edit menu so ⌘X/⌘C/⌘V/⌘A work in the Settings text fields
@@ -114,7 +111,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // ghost lifecycle.
         activityViewer.isCoachingRunning = { [weak self] in
             guard let self else { return false }
-            return self.transcriber != nil || self.drainingStops > 0
+            return self.transcriber != nil || !self.pendingTurnDrainIDs.isEmpty
+        }
+        activityViewer.isSessionAuditClosed = { [weak self] directory in
+            self?.isAuditClosed(for: directory) ?? true
+        }
+        activityViewer.protectedSessionDirectories = { [weak self] in
+            self?.protectedAuditDirectories() ?? []
         }
         // The button launches the same sole agentic evaluator as scripts/eval-session.sh. Resolve the
         // checkout at click time and read the current provider preference then, so Settings changes
@@ -198,9 +201,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    func applicationWillTerminate(_ notification: Notification) {
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         activityViewer?.cancelEvaluation()
         stop(reason: .applicationQuit)
+        return .terminateNow
     }
 
     /// The two clients that move together with one provider/model route target.
@@ -265,7 +269,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                        reasoningEffort: effort.rawValue,
                                        workDirectory: sessionDir,
                                        timeout: BrainWorkloadTimeout.liveCoaching,
-                                       traffic: sessionTraffic, trafficTag: "coach",
+                                       traffic: sessionAudit, trafficTag: "coach",
                                        systemPrompt: JarvisPrompts.Coach.system,
                                        tools: coachTools,
                                        toolChoice: .required,
@@ -276,7 +280,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                         reasoningEffort: ReasoningEffort.low.rawValue,
                                         workDirectory: sessionDir,
                                         timeout: BrainWorkloadTimeout.historyCompaction,
-                                        traffic: sessionTraffic, trafficTag: "summarizer",
+                                        traffic: sessionAudit, trafficTag: "summarizer",
                                         systemPrompt: JarvisPrompts.HistorySummary.system,
                                         tools: [],
                                         toolChoice: .auto,
@@ -288,12 +292,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 reasoningEffort: effort.rawValue,
                 timeout: BrainWorkloadTimeout.liveCoaching,
                 maxOutputTokens: effort.maxOutputTokens,
-                traffic: sessionTraffic, trafficTag: "coach")
+                traffic: sessionAudit, trafficTag: "coach")
             summarizer = OpenAIBrainClient(
                 apiKey: key, model: BrainModelCatalog.summarizerModelID(for: .openAI),
                 reasoningEffort: ReasoningEffort.low.rawValue,
                 timeout: BrainWorkloadTimeout.historyCompaction, maxOutputTokens: 2_048,
-                traffic: sessionTraffic, trafficTag: "summarizer")
+                traffic: sessionAudit, trafficTag: "summarizer")
         }
         return BrainRuntime(coach: coachBase, summarizer: summarizer)
     }
@@ -731,7 +735,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 captureDirectory: sessionDirectory),
             overlay: overlaySink,
             clock: clock,
-            coachingAttempts: sessionCoachingAttempts)
+            coachingAttempts: sessionAudit)
 
         // CoachDriver is @unchecked Sendable; capture it (not @MainActor self) in the callbacks.
         // Route turns through TurnTaskBox so Stop can cancel an in-flight one. Concurrent triggers are
@@ -954,10 +958,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let endedLiveSession = sessionIsLive
         sessionIsLive = false
         requestManualHint = nil              // hotkey beeps again once there's no live session
-        // Capture these session-bound recorders before a quick Start replaces the properties. Their
-        // queues must drain only at teardown, never on the coaching request path.
-        let traffic = sessionTraffic
-        let coachingAttempts = sessionCoachingAttempts
+        // Capture and clear this session handle before a quick Start installs another. The cancelled
+        // tasks retain only its observer ports and can finish enqueueing into the old session.
+        let audit = sessionAudit
+        let auditDirectory = currentSessionDir
+        sessionAudit = nil
         let cancelled = turns?.cancelAll() ?? []; turns = nil   // cancel any in-flight coaching turn
         coachDriver = nil
         activeBrainTarget = nil
@@ -985,25 +990,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if endedLiveSession {
             ActivityLog.shared.record(.sessionEnded(reason: reason))
         }
-        // Session evidence writes are asynchronous during live coaching. Persist every completed
-        // event before this session can become evaluable; this teardown barrier keeps JSON work and
-        // disk I/O out of request latency without letting Evaluate see incomplete evidence.
+        // Activity remains its separate human-facing failure domain. Normal Stop drains this
+        // session's producers and audit in the background, so a replacement Start stays instant.
+        // Quit seals best-effort and returns immediately; diagnostics never own app termination.
         ActivityLog.shared.flush()
-        traffic?.flush()
-        coachingAttempts?.flush()
-        // The just-stopped session becomes evaluable only once any cancelled turn has actually
-        // finished unwinding — its brain request records a final traffic line on the way out, and an
-        // Evaluate click before that line lands would audit an incomplete brain-traffic.jsonl.
-        if !cancelled.isEmpty {
-            drainingStops += 1
+        if reason == .applicationQuit {
+            audit?.abandon()
+        } else if audit != nil || !cancelled.isEmpty {
+            let drainID = UUID()
+            let auditPath = auditDirectory?.standardizedFileURL.path
+            if !cancelled.isEmpty { pendingTurnDrainIDs.insert(drainID) }
+            if let auditPath { closingAuditPaths.insert(auditPath) }
             Task { @MainActor [weak self] in
                 for task in cancelled { await task.value }
-                guard let self else { return }
                 ActivityLog.shared.flush()
-                traffic?.flush()
-                coachingAttempts?.flush()
-                self.drainingStops -= 1
-                self.activityViewer?.coachingStateDidChange()
+                self?.pendingTurnDrainIDs.remove(drainID)
+                self?.activityViewer?.coachingStateDidChange()
+                _ = await audit?.close()
+                if let auditPath { self?.closingAuditPaths.remove(auditPath) }
+                self?.activityViewer?.coachingStateDidChange()
             }
         }
         activityViewer?.coachingStateDidChange()
@@ -1193,20 +1198,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: base.path)
         JarvisLog.enableFileLogging(directory: dir)     // <dir>/jarvis-debug.log, 0600, fresh
         ActivityLog.shared.enable(directory: dir)        // <dir>/jarvis-activity.jsonl, 0600, fresh
-        let traffic = BrainTrafficLog()                  // fresh recorder BOUND to this session's dir
-        traffic.enable(directory: dir)                   // <dir>/brain-traffic.jsonl, 0600, fresh
-        sessionTraffic = traffic
-        let attempts = CoachingAttemptLog()
-        attempts.enable(directory: dir)                  // <dir>/coaching-attempts.jsonl, 0600, fresh
-        sessionCoachingAttempts = attempts
+        // File creation and every later write run on the shared bounded audit worker. Start only
+        // creates a lightweight session handle and never waits for an older session's disk access.
+        let audit = FileSessionAudit(directory: dir)
+        sessionAudit = audit
         currentSessionDir = dir
         // Now that logging is always on, sessions accumulate every launch. Bound it: keep only the most
         // recent few (the just-created one is current, so it's always spared).
-        SessionStore(base: base, current: dir).pruneToMostRecent(Self.retainedSessions)
+        SessionStore(base: base, current: dir).pruneToMostRecent(
+            Self.retainedSessions,
+            preserving: protectedAuditDirectories())
         // Point the viewer's history browser at the new current session and show it live; clear-history
         // spares whichever session is current.
         activityViewer.sessionDidChange(base: base, current: dir)
         jlog("Jarvis: session \(dir.lastPathComponent) (\(dir.path)).")
+    }
+
+    private func isAuditClosed(for directory: URL) -> Bool {
+        !closingAuditPaths.contains(directory.standardizedFileURL.path)
+    }
+
+    /// Protect only directories still owned by a normal Stop close. Closed audits never reopen.
+    private func protectedAuditDirectories() -> Set<URL> {
+        Set(closingAuditPaths.map { URL(fileURLWithPath: $0, isDirectory: true) })
     }
 
     /// A unique id for a session (one per Start), used as its log subdirectory name. Sortable

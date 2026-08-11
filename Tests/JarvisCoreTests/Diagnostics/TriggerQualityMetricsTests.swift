@@ -41,7 +41,7 @@ import Testing
             _ attempt: Int,
             trigger: String,
             phase: String,
-            recordKind: String = BrainTrafficLog.RecordKind.providerCall.rawValue
+            recordKind: String = BrainTrafficAuditEvent.Kind.providerCall.rawValue
         ) throws -> String {
             try json([
                 "tag": "coach",
@@ -77,7 +77,7 @@ import Testing
                 5,
                 trigger: "turn_end",
                 phase: "initial",
-                recordKind: BrainTrafficLog.RecordKind.preRequestFailure.rawValue),
+                recordKind: BrainTrafficAuditEvent.Kind.preRequestFailure.rawValue),
         ].joined(separator: "\n")
         let activity = [
             #"{"k":"heard"}"#,

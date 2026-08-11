@@ -22,7 +22,7 @@ public final class CoachDriver: @unchecked Sendable {
     private let history = CoachHistory()
     private let speechActivity = SpeechActivityGate()
     private let automaticAttemptDelay: AutomaticAttemptDelay
-    private let coachingAttempts: CoachingAttemptLog?
+    private let coachingAttempts: (any CoachingAttemptAuditing)?
 
     /// Safety backstop against a pathological model that loops on capture_screen forever.
     private let maxToolIterations = 4
@@ -65,7 +65,7 @@ public final class CoachDriver: @unchecked Sendable {
 
     private struct PendingCoachingWork {
         var reason: TriggerReason
-        var wake: CoachingAttemptLog.Wake = .trigger
+        var wake: CoachingAttemptAuditEvent.Wake = .trigger
         /// Completed effects safe to carry between attempts and providers: ordinary user context
         /// only. At most the latest screen observation is retained. Never raw reasoning, tool ids,
         /// or call/result linkage.
@@ -131,7 +131,7 @@ public final class CoachDriver: @unchecked Sendable {
         screen: ScreenCapturing,
         overlay: OverlayRendering,
         clock: Clock,
-        coachingAttempts: CoachingAttemptLog? = nil,
+        coachingAttempts: (any CoachingAttemptAuditing)? = nil,
         automaticAttemptDelay: AutomaticAttemptDelay? = nil
     ) {
         self.config = config
@@ -675,7 +675,7 @@ public final class CoachDriver: @unchecked Sendable {
                 latestOutcome = outcome
                 recordAttemptSuccess(on: attempt)
                 if let id = execution.id {
-                    let terminal: CoachingAttemptLog.TerminalAction = outcome == .spoke
+                    let terminal: CoachingAttemptAuditEvent.TerminalAction = outcome == .spoke
                         ? .speak
                         : .staySilent
                     coachingAttempts?.recordFinished(
@@ -710,7 +710,7 @@ public final class CoachDriver: @unchecked Sendable {
                 latestOutcome = outcome
                 let action = await recordAttemptFailure(failure, on: attempt)
                 if let id = execution.id {
-                    let terminal: CoachingAttemptLog.TerminalAction
+                    let terminal: CoachingAttemptAuditEvent.TerminalAction
                     switch action {
                     case .exhausted:
                         terminal = .exhaustion
@@ -895,17 +895,17 @@ public final class CoachDriver: @unchecked Sendable {
             reason == .manualHint ? .force(speakTool.name) : .required
         jlog("💭 thinking… [\(attempt.target.provider.displayName)]")
 
-        var requestPhase: CoachingAttemptLog.RequestPhase = .initial
+        var requestPhase: CoachingAttemptAuditEvent.RequestPhase = .initial
         var requestSequence = 1
         let conversation: any BrainConversation
         do {
-            let requestContext = CoachingAttemptLog.requestContext(
+            let requestContext = CoachingRequestAttribution.context(
                 attemptID: attemptID,
                 wake: work.wake,
                 reason: reason,
                 phase: requestPhase,
                 sequence: requestSequence)
-            conversation = try await CoachingAttemptLog.$currentRequest.withValue(requestContext) {
+            conversation = try await CoachingRequestAttribution.$current.withValue(requestContext) {
                 try await attempt.brain.makeConversation()
             }
         } catch {
@@ -927,13 +927,13 @@ public final class CoachDriver: @unchecked Sendable {
                 iterations += 1
                 let response: BrainResponse
                 do {
-                    let requestContext = CoachingAttemptLog.requestContext(
+                    let requestContext = CoachingRequestAttribution.context(
                         attemptID: attemptID,
                         wake: work.wake,
                         reason: reason,
                         phase: requestPhase,
                         sequence: requestSequence)
-                    response = try await CoachingAttemptLog.$currentRequest.withValue(requestContext) {
+                    response = try await CoachingRequestAttribution.$current.withValue(requestContext) {
                         try await conversation.respond(
                             messages: historyBase + turnMessages,
                             tools: coachTools,
