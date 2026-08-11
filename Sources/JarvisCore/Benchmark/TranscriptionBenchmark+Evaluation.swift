@@ -1,6 +1,23 @@
 import Foundation
 
 public extension TranscriptionBenchmark {
+    static func standardAcceptanceFailureArmIDs(
+        in summary: Summary,
+        expectedRepetitions: Int,
+        requiredProviders: Set<TranscriptionProvider>
+    ) -> [String] {
+        summary.arms.compactMap { arm -> String? in
+            if arm.unavailableReason != nil {
+                return requiredProviders.contains(arm.arm.provider) ? arm.arm.id : nil
+            }
+            guard arm.repetitions.count == expectedRepetitions,
+                  arm.repetitions.allSatisfy({ $0.failure == nil && $0.continuityPassed }) else {
+                return arm.arm.id
+            }
+            return nil
+        }.sorted()
+    }
+
     static func evaluate(_ input: RepetitionInput) -> RepetitionResult {
         let orderedEvents = input.events.enumerated().sorted {
             $0.element.observedAt != $1.element.observedAt
@@ -146,6 +163,11 @@ public extension TranscriptionBenchmark {
                 $0.kind == .reconnectPrepared && $0.generation == initialGeneration
             }
         } ?? []
+        let replacementDropped = replacementGeneration.map { replacementGeneration in
+            events.contains {
+                $0.kind == .reconnectPrepared && $0.generation >= replacementGeneration
+            }
+        } ?? false
         let replayedChunks = replayEvents.compactMap(\.replayedChunks).max() ?? 0
         let bufferEvictionEvents = events.filter { event in
             guard let initialGeneration, let replacementGeneration else { return false }
@@ -169,6 +191,15 @@ public extension TranscriptionBenchmark {
             && ordered
             && noFallback
             && continuityPassed
+            && !replacementDropped
+        let reportedFailure: String?
+        if let failure {
+            reportedFailure = failure
+        } else if replacementDropped {
+            reportedFailure = "Replacement connection dropped before the reconnect snapshot"
+        } else {
+            reportedFailure = passed ? nil : "Reconnect acceptance criteria were not met"
+        }
         return ReconnectSummary(
             model: model,
             phraseIDs: phraseIDs,
@@ -185,7 +216,7 @@ public extension TranscriptionBenchmark {
             captureSequenceGapCount: captureSequenceGapCount,
             continuityPassed: continuityPassed,
             passed: passed,
-            failure: failure ?? (passed ? nil : "Reconnect acceptance criteria were not met"))
+            failure: reportedFailure)
     }
 
     static func normalize(_ text: String) -> String {

@@ -30,11 +30,13 @@ reconnect mode interrupts only Jarvis's transcription WebSocket, fills the real 
 the replacement is held, then exercises the ordinary replacement path without changing host network
 state. The normal app supplies no benchmark instrumentation: its session contract and `AppDelegate`
 wiring expose no benchmark capability, event construction is skipped, and its direct reconnect path
-is unchanged. Neither mode changes defaults or runs in the gate. The first complete standard run finished
+is unchanged. On macOS 14–25, Apple Speech arms remain reported as platform-unavailable without
+failing the runnable matrix. Neither mode changes defaults or runs in the gate. The first complete standard run finished
 35 of 36 repetitions; one GPT Live Transcribe bilingual repetition timed out waiting for its finalized
 stream while capture and delivery continuity remained intact. The automated reconnect run passes all
 three OpenAI models: both scoped-interruption phrases return exactly once and in order, every model
-replays buffered chunks without eviction or capture gaps, and provider identity remains unchanged.
+replays buffered chunks without eviction or capture gaps, the replacement stays healthy through the
+settled snapshot, and provider identity remains unchanged.
 Apple Speech prepares
 the selected supported locale before replacing a running pipeline, submits every captured sample to
 `SpeechAnalyzer`, records only final results, and uses content-free local activity solely to keep

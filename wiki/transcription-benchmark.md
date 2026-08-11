@@ -159,7 +159,9 @@ under `.jarvis/transcription-benchmarks/<run>/`. The run store retains only the 
 Generated fixture audio lives temporarily inside that run directory and is removed at exit. Captured
 PCM is never persisted.
 
-The command exits nonzero when an arm is unavailable or incomplete, capture continuity fails, or the
-strict reconnect acceptance criteria fail. Inspect `summary.json` to distinguish provider
-recognition/finalization behavior from capture or replay failure. Current live evidence and the next
-requested rerun belong in [status.md](./status.md), not on this operating-contract page.
+The command exits nonzero when a platform-supported arm is unavailable or incomplete, capture
+continuity fails, or the strict reconnect acceptance criteria fail. On macOS 14–25, Apple Speech arms
+remain visible in `summary.json` as unavailable because that provider requires macOS 26, but they do
+not fail the runnable matrix. Inspect the summary to distinguish provider recognition/finalization
+behavior from capture or replay failure. Current live evidence and the next requested rerun belong in
+[status.md](./status.md), not on this operating-contract page.

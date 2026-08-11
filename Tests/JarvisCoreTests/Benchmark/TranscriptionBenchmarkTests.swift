@@ -241,6 +241,34 @@ struct TranscriptionBenchmarkTests {
         #expect(object["schemaVersion"] as? Int == 1)
     }
 
+    @Test("platform-only unavailable arms remain reported without failing the runnable matrix")
+    func platformUnavailableArmAcceptance() {
+        let arm = TranscriptionBenchmark.standardArms.first {
+            $0.provider == .appleSpeech
+        }!
+        let summary = TranscriptionBenchmark.Summary(
+            mode: "standard",
+            repetitionsPerArm: 3,
+            arms: [
+                .init(
+                    arm: arm,
+                    repetitions: [],
+                    unavailableReason: "requires macOS 26 or later"),
+            ])
+
+        #expect(summary.arms.first?.unavailableReason == "requires macOS 26 or later")
+        #expect(TranscriptionBenchmark.standardAcceptanceFailureArmIDs(
+            in: summary,
+            expectedRepetitions: 3,
+            requiredProviders: [.openAI]
+        ).isEmpty)
+        #expect(TranscriptionBenchmark.standardAcceptanceFailureArmIDs(
+            in: summary,
+            expectedRepetitions: 3,
+            requiredProviders: Set(TranscriptionProvider.allCases)
+        ) == [arm.id])
+    }
+
     @Test("reconnect evaluation requires replay exactly once ordering and provider identity")
     func reconnectAcceptance() {
         let model = OpenAITranscriptionModel.gptLiveTranscribe
@@ -299,6 +327,61 @@ struct TranscriptionBenchmarkTests {
         #expect(result.continuityPassed)
         #expect(result.finalTexts == phrases.map(\.text))
         #expect(result.finalPhraseIDs == expected)
+    }
+
+    @Test("reconnect evaluation rejects a second drop before the snapshot")
+    func reconnectRejectsSecondDrop() {
+        let model = OpenAITranscriptionModel.gptLiveTranscribe
+        let expected = ["english-technical", "mandarin-technical"]
+        let phrases = expected.map { id in
+            TranscriptionBenchmark.phrases.first { $0.id == id }!
+        }
+        let events = [
+            event(.ready, observedAt: 1, model: model.rawValue, generation: 1),
+            event(
+                .reconnectPrepared,
+                observedAt: 2,
+                model: model.rawValue,
+                generation: 1,
+                replayedChunks: 4),
+            event(
+                .ready,
+                observedAt: 5,
+                model: model.rawValue,
+                generation: 2,
+                replayedChunks: 40),
+            event(
+                .finalized,
+                observedAt: 6,
+                model: model.rawValue,
+                itemID: "english",
+                text: phrases[0].text,
+                generation: 2),
+            event(
+                .finalized,
+                observedAt: 7,
+                model: model.rawValue,
+                itemID: "mandarin",
+                text: phrases[1].text,
+                generation: 2),
+            event(
+                .reconnectPrepared,
+                observedAt: 8,
+                model: model.rawValue,
+                generation: 2,
+                replayedChunks: 20),
+        ]
+
+        let result = TranscriptionBenchmark.evaluateReconnect(
+            model: model,
+            phraseIDs: expected,
+            events: events,
+            captureObservations: [.init(sequenceNumber: 1, sampleCount: 2_400)])
+
+        #expect(!result.passed)
+        #expect(result.exactlyOnce)
+        #expect(result.failure ==
+            "Replacement connection dropped before the reconnect snapshot")
     }
 
     @Test("reconnect evaluation reconstructs phrases split across finalized items")

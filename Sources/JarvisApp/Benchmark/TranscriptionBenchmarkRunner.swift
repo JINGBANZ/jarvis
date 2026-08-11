@@ -99,14 +99,14 @@ final class TranscriptionBenchmarkRunner {
     private func validate(_ summary: TranscriptionBenchmark.Summary) throws {
         switch options.mode {
         case .standard:
-            let incompleteArms = summary.arms.compactMap { arm -> String? in
-                if arm.unavailableReason != nil { return arm.arm.id }
-                guard arm.repetitions.count == options.repetitions,
-                      arm.repetitions.allSatisfy({ $0.failure == nil && $0.continuityPassed }) else {
-                    return arm.arm.id
-                }
-                return nil
+            var requiredProviders: Set<TranscriptionProvider> = [.openAI]
+            if #available(macOS 26.0, *) {
+                requiredProviders.insert(.appleSpeech)
             }
+            let incompleteArms = TranscriptionBenchmark.standardAcceptanceFailureArmIDs(
+                in: summary,
+                expectedRepetitions: options.repetitions,
+                requiredProviders: requiredProviders)
             guard incompleteArms.isEmpty else {
                 throw Failure.acceptanceFailed(
                     "incomplete standard arms: \(incompleteArms.joined(separator: ", "))")
