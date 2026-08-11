@@ -11,8 +11,9 @@ import Synchronization
 /// Mailbox admission uses `NSLock.try()` and drops immediately on contention or pressure; the worker
 /// never holds that lock while parsing JSON or touching a file.
 ///
-/// `@unchecked Sendable`: `mailboxLock` protects the ring and all queue counters. The writer and date
-/// formatter are used only by the private serial queue; immutable limits may be read from any caller.
+/// `@unchecked Sendable`: `mailboxLock` protects the ring, deferred lifecycle closes, and all queue
+/// counters. The writer and date formatter are used only by the private serial queue; immutable
+/// limits may be read from any caller.
 final class SessionAuditWorker: @unchecked Sendable {
     struct Limits: Sendable {
         let maxEventCount: Int
@@ -188,6 +189,20 @@ final class SessionAuditWorker: @unchecked Sendable {
         let retainedBytes: Int
     }
 
+    /// A lifecycle close that could not enter the bounded ring. Its watermark preserves every
+    /// envelope accepted before Close without letting traffic accepted afterward starve settlement.
+    private struct DeferredClose: Sendable {
+        let session: Session
+        let deadline: ContinuousClock.Instant
+        let completion: @Sendable (SessionAuditCloseResult) -> Void
+        let afterFinishedEnvelopeCount: Int
+    }
+
+    private enum Work {
+        case envelope(Envelope)
+        case deferredClose(DeferredClose)
+    }
+
     private enum EventEncodingError: Error {
         case mismatchedAttemptEvidence
     }
@@ -219,6 +234,9 @@ final class SessionAuditWorker: @unchecked Sendable {
     private var retainedCount = 0
     private var retainedBytes = 0
     private var drainScheduled = false
+    private var acceptedEnvelopeCount = 0
+    private var finishedEnvelopeCount = 0
+    private var deferredCloses: [DeferredClose] = []
     private let timestampFormatter: DateFormatter
 
     init(limits: Limits, writer: any SessionAuditWriting) {
@@ -294,12 +312,13 @@ final class SessionAuditWorker: @unchecked Sendable {
             allowingSealedSession: true,
             admission: .lifecycle)
         if !accepted {
-            // A full bounded ring must not strand lifecycle settlement. This barrier runs behind the
-            // current drain on the same serial queue, after all earlier envelopes for the now-sealed
-            // session, and installs the necessarily partial marker before signaling stability.
-            queue.async { [self] in
-                finalize(session, deadline: deadline, completion: completion)
-            }
+            // A full bounded ring must not strand lifecycle settlement. Preserve the watermark of
+            // everything accepted before Close, then prioritize this finalization over traffic that
+            // enters after that point (including a busy replacement session).
+            deferClose(
+                session,
+                deadline: deadline,
+                completion: completion)
         }
         return accepted
     }
@@ -358,6 +377,7 @@ final class SessionAuditWorker: @unchecked Sendable {
         queuedCount += 1
         retainedCount += 1
         retainedBytes += envelope.retainedBytes
+        acceptedEnvelopeCount += 1
         let shouldSchedule = !drainScheduled
         if shouldSchedule { drainScheduled = true }
         mailboxLock.unlock()
@@ -366,6 +386,26 @@ final class SessionAuditWorker: @unchecked Sendable {
             queue.async { [self] in drain() }
         }
         return true
+    }
+
+    private func deferClose(
+        _ session: Session,
+        deadline: ContinuousClock.Instant,
+        completion: @escaping @Sendable (SessionAuditCloseResult) -> Void
+    ) {
+        mailboxLock.lock()
+        deferredCloses.append(DeferredClose(
+            session: session,
+            deadline: deadline,
+            completion: completion,
+            afterFinishedEnvelopeCount: acceptedEnvelopeCount))
+        let shouldSchedule = !drainScheduled
+        if shouldSchedule { drainScheduled = true }
+        mailboxLock.unlock()
+
+        if shouldSchedule {
+            queue.async { [self] in drain() }
+        }
     }
 
     /// A post-seal observer call cannot be appended without violating close ordering. Make the
@@ -388,15 +428,28 @@ final class SessionAuditWorker: @unchecked Sendable {
     }
 
     private func drain() {
-        while let envelope = takeNext() {
-            process(envelope)
-            finish(envelope)
+        while let work = takeNextWork() {
+            switch work {
+            case .envelope(let envelope):
+                process(envelope)
+                finish(envelope)
+            case .deferredClose(let close):
+                finalize(
+                    close.session,
+                    deadline: close.deadline,
+                    completion: close.completion)
+            }
         }
     }
 
-    private func takeNext() -> Envelope? {
+    private func takeNextWork() -> Work? {
         mailboxLock.lock()
         defer { mailboxLock.unlock() }
+        if let close = deferredCloses.first,
+           close.afterFinishedEnvelopeCount <= finishedEnvelopeCount {
+            deferredCloses.removeFirst()
+            return .deferredClose(close)
+        }
         guard queuedCount > 0 else {
             drainScheduled = false
             return nil
@@ -405,13 +458,14 @@ final class SessionAuditWorker: @unchecked Sendable {
         ring[readIndex] = nil
         readIndex = (readIndex + 1) % ring.count
         queuedCount -= 1
-        return envelope
+        return envelope.map(Work.envelope)
     }
 
     private func finish(_ envelope: Envelope) {
         mailboxLock.lock()
         retainedCount -= 1
         retainedBytes -= envelope.retainedBytes
+        finishedEnvelopeCount += 1
         mailboxLock.unlock()
     }
 

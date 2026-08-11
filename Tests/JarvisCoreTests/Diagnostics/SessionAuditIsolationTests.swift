@@ -77,6 +77,65 @@ import Testing
         }
     }
 
+    /// Parks two accepted appends around a rejected Close, then parks that close's health commit.
+    /// This makes it observable whether traffic accepted afterward runs before the close watermark.
+    /// `@unchecked Sendable`: the lock protects counters/flags, semaphores provide the gates, and the
+    /// backing writer remains confined to the worker's serial queue.
+    private final class ClosePriorityWriter: SessionAuditWriting, @unchecked Sendable {
+        let firstAppendEntered = DispatchSemaphore(value: 0)
+        let secondAppendEntered = DispatchSemaphore(value: 0)
+        let closeEntered = DispatchSemaphore(value: 0)
+        private let releaseFirst = DispatchSemaphore(value: 0)
+        private let releaseSecond = DispatchSemaphore(value: 0)
+        private let releaseCloseCommit = DispatchSemaphore(value: 0)
+        private let lock = NSLock()
+        private let backing = SessionAuditFileWriter()
+        private var appendCount = 0
+        private var laterAppendDidStart = false
+
+        var hasStartedLaterAppend: Bool {
+            lock.withLock { laterAppendDidStart }
+        }
+
+        func openSession(at directory: URL, initialHealth: Data) throws {
+            try backing.openSession(at: directory, initialHealth: initialHealth)
+        }
+
+        func append(_ data: Data, filename: String, in directory: URL) throws {
+            let index = lock.withLock {
+                appendCount += 1
+                if appendCount > 2 { laterAppendDidStart = true }
+                return appendCount
+            }
+            if index == 1 {
+                firstAppendEntered.signal()
+                releaseFirst.wait()
+            } else if index == 2 {
+                secondAppendEntered.signal()
+                releaseSecond.wait()
+            }
+            try backing.append(data, filename: filename, in: directory)
+        }
+
+        func replaceHealth(
+            _ data: Data,
+            in directory: URL,
+            shouldCommit: @Sendable () -> Bool
+        ) throws -> Bool {
+            closeEntered.signal()
+            releaseCloseCommit.wait()
+            return try backing.replaceHealth(data, in: directory, shouldCommit: shouldCommit)
+        }
+
+        func invalidateHealth(in directory: URL) throws {
+            try backing.invalidateHealth(in: directory)
+        }
+
+        func releaseFirstAppend() { releaseFirst.signal() }
+        func releaseSecondAppend() { releaseSecond.signal() }
+        func releaseClose() { releaseCloseCommit.signal() }
+    }
+
     /// Opens normally, then fails the first append. A correct session stops calling it afterward.
     /// `@unchecked Sendable`: `lock` protects the append count and the backing writer is confined to
     /// the worker's serial queue.
@@ -407,6 +466,57 @@ import Testing
         #expect(marker["state"] as? String == "partial")
         #expect((marker["queue_overflow"] as? Int ?? 0) > 0)
         #expect(marker["oversize_record"] as? Int == 1)
+    }
+
+    @Test func rejectedCloseRunsAfterItsPredecessorsButBeforeLaterSessionTraffic() async throws {
+        let stoppedDirectory = ActivityLogTests.tmp()
+        let replacementDirectory = ActivityLogTests.tmp()
+        defer {
+            try? FileManager.default.removeItem(at: stoppedDirectory)
+            try? FileManager.default.removeItem(at: replacementDirectory)
+        }
+        let writer = ClosePriorityWriter()
+        let worker = SessionAuditWorker(
+            limits: .init(maxEventCount: 2, maxRetainedBytes: 4_096),
+            writer: writer)
+        let stopped = worker.openSession(at: stoppedDirectory)
+        let replacement = worker.openSession(at: replacementDirectory)
+        await waitUntilIdle(worker)
+        let event = BrainTrafficAuditEvent(
+            tag: "coach",
+            request: Data("{}".utf8),
+            response: nil,
+            status: nil,
+            latencyMs: 1,
+            error: nil,
+            phases: nil,
+            kind: .providerCall,
+            requestContext: nil,
+            date: Date())
+
+        worker.record(event, for: stopped)
+        await wait(for: writer.firstAppendEntered)
+        worker.record(event, for: stopped)
+        stopped.seal()
+        let closeCompleted = DispatchSemaphore(value: 0)
+        #expect(!worker.close(
+            stopped,
+            deadline: ContinuousClock.now.advanced(by: .seconds(30))) { _ in
+                closeCompleted.signal()
+            })
+
+        writer.releaseFirstAppend()
+        await wait(for: writer.secondAppendEntered)
+        worker.record(event, for: replacement)
+        writer.releaseSecondAppend()
+
+        await wait(for: writer.closeEntered)
+        #expect(!writer.hasStartedLaterAppend)
+        writer.releaseClose()
+        await wait(for: closeCompleted)
+        await waitUntilIdle(worker)
+        #expect(try healthMarker(in: stoppedDirectory)["state"] as? String == "partial")
+        #expect(stopped.health.snapshot.queueOverflow > 0)
     }
 
     @Test func closeTimeoutReturnsWithoutReleasingBlockedDiskAndLeavesPartialMarker() async throws {

@@ -40,7 +40,9 @@ Provider and coach callbacks submit typed `Sendable` values. Admission is best-e
 waits for parsing, image redaction, JSON serialization, or file I/O. One process-level
 [`SessionAuditWorker`](../Sources/JarvisCore/Diagnostics/SessionAuditWorker.swift) owns that work and
 orders every accepted event across session handles while retaining only a bounded amount of data;
-the exact limits remain source-owned in that type.
+the exact limits remain source-owned in that type. If a lifecycle close cannot enter the full ring,
+it retains an accepted-envelope watermark and runs immediately after those predecessors, before
+traffic admitted later for a replacement session.
 
 The worker writes the traffic, coaching-attempt, and health artifacts named by `FileSessionAudit` in
 the same owner-only session directory as Activity and the screenshots deliberately shown to the
