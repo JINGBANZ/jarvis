@@ -44,16 +44,12 @@ struct SessionAuditEvidence: Sendable, Equatable {
             if let data = healthJSON.data(using: .utf8),
                let marker = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                marker["version"] as? Int == FileSessionAudit.formatVersion,
-               let state = marker["state"] as? String,
-               let closed = marker["closed"] as? Bool {
-                if !closed {
+               let state = marker["state"] as? String {
+                if state == "in_progress" || state == "open" {
                     limitations.append("session close incomplete")
-                }
-                if state == "partial" {
+                } else if state == "partial" {
                     limitations.append("health marker reports partial evidence")
-                } else if state == "open", closed {
-                    limitations.append("health marker not finalized")
-                } else if state != "complete" && state != "open" {
+                } else if state != "complete" {
                     limitations.append("health marker state \(state) unsupported")
                 }
                 for (key, label) in [
@@ -61,8 +57,6 @@ struct SessionAuditEvidence: Sendable, Equatable {
                     ("oversize_record", "oversize record"),
                     ("open_failure", "open failure"),
                     ("write_failure", "write failure"),
-                    ("close_timeout", "close timeout"),
-                    ("late_event", "late event"),
                     ("serialization_failure", "serialization failure"),
                 ] {
                     guard let count = marker[key] as? Int, count >= 0 else {

@@ -22,15 +22,10 @@ public enum AgenticEvaluation {
     /// The audit report the agent writes back. Activity opens it after the agentic run.
     public static let reportFilename = "eval-report.md"
 
-    /// Exact audit-health bytes used by the evaluator that produced `eval-report.md`. Activity only
-    /// discovers a versioned report while this stamp still matches the canonical health evidence.
-    public static let reportEvidenceFilename = "eval-report.evidence"
-
     public enum EvaluationError: LocalizedError, Equatable {
         case noTraffic
         case missingActivityLog
         case emptyReport
-        case evidenceChanged
 
         public var errorDescription: String? {
             switch self {
@@ -40,8 +35,6 @@ public enum AgenticEvaluation {
                 "The session's complete Activity log is missing or unreadable."
             case .emptyReport:
                 "The agentic evaluator returned an empty report."
-            case .evidenceChanged:
-                "This session's audit evidence changed during evaluation. Wait for it to settle, then try again."
             }
         }
     }
@@ -61,64 +54,7 @@ public enum AgenticEvaluation {
         let url = sessionDir.appendingPathComponent(reportFilename)
         guard let report = try? String(contentsOf: url, encoding: .utf8), !report.isEmpty
         else { return nil }
-        let evidenceURL = sessionDir.appendingPathComponent(reportEvidenceFilename)
-        if let recordedEvidence = try? Data(contentsOf: evidenceURL) {
-            guard let currentEvidence = try? evidenceStamp(in: sessionDir),
-                  recordedEvidence == currentEvidence
-            else { return nil }
-        } else if usesVersionedAudit(in: sessionDir) {
-            // Reports from legacy sessions predate evidence stamps and remain static. A report beside
-            // the new versioned audit format must carry provenance or it cannot be trusted.
-            return nil
-        }
         return report
-    }
-
-    /// Remove every evaluator-derived view of a session. Audit evidence can become partial again
-    /// after a late observer call, so a transcript or report produced under the earlier complete
-    /// marker must not be offered as current. `unlink` keeps this narrowly file-only and idempotent.
-    public static func invalidateDerivedArtifacts(in sessionDir: URL) throws {
-        let filenames = [
-            transcriptFilename,
-            reportFilename,
-            reportEvidenceFilename,
-            EvalReportPage.filename,
-        ]
-        var firstError: Error?
-        for filename in filenames {
-            let path = sessionDir.appendingPathComponent(filename).path
-            guard unlink(path) != 0 else { continue }
-            let code = errno
-            guard code != ENOENT else { continue }
-            if firstError == nil {
-                firstError = NSError(domain: NSPOSIXErrorDomain, code: Int(code))
-            }
-        }
-        if let firstError { throw firstError }
-    }
-
-    /// Snapshot the canonical evidence marker without hashing or copying the larger traffic logs.
-    /// Atomic marker replacement means exact bytes distinguish the complete/partial generation; the
-    /// leading byte distinguishes a genuinely missing marker from an empty file.
-    static func evidenceStamp(in sessionDir: URL) throws -> Data {
-        let url = sessionDir.appendingPathComponent(FileSessionAudit.healthFilename)
-        guard FileManager.default.fileExists(atPath: url.path) else { return Data([0]) }
-        var stamp = Data([1])
-        stamp.append(try Data(contentsOf: url))
-        return stamp
-    }
-
-    private static func usesVersionedAudit(in sessionDir: URL) -> Bool {
-        let healthURL = sessionDir.appendingPathComponent(FileSessionAudit.healthFilename)
-        if FileManager.default.fileExists(atPath: healthURL.path) { return true }
-        let trafficURL = sessionDir.appendingPathComponent(FileSessionAudit.brainTrafficFilename)
-        guard let handle = try? FileHandle(forReadingFrom: trafficURL) else { return false }
-        defer { try? handle.close() }
-        guard let prefix = try? handle.read(upToCount: 4_096) else { return false }
-        // The worker serializes sorted keys, so `audit_version` is in this bounded prefix even when
-        // the request body makes the first JSONL record large.
-        return String(decoding: prefix, as: UTF8.self).contains(
-            "\"audit_version\":\(FileSessionAudit.formatVersion)")
     }
 
     /// Prepare the agent's workspace for one session and return the task prompt to feed the CLI.
@@ -160,12 +96,7 @@ public enum AgenticEvaluation {
 
     /// Persist one successful agent result without ever exposing report bytes through a permissive
     /// intermediate file. A failed run never reaches this point, so an older report remains intact.
-    static func saveReport(
-        _ markdown: String,
-        agentName: String,
-        evidenceStamp: Data? = nil,
-        in sessionDir: URL
-    ) throws -> String {
+    static func saveReport(_ markdown: String, agentName: String, in sessionDir: URL) throws -> String {
         let body = markdown.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !body.isEmpty else { throw EvaluationError.emptyReport }
         let stamp = """
@@ -176,10 +107,6 @@ public enum AgenticEvaluation {
         let report = "\(stamp)\n\n\(body)\n"
         try replaceOwnerOnlyFile(
             Data(report.utf8), filename: reportFilename, in: sessionDir)
-        try replaceOwnerOnlyFile(
-            evidenceStamp ?? Self.evidenceStamp(in: sessionDir),
-            filename: reportEvidenceFilename,
-            in: sessionDir)
         return report
     }
 

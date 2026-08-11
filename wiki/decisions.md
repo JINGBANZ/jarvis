@@ -1391,8 +1391,9 @@
   isolation without scheduler-dependent thresholds.
 - **Supersedes:** 2026-08-09 — Session audit persistence stays off the coaching latency path.
 - **Extends:** 2026-08-08 — Session evaluation uses persisted coaching-attempt provenance.
-- **Superseded in part by:** 2026-08-11 — Audit availability is session-scoped and reopens for late
-  events. Per-session settlement stands; an unresolved drain no longer locks unrelated history.
+- **Superseded in part by:** 2026-08-11 — Session audits close once and never reopen. The bounded
+  worker and self-describing evidence stand; try-lock drops, session-wide persistence disablement,
+  close deadlines, deferred Quit, and reversible settlement do not.
 - **Detail:** [session-audit.md](./session-audit.md),
   `Sources/JarvisCore/Diagnostics/BrainTrafficAuditing.swift`,
   `Sources/JarvisCore/Diagnostics/CoachingAttemptAuditing.swift`,
@@ -1420,8 +1421,41 @@
   spreads one session's diagnostic failure to unrelated data. (c) Block the callback on marker I/O—it
   would put diagnostics back on the coaching latency path.
 - **Extends:** 2026-08-10 — Session audit persistence is bounded and failure-contained.
+- **Superseded by:** 2026-08-11 — Session audits close once and never reopen.
 - **Detail:** [session-audit.md](./session-audit.md),
   `Sources/JarvisCore/Diagnostics/FileSessionAudit.swift`,
   `Sources/JarvisCore/Diagnostics/SessionAuditWorker.swift`,
   `Sources/JarvisCore/Diagnostics/SessionStore.swift`,
   `Sources/JarvisApp/Viewer/ActivityViewer.swift`.
+
+### 2026-08-11 — Session audits close once and never reopen
+
+- **Chose:** Keep one process-level queue bounded by record count and retained bytes. Admission uses
+  a short memory-only lock, so ordinary producer concurrency does not discard evidence. Only actual
+  capacity pressure or an oversize record is dropped; each loss increments a sticky health counter,
+  and every later record still gets an independent admission and persistence attempt. Open,
+  serialization, or write failure likewise affects the available evidence without disabling the
+  remainder of the session.
+- **Chose:** Make health state monotonic: `in_progress` becomes exactly one terminal `complete` or
+  `partial` marker. Regular Stop waits for that session's producer tasks and closes the audit in a
+  background task, while a replacement Start proceeds with a new directory. A post-seal callback is
+  rejected and logged as a lifecycle defect; it never mutates a terminal audit. This removes
+  corrective marker writes, reversible settlement, evaluation-report evidence stamps, and derived-
+  artifact invalidation.
+- **Chose:** Quit never waits for diagnostics. It cancels live work, seals the current audit, requests
+  a best-effort partial close, and lets termination continue. A crash, fast Quit, or unavailable close
+  slot can leave `in_progress`; the evaluator already treats that state as incomplete evidence.
+- **Why:** Diagnostics must preserve as much evidence as practical without delaying coaching, Start,
+  or Quit. Immutable terminal state gives the evaluator a simple trustworthy boundary. The earlier
+  correction and termination protocols optimized rare ordering failures by expanding lifecycle state
+  across the app, viewer, evaluator, and filesystem edge.
+- **Rejected:** (a) Dropping on a brief lock collision—it is not queue pressure. (b) Disabling an
+  entire session after one dropped or failed record—it increases avoidable evidence loss. (c)
+  Reopening a closed audit for late callbacks—it makes every derived artifact mutable. (d) Deferring
+  application termination for audit durability—diagnostics do not own Quit.
+- **Supersedes in part:** 2026-08-10 — Session audit persistence is bounded and failure-contained.
+- **Supersedes:** 2026-08-11 — Audit availability is session-scoped and reopens for late events.
+- **Detail:** [session-audit.md](./session-audit.md),
+  `Sources/JarvisCore/Diagnostics/FileSessionAudit.swift`,
+  `Sources/JarvisCore/Diagnostics/SessionAuditWorker.swift`,
+  `Sources/JarvisApp/App/AppDelegate.swift`.

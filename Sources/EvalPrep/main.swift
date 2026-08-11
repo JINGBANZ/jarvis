@@ -48,10 +48,7 @@ do {
         }
         let evaluator = AgenticEvaluator(repositoryDirectory: repository,
                                          preferredProvider: preferredProvider)
-        _ = try await evaluator.evaluate(sessionDirectory: sessionDir)
-        guard let markdown = AgenticEvaluation.savedReport(in: sessionDir) else {
-            throw AgenticEvaluation.EvaluationError.evidenceChanged
-        }
+        let markdown = try await evaluator.evaluate(sessionDirectory: sessionDir)
         let page = try EvalReportPage.write(
             markdown: markdown, in: sessionDir,
             title: "Session evaluation — \(sessionDir.lastPathComponent)")

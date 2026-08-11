@@ -63,9 +63,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// prepared runtime can be installed on the main actor.
     private var pendingStartTask: Task<Void, Never>?
     private var pendingStartRevision: UInt = 0
-    /// Retained while AppKit has deferred termination so cancelled turns and the audit can drain
-    /// without blocking the main actor they may still need for final delivery bookkeeping.
-    private var terminationDrainTask: Task<Void, Never>?
     /// The global hint hotkey. Lives for the whole app run; its callback beeps when no session runs.
     private var hotkeys: HotkeyController?
     /// Fires an on-demand hint for the running session. Non-nil only while running — set in `start()`,
@@ -79,31 +76,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The current session's log directory (set by `beginNewSession`) — also where `CLIBrainClient`
     /// materializes screenshots for a CLI brain, keeping all screen-derived bytes in one owner-only place.
     private var currentSessionDir: URL?
-    /// Stops whose cancelled turns and audits have not finished draining. Retain the tasks, rather
-    /// than only counting them, so Application Quit can include a just-stopped session in its bounded
-    /// termination drain. The keyed set also keeps rapid Stop → Start → Stop sessions independent.
-    private var stopDrainTasks: [UUID: Task<Void, Never>] = [:]
-    /// Strong audit ownership parallel to `stopDrainTasks`, plus the subset whose close has begun.
-    /// Quit uses this to distinguish a safely open marker from a close that must settle before exit.
-    private var stopDrainAudits: [UUID: FileSessionAudit] = [:]
-    private var closingStopDrainIDs: Set<UUID> = []
     /// Only cancelled coaching work extends the global ghost lifecycle. Audit persistence is scoped
-    /// to its own session: Activity can use settled history while an unrelated marker is repaired.
+    /// to its own session: Activity can use closed history while an unrelated audit drains.
     private var pendingTurnDrainIDs: Set<UUID> = []
-    /// A weak audit handle plus independently retained settlement state. The state is updated before
-    /// its main-actor UI callback is queued, so releasing the last producer cannot make a correction
-    /// look settled while the worker still owns that mutation.
-    private var sessionAuditsByPath: [String: SessionAuditReference] = [:]
+    /// Normal Stop protects and gates only the directory whose immutable terminal marker is pending.
+    /// The path leaves this set after `close()` returns; closed audits never become mutable again.
+    private var closingAuditPaths: Set<String> = []
 
     /// How many past session log *directories* to keep on disk; older ones are pruned at each Start so
     /// the always-on activity log stays bounded across launches. This caps session count, not the size
     /// of any one session — a very long single run still grows its (append-only) logs + screenshots.
     /// Clear all but the current via the viewer's "Clear history".
     private static let retainedSessions = 10
-    /// Application Quit may briefly wait for a cancelled turn to finish its final audit admission.
-    /// If it cannot, the still-open health marker truthfully leaves that session partial.
-    private static let terminationTurnDrainTimeout: Duration = .seconds(1)
-
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory) // ghost-mode-allowed: launch configuration
         MainMenu.install() // an Edit menu so ⌘X/⌘C/⌘V/⌘A work in the Settings text fields
@@ -129,8 +113,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return false }
             return self.transcriber != nil || !self.pendingTurnDrainIDs.isEmpty
         }
-        activityViewer.isSessionEvidenceAvailable = { [weak self] directory in
-            self?.isAuditPersistenceSettled(for: directory) ?? true
+        activityViewer.isSessionAuditClosed = { [weak self] directory in
+            self?.isAuditClosed(for: directory) ?? true
         }
         activityViewer.protectedSessionDirectories = { [weak self] in
             self?.protectedAuditDirectories() ?? []
@@ -218,47 +202,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        if terminationDrainTask != nil { return .terminateLater }
         activityViewer?.cancelEvaluation()
-        let drain = stop(reason: .applicationQuit)
-        let pendingStops = Array(stopDrainTasks.values)
-        let pendingAudits = stopDrainAudits.map { id, audit in
-            PendingStopAudit(audit: audit, closeStarted: closingStopDrainIDs.contains(id))
-        }
-        // A pending Stop that has not begun close must leave its canonical marker open if its turns
-        // miss the termination bound. Cancellation is observed immediately after those turns drain.
-        pendingStops.forEach { $0.cancel() }
-        guard drain.audit != nil || !drain.cancelledTurns.isEmpty || !pendingStops.isEmpty else {
-            return .terminateNow
-        }
-
-        terminationDrainTask = Task { @MainActor [weak self] in
-            guard let self else {
-                sender.reply(toApplicationShouldTerminate: true)
-                return
-            }
-            await self.finishApplicationTermination(
-                drain,
-                pendingStops: pendingStops,
-                pendingAudits: pendingAudits)
-            sender.reply(toApplicationShouldTerminate: true)
-        }
-        return .terminateLater
-    }
-
-    func applicationWillTerminate(_ notification: Notification) {
-        terminationDrainTask?.cancel()
-        terminationDrainTask = nil
-    }
-
-    private struct SessionAuditDrain: Sendable {
-        let audit: FileSessionAudit?
-        let cancelledTurns: [Task<Void, Never>]
-    }
-
-    private struct PendingStopAudit: Sendable {
-        let audit: FileSessionAudit
-        let closeStarted: Bool
+        stop(reason: .applicationQuit)
+        return .terminateNow
     }
 
     /// The two clients that move together with one provider/model route target.
@@ -997,11 +943,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// transcribers must go: otherwise a turn-end trigger from a still-live socket could drive a
     /// coaching turn on a torn-down driver — the exact "speak after Stop" failure the turns box exists
     /// to prevent — and a subsequent Start would leak the orphaned IOProc/endpoints.
-    @discardableResult
     private func stop(
         reason: SessionEndReason,
         preserving readinessToPreserve: JarvisReadiness.Session? = nil
-    ) -> SessionAuditDrain {
+    ) {
         pendingStartRevision &+= 1
         pendingStartTask?.cancel()
         pendingStartTask = nil
@@ -1016,6 +961,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Capture and clear this session handle before a quick Start installs another. The cancelled
         // tasks retain only its observer ports and can finish enqueueing into the old session.
         let audit = sessionAudit
+        let auditDirectory = currentSessionDir
         sessionAudit = nil
         let cancelled = turns?.cancelAll() ?? []; turns = nil   // cancel any in-flight coaching turn
         coachDriver = nil
@@ -1044,100 +990,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if endedLiveSession {
             ActivityLog.shared.record(.sessionEnded(reason: reason))
         }
-        // Activity remains its separate human-facing failure domain. Session audit sealing waits for
-        // cancelled coaching tasks below. Normal Stop drains asynchronously so Start stays instant;
-        // application Quit returns its drain to AppKit's deferred-termination task.
+        // Activity remains its separate human-facing failure domain. Normal Stop drains this
+        // session's producers and audit in the background, so a replacement Start stays instant.
+        // Quit seals best-effort and returns immediately; diagnostics never own app termination.
         ActivityLog.shared.flush()
-        if reason != .applicationQuit, audit != nil || !cancelled.isEmpty {
+        if reason == .applicationQuit {
+            audit?.abandon()
+        } else if audit != nil || !cancelled.isEmpty {
             let drainID = UUID()
+            let auditPath = auditDirectory?.standardizedFileURL.path
             if !cancelled.isEmpty { pendingTurnDrainIDs.insert(drainID) }
-            let drainTask = Task { @MainActor [weak self] in
+            if let auditPath { closingAuditPaths.insert(auditPath) }
+            Task { @MainActor [weak self] in
                 for task in cancelled { await task.value }
                 ActivityLog.shared.flush()
                 self?.pendingTurnDrainIDs.remove(drainID)
                 self?.activityViewer?.coachingStateDidChange()
-                guard !Task.isCancelled else {
-                    self?.finishStopDrain(drainID)
-                    return
-                }
-                self?.closingStopDrainIDs.insert(drainID)
-                _ = await audit?.close(deadline: FileSessionAudit.defaultCloseDeadline)
-                await audit?.waitForPersistenceToStop()
-                self?.finishStopDrain(drainID)
+                _ = await audit?.close()
+                if let auditPath { self?.closingAuditPaths.remove(auditPath) }
+                self?.activityViewer?.coachingStateDidChange()
             }
-            stopDrainTasks[drainID] = drainTask
-            if let audit { stopDrainAudits[drainID] = audit }
         }
-        activityViewer?.coachingStateDidChange()
-        return SessionAuditDrain(audit: audit, cancelledTurns: cancelled)
-    }
-
-    /// AppKit has returned `.terminateLater` before this runs, so awaiting here keeps the main actor
-    /// available to a cancelled turn's final deliveries. The independent timeout wins without making
-    /// termination wait forever on a provider that did not unwind.
-    private static func waitForCancelledTurnsBeforeTermination(
-        _ cancelled: [Task<Void, Never>]
-    ) async -> Bool {
-        guard !cancelled.isEmpty else { return true }
-        let result = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingOldest(1))
-        let completion = Task.detached(priority: .userInitiated) {
-            for task in cancelled { await task.value }
-            result.continuation.yield(true)
-            result.continuation.finish()
-        }
-        let timeout = terminationTurnDrainTimeout
-        let timer = Task.detached {
-            try? await Task.sleep(for: timeout)
-            guard !Task.isCancelled else { return }
-            result.continuation.yield(false)
-            result.continuation.finish()
-        }
-        var iterator = result.stream.makeAsyncIterator()
-        let didDrain = await iterator.next() ?? false
-        completion.cancel()
-        timer.cancel()
-        return didDrain
-    }
-
-    private func finishApplicationTermination(
-        _ drain: SessionAuditDrain,
-        pendingStops: [Task<Void, Never>],
-        pendingAudits: [PendingStopAudit]
-    ) async {
-        let work = pendingStops + drain.cancelledTurns
-        guard await Self.waitForCancelledTurnsBeforeTermination(work) else {
-            // A close already in progress may have renamed a complete marker before discovering its
-            // deadline miss. Do not approve process exit until that marker is stable or invalidated.
-            for pending in pendingAudits where pending.closeStarted {
-                await pending.audit.waitForPersistenceToStop()
-            }
-            jlog("Jarvis: application-quit turn drain timed out; session audit remains partial.")
-            return
-        }
-        ActivityLog.shared.flush()
-
-        // Cancelled pending-Stop tasks stopped at the turn boundary. Finish their audits here now
-        // that every turn drained; an audit whose close had already begun only needs its settlement.
-        for pending in pendingAudits {
-            if !pending.closeStarted {
-                _ = await pending.audit.close(
-                    deadline: FileSessionAudit.defaultCloseDeadline)
-            }
-            await pending.audit.waitForPersistenceToStop()
-        }
-
-        if await drain.audit?.close(
-            deadline: FileSessionAudit.defaultCloseDeadline
-        ) == .partial {
-            jlog("Jarvis: application-quit session audit closed with partial evidence.")
-        }
-        await drain.audit?.waitForPersistenceToStop()
-    }
-
-    private func finishStopDrain(_ drainID: UUID) {
-        stopDrainTasks[drainID] = nil
-        stopDrainAudits[drainID] = nil
-        closingStopDrainIDs.remove(drainID)
         activityViewer?.coachingStateDidChange()
     }
 
@@ -1327,22 +1200,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ActivityLog.shared.enable(directory: dir)        // <dir>/jarvis-activity.jsonl, 0600, fresh
         // File creation and every later write run on the shared bounded audit worker. Start only
         // creates a lightweight session handle and never waits for an older session's disk access.
-        let auditReference = SessionAuditReference()
-        let audit = FileSessionAudit(
-            directory: dir,
-            onPersistenceStateChange: { [weak self, auditReference] isSettled in
-                // This update is synchronous on the producer/worker thread. The viewer's callback may
-                // wait for the main actor, but availability and pruning already see the safe state.
-                auditReference.setPersistenceSettled(isSettled)
-                Task { @MainActor [weak self] in
-                    self?.activityViewer?.auditStateDidChange(
-                        for: dir,
-                        isSettled: isSettled)
-                }
-            })
-        auditReference.setAudit(audit)
+        let audit = FileSessionAudit(directory: dir)
         sessionAudit = audit
-        sessionAuditsByPath[dir.standardizedFileURL.path] = auditReference
         currentSessionDir = dir
         // Now that logging is always on, sessions accumulate every launch. Bound it: keep only the most
         // recent few (the just-created one is current, so it's always spared).
@@ -1355,31 +1214,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         jlog("Jarvis: session \(dir.lastPathComponent) (\(dir.path)).")
     }
 
-    private func isAuditPersistenceSettled(for directory: URL) -> Bool {
-        let path = directory.standardizedFileURL.path
-        guard let reference = sessionAuditsByPath[path] else { return true }
-        let snapshot = reference.snapshot()
-        if snapshot.audit == nil, snapshot.isPersistenceSettled {
-            sessionAuditsByPath[path] = nil
-        }
-        return snapshot.isPersistenceSettled
+    private func isAuditClosed(for directory: URL) -> Bool {
+        !closingAuditPaths.contains(directory.standardizedFileURL.path)
     }
 
-    /// Protect every directory whose audit handle is still alive, including a currently settled
-    /// handle that a delayed producer could make unsettled immediately after this snapshot.
+    /// Protect only directories still owned by a normal Stop close. Closed audits never reopen.
     private func protectedAuditDirectories() -> Set<URL> {
-        var stalePaths: [String] = []
-        var directories: Set<URL> = []
-        for (path, reference) in sessionAuditsByPath {
-            let snapshot = reference.snapshot()
-            guard snapshot.audit != nil || !snapshot.isPersistenceSettled else {
-                stalePaths.append(path)
-                continue
-            }
-            directories.insert(URL(fileURLWithPath: path, isDirectory: true))
-        }
-        for path in stalePaths { sessionAuditsByPath[path] = nil }
-        return directories
+        Set(closingAuditPaths.map { URL(fileURLWithPath: $0, isDirectory: true) })
     }
 
     /// A unique id for a session (one per Start), used as its log subdirectory name. Sortable
@@ -1432,26 +1273,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 && FileManager.default.fileExists(
                     atPath: root.appendingPathComponent("Sources/JarvisCore").path)
         }?.standardizedFileURL
-    }
-}
-
-/// `@unchecked Sendable`: `lock` protects both the weak handle and settlement flag. The app keeps
-/// this lightweight reference after the handle dies only while a worker mutation remains unsettled.
-private final class SessionAuditReference: @unchecked Sendable {
-    private let lock = NSLock()
-    private weak var value: FileSessionAudit?
-    private var persistenceSettled = false
-
-    func snapshot() -> (audit: FileSessionAudit?, isPersistenceSettled: Bool) {
-        lock.withLock { (value, persistenceSettled) }
-    }
-
-    func setAudit(_ audit: FileSessionAudit) {
-        lock.withLock { value = audit }
-    }
-
-    func setPersistenceSettled(_ isSettled: Bool) {
-        lock.withLock { persistenceSettled = isSettled }
     }
 }
 

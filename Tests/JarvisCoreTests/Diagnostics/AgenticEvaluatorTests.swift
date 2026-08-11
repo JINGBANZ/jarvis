@@ -47,10 +47,6 @@ import Testing
         let permissions = try FileManager.default.attributesOfItem(
             atPath: reportURL.path)[.posixPermissions] as? NSNumber
         #expect(permissions?.int16Value == 0o600)
-        let evidencePermissions = try FileManager.default.attributesOfItem(
-            atPath: session.appendingPathComponent(
-                AgenticEvaluation.reportEvidenceFilename).path)[.posixPermissions] as? NSNumber
-        #expect(evidencePermissions?.int16Value == 0o600)
         #expect(FileManager.default.fileExists(
             atPath: session.appendingPathComponent(AgenticEvaluation.transcriptFilename).path))
     }
@@ -66,60 +62,6 @@ import Testing
             _ = try AgenticEvaluator.selectCLI(
                 from: [codex], preferredProvider: .claudeCode)
         }
-    }
-
-    @Test func evidenceChangingDuringAgentRunDiscardsItsReport() async throws {
-        let root = ActivityLogTests.tmp()
-        defer { try? FileManager.default.removeItem(at: root) }
-        let session = root.appendingPathComponent("session")
-        let bin = root.appendingPathComponent("bin")
-        let home = root.appendingPathComponent("home")
-        try FileManager.default.createDirectory(at: session, withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
-        try await writeSessionInputs(to: session)
-
-        let started = root.appendingPathComponent("evaluation-started")
-        let release = root.appendingPathComponent("release-evaluation")
-        let executable = bin.appendingPathComponent("claude")
-        let script = """
-            #!/bin/sh
-            if [ "$1" = "auth" ]; then
-              printf '{"loggedIn":true}'
-              exit 0
-            fi
-            : > '\(started.path)'
-            while [ ! -f '\(release.path)' ]; do sleep 0.01; done
-            printf '## Stale result\\n'
-            """
-        try Data(script.utf8).write(to: executable)
-        try FileManager.default.setAttributes(
-            [.posixPermissions: 0o700], ofItemAtPath: executable.path)
-        let detector = AgentCLIDetector(
-            home: home,
-            pathVariable: bin.path,
-            authStatusTimeout: 1,
-            temporaryDirectory: root.appendingPathComponent("unrelated-system-temp"))
-        let evaluator = AgenticEvaluator(
-            repositoryDirectory: root,
-            preferredProvider: .claudeCode,
-            detector: detector,
-            timeout: 5)
-
-        let evaluation = Task {
-            try await evaluator.evaluate(sessionDirectory: session)
-        }
-        while !FileManager.default.fileExists(atPath: started.path) {
-            try await Task.sleep(for: .milliseconds(10))
-        }
-        try Data(#"{"version":1,"state":"partial","late_event":1}"#.utf8).write(
-            to: session.appendingPathComponent(FileSessionAudit.healthFilename))
-        try Data().write(to: release)
-
-        await #expect(throws: AgenticEvaluation.EvaluationError.evidenceChanged) {
-            try await evaluation.value
-        }
-        #expect(AgenticEvaluation.savedReport(in: session) == nil)
     }
 
     @Test func invocationsAreReadOnlyAndStateless() {

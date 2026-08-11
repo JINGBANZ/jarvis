@@ -496,7 +496,7 @@ lines one at a time (paced by `Config`); the brain response itself is not stream
 Session auditing adds only best-effort typed-event admission to the live path. Parsing, redaction,
 serialization, file I/O, bounded retention, and close behavior belong to the
 [session-audit component](./session-audit.md); ordinary Stop never makes a replacement Start wait for
-an older session's disk access.
+an older session's disk access, and Quit never waits for audit persistence.
 
 ### Resilience
 
@@ -584,14 +584,13 @@ The always-on legs are built to survive transient failure rather than die on it:
   session-scoped app-server when the matching terminal state confirms the stream is healthy;
   uncertain protocol cleanup still invalidates the server. Memory **compaction** fails soft outside
   this route: a failed summary simply leaves the full history for the next attempt.
-- **The audit edge** is isolated, bounded, and completeness-aware. Regular Stop closes an old session
-  asynchronously after cancelled coaching work unwinds; application Quit defers AppKit termination
-  while a bounded asynchronous drain keeps the main actor available and includes any preceding Stop
-  still closing. Evaluate remains gated until the old session's worker has stopped mutating its
-  artifacts, even when the close deadline has already classified them partial. Overload, persistence
-  failure, late work, or a close timeout degrades only the evidence and makes evaluator totals explicit
-  lower bounds. The complete observer, lifecycle, privacy, and evaluator contract lives in
-  [session-audit.md](./session-audit.md).
+- **The audit edge** is isolated, bounded, and completeness-aware. Regular Stop drains and closes its
+  old audit in a background task while a replacement Start proceeds independently. Quit seals the
+  audit and returns without waiting. Capacity or persistence failure loses only affected evidence,
+  leaves a sticky partial signal, and does not disable later admission. The health state moves from
+  `in_progress` to one immutable terminal `complete` or `partial` state; post-seal callbacks are
+  rejected instead of reopening it. The complete observer, lifecycle, privacy, and evaluator contract
+  lives in [session-audit.md](./session-audit.md).
 
 ## 5. Safety Model
 

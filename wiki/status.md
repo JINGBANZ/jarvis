@@ -89,18 +89,15 @@ lines, local skips, call triggers, initial versus screen-continuation calls, mod
 versus unavailable provider telemetry. The dedicated
 [session-audit component](./session-audit.md) gives the coach and brain clients only narrow optional
 observer ports, then contains parsing, redaction, serialization, and file I/O behind one bounded
-process worker. Regular Stop closes old evidence asynchronously so the next Start does not wait;
-application Quit defers AppKit termination while a bounded turn drain keeps main-actor cleanup
-available. An audit whose close never starts before that bound retains its partial open marker; once
-close starts, Quit waits for its final/corrective marker to settle before approving process exit,
-including a session already closing after Stop. Overflow, persistence failure,
-late work, or a close deadline miss makes the versioned health evidence explicitly partial. Evaluate
-for the selected session remains disabled until its worker has persisted a final or corrective marker,
-or safely invalidated a rejected marker. A callback rejected after close immediately reopens only that
-session's persistence gate and schedules one marker correction; if no trustworthy state can be
-established, that session stays unavailable while unrelated settled history remains usable and Clear
-history/pruning preserve directories still owned by audit work. Surviving
-partial totals render as lower bounds. CLI failures before actual transport dispatch
+process worker. Regular Stop drains the old session's producers and closes its audit in a background
+task, so a replacement Start uses a new directory immediately. Application Quit never waits for
+audit persistence; it seals the live audit and requests a best-effort partial close before returning.
+The health marker moves only from `in_progress` to terminal `complete` or `partial`. Actual queue
+pressure or a persistence failure loses only the affected record and marks the final evidence partial;
+later records continue where possible. A callback after sealing is rejected and logged as a lifecycle
+defect, but never reopens or changes a closed audit. Evaluate for the selected session remains disabled
+only while that session's normal Stop close is in progress. Surviving partial totals render as lower
+bounds. CLI failures before actual transport dispatch
 remain separate from provider-call totals, and malformed JSONL likewise makes affected values
 explicitly partial rather than exact-looking. Historical sessions without provenance remain explicitly
 unavailable; `stay_silent` is never treated as an avoidable-call proxy. The compact transcript also

@@ -5,15 +5,10 @@ import Darwin
 import Synchronization
 #endif
 
-/// One process-level worker for every file-backed session audit.
+/// One bounded process-level worker for every file-backed session audit.
 ///
-/// The fixed-size ring and byte budget bound retained evidence even when disk access parks forever.
-/// Mailbox admission uses `NSLock.try()` and drops immediately on contention or pressure; the worker
-/// never holds that lock while parsing JSON or touching a file.
-///
-/// `@unchecked Sendable`: `mailboxLock` protects the ring, deferred lifecycle closes, late-marker
-/// corrections, and all queue counters. The writer and date formatter are used only by the private
-/// serial queue; immutable limits may be read from any caller.
+/// The mailbox lock protects only retained in-memory values and counters. Parsing, redaction,
+/// serialization, and file I/O run on the private serial queue after that lock is released.
 final class SessionAuditWorker: @unchecked Sendable {
     struct Limits: Sendable {
         let maxEventCount: Int
@@ -24,82 +19,23 @@ final class SessionAuditWorker: @unchecked Sendable {
             maxRetainedBytes: 32 * 1024 * 1024)
     }
 
-    struct RetainedSnapshot: Sendable, Equatable {
-        let eventCount: Int
-        let approximateBytes: Int
-        let deferredCloseCount: Int
-        let deferredCloseApproximateBytes: Int
-        let lateCorrectionCount: Int
-        let lateCorrectionApproximateBytes: Int
-    }
-
-    enum CloseAdmission: Sendable, Equatable {
-        case enqueued
-        case deferred
-        case alreadyClosing
-    }
-
-    /// Compiler-checked `Sendable`: every mutable field is an atomic reference and both callbacks are
-    /// immutable `@Sendable` values supplied by the owning `FileSessionAudit`.
+    /// Compiler-checked `Sendable`: mutable state is held only in atomic references.
     final class Session: Sendable {
         let id = UUID()
         let directory: URL
         let health = HealthCounters()
         private let sealed = AtomicCounter()
         private let opened = AtomicCounter()
-        private let persistenceDisabled = AtomicCounter()
-        private let lateCorrectionState = AtomicCounter()
-        private let closeStarted = AtomicCounter()
-        private let persistenceMutationBegan: @Sendable () -> Void
-        private let persistenceMutationFinished: @Sendable () -> Void
 
-        init(
-            directory: URL,
-            persistenceMutationBegan: @escaping @Sendable () -> Void,
-            persistenceMutationFinished: @escaping @Sendable () -> Void
-        ) {
+        init(directory: URL) {
             self.directory = directory
-            self.persistenceMutationBegan = persistenceMutationBegan
-            self.persistenceMutationFinished = persistenceMutationFinished
         }
 
         var isSealed: Bool { sealed.load() > 0 }
         var isOpened: Bool { opened.load() > 0 }
-        var isPersistenceDisabled: Bool { persistenceDisabled.load() > 0 }
-        var isLateCorrectionPending: Bool { lateCorrectionState.load() == 1 }
 
         func seal() { sealed.mark() }
         func markOpened() { opened.mark() }
-        func disablePersistence() { persistenceDisabled.mark() }
-        func beginClose() -> Bool {
-            closeStarted.compareExchange(expected: 0, desired: 1)
-        }
-
-        /// Reserve the session's sole post-seal correction. The initializing state prevents a
-        /// concurrent finalizer from finishing the mutation before its begin callback has run.
-        func beginLateCorrection() -> Bool {
-            guard lateCorrectionState.compareExchange(expected: 0, desired: -1) else {
-                return false
-            }
-            persistenceMutationBegan()
-            _ = lateCorrectionState.compareExchange(expected: -1, desired: 1)
-            return true
-        }
-
-        /// A durable partial marker or successful invalidation makes any late correction stable.
-        func finishLateCorrectionIfPending() {
-            let finished = lateCorrectionState.compareExchange(expected: 1, desired: 2)
-                || lateCorrectionState.compareExchange(expected: 3, desired: 2)
-            guard finished else { return }
-            persistenceMutationFinished()
-        }
-
-        /// Capacity rejection cannot safely make an old complete marker evaluable again. Stop
-        /// retrying this correction without releasing its unavailable persistence gate; importantly,
-        /// the worker no longer retains the session, callback, or directory.
-        func abandonLateCorrectionIfPending() {
-            _ = lateCorrectionState.compareExchange(expected: 1, desired: 3)
-        }
     }
 
     struct HealthSnapshot: Sendable, Equatable {
@@ -107,8 +43,6 @@ final class SessionAuditWorker: @unchecked Sendable {
         let oversizeRecord: Int
         let openFailure: Int
         let writeFailure: Int
-        let closeTimeout: Int
-        let lateEvent: Int
         let serializationFailure: Int
 
         var isComplete: Bool {
@@ -116,8 +50,6 @@ final class SessionAuditWorker: @unchecked Sendable {
                 && oversizeRecord == 0
                 && openFailure == 0
                 && writeFailure == 0
-                && closeTimeout == 0
-                && lateEvent == 0
                 && serializationFailure == 0
         }
     }
@@ -128,16 +60,12 @@ final class SessionAuditWorker: @unchecked Sendable {
         private let oversizeRecord = AtomicCounter()
         private let openFailure = AtomicCounter()
         private let writeFailure = AtomicCounter()
-        private let closeTimeout = AtomicCounter()
-        private let lateEvent = AtomicCounter()
         private let serializationFailure = AtomicCounter()
 
         func markQueueOverflow() { queueOverflow.increment() }
         func markOversizeRecord() { oversizeRecord.increment() }
         func markOpenFailure() { openFailure.increment() }
         func markWriteFailure() { writeFailure.increment() }
-        func markCloseTimeout() { closeTimeout.increment() }
-        func markLateEvent() { lateEvent.increment() }
         func markSerializationFailure() { serializationFailure.increment() }
 
         var snapshot: HealthSnapshot {
@@ -146,14 +74,11 @@ final class SessionAuditWorker: @unchecked Sendable {
                 oversizeRecord: oversizeRecord.load(),
                 openFailure: openFailure.load(),
                 writeFailure: writeFailure.load(),
-                closeTimeout: closeTimeout.load(),
-                lateEvent: lateEvent.load(),
                 serializationFailure: serializationFailure.load())
         }
     }
 
-    /// `@unchecked Sendable`: every access to `storage` goes through an OS atomic primitive; callers
-    /// never receive the address or a non-atomic view of the value.
+    /// `@unchecked Sendable`: every access uses an OS atomic primitive.
     private final class AtomicCounter: @unchecked Sendable {
         #if canImport(Darwin)
         private var storage: Int32 = 0
@@ -164,10 +89,6 @@ final class SessionAuditWorker: @unchecked Sendable {
 
         func mark() {
             _ = OSAtomicOr32Barrier(1, &storage)
-        }
-
-        func compareExchange(expected: Int32, desired: Int32) -> Bool {
-            OSAtomicCompareAndSwap32Barrier(expected, desired, &storage)
         }
 
         func load() -> Int {
@@ -184,14 +105,6 @@ final class SessionAuditWorker: @unchecked Sendable {
             storage.store(1, ordering: .relaxed)
         }
 
-        func compareExchange(expected: Int32, desired: Int32) -> Bool {
-            storage.compareExchange(
-                expected: expected,
-                desired: desired,
-                ordering: .acquiringAndReleasing
-            ).exchanged
-        }
-
         func load() -> Int {
             Int(storage.load(ordering: .relaxed))
         }
@@ -203,7 +116,7 @@ final class SessionAuditWorker: @unchecked Sendable {
         case traffic(BrainTrafficAuditEvent)
         case attempt(CoachingAttemptAuditEvent)
         case close(
-            deadline: ContinuousClock.Instant,
+            forcePartial: Bool,
             completion: @Sendable (SessionAuditCloseResult) -> Void)
     }
 
@@ -213,41 +126,21 @@ final class SessionAuditWorker: @unchecked Sendable {
         let retainedBytes: Int
     }
 
-    /// A lifecycle close that could not enter the bounded ring. Its watermark preserves every
-    /// envelope accepted before Close without letting traffic accepted afterward starve settlement.
+    /// A close that did not fit in the ring. This table is independently bounded, and a close becomes
+    /// runnable only after every accepted envelope for its sealed session has finished.
     private struct DeferredClose: Sendable {
         let session: Session
-        let deadline: ContinuousClock.Instant
-        let completion: @Sendable (SessionAuditCloseResult) -> Void
-        let afterFinishedEnvelopeCount: Int
-    }
-
-    /// Stable-partial fallback for a close that cannot fit in either the ring or the prioritized
-    /// close table. The entry is keyed by a session that still owns at least one bounded envelope and
-    /// is removed as soon as that session's final envelope finishes.
-    private struct CoalescedPartialClose: Sendable {
+        let forcePartial: Bool
         let completion: @Sendable (SessionAuditCloseResult) -> Void
     }
 
     private enum Work {
         case envelope(Envelope)
         case deferredClose(DeferredClose)
-        case lateCorrection(Session)
     }
 
     private enum EventEncodingError: Error {
         case mismatchedAttemptEvidence
-    }
-
-    private enum HealthPersistenceError: Error {
-        case rejectedReplacement
-    }
-
-    private enum Admission {
-        /// Provider and coach callbacks must drop immediately if another ingress owns the ring.
-        case bestEffortRecord
-        /// App lifecycle may wait only for the in-memory ring lock, never for worker or disk work.
-        case lifecycle
     }
 
     static let shared = SessionAuditWorker(
@@ -262,23 +155,12 @@ final class SessionAuditWorker: @unchecked Sendable {
     private var readIndex = 0
     private var writeIndex = 0
     private var queuedCount = 0
-    /// Includes the event currently executing on the worker.
+    /// Includes the envelope currently executing on the worker.
     private var retainedCount = 0
     private var retainedBytes = 0
     private var drainScheduled = false
-    private var acceptedEnvelopeCount = 0
-    private var finishedEnvelopeCount = 0
-    /// One count per session represented by the bounded ring/current envelope. This table therefore
-    /// has at most `limits.maxEventCount` entries.
     private var unfinishedEnvelopeCounts: [UUID: Int] = [:]
-    /// Prioritized closes are independently capped at the ring's count limit. If that table is full,
-    /// one coalesced stable-partial completion may be attached to each still-retained session instead.
     private var deferredCloses: [DeferredClose] = []
-    private var coalescedPartialCloses: [UUID: CoalescedPartialClose] = [:]
-    /// Includes the correction currently executing. Admission is best-effort and capped at the same
-    /// count as the ring, so direct serial-queue work cannot become an unbounded side channel.
-    private var lateCorrections: [Session] = []
-    private var retainedLateCorrectionCount = 0
     private let timestampFormatter: DateFormatter
 
     init(limits: Limits, writer: any SessionAuditWriting) {
@@ -294,20 +176,9 @@ final class SessionAuditWorker: @unchecked Sendable {
         self.timestampFormatter = formatter
     }
 
-    func openSession(
-        at directory: URL,
-        persistenceMutationBegan: @escaping @Sendable () -> Void = {},
-        persistenceMutationFinished: @escaping @Sendable () -> Void = {}
-    ) -> Session {
-        let session = Session(
-            directory: directory,
-            persistenceMutationBegan: persistenceMutationBegan,
-            persistenceMutationFinished: persistenceMutationFinished)
-        let accepted = enqueue(
-            Envelope(session: session, payload: .open, retainedBytes: 256),
-            allowingSealedSession: false,
-            admission: .lifecycle)
-        if !accepted { session.disablePersistence() }
+    func openSession(at directory: URL) -> Session {
+        let session = Session(directory: directory)
+        _ = enqueue(Envelope(session: session, payload: .open, retainedBytes: 256))
         return session
     }
 
@@ -316,14 +187,11 @@ final class SessionAuditWorker: @unchecked Sendable {
             rejectLateEvent(for: session)
             return
         }
-        guard !session.isPersistenceDisabled else { return }
         _ = enqueue(
             Envelope(
                 session: session,
                 payload: .traffic(event),
-                retainedBytes: event.approximateRetainedBytes),
-            allowingSealedSession: false,
-            admission: .bestEffortRecord)
+                retainedBytes: event.approximateRetainedBytes))
     }
 
     func record(_ event: CoachingAttemptAuditEvent, for session: Session) {
@@ -331,131 +199,85 @@ final class SessionAuditWorker: @unchecked Sendable {
             rejectLateEvent(for: session)
             return
         }
-        guard !session.isPersistenceDisabled else { return }
         _ = enqueue(
             Envelope(
                 session: session,
                 payload: .attempt(event),
-                retainedBytes: event.approximateRetainedBytes),
-            allowingSealedSession: false,
-            admission: .bestEffortRecord)
+                retainedBytes: event.approximateRetainedBytes))
     }
 
     func close(
         _ session: Session,
-        deadline: ContinuousClock.Instant,
+        forcePartial: Bool,
         completion: @escaping @Sendable (SessionAuditCloseResult) -> Void
-    ) -> CloseAdmission {
-        guard session.beginClose() else { return .alreadyClosing }
+    ) {
         let envelope = Envelope(
             session: session,
-            payload: .close(deadline: deadline, completion: completion),
+            payload: .close(forcePartial: forcePartial, completion: completion),
             retainedBytes: 256)
-        var admission = CloseAdmission.enqueued
-        var settlesImmediately = false
+        var immediateCompletions: [@Sendable (SessionAuditCloseResult) -> Void] = []
         var shouldSchedule = false
 
         mailboxLock.lock()
-        if envelope.retainedBytes <= limits.maxRetainedBytes,
-           retainedCount < limits.maxEventCount,
-           retainedBytes <= limits.maxRetainedBytes - envelope.retainedBytes {
-            ring[writeIndex] = envelope
-            writeIndex = (writeIndex + 1) % ring.count
-            queuedCount += 1
-            retainedCount += 1
-            retainedBytes += envelope.retainedBytes
-            acceptedEnvelopeCount += 1
-            unfinishedEnvelopeCounts[session.id, default: 0] += 1
+        if canRetain(envelope) {
+            retain(envelope)
+        } else if deferredCloses.count < limits.maxEventCount {
+            deferredCloses.append(DeferredClose(
+                session: session,
+                forcePartial: forcePartial,
+                completion: completion))
+        } else if unfinishedEnvelopeCounts[session.id] == nil {
+            // No accepted work can mutate this session after the lock is released. Its existing
+            // in-progress marker is a stable incomplete result, so no worker retention is needed.
+            immediateCompletions.append(completion)
+        } else if let readyIndex = deferredCloses.firstIndex(where: {
+            unfinishedEnvelopeCounts[$0.session.id] == nil
+        }) {
+            // Preserve the close whose session still has accepted work. The evicted close is already
+            // stable at in-progress and can report partial without risking an evaluator/file race.
+            immediateCompletions.append(deferredCloses.remove(at: readyIndex).completion)
+            deferredCloses.append(DeferredClose(
+                session: session,
+                forcePartial: forcePartial,
+                completion: completion))
         } else {
-            admission = .deferred
-            if envelope.retainedBytes > limits.maxRetainedBytes {
-                session.health.markOversizeRecord()
-            } else {
-                session.health.markQueueOverflow()
-            }
-            // Mark the deadline miss before the worker can observe the deferred close. Otherwise a
-            // fast predecessor could finalize a complete marker between rejection and the caller's
-            // return from `close`.
-            session.health.markCloseTimeout()
-            // This registration shares the failed admission's mailbox critical section, so its
-            // watermark cannot accidentally include traffic admitted after Close.
-            settlesImmediately = deferCloseLocked(
-                session,
-                deadline: deadline,
-                completion: completion)
+            // With at most `maxEventCount` retained envelopes, a new session cannot be unfinished
+            // when that many distinct deferred sessions are also unfinished.
+            assertionFailure("bounded audit close table has no stable entry")
+            immediateCompletions.append(completion)
         }
-        shouldSchedule = !settlesImmediately && !drainScheduled
-        if shouldSchedule { drainScheduled = true }
+        if immediateCompletions.isEmpty && !drainScheduled {
+            drainScheduled = true
+            shouldSchedule = true
+        }
         mailboxLock.unlock()
 
-        if settlesImmediately { completion(.partial) }
+        immediateCompletions.forEach { $0(.partial) }
         if shouldSchedule {
             queue.async { [self] in drain() }
         }
-        return admission
     }
 
-    func retainedSnapshot() -> RetainedSnapshot {
+    private func enqueue(_ envelope: Envelope) -> Bool {
         mailboxLock.lock()
-        defer { mailboxLock.unlock() }
-        return RetainedSnapshot(
-            eventCount: retainedCount,
-            approximateBytes: retainedBytes,
-            deferredCloseCount: deferredCloses.count + coalescedPartialCloses.count,
-            deferredCloseApproximateBytes:
-                (deferredCloses.count + coalescedPartialCloses.count) * 256,
-            lateCorrectionCount: retainedLateCorrectionCount,
-            lateCorrectionApproximateBytes: retainedLateCorrectionCount * 256)
-    }
-
-    private func enqueue(
-        _ envelope: Envelope,
-        allowingSealedSession: Bool,
-        admission: Admission
-    ) -> Bool {
-        if envelope.retainedBytes > limits.maxRetainedBytes {
-            envelope.session.health.markOversizeRecord()
-            if !allowingSealedSession, envelope.session.isSealed {
-                rejectLateEvent(for: envelope.session)
-            }
-            return false
-        }
-        switch admission {
-        case .bestEffortRecord:
-            guard mailboxLock.try() else {
-                envelope.session.health.markQueueOverflow()
-                if !allowingSealedSession, envelope.session.isSealed {
-                    rejectLateEvent(for: envelope.session)
-                }
-                return false
-            }
-        case .lifecycle:
-            mailboxLock.lock()
-        }
-
-        if envelope.session.isSealed && !allowingSealedSession {
+        if envelope.session.isSealed {
             mailboxLock.unlock()
             rejectLateEvent(for: envelope.session)
             return false
         }
-        guard retainedCount < limits.maxEventCount,
-              retainedBytes <= limits.maxRetainedBytes - envelope.retainedBytes
-        else {
+        if envelope.retainedBytes > limits.maxRetainedBytes {
+            // Publish the sticky loss before Close can acquire the mailbox and enter the ring.
+            envelope.session.health.markOversizeRecord()
             mailboxLock.unlock()
-            envelope.session.health.markQueueOverflow()
-            if !allowingSealedSession, envelope.session.isSealed {
-                rejectLateEvent(for: envelope.session)
-            }
             return false
         }
-
-        ring[writeIndex] = envelope
-        writeIndex = (writeIndex + 1) % ring.count
-        queuedCount += 1
-        retainedCount += 1
-        retainedBytes += envelope.retainedBytes
-        acceptedEnvelopeCount += 1
-        unfinishedEnvelopeCounts[envelope.session.id, default: 0] += 1
+        guard canRetain(envelope) else {
+            // Publish the sticky loss before Close can acquire the mailbox and enter the ring.
+            envelope.session.health.markQueueOverflow()
+            mailboxLock.unlock()
+            return false
+        }
+        retain(envelope)
         let shouldSchedule = !drainScheduled
         if shouldSchedule { drainScheduled = true }
         mailboxLock.unlock()
@@ -466,60 +288,22 @@ final class SessionAuditWorker: @unchecked Sendable {
         return true
     }
 
-    /// Register a rejected close while `mailboxLock` is held. Returns true when this session has no
-    /// unfinished worker envelope and its stable-partial completion can run after the lock is released.
-    private func deferCloseLocked(
-        _ session: Session,
-        deadline: ContinuousClock.Instant,
-        completion: @escaping @Sendable (SessionAuditCloseResult) -> Void
-    ) -> Bool {
-        if unfinishedEnvelopeCounts[session.id] == nil {
-            return true
-        } else if deferredCloses.count < limits.maxEventCount {
-            deferredCloses.append(DeferredClose(
-                session: session,
-                deadline: deadline,
-                completion: completion,
-                afterFinishedEnvelopeCount: acceptedEnvelopeCount))
-        } else {
-            // The prioritized table has its own fixed count bound. This fallback retains no second
-            // session reference: its key must already exist in the bounded unfinished-envelope table,
-            // and `finish` releases the completion as soon as this session can no longer touch disk.
-            coalescedPartialCloses[session.id] = CoalescedPartialClose(
-                completion: completion)
-        }
-        assert(deferredCloses.count <= limits.maxEventCount)
-        assert(coalescedPartialCloses.count <= unfinishedEnvelopeCounts.count)
-        return false
+    private func canRetain(_ envelope: Envelope) -> Bool {
+        retainedCount < limits.maxEventCount
+            && retainedBytes <= limits.maxRetainedBytes - envelope.retainedBytes
     }
 
-    /// A post-seal observer call cannot be appended without violating close ordering. Make the
-    /// session unavailable synchronously, then use one serial worker operation to ensure an earlier
-    /// complete marker is no longer canonical. Repeated late calls only increment health evidence.
-    private func rejectLateEvent(for session: Session) {
-        let shouldCorrect = session.beginLateCorrection()
-        session.health.markLateEvent()
-        guard shouldCorrect else { return }
-        guard mailboxLock.try() else {
-            session.health.markQueueOverflow()
-            session.abandonLateCorrectionIfPending()
-            return
-        }
-        guard retainedLateCorrectionCount < limits.maxEventCount else {
-            mailboxLock.unlock()
-            session.health.markQueueOverflow()
-            session.abandonLateCorrectionIfPending()
-            return
-        }
-        lateCorrections.append(session)
-        retainedLateCorrectionCount += 1
-        let shouldSchedule = !drainScheduled
-        if shouldSchedule { drainScheduled = true }
-        mailboxLock.unlock()
+    private func retain(_ envelope: Envelope) {
+        ring[writeIndex] = envelope
+        writeIndex = (writeIndex + 1) % ring.count
+        queuedCount += 1
+        retainedCount += 1
+        retainedBytes += envelope.retainedBytes
+        unfinishedEnvelopeCounts[envelope.session.id, default: 0] += 1
+    }
 
-        if shouldSchedule {
-            queue.async { [self] in drain() }
-        }
+    private func rejectLateEvent(for session: Session) {
+        jlog("Jarvis: rejected a session-audit callback after the audit was sealed.")
     }
 
     private func drain() {
@@ -531,11 +315,8 @@ final class SessionAuditWorker: @unchecked Sendable {
             case .deferredClose(let close):
                 finalize(
                     close.session,
-                    deadline: close.deadline,
+                    forcePartial: close.forcePartial,
                     completion: close.completion)
-            case .lateCorrection(let session):
-                correctLateMarker(for: session)
-                finishLateCorrectionWork()
             }
         }
     }
@@ -543,13 +324,10 @@ final class SessionAuditWorker: @unchecked Sendable {
     private func takeNextWork() -> Work? {
         mailboxLock.lock()
         defer { mailboxLock.unlock() }
-        if let close = deferredCloses.first,
-           close.afterFinishedEnvelopeCount <= finishedEnvelopeCount {
-            deferredCloses.removeFirst()
-            return .deferredClose(close)
-        }
-        if !lateCorrections.isEmpty {
-            return .lateCorrection(lateCorrections.removeFirst())
+        if let closeIndex = deferredCloses.firstIndex(where: {
+            unfinishedEnvelopeCounts[$0.session.id] == nil
+        }) {
+            return .deferredClose(deferredCloses.remove(at: closeIndex))
         }
         guard queuedCount > 0 else {
             drainScheduled = false
@@ -563,81 +341,56 @@ final class SessionAuditWorker: @unchecked Sendable {
     }
 
     private func finish(_ envelope: Envelope) {
-        var coalescedCompletion: (@Sendable (SessionAuditCloseResult) -> Void)?
         mailboxLock.lock()
         retainedCount -= 1
         retainedBytes -= envelope.retainedBytes
-        finishedEnvelopeCount += 1
         let sessionID = envelope.session.id
         if let unfinished = unfinishedEnvelopeCounts[sessionID], unfinished > 1 {
             unfinishedEnvelopeCounts[sessionID] = unfinished - 1
         } else {
             unfinishedEnvelopeCounts[sessionID] = nil
-            coalescedCompletion = coalescedPartialCloses.removeValue(
-                forKey: sessionID)?.completion
         }
-        mailboxLock.unlock()
-        coalescedCompletion?(.partial)
-    }
-
-    private func correctLateMarker(for session: Session) {
-        // A partial finalization ahead of this queued correction may already have persisted the late
-        // evidence and satisfied its mutation. Never unlink that newly trustworthy partial marker.
-        guard session.isLateCorrectionPending else { return }
-        do {
-            try writer.invalidateHealth(in: session.directory)
-            session.finishLateCorrectionIfPending()
-        } catch {
-            session.health.markWriteFailure()
-            // Keep this session unavailable. A later successful partial finalization can still
-            // repair the marker and finish the pending mutation.
-        }
-    }
-
-    private func finishLateCorrectionWork() {
-        mailboxLock.lock()
-        retainedLateCorrectionCount -= 1
         mailboxLock.unlock()
     }
 
     private func process(_ envelope: Envelope) {
         switch envelope.payload {
         case .open:
-            open(envelope.session)
+            _ = ensureOpen(envelope.session)
         case .traffic(let event):
             persistTraffic(event, session: envelope.session)
         case .attempt(let event):
             persistAttempt(event, session: envelope.session)
-        case .close(let deadline, let completion):
-            finalize(envelope.session, deadline: deadline, completion: completion)
+        case .close(let forcePartial, let completion):
+            finalize(
+                envelope.session,
+                forcePartial: forcePartial,
+                completion: completion)
         }
     }
 
-    private func open(_ session: Session) {
+    private func ensureOpen(_ session: Session) -> Bool {
+        if session.isOpened { return true }
         do {
             try writer.openSession(
                 at: session.directory,
                 initialHealth: try healthData(
-                    state: "open", closed: false, snapshot: session.health.snapshot))
+                    state: "in_progress", snapshot: session.health.snapshot))
             session.markOpened()
+            return true
         } catch {
             session.health.markOpenFailure()
-            session.disablePersistence()
+            return false
         }
     }
 
     private func persistTraffic(_ event: BrainTrafficAuditEvent, session: Session) {
-        guard session.isOpened, !session.isPersistenceDisabled else {
-            if !session.isOpened { session.health.markOpenFailure() }
-            session.disablePersistence()
-            return
-        }
+        guard ensureOpen(session) else { return }
         let data: Data
         do {
             data = try encodeTraffic(event)
         } catch {
             session.health.markSerializationFailure()
-            session.disablePersistence()
             return
         }
         do {
@@ -647,22 +400,16 @@ final class SessionAuditWorker: @unchecked Sendable {
                 in: session.directory)
         } catch {
             session.health.markWriteFailure()
-            session.disablePersistence()
         }
     }
 
     private func persistAttempt(_ event: CoachingAttemptAuditEvent, session: Session) {
-        guard session.isOpened, !session.isPersistenceDisabled else {
-            if !session.isOpened { session.health.markOpenFailure() }
-            session.disablePersistence()
-            return
-        }
+        guard ensureOpen(session) else { return }
         let data: Data
         do {
             data = try encodeAttempt(event)
         } catch {
             session.health.markSerializationFailure()
-            session.disablePersistence()
             return
         }
         do {
@@ -672,74 +419,41 @@ final class SessionAuditWorker: @unchecked Sendable {
                 in: session.directory)
         } catch {
             session.health.markWriteFailure()
-            session.disablePersistence()
         }
     }
 
     private func finalize(
         _ session: Session,
-        deadline: ContinuousClock.Instant,
+        forcePartial: Bool,
         completion: @Sendable (SessionAuditCloseResult) -> Void
     ) {
-        if ContinuousClock.now >= deadline {
-            session.health.markCloseTimeout()
-        }
-        var snapshot = session.health.snapshot
-        // Once a complete replacement is attempted, a writer failure can leave that candidate
-        // canonical (for example, after rename but before the post-commit check returns). Only that
-        // ambiguous path requires successful invalidation before settlement can be reported.
-        let completeCandidateCouldBeCanonical = snapshot.isComplete
-        if snapshot.isComplete {
-            let completeSnapshot = snapshot
-            do {
-                let committed = try writer.replaceHealth(
-                    try healthData(state: "complete", closed: true, snapshot: completeSnapshot),
-                    in: session.directory
-                ) {
-                    ContinuousClock.now < deadline
-                        && session.health.snapshot == completeSnapshot
-                }
-                if committed,
-                   ContinuousClock.now < deadline,
-                   session.health.snapshot == completeSnapshot {
-                    completion(.complete)
-                    return
-                }
-            } catch {
-                session.health.markWriteFailure()
-            }
-        }
-
-        if ContinuousClock.now >= deadline {
-            session.health.markCloseTimeout()
-        }
-        snapshot = session.health.snapshot
-        do {
-            let committed = try writer.replaceHealth(
-                try healthData(state: "partial", closed: true, snapshot: snapshot),
-                in: session.directory) { true }
-            guard committed else { throw HealthPersistenceError.rejectedReplacement }
-            session.finishLateCorrectionIfPending()
+        guard ensureOpen(session) else {
             completion(.partial)
+            return
+        }
+        let snapshot = session.health.snapshot
+        let result: SessionAuditCloseResult = forcePartial || !snapshot.isComplete
+            ? .partial : .complete
+        do {
+            try writer.replaceHealth(
+                try healthData(
+                    state: result == .complete ? "complete" : "partial",
+                    snapshot: snapshot),
+                in: session.directory)
+            completion(result)
         } catch {
             session.health.markWriteFailure()
-            do {
-                try writer.invalidateHealth(in: session.directory)
-                session.finishLateCorrectionIfPending()
-                completion(.partial)
-            } catch {
-                session.health.markWriteFailure()
-                guard !completeCandidateCouldBeCanonical else {
-                    // Do not signal settlement while a rejected complete marker might still be
-                    // canonical. Regular Stop keeps Evaluate disabled in this ambiguous disk state.
-                    return
+            if result == .complete {
+                do {
+                    try writer.replaceHealth(
+                        try healthData(
+                            state: "partial", snapshot: session.health.snapshot),
+                        in: session.directory)
+                } catch {
+                    session.health.markWriteFailure()
                 }
-                // No complete replacement was attempted, so the only surviving canonical state is
-                // the initial open marker or no marker. Both are already evaluator-partial; all I/O
-                // has ended even though the best-effort partial rewrite and unlink failed.
-                session.finishLateCorrectionIfPending()
-                completion(.partial)
             }
+            completion(.partial)
         }
     }
 
@@ -821,21 +535,14 @@ final class SessionAuditWorker: @unchecked Sendable {
         return try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
     }
 
-    private func healthData(
-        state: String,
-        closed: Bool,
-        snapshot: HealthSnapshot
-    ) throws -> Data {
+    private func healthData(state: String, snapshot: HealthSnapshot) throws -> Data {
         let object: [String: Any] = [
             "version": FileSessionAudit.formatVersion,
             "state": state,
-            "closed": closed,
             "queue_overflow": snapshot.queueOverflow,
             "oversize_record": snapshot.oversizeRecord,
             "open_failure": snapshot.openFailure,
             "write_failure": snapshot.writeFailure,
-            "close_timeout": snapshot.closeTimeout,
-            "late_event": snapshot.lateEvent,
             "serialization_failure": snapshot.serializationFailure,
         ]
         return try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])

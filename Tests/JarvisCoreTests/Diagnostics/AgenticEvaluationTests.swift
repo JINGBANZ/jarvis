@@ -143,53 +143,6 @@ import Foundation
         #expect(AgenticEvaluation.savedReport(in: dir) == nil)
     }
 
-    @Test func invalidatingChangedEvidenceRemovesOnlyEvaluatorDerivedArtifacts() throws {
-        let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
-        let derivedFilenames = [
-            AgenticEvaluation.transcriptFilename,
-            AgenticEvaluation.reportFilename,
-            AgenticEvaluation.reportEvidenceFilename,
-            EvalReportPage.filename,
-        ]
-        for filename in derivedFilenames {
-            try Data("stale".utf8).write(to: dir.appendingPathComponent(filename))
-        }
-        let evidenceURL = dir.appendingPathComponent(FileSessionAudit.brainTrafficFilename)
-        try Data("{}\n".utf8).write(to: evidenceURL)
-
-        try AgenticEvaluation.invalidateDerivedArtifacts(in: dir)
-        try AgenticEvaluation.invalidateDerivedArtifacts(in: dir)
-
-        for filename in derivedFilenames {
-            #expect(!FileManager.default.fileExists(
-                atPath: dir.appendingPathComponent(filename).path))
-        }
-        #expect(FileManager.default.fileExists(atPath: evidenceURL.path))
-    }
-
-    @Test func versionedReportMustMatchTheHealthEvidenceItWasGeneratedFrom() throws {
-        let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
-        try Data(#"{"audit_version":1,"tag":"coach"}\n"#.utf8).write(
-            to: dir.appendingPathComponent(FileSessionAudit.brainTrafficFilename))
-        let healthURL = dir.appendingPathComponent(FileSessionAudit.healthFilename)
-        try Data(#"{"version":1,"state":"complete"}"#.utf8).write(to: healthURL)
-        let completeEvidence = try AgenticEvaluation.evidenceStamp(in: dir)
-
-        let report = try AgenticEvaluation.saveReport(
-            "## Current audit",
-            agentName: "codex",
-            evidenceStamp: completeEvidence,
-            in: dir)
-        #expect(AgenticEvaluation.savedReport(in: dir) == report)
-
-        try Data(#"{"version":1,"state":"partial","late_event":1}"#.utf8).write(to: healthURL)
-        #expect(AgenticEvaluation.savedReport(in: dir) == nil)
-
-        try FileManager.default.removeItem(
-            at: dir.appendingPathComponent(AgenticEvaluation.reportEvidenceFilename))
-        #expect(AgenticEvaluation.savedReport(in: dir) == nil)
-    }
-
     @Test func hasTrafficRequiresANonemptyTrafficFile() throws {
         let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         #expect(!AgenticEvaluation.hasTraffic(in: dir))

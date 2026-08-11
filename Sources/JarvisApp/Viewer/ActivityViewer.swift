@@ -20,11 +20,9 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
     /// Whether a coaching session is currently running (wired by AppDelegate). Evaluation and report
     /// opening are explicit user actions, but their presentation stays outside the ghost lifecycle.
     var isCoachingRunning: (@MainActor () -> Bool)?
-    /// Per-session persistence gate. A late observer call can temporarily make one historical
-    /// session unsafe to evaluate without disabling unrelated settled sessions.
-    var isSessionEvidenceAvailable: (@MainActor (URL) -> Bool)?
-    /// Directories whose audit handles remain live must survive Clear history because a delayed
-    /// producer can reopen a currently settled handle.
+    /// Per-session persistence gate used only while a normal Stop close is still running.
+    var isSessionAuditClosed: (@MainActor (URL) -> Bool)?
+    /// Directories still owned by background close work must survive Clear history.
     var protectedSessionDirectories: (@MainActor () -> Set<URL>)?
 
     private var webView: WKWebView?
@@ -36,14 +34,6 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
     private var isEvaluating = false
     /// Retained so Quit can cancel the direct CLI child instead of leaving an orphaned paid run.
     private var evaluationTask: Task<Void, Never>?
-    /// A late observer call invalidates only the evaluator reading that session. The generation also
-    /// catches the narrow race where cancellation lands after the CLI returned but before its report
-    /// was handed back to Activity.
-    private var evaluatingSessionPath: String?
-    private var evaluationEvidenceGeneration: UInt = 0
-    /// Tracks the interval from evidence reopening through settlement so cleanup runs at both ends;
-    /// an unlink failure keeps the block afterward rather than exposing a stale "Open report" action.
-    private var invalidEvaluationArtifactPaths: Set<String> = []
     private var sessions: [SessionStore.Session] = []
 
     private var loaded = false             // page navigation finished?
@@ -218,30 +208,6 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         refreshEvaluateButtonState()
     }
 
-    /// Refresh a selected session after its worker settles. If late evidence makes a completed audit
-    /// mutable again, cancel any evaluator reading that session and discard every derived view made
-    /// under its earlier marker before the controls can be re-enabled.
-    func auditStateDidChange(for directory: URL, isSettled: Bool) {
-        let path = directory.standardizedFileURL.path
-        if !isSettled {
-            invalidEvaluationArtifactPaths.insert(path)
-            if evaluatingSessionPath == path {
-                evaluationEvidenceGeneration &+= 1
-                evaluationTask?.cancel()
-            }
-            // State callbacks cross onto the main actor. If correction already settled while this
-            // callback was queued, this cleanup itself is the settlement-side second pass.
-            let alreadySettled = isSessionEvidenceAvailable?(directory) != false
-            invalidateEvaluationArtifacts(
-                in: directory,
-                clearTombstoneOnSuccess: alreadySettled)
-        } else if invalidEvaluationArtifactPaths.contains(path) {
-            // Repeat cleanup at settlement in case a separate evaluator raced the first unlink.
-            invalidateEvaluationArtifacts(in: directory, clearTombstoneOnSuccess: true)
-        }
-        refreshEvaluateButtonState()
-    }
-
     /// Render the Core composition result for the current session. Past sessions intentionally show
     /// only Ended rather than reconstructing transient readiness history that was never persisted.
     func readinessDidChange(_ status: JarvisReadiness.Status) {
@@ -274,20 +240,20 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         }
         let session = sessions[idx]
         if coachingRunning {
-            button.title = savedReport(for: session) == nil
+            button.title = AgenticEvaluation.savedReport(in: session.url) == nil
                 ? "Evaluate" : "Open report"
             button.toolTip = "Stop Jarvis before evaluating or opening a report"
             button.isEnabled = false
             return
         }
-        guard isSessionEvidenceAvailable?(session.url) != false else {
-            button.title = savedReport(for: session) == nil
+        guard isSessionAuditClosed?(session.url) != false else {
+            button.title = AgenticEvaluation.savedReport(in: session.url) == nil
                 ? "Evaluate" : "Open report"
-            button.toolTip = "This session's audit evidence is still settling"
+            button.toolTip = "This session's audit is still closing"
             button.isEnabled = false
             return
         }
-        if savedReport(for: session) != nil {
+        if AgenticEvaluation.savedReport(in: session.url) != nil {
             button.title = "Open report"
             button.toolTip = "Open this session's evaluation report in your browser"
             button.isEnabled = true
@@ -379,11 +345,11 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         }
         guard let idx = picker?.indexOfSelectedItem, sessions.indices.contains(idx) else { return }
         let session = sessions[idx]
-        guard isSessionEvidenceAvailable?(session.url) != false else {
-            jlog("Jarvis: suppressed evaluation while the selected session audit is unsettled.")
+        guard isSessionAuditClosed?(session.url) != false else {
+            jlog("Jarvis: suppressed evaluation while the selected session audit is closing.")
             return
         }
-        if let report = savedReport(for: session) {
+        if let report = AgenticEvaluation.savedReport(in: session.url) {
             openReport(report, for: session)
             return
         }
@@ -399,37 +365,17 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         }
 
         isEvaluating = true
-        let sessionPath = session.url.standardizedFileURL.path
-        let evidenceGeneration = evaluationEvidenceGeneration
-        evaluatingSessionPath = sessionPath
         refreshEvaluateButtonState()
         evaluationTask = Task { [weak self] in
             defer {
                 self?.evaluationTask = nil
-                self?.evaluatingSessionPath = nil
                 self?.isEvaluating = false
                 self?.refreshEvaluateButtonState()
             }
             do {
                 let report = try await evaluator.evaluate(sessionDirectory: session.url)
-                guard let self else { return }
-                guard !Task.isCancelled,
-                      self.evaluationEvidenceGeneration == evidenceGeneration,
-                      self.isSessionEvidenceAvailable?(session.url) != false
-                else {
-                    self.invalidateEvaluationArtifacts(
-                        in: session.url,
-                        clearTombstoneOnSuccess: false)
-                    return
-                }
-                self.invalidEvaluationArtifactPaths.remove(sessionPath)
-                self.openReport(report, for: session)
+                self?.openReport(report, for: session)
             } catch is CancellationError {
-                if let self, self.evaluationEvidenceGeneration != evidenceGeneration {
-                    self.invalidateEvaluationArtifacts(
-                        in: session.url,
-                        clearTombstoneOnSuccess: false)
-                }
                 jlog("Jarvis: Activity evaluation was cancelled.")
             } catch {
                 jlog("Jarvis: Activity evaluation failed — \(error.localizedDescription)")
@@ -443,7 +389,6 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
     func cancelEvaluation() {
         evaluationTask?.cancel()
         evaluationTask = nil
-        evaluatingSessionPath = nil
         isEvaluating = false
         refreshEvaluateButtonState()
     }
@@ -457,13 +402,9 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
             jlog("Jarvis: suppressed Activity report presentation while coaching is running.")
             return
         }
-        guard isSessionEvidenceAvailable?(session.url) != false else {
+        guard isSessionAuditClosed?(session.url) != false else {
             jlog(
-                "Jarvis: suppressed report presentation while the selected session audit is unsettled.")
-            return
-        }
-        guard !invalidEvaluationArtifactPaths.contains(session.url.standardizedFileURL.path) else {
-            jlog("Jarvis: suppressed a report invalidated by changed audit evidence.")
+                "Jarvis: suppressed report presentation while the selected session audit is closing.")
             return
         }
         do {
@@ -472,28 +413,6 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
             NSWorkspace.shared.open(url) // ghost-mode-allowed: guarded explicit Activity action
         } catch {
             info("Couldn't write the report page", error.localizedDescription)
-        }
-    }
-
-    private func savedReport(for session: SessionStore.Session) -> String? {
-        guard !invalidEvaluationArtifactPaths.contains(session.url.standardizedFileURL.path)
-        else { return nil }
-        return AgenticEvaluation.savedReport(in: session.url)
-    }
-
-    private func invalidateEvaluationArtifacts(
-        in directory: URL,
-        clearTombstoneOnSuccess: Bool
-    ) {
-        let path = directory.standardizedFileURL.path
-        do {
-            try AgenticEvaluation.invalidateDerivedArtifacts(in: directory)
-            if clearTombstoneOnSuccess {
-                invalidEvaluationArtifactPaths.remove(path)
-            }
-        } catch {
-            invalidEvaluationArtifactPaths.insert(path)
-            jlog("Jarvis: couldn't invalidate stale evaluation artifacts — \(error.localizedDescription)")
         }
     }
 

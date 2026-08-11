@@ -8,11 +8,11 @@ import Glibc
 /// Owner-only file implementation of the session-audit disk edge.
 struct SessionAuditFileWriter: SessionAuditWriting {
     func openSession(at directory: URL, initialHealth: Data) throws {
-        try createOwnerOnlyFile(
+        try ensureOwnerOnlyFile(
             directory.appendingPathComponent(FileSessionAudit.brainTrafficFilename))
-        try createOwnerOnlyFile(
+        try ensureOwnerOnlyFile(
             directory.appendingPathComponent(FileSessionAudit.coachingAttemptsFilename))
-        _ = try replaceHealth(initialHealth, in: directory) { true }
+        try replaceHealth(initialHealth, in: directory)
     }
 
     func append(_ data: Data, filename: String, in directory: URL) throws {
@@ -29,12 +29,7 @@ struct SessionAuditFileWriter: SessionAuditWriting {
         }
     }
 
-    @discardableResult
-    func replaceHealth(
-        _ data: Data,
-        in directory: URL,
-        shouldCommit: @Sendable () -> Bool
-    ) throws -> Bool {
+    func replaceHealth(_ data: Data, in directory: URL) throws {
         let destination = directory.appendingPathComponent(FileSessionAudit.healthFilename)
         let temporary = directory.appendingPathComponent(
             ".\(FileSessionAudit.healthFilename).\(UUID().uuidString).tmp")
@@ -44,28 +39,20 @@ struct SessionAuditFileWriter: SessionAuditWriting {
             contents: data,
             attributes: [.posixPermissions: 0o600]
         ) else { throw CocoaError(.fileWriteUnknown) }
-
-        guard shouldCommit() else { return false }
-
         guard rename(temporary.path, destination.path) == 0 else {
             throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
         }
-        return shouldCommit()
     }
 
-    func invalidateHealth(in directory: URL) throws {
-        let path = directory.appendingPathComponent(FileSessionAudit.healthFilename).path
-        guard unlink(path) == 0 || errno == ENOENT else {
-            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+    /// Open can be retried after a health-file failure without truncating records already written.
+    private func ensureOwnerOnlyFile(_ url: URL) throws {
+        if !FileManager.default.fileExists(atPath: url.path) {
+            guard FileManager.default.createFile(
+                atPath: url.path,
+                contents: Data(),
+                attributes: [.posixPermissions: 0o600]
+            ) else { throw CocoaError(.fileWriteUnknown) }
         }
-    }
-
-    private func createOwnerOnlyFile(_ url: URL) throws {
-        guard FileManager.default.createFile(
-            atPath: url.path,
-            contents: Data(),
-            attributes: [.posixPermissions: 0o600]
-        ) else { throw CocoaError(.fileWriteUnknown) }
         try FileManager.default.setAttributes(
             [.posixPermissions: 0o600], ofItemAtPath: url.path)
     }

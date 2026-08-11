@@ -1,107 +1,64 @@
 import Foundation
 
-/// File-backed session audit with bounded, nonblocking admission and deadline-bound lifecycle close.
-///
-/// `Sendable` is compiler-checked: the handle stores only immutable references. The worker owns all
-/// file mutation, `Session` owns only atomic state, and `PersistenceSettlement` locks its waiters.
-public final class FileSessionAudit: BrainTrafficAuditing, CoachingAttemptAuditing,
-    SessionAuditLifecycle, Sendable {
+/// File-backed session audit with bounded admission and one-way close semantics.
+public final class FileSessionAudit: BrainTrafficAuditing, CoachingAttemptAuditing, Sendable {
     public static let brainTrafficFilename = "brain-traffic.jsonl"
     public static let coachingAttemptsFilename = "coaching-attempts.jsonl"
     public static let healthFilename = "audit-health.json"
     public static let formatVersion = 1
-    public static let defaultCloseDeadline: Duration = .seconds(1)
 
-    private enum CloseWait: Sendable {
-        case completed(SessionAuditCloseResult)
-        case timedOut
-    }
-
-    /// A close deadline bounds the caller's wait, not the serial worker's filesystem operation. Keep
-    /// a separate settlement gate so UI consumers can refuse mutable evidence until the worker's
-    /// close envelope has actually finished, including a corrective partial-marker write.
-    /// `@unchecked Sendable`: `lock` protects the mutation count and continuation array; the state
-    /// callback is immutable and always invoked after releasing that lock.
-    private final class PersistenceSettlement: @unchecked Sendable {
+    /// `@unchecked Sendable`: the lock protects the result and every continuation. The state moves
+    /// only from not-started to closing to one terminal result.
+    private final class CloseSettlement: @unchecked Sendable {
         private let lock = NSLock()
-        private let onStateChange: (@Sendable (Bool) -> Void)?
-        /// The initial mutation is the close envelope. A rejected post-seal record temporarily adds
-        /// another mutation until the worker has made the canonical marker safely partial.
-        private var pendingMutations = 1
-        private var waiters: [CheckedContinuation<Void, Never>] = []
+        private var started = false
+        private var result: SessionAuditCloseResult?
+        private var waiters: [CheckedContinuation<SessionAuditCloseResult, Never>] = []
 
-        init(onStateChange: (@Sendable (Bool) -> Void)?) {
-            self.onStateChange = onStateChange
-        }
-
-        var isSettled: Bool {
-            lock.withLock { pendingMutations == 0 }
-        }
-
-        func beginMutation() {
-            let becameUnsettled = lock.withLock {
-                let wasSettled = pendingMutations == 0
-                pendingMutations += 1
-                return wasSettled
+        func begin() -> Bool {
+            lock.withLock {
+                guard !started else { return false }
+                started = true
+                return true
             }
-            if becameUnsettled { onStateChange?(false) }
         }
 
-        func finishMutation() {
-            let result = lock.withLock {
-                guard pendingMutations > 0 else {
-                    return (false, [CheckedContinuation<Void, Never>]())
+        func finish(_ result: SessionAuditCloseResult) {
+            let continuations = lock.withLock {
+                guard self.result == nil else {
+                    return [CheckedContinuation<SessionAuditCloseResult, Never>]()
                 }
-                pendingMutations -= 1
-                guard pendingMutations == 0 else {
-                    return (false, [CheckedContinuation<Void, Never>]())
-                }
+                self.result = result
                 let continuations = waiters
                 waiters.removeAll()
-                return (true, continuations)
+                return continuations
             }
-            result.1.forEach { $0.resume() }
-            if result.0 { onStateChange?(true) }
+            continuations.forEach { $0.resume(returning: result) }
         }
 
-        func wait() async {
+        func wait() async -> SessionAuditCloseResult {
             await withCheckedContinuation { continuation in
-                let shouldResume = lock.withLock {
-                    if pendingMutations == 0 { return true }
+                let settled = lock.withLock { () -> SessionAuditCloseResult? in
+                    if let result { return result }
                     waiters.append(continuation)
-                    return false
+                    return nil
                 }
-                if shouldResume { continuation.resume() }
+                if let settled { continuation.resume(returning: settled) }
             }
         }
     }
 
     private let worker: SessionAuditWorker
     private let session: SessionAuditWorker.Session
-    private let persistenceSettlement: PersistenceSettlement
+    private let closeSettlement = CloseSettlement()
 
-    public convenience init(
-        directory: URL,
-        onPersistenceStateChange: (@Sendable (Bool) -> Void)? = nil
-    ) {
-        self.init(
-            directory: directory,
-            worker: .shared,
-            onPersistenceStateChange: onPersistenceStateChange)
+    public convenience init(directory: URL) {
+        self.init(directory: directory, worker: .shared)
     }
 
-    init(
-        directory: URL,
-        worker: SessionAuditWorker,
-        onPersistenceStateChange: (@Sendable (Bool) -> Void)? = nil
-    ) {
-        let settlement = PersistenceSettlement(onStateChange: onPersistenceStateChange)
+    init(directory: URL, worker: SessionAuditWorker) {
         self.worker = worker
-        self.persistenceSettlement = settlement
-        self.session = worker.openSession(
-            at: directory,
-            persistenceMutationBegan: { settlement.beginMutation() },
-            persistenceMutationFinished: { settlement.finishMutation() })
+        self.session = worker.openSession(at: directory)
     }
 
     public func record(_ event: BrainTrafficAuditEvent) {
@@ -112,69 +69,25 @@ public final class FileSessionAudit: BrainTrafficAuditing, CoachingAttemptAuditi
         worker.record(event, for: session)
     }
 
-    public func close(
-        deadline: Duration = FileSessionAudit.defaultCloseDeadline
-    ) async -> SessionAuditCloseResult {
-        let deadline = max(.zero, deadline)
+    /// Seal the audit and wait for its accepted records plus one immutable terminal marker. Callers
+    /// run this from a background lifecycle task; it never blocks a replacement session's Start.
+    public func close() async -> SessionAuditCloseResult {
         session.seal()
-        let streamPair = AsyncStream<SessionAuditCloseResult>.makeStream(
-            bufferingPolicy: .bufferingNewest(1))
-        let closeDeadline = ContinuousClock.now.advanced(by: deadline)
-        let admission = worker.close(
-            session,
-            deadline: closeDeadline
-        ) { [persistenceSettlement] result in
-            persistenceSettlement.finishMutation()
-            streamPair.continuation.yield(result)
-            streamPair.continuation.finish()
-        }
-        switch admission {
-        case .deferred:
-            return .partial
-        case .alreadyClosing:
-            return persistenceSettlement.isSettled && session.health.snapshot.isComplete
-                ? .complete
-                : .partial
-        case .enqueued:
-            break
-        }
-
-        return await withTaskGroup(of: CloseWait.self) { group in
-            group.addTask {
-                var iterator = streamPair.stream.makeAsyncIterator()
-                guard let result = await iterator.next() else { return .timedOut }
-                return .completed(result)
-            }
-            group.addTask {
-                try? await Task.sleep(for: deadline)
-                return .timedOut
-            }
-            let first = await group.next() ?? .timedOut
-            group.cancelAll()
-            switch first {
-            case .completed(let result):
-                return result
-            case .timedOut:
-                session.health.markCloseTimeout()
-                return .partial
+        if closeSettlement.begin() {
+            worker.close(session, forcePartial: false) { [closeSettlement] result in
+                closeSettlement.finish(result)
             }
         }
+        return await closeSettlement.wait()
     }
 
-    /// Wait until this sealed session's worker envelope has stopped touching its files. This is
-    /// intentionally separate from the bounded close result: a deadline miss returns partial promptly,
-    /// while Activity keeps Evaluate disabled until the corrective marker is durable.
-    public func waitForPersistenceToStop() async {
-        await persistenceSettlement.wait()
-    }
-
-    /// Whether the session directory is currently safe for the evaluator to read. A late observer
-    /// call can make a previously settled session unavailable again until its marker is invalidated.
-    public var isPersistenceSettled: Bool {
-        persistenceSettlement.isSettled
-    }
-
-    var healthSnapshot: SessionAuditWorker.HealthSnapshot {
-        session.health.snapshot
+    /// Seal on an unexpected teardown and request a partial marker without waiting for persistence.
+    /// A fast process exit can leave `in_progress`, which is also evaluator-visible incomplete state.
+    public func abandon() {
+        session.seal()
+        guard closeSettlement.begin() else { return }
+        worker.close(session, forcePartial: true) { [closeSettlement] result in
+            closeSettlement.finish(result)
+        }
     }
 }

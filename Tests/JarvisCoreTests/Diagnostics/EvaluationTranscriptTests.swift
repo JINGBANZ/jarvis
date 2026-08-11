@@ -252,7 +252,7 @@ import Foundation
             #"{"audit_version":1,"event":"started","attempt":1,"transcript":[]}"#
             + "\n"
             + #"{"audit_version":1,"event":"finished","attempt":1,"terminal":"speak"}"#
-        let health = #"{"version":1,"state":"partial","closed":true,"queue_overflow":2,"oversize_record":0,"open_failure":0,"write_failure":0,"close_timeout":0,"late_event":0,"serialization_failure":0}"#
+        let health = #"{"version":1,"state":"partial","queue_overflow":2,"oversize_record":0,"open_failure":0,"write_failure":0,"serialization_failure":0}"#
 
         let output = EvaluationTranscript.render(
             jsonl: traffic,
@@ -284,11 +284,21 @@ import Foundation
         #expect(oldOutput.contains("session totals: 1 calls"))
     }
 
+    @Test func inProgressMarkerIsExplicitlyIncomplete() {
+        let evidence = SessionAuditEvidence.assess(
+            trafficJSONL: "",
+            attemptsJSONL: "",
+            healthJSON: #"{"version":1,"state":"in_progress","queue_overflow":0,"oversize_record":0,"open_failure":0,"write_failure":0,"serialization_failure":0}"#)
+
+        #expect(evidence.state == .partial)
+        #expect(evidence.limitations.contains("session close incomplete"))
+    }
+
     @Test func incompleteHealthSchemaCannotBeMistakenForCompleteEvidence() {
         let evidence = SessionAuditEvidence.assess(
             trafficJSONL: "",
             attemptsJSONL: "",
-            healthJSON: #"{"version":1,"state":"complete","closed":true}"#)
+            healthJSON: #"{"version":1,"state":"complete"}"#)
 
         #expect(evidence.state == .partial)
         #expect(evidence.limitations.contains {
