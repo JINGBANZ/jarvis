@@ -42,7 +42,10 @@ waits for parsing, image redaction, JSON serialization, or file I/O. One process
 orders every accepted event across session handles while retaining only a bounded amount of data;
 the exact limits remain source-owned in that type. If a lifecycle close cannot enter the full ring,
 it retains an accepted-envelope watermark and runs immediately after those predecessors, before
-traffic admitted later for a replacement session.
+traffic admitted later for a replacement session. Prioritized closes have their own fixed count
+bound. A rejected close whose session has no unfinished worker envelope settles immediately against
+its already-stable non-complete state; if the prioritized table is full, one fallback is coalesced
+onto a session already represented by the bounded ring and released with that session's last envelope.
 
 The worker writes the traffic, coaching-attempt, and health artifacts named by `FileSessionAudit` in
 the same owner-only session directory as Activity and the screenshots deliberately shown to the
@@ -55,6 +58,9 @@ Historical sessions without the versioned marker retain their explicit legacy in
 One Start creates one audit handle and passes its narrow observer views to that session's
 `CoachDriver` and brain clients. A quick Stop → Start clears the old app-owned handle before creating
 the replacement, so work still unwinding from the old session cannot contaminate the new directory.
+The app's path registry keeps the handle weak, but retains its lock-protected settlement bit until the
+worker reports the last mutation finished. Releasing the final producer therefore cannot make an
+in-progress late correction look available or allow pruning to delete the directory it still touches.
 
 | Transition | Behavior |
 |---|---|
@@ -77,9 +83,10 @@ operation already in progress. A separate settlement signal fires only after the
 finished the final or corrective marker write, or has safely invalidated a rejected marker. If even
 invalidation fails, settlement remains pending and Evaluate stays unavailable rather than trusting
 ambiguous evidence. Regular Stop retains that settlement task until the session directory is safe
-to read. Clear history and automatic pruning preserve every directory with a live audit handle,
-including a settled handle that a delayed producer could reopen, so a worker can never race deletion.
-Quit also awaits this gate for the current audit and every earlier Stop whose close already began.
+to read. Clear history and automatic pruning preserve every directory with a live audit handle and
+every independently tracked unsettled mutation, including a settled handle that a delayed producer
+could reopen, so a worker can never race deletion. Quit also awaits this gate for the current audit
+and every earlier Stop whose close already began.
 
 A callback rejected after sealing increments `late_event` and immediately reopens that session's
 persistence gate. The worker schedules at most one serial correction to invalidate any already
@@ -134,6 +141,7 @@ from prose, `stay_silent`, or Activity copy.
 
 Deterministic parked and failing writers exercise overload, blocked I/O, deadline crossing, open and
 write failure, serialization failure, both final-commit deadline crossings, failed correction
-invalidation, post-close marker correction, protected-session retention, and behavioral equivalence in
+invalidation, post-close marker correction, bounded rejected-close retention, protected-session
+retention, and behavioral equivalence in
 [`SessionAuditIsolationTests`](../Tests/JarvisCoreTests/Diagnostics/SessionAuditIsolationTests.swift).
 The repository gate remains `swift build && ./scripts/run-tests.sh`.

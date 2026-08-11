@@ -499,11 +499,14 @@ import Testing
         worker.record(event, for: stopped)
         stopped.seal()
         let closeCompleted = DispatchSemaphore(value: 0)
-        #expect(!worker.close(
+        #expect(worker.close(
             stopped,
             deadline: ContinuousClock.now.advanced(by: .seconds(30))) { _ in
                 closeCompleted.signal()
-            })
+            } == .deferred)
+        let retainedClose = worker.retainedSnapshot()
+        #expect(retainedClose.deferredCloseCount == 1)
+        #expect(retainedClose.deferredCloseApproximateBytes == 256)
 
         writer.releaseFirstAppend()
         await wait(for: writer.secondAppendEntered)
@@ -517,6 +520,37 @@ import Testing
         await waitUntilIdle(worker)
         #expect(try healthMarker(in: stoppedDirectory)["state"] as? String == "partial")
         #expect(stopped.health.snapshot.queueOverflow > 0)
+        #expect(stopped.health.snapshot.closeTimeout > 0)
+    }
+
+    @Test func rejectedClosesWithoutPendingSessionWorkDoNotAccumulate() async throws {
+        let directory = ActivityLogTests.tmp()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let writer = BlockingWriter()
+        let limits = SessionAuditWorker.Limits(
+            maxEventCount: 1,
+            maxRetainedBytes: 4_096)
+        let worker = SessionAuditWorker(limits: limits, writer: writer)
+        let blocked = FileSessionAudit(
+            directory: directory.appendingPathComponent("blocked"),
+            worker: worker)
+        await wait(for: writer.openEntered)
+
+        for index in 0..<100 {
+            let audit = FileSessionAudit(
+                directory: directory.appendingPathComponent("replacement-\(index)"),
+                worker: worker)
+            #expect(await audit.close(deadline: .zero) == .partial)
+            #expect(audit.isPersistenceSettled)
+            let retained = worker.retainedSnapshot()
+            #expect(retained.deferredCloseCount == 0)
+            #expect(retained.deferredCloseApproximateBytes == 0)
+        }
+
+        writer.releaseOpen()
+        await waitUntilIdle(worker)
+        _ = await blocked.close(deadline: .seconds(5))
+        await blocked.waitForPersistenceToStop()
     }
 
     @Test func closeTimeoutReturnsWithoutReleasingBlockedDiskAndLeavesPartialMarker() async throws {
@@ -622,7 +656,7 @@ import Testing
             session,
             deadline: ContinuousClock.now.advanced(by: .seconds(30))) { _ in
                 completion.mark()
-            })
+            } == .enqueued)
         await wait(for: writer.completeMarkerRenamed)
         session.health.markCloseTimeout()
         writer.releaseRenamedHealth()
@@ -656,7 +690,7 @@ import Testing
             session,
             deadline: ContinuousClock.now.advanced(by: .seconds(30))) { _ in
                 completion.mark()
-            })
+            } == .enqueued)
 
         await wait(for: writer.completeMarkerRenamed)
         session.health.markCloseTimeout()

@@ -90,9 +90,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Only cancelled coaching work extends the global ghost lifecycle. Audit persistence is scoped
     /// to its own session: Activity can use settled history while an unrelated marker is repaired.
     private var pendingTurnDrainIDs: Set<UUID> = []
-    /// Weak lookup keeps a session discoverable while any producer or drain still owns its audit,
-    /// without retaining every session handle for the lifetime of the app.
-    private var sessionAuditsByPath: [String: WeakSessionAudit] = [:]
+    /// A weak audit handle plus independently retained settlement state. The state is updated before
+    /// its main-actor UI callback is queued, so releasing the last producer cannot make a correction
+    /// look settled while the worker still owns that mutation.
+    private var sessionAuditsByPath: [String: SessionAuditReference] = [:]
 
     /// How many past session log *directories* to keep on disk; older ones are pruned at each Start so
     /// the always-on activity log stays bounded across launches. This caps session count, not the size
@@ -129,7 +130,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return self.transcriber != nil || !self.pendingTurnDrainIDs.isEmpty
         }
         activityViewer.isSessionEvidenceAvailable = { [weak self] directory in
-            self?.audit(for: directory)?.isPersistenceSettled ?? true
+            self?.isAuditPersistenceSettled(for: directory) ?? true
         }
         activityViewer.protectedSessionDirectories = { [weak self] in
             self?.protectedAuditDirectories() ?? []
@@ -1326,17 +1327,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ActivityLog.shared.enable(directory: dir)        // <dir>/jarvis-activity.jsonl, 0600, fresh
         // File creation and every later write run on the shared bounded audit worker. Start only
         // creates a lightweight session handle and never waits for an older session's disk access.
+        let auditReference = SessionAuditReference()
         let audit = FileSessionAudit(
             directory: dir,
-            onPersistenceStateChange: { [weak self] isSettled in
+            onPersistenceStateChange: { [weak self, auditReference] isSettled in
+                // This update is synchronous on the producer/worker thread. The viewer's callback may
+                // wait for the main actor, but availability and pruning already see the safe state.
+                auditReference.setPersistenceSettled(isSettled)
                 Task { @MainActor [weak self] in
                     self?.activityViewer?.auditStateDidChange(
                         for: dir,
                         isSettled: isSettled)
                 }
             })
+        auditReference.setAudit(audit)
         sessionAudit = audit
-        sessionAuditsByPath[dir.standardizedFileURL.path] = WeakSessionAudit(audit)
+        sessionAuditsByPath[dir.standardizedFileURL.path] = auditReference
         currentSessionDir = dir
         // Now that logging is always on, sessions accumulate every launch. Bound it: keep only the most
         // recent few (the just-created one is current, so it's always spared).
@@ -1349,14 +1355,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         jlog("Jarvis: session \(dir.lastPathComponent) (\(dir.path)).")
     }
 
-    private func audit(for directory: URL) -> FileSessionAudit? {
+    private func isAuditPersistenceSettled(for directory: URL) -> Bool {
         let path = directory.standardizedFileURL.path
-        guard let reference = sessionAuditsByPath[path] else { return nil }
-        guard let audit = reference.value else {
+        guard let reference = sessionAuditsByPath[path] else { return true }
+        let snapshot = reference.snapshot()
+        if snapshot.audit == nil, snapshot.isPersistenceSettled {
             sessionAuditsByPath[path] = nil
-            return nil
         }
-        return audit
+        return snapshot.isPersistenceSettled
     }
 
     /// Protect every directory whose audit handle is still alive, including a currently settled
@@ -1365,7 +1371,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         var stalePaths: [String] = []
         var directories: Set<URL> = []
         for (path, reference) in sessionAuditsByPath {
-            guard reference.value != nil else {
+            let snapshot = reference.snapshot()
+            guard snapshot.audit != nil || !snapshot.isPersistenceSettled else {
                 stalePaths.append(path)
                 continue
             }
@@ -1428,11 +1435,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-private final class WeakSessionAudit {
-    weak var value: FileSessionAudit?
+/// `@unchecked Sendable`: `lock` protects both the weak handle and settlement flag. The app keeps
+/// this lightweight reference after the handle dies only while a worker mutation remains unsettled.
+private final class SessionAuditReference: @unchecked Sendable {
+    private let lock = NSLock()
+    private weak var value: FileSessionAudit?
+    private var persistenceSettled = false
 
-    init(_ value: FileSessionAudit) {
-        self.value = value
+    func snapshot() -> (audit: FileSessionAudit?, isPersistenceSettled: Bool) {
+        lock.withLock { (value, persistenceSettled) }
+    }
+
+    func setAudit(_ audit: FileSessionAudit) {
+        lock.withLock { value = audit }
+    }
+
+    func setPersistenceSettled(_ isSettled: Bool) {
+        lock.withLock { persistenceSettled = isSettled }
     }
 }
 

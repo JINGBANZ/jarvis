@@ -120,7 +120,7 @@ public final class FileSessionAudit: BrainTrafficAuditing, CoachingAttemptAuditi
         let streamPair = AsyncStream<SessionAuditCloseResult>.makeStream(
             bufferingPolicy: .bufferingNewest(1))
         let closeDeadline = ContinuousClock.now.advanced(by: deadline)
-        let accepted = worker.close(
+        let admission = worker.close(
             session,
             deadline: closeDeadline
         ) { [persistenceSettlement] result in
@@ -128,9 +128,15 @@ public final class FileSessionAudit: BrainTrafficAuditing, CoachingAttemptAuditi
             streamPair.continuation.yield(result)
             streamPair.continuation.finish()
         }
-        guard accepted else {
-            session.health.markCloseTimeout()
+        switch admission {
+        case .deferred:
             return .partial
+        case .alreadyClosing:
+            return persistenceSettlement.isSettled && session.health.snapshot.isComplete
+                ? .complete
+                : .partial
+        case .enqueued:
+            break
         }
 
         return await withTaskGroup(of: CloseWait.self) { group in
