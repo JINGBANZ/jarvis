@@ -42,7 +42,7 @@ public enum AgenticEvaluation {
     /// A cheap UI preflight. `prepare` remains the authoritative parser because a non-empty file may
     /// still contain no valid traffic records.
     public static func hasTraffic(in sessionDir: URL) -> Bool {
-        let url = sessionDir.appendingPathComponent(BrainTrafficLog.filename)
+        let url = sessionDir.appendingPathComponent(FileSessionAudit.brainTrafficFilename)
         guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
               let size = attributes[.size] as? NSNumber
         else { return false }
@@ -65,7 +65,7 @@ public enum AgenticEvaluation {
     /// to audit.
     public static func prepare(sessionDir: URL) throws -> String {
         try CodexRuntimeHome.removeLegacyHomes(from: sessionDir)
-        let trafficURL = sessionDir.appendingPathComponent(BrainTrafficLog.filename)
+        let trafficURL = sessionDir.appendingPathComponent(FileSessionAudit.brainTrafficFilename)
         let jsonl = (try? String(contentsOf: trafficURL, encoding: .utf8)) ?? ""
         guard !JSONLRecords.parse(jsonl).lines.isEmpty else {
             throw EvaluationError.noTraffic
@@ -75,12 +75,15 @@ public enum AgenticEvaluation {
             throw EvaluationError.missingActivityLog
         }
         let activityJSONL = try String(contentsOf: activityURL, encoding: .utf8)
-        let attemptsURL = sessionDir.appendingPathComponent(CoachingAttemptLog.filename)
+        let attemptsURL = sessionDir.appendingPathComponent(FileSessionAudit.coachingAttemptsFilename)
         let attemptsJSONL = try? String(contentsOf: attemptsURL, encoding: .utf8)
+        let healthURL = sessionDir.appendingPathComponent(FileSessionAudit.healthFilename)
+        let healthJSON = try? String(contentsOf: healthURL, encoding: .utf8)
         let transcript = EvaluationTranscript.render(
             jsonl: jsonl,
             attemptsJSONL: attemptsJSONL,
-            activityJSONL: activityJSONL)
+            activityJSONL: activityJSONL,
+            healthJSON: healthJSON)
         guard !transcript.isEmpty else { throw EvaluationError.noTraffic }
 
         // A failed write must abort: the prompt tells the agent the transcript is its primary
@@ -140,8 +143,9 @@ public enum AgenticEvaluation {
         JarvisPrompts.Evaluation.sessionAudit(
             sessionDirectoryPath: sessionDirPath,
             transcriptFilename: transcriptFilename,
-            trafficFilename: BrainTrafficLog.filename,
-            attemptsFilename: CoachingAttemptLog.filename,
+            trafficFilename: FileSessionAudit.brainTrafficFilename,
+            attemptsFilename: FileSessionAudit.coachingAttemptsFilename,
+            healthFilename: FileSessionAudit.healthFilename,
             activityFilename: ActivityLog.filename,
             reportFilename: reportFilename
         )

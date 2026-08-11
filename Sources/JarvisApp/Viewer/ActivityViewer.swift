@@ -20,6 +20,10 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
     /// Whether a coaching session is currently running (wired by AppDelegate). Evaluation and report
     /// opening are explicit user actions, but their presentation stays outside the ghost lifecycle.
     var isCoachingRunning: (@MainActor () -> Bool)?
+    /// Per-session persistence gate used only while a normal Stop close is still running.
+    var isSessionAuditClosed: (@MainActor (URL) -> Bool)?
+    /// Directories still owned by background close work must survive Clear history.
+    var protectedSessionDirectories: (@MainActor () -> Set<URL>)?
 
     private var webView: WKWebView?
     private var picker: NSPopUpButton?
@@ -242,6 +246,13 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
             button.isEnabled = false
             return
         }
+        guard isSessionAuditClosed?(session.url) != false else {
+            button.title = AgenticEvaluation.savedReport(in: session.url) == nil
+                ? "Evaluate" : "Open report"
+            button.toolTip = "This session's audit is still closing"
+            button.isEnabled = false
+            return
+        }
         if AgenticEvaluation.savedReport(in: session.url) != nil {
             button.title = "Open report"
             button.toolTip = "Open this session's evaluation report in your browser"
@@ -334,6 +345,10 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         }
         guard let idx = picker?.indexOfSelectedItem, sessions.indices.contains(idx) else { return }
         let session = sessions[idx]
+        guard isSessionAuditClosed?(session.url) != false else {
+            jlog("Jarvis: suppressed evaluation while the selected session audit is closing.")
+            return
+        }
         if let report = AgenticEvaluation.savedReport(in: session.url) {
             openReport(report, for: session)
             return
@@ -387,6 +402,11 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
             jlog("Jarvis: suppressed Activity report presentation while coaching is running.")
             return
         }
+        guard isSessionAuditClosed?(session.url) != false else {
+            jlog(
+                "Jarvis: suppressed report presentation while the selected session audit is closing.")
+            return
+        }
         do {
             let url = try EvalReportPage.write(markdown: report, in: session.url,
                                                title: "Session evaluation — \(session.label)")
@@ -416,12 +436,13 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         }
         let alert = NSAlert() // ghost-mode-allowed: guarded explicit Activity action
         alert.messageText = "Clear session history?"
-        alert.informativeText = "This permanently deletes all previous sessions (logs and screenshots). The current session is kept."
+        alert.informativeText = "This permanently deletes all previous sessions (logs and "
+            + "screenshots). The current session and any session still owned by audit work are kept."
         alert.alertStyle = .warning
         alert.addButton(withTitle: "Clear")
         alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return } // ghost-mode-allowed: guarded explicit Activity action
-        store.clearHistory()
+        store.clearHistory(preserving: protectedSessionDirectories?() ?? [])
         populatePicker()
         loadCurrent()   // the viewed session may be gone; fall back to the live one
     }

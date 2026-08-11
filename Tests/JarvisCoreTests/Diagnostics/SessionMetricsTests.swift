@@ -3,7 +3,7 @@ import Foundation
 @testable import JarvisCore
 
 @Suite struct SessionMetricsTests {
-    /// One traffic line in the on-disk shape `BrainTrafficLog` writes.
+    /// One traffic line in the on-disk shape `FileSessionAudit` writes.
     private func line(tag: String = "coach", status: Int? = 200, ms: Int = 500,
                       request: [String: Any], response: [String: Any]? = nil,
                       error: String? = nil, recordKind: String? = nil) throws -> String {
@@ -156,7 +156,7 @@ import Foundation
             status: nil,
             request: ["provider": "codex-cli", "runtime": "app-server"],
             error: "app-server unavailable",
-            recordKind: BrainTrafficLog.RecordKind.preRequestFailure.rawValue)
+            recordKind: BrainTrafficAuditEvent.Kind.preRequestFailure.rawValue)
         let providerCall = try line(
             request: ["provider": "codex-cli", "model": "gpt-5.4"],
             response: ["reply": "done"])

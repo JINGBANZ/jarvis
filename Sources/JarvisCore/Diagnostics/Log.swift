@@ -10,20 +10,40 @@ public enum JarvisLog {
     nonisolated(unsafe) private static var directory: URL?   // guarded by `lock`
 
     public static func enableFileLogging(directory dir: URL) {
-        lock.lock(); directory = dir; lock.unlock()
+        lock.lock()
+        defer { lock.unlock() }
+        directory = dir
         // Fresh, owner-only file for the session.
         let url = dir.appendingPathComponent("jarvis-debug.log")
         FileManager.default.createFile(atPath: url.path, contents: Data(),
                                        attributes: [.posixPermissions: 0o600])
     }
 
-    /// The debug-log file, or nil when file logging is disabled.
-    static var debugLogURL: URL? {
-        lock.lock(); let dir = directory; lock.unlock()
-        if let dir { return dir.appendingPathComponent("jarvis-debug.log") }
-        // Headless/test override.
-        if let p = ProcessInfo.processInfo.environment["JARVIS_LOG"] { return URL(fileURLWithPath: p) }
-        return nil
+    /// Serialize the open-seek-write sequence. Separate file handles can otherwise seek to the same
+    /// end offset and overwrite a peer diagnostic emitted at the same time.
+    fileprivate static func append(_ line: String) {
+        guard let data = line.data(using: .utf8) else { return }
+        lock.lock()
+        defer { lock.unlock() }
+        let url: URL?
+        if let directory {
+            url = directory.appendingPathComponent("jarvis-debug.log")
+        } else if let path = ProcessInfo.processInfo.environment["JARVIS_LOG"] {
+            url = URL(fileURLWithPath: path)
+        } else {
+            url = nil
+        }
+        guard let url else { return }
+
+        if let fh = try? FileHandle(forWritingTo: url) {
+            defer { try? fh.close() }
+            _ = try? fh.seekToEnd()
+            try? fh.write(contentsOf: data)
+        } else {
+            // First write of the session (or after enable truncated it): create owner-only.
+            FileManager.default.createFile(atPath: url.path, contents: data,
+                                           attributes: [.posixPermissions: 0o600])
+        }
     }
 }
 
@@ -32,19 +52,7 @@ public enum JarvisLog {
 /// `ActivityLog`, whose entries are a separate, human-facing coaching record.
 public func jlog(_ message: String) {
     NSLog("%@", message)
-
-    guard let url = JarvisLog.debugLogURL else { return }
-    let line = "\(logTimestamp()) \(message)\n"
-    guard let data = line.data(using: .utf8) else { return }
-    if let fh = try? FileHandle(forWritingTo: url) {
-        defer { try? fh.close() }
-        _ = try? fh.seekToEnd()
-        try? fh.write(contentsOf: data)
-    } else {
-        // First write of the session (or after enable truncated it): create owner-only.
-        FileManager.default.createFile(atPath: url.path, contents: data,
-                                       attributes: [.posixPermissions: 0o600])
-    }
+    JarvisLog.append("\(logTimestamp()) \(message)\n")
 }
 
 private func logTimestamp() -> String {

@@ -25,7 +25,7 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
     /// When set, every round trip (request body, response body, status, latency — or the transport
     /// error) is recorded to the session's `brain-traffic.jsonl`, tagged with `trafficTag` so the
     /// coach and the summarizer are distinguishable. Nil (tests, the evaluator itself) records nothing.
-    private let traffic: BrainTrafficLog?
+    private let traffic: (any BrainTrafficAuditing)?
     private let trafficTag: String
 
     public init(apiKey: String,
@@ -39,7 +39,7 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
                 // default mirrors the default effort so there's one source of truth, never a magic number.
                 maxOutputTokens: Int = ReasoningEffort.default.maxOutputTokens,
                 promptCacheKey: String = "jarvis-coach-v1",
-                traffic: BrainTrafficLog? = nil,
+                traffic: (any BrainTrafficAuditing)? = nil,
                 trafficTag: String = "coach",
                 send: Sender? = nil) {
         self.apiKey = apiKey

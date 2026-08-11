@@ -5,14 +5,14 @@ import Foundation
 @Suite struct AgenticEvaluationTests {
     /// `prepare` renders the traffic to an owner-only transcript file beside it and returns a prompt
     /// that points the agent at the session dir + repo.
-    @Test func prepareWritesOwnerOnlyTranscriptAndReturnsPrompt() throws {
+    @Test func prepareWritesOwnerOnlyTranscriptAndReturnsPrompt() async throws {
         let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
-        let traffic = BrainTrafficLog(); traffic.enable(directory: dir)
+        let traffic = await FileSessionAudit.readyForTesting(directory: dir)
         traffic.record(tag: "coach",
                        request: Data(#"{"model":"gpt-5.5","input":[]}"#.utf8),
                        response: Data(#"{"status":"completed","output":[]}"#.utf8),
                        status: 200, latencyMs: 300)
-        traffic.flush()
+        _ = await traffic.closeForTesting()
         let activityJSONL = [
             #"{"t":"10:00:00","m":"heard question","k":"heard"}"#,
             #"{"t":"10:00:20","m":"coaching tip","k":"tip"}"#,
@@ -61,20 +61,20 @@ import Foundation
         #expect(prompt.contains("CoachHistory.swift"))
         #expect(prompt.contains(AgenticEvaluation.reportFilename))
         #expect(prompt.contains(ActivityLog.filename))
-        #expect(prompt.contains(CoachingAttemptLog.filename))
+        #expect(prompt.contains(FileSessionAudit.coachingAttemptsFilename))
         #expect(prompt.contains("COMPLETE sanitized human-facing coaching record"))
         #expect(prompt.contains("Read the file itself in full"))
         #expect(prompt.contains("deliberately NOT filtered, summarized"))
     }
 
-    @Test func prepareReplacesTranscriptSoAFailedEvaluatorCanBeRetried() throws {
+    @Test func prepareReplacesTranscriptSoAFailedEvaluatorCanBeRetried() async throws {
         let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
-        let traffic = BrainTrafficLog(); traffic.enable(directory: dir)
+        let traffic = await FileSessionAudit.readyForTesting(directory: dir)
         traffic.record(tag: "coach",
                        request: Data(#"{"model":"gpt-5.5","input":[]}"#.utf8),
                        response: Data(#"{"status":"completed","output":[]}"#.utf8),
                        status: 200, latencyMs: 300)
-        traffic.flush()
+        _ = await traffic.closeForTesting()
         try Data().write(to: dir.appendingPathComponent(ActivityLog.filename))
 
         _ = try AgenticEvaluation.prepare(sessionDir: dir)
@@ -116,7 +116,7 @@ import Foundation
         #expect(prompt.contains("ClaudeCodeRuntime.swift"))
         #expect(prompt.contains("CodexAppServerRuntime.swift"))
         // Cardinal counts must come from the un-elided jsonl, not the elided transcript.
-        #expect(prompt.contains(BrainTrafficLog.filename))
+        #expect(prompt.contains(FileSessionAudit.brainTrafficFilename))
         #expect(prompt.contains("MUST be counted here"))
         #expect(prompt.contains("re-check every number"))
         #expect(prompt.contains("session-level UX failure"))
@@ -146,7 +146,7 @@ import Foundation
     @Test func hasTrafficRequiresANonemptyTrafficFile() throws {
         let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         #expect(!AgenticEvaluation.hasTraffic(in: dir))
-        let url = dir.appendingPathComponent(BrainTrafficLog.filename)
+        let url = dir.appendingPathComponent(FileSessionAudit.brainTrafficFilename)
         try Data().write(to: url)
         #expect(!AgenticEvaluation.hasTraffic(in: dir))
         try Data("{}\n".utf8).write(to: url)
@@ -186,7 +186,7 @@ import Foundation
     @Test func preparePreservesMalformedOnlyTrafficAsUnavailableEvidence() throws {
         let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         try Data("{truncated\n".utf8).write(
-            to: dir.appendingPathComponent(BrainTrafficLog.filename))
+            to: dir.appendingPathComponent(FileSessionAudit.brainTrafficFilename))
         try Data().write(to: dir.appendingPathComponent(ActivityLog.filename))
 
         _ = try AgenticEvaluation.prepare(sessionDir: dir)
@@ -198,14 +198,14 @@ import Foundation
         #expect(transcript.contains("total unavailable"))
     }
 
-    @Test func prepareRequiresTheCompleteActivityFile() throws {
+    @Test func prepareRequiresTheCompleteActivityFile() async throws {
         let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
-        let traffic = BrainTrafficLog(); traffic.enable(directory: dir)
+        let traffic = await FileSessionAudit.readyForTesting(directory: dir)
         traffic.record(tag: "coach",
                        request: Data(#"{"model":"gpt-5.5","input":[]}"#.utf8),
                        response: Data(#"{"status":"completed","output":[]}"#.utf8),
                        status: 200, latencyMs: 300)
-        traffic.flush()
+        _ = await traffic.closeForTesting()
 
         #expect(throws: AgenticEvaluation.EvaluationError.missingActivityLog) {
             try AgenticEvaluation.prepare(sessionDir: dir)
@@ -216,14 +216,14 @@ import Foundation
 
     /// A transcript that can't be written must abort the audit — the prompt promises the agent the
     /// transcript exists, so proceeding would spend an agentic run on a missing/stale file.
-    @Test func prepareThrowsWhenTranscriptCannotBeWritten() throws {
+    @Test func prepareThrowsWhenTranscriptCannotBeWritten() async throws {
         let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
-        let traffic = BrainTrafficLog(); traffic.enable(directory: dir)
+        let traffic = await FileSessionAudit.readyForTesting(directory: dir)
         traffic.record(tag: "coach",
                        request: Data(#"{"model":"gpt-5.5","input":[]}"#.utf8),
                        response: Data(#"{"status":"completed","output":[]}"#.utf8),
                        status: 200, latencyMs: 300)
-        traffic.flush()
+        _ = await traffic.closeForTesting()
         try Data().write(to: dir.appendingPathComponent(ActivityLog.filename))
         // A directory squatting on the transcript path makes createFile fail.
         try FileManager.default.createDirectory(
