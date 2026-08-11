@@ -112,4 +112,29 @@ struct TranscriptionBenchmarkSessionRelayTests {
         #expect(firstCapture.count == 1)
         #expect(secondCapture.count == 1)
     }
+
+    @Test("an enqueued chunk stays with the target installed when it was queued")
+    func queuedChunkDoesNotCrossTheInstallBoundary() throws {
+        let relay = TranscriptionBenchmarkSessionRelay()
+        let first = BenchmarkSessionSpy()
+        let second = BenchmarkSessionSpy()
+        let firstCapture = BenchmarkCaptureSpy()
+        let secondCapture = BenchmarkCaptureSpy()
+        let pcm = Data([1, 2, 3, 4])
+
+        relay.install(first) { firstCapture.record(sequence: $0, samples: $1) }
+        relay.enqueue(
+            pcm,
+            sequence: 7,
+            samples: 2,
+            capturedAt: 1.5,
+            speechEvents: [])
+        relay.install(second) { secondCapture.record(sequence: $0, samples: $1) }
+
+        let delivery = try #require(first.snapshot())
+        #expect(delivery.sequence == 7)
+        #expect(firstCapture.count == 1)
+        #expect(second.snapshot() == nil)
+        #expect(secondCapture.count == 0)
+    }
 }

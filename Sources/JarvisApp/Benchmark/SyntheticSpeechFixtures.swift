@@ -51,14 +51,21 @@ final class SyntheticSpeechFixtures {
             try FileManager.default.setAttributes(
                 [.posixPermissions: 0o600], ofItemAtPath: endpointSilence.path)
         } catch {
+            let generationFailure = error
             // This initializer has not produced an owner yet, so perform its normal temporary-file
             // cleanup here rather than relying on `removeGeneratedAudio()`.
             if createdDirectory,
                fixtureDirectory.deletingLastPathComponent() == standardizedOutput,
                fixtureDirectory.lastPathComponent == "fixtures" {
-                try? FileManager.default.removeItem(at: fixtureDirectory)
+                do {
+                    try FileManager.default.removeItem(at: fixtureDirectory)
+                } catch {
+                    jlog("Jarvis benchmark: fixture generation failed with \(generationFailure); "
+                         + "partial-fixture cleanup also failed: \(error)")
+                    throw error
+                }
             }
-            throw error
+            throw generationFailure
         }
 
         self.outputDirectory = standardizedOutput
@@ -74,19 +81,14 @@ final class SyntheticSpeechFixtures {
         return fixture
     }
 
-    func removeGeneratedAudio() {
+    func removeGeneratedAudio() throws {
         let expected = outputDirectory.appendingPathComponent("fixtures", isDirectory: true)
             .standardizedFileURL
         guard directory == expected,
               directory.deletingLastPathComponent() == outputDirectory else {
-            jlog("Jarvis benchmark: refused to remove an unexpected fixture directory")
-            return
+            throw Failure.unexpectedFixtureDirectory
         }
-        do {
-            try FileManager.default.removeItem(at: directory)
-        } catch {
-            jlog("Jarvis benchmark: could not remove synthetic fixtures: \(error)")
-        }
+        try FileManager.default.removeItem(at: directory)
     }
 
     enum Failure: Error, CustomStringConvertible {
@@ -94,6 +96,7 @@ final class SyntheticSpeechFixtures {
         case missingFixture(String)
         case invalidAudioFormat
         case fixtureDirectoryAlreadyExists
+        case unexpectedFixtureDirectory
 
         var description: String {
             switch self {
@@ -103,6 +106,8 @@ final class SyntheticSpeechFixtures {
             case .invalidAudioFormat: "Could not construct the synthetic silence format"
             case .fixtureDirectoryAlreadyExists:
                 "The benchmark run directory already contains a fixtures directory"
+            case .unexpectedFixtureDirectory:
+                "Refused to remove an unexpected fixture directory"
             }
         }
     }

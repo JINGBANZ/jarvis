@@ -35,19 +35,8 @@ final class SystemAudioBenchmarkCapture: @unchecked Sendable {
         }
     }
 
-    private struct Chunk: Sendable {
-        let data: Data
-        let sequence: UInt64
-        let sampleCount: Int
-        let capturedAt: TimeInterval
-        let speechEvents: [LocalSpeechEvent]
-    }
-
     private let onChunk: @Sendable (Data, UInt64, Int, TimeInterval, [LocalSpeechEvent]) -> Void
     private let lock = NSLock()
-    private let deliveryQueue = DispatchQueue(
-        label: "jarvis.benchmark.system-audio.delivery",
-        qos: .userInitiated)
 
     private var tapID = AudioObjectID(kAudioObjectUnknown)
     private var aggregateID = AudioObjectID(kAudioObjectUnknown)
@@ -83,9 +72,6 @@ final class SystemAudioBenchmarkCapture: @unchecked Sendable {
         lock.lock()
         teardownLocked()
         lock.unlock()
-        // AudioDeviceStop drains IOProc. Drain its already-enqueued delivery work as well before a
-        // caller stops the active transcription session.
-        deliveryQueue.sync {}
     }
 
     @available(macOS 14.2, *)
@@ -218,20 +204,9 @@ final class SystemAudioBenchmarkCapture: @unchecked Sendable {
             }
         }
         let data = wireSamples.withUnsafeBufferPointer { Data(buffer: $0) }
-        let chunk = Chunk(
-            data: data,
-            sequence: sequence,
-            sampleCount: sampleCount,
-            capturedAt: capturedAt,
-            speechEvents: speechEvents)
-        deliveryQueue.async { [onChunk] in
-            onChunk(
-                chunk.data,
-                chunk.sequence,
-                chunk.sampleCount,
-                chunk.capturedAt,
-                chunk.speechEvents)
-        }
+        // The runner supplies `TranscriptionBenchmarkSessionRelay.enqueue`, which only binds this
+        // chunk to the relay's serial delivery stream. Provider work never runs on the IOProc.
+        onChunk(data, sequence, sampleCount, capturedAt, speechEvents)
     }
 
     @available(macOS 14.2, *)

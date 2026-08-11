@@ -6,6 +6,8 @@ capture_source="Sources/JarvisApp/Capture/AggregateEchoCapture.swift"
 benchmark_capture_source="Sources/JarvisApp/Benchmark/SystemAudioBenchmarkCapture.swift"
 benchmark_standard_source="Sources/JarvisApp/Benchmark/TranscriptionBenchmarkRunner+Standard.swift"
 benchmark_reconnect_source="Sources/JarvisApp/Benchmark/TranscriptionBenchmarkRunner+Reconnect.swift"
+benchmark_runner_source="Sources/JarvisApp/Benchmark/TranscriptionBenchmarkRunner.swift"
+benchmark_fixtures_source="Sources/JarvisApp/Benchmark/SyntheticSpeechFixtures.swift"
 benchmark_script="scripts/transcription-benchmark.sh"
 normal_session_contract="Sources/JarvisCore/Transcription/TranscriptionSession.swift"
 normal_app_wiring="Sources/JarvisApp/App/AppDelegate.swift"
@@ -64,6 +66,11 @@ fi
 if ! /usr/bin/grep -Fq 'benchmark: TranscriptionBenchmarkInstrumentation? = nil' \
     "$session_factory"; then
     echo "Transcription benchmark instrumentation must remain absent by default." >&2
+    exit 1
+fi
+if ! /usr/bin/grep -Fq 'func removeGeneratedAudio() throws' "$benchmark_fixtures_source" \
+    || ! /usr/bin/grep -Fq 'try fixtures.removeGeneratedAudio()' "$benchmark_runner_source"; then
+    echo "Benchmark fixture cleanup failures must prevent a successful run." >&2
     exit 1
 fi
 

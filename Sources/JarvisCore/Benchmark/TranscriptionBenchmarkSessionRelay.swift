@@ -1,10 +1,15 @@
 import Foundation
 
 /// Atomically switches one capture stream between benchmark repetitions without rebuilding the tap.
-/// `@unchecked Sendable`: `lock` guards both mutable callback references and they are copied before
-/// invocation, so client code never runs while the relay is locked.
+/// Enqueued chunks and target installations share one serial queue, so every chunk submitted before
+/// a repetition switch reaches the old target before that target is stopped. `@unchecked Sendable`:
+/// `lock` guards both mutable callback references and they are copied before invocation, so client
+/// code never runs while the relay is locked.
 public final class TranscriptionBenchmarkSessionRelay: @unchecked Sendable {
     private let lock = NSLock()
+    private let deliveryQueue = DispatchQueue(
+        label: "jarvis.benchmark.system-audio.delivery",
+        qos: .userInitiated)
     private var session: (any TranscriptionSession)?
     private var onCapture: (@Sendable (UInt64, Int) -> Void)?
 
@@ -14,10 +19,29 @@ public final class TranscriptionBenchmarkSessionRelay: @unchecked Sendable {
         _ session: (any TranscriptionSession)?,
         onCapture: (@Sendable (UInt64, Int) -> Void)? = nil
     ) {
-        lock.lock()
-        self.session = session
-        self.onCapture = onCapture
-        lock.unlock()
+        deliveryQueue.sync {
+            lock.lock()
+            self.session = session
+            self.onCapture = onCapture
+            lock.unlock()
+        }
+    }
+
+    public func enqueue(
+        _ data: Data,
+        sequence: UInt64,
+        samples: Int,
+        capturedAt: TimeInterval,
+        speechEvents: [LocalSpeechEvent]
+    ) {
+        deliveryQueue.async { [self] in
+            deliver(
+                data,
+                sequence: sequence,
+                samples: samples,
+                capturedAt: capturedAt,
+                speechEvents: speechEvents)
+        }
     }
 
     public func deliver(

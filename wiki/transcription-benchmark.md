@@ -157,7 +157,8 @@ Each run writes owner-only `summary.json`, `jarvis-debug.log`, progress state, a
 under `.jarvis/transcription-benchmarks/<run>/`. The run store retains only the bounded number owned by
 [`TranscriptionBenchmark.retainedRunCount`](../Sources/JarvisCore/Benchmark/TranscriptionBenchmark.swift).
 Generated fixture audio lives temporarily inside that run directory and is removed at exit. Captured
-PCM is never persisted.
+PCM is never persisted. A fixture-cleanup failure is a run failure and prevents the launcher from
+publishing a success marker.
 
 The command exits nonzero when a platform-supported arm is unavailable or incomplete, capture
 continuity fails, or the strict reconnect acceptance criteria fail. On macOS 14–25, Apple Speech arms

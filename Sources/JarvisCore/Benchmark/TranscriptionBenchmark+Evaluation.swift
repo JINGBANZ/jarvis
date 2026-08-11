@@ -31,7 +31,8 @@ public extension TranscriptionBenchmark {
         let providerFinals = orderedEvents.filter { $0.kind == .providerFinal }
         let bufferEvictions = orderedEvents.filter { $0.kind == .bufferEviction }
         let usableFinals = finals.filter { event in
-            event.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            !event.transcriptUnavailable
+                && event.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
         }
         let finalTexts = usableFinals.compactMap(\.text)
         let finalItemIDs = usableFinals.compactMap(\.itemID)
@@ -41,9 +42,11 @@ public extension TranscriptionBenchmark {
         let rate = distance.map { expected.isEmpty ? 0 : Double($0) / Double(expected.count) }
 
         let providerUsableFinals = providerFinals.filter {
-            $0.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            !$0.transcriptUnavailable
+                && $0.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
         }
         let rawFinalsForRevision = providerFinals.isEmpty ? usableFinals : providerUsableFinals
+        let rawFinalTexts = rawFinalsForRevision.compactMap(\.text).map(normalize)
         var textsByItem: [String: Set<String>] = [:]
         for final in rawFinalsForRevision {
             guard let itemID = final.itemID, let text = final.text else { continue }
@@ -55,8 +58,7 @@ public extension TranscriptionBenchmark {
         let duplicateCount = duplicateDeliveryCount(in: usableFinals)
         let providerDuplicateCount = max(
             0,
-            rawFinalsForRevision.count
-                - Set(rawFinalsForRevision.compactMap(\.text).map(normalize)).count)
+            rawFinalTexts.count - Set(rawFinalTexts).count)
         let captureSequenceGapCount = sequenceGapCount(input.captureObservations)
         let capturedSampleCount = input.captureObservations.reduce(0) { $0 + $1.sampleCount }
         let evictedChunkCount = bufferEvictions.compactMap(\.evictedChunks).reduce(0, +)
@@ -90,7 +92,7 @@ public extension TranscriptionBenchmark {
             commitLatencySeconds: commits.first.map {
                 max(0, $0.observedAt - input.speechEndedAt)
             },
-            finalLatencySeconds: finals.last.map {
+            finalLatencySeconds: usableFinals.last.map {
                 max(0, $0.observedAt - input.speechEndedAt)
             },
             missing: usableFinals.isEmpty,

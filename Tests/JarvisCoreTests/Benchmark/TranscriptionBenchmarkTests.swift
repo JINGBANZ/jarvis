@@ -185,10 +185,10 @@ struct TranscriptionBenchmarkTests {
         #expect(result.revisionCount == 1)
         #expect(result.unavailableCount == 1)
         #expect(abs((result.endpointLatencySeconds ?? 0) - 0.1) < 0.000_001)
-        #expect(abs((result.finalLatencySeconds ?? 0) - 0.4) < 0.000_001)
+        #expect(abs((result.finalLatencySeconds ?? 0) - 0.3) < 0.000_001)
     }
 
-    @Test("rejected provider final is counted as unavailable")
+    @Test("an unavailable final adds neither a provider duplicate nor accepted-final latency")
     func unavailableAfterEmptyCompletion() {
         let arm = TranscriptionBenchmark.standardArms.first {
             $0.model == .gpt4oTranscribe && $0.phrase.language == .english
@@ -217,7 +217,8 @@ struct TranscriptionBenchmarkTests {
 
         #expect(result.missing)
         #expect(result.unavailableCount == 1)
-        #expect(abs((result.finalLatencySeconds ?? 0) - 0.2) < 0.000_001)
+        #expect(result.providerDuplicateCount == 0)
+        #expect(result.finalLatencySeconds == nil)
     }
 
     @Test("normalization and edit distance are Unicode aware")

@@ -58,7 +58,26 @@ final class TranscriptionBenchmarkRunner {
             phase: "preparing-synthetic-fixtures", to: options.outputDirectory)
 
         let fixtures = try SyntheticSpeechFixtures(outputDirectory: options.outputDirectory)
-        defer { fixtures.removeGeneratedAudio() }
+        do {
+            try await run(fixtures: fixtures)
+        } catch {
+            let runFailure = error
+            do {
+                try fixtures.removeGeneratedAudio()
+            } catch {
+                jlog("Jarvis benchmark: run failed with \(runFailure); fixture cleanup also failed: "
+                     + "\(error)")
+                throw error
+            }
+            throw runFailure
+        }
+        try fixtures.removeGeneratedAudio()
+        TranscriptionBenchmarkFiles.writeProgress(
+            phase: "complete", detail: "summary.json", to: options.outputDirectory)
+        jlog("Jarvis benchmark: complete (\(options.outputDirectory.path)/summary.json)")
+    }
+
+    private func run(fixtures: SyntheticSpeechFixtures) async throws {
         guard let first = TranscriptionBenchmark.phrases.first else {
             throw Failure.missingFixture("first")
         }
@@ -66,7 +85,7 @@ final class TranscriptionBenchmarkRunner {
 
         let capture = SystemAudioBenchmarkCapture {
             [relay] data, sequence, samples, timestamp, events in
-            relay.deliver(
+            relay.enqueue(
                 data,
                 sequence: sequence,
                 samples: samples,
@@ -75,8 +94,8 @@ final class TranscriptionBenchmarkRunner {
         }
         try capture.start()
         defer {
-            relay.install(nil)
             capture.stop()
+            relay.install(nil)
         }
 
         let summary: TranscriptionBenchmark.Summary
@@ -91,9 +110,6 @@ final class TranscriptionBenchmarkRunner {
             named: "summary.json",
             to: options.outputDirectory)
         try validate(summary)
-        TranscriptionBenchmarkFiles.writeProgress(
-            phase: "complete", detail: "summary.json", to: options.outputDirectory)
-        jlog("Jarvis benchmark: complete (\(options.outputDirectory.path)/summary.json)")
     }
 
     private func validate(_ summary: TranscriptionBenchmark.Summary) throws {
