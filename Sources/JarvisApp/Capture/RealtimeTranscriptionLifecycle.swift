@@ -410,7 +410,7 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
     /// The retry gate represents an unsettled utterance, not only the VAD interval. Publish while
     /// holding `lock` so concurrent socket and timeout callbacks cannot reorder state transitions.
     private func updateCoachingActivityLocked() {
-        coachingCoordinator.updateActivity(hasPendingWorkLocked)
+        coachingCoordinator.updateTranscriptionWork(hasPendingWorkLocked)
     }
 
     private var hasPendingWorkLocked: Bool {

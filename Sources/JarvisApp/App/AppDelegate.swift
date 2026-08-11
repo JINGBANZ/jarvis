@@ -724,6 +724,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             effort: brainPreferences.effort,
             sessionDirectory: sessionDirectory)
         observeReadiness(.brainPreparation(.ready), for: readinessSession)
+        // One time origin makes mic/system timestamps directly comparable. Each provider may finish
+        // independently, but neither gets its own definition of "seconds since session start."
+        let conversationStart = clock.now()
         // Fan each spoken tip out to both the Overlay Caption and the persistent Overlay Box.
         let overlaySink = BroadcastOverlay([overlayCaption, overlayBox])
         let driver = CoachDriver(
@@ -735,6 +738,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 captureDirectory: sessionDirectory),
             overlay: overlaySink,
             clock: clock,
+            sessionStart: conversationStart,
             coachingAttempts: sessionAudit)
 
         // CoachDriver is @unchecked Sendable; capture it (not @MainActor self) in the callbacks.
@@ -749,14 +753,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             speaker: .me,
             transcript: transcript,
             clock: clock,
+            sessionStart: conversationStart,
             config: config,
             networkStatus: { [networkDiagnostics] in
                 networkDiagnostics.currentSummary
             })
         transcriber.onTurnEnd = { turns.run { await driver.handleTrigger(.turnEnd) } }
         transcriber.onSilence = { secs in turns.run { await driver.handleTrigger(.silence(secondsQuiet: secs)) } }
-        transcriber.onSpeechActivityChanged = {
-            driver.updateSpeechActivity($0, for: .me)
+        transcriber.onTranscriptionWorkChanged = {
+            driver.updateTranscriptionWork($0, for: .me)
         }
 
         // "Them" side: system audio (remote participants). Drives turn-end so Jarvis can react when the
@@ -769,13 +774,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             speaker: .them,
             transcript: transcript,
             clock: clock,
+            sessionStart: conversationStart,
             config: config,
             networkStatus: { [networkDiagnostics] in
                 networkDiagnostics.currentSummary
             })
         themTranscriber.onTurnEnd = { turns.run { await driver.handleTrigger(.turnEnd) } }
-        themTranscriber.onSpeechActivityChanged = {
-            driver.updateSpeechActivity($0, for: .them)
+        themTranscriber.onTranscriptionWorkChanged = {
+            driver.updateTranscriptionWork($0, for: .them)
         }
         // Bind terminal callbacks to the transcriber that emitted them. A callback already queued
         // across Stop → Start must not report against or tear down the replacement session.

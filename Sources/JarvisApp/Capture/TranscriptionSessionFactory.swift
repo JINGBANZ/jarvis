@@ -11,6 +11,7 @@ enum TranscriptionSessionFactory {
         speaker: Speaker,
         transcript: RollingTranscript,
         clock: Clock,
+        sessionStart: TimeInterval,
         config: Config,
         networkStatus: @escaping @Sendable () -> String,
         benchmark: TranscriptionBenchmarkInstrumentation? = nil
@@ -24,6 +25,7 @@ enum TranscriptionSessionFactory {
                 speaker: speaker,
                 transcript: transcript,
                 clock: clock,
+                sessionStart: sessionStart,
                 silenceTimeout: config.silenceTimeoutSeconds,
                 silenceMaxInterval: config.silenceMaxIntervalSeconds,
                 silenceIdleCutoff: speaker == .me
@@ -49,6 +51,7 @@ enum TranscriptionSessionFactory {
                     speaker: speaker,
                     transcript: transcript,
                     clock: clock,
+                    sessionStart: sessionStart,
                     silenceTimeout: config.silenceTimeoutSeconds,
                     silenceMaxInterval: config.silenceMaxIntervalSeconds,
                     silenceIdleCutoff: speaker == .me

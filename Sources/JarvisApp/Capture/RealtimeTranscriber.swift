@@ -24,7 +24,7 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
 
     var onTurnEnd: (@Sendable () -> Void)?
     var onSilence: (@Sendable (TimeInterval) -> Void)?
-    var onSpeechActivityChanged: (@Sendable (Bool) -> Void)?
+    var onTranscriptionWorkChanged: (@Sendable (Bool) -> Void)?
     var onConnectionStateChange: (@Sendable (TranscriptionConnectionState) -> Void)?
     /// Fired when transcription becomes unusable, either from an unrecoverable provider rejection or
     /// after reconnection is abandoned, so the app can stop instead of lying green.
@@ -87,6 +87,7 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         speaker: Speaker = .me,
         transcript: RollingTranscript,
         clock: Clock,
+        sessionStart: TimeInterval,
         silenceTimeout: TimeInterval,
         silenceMaxInterval: TimeInterval,
         silenceIdleCutoff: TimeInterval = .infinity,
@@ -108,7 +109,6 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         self.languageProfile = languageProfile
         self.speaker = speaker
         self.clock = clock
-        let sessionStart = clock.now()
         self.sessionStart = sessionStart
         self.silenceDurationMs = silenceDurationMs
         self.noiseReduction = noiseReduction
@@ -144,8 +144,8 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
             silenceEnabled: speaker == .me,
             onTurnEnd: { [weak self] in self?.onTurnEnd?() },
             onSilence: { [weak self] quiet in self?.onSilence?(quiet) },
-            onSpeechActivityChanged: { [weak self] active in
-                self?.onSpeechActivityChanged?(active)
+            onTranscriptionWorkChanged: { [weak self] hasPendingWork in
+                self?.onTranscriptionWorkChanged?(hasPendingWork)
             })
         let onFinalizedItem: (@Sendable (RealtimeTranscriptionLedger.FinalizedItem) -> Void)?
         if benchmark == nil {

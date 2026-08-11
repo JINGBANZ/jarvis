@@ -1,25 +1,25 @@
 import Foundation
 
-/// A small synchronous bridge from transcription activity callbacks to the asynchronous
-/// pending-attempt scheduler. The scheduler suspends without polling while either side is speaking.
+/// A synchronous bridge from provider transcription state to automatic coaching admission.
+/// Automatic attempts suspend without polling while either side owns unfinished transcription work.
 ///
-/// `@unchecked Sendable` is safe because `lock` guards all mutable state (`activeSpeakers` and
-/// `waiters`), and continuations are removed under that lock before they are resumed.
-final class SpeechActivityGate: @unchecked Sendable {
+/// `@unchecked Sendable` is safe because `lock` guards all mutable state, and continuations are
+/// removed under that lock before they are resumed.
+final class TranscriptionSettlementGate: @unchecked Sendable {
     private let lock = NSLock()
-    private var activeSpeakers: Set<Speaker> = []
+    private var unsettledSpeakers: Set<Speaker> = []
     private var waiters: [UUID: CheckedContinuation<Void, Never>] = [:]
     private var interruptGeneration: UInt = 0
 
-    func setActive(_ isActive: Bool, for speaker: Speaker) {
+    func setUnsettled(_ isUnsettled: Bool, for speaker: Speaker) {
         let continuations: [CheckedContinuation<Void, Never>]
         lock.lock()
-        if isActive {
-            activeSpeakers.insert(speaker)
+        if isUnsettled {
+            unsettledSpeakers.insert(speaker)
         } else {
-            activeSpeakers.remove(speaker)
+            unsettledSpeakers.remove(speaker)
         }
-        if activeSpeakers.isEmpty {
+        if unsettledSpeakers.isEmpty {
             continuations = Array(waiters.values)
             waiters.removeAll()
         } else {
@@ -29,10 +29,8 @@ final class SpeechActivityGate: @unchecked Sendable {
         continuations.forEach { $0.resume() }
     }
 
-    /// Wake the attempts currently parked on speech without changing the tracked activity state.
-    ///
-    /// An explicit manual hint uses this interruption boundary. A later automatic attempt still
-    /// observes the unchanged active-speaker set and waits normally.
+    /// Wake the attempts currently parked on transcription without changing provider state.
+    /// A manual hint uses this explicit exception; later automatic attempts still see unsettled work.
     func interruptWaiters() {
         let continuations: [CheckedContinuation<Void, Never>]
         lock.lock()
@@ -47,16 +45,14 @@ final class SpeechActivityGate: @unchecked Sendable {
         lock.withLock { interruptGeneration }
     }
 
-    /// Wait for inactive speech unless an explicit interruption occurred after `generation`.
-    ///
-    /// Comparing the generation while registering closes the lost-wakeup window where a manual
-    /// hint arrives after the caller checks pending triggers but before this continuation exists.
-    func waitUntilInactive(unlessInterruptedAfter generation: UInt) async {
+    /// Wait until both providers are settled unless an explicit interruption occurred after the
+    /// supplied generation. The generation comparison closes the manual-hint lost-wakeup window.
+    func waitUntilSettled(unlessInterruptedAfter generation: UInt) async {
         let id = UUID()
         await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
                 lock.lock()
-                if activeSpeakers.isEmpty || Task.isCancelled
+                if unsettledSpeakers.isEmpty || Task.isCancelled
                     || interruptGeneration != generation {
                     lock.unlock()
                     continuation.resume()

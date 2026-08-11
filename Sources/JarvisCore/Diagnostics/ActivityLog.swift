@@ -137,8 +137,22 @@ public final class ActivityLog: @unchecked Sendable {
         public let time: String
         public let message: String
         public let imageFile: String?
-        public init(time: String, message: String, imageFile: String?) {
-            self.time = time; self.message = message; self.imageFile = imageFile
+        /// Numeric event time and stable insertion tie-breaker. Both are nil for old or mixed
+        /// sessions that cannot be reordered safely.
+        public let occurredAt: TimeInterval?
+        public let insertionOrder: UInt64?
+        public init(
+            time: String,
+            message: String,
+            imageFile: String?,
+            occurredAt: TimeInterval? = nil,
+            insertionOrder: UInt64? = nil
+        ) {
+            self.time = time
+            self.message = message
+            self.imageFile = imageFile
+            self.occurredAt = occurredAt
+            self.insertionOrder = insertionOrder
         }
     }
 
@@ -158,6 +172,9 @@ public final class ActivityLog: @unchecked Sendable {
         let m: String       // message
         let s: String?      // shot filename, if any
         let k: EventKind?   // stable event identity; nil only for backward-compatible old rows
+        let o: TimeInterval? // event occurrence time (Unix seconds)
+        let q: UInt64?      // stable insertion tie-breaker
+        let r: TimeInterval? // record/completion time (Unix seconds), for chronology diagnosis
     }
 
     /// In-memory replay cap for a late-attaching viewer. Sized for hours of coaching (an hour-long
@@ -166,7 +183,7 @@ public final class ActivityLog: @unchecked Sendable {
     /// bytes stay on disk), so memory is not a concern.
     private let maxLines = 10_000
     private let queue = DispatchQueue(label: "jarvis.activitylog")   // serializes state + disk writes
-    private var entries: [Entry] = []
+    private var entries = ConversationChronology<Entry>()
     private var totalCount = 0    // everything recorded this session (survives the maxLines cap)
     private var shotSeq = 0       // monotonic id for saved screenshot files this session
     private var sessionHasEnded = false
@@ -217,23 +234,36 @@ public final class ActivityLog: @unchecked Sendable {
     /// that exists.
     public func record(_ event: Event, at date: Date = Date()) {
         let rendered = event.rendered
+        let recordedAt = Date().timeIntervalSince1970
         queue.async { [self] in
             // Teardown can race a coaching task that is finishing cancellation. Once the typed end
             // marker reaches this serial queue, it is the final event for this session by definition.
             guard let dir, !sessionHasEnded else { return }
             let shotName = rendered.imageBase64.flatMap { saveShot($0, in: dir) }
-            let entry = Entry(time: df.string(from: date), message: rendered.message,
-                              imageFile: shotName)
-            appendJSONL(entry, kind: rendered.kind, in: dir)
-            entries.append(entry)
+            let occurredAt = date.timeIntervalSince1970
+            let baseEntry = Entry(
+                time: df.string(from: date),
+                message: rendered.message,
+                imageFile: shotName)
+            let item = entries.append(baseEntry, occurredAt: occurredAt)
+            let entry = Entry(
+                time: baseEntry.time,
+                message: baseEntry.message,
+                imageFile: baseEntry.imageFile,
+                occurredAt: item.occurredAt,
+                insertionOrder: item.insertionOrder)
+            appendJSONL(entry, kind: rendered.kind, recordedAt: recordedAt, in: dir)
             totalCount += 1
             if rendered.kind == .sessionEnded {
                 sessionHasEnded = true
             }
-            if entries.count > maxLines { entries.removeFirst(entries.count - maxLines) }
+            let chronologicalIndex = entries.chronologicalIndex(
+                forInsertionOrder: item.insertionOrder)
+            entries.keepMostRecentInsertions(maxLines)
             // Push with the live bytes in hand (no disk read on the hot path).
             onAppend?(Self.rowScript(time: entry.time, message: entry.message,
-                                     imageBase64: rendered.imageBase64))
+                                     imageBase64: rendered.imageBase64,
+                                     insertionIndex: chronologicalIndex))
         }
     }
 
@@ -243,12 +273,16 @@ public final class ActivityLog: @unchecked Sendable {
     public func attach(_ onAppend: @escaping (String) -> Void) -> Snapshot {
         queue.sync {
             self.onAppend = onAppend
-            let rows: [String] = entries.map { e in
+            let rows: [String] = entries.chronologicalItems.map { item in
+                let e = item.element
                 let b64: String? = e.imageFile.flatMap { name in
                     guard let dir else { return nil }
                     return (try? Data(contentsOf: dir.appendingPathComponent(name)))?.base64EncodedString()
                 }
-                return Self.rowScript(time: e.time, message: e.message, imageBase64: b64)
+                return Self.rowScript(
+                    time: e.time,
+                    message: e.message,
+                    imageBase64: b64)
             }
             return Snapshot(shellHTML: Self.htmlShell(), rows: rows, shown: entries.count, total: totalCount)
         }
@@ -277,8 +311,20 @@ public final class ActivityLog: @unchecked Sendable {
 
     /// Append one JSON line to `jarvis-activity.jsonl`. Best-effort; a failed write just means that
     /// line won't survive into history (the live push already happened). Must run on `queue`.
-    private func appendJSONL(_ entry: Entry, kind: EventKind, in dir: URL) {
-        let pe = PersistedEntry(t: entry.time, m: entry.message, s: entry.imageFile, k: kind)
+    private func appendJSONL(
+        _ entry: Entry,
+        kind: EventKind,
+        recordedAt: TimeInterval,
+        in dir: URL
+    ) {
+        let pe = PersistedEntry(
+            t: entry.time,
+            m: entry.message,
+            s: entry.imageFile,
+            k: kind,
+            o: entry.occurredAt,
+            q: entry.insertionOrder,
+            r: recordedAt)
         guard let data = try? JSONEncoder().encode(pe) else { return }
         let url = dir.appendingPathComponent(Self.filename)
         guard let fh = try? FileHandle(forWritingTo: url) else { return }
@@ -293,16 +339,24 @@ public final class ActivityLog: @unchecked Sendable {
     /// The JS call that renders one row. Pushed to `evaluateJavaScript` (live) or replayed from a
     /// snapshot. The payload is a JSON object literal; the page's JS sets text via `textContent` and
     /// the image via `img.src`, so the message is XSS-safe by construction and no HTML escaping is
-    /// needed here. `imageBase64`, when present, becomes an in-memory `data:` URI.
-    public static func rowScript(time: String, message: String, imageBase64: String?) -> String {
+    /// needed here. `imageBase64`, when present, becomes an in-memory `data:` URI. A live row's
+    /// insertion index is computed by `ConversationChronology`; the WebView only applies it.
+    public static func rowScript(
+        time: String,
+        message: String,
+        imageBase64: String?,
+        insertionIndex: Int? = nil
+    ) -> String {
         struct Row: Encodable {
             let time: String
             let message: String
             let cls: String
             let img: String?
+            let insertionIndex: Int?
         }
         let row = Row(time: time, message: message, cls: cssClass(for: message),
-                      img: imageBase64.map { "data:image/jpeg;base64,\($0)" })
+                      img: imageBase64.map { "data:image/jpeg;base64,\($0)" },
+                      insertionIndex: insertionIndex)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.withoutEscapingSlashes]   // keep data: URIs readable (no \/ )
         guard let data = try? encoder.encode(row), let json = String(data: data, encoding: .utf8) else {
@@ -437,6 +491,7 @@ public final class ActivityLog: @unchecked Sendable {
         <script>
           function appendRow(p){
             var log=document.getElementById('log');
+            var near=(window.innerHeight+window.scrollY)>=(document.body.scrollHeight-60);
             var row=document.createElement('div'); row.className='row '+(p.cls||'');
             var t=document.createElement('span'); t.className='t'; t.textContent=p.time||'';
             var m=document.createElement('span'); m.className='m'; m.textContent=p.message||'';
@@ -447,8 +502,13 @@ public final class ActivityLog: @unchecked Sendable {
               a.addEventListener('click',function(e){e.preventDefault();openShot(p.img);});
               m.appendChild(a);
             }
-            row.appendChild(t); row.appendChild(m); log.appendChild(row);
-            var near=(window.innerHeight+window.scrollY)>=(document.body.scrollHeight-60);
+            row.appendChild(t); row.appendChild(m);
+            if(Number.isInteger(p.insertionIndex) && p.insertionIndex>=0 &&
+               p.insertionIndex<log.children.length){
+              log.insertBefore(row,log.children[p.insertionIndex]);
+            }else{
+              log.appendChild(row);
+            }
             if(near) window.scrollTo(0,document.body.scrollHeight);
           }
           function openShot(src){ document.getElementById('lightbox-img').src=src;

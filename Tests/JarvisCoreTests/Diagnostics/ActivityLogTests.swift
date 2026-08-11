@@ -137,6 +137,43 @@ import Foundation
         #expect(!jsonl.contains("recovered"))
     }
 
+    @Test func heardRowsUseSpeechTimeInsteadOfTranscriptCompletionOrder() throws {
+        let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
+        let log = ActivityLog(); log.enable(directory: dir)
+        let liveRowsLock = NSLock()
+        var liveRows: [String] = []
+        _ = log.attach { row in
+            liveRowsLock.withLock { liveRows.append(row) }
+        }
+
+        // The short reply finishes transcription first, but it was spoken after the question.
+        log.record(
+            .heard(speaker: .me, text: "Yep."),
+            at: Date(timeIntervalSince1970: 20))
+        log.record(
+            .heard(speaker: .them, text: "Did you see the pop-up?"),
+            at: Date(timeIntervalSince1970: 10))
+
+        log.flush()
+        let pushedRows = liveRowsLock.withLock { liveRows }
+        #expect(pushedRows.count == 2)
+        #expect(pushedRows[1].contains("\"insertionIndex\":0"))
+
+        let rows = log.attach { _ in }.rows
+        #expect(rows.count == 2)
+        #expect(rows[0].contains("heard (them)"))
+        #expect(rows[1].contains("heard (me)"))
+
+        let jsonl = try String(
+            contentsOf: dir.appendingPathComponent(ActivityLog.filename),
+            encoding: .utf8)
+        let persisted = try jsonl.split(separator: "\n").map { raw in
+            try #require(JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any])
+        }
+        #expect(persisted.map { $0["o"] as? Double } == [20, 10])
+        #expect(persisted.allSatisfy { $0["q"] != nil && $0["r"] != nil })
+    }
+
     @Test func everyBrainActionHasAHumanFacingEvent() throws {
         let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         let log = ActivityLog(); log.enable(directory: dir)

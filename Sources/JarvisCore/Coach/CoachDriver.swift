@@ -20,7 +20,7 @@ public final class CoachDriver: @unchecked Sendable {
     private let clock: Clock
     private let sessionStart: TimeInterval
     private let history = CoachHistory()
-    private let speechActivity = SpeechActivityGate()
+    private let transcriptionSettlement = TranscriptionSettlementGate()
     private let automaticAttemptDelay: AutomaticAttemptDelay
     private let coachingAttempts: (any CoachingAttemptAuditing)?
 
@@ -65,12 +65,20 @@ public final class CoachDriver: @unchecked Sendable {
 
     private struct PendingCoachingWork {
         var reason: TriggerReason
+        /// Only an explicit hotkey wake may cross unsettled transcription. A retry of a failed
+        /// manual hint is automatic and resets this bit unless another hotkey press joins it.
+        var bypassesTranscriptionSettlement: Bool
         var wake: CoachingAttemptAuditEvent.Wake = .trigger
         /// Completed effects safe to carry between attempts and providers: ordinary user context
         /// only. At most the latest screen observation is retained. Never raw reasoning, tool ids,
         /// or call/result linkage.
         var observations: [ChatMessage] = []
         var manualHintPrepared = false
+
+        init(reason: TriggerReason) {
+            self.reason = reason
+            bypassesTranscriptionSettlement = reason == .manualHint
+        }
     }
 
     private enum AttemptResult {
@@ -131,6 +139,7 @@ public final class CoachDriver: @unchecked Sendable {
         screen: ScreenCapturing,
         overlay: OverlayRendering,
         clock: Clock,
+        sessionStart: TimeInterval? = nil,
         coachingAttempts: (any CoachingAttemptAuditing)? = nil,
         automaticAttemptDelay: AutomaticAttemptDelay? = nil
     ) {
@@ -142,7 +151,7 @@ public final class CoachDriver: @unchecked Sendable {
         self.overlay = overlay
         self.clock = clock
         self.coachingAttempts = coachingAttempts
-        self.sessionStart = clock.now()
+        self.sessionStart = sessionStart ?? clock.now()
         self.automaticAttemptDelay = automaticAttemptDelay ?? Self.defaultAutomaticAttemptDelay
     }
 
@@ -260,10 +269,46 @@ public final class CoachDriver: @unchecked Sendable {
         return true
     }
 
-    /// Transcription activity feeds both speakers into one aggregate gate. Automatic pending-work
-    /// attempts wait until both sides are inactive; natural triggers still coalesce while waiting.
-    public func updateSpeechActivity(_ isActive: Bool, for speaker: Speaker) {
-        speechActivity.setActive(isActive, for: speaker)
+    /// Provider state feeds both speakers into one aggregate gate. `hasPendingWork` means the provider
+    /// still owns speech or transcript work, not merely that the audio waveform is non-silent.
+    public func updateTranscriptionWork(_ hasPendingWork: Bool, for speaker: Speaker) {
+        transcriptionSettlement.setUnsettled(hasPendingWork, for: speaker)
+    }
+
+    /// Admit one attempt only after both transcription streams are settled. Every automatic path
+    /// reaches this boundary: the first trigger, a trigger queued behind an in-flight model call,
+    /// and a pending-work retry. A manual hint is the explicit immediate exception.
+    private func waitForTranscriptionSettlement(
+        before work: PendingCoachingWork
+    ) async -> PendingCoachingWork {
+        guard !work.bypassesTranscriptionSettlement else { return work }
+
+        let interruptGeneration = transcriptionSettlement.interruptGenerationSnapshot()
+        var settledWork = work
+        var receivedTrigger = false
+        var wake = takePendingTriggerSnapshot()
+        if let pending = wake.reason {
+            receivedTrigger = true
+            settledWork.reason = Self.coalescing(settledWork.reason, with: pending)
+            settledWork.bypassesTranscriptionSettlement = pending == .manualHint
+        }
+        guard !settledWork.bypassesTranscriptionSettlement else {
+            settledWork.wake = .trigger
+            return settledWork
+        }
+
+        await transcriptionSettlement.waitUntilSettled(
+            unlessInterruptedAfter: interruptGeneration)
+        wake = takePendingTriggerSnapshot()
+        if let pending = wake.reason {
+            receivedTrigger = true
+            settledWork.reason = Self.coalescing(settledWork.reason, with: pending)
+            settledWork.bypassesTranscriptionSettlement = pending == .manualHint
+        }
+        if receivedTrigger {
+            settledWork.wake = .trigger
+        }
+        return settledWork
     }
 
     private func currentCommittedTranscriptCount() -> Int {
@@ -312,7 +357,7 @@ public final class CoachDriver: @unchecked Sendable {
                 // A hint arriving after an automatic attempt has parked on unsettled speech must
                 // wake that exact pending attempt. The trigger stays queued until the fresh-attempt
                 // boundary consumes it together with the newest transcript.
-                speechActivity.interruptWaiters()
+                transcriptionSettlement.interruptWaiters()
             }
             return .pending
         }
@@ -664,6 +709,11 @@ public final class CoachDriver: @unchecked Sendable {
         var latestOutcome: TurnOutcome = .silentByModel
 
         while !Task.isCancelled {
+            work = await waitForTranscriptionSettlement(before: work)
+            if Task.isCancelled {
+                releaseHandlingSlot()
+                return .cancelled
+            }
             guard let attempt = await selectBrainForAttempt() else {
                 releaseHandlingSlot()
                 return .brainError
@@ -764,29 +814,15 @@ public final class CoachDriver: @unchecked Sendable {
                     return .cancelled
                 }
 
-                // A trigger may arrive while the delay is sleeping. Consume it before the fresh
-                // attempt so an explicit manual hint retains its force-speak semantics. Snapshot
-                // the speech-interrupt generation first so a hint landing between this trigger
-                // snapshot and waiter registration cannot be lost.
-                let speechInterruptGeneration = speechActivity.interruptGenerationSnapshot()
+                // A trigger may arrive while the delay is sleeping. Consume it before the shared
+                // admission boundary so an explicit manual hint retains its force-speak semantics.
                 wake = takePendingTriggerSnapshot()
                 if let reason = wake.reason {
                     receivedTrigger = true
                     explicitManualWake = explicitManualWake || reason == .manualHint
                     work.reason = Self.coalescing(work.reason, with: reason)
                 }
-                if !explicitManualWake {
-                    await speechActivity.waitUntilInactive(
-                        unlessInterruptedAfter: speechInterruptGeneration)
-                    // Consume a trigger that arrived while parked. Natural triggers still wait for
-                    // speech inactivity; a manual hint interrupts that wait and turns this same
-                    // pending-work attempt into the force-speak attempt.
-                    wake = takePendingTriggerSnapshot()
-                    if let reason = wake.reason {
-                        receivedTrigger = true
-                        work.reason = Self.coalescing(work.reason, with: reason)
-                    }
-                }
+                work.bypassesTranscriptionSettlement = explicitManualWake
                 work.wake = receivedTrigger ? .trigger : .pendingWork
             }
         }

@@ -99,6 +99,41 @@ import Foundation
         #expect(rows[0].1 == nil)                    // missing shot degrades to text row
     }
 
+    @Test func entriesUsePersistedEventTimeInsteadOfJsonlAppendOrder() throws {
+        let base = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: base) }
+        let id = "2026-06-16_10-00-00_aaaa"
+        try makeSession(base, id, lines: [
+            #"{"t":"10:00:20","m":"🗣 heard (me): \"Yep.\"","k":"heard","o":20}"#,
+            #"{"t":"10:00:10","m":"🗣 heard (them): \"Did you see it?\"","k":"heard","o":10}"#,
+        ])
+
+        let store = SessionStore(base: base, current: nil)
+        let session = try #require(store.listSessions().first)
+        let rows = store.entries(for: session)
+        #expect(rows.map(\.0.message) == [
+            "🗣 heard (them): \"Did you see it?\"",
+            "🗣 heard (me): \"Yep.\"",
+        ])
+    }
+
+    @Test func entriesPreserveFileOrderWhenChronologyMetadataIsIncomplete() throws {
+        let base = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: base) }
+        let id = "2026-06-16_10-00-00_aaaa"
+        try makeSession(base, id, lines: [
+            #"{"t":"10:00:20","m":"🗣 old row without chronology","k":"heard"}"#,
+            #"{"t":"10:00:10","m":"🗣 upgraded row","k":"heard","o":10,"q":1}"#,
+        ])
+
+        let store = SessionStore(base: base, current: nil)
+        let session = try #require(store.listSessions().first)
+        let rows = store.entries(for: session)
+        #expect(rows.map(\.0.message) == [
+            "🗣 old row without chronology",
+            "🗣 upgraded row",
+        ])
+        #expect(rows.allSatisfy { $0.0.occurredAt == nil && $0.0.insertionOrder == nil })
+    }
+
     @Test func typedRouteEventsRemainVisibleWhenSessionIsReopened() throws {
         let base = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: base) }
         let id = "2026-06-16_10-00-00_aaaa"

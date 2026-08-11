@@ -100,7 +100,9 @@ code, has zero network surface, and is the most testable (the production runtime
 runtime). It also sidesteps the `file://` `fetch()` restriction that forced the original viewer's
 `<meta refresh>` reload.
 
-- New events stream in live (no reload, no flicker); thumbnails open in an in-page lightbox.
+- New events stream in live (no reload, no flicker); thumbnails open in an in-page lightbox. Rows use
+  event occurrence time, with stable insertion order only for ties, so a slower earlier transcript
+  final is inserted before a faster later reply.
 - Each Start opens a fresh session (a Stop→Start gets a new log, never resuming the previous run),
   persisted as owner-only `jarvis-activity.jsonl` + `shot-N.jpg`; the same directory contains
   `coaching-attempts.jsonl` for evaluator-only trigger/delta/outcome provenance and
@@ -114,6 +116,11 @@ runtime). It also sidesteps the `file://` `fetch()` restriction that forced the 
   repo itself; opening the bundle directly with no `--log-dir` falls back to
   `~/Library/Application Support/Jarvis/sessions/`. The full privacy posture is in
   [sandbox.md](./sandbox.md).
+- Activity JSONL stays append-only for durable writes, but each new row carries numeric occurrence,
+  insertion, and record times. Live and reopened views apply the shared Core chronology rule rather
+  than treating file append order as speech order. Historical files without complete chronology
+  metadata keep their original file order; second-resolution display strings are not precise enough
+  to reconstruct it safely.
 - The viewer's rendering logic (`htmlShell`/`rowScript`) and history reader (`SessionStore`) live in
   `JarvisCore` so they're unit/WebKit-tested; `ActivityViewer` in `JarvisApp` is the thin window.
 - Session evaluation is agentic only. After Stop, select a session and click **Evaluate**: the
@@ -154,6 +161,9 @@ the human-facing coaching record. The current validation priority lives in
   speak into the microphone and play speech through system audio; confirm both appear as finalized
   `heard:` entries in Activity. If frames never arrive, confirm Jarvis stops (mic) or degrades to
   microphone-only (system) instead of reporting ready.
+- Create an overlapping exchange where a longer interviewer question finalizes after a short user
+  reply. Confirm Activity places the question first and the first automatic brain request uses the
+  same order. Repeat while a prior brain call is in flight to exercise the queued-attempt boundary.
 - Show an interview question without speaking its details, then ask, “Jarvis, how can I solve this in
   one pass?” Confirm Activity shows exactly one screen view followed by a screen-specific tip. A fully
   stated behavioral question should not cause an unnecessary capture.

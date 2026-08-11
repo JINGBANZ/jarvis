@@ -19,7 +19,7 @@ import Testing
         }
 
         coordinator.start()
-        coordinator.updateActivity(true)
+        coordinator.updateTranscriptionWork(true)
         #expect(coordinator.recordFinalizedTranscript(
             "  first fragment  ", spokenAt: 1, source: "test"))
         #expect(coordinator.recordFinalizedTranscript(
@@ -31,7 +31,7 @@ import Testing
         #expect(events.turnCount == 0)
         #expect(events.activity == [true])
 
-        coordinator.updateActivity(false)
+        coordinator.updateTranscriptionWork(false)
         #expect(await waitUntil { events.turnCount == 1 })
         #expect(events.activity == [true, false])
         #expect(transcript.renderFrom(index: 0).text
@@ -101,7 +101,7 @@ import Testing
             silenceEnabled: silenceEnabled,
             onTurnEnd: { events.recordTurn() },
             onSilence: { events.recordSilence($0) },
-            onSpeechActivityChanged: { events.recordActivity($0) })
+            onTranscriptionWorkChanged: { events.recordActivity($0) })
     }
 }
 
@@ -176,7 +176,7 @@ private func waitForMainQueue(after delay: TimeInterval) async {
 
 /// `fireTurn` has no externally visible callback while transcription remains active. This
 /// test-local probe observes the exact `UtteranceBuffer` transition instead of adding a production
-/// hook, then restores the state so `updateActivity(false)` still exercises the normal resume path.
+/// hook, then restores the state so `updateTranscriptionWork(false)` exercises the resume path.
 private struct PendingTurnProbe: Sendable {
     private let pending: UtteranceBuffer
 
@@ -203,7 +203,7 @@ private func recordAndStopBeforeQueuedDebounceRuns(
 ) -> (empty: Bool, usable: Bool) {
     coordinator.start()
     let empty = coordinator.recordFinalizedTranscript(" … ", spokenAt: nil, source: "test")
-    coordinator.updateActivity(true)
+    coordinator.updateTranscriptionWork(true)
     let usable = coordinator.recordFinalizedTranscript("usable", spokenAt: nil, source: "test")
     coordinator.stop()
     return (empty, usable)

@@ -26,6 +26,25 @@ import WebKit
         #expect(cls?.contains("say") == true)
     }
 
+    @MainActor @Test func coreInsertionIndexPlacesLateRow() async throws {
+        let h = WebViewHarness()
+        try await h.load(ActivityLog.htmlShell())
+        try await h.eval(ActivityLog.rowScript(
+            time: "10:00:20",
+            message: "🗣 heard (me): Yep.",
+            imageBase64: nil))
+        try await h.eval(ActivityLog.rowScript(
+            time: "10:00:10",
+            message: "🗣 heard (them): Did you see it?",
+            imageBase64: nil,
+            insertionIndex: 0))
+
+        let messages = try await h.eval(
+            "Array.from(document.querySelectorAll('#log .m')).map(x=>x.textContent).join('|')"
+        ) as? String
+        #expect(messages == "🗣 heard (them): Did you see it?|🗣 heard (me): Yep.")
+    }
+
     @MainActor @Test func activityFeedUsesAdaptiveSettingsRowLayout() async throws {
         let h = WebViewHarness()
         try await h.load(ActivityLog.htmlShell())

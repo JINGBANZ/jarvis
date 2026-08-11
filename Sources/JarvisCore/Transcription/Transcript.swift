@@ -19,28 +19,25 @@ public struct TranscriptLine: Sendable {
 
 /// Holds the session transcript and renders a recent, timestamped window for the model.
 public final class RollingTranscript: @unchecked Sendable {
-    private var lines: [TranscriptLine] = []
+    private var chronology = ConversationChronology<TranscriptLine>()
     private let lock = NSLock()
 
     public init() {}
 
     public func append(_ line: TranscriptLine) {
         lock.lock(); defer { lock.unlock() }
-        lines.append(line)
+        chronology.append(line, occurredAt: line.at)
     }
 
     /// Number of lines recorded — used as the index boundary for server-side delta sending.
     public var count: Int {
         lock.lock(); defer { lock.unlock() }
-        return lines.count
+        return chronology.count
     }
 
     public var lastSpeechTime: TimeInterval? {
         lock.lock(); defer { lock.unlock() }
-        // Latest by SPOKEN time, not last-appended: the two sockets append out of time order (a slow
-        // "them" utterance can land after a later "me" line), so `lines.last.at` can be stale. Using
-        // the true latest keeps silenceDuration — and the "are you stuck?" guard built on it — honest.
-        return lines.map(\.at).max()
+        return chronology.latestOccurredAt
     }
 
     /// Seconds since the last spoken line. Callers pass session-relative time, so with **no speech yet
@@ -58,10 +55,13 @@ public final class RollingTranscript: @unchecked Sendable {
     /// clamped to a valid range (defensive against a stale caller index). The raw `lines` are what the
     /// coach loop's substance gate inspects (see `TurnSubstance`) before spending a brain request.
     public func renderFrom(index: Int) -> (text: String, upTo: Int, lines: [TranscriptLine]) {
-        lock.lock(); let snapshot = lines; lock.unlock()
-        let start = min(max(0, index), snapshot.count)
-        // Spoken-order rendering (see `render`): the two sockets can append out of time order.
-        return (Self.render(snapshot[start...]), snapshot.count, Array(snapshot[start...]))
+        lock.lock(); let snapshot = chronology.snapshot(fromInsertionIndex: index); lock.unlock()
+        let insertionOrderedLines = snapshot.insertionOrderedItems.map(\.element)
+        let chronologicalLines = snapshot.chronologicalItems.map(\.element)
+        return (
+            Self.renderChronological(chronologicalLines),
+            snapshot.upToInsertionIndex,
+            insertionOrderedLines)
     }
 
     /// Render lines as `[mm:ss] speaker: text`, one per line, in SPOKEN order. The two transcription
@@ -69,9 +69,13 @@ public final class RollingTranscript: @unchecked Sendable {
     /// — and so be appended — after a later one, so insertion order isn't time order. We sort by `.at`
     /// (stable on ties via the original index) so the coach always sees the order things were said.
     static func render<S: Sequence>(_ lines: S) -> String where S.Element == TranscriptLine {
-        lines.enumerated()
-            .sorted { $0.element.at != $1.element.at ? $0.element.at < $1.element.at : $0.offset < $1.offset }
-            .map { "[\(stamp($0.element.at))] \($0.element.speaker.rawValue): \($0.element.text)" }
+        renderChronological(ConversationChronology<TranscriptLine>.ordered(lines, occurredAt: \.at))
+    }
+
+    private static func renderChronological<S: Sequence>(_ lines: S) -> String
+    where S.Element == TranscriptLine {
+        lines
+            .map { "[\(stamp($0.at))] \($0.speaker.rawValue): \($0.text)" }
             .joined(separator: "\n")
     }
 

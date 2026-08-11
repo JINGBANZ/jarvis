@@ -22,7 +22,7 @@ import JarvisCore
 final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
     var onTurnEnd: (@Sendable () -> Void)?
     var onSilence: (@Sendable (TimeInterval) -> Void)?
-    var onSpeechActivityChanged: (@Sendable (Bool) -> Void)?
+    var onTranscriptionWorkChanged: (@Sendable (Bool) -> Void)?
     var onConnectionStateChange: (@Sendable (TranscriptionConnectionState) -> Void)?
     var onTerminalFailure: (@Sendable (TranscriptionFailureReason) -> Void)?
     var onCaptureContinuity: (@Sendable (CaptureReadinessMonitor.Signal) -> Void)?
@@ -76,6 +76,7 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
         speaker: Speaker,
         transcript: RollingTranscript,
         clock: Clock,
+        sessionStart: TimeInterval,
         silenceTimeout: TimeInterval,
         silenceMaxInterval: TimeInterval,
         silenceIdleCutoff: TimeInterval = .infinity,
@@ -86,7 +87,6 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
         self.locale = locale
         self.speaker = speaker
         self.clock = clock
-        let sessionStart = clock.now()
         self.sessionStart = sessionStart
         self.benchmark = benchmark
         maximumBufferedBytes = TranscriptionAudioFormat.pcm16Mono.byteCount(
@@ -111,8 +111,8 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
             silenceEnabled: speaker == .me,
             onTurnEnd: { [weak self] in self?.onTurnEnd?() },
             onSilence: { [weak self] quiet in self?.onSilence?(quiet) },
-            onSpeechActivityChanged: { [weak self] active in
-                self?.onSpeechActivityChanged?(active)
+            onTranscriptionWorkChanged: { [weak self] hasPendingWork in
+                self?.onTranscriptionWorkChanged?(hasPendingWork)
             })
         continuityReporter.onCaptureContinuity = { [weak self] signal in
             self?.onCaptureContinuity?(signal)
@@ -521,7 +521,7 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
 
     private func setSpeechActivity(_ active: Bool, generation: Int) {
         guard isLive(generation: generation) else { return }
-        coachingCoordinator.updateActivity(active)
+        coachingCoordinator.updateTranscriptionWork(active)
     }
 
     private func fail(generation: Int, diagnostic: String) {

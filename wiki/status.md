@@ -48,8 +48,14 @@ boundaries, salvages partial text while keeping unavailable items diagnostic-onl
 real system-audio sample while padding only missing tap silence for activity detection, and keeps
 AEC on a separate exact-length reference. Content-free continuity checkpoints cover capture through
 provider speech without archiving PCM, and timestamp-interval correlation handles locally split or
-replayed utterances without adding diagnostic text to the brain transcript. The app combines
-provider connection state with content-free capture health from the Foundation-only
+replayed utterances without adding diagnostic text to the brain transcript. Both speaker streams
+share one session time origin and one Foundation-only conversation chronology: spoken event time orders
+model deltas and Activity rows, with stable insertion order only for ties. Every automatic coaching
+attempt waits for both providers to report settled transcription work, so a faster later reply cannot
+cross an earlier utterance into immutable model history. The manual hint remains the explicit
+immediate exception. The client debounce still groups rapid final fragments; it is not the ordering
+guarantee. The app combines provider connection state with content-free capture health from the
+Foundation-only
 [`CaptureReadinessMonitor`](../Sources/JarvisCore/Diagnostics/CaptureReadinessMonitor.swift): each
 stream's first positive sample-count callback establishes frame health, so valid digital silence
 counts, while a missing first frame or a sustained stall after frame flow begins becomes a terminal
@@ -147,12 +153,20 @@ workflows. At visibility change, enable private vulnerability reporting, secret 
 protection, Dependabot security updates, fork-workflow approval, and a `main` ruleset requiring pull
 requests and the CI check. Keep self-hosted runners unavailable to public forks.
 
-Repeat `./scripts/transcription-benchmark.sh standard` to classify the single GPT Live Transcribe
-bilingual final-stream timeout from the first 36-repetition run. The automated scoped reconnect run
-is complete and passes all three OpenAI models without changing host networking. These live runs are
-not part of the gate and do not use the microphone.
 
-Then finish the remaining transcription configuration smoke:
+Run a live chronology smoke on a fresh session: let one speaker finish a longer question while the
+other gives a short reply, then confirm Activity inserts the question before the reply and the first
+automatic brain request contains that same order. Repeat while a model call is already in flight so
+the queued automatic attempt also waits. This requires live audio permissions and was not exercised
+by the offline gate. Lower-priority evaluator and coaching follow-ups from the session audit remain
+parked in [issue #151](https://github.com/JINGBANZ/jarvis/issues/151).
+
+Then repeat `./scripts/transcription-benchmark.sh standard` to classify the single GPT Live
+Transcribe bilingual final-stream timeout from the first 36-repetition run. The automated scoped
+reconnect run is complete and passes all three OpenAI models without changing host networking. These
+live runs are not part of the gate and do not use the microphone.
+
+Finish the remaining transcription configuration smoke:
 confirm Apple Speech plus a CLI-only brain route starts without an API key, while any OpenAI
 transcription or brain target still requires one. Change a transcription setting during a live run
 and confirm the current snapshot remains active until the next Start; force an Apple analyzer failure
@@ -191,16 +205,16 @@ Tested `JarvisCore` + `JarvisOverlay` harness is green (`./scripts/run-tests.sh`
 thin OS shell, verified by the smoke run.
 
 - `Sources/JarvisCore/Audio/` — transactional PCM + utterance buffering, bounded speech pre-roll, adaptive content-free activity detection, stable frame-decision endpoints, non-destructive AEC reference alignment, and system-audio timeline preservation (`PCMBuffer`, `SpeechGatedAudioBuffer`, `UtteranceBuffer`, `PCM16Framer`, `SpeechEndpointDetector`, `AudioDownmix`, `AdaptiveAudioActivityDetector`, `PCM16SpeechActivityTracker`, `EchoReferenceAlignment`, `SystemAudioTimeline`).
-- `Sources/JarvisCore/Transcription/` — provider-neutral session/provider contracts and immutable Start configuration, selectable OpenAI model/language-profile values, the OpenAI Realtime wire contract, reconnect-safe Jarvis-managed turn coordinator, per-item ledger, and rolling transcript (`TranscriptionSession`, `TranscriptionProvider`, `TranscriptionConfiguration`, `OpenAITranscriptionModel`, `OpenAITranscriptionLanguageProfile`, `RealtimeSession`, `RealtimeJarvisManagedTurnCoordinator`, `RealtimeTranscriptionLedger`, `Transcript`, `NoiseReduction`).
+- `Sources/JarvisCore/Transcription/` — provider-neutral session/provider contracts and immutable Start configuration, selectable OpenAI model/language-profile values, the OpenAI Realtime wire contract, reconnect-safe Jarvis-managed turn coordinator, per-item ledger, and the single spoken-time ordering policy used by the rolling transcript and Activity (`TranscriptionSession`, `TranscriptionProvider`, `TranscriptionConfiguration`, `OpenAITranscriptionModel`, `OpenAITranscriptionLanguageProfile`, `RealtimeSession`, `RealtimeJarvisManagedTurnCoordinator`, `RealtimeTranscriptionLedger`, `ConversationChronology`, `Transcript`, `NoiseReduction`).
 - `Sources/JarvisCore/Benchmark/` + `Sources/JarvisApp/Benchmark/` — the Foundation-only fixed transcription matrix, optional absence-means-disabled instrumentation, scoring and deterministic summary contract, plus the hidden signed-app runner, process-scoped synthetic system-audio tap, and automated transcription-transport reconnect regression (`TranscriptionBenchmark`, `TranscriptionBenchmarkEvent`, `TranscriptionBenchmarkInstrumentation`, `TranscriptionBenchmarkRunner`, `SystemAudioBenchmarkCapture`; operating, isolation, and scoring contract in [transcription-benchmark.md](./transcription-benchmark.md)).
 - `Sources/JarvisCore/Brain/` — provider-neutral `BrainClient`/attempt-scoped `BrainConversation` contracts and models stay at the root. `Adapters/OpenAI/` owns the Responses transport; `Adapters/LocalAgent/` owns CLI detection, `CLIBrainClient`, the Claude Code and Codex runtimes, and the bounded shared process edge. `LocalAgentRuntimeSet` encapsulates provider-specific coach/summarizer ownership. `AgentCLIProcessRunner` remains only for the explicit completed-session evaluator. The subsystem also owns provider-boundary failure classification (`BrainFailure`), immutable `BrainTarget`/`BrainRoute`, `BrainProvider`, `BrainModelCatalog` (first per-provider entry is the default), and `ReasoningEffort`.
-- `Sources/JarvisCore/Coach/` — the event loop: `CoachDriver` (fresh-attempt scheduling and one-target tool-loop orchestration), the pure forward-only `BrainRouteSession`, `SpeechActivityGate`, `CoachHistory` (client-managed session memory), and `ToolDefs` (coach tool schemas).
+- `Sources/JarvisCore/Coach/` — the event loop: `CoachDriver` (fresh-attempt scheduling, transcription-settlement admission, and one-target tool-loop orchestration), the pure forward-only `BrainRouteSession`, `TranscriptionSettlementGate`, `CoachHistory` (client-managed session memory), and `ToolDefs` (coach tool schemas).
 - `Sources/JarvisCore/Triggers/` — turn/silence trigger detection, substance classification, and silence backoff (`Trigger`, `TurnSubstance`, `SilenceBackoff`).
 - `Sources/JarvisCore/Screen/` — the model-triggered screen-capture tool contract + window-scoped capture logic, plus `ScreenCaptureRunner`, which owns each cancellable `screencapture` helper and the transient JPEG it writes into the owner-only session directory: it verifies that file is gone before returning, and a capture whose cleanup can't be proven latches the runner so no later capture (or display fallback) starts while a screen-derived file is unaccounted for (`ScreenCapture`, `ScreenCaptureRunner`, `ScreenSnapshot`, `FrontWindowSelector`, `RecognizedTextLayout`).
 - `Sources/JarvisCore/Overlay/` — overlay text model + length-proportional timing + fan-out (`OverlayRendering`, `OverlayTiming`, `OverlayAppearance`, `BroadcastOverlay`).
 - `Sources/JarvisCore/Config/` — config + owner-only secrets + transcription/brain/screen preferences (`Config`, `Secrets`, `TranscriptionPreferences`, `BrainPreferences`, `ScreenCapturePreferences`, `ScreenCaptureScope`).
 - `Sources/JarvisCore/Support/` — small shared runtime primitives (`Clock`, `TurnTaskBox`, `RetrySchedule`, `RetryIncident`).
-- `Sources/JarvisCore/Diagnostics/` — logging, always-on activity log with stable persisted event kinds and fixed typed brain-change/failure notices, privacy-preserving audio continuity and capture-readiness policy, authoritative session-readiness composition, session-history store, the bounded [session-audit component](./session-audit.md), loss-aware JSONL parsing, deterministic trigger-quality metrics, the read-only agentic audit over the complete session directory, and user-facing errors (`ActivityLog`, `AudioContinuityWitness`, `CaptureReadinessMonitor`, `JarvisReadiness`, `SessionStore`, `BrainTrafficAuditing`, `CoachingAttemptAuditing`, `FileSessionAudit`, `SessionAuditEvidence`, `JSONLRecords`, `TriggerQualityMetrics`, `EvaluationTranscript`, `AgenticEvaluation`, `AgenticEvaluator`, `UserFacingError`).
+- `Sources/JarvisCore/Diagnostics/` — logging, always-on event-time-ordered activity with stable persisted event kinds, occurrence/record timing, and fixed typed brain-change/failure notices, privacy-preserving audio continuity and capture-readiness policy, authoritative session-readiness composition, chronology-aware session history, the bounded [session-audit component](./session-audit.md), loss-aware JSONL parsing, deterministic trigger-quality metrics, the read-only agentic audit over the complete session directory, and user-facing errors (`ActivityLog`, `AudioContinuityWitness`, `CaptureReadinessMonitor`, `JarvisReadiness`, `SessionStore`, `BrainTrafficAuditing`, `CoachingAttemptAuditing`, `FileSessionAudit`, `SessionAuditEvidence`, `JSONLRecords`, `TriggerQualityMetrics`, `EvaluationTranscript`, `AgenticEvaluation`, `AgenticEvaluator`, `UserFacingError`).
 - `Sources/JarvisCore/Prompts/` — the single Foundation-only audit surface for predefined model-facing text across coaching, history compaction, local-agent protocols, transcription context, and session evaluation (`JarvisPrompts`).
 - `Sources/JarvisOverlay/` — the capture-invisible `NSPanel` surfaces: `OverlayCaptionPanel` (transient), `OverlayBoxPanel` (persistent), `NSPanel+CaptureExclusion`.
 - `Sources/JarvisApp/App/` + `MenuBar/` — entry point, shared authoritative readiness rendering, Start/Stop, `ErrorReporter` (startup alerts plus an unconditional no-presentation runtime policy).
