@@ -393,14 +393,14 @@ private func speakResponseBody(arguments: String) -> Data {
     /// eval pipeline input — tagged, with the request body and response body both present.
     @Test func successfulRoundTripIsRecordedToTrafficLog() async throws {
         let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
-        let traffic = BrainTrafficLog(); traffic.enable(directory: dir)
+        let traffic = await FileSessionAudit.readyForTesting(directory: dir)
         let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
                                        traffic: traffic, trafficTag: "coach",
                                        send: { _ in (Data(#"{"output":[]}"#.utf8), http(200)) })
         _ = try await client.respond(messages: [.user("hi")], tools: coachTools)
-        traffic.flush()
+        _ = await traffic.closeForTesting()
 
-        let text = try String(contentsOf: dir.appendingPathComponent(BrainTrafficLog.filename),
+        let text = try String(contentsOf: dir.appendingPathComponent(FileSessionAudit.brainTrafficFilename),
                               encoding: .utf8)
         let entry = try #require(try JSONSerialization.jsonObject(
             with: Data(text.split(separator: "\n")[0].utf8)) as? [String: Any])
@@ -413,15 +413,15 @@ private func speakResponseBody(arguments: String) -> Data {
     /// A transport failure still records the attempt (request + error, no response) and rethrows.
     @Test func transportErrorIsRecordedToTrafficLogAndRethrown() async throws {
         let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
-        let traffic = BrainTrafficLog(); traffic.enable(directory: dir)
+        let traffic = await FileSessionAudit.readyForTesting(directory: dir)
         let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
                                        traffic: traffic, trafficTag: "coach",
                                        send: { _ in throw URLError(.timedOut) })
         await #expect(throws: (any Error).self) {
             try await client.respond(messages: [.user("hi")], tools: coachTools)
         }
-        traffic.flush()
-        let text = try String(contentsOf: dir.appendingPathComponent(BrainTrafficLog.filename),
+        _ = await traffic.closeForTesting()
+        let text = try String(contentsOf: dir.appendingPathComponent(FileSessionAudit.brainTrafficFilename),
                               encoding: .utf8)
         let entry = try #require(try JSONSerialization.jsonObject(
             with: Data(text.split(separator: "\n")[0].utf8)) as? [String: Any])

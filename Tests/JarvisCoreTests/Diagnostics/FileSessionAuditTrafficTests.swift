@@ -2,19 +2,19 @@ import Testing
 import Foundation
 @testable import JarvisCore
 
-@Suite struct BrainTrafficLogTests {
+@Suite struct FileSessionAuditTrafficTests {
     /// Read the traffic file back as parsed JSON lines.
     private func lines(in dir: URL) throws -> [[String: Any]] {
-        let text = try String(contentsOf: dir.appendingPathComponent(BrainTrafficLog.filename),
+        let text = try String(contentsOf: dir.appendingPathComponent(FileSessionAudit.brainTrafficFilename),
                               encoding: .utf8)
         return try text.split(separator: "\n", omittingEmptySubsequences: true).map {
             try #require(JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any])
         }
     }
 
-    @Test func recordPersistsRoundTripWithImagesRedacted() throws {
+    @Test func recordPersistsRoundTripWithImagesRedacted() async throws {
         let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
-        let log = BrainTrafficLog(); log.enable(directory: dir)
+        let log = await FileSessionAudit.readyForTesting(directory: dir)
         let request = try JSONSerialization.data(withJSONObject: [
             "model": "gpt-5.5",
             "input": [
@@ -25,7 +25,7 @@ import Foundation
         ])
         let response = Data(#"{"status":"completed","usage":{"input_tokens":10}}"#.utf8)
         log.record(tag: "coach", request: request, response: response, status: 200, latencyMs: 812)
-        log.flush()
+        _ = await log.closeForTesting()
 
         let entry = try #require(try lines(in: dir).first)
         #expect(entry["tag"] as? String == "coach")
@@ -44,12 +44,12 @@ import Foundation
         #expect(resp["status"] as? String == "completed")
     }
 
-    @Test func transportErrorRecordsRequestAndErrorWithoutResponse() throws {
+    @Test func transportErrorRecordsRequestAndErrorWithoutResponse() async throws {
         let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
-        let log = BrainTrafficLog(); log.enable(directory: dir)
+        let log = await FileSessionAudit.readyForTesting(directory: dir)
         log.record(tag: "coach", request: Data(#"{"model":"gpt-5.5"}"#.utf8),
                    response: nil, status: nil, latencyMs: 60_000, error: "timed out")
-        log.flush()
+        _ = await log.closeForTesting()
 
         let entry = try #require(try lines(in: dir).first)
         #expect(entry["error"] as? String == "timed out")
@@ -58,25 +58,28 @@ import Foundation
         #expect((entry["request"] as? [String: Any])?["model"] as? String == "gpt-5.5")
     }
 
-    @Test func enableCreatesOwnerOnlyFileImmediately() throws {
+    @Test func closeCreatesOwnerOnlySessionFiles() async throws {
         let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
-        let log = BrainTrafficLog(); log.enable(directory: dir)
-        let url = dir.appendingPathComponent(BrainTrafficLog.filename)
-        #expect(FileManager.default.fileExists(atPath: url.path))
-        let perms = try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? NSNumber
-        #expect(perms?.int16Value == 0o600)
-    }
-
-    @Test func recordIsNoOpWhenDisabled() {
-        let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
-        let log = BrainTrafficLog()                     // never enabled
-        log.record(tag: "coach", request: Data("{}".utf8), response: nil, status: nil, latencyMs: 1)
-        log.flush()
-        #expect(!FileManager.default.fileExists(atPath: dir.appendingPathComponent(BrainTrafficLog.filename).path))
+        let log = await FileSessionAudit.readyForTesting(directory: dir)
+        #expect(await log.closeForTesting() == .complete)
+        let directoryPermissions = try FileManager.default.attributesOfItem(
+            atPath: dir.path)[.posixPermissions] as? NSNumber
+        #expect(directoryPermissions?.int16Value == 0o700)
+        for filename in [
+            FileSessionAudit.brainTrafficFilename,
+            FileSessionAudit.coachingAttemptsFilename,
+            FileSessionAudit.healthFilename,
+        ] {
+            let url = dir.appendingPathComponent(filename)
+            #expect(FileManager.default.fileExists(atPath: url.path))
+            let permissions = try FileManager.default.attributesOfItem(
+                atPath: url.path)[.posixPermissions] as? NSNumber
+            #expect(permissions?.int16Value == 0o600)
+        }
     }
 
     @Test func redactionWalksNestedStructuresAndLeavesOtherStringsAlone() {
-        let redacted = BrainTrafficLog.redactingImages([
+        let redacted = SessionAuditWorker.redactingImages([
             "plain": "data-driven text",
             "nested": [["image_url": "data:image/png;base64,AAAA"]],
         ]) as? [String: Any]
@@ -85,17 +88,17 @@ import Foundation
         #expect((inner?["image_url"] as? String)?.hasPrefix("[base64 image omitted") == true)
     }
 
-    @Test func coachingRequestContextLinksTheWireCallToItsAttempt() throws {
+    @Test func coachingRequestContextLinksTheWireCallToItsAttempt() async throws {
         let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
-        let log = BrainTrafficLog(); log.enable(directory: dir)
-        let context = CoachingAttemptLog.requestContext(
+        let log = await FileSessionAudit.readyForTesting(directory: dir)
+        let context = CoachingRequestAttribution.context(
             attemptID: 7,
             wake: .pendingWork,
             reason: .turnEnd,
             phase: .captureScreenContinuation,
             sequence: 2)
 
-        CoachingAttemptLog.$currentRequest.withValue(context) {
+        CoachingRequestAttribution.$current.withValue(context) {
             log.record(
                 tag: "coach",
                 request: Data(#"{"model":"gpt-5.5"}"#.utf8),
@@ -109,7 +112,7 @@ import Foundation
                 status: 200,
                 latencyMs: 8)
         }
-        log.flush()
+        _ = await log.closeForTesting()
 
         let entries = try lines(in: dir)
         let entry = try #require(entries.first)

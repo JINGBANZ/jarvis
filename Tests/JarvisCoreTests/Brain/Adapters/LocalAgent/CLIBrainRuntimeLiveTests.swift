@@ -52,8 +52,7 @@ import Testing
             at: workDirectory,
             withIntermediateDirectories: false,
             attributes: [.posixPermissions: 0o700])
-        let traffic = BrainTrafficLog()
-        traffic.enable(directory: workDirectory)
+        let traffic = await FileSessionAudit.readyForTesting(directory: workDirectory)
 
         let runtime = CLIBrainRuntime(
             provider: provider,
@@ -108,13 +107,13 @@ import Testing
         }
 
         let total = attemptStarted.duration(to: .now)
-        traffic.flush()
+        _ = await traffic.closeForTesting()
         print(
             "ISSUE110_LIVE provider=\(provider.rawValue) "
             + "first_ms=\(milliseconds(firstElapsed)) "
             + "second_ms=\(milliseconds(secondElapsed)) "
             + "total_ms=\(milliseconds(total)) "
-            + "traffic=\(workDirectory.appendingPathComponent(BrainTrafficLog.filename).path)")
+            + "traffic=\(workDirectory.appendingPathComponent(FileSessionAudit.brainTrafficFilename).path)")
     }
 
     private func milliseconds(_ duration: Duration) -> Int {

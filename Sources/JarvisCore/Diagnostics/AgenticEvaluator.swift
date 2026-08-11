@@ -69,6 +69,7 @@ public struct AgenticEvaluator: Sendable {
                  + String(diagnostic.suffix(2_000)))
             throw EvaluationError.agentFailed(cli.provider.displayName)
         }
+        try Task.checkCancellation()
         return try AgenticEvaluation.saveReport(
             output.stdout, agentName: cli.executableURL.lastPathComponent, in: sessionDirectory)
     }

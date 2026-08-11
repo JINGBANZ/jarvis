@@ -1,4 +1,5 @@
 import Foundation
+@testable import JarvisCore
 
 /// Shared test fixtures.
 enum TestFixtures {
@@ -11,4 +12,43 @@ enum TestFixtures {
 
     /// Decoded bytes of `tinyJpegBase64`.
     static var tinyJpeg: Data { Data(base64Encoded: tinyJpegBase64)! }
+}
+
+extension FileSessionAudit {
+    /// Persistence tests get an isolated worker. Wait for its asynchronous open before sending the
+    /// record under test so the assertion observes the same ordered lifecycle as production.
+    static func readyForTesting(directory: URL) async -> FileSessionAudit {
+        let audit = FileSessionAudit(
+            directory: directory,
+            worker: SessionAuditWorker(
+                limits: .production,
+                writer: SessionAuditFileWriter()))
+        let marker = directory.appendingPathComponent(FileSessionAudit.healthFilename)
+        while !FileManager.default.fileExists(atPath: marker.path) {
+            await Task.yield()
+        }
+        return audit
+    }
+
+    /// Persistence assertions await the real asynchronous lifecycle.
+    func closeForTesting() async -> SessionAuditCloseResult {
+        await close()
+    }
+
+    /// Submit once, then wait for the worker to persist the accepted event.
+    func recordForTesting(
+        file: URL,
+        expectedLineCount: Int,
+        _ record: () -> Void
+    ) async -> Bool {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(1))
+        record()
+        while ContinuousClock.now < deadline {
+            let lineCount = (try? String(contentsOf: file, encoding: .utf8))?
+                .split(separator: "\n").count ?? 0
+            if lineCount >= expectedLineCount { return true }
+            await Task.yield()
+        }
+        return false
+    }
 }

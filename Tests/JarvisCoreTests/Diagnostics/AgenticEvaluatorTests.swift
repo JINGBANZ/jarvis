@@ -12,7 +12,7 @@ import Testing
         try FileManager.default.createDirectory(at: session, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
-        try writeSessionInputs(to: session)
+        try await writeSessionInputs(to: session)
 
         let executable = bin.appendingPathComponent("claude")
         let script = """
@@ -99,16 +99,15 @@ import Testing
         #expect(codexRun.workingDirectory == repository)
     }
 
-    private func writeSessionInputs(to session: URL) throws {
-        let traffic = BrainTrafficLog()
-        traffic.enable(directory: session)
+    private func writeSessionInputs(to session: URL) async throws {
+        let traffic = await FileSessionAudit.readyForTesting(directory: session)
         traffic.record(
             tag: "coach",
             request: Data(#"{"model":"gpt-5.5","input":[]}"#.utf8),
             response: Data(#"{"status":"completed","output":[]}"#.utf8),
             status: 200,
             latencyMs: 100)
-        traffic.flush()
+        _ = await traffic.closeForTesting()
         try Data(#"{"t":"10:00:00","m":"heard question","k":"heard"}\n"#.utf8)
             .write(to: session.appendingPathComponent(ActivityLog.filename))
     }

@@ -118,13 +118,16 @@ public struct SessionStore: Sendable {
     }
 
     /// Delete every past session directory (immediate, session-shaped subdir of `base`), sparing the
-    /// current session and skipping symlinks. Never removes `base` itself or anything outside it.
-    public func clearHistory() {
+    /// current session, caller-protected sessions, and symlinks. Never removes `base` itself or
+    /// anything outside it.
+    public func clearHistory(preserving protectedDirectories: Set<URL> = []) {
         let curPath = current?.standardizedFileURL.path
+        let protectedPaths = Set(protectedDirectories.map { $0.standardizedFileURL.path })
         let names = (try? FileManager.default.contentsOfDirectory(atPath: base.path)) ?? []
         for name in names where Self.isSessionID(name) {
             let url = base.appendingPathComponent(name)
             if url.standardizedFileURL.path == curPath { continue }                 // spare current
+            if protectedPaths.contains(url.standardizedFileURL.path) { continue }
             let vals = try? url.resourceValues(forKeys: [.isSymbolicLinkKey])
             if vals?.isSymbolicLink == true { continue }                            // don't follow symlinks
             try? FileManager.default.removeItem(at: url)
@@ -135,16 +138,22 @@ public struct SessionStore: Sendable {
     /// log can't grow without bound across launches. Counts EVERY session-shaped subdir (including
     /// content-less aborted runs that `listSessions` hides), spares the current session, and skips
     /// symlinks; bounded to immediate children of `base` exactly like `clearHistory`. A non-positive
-    /// `keep` is treated as 1 so a run never deletes the session it's about to write into.
-    public func pruneToMostRecent(_ keep: Int) {
+    /// `keep` is treated as 1 so a run never deletes the session it's about to write into. Protected
+    /// sessions outside the newest `keep` are additional survivors until their caller releases them.
+    public func pruneToMostRecent(
+        _ keep: Int,
+        preserving protectedDirectories: Set<URL> = []
+    ) {
         let keep = max(1, keep)
         let curPath = current?.standardizedFileURL.path
+        let protectedPaths = Set(protectedDirectories.map { $0.standardizedFileURL.path })
         let names = ((try? FileManager.default.contentsOfDirectory(atPath: base.path)) ?? [])
             .filter { Self.isSessionID($0) }
             .sorted(by: >)   // id is a lexically-sortable timestamp ⇒ newest first
         for name in names.dropFirst(keep) {
             let url = base.appendingPathComponent(name)
             if url.standardizedFileURL.path == curPath { continue }                 // spare current
+            if protectedPaths.contains(url.standardizedFileURL.path) { continue }
             let vals = try? url.resourceValues(forKeys: [.isSymbolicLinkKey])
             if vals?.isSymbolicLink == true { continue }                            // don't follow symlinks
             try? FileManager.default.removeItem(at: url)
