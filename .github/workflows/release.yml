@@ -84,27 +84,75 @@ jobs:
 
       - name: Build, sign, notarize, package
         env:
+          EXPECTED_RELEASE_TAG: ${{ needs.release-please.outputs.tag_name }}
           NOTARY_KEY_BASE64: ${{ secrets.NOTARY_KEY_BASE64 }}
           NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
           NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
         run: |
+          if [[ -z "$EXPECTED_RELEASE_TAG" ]]; then
+            echo "error: release-please did not provide the expected release tag" >&2
+            exit 1
+          fi
           NOTARY_KEY_PATH="$RUNNER_TEMP/AuthKey.p8"
           echo -n "$NOTARY_KEY_BASE64" | base64 --decode -o "$NOTARY_KEY_PATH"
           export NOTARY_KEY_PATH
           ./scripts/package-app.sh
 
       # The Release is created as a draft (release-please-config.json), so a failed build/sign/
-      # notarize run never leaves a public Release without its app — publishing happens only after
-      # the asset is attached. force-tag-creation makes release-please create the git tag
-      # immediately (GitHub otherwise defers tagging drafts until publish, and a lingering untagged
-      # draft would make later release-please runs miss the previous release and garble changelogs).
+      # notarize/verify run never leaves a public Release without its app — publishing happens only
+      # after the assets and user-facing install notes are ready. force-tag-creation makes
+      # release-please create the git tag immediately (GitHub otherwise defers tagging drafts until
+      # publish, and a lingering untagged draft would make later release-please runs miss the previous
+      # release and garble changelogs).
       - name: Attach the app and publish the Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.release-please.outputs.tag_name }}
         run: |
-          gh release upload "$TAG" Jarvis-*.zip
-          gh release edit "$TAG" --draft=false --latest
+          archives=(Jarvis-*.zip)
+          if [[ ${#archives[@]} -ne 1 || ! -f "${archives[0]}" ]]; then
+            echo "error: expected exactly one Jarvis release archive" >&2
+            exit 1
+          fi
+          shasum -a 256 "${archives[0]}" > SHA256SUMS
+
+          CURRENT_NOTES="$RUNNER_TEMP/current-release-notes.md"
+          RELEASE_NOTES="$RUNNER_TEMP/release-notes.md"
+          gh release view "$TAG" --json body --jq .body > "$CURRENT_NOTES"
+          if grep -Fq '<!-- jarvis-release-install -->' "$CURRENT_NOTES"; then
+            cp "$CURRENT_NOTES" "$RELEASE_NOTES"
+          else
+            cat .github/release-header.md "$CURRENT_NOTES" > "$RELEASE_NOTES"
+          fi
+
+          ASSET_NAMES="$RUNNER_TEMP/existing-release-assets.txt"
+          ASSET_DIR="$RUNNER_TEMP/existing-release-assets"
+          mkdir -p "$ASSET_DIR"
+          RELEASE_IS_DRAFT="$(gh release view "$TAG" --json isDraft --jq .isDraft)"
+          if [[ "$RELEASE_IS_DRAFT" != "true" && "$RELEASE_IS_DRAFT" != "false" ]]; then
+            echo "error: couldn't determine whether release $TAG is a draft" >&2
+            exit 1
+          fi
+          gh release view "$TAG" --json assets --jq '.assets[].name' > "$ASSET_NAMES"
+          # A retry may encounter either a partial draft or a public Release whose publish response
+          # was lost. Draft assets are safe to replace; public assets must never be deleted here.
+          for asset in "${archives[0]}" SHA256SUMS; do
+            if grep -Fxq "$asset" "$ASSET_NAMES"; then
+              gh release download "$TAG" --pattern "$asset" --dir "$ASSET_DIR"
+              if cmp -s "$asset" "$ASSET_DIR/$asset"; then
+                echo "existing release asset is identical: $asset"
+              elif [[ "$RELEASE_IS_DRAFT" == "true" ]]; then
+                echo "replacing different draft release asset: $asset"
+                gh release upload "$TAG" "$asset" --clobber
+              else
+                echo "error: release already has a different $asset; preserving it" >&2
+                exit 1
+              fi
+            else
+              gh release upload "$TAG" "$asset"
+            fi
+          done
+          gh release edit "$TAG" --notes-file "$RELEASE_NOTES" --draft=false --latest
 
       # Hosted runners are ephemeral, but scrubbing the signing key is cheap insurance (and
       # required hygiene if this ever moves to a self-hosted runner).

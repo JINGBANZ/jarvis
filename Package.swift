@@ -21,7 +21,7 @@ let jarvisAppSwiftSettings: [SwiftSetting] = forceAppleSpeechFallback
 
 let package = Package(
     name: "Jarvis",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS("14.2")],
     targets: [
         .target(name: "JarvisCore"),
         // The AppKit overlay lives in its own library target (not the executable) so it can be

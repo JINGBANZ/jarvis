@@ -53,6 +53,10 @@ timestamp (both notarization requirements) — submits it to Apple's notary serv
 ticket, and re-zips the stapled bundle into `Jarvis-<version>.zip` (a zip itself can't be stapled,
 so the archive is rebuilt after stapling). Hardened runtime denies microphone capture outright
 without the `audio-input` entitlement, so the script signs with `Resources/Jarvis.entitlements`.
+The script then passes that final zip to `scripts/verify-release.sh`, which extracts it into a fresh
+verification directory and checks the exact shipped app's bundle shape, version, arm64 architecture,
+notices, strict code signature, stapled ticket, and Gatekeeper policy result. The pre-compression app
+is not accepted as a proxy for the downloaded artifact.
 
 Releases are cut by `.github/workflows/release.yml`, not by hand: on every push to `main`,
 **release-please** maintains a standing Release PR from the conventional-commit history (bumping both
@@ -60,13 +64,16 @@ version keys in `Resources/Info.plist` via `x-release-please-version` annotation
 CHANGELOG — config in `release-please-config.json`). Merging that PR creates the GitHub Release **as
 a draft**; a `macos-15` job then runs the test gate, signs/notarizes via repo secrets (the base64
 `.p12` certificate and an App Store Connect API key — names in the workflow), attaches the zip, and
-only then publishes the Release. A failed sign/notarize run therefore never leaves a public Release
-without its app. The publish job lives in the same workflow because tags created with
-`GITHUB_TOKEN` never trigger other workflows.
+only then publishes the Release. The publish step also attaches `SHA256SUMS` and prepends the stable
+installation block in `.github/release-header.md` to release-please's generated changelog. A failed
+sign, notarization, or final-archive verification therefore never leaves a public Release without a
+validated app. The publish job lives in the same workflow because tags created with `GITHUB_TOKEN`
+never trigger other workflows.
 
 `package-app.sh` also runs locally (one-time `xcrun notarytool store-credentials jarvis-notary …`,
-then just run the script) for packaging without CI. Distributed builds run on Apple Silicon only —
-`libjarvis-aec.a` is arm64-only — and users supply their own OpenAI key at first run.
+then just run the script) for packaging without CI. Distributed builds require macOS 14.2 or later
+and run on Apple silicon only because `libjarvis-aec.a` is arm64-only. The README owns the user
+installation steps; provider credentials remain user-supplied in Settings.
 
 ## Running
 
@@ -80,9 +87,10 @@ then just run the script) for packaging without CI. Distributed builds run on Ap
   TCC attribute the grant to the *terminal*, so the app reports Microphone, System Audio Recording,
   or Screen Recording as "denied" even when granted. Pass flags with
   `open ./Jarvis.app --args …`.
-- Jarvis does **not** auto-start: set the OpenAI key once (Settings → Brain, saved to an owner-only
-  file; `OPENAI_API_KEY` is a headless fallback), then **Start / Stop** from the menu. The icon shows
-  two states only: ⚪️ stopped, 🟢 running.
+- Jarvis does **not** auto-start: choose transcription and Primary brain providers in Settings, meet
+  their credential or local sign-in requirements, then **Start / Stop** from the menu. OpenAI keys
+  are saved to an owner-only file; `OPENAI_API_KEY` is a headless fallback. The icon shows two states
+  only: ⚪️ stopped, 🟢 running.
 
 ## The live activity viewer
 

@@ -12,7 +12,7 @@
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleExecutable</key><string>JarvisApp</string>
   <key>CFBundleIconFile</key><string>Jarvis.icns</string>
-  <key>LSMinimumSystemVersion</key><string>14.0</string>
+  <key>LSMinimumSystemVersion</key><string>14.2</string>
   <key>LSUIElement</key><true/>
   <key>NSMicrophoneUsageDescription</key>
   <string>Jarvis listens to you think aloud to offer coaching tips.</string>
