@@ -2,7 +2,7 @@
 
 > The project's decision log — *why* Jarvis is the way it is. One entry per load-bearing, non-obvious
 > choice. Unlike the rest of the wiki, this page is **append-mostly and historical**: it is the one
-> place [`CLAUDE.md`](./CLAUDE.md) → Convention 3's "write in the present, delete the narration" rule
+> place [`AGENTS.md`](./AGENTS.md) → Convention 3's "write in the present, delete the narration" rule
 > does **not** apply, because the rejected alternative is exactly what you don't want to lose. A
 > running list, newest last, each entry dated. When a decision is reversed, **supersede it in place**
 > (add the `Superseded by` / `Supersedes` lines); never delete it. The *how it works* lives in the
