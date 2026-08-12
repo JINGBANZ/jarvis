@@ -128,17 +128,26 @@ jobs:
           ASSET_NAMES="$RUNNER_TEMP/existing-release-assets.txt"
           ASSET_DIR="$RUNNER_TEMP/existing-release-assets"
           mkdir -p "$ASSET_DIR"
+          RELEASE_IS_DRAFT="$(gh release view "$TAG" --json isDraft --jq .isDraft)"
+          if [[ "$RELEASE_IS_DRAFT" != "true" && "$RELEASE_IS_DRAFT" != "false" ]]; then
+            echo "error: couldn't determine whether release $TAG is a draft" >&2
+            exit 1
+          fi
           gh release view "$TAG" --json assets --jq '.assets[].name' > "$ASSET_NAMES"
-          # A lost publish response can leave a public Release behind for the retry. Preserve its
-          # assets: reuse byte-identical files and fail closed if an existing name differs.
+          # A retry may encounter either a partial draft or a public Release whose publish response
+          # was lost. Draft assets are safe to replace; public assets must never be deleted here.
           for asset in "${archives[0]}" SHA256SUMS; do
             if grep -Fxq "$asset" "$ASSET_NAMES"; then
               gh release download "$TAG" --pattern "$asset" --dir "$ASSET_DIR"
-              if ! cmp -s "$asset" "$ASSET_DIR/$asset"; then
+              if cmp -s "$asset" "$ASSET_DIR/$asset"; then
+                echo "existing release asset is identical: $asset"
+              elif [[ "$RELEASE_IS_DRAFT" == "true" ]]; then
+                echo "replacing different draft release asset: $asset"
+                gh release upload "$TAG" "$asset" --clobber
+              else
                 echo "error: release already has a different $asset; preserving it" >&2
                 exit 1
               fi
-              echo "existing release asset is identical: $asset"
             else
               gh release upload "$TAG" "$asset"
             fi
