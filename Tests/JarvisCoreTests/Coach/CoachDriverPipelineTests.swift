@@ -2329,9 +2329,9 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(brain.callCount >= 2)                      // the original AND the coalesced turn ran
     }
 
-    /// The settling speaker's debounce callback can arrive after a parked attempt has already
-    /// admitted and included that speaker's final line. Its boundary identifies the callback as
-    /// already consumed, so it cannot buy a duplicate request.
+    /// The settling speaker's delayed transcript-batch callback can arrive after a parked attempt has
+    /// already admitted and included that speaker's final line. Its boundary identifies the callback
+    /// as already consumed, so it cannot buy a duplicate request.
     @Test func deferredTurnForCommittedTranscriptDoesNotStartAnotherAttempt() async {
         let gate = AsyncGate()
         let brain = GatedBrain(

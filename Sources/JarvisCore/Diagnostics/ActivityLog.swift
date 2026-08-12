@@ -12,6 +12,9 @@ import Foundation
 public final class ActivityLog: @unchecked Sendable {
     public static let shared = ActivityLog()
     public static let filename = "jarvis-activity.jsonl"
+    /// Shared live/history backstop. Both paths retain insertion identities first, then ask
+    /// `ConversationChronology` to display those retained entries by event time.
+    public static let retainedEntryLimit = 10_000
 
     /// Stable on-disk identity for each typed Activity event. Human copy and emoji may evolve; tools
     /// reading the complete log can use this value instead of reverse-parsing prose.
@@ -158,7 +161,8 @@ public final class ActivityLog: @unchecked Sendable {
 
     /// The atomic cut point returned by `attach`: the empty page shell plus the current entries
     /// already encoded as `appendRow(...)` snippets to replay. `shown` = rows in the snapshot
-    /// (capped at `maxLines`); `total` = everything recorded this session (for "showing last N of M").
+    /// (capped at `retainedEntryLimit`); `total` = everything recorded this session (for
+    /// "showing last N of M").
     public struct Snapshot: Sendable {
         public let shellHTML: String
         public let rows: [String]
@@ -181,10 +185,9 @@ public final class ActivityLog: @unchecked Sendable {
     /// session logs a few thousand lines) — a cap this high exists only as a runaway backstop, so the
     /// viewer shows the WHOLE session, not just its tail. Entries are small (text + a filename; shot
     /// bytes stay on disk), so memory is not a concern.
-    private let maxLines = 10_000
     private let queue = DispatchQueue(label: "jarvis.activitylog")   // serializes state + disk writes
     private var entries = ConversationChronology<Entry>()
-    private var totalCount = 0    // everything recorded this session (survives the maxLines cap)
+    private var totalCount = 0    // everything recorded this session (survives the retained-entry cap)
     private var shotSeq = 0       // monotonic id for saved screenshot files this session
     private var sessionHasEnded = false
     private let df: DateFormatter
@@ -257,7 +260,7 @@ public final class ActivityLog: @unchecked Sendable {
             if rendered.kind == .sessionEnded {
                 sessionHasEnded = true
             }
-            let removedItems = entries.keepMostRecentInsertions(maxLines)
+            let removedItems = entries.keepMostRecentInsertions(Self.retainedEntryLimit)
             let chronologicalIndex = entries.chronologicalIndex(
                 forInsertionOrder: item.insertionOrder)
             // Push with the live bytes in hand (no disk read on the hot path).

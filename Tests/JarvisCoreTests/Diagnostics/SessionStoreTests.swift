@@ -116,6 +116,28 @@ import Foundation
         ])
     }
 
+    @Test func boundedSnapshotRetainsInsertionTailBeforeOrderingByEventTime() throws {
+        let base = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: base) }
+        let id = "2026-06-16_10-00-00_aaaa"
+        try makeSession(base, id, lines: [
+            #"{"t":"10:00:30","m":"🗣 oldest insertion, late speech","k":"heard","o":30,"q":0}"#,
+            #"{"t":"10:00:10","m":"🗣 middle insertion","k":"heard","o":10,"q":1}"#,
+            #"{"t":"10:00:20","m":"🗣 newest insertion","k":"heard","o":20,"q":2}"#,
+        ])
+
+        let store = SessionStore(base: base, current: nil)
+        let session = try #require(store.listSessions().first)
+        let snapshot = store.entrySnapshot(
+            for: session,
+            retainingMostRecentInsertions: 2)
+
+        #expect(snapshot.total == 3)
+        #expect(snapshot.entries.map(\.0.message) == [
+            "🗣 middle insertion",
+            "🗣 newest insertion",
+        ])
+    }
+
     @Test func entriesPreserveFileOrderWhenChronologyMetadataIsIncomplete() throws {
         let base = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: base) }
         let id = "2026-06-16_10-00-00_aaaa"

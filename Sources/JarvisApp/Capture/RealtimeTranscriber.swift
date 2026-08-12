@@ -102,7 +102,7 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         silenceIdleCutoff: TimeInterval = .infinity,
         silenceDurationMs: Int = 1000,
         noiseReduction: NoiseReductionMode = .auto,
-        turnDebounce: TimeInterval = 0.4,
+        transcriptBatchingDelay: TimeInterval = 0.4,
         transcriptionTerminalTimeout: TimeInterval = 8,
         transcriptionActiveTimeout: TimeInterval = 180,
         maxBufferedAudioSeconds: TimeInterval = 60,
@@ -146,7 +146,7 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
             transcript: transcript,
             clock: clock,
             sessionStart: sessionStart,
-            turnDebounce: turnDebounce,
+            transcriptBatchingDelay: transcriptBatchingDelay,
             silenceTimeout: silenceTimeout,
             silenceMaxInterval: silenceMaxInterval,
             silenceIdleCutoff: silenceIdleCutoff,
@@ -679,8 +679,8 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
             }
         case RealtimeSession.completedTranscriptionType:
             // A completed utterance fragment: record it immediately (so the model's context is
-            // whole), but DON'T fire the coach yet — debounce so rapid fragments of one spoken
-            // sentence coalesces into a single trigger. `audio_start_ms`, captured by the ledger on
+            // whole), but DON'T fire the coach yet — briefly batch rapid fragments of one spoken
+            // sentence into a single trigger. `audio_start_ms`, captured by the ledger on
             // speech_started, timestamps the line when it was spoken rather than when inference ended.
             guard let itemID = obj["item_id"] as? String else {
                 jlog("Jarvis realtime [\(speaker.rawValue)]: completed transcription missing item_id")

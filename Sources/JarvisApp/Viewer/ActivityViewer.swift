@@ -44,10 +44,6 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
     /// Current UI state only. It is injected into the in-memory page and never written to Activity.
     private var readinessStatus: JarvisReadiness.Status = .stopped
 
-    // Runaway backstop only — high enough that a whole multi-hour session replays in full (cutting a
-    // session's head off is worse than a big DOM; text rows are cheap and screenshots are bounded).
-    private let renderCap = 10_000
-
     init(log: ActivityLog, store: SessionStore) {
         self.log = log
         self.store = store
@@ -277,13 +273,15 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
     private func loadPast(_ session: SessionStore.Session) {
         viewingCurrent = false
         log.detach()   // a past session is static; stop receiving live rows
-        let all = store.entries(for: session)
-        let shown = all.suffix(renderCap)
-        let rows = shown.map { entry, data in
+        let snapshot = store.entrySnapshot(
+            for: session,
+            retainingMostRecentInsertions: ActivityLog.retainedEntryLimit)
+        let rows = snapshot.entries.map { entry, data in
             ActivityLog.rowScript(time: entry.time, message: entry.message,
                                   imageBase64: data?.base64EncodedString())
         }
-        beginLoad(shell: ActivityLog.htmlShell(), rows: rows, shown: rows.count, total: all.count)
+        beginLoad(shell: ActivityLog.htmlShell(), rows: rows,
+                  shown: rows.count, total: snapshot.total)
     }
 
     private func beginLoad(shell: String, rows: [String], shown: Int, total: Int) {

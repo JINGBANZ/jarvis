@@ -111,6 +111,47 @@ import Testing
         #expect(!recovery.blocksCoaching)
     }
 
+    @Test func consecutiveReconnectRetainsLaterPartialUntilCoverageLoss() {
+        var recovery = RealtimeReconnectTranscriptionRecovery()
+        recovery.begin(
+            interruptedItems: [],
+            duplicateRiskItemCount: 0,
+            replayAvailable: true,
+            hasUntrackedReplayAudio: true)
+        _ = recovery.markReplacementReady()
+
+        let laterPartial = fallback("replacement partial")
+        recovery.begin(
+            interruptedItems: [laterPartial],
+            duplicateRiskItemCount: 0,
+            replayAvailable: true)
+        #expect(recovery.blocksCoaching)
+        #expect(recovery.markReplacementReady().isEmpty)
+
+        #expect(recovery.recordCoverageLoss() == [laterPartial])
+        #expect(!recovery.blocksCoaching)
+    }
+
+    @Test func consecutiveReconnectRetainsLaterPartialUntilRecoveryDeadline() {
+        var recovery = RealtimeReconnectTranscriptionRecovery()
+        recovery.begin(
+            interruptedItems: [],
+            duplicateRiskItemCount: 0,
+            replayAvailable: true,
+            hasUntrackedReplayAudio: true)
+        _ = recovery.markReplacementReady()
+
+        let laterPartial = fallback("replacement partial")
+        recovery.begin(
+            interruptedItems: [laterPartial],
+            duplicateRiskItemCount: 0,
+            replayAvailable: true)
+        _ = recovery.markReplacementReady()
+
+        #expect(recovery.timeout() == [laterPartial])
+        #expect(!recovery.blocksCoaching)
+    }
+
     private func fallback(_ text: String) -> RealtimeTranscriptionLedger.FinalizedItem {
         .init(itemID: text, text: text, spokenAt: 1, spokenEndAt: nil,
               recoveredFromDeltas: true, isTranscriptUnavailable: false)

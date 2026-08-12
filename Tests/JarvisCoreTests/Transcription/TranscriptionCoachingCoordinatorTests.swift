@@ -11,7 +11,7 @@ import Testing
             transcript: transcript,
             clock: clock,
             sessionStart: 100,
-            turnDebounce: 0,
+            transcriptBatchingDelay: 0,
             events: events)
         guard let pendingTurn = PendingTurnProbe(coordinator) else {
             Issue.record("Could not inspect the coordinator's pending utterance buffer")
@@ -44,19 +44,19 @@ import Testing
         let transcript = RollingTranscript()
         let clock = ManualClock(now: 10)
         let events = CoachingEvents()
-        let turnDebounce: TimeInterval = 0.02
+        let transcriptBatchingDelay: TimeInterval = 0.02
         let coordinator = makeCoordinator(
             transcript: transcript,
             clock: clock,
             sessionStart: 10,
-            turnDebounce: turnDebounce,
+            transcriptBatchingDelay: transcriptBatchingDelay,
             events: events)
 
-        let accepted = await recordAndStopBeforeQueuedDebounceRuns(coordinator)
+        let accepted = await recordAndStopBeforeQueuedBatchRuns(coordinator)
         #expect(!accepted.empty)
         #expect(accepted.usable)
 
-        await waitForMainQueue(after: turnDebounce * 2)
+        await waitForMainQueue(after: transcriptBatchingDelay * 2)
         #expect(events.turnCount == 0)
         #expect(events.activity == [true, false])
         #expect(transcript.renderFrom(index: 0).text == "[00:00] me: usable")
@@ -86,7 +86,7 @@ import Testing
         transcript: RollingTranscript,
         clock: Clock,
         sessionStart: TimeInterval,
-        turnDebounce: TimeInterval = 0.01,
+        transcriptBatchingDelay: TimeInterval = 0.01,
         silenceTimeout: TimeInterval = 60,
         silenceEnabled: Bool = false,
         events: CoachingEvents
@@ -96,7 +96,7 @@ import Testing
             transcript: transcript,
             clock: clock,
             sessionStart: sessionStart,
-            turnDebounce: turnDebounce,
+            transcriptBatchingDelay: transcriptBatchingDelay,
             silenceTimeout: silenceTimeout,
             silenceMaxInterval: silenceTimeout,
             silenceEnabled: silenceEnabled,
@@ -171,8 +171,8 @@ private func waitUntil(
     return condition()
 }
 
-/// Production scheduled its debounce before this later-deadline marker on the same serial queue.
-/// Reaching the marker proves the invalidated `fireTurn` callback was dequeued first, even when
+/// Production scheduled its transcript batch before this later-deadline marker on the same queue.
+/// Reaching the marker proves the invalidated `publishTranscriptBatch` callback ran first, even when
 /// parallel test load delays both callbacks beyond their deadlines.
 private func waitForMainQueue(after delay: TimeInterval) async {
     await withCheckedContinuation { continuation in
@@ -182,7 +182,7 @@ private func waitForMainQueue(after delay: TimeInterval) async {
     }
 }
 
-/// `fireTurn` has no externally visible callback while transcription remains active. This
+/// `publishTranscriptBatch` has no externally visible callback while transcription remains active. This
 /// test-local probe observes the exact `UtteranceBuffer` transition instead of adding a production
 /// hook, then restores the state so `updateTranscriptionWork(false)` exercises the resume path.
 private struct PendingTurnProbe: Sendable {
@@ -203,10 +203,10 @@ private struct PendingTurnProbe: Sendable {
     }
 }
 
-/// Running the complete start/record/stop sequence in one main-actor turn guarantees the debounce
+/// Running the complete start/record/stop sequence in one main-actor turn guarantees the batch callback
 /// is genuinely queued but cannot execute until after `stop()` invalidates it.
 @MainActor
-private func recordAndStopBeforeQueuedDebounceRuns(
+private func recordAndStopBeforeQueuedBatchRuns(
     _ coordinator: TranscriptionCoachingCoordinator
 ) -> (empty: Bool, usable: Bool) {
     coordinator.start()

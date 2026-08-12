@@ -60,7 +60,8 @@ moments the model judges worthwhile.
 1. The Transcriber emits a **turn-end** event after it finalizes an utterance (GPT-4o uses tuned
    server VAD, GPT Transcribe and GPT Live use local WebRTC VAD plus an explicit acknowledged
    commit, and Apple Speech uses final `SpeechTranscriber` segments; all paths share the same client
-   debounce, which groups rapid final fragments but does not establish cross-speaker chronology),
+   transcript-batching delay, which groups rapid final fragments but does not establish
+   cross-speaker chronology),
    or a **silence check** fires (you've gone quiet, maybe stuck). The silence check carries *how
    long* you've been quiet and backs off across a long silence (the interval
    doubles each step up to a cap — see `Config`), resetting on speech; past an idle cutoff it stops
@@ -72,8 +73,8 @@ moments the model judges worthwhile.
    PCM silence requests `SpeechAnalyzer.finalize` and remains unsettled until matching final-result
    progress is consumed from the module stream.
    Natural triggers coalesce while waiting. Each finalized turn carries its transcript boundary, so
-   a debounce callback arriving after another attempt committed that same line is consumed instead
-   of buying a duplicate request. The explicit manual-hint hotkey bypasses this wait.
+   a delayed transcript-batch callback arriving after another attempt committed that same line is
+   consumed instead of buying a duplicate request. The explicit manual-hint hotkey bypasses this wait.
    The CoachDriver then calls the brain on every trigger that carries **substance** — there is no
    cooldown, rate cap, or wake-word gate. Whether to speak (and whether the user just addressed
    Jarvis) is the model's call, governed by the system prompt; the only hard gates are the user's
@@ -106,8 +107,9 @@ moments the model judges worthwhile.
    occurrence time is authoritative, and insertion order breaks timestamp ties. A late-finalizing
    earlier utterance is therefore inserted before a faster later reply. When Activity reaches its
    memory backstop, Core sends the discarded insertion identities so the live DOM trims in lockstep
-   and keeps using those same indices. The deliberate-silence entry is human-facing but stays out of
-   model memory.
+   and keeps using those same indices. Reopened sessions retain the same newest insertion identities
+   before sorting that retained set by occurrence time. The deliberate-silence entry is human-facing
+   but stays out of model memory.
 7. `CoachDriver` reports the audit facts around the decision through the narrow
    `CoachingAttemptAuditing` port: the natural trigger or pending-work wake, the indexed finalized
    lines considered by the substance gate, whether a provider call is the initial request or a screen
@@ -382,9 +384,9 @@ rather than a per-turn screenshot.
   accuracy, while its result stream does not expose usable VAD boundaries; Jarvis therefore sends
   all audio to the transcriber and uses its existing content-free PCM activity detector only to
   request finalization and postpone coaching until the matching final-result boundary is consumed.
-  Both adapters apply the client-side turn debounce to group
-  rapid final fragments; automatic model admission is controlled separately by provider work state,
-  never by extending that fixed delay.
+  Both adapters apply the client-side transcript-batching delay to group rapid final fragments;
+  automatic model admission is controlled separately by provider work state, never by extending
+  that fixed delay.
 
 ### Local CLI brain providers
 

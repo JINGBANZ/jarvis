@@ -42,13 +42,13 @@ public struct RealtimeReconnectTranscriptionRecovery: Sendable {
         replayAvailable: Bool,
         hasUntrackedReplayAudio: Bool = false
     ) {
-        guard !isActive else { return }
-        duplicateRiskCount = max(0, duplicateRiskItemCount)
-        interruptedFallbackItems = interruptedItems
+        // A replacement can itself fail before the prior recovery settles. Preserve every
+        // generation's evidence so a later coverage loss or deadline can still publish its fallback.
+        duplicateRiskCount += max(0, duplicateRiskItemCount)
+        interruptedFallbackItems.append(contentsOf: interruptedItems)
         self.replayAvailable = replayAvailable
-        self.hasUntrackedReplayAudio = hasUntrackedReplayAudio
+        self.hasUntrackedReplayAudio = self.hasUntrackedReplayAudio || hasUntrackedReplayAudio
         replacementReady = false
-        coverageLost = false
     }
 
     /// Audio accepted while a replacement connection is unavailable can later create an earlier

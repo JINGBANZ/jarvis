@@ -3,8 +3,8 @@ import Testing
 
 @Suite struct RealtimeTurnCoalescingTests {
     /// Reproduces session 2026-07-18_10-30-19_02F3: each next VAD item starts before the previous
-    /// item's final transcript arrives. Debounce expiry must observe the active ledger item and keep
-    /// every completed fragment for one final coaching turn.
+    /// item's final transcript arrives. Batching-delay expiry must observe the active ledger item
+    /// and keep every completed fragment for one final coaching turn.
     @Test func startBeforePreviousCompletionKeepsOneSemanticTurn() throws {
         let ledger = RealtimeTranscriptionLedger()
         let pending = UtteranceBuffer()

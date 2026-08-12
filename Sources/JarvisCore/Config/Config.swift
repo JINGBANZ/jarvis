@@ -39,10 +39,10 @@ public struct Config: Sendable {
     /// active mic's Core Audio transport type each session (see `NoiseReduction` / `InputDeviceProximity`);
     /// or pin `.nearField` / `.farField`, or `.off` to disable.
     public var audioNoiseReduction: NoiseReductionMode
-    /// Client-side coalescing window: rapid `…transcription.completed` fragments arriving within this
-    /// window are merged into one coaching trigger, so even residual VAD fragmentation doesn't drive
+    /// Client-side batching delay: rapid `…transcription.completed` fragments arriving within this
+    /// delay are merged into one coaching trigger, so even residual VAD fragmentation doesn't drive
     /// multiple brain calls for one spoken sentence.
-    public var turnDebounceSeconds: TimeInterval
+    public var transcriptBatchingDelaySeconds: TimeInterval
     /// How many seconds of mic audio to buffer while the realtime socket is down, flushed into the
     /// new session on reconnect so a mid-sentence drop isn't lost. Capped so a long outage can't grow
     /// memory without bound (the oldest audio is evicted past the cap).
@@ -65,7 +65,7 @@ public struct Config: Sendable {
         overlayMaxDisplaySeconds: TimeInterval = 8,
         vadSilenceDurationMs: Int = 1000,
         audioNoiseReduction: NoiseReductionMode = .auto,
-        turnDebounceSeconds: TimeInterval = 0.4,
+        transcriptBatchingDelaySeconds: TimeInterval = 0.4,
         maxBufferedAudioSeconds: TimeInterval = 60,
         realtimeReadyTimeoutSeconds: TimeInterval = 10,
         realtimePingIntervalSeconds: TimeInterval = 20,
@@ -80,7 +80,7 @@ public struct Config: Sendable {
         self.overlayMaxDisplaySeconds = overlayMaxDisplaySeconds
         self.vadSilenceDurationMs = vadSilenceDurationMs
         self.audioNoiseReduction = audioNoiseReduction
-        self.turnDebounceSeconds = turnDebounceSeconds
+        self.transcriptBatchingDelaySeconds = transcriptBatchingDelaySeconds
         self.maxBufferedAudioSeconds = maxBufferedAudioSeconds
         self.realtimeReadyTimeoutSeconds = realtimeReadyTimeoutSeconds
         self.realtimePingIntervalSeconds = realtimePingIntervalSeconds
