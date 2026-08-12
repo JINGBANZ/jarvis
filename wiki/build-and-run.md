@@ -55,20 +55,23 @@ so the archive is rebuilt after stapling). Hardened runtime denies microphone ca
 without the `audio-input` entitlement, so the script signs with `Resources/Jarvis.entitlements`.
 The script then passes that final zip to `scripts/verify-release.sh`, which extracts it into a fresh
 verification directory and checks the exact shipped app's bundle shape, version, arm64 architecture,
-notices, strict code signature, stapled ticket, and Gatekeeper policy result. The pre-compression app
-is not accepted as a proxy for the downloaded artifact.
+linked macOS 26-or-newer SDK, notices, strict code signature, stapled ticket, and Gatekeeper policy
+result. The same SDK guard runs immediately after the release build, before signing or notarization;
+the pre-compression app is not accepted as a proxy for the downloaded artifact.
 
 Releases are cut by `.github/workflows/release.yml`, not by hand: on every push to `main`,
 **release-please** maintains a standing Release PR from the conventional-commit history (bumping both
 version keys in `Resources/Info.plist` via `x-release-please-version` annotations, plus the
 CHANGELOG — config in `release-please-config.json`). Merging that PR creates the GitHub Release **as
-a draft**; a `macos-15` job then runs the test gate, signs/notarizes via repo secrets (the base64
-`.p12` certificate and an App Store Connect API key — names in the workflow), attaches the zip, and
-only then publishes the Release. The publish step also attaches `SHA256SUMS` and prepends the stable
-installation block in `.github/release-header.md` to release-please's generated changelog. A failed
-sign, notarization, or final-archive verification therefore never leaves a public Release without a
-validated app. The publish job lives in the same workflow because tags created with `GITHUB_TOKEN`
-never trigger other workflows.
+a draft**; an Apple-silicon `macos-26` job then runs the test gate, signs/notarizes via repo secrets
+(the base64 `.p12` certificate and an App Store Connect API key — names in the workflow), attaches
+the zip, and only then publishes the Release. The publish step also attaches `SHA256SUMS` and
+prepends the stable installation block in `.github/release-header.md` to release-please's generated
+changelog. A failed sign, notarization, or final-archive verification therefore never leaves a
+public Release without a validated app. The exact runner label and binary guard keep downloaded
+AppKit controls on the same macOS 26 design as local development builds instead of inheriting the
+compatibility appearance of an older linked SDK. The publish job lives in the same workflow because
+tags created with `GITHUB_TOKEN` never trigger other workflows.
 
 `package-app.sh` also runs locally (one-time `xcrun notarytool store-credentials jarvis-notary …`,
 then just run the script) for packaging without CI. Distributed builds require macOS 14.2 or later
