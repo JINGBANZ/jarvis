@@ -47,6 +47,8 @@ jobs:
     needs: release-please
     if: ${{ needs.release-please.outputs.release_created == 'true' }}
     runs-on: macos-15
+    # Keep signing and notarization credentials unavailable until the owner approves the job.
+    environment: release
     # Notarization occasionally stalls on Apple's side; without a cap, a stalled run rides the
     # 6-hour default timeout at the 10x macOS minute multiplier. Normal publishes finish well
     # under this. The cap must clear package-app.sh's `notarytool --wait --timeout 30m` PLUS
