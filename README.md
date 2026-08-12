@@ -54,8 +54,10 @@ cd jarvis
 ./scripts/build-app.sh --run
 ```
 
-On the first local build, macOS asks whether `codesign` can use the `Jarvis Dev` key; choose
-**Always Allow**. The downloaded release does not use this local development identity.
+The script creates and opens `Jarvis Dev.app`, whose name, bundle id, preferences, and macOS privacy
+grants are independent from an installed `Jarvis.app` release. On the first local build, macOS asks
+whether `codesign` can use the `Jarvis Dev` key; choose **Always Allow**. macOS then asks once for the
+development app's own capture permissions. The downloaded release does not use this local identity.
 
 For signing details, permission recovery, and other commands, see
 [Build and run](./wiki/build-and-run.md). Always launch the app through the build script or `open`,

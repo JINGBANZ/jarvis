@@ -1593,3 +1593,25 @@
 - **Supersedes in part:** 2026-08-10 — Public repositories keep hosted, owner-gated agent automation.
 - **Detail:** `.github/workflows/claude-code-review.yml`, `.github/workflows/claude.yml`,
   `.github/workflows/issue-opener.yml`, `.github/workflows/issue-worker.yml`.
+
+### 2026-08-12 — Development and release builds have independent macOS identities
+
+- **Chose:** Make `scripts/build-app.sh` assemble `Jarvis Dev.app` with display name `Jarvis Dev`
+  and bundle id `com.jarvis.coach.dev`, while release packaging continues to ship `Jarvis.app` as
+  `com.jarvis.coach`. Derive the development plist from the production source at assembly time and
+  override only those identity fields. The signed-app transcription benchmark uses the development
+  bundle. Existing owner-only credential and session storage paths remain unchanged.
+- **Why:** TCC records privacy decisions against signed code identity, not the display label alone.
+  The self-signed development build and Developer ID release previously had incompatible designated
+  requirements but the same name and bundle id, leaving an ambiguous enabled “Jarvis” row while the
+  other variant could still be prompted on every launch. Separate identities make permission state,
+  Launch Services registration, and preferences unambiguous and let both variants coexist on one Mac.
+- **Rejected:** (a) Renaming only the `.app` directory—the signed bundle id would still collide.
+  (b) Giving both signatures mutually compatible designated requirements—that would deliberately
+  share the privacy grant instead of making the variants independent. (c) Maintaining a complete
+  second Info.plist—usage descriptions and release versions would drift. (d) Resetting TCC whenever
+  switching variants—destructive ceremony around an identity problem rather than a durable fix.
+- **Extends:** 2026-06-13 — Toolchain: SwiftPM + Command Line Tools. The stable local signing
+  identity remains; the development bundle now also has a distinct application identity.
+- **Detail:** [build-and-run.md → Packaging and signing](./build-and-run.md#packaging--signing--why-permission-grants-persist),
+  `scripts/build-app.sh`, `scripts/check-app-identities.sh`.

@@ -8,8 +8,8 @@
 
 The benchmark answers a narrow question: **given known audio, does each production transcription
 path receive it continuously and return the expected result with a healthy lifecycle?** It uses the
-real signed `Jarvis.app`, process-scoped system-audio capture, provider sessions, reconnect code, and
-replay buffer. It does not start a coaching session or evaluate what the coach did.
+real signed `Jarvis Dev.app`, process-scoped system-audio capture, provider sessions, reconnect code,
+and replay buffer. It does not start a coaching session or evaluate what the coach did.
 
 The runner and scorer have different jobs:
 
@@ -17,7 +17,7 @@ The runner and scorer have different jobs:
 fixed synthetic speech
         │
         ▼
-hidden signed Jarvis.app ── lifecycle + capture observations ──► deterministic scorer
+hidden signed Jarvis Dev.app ─ lifecycle + capture observations ─► deterministic scorer
         │                                                           │
         └──────── real transcription provider path ─────────────────┘
                                                                     ▼

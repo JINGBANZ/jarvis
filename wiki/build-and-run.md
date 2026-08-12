@@ -26,20 +26,33 @@ needs — so a SwiftUI + ScreenCaptureKit binary builds with plain `swift build`
 
 ## Packaging & signing — why permission grants persist
 
-`scripts/build-app.sh` assembles the executable into a hand-built `.app` bundle (the bundle layout
-and the stable bundle id live in the script and `Resources/Info.plist`).
+`scripts/build-app.sh` assembles the executable into a hand-built `Jarvis Dev.app`. The production
+identity remains the source in `Resources/Info.plist`; the development script overrides only the
+assembled bundle's name and bundle id.
 
 **Permission persistence is a signing problem.** macOS TCC keys Screen-Recording, Microphone, and
 System Audio Recording grants to **code signature + bundle id + bundle path**. An ad-hoc signature
 changes every build, so macOS
 forgets the grant and re-prompts on each rebuild. So `build-app.sh` always signs with a **stable
 self-signed identity (`Jarvis Dev`**, created automatically on first build) — there is **no ad-hoc
-fallback**. With the identity, bundle id, and path all fixed, grants persist across rebuilds and
-relaunches. On the first build macOS prompts once to let `codesign` use the new key — click
-**"Always Allow"**.
+fallback**. It produces `Jarvis Dev.app` with bundle id `com.jarvis.coach.dev`; the downloaded
+`Jarvis.app` keeps `com.jarvis.coach` and its Developer ID signature. These intentionally incompatible
+identities give each variant its own TCC grants, Launch Services registration, and bundle-id-backed
+preferences, so both can be installed and run on one Mac without one variant impersonating the
+other. With the development identity, bundle id, and checkout path fixed, its grants persist across
+rebuilds and relaunches. On the first build macOS prompts once to let `codesign` use the new key —
+click **"Always Allow"** — and the first launch requests the development app's own capture grants.
+
+The identity split is not a second data sandbox. Both variants intentionally keep the established
+owner-only API-key and direct-open session storage under `Application Support/Jarvis`; launching the
+development app through `build-app.sh --run` continues to put its sessions in that checkout's
+`.jarvis/`. If a checkout still contains a generated `Jarvis.app` from before the split, move only
+that checkout-local bundle to the Trash so it cannot be launched accidentally; leave
+`/Applications/Jarvis.app` in place.
 
 - Recover a stale *denied* state (which macOS won't re-prompt for) with
-  `tccutil reset Microphone com.jarvis.coach` (or `ScreenCapture`), then relaunch and Allow.
+  `tccutil reset Microphone com.jarvis.coach.dev` (or `ScreenCapture`), then relaunch `Jarvis Dev`
+  and Allow. Use `com.jarvis.coach` only when intentionally resetting the production release.
 - Screen Recording + Microphone are granted by **TCC prompts at first launch**, not an App-Sandbox
   entitlement file. `Permissions.primeAll()` requests them at launch and is idempotent. Core Audio
   requests System Audio Recording when Jarvis first builds its process tap after Start.
@@ -80,13 +93,16 @@ installation steps; provider credentials remain user-supplied in Settings.
 | Command | What it does |
 |---|---|
 | `./scripts/run-tests.sh` | Build + run the unit/offline-pipeline tests (no key, no permissions). |
-| `./scripts/build-app.sh [release\|debug]` | Build, bundle, sign `Jarvis.app` (default `release`). Creates `Jarvis Dev` on first run. |
-| `./scripts/build-app.sh --run` | Same build, then launch. Per-session logs land in the workspace `.jarvis/` (see below). |
+| `./scripts/build-app.sh [release\|debug]` | Build, bundle, sign `Jarvis Dev.app` (default `release`). Creates the `Jarvis Dev` signing identity on first run. |
+| `./scripts/build-app.sh --run` | Same development build, then launch it. Per-session logs land in the workspace `.jarvis/` (see below). |
 
-- **Always launch with `open ./Jarvis.app`**, never the bare binary — running it from a shell makes
+- **Always launch with `open "./Jarvis Dev.app"`**, never the bare binary — running it from a shell makes
   TCC attribute the grant to the *terminal*, so the app reports Microphone, System Audio Recording,
   or Screen Recording as "denied" even when granted. Pass flags with
-  `open ./Jarvis.app --args …`.
+  `open "./Jarvis Dev.app" --args …`.
+- Production and development can stay open together, but the fixed global ⌥⌘J shortcut can belong
+  to only one running process. The second app logs that the shortcut is unavailable; use its menu-bar
+  controls directly or quit the other variant when testing the shortcut.
 - Jarvis does **not** auto-start: choose transcription and Primary brain providers in Settings, meet
   their credential or local sign-in requirements, then **Start / Stop** from the menu. OpenAI keys
   are saved to an owner-only file; `OPENAI_API_KEY` is a headless fallback. The icon shows two states
@@ -143,7 +159,7 @@ runtime). It also sidesteps the `file://` `fetch()` restriction that forced the 
   rendered page. A saved session shows **Open report** instead, avoiding another agent run. The local
   app locates its checkout from the
   workspace `.jarvis/`, a `--repo-dir` launch argument, or the directory containing a locally built
-  `Jarvis.app`; without live source it refuses to run a weaker audit. `./scripts/eval-session.sh
+  app bundle; without live source it refuses to run a weaker audit. `./scripts/eval-session.sh
   [session-dir]` is the terminal launcher for the same Core evaluator.
 
 ## System-audio transcription benchmark
