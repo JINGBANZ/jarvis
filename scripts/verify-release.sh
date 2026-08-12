@@ -4,8 +4,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 ZIP="${1:-}"
-if [[ -z "$ZIP" || ! -f "$ZIP" || -L "$ZIP" ]]; then
-  echo "usage: $0 Jarvis-<version>.zip" >&2
+EXPECTED_RELEASE_TAG="${2:-}"
+if [[ $# -gt 2 || -z "$ZIP" || ! -f "$ZIP" || -L "$ZIP" ]]; then
+  echo "usage: $0 Jarvis-<version>.zip [v<version>]" >&2
   exit 2
 fi
 ZIP="$(cd "$(dirname "$ZIP")" && pwd)/$(basename "$ZIP")"
@@ -45,6 +46,10 @@ VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \
   "$EXTRACTED_APP/Contents/Info.plist")"
 if [[ "$(basename "$ZIP")" != "Jarvis-$VERSION.zip" ]]; then
   echo "error: archive filename does not match bundled version $VERSION" >&2
+  exit 1
+fi
+if [[ -n "$EXPECTED_RELEASE_TAG" && "$EXPECTED_RELEASE_TAG" != "v$VERSION" ]]; then
+  echo "error: expected release tag $EXPECTED_RELEASE_TAG does not match bundled version $VERSION" >&2
   exit 1
 fi
 ARCHITECTURES="$(lipo -archs "$EXTRACTED_APP/Contents/MacOS/$BIN_NAME")"

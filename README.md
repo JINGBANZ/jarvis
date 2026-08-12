@@ -44,7 +44,7 @@ flowchart TD
 The detailed loop and its design rationale live in the
 [architecture guide](./wiki/architecture.md).
 
-## Build from source
+## Developer quick start
 
 Building locally additionally requires Swift 6 and the macOS Command Line Tools.
 

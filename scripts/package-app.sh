@@ -90,5 +90,9 @@ ditto -c -k --keepParent "$APP" "$ZIP"
 
 # Verify the exact archive users receive, not only the pre-compression bundle. A packaging mistake
 # must leave the draft Release unpublished even if signing and notarization already succeeded.
-./scripts/verify-release.sh "$ZIP"
+verify_args=("$ZIP")
+if [[ -n "${EXPECTED_RELEASE_TAG:-}" ]]; then
+  verify_args+=("$EXPECTED_RELEASE_TAG")
+fi
+./scripts/verify-release.sh "${verify_args[@]}"
 echo "✅ $ZIP is notarized and ready to distribute (Apple silicon, macOS 14.2+)"

@@ -8,7 +8,5 @@
 3. Grant the permissions its selected features need, then configure transcription and brain providers
    in **Settings**.
 
-Jarvis is signed with Developer ID and notarized by Apple. To verify the download, place the archive
-and `SHA256SUMS` in the same folder and run `shasum -a 256 -c SHA256SUMS`. Before using it in a
-meeting, review the
+Jarvis is signed with Developer ID and notarized by Apple. Before using it in a meeting, review the
 [privacy and consent requirements](https://github.com/JINGBANZ/jarvis#privacy).

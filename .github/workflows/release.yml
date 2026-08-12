@@ -84,10 +84,15 @@ jobs:
 
       - name: Build, sign, notarize, package
         env:
+          EXPECTED_RELEASE_TAG: ${{ needs.release-please.outputs.tag_name }}
           NOTARY_KEY_BASE64: ${{ secrets.NOTARY_KEY_BASE64 }}
           NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
           NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
         run: |
+          if [[ -z "$EXPECTED_RELEASE_TAG" ]]; then
+            echo "error: release-please did not provide the expected release tag" >&2
+            exit 1
+          fi
           NOTARY_KEY_PATH="$RUNNER_TEMP/AuthKey.p8"
           echo -n "$NOTARY_KEY_BASE64" | base64 --decode -o "$NOTARY_KEY_PATH"
           export NOTARY_KEY_PATH
@@ -120,7 +125,24 @@ jobs:
             cat .github/release-header.md "$CURRENT_NOTES" > "$RELEASE_NOTES"
           fi
 
-          gh release upload "$TAG" "${archives[0]}" SHA256SUMS --clobber
+          ASSET_NAMES="$RUNNER_TEMP/existing-release-assets.txt"
+          ASSET_DIR="$RUNNER_TEMP/existing-release-assets"
+          mkdir -p "$ASSET_DIR"
+          gh release view "$TAG" --json assets --jq '.assets[].name' > "$ASSET_NAMES"
+          # A lost publish response can leave a public Release behind for the retry. Preserve its
+          # assets: reuse byte-identical files and fail closed if an existing name differs.
+          for asset in "${archives[0]}" SHA256SUMS; do
+            if grep -Fxq "$asset" "$ASSET_NAMES"; then
+              gh release download "$TAG" --pattern "$asset" --dir "$ASSET_DIR"
+              if ! cmp -s "$asset" "$ASSET_DIR/$asset"; then
+                echo "error: release already has a different $asset; preserving it" >&2
+                exit 1
+              fi
+              echo "existing release asset is identical: $asset"
+            else
+              gh release upload "$TAG" "$asset"
+            fi
+          done
           gh release edit "$TAG" --notes-file "$RELEASE_NOTES" --draft=false --latest
 
       # Hosted runners are ephemeral, but scrubbing the signing key is cheap insurance (and
