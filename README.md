@@ -14,6 +14,20 @@ session for an immediate, screen-aware hint.
 > with all required consent and where law, workplace policy, and platform terms allow. Read the full
 > [privacy and security model](./wiki/sandbox.md).
 
+## Install Jarvis
+
+**Requirements:** an Apple silicon Mac running macOS 14.2 or later. No developer tools are needed.
+
+[**Download the latest signed and notarized release**](https://github.com/JINGBANZ/jarvis/releases/latest)
+
+1. Under **Assets**, download `Jarvis-<version>.zip` and double-click it to extract the app.
+2. Move `Jarvis.app` to **Applications**, then open it. Jarvis appears in the menu bar rather than
+   the Dock.
+3. Allow Microphone access and, for screen-aware hints, Screen Recording when macOS prompts.
+4. From the menu-bar icon, open **Settings**, choose transcription and brain providers, add any
+   credential those providers require, then select **Start Jarvis**. Allow System Audio Recording
+   when Start requests it so Jarvis can hear the other side.
+
 ## How it works
 
 ```mermaid
@@ -30,10 +44,9 @@ flowchart TD
 The detailed loop and its design rationale live in the
 [architecture guide](./wiki/architecture.md).
 
-## Run Jarvis
+## Build from source
 
-**Requirements:** an Apple silicon Mac running macOS 14.2 or later, Swift 6, and the macOS Command
-Line Tools. An OpenAI API key is needed only when OpenAI provides transcription or coaching.
+Building locally additionally requires Swift 6 and the macOS Command Line Tools.
 
 ```bash
 git clone https://github.com/JINGBANZ/jarvis.git
@@ -41,12 +54,8 @@ cd jarvis
 ./scripts/build-app.sh --run
 ```
 
-On the first run:
-
-1. When macOS asks whether `codesign` can use the `Jarvis Dev` key, choose **Always Allow**.
-2. Allow Microphone access to start. Allow System Audio Recording to hear the other side and Screen
-   Recording for screen-aware hints.
-3. Open **Settings**, choose your transcription and coaching providers, then select **Start Jarvis**.
+On the first local build, macOS asks whether `codesign` can use the `Jarvis Dev` key; choose
+**Always Allow**. The downloaded release does not use this local development identity.
 
 For signing details, permission recovery, and other commands, see
 [Build and run](./wiki/build-and-run.md). Always launch the app through the build script or `open`,

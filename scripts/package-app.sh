@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Package Jarvis.app for distribution: Developer ID signing + notarization + stapling.
-# Produces Jarvis-<version>.zip, which opens on any Apple Silicon Mac (macOS 14+) with no
+# Produces Jarvis-<version>.zip, which opens on any Apple silicon Mac (macOS 14.2+) with no
 # Gatekeeper friction. Driven locally or by CI (.github/workflows/release.yml).
 #
 # Deliberately self-contained rather than layered on build-app.sh: the dev script's self-signed
@@ -88,6 +88,7 @@ xcrun stapler staple "$APP"
 rm -f "$ZIP"
 ditto -c -k --keepParent "$APP" "$ZIP"
 
-# Final check, the way Gatekeeper will assess it ("source=Notarized Developer ID").
-spctl --assess --type execute --verbose "$APP"
-echo "✅ $ZIP is notarized and ready to distribute (Apple Silicon, macOS 14+)"
+# Verify the exact archive users receive, not only the pre-compression bundle. A packaging mistake
+# must leave the draft Release unpublished even if signing and notarization already succeeded.
+./scripts/verify-release.sh "$ZIP"
+echo "✅ $ZIP is notarized and ready to distribute (Apple silicon, macOS 14.2+)"

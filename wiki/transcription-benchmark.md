@@ -161,7 +161,7 @@ PCM is never persisted. A fixture-cleanup failure is a run failure and prevents 
 publishing a success marker.
 
 The command exits nonzero when a platform-supported arm is unavailable or incomplete, capture
-continuity fails, or the strict reconnect acceptance criteria fail. On macOS 14–25, Apple Speech arms
+continuity fails, or the strict reconnect acceptance criteria fail. On macOS 14.2–25, Apple Speech arms
 remain visible in `summary.json` as unavailable because that provider requires macOS 26, but they do
 not fail the runnable matrix. Inspect the summary to distinguish provider recognition/finalization
 behavior from capture or replay failure. Current live evidence and the next requested rerun belong in

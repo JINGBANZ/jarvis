@@ -30,7 +30,7 @@ reconnect mode interrupts only Jarvis's transcription WebSocket, fills the real 
 the replacement is held, then exercises the ordinary replacement path without changing host network
 state. The normal app supplies no benchmark instrumentation: its session contract and `AppDelegate`
 wiring expose no benchmark capability, event construction is skipped, and its direct reconnect path
-is unchanged. On macOS 14–25, Apple Speech arms remain reported as platform-unavailable without
+is unchanged. On macOS 14.2–25, Apple Speech arms remain reported as platform-unavailable without
 failing the runnable matrix. Neither mode changes defaults or runs in the gate. The first complete standard run finished
 35 of 36 repetitions; one GPT Live Transcribe bilingual repetition timed out waiting for its finalized
 stream while capture and delivery continuity remained intact. The automated reconnect run passes all
@@ -133,31 +133,32 @@ and opens its saved report; the standalone script calls the same Core implementa
 covers microphone transcription, audio-route loss, in-place CLI preflight, and Activity-audit
 completion: no runtime error autonomously activates Jarvis, opens a browser, or presents a modal;
 fixed notices remain available in Activity. The gate statically rejects unreviewed presentation APIs.
-The source tree is prepared for a public launch without giving public input a direct privileged-agent
-path. CI, release, and agent automation use hosted runners; no self-hosted runner remains registered.
+The public source tree gives no public input a direct privileged-agent path. CI, release, and agent
+automation use hosted runners; no self-hosted runner remains registered.
 Automatic agent review is limited to same-repository PR branches, `@claude` is owner-invoked, issue
 discovery keeps its scheduled/manual triggers, and automatic issue implementation relies on the
 central workflow's existing author write-access check. Reusable agent workflows track the shared
 repository's `main` branch; retained third-party Actions are SHA-pinned and Dependabot-managed.
-Public docs
-disclose the current unsandboxed boundary, contribution and private-reporting paths are present, and
-release app bundles carry the Apache license plus third-party notices. The existing Git/PR history is
-intentionally preserved after the full-history secret scan found no credential leak; current-tree
-machine-specific instructions were generalized instead of rewriting repository identity and provenance.
+Public docs disclose the current unsandboxed boundary, contribution and private-reporting paths are
+present, and the latest GitHub Release carries a Developer ID-signed, notarized Apple silicon app.
+The release workflow requires macOS 14.2 or later, re-extracts and checks the final zip as the user
+receives it, and attaches a SHA-256 checksum; the app bundle carries the Apache license plus
+third-party notices. The existing Git/PR history is intentionally preserved after the full-history
+secret scan found no credential leak; current-tree machine-specific instructions were generalized
+instead of rewriting repository identity and provenance.
 
 ## Next action
 
 Re-enable the four agent workflows. Their hosted definitions and existing source-level gates are
 ready on `main`; they were disabled during rollout so the old base-branch copies could not target the
 removed self-hosted runner.
-Before changing repository visibility, delete the historical self-hosted runs and artifacts after
-owner approval: the audit found no credential leak, but those logs expose runner, account, and
-installed-tool paths.
+Delete the historical self-hosted runs and artifacts after owner approval: the audit found no
+credential leak, but those logs expose runner, account, and installed-tool paths.
 Replace release-please's `GITHUB_TOKEN` with a GitHub App token
 before making CI a required check, because token-authored Release PRs do not trigger `pull_request`
-workflows. At visibility change, enable private vulnerability reporting, secret scanning and push
-protection, Dependabot security updates, fork-workflow approval, and a `main` ruleset requiring pull
-requests and the CI check. Keep self-hosted runners unavailable to public forks.
+workflows. Confirm private vulnerability reporting, secret scanning and push protection, Dependabot
+security updates, fork-workflow approval, and a `main` ruleset requiring pull requests and the CI
+check for the public repository. Keep self-hosted runners unavailable to public forks.
 
 
 Run a live chronology smoke on a fresh session: let one speaker finish a longer question while the
@@ -230,14 +231,12 @@ thin OS shell, verified by the smoke run.
 - `Sources/JarvisApp/Viewer/ActivityViewer.swift` — the in-app `WKWebView` activity viewer, with the current non-persisted readiness badge, an exact selectable/copyable session ID, and one-click **Evaluate** / **Open report** agentic audit flow.
 - `Sources/EvalPrep/main.swift` — the Foundation-only terminal entry point for the same `AgenticEvaluator` Activity invokes; `scripts/eval-session.sh` runs it over the repo + session dir.
 - `Sources/CJarvisAEC/lib/libjarvis-aec.a` — the prebuilt, zero-dylib WebRTC AEC3 + classic VAD native edge (the `CJarvisAEC` target; rebuilt by `scripts/build-aec.sh`).
-- `.github/workflows/` + `scripts/package-app.sh` — hosted automation only: owner-gated development agents, the repository gate on pull requests, then release-please Release PR → Developer ID-signed, notarized, stapled `Jarvis-<version>.zip` with Apache and third-party notices attached to a GitHub Release ([build-and-run.md → Distribution](./build-and-run.md#distribution--signed-notarized-releases-from-ci)).
+- `.github/workflows/` + `scripts/package-app.sh` + `scripts/verify-release.sh` — hosted automation only: owner-gated development agents, the repository gate on pull requests, then release-please Release PR → Developer ID-signed, notarized, stapled, re-extracted, and Gatekeeper-checked `Jarvis-<version>.zip` with Apache and third-party notices plus `SHA256SUMS` attached to a GitHub Release ([build-and-run.md → Distribution](./build-and-run.md#distribution--signed-notarized-releases-from-ci)).
 - `AGENTS.md` + `.github/workflows/sync-shared-rules.yml` — project-specific agent guidance with a
   machine-managed shared-rules block that syncs weekly from `JINGBANZ/rules`; `CLAUDE.md` imports the
   same canonical file.
 
 ## Not yet built
 
-- **First notarized release** — the release workflow needs its five repo secrets (Developer ID `.p12` + App Store Connect API key; names in `.github/workflows/release.yml`) set before the first Release PR is merged; the first run is the pipeline's live test.
 - **Universal binary** — `Sources/CJarvisAEC/lib/libjarvis-aec.a` is arm64-only; `lipo` in an x86_64 slice if Intel is ever needed.
 - **Neural double-talk canceller** (DTLN / Muesli-style on the same aligned streams) — the escalation if AEC3 over-attenuates the user under loud far audio in practice.
-- **Minimum macOS version confirmed** — currently targeting macOS 14+; confirm against the APIs actually used (ScreenCaptureKit needs 13+).

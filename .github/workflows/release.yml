@@ -94,17 +94,34 @@ jobs:
           ./scripts/package-app.sh
 
       # The Release is created as a draft (release-please-config.json), so a failed build/sign/
-      # notarize run never leaves a public Release without its app — publishing happens only after
-      # the asset is attached. force-tag-creation makes release-please create the git tag
-      # immediately (GitHub otherwise defers tagging drafts until publish, and a lingering untagged
-      # draft would make later release-please runs miss the previous release and garble changelogs).
+      # notarize/verify run never leaves a public Release without its app — publishing happens only
+      # after the assets and user-facing install notes are ready. force-tag-creation makes
+      # release-please create the git tag immediately (GitHub otherwise defers tagging drafts until
+      # publish, and a lingering untagged draft would make later release-please runs miss the previous
+      # release and garble changelogs).
       - name: Attach the app and publish the Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.release-please.outputs.tag_name }}
         run: |
-          gh release upload "$TAG" Jarvis-*.zip
-          gh release edit "$TAG" --draft=false --latest
+          archives=(Jarvis-*.zip)
+          if [[ ${#archives[@]} -ne 1 || ! -f "${archives[0]}" ]]; then
+            echo "error: expected exactly one Jarvis release archive" >&2
+            exit 1
+          fi
+          shasum -a 256 "${archives[0]}" > SHA256SUMS
+
+          CURRENT_NOTES="$RUNNER_TEMP/current-release-notes.md"
+          RELEASE_NOTES="$RUNNER_TEMP/release-notes.md"
+          gh release view "$TAG" --json body --jq .body > "$CURRENT_NOTES"
+          if grep -Fq '<!-- jarvis-release-install -->' "$CURRENT_NOTES"; then
+            cp "$CURRENT_NOTES" "$RELEASE_NOTES"
+          else
+            cat .github/release-header.md "$CURRENT_NOTES" > "$RELEASE_NOTES"
+          fi
+
+          gh release upload "$TAG" "${archives[0]}" SHA256SUMS --clobber
+          gh release edit "$TAG" --notes-file "$RELEASE_NOTES" --draft=false --latest
 
       # Hosted runners are ephemeral, but scrubbing the signing key is cheap insurance (and
       # required hygiene if this ever moves to a self-hosted runner).

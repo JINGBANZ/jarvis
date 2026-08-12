@@ -5,7 +5,7 @@ local-process boundaries. Small, testable changes are preferred.
 
 ## Before opening a pull request
 
-1. Use an Apple silicon Mac with macOS 14+, Swift 6, and the Command Line Tools.
+1. Use an Apple silicon Mac with macOS 14.2+, Swift 6, and the Command Line Tools.
 2. Create a branch or isolated worktree; never commit directly to `main`.
 3. Put Foundation-only logic in `JarvisCore` and keep OS-bound code thin in `JarvisApp` or
    `JarvisOverlay`. Read [`CLAUDE.md`](./CLAUDE.md) and the relevant page under [`wiki/`](./wiki/).
