@@ -22,9 +22,9 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         case commit(RealtimeJarvisManagedTurnCoordinator.Turn, URLSessionWebSocketTask, Int)
     }
 
-    var onTurnEnd: (@Sendable () -> Void)?
+    var onTurnEnd: (@Sendable (_ transcriptBoundary: Int) -> Void)?
     var onSilence: (@Sendable (TimeInterval) -> Void)?
-    var onSpeechActivityChanged: (@Sendable (Bool) -> Void)?
+    var onTranscriptionWorkChanged: (@Sendable (Bool) -> Void)?
     var onConnectionStateChange: (@Sendable (TranscriptionConnectionState) -> Void)?
     /// Fired when transcription becomes unusable, either from an unrecoverable provider rejection or
     /// after reconnection is abandoned, so the app can stop instead of lying green.
@@ -71,6 +71,15 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
     private var stopped = false
     private var connected = false        // true only between "session ready" and the next drop/close
     private var everConnected = false    // distinguishes the first connect from a reconnect
+    /// Closes the short handoff between snapshotting old item state and accepting new outage audio.
+    /// Producers set the companion bit instead of calling into the lifecycle until initialization
+    /// completes, avoiding both a missed barrier and an inverse lock order.
+    private var reconnectRecoveryIsInitializing = false
+    private var bufferedAudioDuringRecoveryInitialization = false
+    /// Stays set until replacement readiness snapshots it. This closes the race where a producer
+    /// accepts outage audio, readiness wins before its lifecycle callback, and the gate otherwise
+    /// sees no untracked replay work.
+    private var hasUntrackedBufferedReplayAudio = false
     private var rotating = false         // an EXPECTED server rotation is mid-flight; quiet the noise it makes
     private var terminalFailureReported = false
     private var generation = 0           // rejects late callbacks from a replaced socket
@@ -87,12 +96,13 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         speaker: Speaker = .me,
         transcript: RollingTranscript,
         clock: Clock,
+        sessionStart: TimeInterval,
         silenceTimeout: TimeInterval,
         silenceMaxInterval: TimeInterval,
         silenceIdleCutoff: TimeInterval = .infinity,
         silenceDurationMs: Int = 1000,
         noiseReduction: NoiseReductionMode = .auto,
-        turnDebounce: TimeInterval = 0.4,
+        transcriptBatchingWindow: TimeInterval = 0.4,
         transcriptionTerminalTimeout: TimeInterval = 8,
         transcriptionActiveTimeout: TimeInterval = 180,
         maxBufferedAudioSeconds: TimeInterval = 60,
@@ -108,7 +118,6 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         self.languageProfile = languageProfile
         self.speaker = speaker
         self.clock = clock
-        let sessionStart = clock.now()
         self.sessionStart = sessionStart
         self.silenceDurationMs = silenceDurationMs
         self.noiseReduction = noiseReduction
@@ -137,15 +146,15 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
             transcript: transcript,
             clock: clock,
             sessionStart: sessionStart,
-            turnDebounce: turnDebounce,
+            transcriptBatchingWindow: transcriptBatchingWindow,
             silenceTimeout: silenceTimeout,
             silenceMaxInterval: silenceMaxInterval,
             silenceIdleCutoff: silenceIdleCutoff,
             silenceEnabled: speaker == .me,
-            onTurnEnd: { [weak self] in self?.onTurnEnd?() },
+            onTurnEnd: { [weak self] boundary in self?.onTurnEnd?(boundary) },
             onSilence: { [weak self] quiet in self?.onSilence?(quiet) },
-            onSpeechActivityChanged: { [weak self] active in
-                self?.onSpeechActivityChanged?(active)
+            onTranscriptionWorkChanged: { [weak self] hasPendingWork in
+                self?.onTranscriptionWorkChanged?(hasPendingWork)
             })
         let onFinalizedItem: (@Sendable (RealtimeTranscriptionLedger.FinalizedItem) -> Void)?
         if benchmark == nil {
@@ -191,6 +200,9 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         lock.lock()
         stopped = false; reconnectAttempt = 0; isReconnecting = false; rotating = false
         terminalFailureReported = false
+        reconnectRecoveryIsInitializing = false
+        bufferedAudioDuringRecoveryInitialization = false
+        hasUntrackedBufferedReplayAudio = false
         pendingAudioTimelineOrigin = 0; activeAudioTimelineOrigin = 0
         jarvisManagedTurnCoordinator?.clear()
         jarvisManagedSpeechBuffer?.clear()
@@ -244,6 +256,9 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         let t = task; task = nil
         let s = session; session = nil
         pendingPingGeneration = nil
+        reconnectRecoveryIsInitializing = false
+        bufferedAudioDuringRecoveryInitialization = false
+        hasUntrackedBufferedReplayAudio = false
         generation += 1                 // invalidate every callback retained by the old task
         audioBuffer.clear()             // atomic with `stopped`: no producer can append after this
         jarvisManagedTurnCoordinator?.clear()
@@ -301,9 +316,21 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         lock.lock()
         guard !stopped else { lock.unlock(); return }
         let connectionUnavailable = !connected
+        let bufferingForReconnect = everConnected && !connected
         let readyChunks = jarvisManagedSpeechBuffer?.append(chunk) ?? [chunk]
         let evicted = appendToAudioBuffer(readyChunks)
+        let publishReplayBarrier = bufferingForReconnect && !readyChunks.isEmpty
+            && !reconnectRecoveryIsInitializing
+        if bufferingForReconnect, !readyChunks.isEmpty {
+            hasUntrackedBufferedReplayAudio = true
+            if reconnectRecoveryIsInitializing {
+                bufferedAudioDuringRecoveryInitialization = true
+            }
+        }
         lock.unlock()
+        if publishReplayBarrier {
+            transcriptionLifecycle.recordBufferedReplayAudio()
+        }
         continuityReporter.recordDelivery(sequence: sequenceNumber, pcm16: pcm, at: observedAt)
         reportBufferEviction(evicted, connectionUnavailable: connectionUnavailable)
         pumpAudioIfReady()
@@ -321,8 +348,21 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
             lock.lock()
             guard !stopped else { lock.unlock(); return }
             let connectionUnavailable = !connected
-            let evicted = appendToAudioBuffer(jarvisManagedSpeechBuffer?.speechStarted() ?? [])
+            let bufferingForReconnect = everConnected && !connected
+            let readyChunks = jarvisManagedSpeechBuffer?.speechStarted() ?? []
+            let evicted = appendToAudioBuffer(readyChunks)
+            let publishReplayBarrier = bufferingForReconnect && !readyChunks.isEmpty
+                && !reconnectRecoveryIsInitializing
+            if bufferingForReconnect, !readyChunks.isEmpty {
+                hasUntrackedBufferedReplayAudio = true
+                if reconnectRecoveryIsInitializing {
+                    bufferedAudioDuringRecoveryInitialization = true
+                }
+            }
             lock.unlock()
+            if publishReplayBarrier {
+                transcriptionLifecycle.recordBufferedReplayAudio()
+            }
             reportBufferEviction(evicted, connectionUnavailable: connectionUnavailable)
             pumpAudioIfReady()
         case .ended(let startedAt, let commitAt):
@@ -639,8 +679,8 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
             }
         case RealtimeSession.completedTranscriptionType:
             // A completed utterance fragment: record it immediately (so the model's context is
-            // whole), but DON'T fire the coach yet — debounce so rapid fragments of one spoken
-            // sentence coalesces into a single trigger. `audio_start_ms`, captured by the ledger on
+            // whole), but DON'T fire the coach yet — briefly batch rapid fragments of one spoken
+            // sentence into a single trigger. `audio_start_ms`, captured by the ledger on
             // speech_started, timestamps the line when it was spoken rather than when inference ended.
             guard let itemID = obj["item_id"] as? String else {
                 jlog("Jarvis realtime [\(speaker.rawValue)]: completed transcription missing item_id")
@@ -771,13 +811,17 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         activeAudioTimelineOrigin = audioBuffer.oldestQueuedCaptureTime
             ?? pendingAudioTimelineOrigin
         let bufferedChunks = audioBuffer.queuedChunkCount
+        let hasUntrackedReplayAudio = hasUntrackedBufferedReplayAudio
+        hasUntrackedBufferedReplayAudio = false
         // Keep old-socket deltas throughout reconnect attempts so terminal failure can still salvage
         // them. Once a replacement is ready, its replayed PCM becomes authoritative and old item IDs
         // must leave before the replacement emits its own lifecycle events.
         connected = true
         lock.unlock()
         let recovery = wasReconnect
-            ? transcriptionLifecycle.markReplacementReady(socketGeneration: socketGeneration)
+            ? transcriptionLifecycle.markReplacementReady(
+                socketGeneration: socketGeneration,
+                hasUntrackedReplayAudio: hasUntrackedReplayAudio)
             : nil
         invalidateReadyTimer(task: task, generation: socketGeneration)
         let id = sessionID.map { ", session \($0)" } ?? ""
@@ -936,6 +980,9 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         let droppedJarvisManagedTurns = jarvisManagedTurnCoordinator?.prepareForReconnect(
             oldestAvailableSequenceNumber: replay.oldestSequenceNumber) ?? []
         pendingAudioTimelineOrigin = replay.oldestCapturedAt ?? failureAt
+        reconnectRecoveryIsInitializing = true
+        bufferedAudioDuringRecoveryInitialization = false
+        hasUntrackedBufferedReplayAudio = false
         lock.unlock()
 
         benchmark?.observer.record(.init(
@@ -952,6 +999,14 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
 
         let interruptedItems = transcriptionLifecycle.beginReconnectRecovery(
             replayAvailable: audioBuffer.bufferedChunkCount > 0)
+        lock.lock()
+        let bufferedDuringInitialization = bufferedAudioDuringRecoveryInitialization
+        reconnectRecoveryIsInitializing = false
+        bufferedAudioDuringRecoveryInitialization = false
+        lock.unlock()
+        if bufferedDuringInitialization {
+            transcriptionLifecycle.recordBufferedReplayAudio()
+        }
         reportDroppedJarvisManagedTurns(droppedJarvisManagedTurns)
         reportBufferEviction(replay.evicted, connectionUnavailable: true)
         // Old-socket deltas are now held by the reconnect recovery gate. They remain a fallback if

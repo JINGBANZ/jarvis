@@ -1,9 +1,9 @@
 import Foundation
 
 /// Accumulates the `…transcription.completed` fragments of one spoken turn so the coach sees the
-/// WHOLE utterance, not just the first fragment. The shared transcription coordinator debounces
-/// fragment arrival and drains this buffer only after the provider reports no unfinished work. Pure
-/// and lock-guarded so the coalescing is unit-testable outside the app target.
+/// WHOLE utterance, not just the first fragment. The shared transcription coordinator briefly waits
+/// to batch nearby fragments and drains this buffer only after the provider reports no unfinished
+/// work. Pure and lock-guarded so the batching is unit-testable outside the app target.
 public final class UtteranceBuffer: @unchecked Sendable {
     public enum DrainResult: Equatable, Sendable {
         case empty
@@ -14,8 +14,8 @@ public final class UtteranceBuffer: @unchecked Sendable {
     private let lock = NSLock()
     private var text = ""
     private var fragments = 0
-    /// A debounce expired while the provider still owned unfinished work. The lifecycle, rather than
-    /// a polling timer, uses this bit to re-arm the debounce once that work is terminal.
+    /// A batching delay expired while the provider still owned unfinished work. The lifecycle,
+    /// rather than a polling timer, uses this bit to schedule a fresh batch once that work is terminal.
     private var waitingForPendingTranscriptions = false
 
     public init() {}
@@ -26,14 +26,14 @@ public final class UtteranceBuffer: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         text += (text.isEmpty ? "" : " ") + fragment
         fragments += 1
-        // This new final fragment owns a fresh debounce timer. If another item is still active, that
-        // timer will put the buffer back into the waiting state when it expires.
+        // This new final fragment starts a fresh batching delay. If another item is still active,
+        // expiry will put the buffer back into the waiting state.
         waitingForPendingTranscriptions = false
     }
 
     /// Drain only after every provider item for this speaker is terminal. A later fragment can already
-    /// be active when the previous fragment's final transcript arrives, so elapsed debounce time alone
-    /// is not evidence that the semantic turn ended.
+    /// be active when the previous fragment's final transcript arrives, so an elapsed batching delay
+    /// alone is not evidence that the semantic turn ended.
     public func drainIfSettled(hasPendingTranscriptions: Bool) -> DrainResult {
         lock.lock(); defer { lock.unlock() }
         guard fragments > 0 else {
@@ -49,8 +49,8 @@ public final class UtteranceBuffer: @unchecked Sendable {
         return result
     }
 
-    /// Returns true exactly once when a timer-deferred turn has become eligible for a fresh
-    /// debounce. This also wakes a buffered turn when the last pending item resolves without text.
+    /// Returns true exactly once when a delayed batch has become eligible for a fresh wait. This also
+    /// wakes a buffered turn when the last pending item resolves without text.
     public func shouldResumeAfterPendingTranscriptionsSettle(
         hasPendingTranscriptions: Bool
     ) -> Bool {

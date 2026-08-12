@@ -20,7 +20,7 @@ public final class CoachDriver: @unchecked Sendable {
     private let clock: Clock
     private let sessionStart: TimeInterval
     private let history = CoachHistory()
-    private let speechActivity = SpeechActivityGate()
+    private let transcriptionSettlement = TranscriptionSettlementGate()
     private let automaticAttemptDelay: AutomaticAttemptDelay
     private let coachingAttempts: (any CoachingAttemptAuditing)?
 
@@ -46,12 +46,19 @@ public final class CoachDriver: @unchecked Sendable {
     /// Transcript is committed only by a complete, non-truncated `speak` or `stay_silent`.
     private var committedTranscriptCount = 0
     /// Natural triggers coalesce while an attempt or automatic pending-work wait owns the slot.
-    private var pendingTrigger: TriggerReason?
+    private var pendingTrigger: PendingTrigger?
     /// Monotonic pulse used to race bounded automatic backoff against a newly coalesced trigger
     /// without losing a trigger that lands just before the async waiter is installed.
     private var pendingTriggerGeneration: UInt = 0
     private var pendingTriggerWaiters: [UUID: CheckedContinuation<Void, Never>] = [:]
     private var nextAttemptID = 0
+
+    /// A turn-end carries the transcript boundary that caused it. This makes a delayed callback
+    /// idempotent after another admitted attempt already committed the same finalized speech.
+    private struct PendingTrigger {
+        let reason: TriggerReason
+        let transcriptBoundary: Int?
+    }
 
     private struct AttemptBrain {
         let routeRevision: UInt
@@ -65,12 +72,20 @@ public final class CoachDriver: @unchecked Sendable {
 
     private struct PendingCoachingWork {
         var reason: TriggerReason
+        /// Only an explicit hotkey wake may cross unsettled transcription. A retry of a failed
+        /// manual hint is automatic and resets this bit unless another hotkey press joins it.
+        var bypassesTranscriptionSettlement: Bool
         var wake: CoachingAttemptAuditEvent.Wake = .trigger
         /// Completed effects safe to carry between attempts and providers: ordinary user context
         /// only. At most the latest screen observation is retained. Never raw reasoning, tool ids,
         /// or call/result linkage.
         var observations: [ChatMessage] = []
         var manualHintPrepared = false
+
+        init(reason: TriggerReason) {
+            self.reason = reason
+            bypassesTranscriptionSettlement = reason == .manualHint
+        }
     }
 
     private enum AttemptResult {
@@ -131,6 +146,7 @@ public final class CoachDriver: @unchecked Sendable {
         screen: ScreenCapturing,
         overlay: OverlayRendering,
         clock: Clock,
+        sessionStart: TimeInterval? = nil,
         coachingAttempts: (any CoachingAttemptAuditing)? = nil,
         automaticAttemptDelay: AutomaticAttemptDelay? = nil
     ) {
@@ -142,7 +158,7 @@ public final class CoachDriver: @unchecked Sendable {
         self.overlay = overlay
         self.clock = clock
         self.coachingAttempts = coachingAttempts
-        self.sessionStart = clock.now()
+        self.sessionStart = sessionStart ?? clock.now()
         self.automaticAttemptDelay = automaticAttemptDelay ?? Self.defaultAutomaticAttemptDelay
     }
 
@@ -260,10 +276,46 @@ public final class CoachDriver: @unchecked Sendable {
         return true
     }
 
-    /// Transcription activity feeds both speakers into one aggregate gate. Automatic pending-work
-    /// attempts wait until both sides are inactive; natural triggers still coalesce while waiting.
-    public func updateSpeechActivity(_ isActive: Bool, for speaker: Speaker) {
-        speechActivity.setActive(isActive, for: speaker)
+    /// Provider state feeds both speakers into one aggregate gate. `hasPendingWork` means the provider
+    /// still owns speech or transcript work, not merely that the audio waveform is non-silent.
+    public func updateTranscriptionWork(_ hasPendingWork: Bool, for speaker: Speaker) {
+        transcriptionSettlement.setUnsettled(hasPendingWork, for: speaker)
+    }
+
+    /// Admit one attempt only after both transcription streams are settled. Every automatic path
+    /// reaches this boundary: the first trigger, a trigger queued behind an in-flight model call,
+    /// and a pending-work retry. A manual hint is the explicit immediate exception.
+    private func waitForTranscriptionSettlement(
+        before work: PendingCoachingWork
+    ) async -> PendingCoachingWork {
+        guard !work.bypassesTranscriptionSettlement else { return work }
+
+        let interruptGeneration = transcriptionSettlement.interruptGenerationSnapshot()
+        var settledWork = work
+        var receivedTrigger = false
+        var wake = takePendingTriggerSnapshot()
+        if let pending = wake.trigger?.reason {
+            receivedTrigger = true
+            settledWork.reason = Self.coalescing(settledWork.reason, with: pending)
+            settledWork.bypassesTranscriptionSettlement = pending == .manualHint
+        }
+        guard !settledWork.bypassesTranscriptionSettlement else {
+            settledWork.wake = .trigger
+            return settledWork
+        }
+
+        await transcriptionSettlement.waitUntilSettled(
+            unlessInterruptedAfter: interruptGeneration)
+        wake = takePendingTriggerSnapshot()
+        if let pending = wake.trigger?.reason {
+            receivedTrigger = true
+            settledWork.reason = Self.coalescing(settledWork.reason, with: pending)
+            settledWork.bypassesTranscriptionSettlement = pending == .manualHint
+        }
+        if receivedTrigger {
+            settledWork.wake = .trigger
+        }
+        return settledWork
     }
 
     private func currentCommittedTranscriptCount() -> Int {
@@ -291,28 +343,33 @@ public final class CoachDriver: @unchecked Sendable {
     private enum TriggerClaim {
         case claimed
         case pending
+        case covered
         case exhausted
     }
 
-    private func claimOrPend(_ reason: TriggerReason) -> TriggerClaim {
+    private func claimOrPend(_ trigger: PendingTrigger) -> TriggerClaim {
         let waiters: [CheckedContinuation<Void, Never>]
         stateLock.lock()
         if routeIsExhausted {
             stateLock.unlock()
             return .exhausted
         }
+        if isCoveredByCommittedTranscript(trigger) {
+            stateLock.unlock()
+            return .covered
+        }
         if isHandling {
-            pendingTrigger = Self.coalescing(pendingTrigger, with: reason)
+            pendingTrigger = Self.coalescing(pendingTrigger, with: trigger)
             pendingTriggerGeneration &+= 1
             waiters = Array(pendingTriggerWaiters.values)
             pendingTriggerWaiters.removeAll()
             stateLock.unlock()
             waiters.forEach { $0.resume() }
-            if reason == .manualHint {
+            if trigger.reason == .manualHint {
                 // A hint arriving after an automatic attempt has parked on unsettled speech must
                 // wake that exact pending attempt. The trigger stays queued until the fresh-attempt
                 // boundary consumes it together with the newest transcript.
-                speechActivity.interruptWaiters()
+                transcriptionSettlement.interruptWaiters()
             }
             return .pending
         }
@@ -333,12 +390,40 @@ public final class CoachDriver: @unchecked Sendable {
         return incoming
     }
 
+    private static func coalescing(
+        _ existing: PendingTrigger?,
+        with incoming: PendingTrigger
+    ) -> PendingTrigger {
+        guard let existing else { return incoming }
+        let reason = coalescing(existing.reason, with: incoming.reason)
+        let boundary: Int?
+        if reason == .turnEnd {
+            let turnEnds = [existing, incoming].filter { $0.reason == .turnEnd }
+            // A legacy/provider-less turn has no identity and must stay conservative when mixed
+            // with identified turns; only fully identified callbacks are safe to suppress.
+            boundary = turnEnds.allSatisfy { $0.transcriptBoundary != nil }
+                ? turnEnds.compactMap(\.transcriptBoundary).max()
+                : nil
+        } else {
+            boundary = nil
+        }
+        return PendingTrigger(reason: reason, transcriptBoundary: boundary)
+    }
+
+    /// Must be called while `stateLock` is held.
+    private func isCoveredByCommittedTranscript(_ trigger: PendingTrigger) -> Bool {
+        trigger.reason == .turnEnd
+            && trigger.transcriptBoundary.map { $0 <= committedTranscriptCount } == true
+    }
+
     /// Atomically take a coalesced trigger and the pulse generation at the same boundary. A later
     /// generation can then wake bounded backoff even if it arrives before the waiter is registered.
-    private func takePendingTriggerSnapshot() -> (reason: TriggerReason?, generation: UInt) {
+    private func takePendingTriggerSnapshot() -> (trigger: PendingTrigger?, generation: UInt) {
         stateLock.lock()
         defer { stateLock.unlock() }
-        let pending = pendingTrigger
+        let pending = pendingTrigger.flatMap {
+            isCoveredByCommittedTranscript($0) ? nil : $0
+        }
         pendingTrigger = nil
         return (pending, pendingTriggerGeneration)
     }
@@ -384,12 +469,14 @@ public final class CoachDriver: @unchecked Sendable {
 
     /// Atomically take the next trigger or release the slot. A trigger arriving at the completion
     /// boundary can therefore never be orphaned.
-    private func finishOrTakeNextTrigger() -> TriggerReason? {
+    private func finishOrTakeNextTrigger() -> PendingTrigger? {
         stateLock.lock()
         defer { stateLock.unlock() }
         if let pendingTrigger {
             self.pendingTrigger = nil
-            return pendingTrigger
+            if !isCoveredByCommittedTranscript(pendingTrigger) {
+                return pendingTrigger
+            }
         }
         isHandling = false
         return nil
@@ -647,12 +734,21 @@ public final class CoachDriver: @unchecked Sendable {
     }
 
     @discardableResult
-    public func handleTrigger(_ reason: TriggerReason) async -> TurnOutcome {
-        switch claimOrPend(reason) {
+    public func handleTrigger(
+        _ reason: TriggerReason,
+        transcriptBoundary: Int? = nil
+    ) async -> TurnOutcome {
+        let trigger = PendingTrigger(
+            reason: reason,
+            transcriptBoundary: reason == .turnEnd ? transcriptBoundary : nil)
+        switch claimOrPend(trigger) {
         case .claimed:
             break
         case .pending:
             jlog("… busy; batching this \(reason) into the pending conversation")
+            return .busy
+        case .covered:
+            jlog("… coalesced deferred turn for already-committed transcript")
             return .busy
         case .exhausted:
             jlog("… provider route already exhausted")
@@ -664,6 +760,11 @@ public final class CoachDriver: @unchecked Sendable {
         var latestOutcome: TurnOutcome = .silentByModel
 
         while !Task.isCancelled {
+            work = await waitForTranscriptionSettlement(before: work)
+            if Task.isCancelled {
+                releaseHandlingSlot()
+                return .cancelled
+            }
             guard let attempt = await selectBrainForAttempt() else {
                 releaseHandlingSlot()
                 return .brainError
@@ -685,7 +786,7 @@ public final class CoachDriver: @unchecked Sendable {
                 guard let next = finishOrTakeNextTrigger() else {
                     return latestOutcome
                 }
-                work = PendingCoachingWork(reason: next)
+                work = PendingCoachingWork(reason: next.reason)
 
             case .skipped(let outcome):
                 latestOutcome = outcome
@@ -696,7 +797,7 @@ public final class CoachDriver: @unchecked Sendable {
                 guard let next = finishOrTakeNextTrigger() else {
                     return latestOutcome
                 }
-                work = PendingCoachingWork(reason: next)
+                work = PendingCoachingWork(reason: next.reason)
 
             case .cancelled:
                 if let id = execution.id {
@@ -744,9 +845,9 @@ public final class CoachDriver: @unchecked Sendable {
                 }
 
                 var wake = takePendingTriggerSnapshot()
-                var receivedTrigger = wake.reason != nil
-                var explicitManualWake = wake.reason == .manualHint
-                if let reason = wake.reason {
+                var receivedTrigger = wake.trigger != nil
+                var explicitManualWake = wake.trigger?.reason == .manualHint
+                if let reason = wake.trigger?.reason {
                     failedWork.reason = Self.coalescing(failedWork.reason, with: reason)
                 }
                 work = failedWork
@@ -754,7 +855,7 @@ public final class CoachDriver: @unchecked Sendable {
 
                 // A natural trigger and the automatic wake are the same pending attempt. Without a
                 // natural wake, use a bounded delay so a quiet provider outage cannot spin.
-                if wake.reason == nil && !routeChanged {
+                if wake.trigger == nil && !routeChanged {
                     await waitForAutomaticWakeOrDelay(
                         sequence: automaticSequence,
                         after: wake.generation)
@@ -764,29 +865,15 @@ public final class CoachDriver: @unchecked Sendable {
                     return .cancelled
                 }
 
-                // A trigger may arrive while the delay is sleeping. Consume it before the fresh
-                // attempt so an explicit manual hint retains its force-speak semantics. Snapshot
-                // the speech-interrupt generation first so a hint landing between this trigger
-                // snapshot and waiter registration cannot be lost.
-                let speechInterruptGeneration = speechActivity.interruptGenerationSnapshot()
+                // A trigger may arrive while the delay is sleeping. Consume it before the shared
+                // admission boundary so an explicit manual hint retains its force-speak semantics.
                 wake = takePendingTriggerSnapshot()
-                if let reason = wake.reason {
+                if let reason = wake.trigger?.reason {
                     receivedTrigger = true
                     explicitManualWake = explicitManualWake || reason == .manualHint
                     work.reason = Self.coalescing(work.reason, with: reason)
                 }
-                if !explicitManualWake {
-                    await speechActivity.waitUntilInactive(
-                        unlessInterruptedAfter: speechInterruptGeneration)
-                    // Consume a trigger that arrived while parked. Natural triggers still wait for
-                    // speech inactivity; a manual hint interrupts that wait and turns this same
-                    // pending-work attempt into the force-speak attempt.
-                    wake = takePendingTriggerSnapshot()
-                    if let reason = wake.reason {
-                        receivedTrigger = true
-                        work.reason = Self.coalescing(work.reason, with: reason)
-                    }
-                }
+                work.bypassesTranscriptionSettlement = explicitManualWake
                 work.wake = receivedTrigger ? .trigger : .pendingWork
             }
         }

@@ -11,6 +11,7 @@ enum TranscriptionSessionFactory {
         speaker: Speaker,
         transcript: RollingTranscript,
         clock: Clock,
+        sessionStart: TimeInterval,
         config: Config,
         networkStatus: @escaping @Sendable () -> String,
         benchmark: TranscriptionBenchmarkInstrumentation? = nil
@@ -24,6 +25,7 @@ enum TranscriptionSessionFactory {
                 speaker: speaker,
                 transcript: transcript,
                 clock: clock,
+                sessionStart: sessionStart,
                 silenceTimeout: config.silenceTimeoutSeconds,
                 silenceMaxInterval: config.silenceMaxIntervalSeconds,
                 silenceIdleCutoff: speaker == .me
@@ -31,7 +33,7 @@ enum TranscriptionSessionFactory {
                     : .infinity,
                 silenceDurationMs: config.vadSilenceDurationMs,
                 noiseReduction: config.audioNoiseReduction,
-                turnDebounce: config.turnDebounceSeconds,
+                transcriptBatchingWindow: config.transcriptBatchingWindowSeconds,
                 maxBufferedAudioSeconds: config.maxBufferedAudioSeconds,
                 readyTimeout: config.realtimeReadyTimeoutSeconds,
                 pingInterval: config.realtimePingIntervalSeconds,
@@ -49,12 +51,13 @@ enum TranscriptionSessionFactory {
                     speaker: speaker,
                     transcript: transcript,
                     clock: clock,
+                    sessionStart: sessionStart,
                     silenceTimeout: config.silenceTimeoutSeconds,
                     silenceMaxInterval: config.silenceMaxIntervalSeconds,
                     silenceIdleCutoff: speaker == .me
                         ? config.silenceIdleCutoffSeconds
                         : .infinity,
-                    turnDebounce: config.turnDebounceSeconds,
+                    transcriptBatchingWindow: config.transcriptBatchingWindowSeconds,
                     maxBufferedAudioSeconds: config.maxBufferedAudioSeconds,
                     benchmark: benchmark)
             } else {

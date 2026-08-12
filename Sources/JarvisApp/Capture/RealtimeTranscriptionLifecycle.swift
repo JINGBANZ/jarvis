@@ -222,19 +222,43 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
         let preserveLocalReplayAudio = !locallyCommittedItemIDs.isEmpty
         let duplicateRiskItems = ledger.replayDuplicateRiskItemCount
         let interruptedItems = ledger.resolveAllInterruptedItems(speaker: speaker)
+        // With no server item, buffered PCM is the only evidence that replay can still produce an
+        // earlier line. Known items retain their own counted recovery barriers.
+        let hasUntrackedReplayAudio = replayAvailable
+            && duplicateRiskItems == 0 && interruptedItems.isEmpty
         if !preserveLocalReplayAudio { discardServerConfirmedAudioLocked() }
         locallyCommittedItemIDs.removeAll(keepingCapacity: true)
         reconnectRecovery.begin(interruptedItems: interruptedItems,
                                 duplicateRiskItemCount: duplicateRiskItems,
-                                replayAvailable: replayAvailable)
+                                replayAvailable: replayAvailable,
+                                hasUntrackedReplayAudio: hasUntrackedReplayAudio)
         let count = reconnectRecovery.unresolvedItemCount
         updateCoachingActivityLocked()
         lock.unlock()
         return count
     }
 
-    func markReplacementReady(socketGeneration: Int) -> ReplacementReadyOutcome {
+    /// Record PCM captured after the old socket stopped accepting audio. Server-VAD models have no
+    /// item for this audio until the replacement replays it, so the replay itself is pending work.
+    func recordBufferedReplayAudio() {
         lock.lock()
+        guard !stopped else { lock.unlock(); return }
+        reconnectRecovery.recordUntrackedReplayAudio()
+        updateCoachingActivityLocked()
+        lock.unlock()
+    }
+
+    func markReplacementReady(
+        socketGeneration: Int,
+        hasUntrackedReplayAudio: Bool = false
+    ) -> ReplacementReadyOutcome {
+        lock.lock()
+        // A producer may have accepted outage audio immediately before readiness and not yet
+        // reached its out-of-lock publication callback. Readiness carries the transcriber's sticky
+        // snapshot so the recovery gate and timer are installed atomically here.
+        if hasUntrackedReplayAudio {
+            reconnectRecovery.recordUntrackedReplayAudio()
+        }
         let unresolvedItems = reconnectRecovery.unresolvedItemCount
         ledger.clear()
         let fallbackItems = reconnectRecovery.markReplacementReady()
@@ -253,9 +277,10 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
         let recoveryWasActive = reconnectRecovery.isActive
         let fallbackItems = reconnectRecovery.recordCoverageLoss()
         for item in fallbackItems { appendFinalizedItemLocked(item, reason: "replay coverage lost") }
+        let recoverySettled = recoveryWasActive && !reconnectRecovery.isActive
         updateCoachingActivityLocked()
         lock.unlock()
-        if !fallbackItems.isEmpty { cancelReplayRecoveryDeadline() }
+        if recoverySettled { cancelReplayRecoveryDeadline() }
         return recoveryWasActive
     }
 
@@ -410,7 +435,7 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
     /// The retry gate represents an unsettled utterance, not only the VAD interval. Publish while
     /// holding `lock` so concurrent socket and timeout callbacks cannot reorder state transitions.
     private func updateCoachingActivityLocked() {
-        coachingCoordinator.updateActivity(hasPendingWorkLocked)
+        coachingCoordinator.updateTranscriptionWork(hasPendingWorkLocked)
     }
 
     private var hasPendingWorkLocked: Bool {

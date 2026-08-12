@@ -2,26 +2,27 @@ import Foundation
 
 /// Provider-neutral owner for finalized transcript delivery and the coaching triggers derived from it.
 /// Provider adapters report only final text and whether their own work is unsettled; this coordinator
-/// keeps turn coalescing, debounce, speech gating, and silence backoff identical across providers.
+/// keeps transcript batching, speech gating, and silence backoff identical across providers.
 /// `@unchecked Sendable`: `lock` guards every mutable field; collaborators and callbacks are Sendable.
 public final class TranscriptionCoachingCoordinator: @unchecked Sendable {
     private let speaker: Speaker
     private let transcript: RollingTranscript
     private let clock: Clock
     private let sessionStart: TimeInterval
-    private let turnDebounce: TimeInterval
+    private let transcriptBatchingWindow: TimeInterval
     private let silenceEnabled: Bool
-    private let onTurnEnd: @Sendable () -> Void
+    private let onTurnEnd: @Sendable (_ transcriptBoundary: Int) -> Void
     private let onSilence: @Sendable (TimeInterval) -> Void
-    private let onSpeechActivityChanged: @Sendable (Bool) -> Void
+    private let onTranscriptionWorkChanged: @Sendable (Bool) -> Void
 
     private let lock = NSLock()
     private let pending = UtteranceBuffer()
     private var silenceBackoff: SilenceBackoff
     private var stopped = true
     private var generation = 0
-    private var activityPending = false
-    private var debounceRevision = 0
+    private var hasPendingTranscriptionWork = false
+    private var pendingTranscriptBoundary: Int?
+    private var transcriptBatchRevision = 0
     private var silenceRevision = 0
     private var silencePausedLogged = false
 
@@ -30,25 +31,25 @@ public final class TranscriptionCoachingCoordinator: @unchecked Sendable {
         transcript: RollingTranscript,
         clock: Clock,
         sessionStart: TimeInterval,
-        turnDebounce: TimeInterval,
+        transcriptBatchingWindow: TimeInterval,
         silenceTimeout: TimeInterval,
         silenceMaxInterval: TimeInterval,
         silenceIdleCutoff: TimeInterval = .infinity,
         silenceEnabled: Bool,
-        onTurnEnd: @escaping @Sendable () -> Void,
+        onTurnEnd: @escaping @Sendable (_ transcriptBoundary: Int) -> Void,
         onSilence: @escaping @Sendable (TimeInterval) -> Void,
-        onSpeechActivityChanged: @escaping @Sendable (Bool) -> Void
+        onTranscriptionWorkChanged: @escaping @Sendable (Bool) -> Void
     ) {
-        precondition(turnDebounce >= 0 && turnDebounce.isFinite)
+        precondition(transcriptBatchingWindow >= 0 && transcriptBatchingWindow.isFinite)
         self.speaker = speaker
         self.transcript = transcript
         self.clock = clock
         self.sessionStart = sessionStart
-        self.turnDebounce = turnDebounce
+        self.transcriptBatchingWindow = transcriptBatchingWindow
         self.silenceEnabled = silenceEnabled
         self.onTurnEnd = onTurnEnd
         self.onSilence = onSilence
-        self.onSpeechActivityChanged = onSpeechActivityChanged
+        self.onTranscriptionWorkChanged = onTranscriptionWorkChanged
         silenceBackoff = SilenceBackoff(
             base: silenceTimeout,
             maxInterval: silenceMaxInterval,
@@ -59,15 +60,16 @@ public final class TranscriptionCoachingCoordinator: @unchecked Sendable {
         lock.lock()
         generation &+= 1
         let generation = generation
-        let reportInactive = activityPending
+        let reportSettled = hasPendingTranscriptionWork
         stopped = false
-        activityPending = false
-        debounceRevision &+= 1
+        hasPendingTranscriptionWork = false
+        pendingTranscriptBoundary = nil
+        transcriptBatchRevision &+= 1
         silenceRevision &+= 1
         pending.clear()
         lock.unlock()
 
-        if reportInactive { onSpeechActivityChanged(false) }
+        if reportSettled { onTranscriptionWorkChanged(false) }
         restartSilenceTimer(generation: generation)
     }
 
@@ -76,14 +78,15 @@ public final class TranscriptionCoachingCoordinator: @unchecked Sendable {
         guard !stopped else { lock.unlock(); return }
         stopped = true
         generation &+= 1
-        debounceRevision &+= 1
+        transcriptBatchRevision &+= 1
         silenceRevision &+= 1
-        let reportInactive = activityPending
-        activityPending = false
+        let reportSettled = hasPendingTranscriptionWork
+        hasPendingTranscriptionWork = false
+        pendingTranscriptBoundary = nil
         pending.clear()
         lock.unlock()
 
-        if reportInactive { onSpeechActivityChanged(false) }
+        if reportSettled { onTranscriptionWorkChanged(false) }
     }
 
     /// Normalize and publish one provider-final result. Provider-specific recovery detail remains in
@@ -101,52 +104,69 @@ public final class TranscriptionCoachingCoordinator: @unchecked Sendable {
 
         lock.lock()
         guard !stopped else { lock.unlock(); return false }
-        transcript.append(.init(speaker: speaker, text: text, at: at))
+        let transcriptBoundary = transcript.append(
+            .init(speaker: speaker, text: text, at: at))
         pending.append(text)
+        pendingTranscriptBoundary = max(pendingTranscriptBoundary ?? 0, transcriptBoundary)
         let generation = generation
-        ActivityLog.shared.record(.heard(speaker: speaker, text: text))
+        // Activity and model context share the same speech-time chronology. Transcript completion
+        // time remains visible in debug, but it must not decide conversation order.
+        ActivityLog.shared.record(
+            .heard(speaker: speaker, text: text),
+            at: Date(timeIntervalSince1970: sessionStart + at))
         jlog("🗣 heard (\(speaker.rawValue)): \"\(text)\" (\(source))")
         lock.unlock()
 
         restartSilenceTimer(generation: generation)
-        scheduleTurnDebounce(generation: generation)
+        scheduleTranscriptBatch(generation: generation)
         return true
     }
 
-    /// `active` is provider-defined: Realtime supplies its complete item/recovery state, while Apple
-    /// supplies its content-free local PCM activity. A deferred turn resumes when that work settles.
-    public func updateActivity(_ active: Bool) {
+    /// Realtime supplies its complete item/recovery state. Apple supplies its best available
+    /// content-free local PCM proxy. A deferred turn resumes when the provider reports no work.
+    public func updateTranscriptionWork(_ hasPendingWork: Bool) {
         lock.lock()
-        guard !stopped, activityPending != active else { lock.unlock(); return }
-        activityPending = active
+        guard !stopped, hasPendingTranscriptionWork != hasPendingWork else {
+            lock.unlock()
+            return
+        }
+        hasPendingTranscriptionWork = hasPendingWork
         let generation = generation
-        let shouldResume = !active
+        let shouldResume = !hasPendingWork
             && pending.shouldResumeAfterPendingTranscriptionsSettle(
                 hasPendingTranscriptions: false)
         lock.unlock()
 
-        onSpeechActivityChanged(active)
-        if shouldResume { scheduleTurnDebounce(generation: generation) }
+        onTranscriptionWorkChanged(hasPendingWork)
+        if shouldResume { scheduleTranscriptBatch(generation: generation) }
     }
 
-    private func scheduleTurnDebounce(generation: Int) {
+    private func scheduleTranscriptBatch(generation: Int) {
         lock.lock()
         guard !stopped, self.generation == generation else { lock.unlock(); return }
-        debounceRevision &+= 1
-        let revision = debounceRevision
-        let delay = turnDebounce
+        transcriptBatchRevision &+= 1
+        let revision = transcriptBatchRevision
+        let window = transcriptBatchingWindow
         lock.unlock()
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-            self?.fireTurn(generation: generation, revision: revision)
+        DispatchQueue.main.asyncAfter(deadline: .now() + window) { [weak self] in
+            self?.publishTranscriptBatch(generation: generation, revision: revision)
         }
     }
 
-    private func fireTurn(generation: Int, revision: Int) {
+    private func publishTranscriptBatch(generation: Int, revision: Int) {
         lock.lock()
         guard !stopped, self.generation == generation,
-              debounceRevision == revision else { lock.unlock(); return }
-        let result = pending.drainIfSettled(hasPendingTranscriptions: activityPending)
+              transcriptBatchRevision == revision else { lock.unlock(); return }
+        let result = pending.drainIfSettled(
+            hasPendingTranscriptions: hasPendingTranscriptionWork)
+        let transcriptBoundary: Int?
+        if case .ready = result {
+            transcriptBoundary = pendingTranscriptBoundary
+            pendingTranscriptBoundary = nil
+        } else {
+            transcriptBoundary = nil
+        }
         lock.unlock()
 
         switch result {
@@ -156,7 +176,11 @@ public final class TranscriptionCoachingCoordinator: @unchecked Sendable {
             jlog("… coaching turn waiting for transcription to settle")
         case .ready(_, let fragments):
             if fragments > 1 { jlog("🧩 coalesced \(fragments) fragments into one turn") }
-            onTurnEnd()
+            guard let transcriptBoundary else {
+                jlog("Jarvis transcription coordinator: dropped turn without transcript boundary")
+                return
+            }
+            onTurnEnd(transcriptBoundary)
         }
     }
 
@@ -199,7 +223,7 @@ public final class TranscriptionCoachingCoordinator: @unchecked Sendable {
         lock.lock()
         guard !stopped, self.generation == generation,
               silenceRevision == revision else { lock.unlock(); return }
-        if activityPending {
+        if hasPendingTranscriptionWork {
             lock.unlock()
             scheduleSilenceTimer(
                 after: 1,

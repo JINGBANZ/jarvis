@@ -60,13 +60,22 @@ moments the model judges worthwhile.
 1. The Transcriber emits a **turn-end** event after it finalizes an utterance (GPT-4o uses tuned
    server VAD, GPT Transcribe and GPT Live use local WebRTC VAD plus an explicit acknowledged
    commit, and Apple Speech uses final `SpeechTranscriber` segments; all paths share the same client
-   debounce),
+   transcript-batching window, which groups rapid final fragments but does not establish
+   cross-speaker chronology),
    or a **silence check** fires (you've gone quiet, maybe stuck). The silence check carries *how
    long* you've been quiet and backs off across a long silence (the interval
    doubles each step up to a cap — see `Config`), resetting on speech; past an idle cutoff it stops
    probing entirely (you've stepped away — a nudge into an empty room still bills a request) until
    speech re-arms it.
-2. The CoachDriver calls the brain on every trigger that carries **substance** — there is no
+2. Before an automatic attempt, `TranscriptionSettlementGate` waits until both provider streams say
+   that no active speech, finalization, or recovery can still produce an earlier transcript line.
+   OpenAI reconnect-buffered audio remains unsettled even before replay creates a server item; Apple
+   PCM silence requests `SpeechAnalyzer.finalize` and remains unsettled until matching final-result
+   progress is consumed from the module stream.
+   Natural triggers coalesce while waiting. Each finalized turn carries its transcript boundary, so
+   a delayed transcript-batch callback arriving after another attempt committed that same line is
+   consumed instead of buying a duplicate request. The explicit manual-hint hotkey bypasses this wait.
+   The CoachDriver then calls the brain on every trigger that carries **substance** — there is no
    cooldown, rate cap, or wake-word gate. Whether to speak (and whether the user just addressed
    Jarvis) is the model's call, governed by the system prompt; the only hard gates are the user's
    Start/Stop and the **substance gate** (`TurnSubstance`): a turn-end whose delta is pure
@@ -94,7 +103,13 @@ moments the model judges worthwhile.
    explicit tool, never plain text, so the session memory stays free of stray model prose
    (see [decisions.md](./decisions.md)).
 6. `ActivityLog` records every brain action: successful or failed `capture_screen`, `speak`, and
-   `stay_silent`. The deliberate-silence entry is human-facing but stays out of model memory.
+   `stay_silent`. Heard rows and model-facing transcript deltas share `ConversationChronology`:
+   occurrence time is authoritative, and insertion order breaks timestamp ties. A late-finalizing
+   earlier utterance is therefore inserted before a faster later reply. When Activity reaches its
+   memory backstop, Core sends the discarded insertion identities so the live DOM trims in lockstep
+   and keeps using those same indices. Reopened sessions retain the same newest insertion identities
+   before sorting that retained set by occurrence time. The deliberate-silence entry is human-facing
+   but stays out of model memory.
 7. `CoachDriver` reports the audit facts around the decision through the narrow
    `CoachingAttemptAuditing` port: the natural trigger or pending-work wake, the indexed finalized
    lines considered by the substance gate, whether a provider call is the initial request or a screen
@@ -151,8 +166,9 @@ plugins ship only with full Xcode, and Jarvis builds **CLT-only** (see
 | **WebRTCEchoCanceller** | AEC3 echo canceller driven at 48 kHz on 10 ms frames inside the capture IOProc; far reference first, then the mic cleaned in place. | WebRTC **AEC3** (`webrtc-audio-processing`), vendored static + zero-dylib via `scripts/build-aec.sh`. |
 | **ErrorReporter** | The single funnel for user-facing failures. Severity on a Foundation-only `UserFacingError` decides the lifecycle consequence; an explicit startup/runtime context decides presentation. Startup failures may alert, but runtime failures never activate Jarvis or present UI even when they stop the session. `BrainFailure` feeds attempt outcomes into the finite provider route; only route exhaustion enters terminal reporting. Fixed, typed Activity outcomes carry stable on-disk identities while raw detail stays in `JarvisLog`. | AppKit (`NSAlert`) for startup only. |
 | **JarvisReadiness** | Compose the selected session's permission, credential, brain preparation, transcription preparation, endpoint, and capture-health snapshots into one typed status: checking, blocked, recovering, fully ready, microphone-only ready, or stopped. An opaque Start generation rejects stale callbacks. Focused subsystems keep owning their own mechanics; this Foundation-only component emits effects that the app renders in both the menu and Activity. | Foundation-only state reduction over `CaptureReadinessMonitor` and typed app observations. |
-| **Transcriber** | Maintain a rolling, speaker-labeled, **spoken-time timestamped** transcript; emit speech-activity, turn-end, and backing-off silence events (with quiet duration). Two instances run in parallel — one per side — tagging lines `me`/`them` into one shared transcript through the provider-neutral `TranscriptionSession` port. The default OpenAI adapter keeps its per-`item_id` reconciliation, delta salvage, acknowledged readiness, ping/pong health, and transactional reconnect path. GPT-4o Transcribe remains its default model and uses tuned server VAD. GPT Transcribe and GPT Live Transcribe remain opt-in with local WebRTC VAD: a bounded pre-roll opens at confirmed speech onset, active speech and trailing silence enter the ordered audio FIFO, and indefinite idle silence stays off the wire. Endpoints commit only after that FIFO reaches their boundary, and the server's commit acknowledgement binds each boundary to its `item_id`. GPT Transcribe also reports detected completion languages to debug diagnostics. Both new models receive fixed context for the captured speaker role, and GPT Live additionally requests low transcription delay. The opt-in macOS 26+ Apple adapter prepares one selected-locale asset before capture, converts the existing 24 kHz PCM to `SpeechAnalyzer`'s preferred format, and commits final results only. Its content-free local activity tracker delays coaching but never gates transcription or retains PCM. Every path keeps unusable words diagnostic-only and records content-free boundary evidence. | OpenAI Realtime transcription (model-compatible server or local turn detection) or Apple `SpeechAnalyzer` / `SpeechTranscriber` (on-device). |
-| **CoachDriver** | Coordinate one single-flighted coaching attempt from a natural trigger or pending-work wake-up: snapshot one route target plus the latest conversation, route its tool calls, commit only a complete terminal action, and report one outcome to the scheduler. No speaking cooldown/rate cap — restraint is the model's; `TurnSubstance` removes only clear hesitation sounds from mixed deltas and skips a turn-end when no substantive text or saved observation remains. | The selected OpenAI Responses API, Claude Code, or Codex route target; See [§4 Local CLI brain providers](#local-cli-brain-providers). Provider-specific summary tiers are defined in `BrainModelCatalog`. |
+| **Transcriber** | Maintain a rolling, speaker-labeled, **spoken-time timestamped** transcript; emit transcription-work state, transcript-bound turn-end, and backing-off silence events (with quiet duration). Two instances run in parallel — one per side — tagging lines `me`/`them` into one shared transcript through the provider-neutral `TranscriptionSession` port. The default OpenAI adapter keeps its per-`item_id` reconciliation, delta salvage, acknowledged readiness, ping/pong health, and transactional reconnect path; PCM captured while its socket is unavailable is itself pending recovery until replacement replay reaches a terminal boundary. GPT-4o Transcribe remains its default model and uses tuned server VAD. GPT Transcribe and GPT Live Transcribe remain opt-in with local WebRTC VAD: a bounded pre-roll opens at confirmed speech onset, active speech and trailing silence enter the ordered audio FIFO, and indefinite idle silence stays off the wire. Endpoints commit only after that FIFO reaches their boundary, and the server's commit acknowledgement binds each boundary to its `item_id`. GPT Transcribe also reports detected completion languages to debug diagnostics. Both new models receive fixed context for the captured speaker role, and GPT Live additionally requests low transcription delay. The opt-in macOS 26+ Apple adapter prepares one selected-locale asset before capture, converts the existing 24 kHz PCM to `SpeechAnalyzer`'s preferred format, and commits final results only. Its content-free local activity tracker requests analyzer finalization after speech; `TranscriptionFinalizationState` keeps work unsettled until the analyzer completes and matching module-result progress is consumed, including speech or setup races, without gating transcription or retaining PCM. Every path keeps unusable words diagnostic-only and records content-free boundary evidence. | OpenAI Realtime transcription (model-compatible server or local turn detection) or Apple `SpeechAnalyzer` / `SpeechTranscriber` (on-device). |
+| **ConversationChronology** | Own the ordering rule for conversation-derived data in Foundation-only Core: both speaker streams use one session time origin, event occurrence time comes first, and stable insertion order breaks ties. It preserves append-index provenance while producing chronological views for the model, live Activity, and reopened sessions. | `TranscriptLine.at` and Activity event timestamps. |
+| **CoachDriver** | Coordinate one single-flighted coaching attempt from a natural trigger or pending-work wake-up: admit every automatic attempt only after both transcription streams settle, consume a deferred turn whose transcript boundary is already committed, snapshot one route target plus the latest chronological conversation, route its tool calls, commit only a complete terminal action, and report one outcome to the scheduler. No speaking cooldown/rate cap — restraint is the model's; `TurnSubstance` removes only clear hesitation sounds from mixed deltas and skips a turn-end when no substantive text or saved observation remains. | The selected OpenAI Responses API, Claude Code, or Codex route target; See [§4 Local CLI brain providers](#local-cli-brain-providers). Provider-specific summary tiers are defined in `BrainModelCatalog`. |
 | **[Session audit](./session-audit.md)** | Record typed attempt provenance and provider traffic through optional observer ports without coupling diagnostics to coaching behavior or latency. A bounded worker contains persistence failures and a versioned health marker keeps incomplete evidence honest. | Foundation-only owner-only session artifacts beside Activity. |
 | **Local agent runtime** | Keep provider startup outside the coaching latency path while preserving the attempt boundary: a `BrainConversation` lease owns every model turn in one attempt, including a `capture_screen` continuation, then is explicitly finished. Claude leases one initialized safe-mode query; Codex prepares the first target-specific ephemeral thread at Session Start and opens a fresh thread for each later attempt on one session-scoped app-server. A runtime failure fails the attempt; it never switches to a one-shot transport. | Claude Code stream-json control protocol; Codex app-server JSON-RPC over stdio. |
 | **ScreenTool** | Fulfill `capture_screen`: silently shoot the **active window** (default scope) — the window-server frontmost, on whichever display, clean even when partially covered — and attach an **on-device OCR** of the shot to the tool result so the model reads exact text instead of pixels. Falls back to a full-display capture (no OCR) — the Settings-chosen display in Entire-display scope, the main display when no window is eligible; the overlay window is excluded either way. See [settings-window.md](./settings-window.md#capture-scope). | macOS `screencapture` CLI + Apple Vision (`VNRecognizeTextRequest`). |
@@ -253,10 +269,11 @@ Failed conversation work remains pending and schedules another coaching attempt 
 backoff. This internal wake-up does not depend on a new natural trigger. If a turn-end, silence, or
 manual-hint trigger arrives first, it coalesces with the pending wake-up; the next attempt contains the
 failed conversation plus every newer finalized transcript item. If nothing new arrives, the new
-attempt uses the same pending conversation. Automatic wake-ups wait while speech is active so they do
-not race an utterance that is about to finalize. An explicit manual hint interrupts that postponement
-even after the wait begins and upgrades the same pending-work attempt to a forced hint; ordinary
-natural triggers remain parked until transcription settles. `TriggerReason` remains the model-facing
+attempt uses the same pending conversation. Every automatic attempt waits while either transcription
+stream owns unfinished work so it does not cross an earlier utterance that is about to finalize. An
+explicit manual hint interrupts that postponement even after the wait begins and upgrades the same
+pending-work attempt to a forced hint; ordinary natural triggers remain parked until transcription
+settles. `TriggerReason` remains the model-facing
 reason that made coaching useful (`turnEnd`, `silence`, or `manualHint`); pending work is scheduler
 state, not a fourth instruction to the model. An automatic attempt with no newer trigger reuses the
 pending work's reason; when another natural trigger arrives, its newer reason describes the fresh
@@ -277,8 +294,8 @@ route-exhausted event, and raw errors stay in `jarvis-debug.log`.
 
 ```mermaid
 flowchart TD
-    T[Turn end, silence, manual hint,<br/>or pending-work wake] --> S{Speech active?}
-    S -- Yes, automatic wake --> P[Keep work pending<br/>and postpone]
+    T[Turn end, silence, manual hint,<br/>or pending-work wake] --> S{Either transcription<br/>stream unsettled?}
+    S -- Yes, automatic attempt --> P[Keep work pending<br/>and postpone]
     S -- No --> A[Snapshot active target +<br/>latest finalized conversation]
     A --> R[Run one coaching attempt<br/>on one target]
     R -- Complete terminal action --> C[Commit conversation<br/>reset failure count<br/>stay on target]
@@ -301,11 +318,11 @@ The implementation keeps orchestration, route policy, and OS edges separate:
 |---|---|---|
 | Route value (`JarvisCore/Brain`) | Immutable ordered targets and validation. | Schedule work or create UI. |
 | Route state machine (`JarvisCore/Coach`) | Count attempt outcomes, move forward, and emit pure transition commands. | Call providers, read preferences, or own timers. |
-| Attempt scheduler (`JarvisCore/Coach`) | Own pending work, bounded backoff, trigger coalescing, single-flight, and speech-aware postponement. | Classify provider payloads or mutate the route directly. |
+| Attempt scheduler (`JarvisCore/Coach`) | Own pending work, bounded backoff, trigger coalescing, single-flight, and transcription-settlement admission. | Classify provider payloads or mutate the route directly. |
 | Attempt runner (`CoachDriver`) | Snapshot one target, run its tool loop, normalize completed provider-neutral effects, and report one outcome. | Retry a failed request or choose another target mid-attempt. |
 | Client factory (`JarvisCore/Brain`) | Build a `BrainClient` for an explicit target and surface preflight availability. | Select or reorder targets. |
 | Preferences (`JarvisCore/Config`) | Persist primary, ordered fallbacks, per-provider models, and shared effort. | Store the live route cursor or failure counts. |
-| App adapters (`JarvisApp`) | Render the list editor and feed speech-activity/timer events into Core. | Contain retry or failover policy. |
+| App adapters (`JarvisApp`) | Render the list editor and feed provider transcription-work/timer events into Core. | Contain retry or failover policy. |
 
 ## 4. Data Flow & Cost Model
 
@@ -366,7 +383,10 @@ rather than a per-turn screenshot.
   documents `SpeechDetector` as an optional power-saving gate that may trade away transcription
   accuracy, while its result stream does not expose usable VAD boundaries; Jarvis therefore sends
   all audio to the transcriber and uses its existing content-free PCM activity detector only to
-  postpone coaching until speech settles. Both adapters apply the client-side turn debounce.
+  request finalization and postpone coaching until the matching final-result boundary is consumed.
+  Both adapters apply the client-side transcript-batching window to group rapid final fragments;
+  automatic model admission is controlled separately by provider work state, never by extending
+  that fixed delay.
 
 ### Local CLI brain providers
 
@@ -559,8 +579,9 @@ The always-on legs are built to survive transient failure rather than die on it:
   for English/Mandarin code-switching rather than parallel Apple analyzers.
   Setup uses the same bounded pre-ready audio budget as OpenAI; overflow is diagnostic. Final
   provider ranges supply spoken timestamps and continuity boundaries. The local activity tracker
-  retains only adaptive level state, not PCM, and gates coaching timing rather than transcription
-  input. An analyzer, result-stream, conversion, or input-stream failure stays inside the Apple
+  retains only adaptive level state, not PCM, and requests analyzer finalization rather than gating
+  transcription input; model admission remains parked until finalization and matching consumed result
+  progress agree. An analyzer, result-stream, conversion, or input-stream failure stays inside the Apple
   boundary and follows the terminal/degraded lifecycle above—never an implicit OpenAI fallback.
 - **The brain call** is single-flighted (a turn can't double-speak) and runs under a Core-owned
   workload deadline shared by the API, Claude, and Codex transports. A one-shot local auxiliary

@@ -4,9 +4,12 @@ import Foundation
 /// adapters own their setup and recovery; the app owns the two sessions and feeds them ordered mono
 /// PCM16 captured in `TranscriptionAudioFormat.pcm16Mono`.
 public protocol TranscriptionSession: AnyObject, Sendable {
-    var onTurnEnd: (@Sendable () -> Void)? { get set }
+    /// Exclusive transcript insertion boundary represented by this finalized turn.
+    var onTurnEnd: (@Sendable (_ transcriptBoundary: Int) -> Void)? { get set }
     var onSilence: (@Sendable (TimeInterval) -> Void)? { get set }
-    var onSpeechActivityChanged: (@Sendable (Bool) -> Void)? { get set }
+    /// `true` while this provider owns active speech, finalization, or recovery work that can still
+    /// produce an earlier transcript line; `false` only when its current chronology is settled.
+    var onTranscriptionWorkChanged: (@Sendable (Bool) -> Void)? { get set }
     var onConnectionStateChange: (@Sendable (TranscriptionConnectionState) -> Void)? { get set }
     var onTerminalFailure: (@Sendable (TranscriptionFailureReason) -> Void)? { get set }
     /// Content-free capture progress/stall edges derived from this endpoint's continuity witness.

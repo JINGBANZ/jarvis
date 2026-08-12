@@ -1715,6 +1715,73 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(!freshRequest.contains { $0.toolCalls != nil })
     }
 
+    @Test func initialAutomaticAttemptWaitsForSettlementAndOrdersLateEarlierSpeech() async throws {
+        let brain = ScriptedBrain(script: [
+            .init(toolCalls: [.staySilent(callId: "quiet")]),
+        ])
+        let (driver, transcript) = makeDriver(brain: brain, clock: ManualClock())
+        driver.updateTranscriptionWork(true, for: .them)
+        transcript.append(.init(speaker: .me, text: "Yep.", at: 20))
+
+        let outcome = Task {
+            await turnOutcomeBeforeTimeout {
+                await driver.handleTrigger(.turnEnd)
+            }
+        }
+        defer {
+            outcome.cancel()
+            driver.updateTranscriptionWork(false, for: .them)
+        }
+
+        #expect(!(await waitUntil { !brain.calls.isEmpty }))
+        transcript.append(.init(speaker: .them, text: "Did you see the pop-up?", at: 10))
+        driver.updateTranscriptionWork(false, for: .them)
+
+        #expect(await outcome.value == .silentByModel)
+        let request = try #require(brain.calls.first)
+        let userText = request.compactMap(\.text).joined(separator: "\n")
+        let question = try #require(userText.range(of: "them: Did you see the pop-up?"))
+        let reply = try #require(userText.range(of: "me: Yep."))
+        #expect(question.lowerBound < reply.lowerBound)
+    }
+
+    @Test func queuedAutomaticAttemptAlsoWaitsForSettlement() async throws {
+        let gate = AsyncGate()
+        let brain = GatedBrain(gate: gate, script: [
+            .init(toolCalls: [.staySilent(callId: "first")]),
+            .init(toolCalls: [.staySilent(callId: "second")]),
+        ])
+        let (driver, transcript) = makeDriver(brain: brain, clock: ManualClock())
+        transcript.append(.init(speaker: .me, text: "First complete turn.", at: 1))
+
+        let outcome = Task {
+            await turnOutcomeBeforeTimeout {
+                await driver.handleTrigger(.turnEnd)
+            }
+        }
+        defer {
+            outcome.cancel()
+            driver.updateTranscriptionWork(false, for: .them)
+        }
+        await gate.waitUntilEntered()
+
+        driver.updateTranscriptionWork(true, for: .them)
+        transcript.append(.init(speaker: .me, text: "Yep.", at: 20))
+        #expect(await driver.handleTrigger(.turnEnd) == .busy)
+        await gate.release()
+
+        #expect(!(await waitUntil { brain.callCount == 2 }))
+        transcript.append(.init(speaker: .them, text: "Did you see the pop-up?", at: 10))
+        driver.updateTranscriptionWork(false, for: .them)
+
+        #expect(await outcome.value == .silentByModel)
+        let request = try #require(brain.calls.last)
+        let userText = request.compactMap(\.text).joined(separator: "\n")
+        let question = try #require(userText.range(of: "them: Did you see the pop-up?"))
+        let reply = try #require(userText.range(of: "me: Yep."))
+        #expect(question.lowerBound < reply.lowerBound)
+    }
+
     @Test func automaticPendingAttemptWaitsForBothSpeakersToStop() async {
         let gate = AsyncGate()
         let delayGate = AsyncGate()
@@ -1723,8 +1790,6 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             brain: brain,
             clock: ManualClock(),
             automaticAttemptDelay: { _ in await delayGate.enter() })
-        driver.updateSpeechActivity(true, for: .me)
-        driver.updateSpeechActivity(true, for: .them)
         transcript.append(.init(speaker: .me, text: "wait for quiet", at: 0))
         let outcome = Task {
             await turnOutcomeBeforeTimeout {
@@ -1733,11 +1798,13 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         }
         defer { outcome.cancel() }
         await gate.waitUntilEntered()
+        driver.updateTranscriptionWork(true, for: .me)
+        driver.updateTranscriptionWork(true, for: .them)
         await gate.release()
         #expect(await waitUntilAsync { await delayGate.hasEntered })
         #expect(brain.calls.count == 1)
 
-        driver.updateSpeechActivity(false, for: .me)
+        driver.updateTranscriptionWork(false, for: .me)
         #expect(brain.calls.count == 1)
 
         await delayGate.release()
@@ -1746,7 +1813,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(!(await waitUntil {
             brain.calls.count == 2
         }))
-        driver.updateSpeechActivity(false, for: .them)
+        driver.updateTranscriptionWork(false, for: .them)
         #expect(await outcome.value == .spoke)
         #expect(brain.calls.count == 2)
     }
@@ -1763,7 +1830,6 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             automaticAttemptDelay: { _ in
                 try await delayProbe.waitForCancellation()
             })
-        driver.updateSpeechActivity(true, for: .them)
         transcript.append(.init(speaker: .me, text: "failed pending thought", at: 0))
 
         let outcome = Task {
@@ -1773,9 +1839,10 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         }
         defer {
             outcome.cancel()
-            driver.updateSpeechActivity(false, for: .them)
+            driver.updateTranscriptionWork(false, for: .them)
         }
         await gate.waitUntilEntered()
+        driver.updateTranscriptionWork(true, for: .them)
         await gate.release()
         #expect(await waitUntilAsync { await delayProbe.hasEntered })
         #expect(brain.calls.count == 1)
@@ -1796,17 +1863,17 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let (driver, transcript) = makeDriver(
             brain: brain,
             clock: ManualClock())
-        driver.updateSpeechActivity(true, for: .them)
         transcript.append(.init(speaker: .me, text: "first attempt", at: 0))
 
         async let outcome = driver.handleTrigger(.turnEnd)
         await gate.waitUntilEntered()
+        driver.updateTranscriptionWork(true, for: .them)
         #expect(await driver.handleTrigger(.manualHint) == .busy)
         await gate.release()
 
         #expect(await outcome == .spoke)
         #expect(brain.calls.count == 2)
-        driver.updateSpeechActivity(false, for: .them)
+        driver.updateTranscriptionWork(false, for: .them)
     }
 
     @Test func automaticRetryOfFailedManualHintWaitsForUnsettledSpeech() async {
@@ -1817,7 +1884,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             brain: brain,
             clock: ManualClock(),
             automaticAttemptDelay: { _ in await delayGate.enter() })
-        driver.updateSpeechActivity(true, for: .them)
+        driver.updateTranscriptionWork(true, for: .them)
 
         let outcome = Task {
             await turnOutcomeBeforeTimeout {
@@ -1826,7 +1893,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         }
         defer {
             outcome.cancel()
-            driver.updateSpeechActivity(false, for: .them)
+            driver.updateTranscriptionWork(false, for: .them)
         }
         await gate.waitUntilEntered()
         await gate.release()
@@ -1835,11 +1902,11 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
         await delayGate.release()
         // A broken manual-hint retry would make its second call while `.them` is still active.
-        // Keep speech unsettled long enough to prove the retry reached the speech gate first.
+        // Keep transcription unsettled long enough to prove the retry reached the settlement gate.
         #expect(!(await waitUntil {
             brain.calls.count == 2
         }))
-        driver.updateSpeechActivity(false, for: .them)
+        driver.updateTranscriptionWork(false, for: .them)
         #expect(await outcome.value == .spoke)
         #expect(brain.calls.count == 2)
     }
@@ -2261,6 +2328,31 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         _ = await first
         #expect(brain.callCount >= 2)                      // the original AND the coalesced turn ran
     }
+
+    /// The settling speaker's delayed transcript-batch callback can arrive after a parked attempt has
+    /// already admitted and included that speaker's final line. Its boundary identifies the callback
+    /// as already consumed, so it cannot buy a duplicate request.
+    @Test func deferredTurnForCommittedTranscriptDoesNotStartAnotherAttempt() async {
+        let gate = AsyncGate()
+        let brain = GatedBrain(
+            gate: gate,
+            response: .init(toolCalls: [.staySilent(callId: "quiet")]))
+        let (driver, transcript) = makeDriver(
+            brain: brain,
+            clock: ManualClock(now: 0))
+        let boundary = transcript.append(
+            .init(speaker: .them, text: "settling speaker's final question", at: 1))
+
+        async let first = driver.handleTrigger(.turnEnd)
+        await gate.waitUntilEntered()
+        #expect(await driver.handleTrigger(
+            .turnEnd,
+            transcriptBoundary: boundary) == .busy)
+        await gate.release()
+
+        #expect(await first == .silentByModel)
+        #expect(brain.callCount == 1)
+    }
 }
 
 /// Synchronous on purpose: it holds main-actor delivery at a deterministic point while the test
@@ -2510,17 +2602,20 @@ final class GatedBrain: BrainClient, @unchecked Sendable {
     private let script: [BrainResponse]
     private let lock = NSLock()
     private var _callCount = 0
+    private var _calls: [[ChatMessage]] = []
     var callCount: Int { lock.lock(); defer { lock.unlock() }; return _callCount }
-    private func record() -> Int {
+    var calls: [[ChatMessage]] { lock.withLock { _calls } }
+    private func record(_ messages: [ChatMessage]) -> Int {
         lock.lock(); defer { lock.unlock() }
         let index = _callCount
         _callCount += 1
+        _calls.append(messages)
         return index
     }
     init(gate: AsyncGate, response: BrainResponse) { self.gate = gate; self.script = [response] }
     init(gate: AsyncGate, script: [BrainResponse]) { self.gate = gate; self.script = script }
     func respond(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice) async throws -> BrainResponse {
-        let index = record()
+        let index = record(messages)
         await gate.enter()
         return script[min(index, script.count - 1)]
     }

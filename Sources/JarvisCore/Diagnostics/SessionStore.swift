@@ -13,6 +13,11 @@ public struct SessionStore: Sendable {
         public let isCurrent: Bool
     }
 
+    public struct EntrySnapshot: Sendable {
+        public let entries: [(ActivityLog.Entry, Data?)]
+        public let total: Int
+    }
+
     private let base: URL
     private let current: URL?
 
@@ -38,6 +43,15 @@ public struct SessionStore: Sendable {
         /// A raw value lets this build distinguish current typed events from unknown kinds; only
         /// current kinds bypass the human-copy classifier.
         let k: String?
+        let o: TimeInterval?
+        let q: UInt64?
+        let r: TimeInterval?
+    }
+
+    private struct LoadedEntry: Sendable {
+        let entry: ActivityLog.Entry
+        let imageData: Data?
+        let occurredAt: TimeInterval?
     }
 
     /// Immediate subdirectories of `base` that look like a session and hold a `jarvis-activity.jsonl`,
@@ -92,9 +106,29 @@ public struct SessionStore: Sendable {
     /// filename is a valid, present `shot-N.jpg`). Malformed lines are skipped; an invalid or missing
     /// shot degrades to a text-only row (`nil` bytes).
     public func entries(for session: Session) -> [(ActivityLog.Entry, Data?)] {
+        loadEntrySnapshot(for: session, retainingMostRecentInsertions: nil).entries
+    }
+
+    /// Decode a bounded history snapshot using the same identity policy as live Activity: retain the
+    /// newest insertions first, then display that retained set in event-time order.
+    public func entrySnapshot(
+        for session: Session,
+        retainingMostRecentInsertions maximumCount: Int
+    ) -> EntrySnapshot {
+        loadEntrySnapshot(
+            for: session,
+            retainingMostRecentInsertions: max(0, maximumCount))
+    }
+
+    private func loadEntrySnapshot(
+        for session: Session,
+        retainingMostRecentInsertions maximumCount: Int?
+    ) -> EntrySnapshot {
         let url = session.url.appendingPathComponent("jarvis-activity.jsonl")
-        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return [] }
-        var out: [(ActivityLog.Entry, Data?)] = []
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else {
+            return EntrySnapshot(entries: [], total: 0)
+        }
+        var out: [LoadedEntry] = []
         for raw in text.split(separator: "\n", omittingEmptySubsequences: true) {
             guard let line = try? JSONDecoder().decode(Line.self, from: Data(raw.utf8)) else { continue }
             var bytes: Data?
@@ -111,10 +145,44 @@ public struct SessionStore: Sendable {
             ) else {
                 continue
             }
-            out.append((ActivityLog.Entry(time: line.t, message: line.m,
-                                          imageFile: shotName), bytes))
+            let insertionOrder = line.q ?? UInt64(out.count)
+            let entry = ActivityLog.Entry(
+                time: line.t,
+                message: line.m,
+                imageFile: shotName,
+                occurredAt: line.o,
+                insertionOrder: insertionOrder)
+            out.append(LoadedEntry(entry: entry, imageData: bytes, occurredAt: line.o))
         }
-        return out
+        let total = out.count
+        if let maximumCount, out.count > maximumCount {
+            out = Array(out.suffix(maximumCount))
+        }
+        // A session created by an older build has no event-time metadata. Preserve its file order
+        // rather than guessing chronology from second-resolution display strings. New sessions have
+        // metadata on every typed row and use the same ordering component as live Activity/model data.
+        guard out.allSatisfy({ $0.occurredAt?.isFinite == true }) else {
+            // Strip partial metadata too. The viewer's live insertion routine must append every row
+            // in file order for a mixed/old session instead of moving only the upgraded rows.
+            let entries = out.map { loaded in
+                let entry = loaded.entry
+                return (
+                    ActivityLog.Entry(
+                        time: entry.time,
+                        message: entry.message,
+                        imageFile: entry.imageFile),
+                    loaded.imageData)
+            }
+            return EntrySnapshot(entries: entries, total: total)
+        }
+        var chronology = ConversationChronology<LoadedEntry>()
+        for loaded in out {
+            chronology.append(loaded, occurredAt: loaded.occurredAt!)
+        }
+        let entries = chronology.chronologicalItems.map {
+            ($0.element.entry, $0.element.imageData)
+        }
+        return EntrySnapshot(entries: entries, total: total)
     }
 
     /// Delete every past session directory (immediate, session-shaped subdir of `base`), sparing the

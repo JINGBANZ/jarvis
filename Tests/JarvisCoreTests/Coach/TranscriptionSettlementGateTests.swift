@@ -1,24 +1,24 @@
 import Testing
 @testable import JarvisCore
 
-@Suite struct SpeechActivityGateTests {
+@Suite struct TranscriptionSettlementGateTests {
     @Test func interruptionBeforeWaitRegistrationIsSticky() async {
-        let gate = SpeechActivityGate()
-        gate.setActive(true, for: .me)
+        let gate = TranscriptionSettlementGate()
+        gate.setUnsettled(true, for: .me)
         let generation = gate.interruptGenerationSnapshot()
 
-        // Models a manual hint landing after CoachDriver's pending-trigger snapshot but before
-        // SpeechActivityGate has installed the continuation.
+        // Models a manual hint landing after CoachDriver's pending-trigger snapshot but before the
+        // settlement gate has installed the continuation.
         gate.interruptWaiters()
 
         #expect(await completesBeforeTimeout {
-            await gate.waitUntilInactive(unlessInterruptedAfter: generation)
+            await gate.waitUntilSettled(unlessInterruptedAfter: generation)
         })
     }
 
-    @Test func interruptionResumesARegisteredWaitWithoutChangingActivity() async {
-        let gate = SpeechActivityGate()
-        gate.setActive(true, for: .them)
+    @Test func interruptionResumesARegisteredWaitWithoutChangingProviderState() async {
+        let gate = TranscriptionSettlementGate()
+        gate.setUnsettled(true, for: .them)
         let generation = gate.interruptGenerationSnapshot()
         let interrupter = Task {
             await Task.yield()
@@ -26,18 +26,18 @@ import Testing
         }
 
         #expect(await completesBeforeTimeout {
-            await gate.waitUntilInactive(unlessInterruptedAfter: generation)
+            await gate.waitUntilSettled(unlessInterruptedAfter: generation)
         })
         await interrupter.value
 
         // The interruption wakes only the explicit hint. A later automatic wait still sees the
-        // speaker as active and therefore remains parked until ordinary speech inactivity.
+        // provider as unsettled and remains parked until it finishes.
         let laterGeneration = gate.interruptGenerationSnapshot()
         #expect(!(await completesBeforeTimeout(nanoseconds: 20_000_000) {
-            await gate.waitUntilInactive(unlessInterruptedAfter: laterGeneration)
+            await gate.waitUntilSettled(unlessInterruptedAfter: laterGeneration)
         }))
-        gate.setActive(false, for: .them)
-        await gate.waitUntilInactive(unlessInterruptedAfter: laterGeneration)
+        gate.setUnsettled(false, for: .them)
+        await gate.waitUntilSettled(unlessInterruptedAfter: laterGeneration)
     }
 }
 

@@ -1543,6 +1543,44 @@
   `Sources/JarvisCore/Benchmark/TranscriptionBenchmarkObserving.swift`,
   `Sources/JarvisCore/Benchmark/TranscriptionBenchmarkTransportControl.swift`.
 
+### 2026-08-11 — Spoken time owns conversation chronology; automatic coaching waits for settled transcription
+
+- **Chose:** Give both transcribers and `CoachDriver` one session time origin, then put the ordering
+  rule in one Foundation-only `ConversationChronology`: event occurrence time is authoritative and
+  stable insertion order breaks ties. Keep backing storage in append order
+  so transcript provenance cursors remain valid, but use chronological views for model deltas, live
+  Activity, and reopened sessions. Persist both occurrence and record timing so late finalization
+  remains diagnosable without making completion order authoritative.
+- **Chose:** Route every automatic coaching attempt—the first trigger, a trigger queued behind an
+  in-flight attempt, and a pending-work retry—through one aggregate `TranscriptionSettlementGate`.
+  It waits while either provider can still produce an earlier transcript line. OpenAI PCM captured
+  during reconnect remains pending before replay has a server item; Apple PCM inactivity explicitly
+  finalizes `SpeechAnalyzer` input and does not settle the stream until matching final-result progress
+  is consumed from the module stream. A finalized turn also carries its transcript boundary, making
+  a delayed transcript-batch callback idempotent after the same line was committed. The manual hint
+  is the explicit immediate exception. The existing transcript-batching window remains only a
+  rapid-final-fragment grouping mechanism; it is not extended or treated as proof that both streams
+  are settled.
+- **Chose:** Keep Activity's bounded in-memory chronology and live DOM as two views of the same
+  retained set. When the cap removes insertion records, the renderer removes those exact stable
+  identities before applying the next Core-computed chronological index.
+- **Why:** The mic and system-audio transcribers finish independently. A short reply can finalize
+  before the longer question it answers, so completion order can invert Activity and, once the reply
+  enters committed model history, make the semantic order impossible to repair in a later delta.
+  Event-time rendering fixes the human record; state-based admission protects the immutable model
+  history boundary.
+- **Rejected:** (a) Sorting only the Activity UI—the model could still see the wrong conversation.
+  (b) Sorting the backing transcript array—it invalidates append-index provenance. (c) Increasing a
+  fixed debounce—it adds latency and cannot guarantee that another provider has finalized. (d)
+  Rebuilding committed model history after a late line—a much larger memory/provenance change when
+  the provider already exposes unfinished-work state.
+- **Detail:** [architecture.md → The turn](./architecture.md#the-turn),
+  `Sources/JarvisCore/Transcription/ConversationChronology.swift`,
+  `Sources/JarvisCore/Transcription/TranscriptionFinalizationState.swift`,
+  `Sources/JarvisCore/Transcription/RealtimeReconnectTranscriptionRecovery.swift`,
+  `Sources/JarvisCore/Coach/TranscriptionSettlementGate.swift`,
+  `Sources/JarvisCore/Diagnostics/ActivityLog.swift`.
+
 ### 2026-08-12 — Shared development workflows track `main`
 
 - **Chose:** Keep retained third-party Actions pinned to full commit SHAs, but have Jarvis's four

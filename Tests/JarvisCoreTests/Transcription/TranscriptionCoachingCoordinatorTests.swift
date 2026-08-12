@@ -11,7 +11,7 @@ import Testing
             transcript: transcript,
             clock: clock,
             sessionStart: 100,
-            turnDebounce: 0,
+            transcriptBatchingWindow: 0,
             events: events)
         guard let pendingTurn = PendingTurnProbe(coordinator) else {
             Issue.record("Could not inspect the coordinator's pending utterance buffer")
@@ -19,7 +19,7 @@ import Testing
         }
 
         coordinator.start()
-        coordinator.updateActivity(true)
+        coordinator.updateTranscriptionWork(true)
         #expect(coordinator.recordFinalizedTranscript(
             "  first fragment  ", spokenAt: 1, source: "test"))
         #expect(coordinator.recordFinalizedTranscript(
@@ -31,8 +31,9 @@ import Testing
         #expect(events.turnCount == 0)
         #expect(events.activity == [true])
 
-        coordinator.updateActivity(false)
+        coordinator.updateTranscriptionWork(false)
         #expect(await waitUntil { events.turnCount == 1 })
+        #expect(events.firstTurnBoundary == 2)
         #expect(events.activity == [true, false])
         #expect(transcript.renderFrom(index: 0).text
             == "[00:01] me: first fragment\n[00:02] me: second fragment")
@@ -43,19 +44,19 @@ import Testing
         let transcript = RollingTranscript()
         let clock = ManualClock(now: 10)
         let events = CoachingEvents()
-        let turnDebounce: TimeInterval = 0.02
+        let transcriptBatchingWindow: TimeInterval = 0.02
         let coordinator = makeCoordinator(
             transcript: transcript,
             clock: clock,
             sessionStart: 10,
-            turnDebounce: turnDebounce,
+            transcriptBatchingWindow: transcriptBatchingWindow,
             events: events)
 
-        let accepted = await recordAndStopBeforeQueuedDebounceRuns(coordinator)
+        let accepted = await recordAndStopBeforeQueuedBatchRuns(coordinator)
         #expect(!accepted.empty)
         #expect(accepted.usable)
 
-        await waitForMainQueue(after: turnDebounce * 2)
+        await waitForMainQueue(after: transcriptBatchingWindow * 2)
         #expect(events.turnCount == 0)
         #expect(events.activity == [true, false])
         #expect(transcript.renderFrom(index: 0).text == "[00:00] me: usable")
@@ -85,7 +86,7 @@ import Testing
         transcript: RollingTranscript,
         clock: Clock,
         sessionStart: TimeInterval,
-        turnDebounce: TimeInterval = 0.01,
+        transcriptBatchingWindow: TimeInterval = 0.01,
         silenceTimeout: TimeInterval = 60,
         silenceEnabled: Bool = false,
         events: CoachingEvents
@@ -95,13 +96,13 @@ import Testing
             transcript: transcript,
             clock: clock,
             sessionStart: sessionStart,
-            turnDebounce: turnDebounce,
+            transcriptBatchingWindow: transcriptBatchingWindow,
             silenceTimeout: silenceTimeout,
             silenceMaxInterval: silenceTimeout,
             silenceEnabled: silenceEnabled,
-            onTurnEnd: { events.recordTurn() },
+            onTurnEnd: { events.recordTurn(boundary: $0) },
             onSilence: { events.recordSilence($0) },
-            onSpeechActivityChanged: { events.recordActivity($0) })
+            onTranscriptionWorkChanged: { events.recordActivity($0) })
     }
 }
 
@@ -109,12 +110,18 @@ import Testing
 private final class CoachingEvents: @unchecked Sendable {
     private let lock = NSLock()
     private var turns = 0
+    private var turnBoundaries: [Int] = []
     private var silences: [TimeInterval] = []
     private var activityValues: [Bool] = []
 
     var turnCount: Int {
         lock.lock(); defer { lock.unlock() }
         return turns
+    }
+
+    var firstTurnBoundary: Int? {
+        lock.lock(); defer { lock.unlock() }
+        return turnBoundaries.first
     }
 
     var silenceCount: Int {
@@ -132,9 +139,10 @@ private final class CoachingEvents: @unchecked Sendable {
         return activityValues
     }
 
-    func recordTurn() {
+    func recordTurn(boundary: Int) {
         lock.lock()
         turns += 1
+        turnBoundaries.append(boundary)
         lock.unlock()
     }
 
@@ -163,8 +171,8 @@ private func waitUntil(
     return condition()
 }
 
-/// Production scheduled its debounce before this later-deadline marker on the same serial queue.
-/// Reaching the marker proves the invalidated `fireTurn` callback was dequeued first, even when
+/// Production scheduled its transcript batch before this later-deadline marker on the same queue.
+/// Reaching the marker proves the invalidated `publishTranscriptBatch` callback ran first, even when
 /// parallel test load delays both callbacks beyond their deadlines.
 private func waitForMainQueue(after delay: TimeInterval) async {
     await withCheckedContinuation { continuation in
@@ -174,9 +182,9 @@ private func waitForMainQueue(after delay: TimeInterval) async {
     }
 }
 
-/// `fireTurn` has no externally visible callback while transcription remains active. This
+/// `publishTranscriptBatch` has no externally visible callback while transcription remains active. This
 /// test-local probe observes the exact `UtteranceBuffer` transition instead of adding a production
-/// hook, then restores the state so `updateActivity(false)` still exercises the normal resume path.
+/// hook, then restores the state so `updateTranscriptionWork(false)` exercises the resume path.
 private struct PendingTurnProbe: Sendable {
     private let pending: UtteranceBuffer
 
@@ -195,15 +203,15 @@ private struct PendingTurnProbe: Sendable {
     }
 }
 
-/// Running the complete start/record/stop sequence in one main-actor turn guarantees the debounce
+/// Running the complete start/record/stop sequence in one main-actor turn guarantees the batch callback
 /// is genuinely queued but cannot execute until after `stop()` invalidates it.
 @MainActor
-private func recordAndStopBeforeQueuedDebounceRuns(
+private func recordAndStopBeforeQueuedBatchRuns(
     _ coordinator: TranscriptionCoachingCoordinator
 ) -> (empty: Bool, usable: Bool) {
     coordinator.start()
     let empty = coordinator.recordFinalizedTranscript(" … ", spokenAt: nil, source: "test")
-    coordinator.updateActivity(true)
+    coordinator.updateTranscriptionWork(true)
     let usable = coordinator.recordFinalizedTranscript("usable", spokenAt: nil, source: "test")
     coordinator.stop()
     return (empty, usable)
