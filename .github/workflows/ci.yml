@@ -1,9 +1,8 @@
 name: CI
 
-# Test-only CI: compiles and runs the JarvisCore test suite. It deliberately does NOT build or sign
-# the .app bundle — a CI runner can't grant the interactive TCC permissions (Microphone, Screen
-# Recording) or exercise the live capture pipeline, so a bundled artifact would carry no extra
-# signal. Bundling/signing stays a local step (scripts/build-app.sh).
+# CI runs the repository gate: compile every target, then run all test targets and static guards.
+# It deliberately does not launch or sign the .app bundle because a hosted runner cannot grant the
+# interactive TCC permissions or exercise the live capture pipeline.
 
 # PR-only on purpose: every change lands through a PR (already tested here), and a release merge
 # is re-tested by release.yml's publish gate — a push-to-main trigger would run the same suite a
@@ -11,6 +10,9 @@ name: CI
 # a direct push to main isn't tested until the next PR or release touches it.
 on:
   pull_request:
+
+permissions:
+  contents: read
 
 # Cancel superseded runs on the same ref so a quick succession of pushes doesn't pile up.
 concurrency:
@@ -25,10 +27,13 @@ jobs:
     # tier. Normal runs finish in ~1 minute.
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Show toolchain
         run: swift --version
 
-      - name: Run tests
+      - name: Compile all targets
+        run: swift build
+
+      - name: Run tests and static guards
         run: ./scripts/run-tests.sh

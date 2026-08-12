@@ -8,6 +8,15 @@ wiki/build_html.py
 *.xcodeproj
 .DS_Store
 secrets.env
+.env
+.env.*
+!.env.example
+*.key
+*.p8
+*.p12
+*.pem
+*.pfx
+auth.json
 
 # Dev-mode activity/debug logs (screen-derived content — never commit)
 .jarvis/

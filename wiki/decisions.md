@@ -1352,6 +1352,45 @@
   `Sources/JarvisCore/Diagnostics/JSONLRecords.swift`,
   `Sources/JarvisApp/App/AppDelegate.swift`.
 
+### 2026-08-10 — Public launch preserves repository history
+
+- **Chose:** Publish the existing Git, issue, pull-request, and review history without rewriting
+  commits. Generalize machine-specific instructions in the current tree, but retain contributor
+  identity and project provenance. Treat historical Actions logs and artifacts as a separate manual
+  review before visibility changes.
+- **Why:** A full Git history secret scan and high-signal review of GitHub discussion content found
+  no credential leak. The existing contributor address is already exposed through the maintainer's
+  public profile, so rewriting every commit would add little privacy while invalidating commit ids,
+  review links, tags, and downstream clones.
+- **Rejected:** (a) Squashing or filtering the complete history as a default precaution—high
+  provenance cost without an identified secret. (b) Publishing Actions logs without review—they can
+  contain execution context that source/history scans do not cover.
+- **Changes this decision:** A newly discovered credential, private artifact, or personal identifier
+  whose removal materially improves privacy.
+- **Detail:** [status.md → Next action](./status.md#next-action).
+
+### 2026-08-10 — Public repositories keep hosted, owner-gated agent automation
+
+- **Chose:** Remove the persistent repository-level `vps` runner, but retain the four development
+  agent workflows on GitHub-hosted runners. Limit automatic review to same-repository PR branches;
+  accept `@claude` only from the repository owner; retain Issue Opener's scheduled/manual triggers;
+  and rely on Issue Worker's central gate, which requires the issue author to have admin, maintain,
+  or write permission before its agent job receives write authority. Pin reusable workflow calls to
+  a full commit SHA. Keep the workflows disabled until this caller hardening lands on the default
+  branch.
+- **Why:** Ephemeral hosted runners remove the persistent-machine exposure without discarding useful
+  development automation. Trigger gates separately prevent arbitrary public issues, comments, and
+  fork code from launching a credential-bearing or write-capable agent.
+- **Rejected:** (a) Deleting all agent workflows—safe but unnecessarily removes the development
+  loop. (b) Changing only `runs-on`—that protects the old VPS but leaves public-input credential and
+  prompt-injection risks in the review/comment callers that lack a permission gate. (c) Adding a
+  second label gate to Issue Worker—the central author-permission gate already provides the intended
+  trust boundary and the duplicate gate breaks the automatic Opener → Worker chain.
+- **Detail:** `.github/workflows/claude-code-review.yml`, `.github/workflows/claude.yml`,
+  `.github/workflows/issue-opener.yml`, `.github/workflows/issue-worker.yml`.
+- **Superseded in part by:** 2026-08-12 — Shared development workflows track `main`. The hosted
+  runner and trigger gates stand; full-SHA pinning of first-party reusable workflows does not.
+
 ### 2026-08-10 — The reconnect benchmark faults only Jarvis's transcription transport
 
 - **Chose:** Make the explicit reconnect benchmark close only the active Jarvis transcription
@@ -1503,3 +1542,16 @@
   `Sources/JarvisCore/Benchmark/TranscriptionBenchmarkInstrumentation.swift`,
   `Sources/JarvisCore/Benchmark/TranscriptionBenchmarkObserving.swift`,
   `Sources/JarvisCore/Benchmark/TranscriptionBenchmarkTransportControl.swift`.
+
+### 2026-08-12 — Shared development workflows track `main`
+
+- **Chose:** Keep retained third-party Actions pinned to full commit SHAs, but have Jarvis's four
+  first-party development-agent callers follow `JINGBANZ/workflows` at `main`.
+- **Why:** The same maintainer owns both repositories and wants shared workflow fixes to reach Jarvis
+  without a caller update for every central change. The caller-side public-input gates remain local
+  and reviewable in this repository.
+- **Rejected:** Pinning each first-party reusable workflow to a commit SHA—stronger immutability, but
+  it makes every central workflow update require a matching Jarvis pull request.
+- **Supersedes in part:** 2026-08-10 — Public repositories keep hosted, owner-gated agent automation.
+- **Detail:** `.github/workflows/claude-code-review.yml`, `.github/workflows/claude.yml`,
+  `.github/workflows/issue-opener.yml`, `.github/workflows/issue-worker.yml`.

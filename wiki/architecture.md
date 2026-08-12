@@ -596,15 +596,14 @@ The always-on legs are built to survive transient failure rather than die on it:
 
 Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full model. In short:
 
-- **App Sandbox** with only the entitlements it needs (screen recording, audio input), giving
-  **no general filesystem access** — the hardened posture for a shippable build. *For the current
-  personal build this is relaxed:* the app is unsandboxed and signed with a stable self-signed
-  identity (`Jarvis Dev`, so grants persist), relying on macOS **TCC prompts** for Screen Recording
-  + Microphone. It can therefore technically read the user's files;
-  that tradeoff is accepted for the personal tool. See [sandbox.md](./sandbox.md).
+- **The current app is unsandboxed.** It is signed with a stable identity and relies on macOS TCC
+  prompts for microphone, system-audio, and screen capture. It therefore has the filesystem authority
+  of the signed-in user. App Sandbox with a narrow set of capabilities remains a future distribution
+  target, not a property of the current build. See [sandbox.md](./sandbox.md).
 - **API key in an owner-only file** (`0600`), not the Keychain — see [sandbox.md §3](./sandbox.md) for why.
-- **Built and run in the main `forrest` account inside a git worktree** (recoverability). The
-  separate-restricted-account requirement is waived for the personal build; see [sandbox.md](./sandbox.md).
+- **Development happens inside a git worktree** for recoverability. A worktree does not isolate the
+  process from the developer's account; a separate Standard account is optional hardening for long
+  unattended agent runs. See [sandbox.md](./sandbox.md).
 - **Egress is narrow and explicit:** the selected OpenAI transcription model receives audio when
   OpenAI is the provider, while opt-in Apple Speech keeps raw audio on-device; a screenshot +
   transcript window goes to the selected brain provider/model *only when the model triggers a
@@ -647,7 +646,8 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
 2. **Least code wins.** Prefer a borrowed tool (`screencapture`, an Apple framework, an OpenAI API) over custom code, every time.
 3. **The model is the cost governor.** Expensive actions (vision, speaking) happen only when the model opts in.
 4. **Proactive, but disciplined.** Speaking up unprompted is the whole point; the model's own restraint (a tuned system prompt) keeps it from being annoying.
-5. **Sees the screen, not the disk.** Security is enforced by the sandbox, not by good intentions.
+5. **Make sensitive capabilities explicit.** TCC, owner-only files, provider selection, and narrow
+   egress are enforced today; do not claim filesystem isolation until App Sandbox is implemented.
 6. **Self-verifying.** Every build ships with tests and a smoke checklist the agent can run to prove it works.
 7. **One domain, done well.** Ship the technical-interview coach; expand later.
 

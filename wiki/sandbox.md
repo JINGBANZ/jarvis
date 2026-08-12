@@ -1,37 +1,40 @@
 # Sandbox & Security Model
 
-> Jarvis runs on a personal machine and watches the screen and microphone. This page describes the
-> **hardened** model (the target for any shippable build) and the **relaxed posture currently in
-> effect** for the personal build.
+> Jarvis runs on a personal machine and watches the screen and microphone. This page distinguishes
+> the controls enforced by the current build from a future App-Sandboxed distribution target.
 
-## Current Posture (personal build, 2026-06-14)
+## Current Posture
 
-Two layers below are **relaxed** for the personal build, by explicit decision:
+Two layers below are **not OS-enforced** in the current build:
 
 - **No App Sandbox.** The app is **unsandboxed**, signed with a **stable self-signed identity
   (`Jarvis Dev`)** — not ad-hoc, so TCC grants persist across rebuilds (see
   [build-and-run.md](./build-and-run.md)). Screen Recording, Microphone, and System Audio Recording
-  are granted via **TCC prompts**. Consequence: the app *could* read the user's files —
-  accepted for a personal tool. (Hardened model: §1.)
-- **No separate account.** The build and the app run in the **main `forrest` account**, inside a
-  **git worktree** for recoverability, rather than a restricted `jarvisbuild` account. The former
-  HARD REQUIREMENT is **waived** here. (Hardened model: §2.)
+  are granted via **TCC prompts**. Consequence: the app has the filesystem authority of the signed-in
+  user even though Jarvis's own code limits its normal file access. (Future model: §1.)
+- **No separate account requirement.** Development normally runs in the developer's current account
+  inside a **git worktree** for recoverability. A worktree is not an OS access boundary. (Optional
+  hardened development model: §2.)
 
 Everything else (owner-only file for the key, narrow egress, no rolling stream archive, owner-only
-activity log, model-governed behavioral restraint) **still holds**. To re-harden for a shippable
-build, re-enable §1 and §2.
+activity log, model-governed behavioral restraint) **still holds**. The README must keep the
+unsandboxed boundary visible until §1 is actually implemented and validated.
 
-## Principle
+## Current enforcement boundary
 
-**Jarvis can see the screen, not the disk.** Anything it can reach is something the OS explicitly
-granted; everything else is denied by default.
+TCC gates microphone, system-audio, and screen capture; owner-only permissions protect credentials
+and session files; provider choice and egress are explicit in Jarvis's code. Because App Sandbox is
+off, **“screen, not disk” is not a current OS guarantee**: another bug in this process could reach
+files available to the signed-in user.
 
 ## Layers
 
 ### 1. App Sandbox (OS-enforced) — *hardened model; relaxed in the current build*
 
 > **Current build:** App Sandbox is **off**; the app is signed with a stable self-signed identity
-> (`Jarvis Dev`) and relies on TCC prompts. The description below is the target for a shippable version.
+> (`Jarvis Dev`) and relies on TCC prompts. The description below is a future target, not a claim
+> about the downloadable or locally built app. It requires explicit design work for CLI providers,
+> session storage, and the `screencapture` helper before it can be enabled.
 
 The app ships with the macOS App Sandbox enabled and requests **only** the entitlements it needs:
 
@@ -46,13 +49,11 @@ It requests **no** general filesystem entitlement. It cannot read the user's doc
 data, or home directory. The only files it touches are its own sandbox container and transient
 screenshot temp files it creates and deletes.
 
-### 2. Restricted macOS User Account (development & run) — *was HARD; waived in the current build*
+### 2. Restricted macOS User Account (optional development hardening)
 
-> **Current build (2026-06-14): waived.** Building and running happen in the main `forrest` account
-> inside a **git worktree** (`.claude/worktrees/…`), which gives version-controlled recoverability
+> Development normally happens in the developer's current account inside a **git worktree**, which gives version-controlled recoverability
 > but **not** an OS file-access boundary. The agent is instructed to confine all writes to the
-> worktree. The description below is the hardened model, recommended before any long *unattended*
-> autonomous run or a shippable build.
+> worktree. The description below is recommended before any long *unattended* autonomous run.
 
 The hardened requirement: run the autonomous build agent inside a **separate, low-privilege
 (Standard, non-admin) macOS user account** — never the user's primary account — so that *no file on
@@ -60,11 +61,8 @@ the user's main account is readable or writable by the build agent*. A separate 
 boundary; the agent's reach is confined to that throwaway account's home folder, bounding the blast
 radius of both the build agent and the running app.
 
-A Standard account `dev` already exists on this Mac and could serve, or add a fresh one:
-**System Settings → Users & Groups → add a Standard user (e.g. `jarvisbuild`) →** log in via Fast
-User Switching → run Claude Code there (the session runs *as* that user — true isolation). Note the
-build still needs one-time **admin** setup from `forrest` (TCC grants, any tool installs), since a
-Standard account cannot grant itself Screen Recording or System Audio Recording.
+Create one through **System Settings → Users & Groups → Add User → Standard**, then run the build
+agent as that user. Any required administrator setup remains a separate, explicit operator action.
 
 ### 3. Secrets
 
@@ -145,9 +143,9 @@ the **per-session log directory** — owner-only and bounded; see below.
 > `store:true` (`OpenAIBrainClient.swift`) so each request/response remains inspectable in the OpenAI
 > dashboard logs while the harness is being tuned. This **does** retain the transcript and the
 > screenshots sent to the model server-side at OpenAI (≈30-day TTL), so the no-local-retention
-> guarantee above does **not** extend to OpenAI's servers. A deliberate *debuggability-over-retention*
-> choice; flipping to `store:false` — now a one-line change with no quality cost — is tracked as a
-> future privacy item.
+> guarantee above does **not** extend to OpenAI's servers. This remains a deliberate
+> *debuggability-over-retention* choice. A future `store:false` change must also preserve stateless
+> tool-loop reasoning continuity; it is not part of the public-launch hardening.
 
 **The per-session log directory is the one bounded form of disk persistence, hardened to stay
 owner-only.** It holds the **activity log** (the in-app `WKWebView` viewer's `jarvis-activity.jsonl` +
@@ -183,5 +181,6 @@ readable by this user account and by nothing else. See [build-and-run.md](./buil
 
 ## Consent Note
 
-Capturing system audio can record the other side of a call. For personal use this is fine; if this
-ever becomes multi-user (it won't in v1), two-party-consent law would require a disclosure UX.
+Capturing system audio can record other people. Use Jarvis only when every authorization or consent
+required by applicable law, workplace policy, platform terms, and the conversation itself has been
+obtained. Jarvis does not provide legal advice or a built-in disclosure/consent workflow.

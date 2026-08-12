@@ -121,8 +121,31 @@ and opens its saved report; the standalone script calls the same Core implementa
 covers microphone transcription, audio-route loss, in-place CLI preflight, and Activity-audit
 completion: no runtime error autonomously activates Jarvis, opens a browser, or presents a modal;
 fixed notices remain available in Activity. The gate statically rejects unreviewed presentation APIs.
+The source tree is prepared for a public launch without giving public input a direct privileged-agent
+path. CI, release, and agent automation use hosted runners; no self-hosted runner remains registered.
+Automatic agent review is limited to same-repository PR branches, `@claude` is owner-invoked, issue
+discovery keeps its scheduled/manual triggers, and automatic issue implementation relies on the
+central workflow's existing author write-access check. Reusable agent workflows track the shared
+repository's `main` branch; retained third-party Actions are SHA-pinned and Dependabot-managed.
+Public docs
+disclose the current unsandboxed boundary, contribution and private-reporting paths are present, and
+release app bundles carry the Apache license plus third-party notices. The existing Git/PR history is
+intentionally preserved after the full-history secret scan found no credential leak; current-tree
+machine-specific instructions were generalized instead of rewriting repository identity and provenance.
 
 ## Next action
+
+Re-enable the four agent workflows. Their hosted definitions and existing source-level gates are
+ready on `main`; they were disabled during rollout so the old base-branch copies could not target the
+removed self-hosted runner.
+Before changing repository visibility, delete the historical self-hosted runs and artifacts after
+owner approval: the audit found no credential leak, but those logs expose runner, account, and
+installed-tool paths.
+Replace release-please's `GITHUB_TOKEN` with a GitHub App token
+before making CI a required check, because token-authored Release PRs do not trigger `pull_request`
+workflows. At visibility change, enable private vulnerability reporting, secret scanning and push
+protection, Dependabot security updates, fork-workflow approval, and a `main` ruleset requiring pull
+requests and the CI check. Keep self-hosted runners unavailable to public forks.
 
 Repeat `./scripts/transcription-benchmark.sh standard` to classify the single GPT Live Transcribe
 bilingual final-stream timeout from the first 36-repetition run. The automated scoped reconnect run
@@ -187,7 +210,7 @@ thin OS shell, verified by the smoke run.
 - `Sources/JarvisApp/Viewer/ActivityViewer.swift` — the in-app `WKWebView` activity viewer, with the current non-persisted readiness badge, an exact selectable/copyable session ID, and one-click **Evaluate** / **Open report** agentic audit flow.
 - `Sources/EvalPrep/main.swift` — the Foundation-only terminal entry point for the same `AgenticEvaluator` Activity invokes; `scripts/eval-session.sh` runs it over the repo + session dir.
 - `Sources/CJarvisAEC/lib/libjarvis-aec.a` — the prebuilt, zero-dylib WebRTC AEC3 + classic VAD native edge (the `CJarvisAEC` target; rebuilt by `scripts/build-aec.sh`).
-- `.github/workflows/release.yml` + `scripts/package-app.sh` — automated releases: release-please Release PR → Developer ID-signed, notarized, stapled `Jarvis-<version>.zip` attached to a GitHub Release ([build-and-run.md → Distribution](./build-and-run.md#distribution--signed-notarized-releases-from-ci)).
+- `.github/workflows/` + `scripts/package-app.sh` — hosted automation only: owner-gated development agents, the repository gate on pull requests, then release-please Release PR → Developer ID-signed, notarized, stapled `Jarvis-<version>.zip` with Apache and third-party notices attached to a GitHub Release ([build-and-run.md → Distribution](./build-and-run.md#distribution--signed-notarized-releases-from-ci)).
 - `AGENTS.md` + `.github/workflows/sync-shared-rules.yml` — project-specific agent guidance with a
   machine-managed shared-rules block that syncs weekly from `JINGBANZ/rules`; `CLAUDE.md` imports the
   same canonical file.

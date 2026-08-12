@@ -11,6 +11,13 @@ screen-aware hint.
 > [`wiki/status.md`](./wiki/status.md). Start at the [`wiki index`](./wiki/index.md) for the design
 > documentation.
 
+> [!WARNING]
+> Jarvis is experimental software, not a production security boundary. The current app is not
+> App-Sandboxed, so it runs with the filesystem authority of the signed-in macOS account. It also
+> captures microphone and system audio and may send transcripts or requested screenshots to the
+> providers you select. Use it only where every required participant has authorized the capture and
+> where applicable law, workplace policy, and platform terms permit it.
+
 ## How it works
 
 ```text
@@ -51,7 +58,7 @@ For the full loop and its design rationale, see
 - Apple silicon Mac running macOS 14 or later
 - Swift 6 and the macOS Command Line Tools; full Xcode is not required
 - An OpenAI API key when using OpenAI transcription or an OpenAI brain target
-- Microphone and Screen Recording permission
+- Microphone, System Audio Recording, and Screen Recording permission
 
 ## Quick start
 
@@ -134,4 +141,11 @@ The package boundaries are intentionally small:
 | `EvalPrep` | Foundation-only helper used by the developer-side session audit |
 
 Contributor workflow, subsystem placement, and testing rules live in
-[`AGENTS.md`](./AGENTS.md).
+[`AGENTS.md`](./AGENTS.md) and [`CONTRIBUTING.md`](./CONTRIBUTING.md). Please report security issues
+through the private process in [`SECURITY.md`](./SECURITY.md), not a public issue.
+
+## License
+
+Jarvis is licensed under the [Apache License 2.0](./LICENSE). The bundled WebRTC AEC/VAD archive
+includes additional attribution in [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md); release app
+bundles include both files under `Contents/Resources/`.
