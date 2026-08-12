@@ -1,5 +1,5 @@
-# The pinned reusable workflow gates every opened issue before its agent job: only an author with
-# admin, maintain, or write permission can proceed. Its runner default is `ubuntu-latest`.
+# The shared workflow's main branch gates every opened issue before its agent job: only an author
+# with admin, maintain, or write permission can proceed. Its runner default is `ubuntu-latest`.
 name: Issue Worker
 
 on:
@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   work:
-    uses: JINGBANZ/workflows/.github/workflows/issue-worker.yml@0576cdaa7c17a5125960b68918f7d1e9ab0e7619
+    uses: JINGBANZ/workflows/.github/workflows/issue-worker.yml@main
     permissions:
       contents: write
       pull-requests: write

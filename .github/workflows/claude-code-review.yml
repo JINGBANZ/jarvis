@@ -1,7 +1,7 @@
 name: Claude Code Review
 
-# Review logic lives in the pinned reusable workflow at JINGBANZ/workflows. Automatic reviews remain
-# limited to branches in this repository; the reusable workflow defaults to `ubuntu-latest`.
+# Review logic follows the shared workflow's main branch. Automatic reviews remain limited to
+# branches in this repository; the reusable workflow defaults to `ubuntu-latest`.
 on:
   pull_request:
     types: [opened, synchronize, ready_for_review, reopened]
@@ -9,7 +9,7 @@ on:
 jobs:
   review:
     if: github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]'
-    uses: JINGBANZ/workflows/.github/workflows/claude-code-review.yml@0576cdaa7c17a5125960b68918f7d1e9ab0e7619
+    uses: JINGBANZ/workflows/.github/workflows/claude-code-review.yml@main
     permissions:
       contents: read
       pull-requests: read

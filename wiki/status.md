@@ -21,9 +21,23 @@ Start snapshots the provider, OpenAI model/profile, or Apple locale for both `me
 is no automatic provider or model fallback. An initial same-input macOS 26 system-audio comparison
 keeps GPT-4o Transcribe as the default: among the tested GPT-4o, GPT Live, and Apple Speech arms, it
 alone preserved the English, Mandarin, and within-sentence language-switching inputs. This is
-directional evidence rather than a full benchmark because it does not include GPT Transcribe;
-[issue #136](https://github.com/JINGBANZ/jarvis/issues/136) owns repeated system-audio runs plus an
-explicitly opt-in reconnect/replay scenario before any future default change. Apple Speech prepares
+directional evidence rather than a full benchmark because it does not include GPT Transcribe. The
+[transcription benchmark](./transcription-benchmark.md) now covers all OpenAI models and
+single-locale Apple Speech with fixed synthetic English, Mandarin, and bilingual system audio, at
+least three byte-identical repetitions
+per arm, audio-free structured lifecycle evidence, and a deterministic summary. Its separate
+reconnect mode interrupts only Jarvis's transcription WebSocket, fills the real replay buffer while
+the replacement is held, then exercises the ordinary replacement path without changing host network
+state. The normal app supplies no benchmark instrumentation: its session contract and `AppDelegate`
+wiring expose no benchmark capability, event construction is skipped, and its direct reconnect path
+is unchanged. On macOS 14–25, Apple Speech arms remain reported as platform-unavailable without
+failing the runnable matrix. Neither mode changes defaults or runs in the gate. The first complete standard run finished
+35 of 36 repetitions; one GPT Live Transcribe bilingual repetition timed out waiting for its finalized
+stream while capture and delivery continuity remained intact. The automated reconnect run passes all
+three OpenAI models: both scoped-interruption phrases return exactly once and in order, every model
+replays buffered chunks without eviction or capture gaps, the replacement stays healthy through the
+settled snapshot, and provider identity remains unchanged.
+Apple Speech prepares
 the selected supported locale before replacing a running pipeline, submits every captured sample to
 `SpeechAnalyzer`, records only final results, and uses content-free local activity solely to keep
 coaching from waking mid-utterance. An OpenAI key is required only when OpenAI supplies
@@ -49,9 +63,9 @@ Activity badge. Badge changes are not Activity rows and are never persisted; a p
 **Ended**.
 Locally accepted WebSocket sends remain in a bounded memory-only recovery tail because Realtime does
 not acknowledge audio appends; server audio-clock progress retires only a safe prefix, and a
-replacement socket replays the rest after a half-open failure. A live Wi-Fi reconnect run confirms
-that speech captured during the outage returns after recovery. The brain can also run through a
-locally installed Claude Code or Codex CLI on the user's subscription; Settings → Brain auto-detects
+replacement socket replays the rest after a half-open failure. The scoped reconnect harness confirms
+that speech captured while that socket is unavailable returns after recovery. The brain can also run
+through a locally installed Claude Code or Codex CLI on the user's subscription; Settings → Brain auto-detects
 both, reports Claude's current sign-in state from its bounded status command, and keeps the
 OpenAI API-key path available. Codex also remains available to the explicit agentic session
 evaluator. The ordered provider route uses one primary
@@ -111,8 +125,9 @@ The source tree is prepared for a public launch without giving public input a di
 path. CI, release, and agent automation use hosted runners; no self-hosted runner remains registered.
 Automatic agent review is limited to same-repository PR branches, `@claude` is owner-invoked, issue
 discovery keeps its scheduled/manual triggers, and automatic issue implementation relies on the
-central workflow's existing author write-access check. Reusable agent workflows and retained
-third-party Actions are SHA-pinned; hosted CI/release Actions are Dependabot-managed. Public docs
+central workflow's existing author write-access check. Reusable agent workflows track the shared
+repository's `main` branch; retained third-party Actions are SHA-pinned and Dependabot-managed.
+Public docs
 disclose the current unsandboxed boundary, contribution and private-reporting paths are present, and
 release app bundles carry the Apache license plus third-party notices. The existing Git/PR history is
 intentionally preserved after the full-history secret scan found no credential leak; current-tree
@@ -132,13 +147,17 @@ workflows. At visibility change, enable private vulnerability reporting, secret 
 protection, Dependabot security updates, fork-workflow approval, and a `main` ruleset requiring pull
 requests and the CI check. Keep self-hosted runners unavailable to public forks.
 
-Then finish the remaining transcription configuration smoke without expanding the performance benchmark:
+Repeat `./scripts/transcription-benchmark.sh standard` to classify the single GPT Live Transcribe
+bilingual final-stream timeout from the first 36-repetition run. The automated scoped reconnect run
+is complete and passes all three OpenAI models without changing host networking. These live runs are
+not part of the gate and do not use the microphone.
+
+Then finish the remaining transcription configuration smoke:
 confirm Apple Speech plus a CLI-only brain route starts without an API key, while any OpenAI
 transcription or brain target still requires one. Change a transcription setting during a live run
 and confirm the current snapshot remains active until the next Start; force an Apple analyzer failure
 and confirm Jarvis never sends audio to OpenAI as an implicit fallback. Microphone benchmarking and
-Apple-specific finalization optimization are not required; the repeated model matrix and opt-in
-network interruption belong to [issue #136](https://github.com/JINGBANZ/jarvis/issues/136).
+Apple-specific finalization optimization are not required.
 
 Then run the live prompt smoke on a fresh session: show an interview question without speaking its
 details, ask “Jarvis, how can I solve this in one pass?”, and confirm the first action is
@@ -173,6 +192,7 @@ thin OS shell, verified by the smoke run.
 
 - `Sources/JarvisCore/Audio/` — transactional PCM + utterance buffering, bounded speech pre-roll, adaptive content-free activity detection, stable frame-decision endpoints, non-destructive AEC reference alignment, and system-audio timeline preservation (`PCMBuffer`, `SpeechGatedAudioBuffer`, `UtteranceBuffer`, `PCM16Framer`, `SpeechEndpointDetector`, `AudioDownmix`, `AdaptiveAudioActivityDetector`, `PCM16SpeechActivityTracker`, `EchoReferenceAlignment`, `SystemAudioTimeline`).
 - `Sources/JarvisCore/Transcription/` — provider-neutral session/provider contracts and immutable Start configuration, selectable OpenAI model/language-profile values, the OpenAI Realtime wire contract, reconnect-safe Jarvis-managed turn coordinator, per-item ledger, and rolling transcript (`TranscriptionSession`, `TranscriptionProvider`, `TranscriptionConfiguration`, `OpenAITranscriptionModel`, `OpenAITranscriptionLanguageProfile`, `RealtimeSession`, `RealtimeJarvisManagedTurnCoordinator`, `RealtimeTranscriptionLedger`, `Transcript`, `NoiseReduction`).
+- `Sources/JarvisCore/Benchmark/` + `Sources/JarvisApp/Benchmark/` — the Foundation-only fixed transcription matrix, optional absence-means-disabled instrumentation, scoring and deterministic summary contract, plus the hidden signed-app runner, process-scoped synthetic system-audio tap, and automated transcription-transport reconnect regression (`TranscriptionBenchmark`, `TranscriptionBenchmarkEvent`, `TranscriptionBenchmarkInstrumentation`, `TranscriptionBenchmarkRunner`, `SystemAudioBenchmarkCapture`; operating, isolation, and scoring contract in [transcription-benchmark.md](./transcription-benchmark.md)).
 - `Sources/JarvisCore/Brain/` — provider-neutral `BrainClient`/attempt-scoped `BrainConversation` contracts and models stay at the root. `Adapters/OpenAI/` owns the Responses transport; `Adapters/LocalAgent/` owns CLI detection, `CLIBrainClient`, the Claude Code and Codex runtimes, and the bounded shared process edge. `LocalAgentRuntimeSet` encapsulates provider-specific coach/summarizer ownership. `AgentCLIProcessRunner` remains only for the explicit completed-session evaluator. The subsystem also owns provider-boundary failure classification (`BrainFailure`), immutable `BrainTarget`/`BrainRoute`, `BrainProvider`, `BrainModelCatalog` (first per-provider entry is the default), and `ReasoningEffort`.
 - `Sources/JarvisCore/Coach/` — the event loop: `CoachDriver` (fresh-attempt scheduling and one-target tool-loop orchestration), the pure forward-only `BrainRouteSession`, `SpeechActivityGate`, `CoachHistory` (client-managed session memory), and `ToolDefs` (coach tool schemas).
 - `Sources/JarvisCore/Triggers/` — turn/silence trigger detection, substance classification, and silence backoff (`Trigger`, `TurnSubstance`, `SilenceBackoff`).

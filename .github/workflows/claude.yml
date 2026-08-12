@@ -21,7 +21,7 @@ jobs:
        (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
        (github.event_name == 'issues' &&
         (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude'))))
-    uses: JINGBANZ/workflows/.github/workflows/claude.yml@0576cdaa7c17a5125960b68918f7d1e9ab0e7619
+    uses: JINGBANZ/workflows/.github/workflows/claude.yml@main
     permissions:
       contents: read
       pull-requests: read

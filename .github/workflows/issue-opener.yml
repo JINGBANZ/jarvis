@@ -1,4 +1,4 @@
-# The scheduled/manual caller delegates to a pinned reusable workflow whose runner default is
+# The scheduled/manual caller follows the shared workflow's main branch, whose runner default is
 # `ubuntu-latest`. Its repository-scoped token lets a filed issue trigger Issue Worker.
 name: Issue Opener
 
@@ -9,7 +9,7 @@ on:
 
 jobs:
   open-issue:
-    uses: JINGBANZ/workflows/.github/workflows/issue-opener.yml@0576cdaa7c17a5125960b68918f7d1e9ab0e7619
+    uses: JINGBANZ/workflows/.github/workflows/issue-opener.yml@main
     permissions:
       contents: read
       issues: write
