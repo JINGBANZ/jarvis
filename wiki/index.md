@@ -24,11 +24,11 @@
 ## Decisions
 
 - **[decisions.md](./decisions.md)** — the decision log: what was chosen and why, with the rejected
-  alternative. One page, no ADR folder by design; see [CLAUDE.md](./CLAUDE.md) → Convention 8.
+  alternative. One page, no ADR folder by design; see [AGENTS.md](./AGENTS.md) → Convention 8.
 
 ## Meta
 
-- **[CLAUDE.md](./CLAUDE.md)** — conventions for maintaining this wiki. Read before editing any wiki file.
+- **[AGENTS.md](./AGENTS.md)** — conventions for maintaining this wiki. Read before editing any wiki file.
 
 ## What Jarvis Is, In One Sentence
 
