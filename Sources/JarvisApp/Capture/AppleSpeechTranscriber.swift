@@ -38,7 +38,7 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
     private struct ActiveFinalization {
         let token: TranscriptionFinalizationState.Token
         /// Exclusive analyzer time through which module results must have been consumed.
-        let resultBoundary: CMTime
+        let boundary: CMTime
     }
 
     /// `AVAudioConverter` requires a Sendable input block. The block and this flag are confined to
@@ -605,11 +605,10 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
                 diagnostic: "could not finalize before analyzer audio was submitted")
             return
         }
-        let resultBoundary = CMTime(
+        // One exclusive end-of-buffer boundary drives both sides of settlement: what the analyzer
+        // must finalize and how far result consumption must advance.
+        let finalizationBoundary = CMTime(
             value: submittedAnalyzerFrameCount,
-            timescale: analyzerTimeScale)
-        let finalSampleTime = CMTime(
-            value: submittedAnalyzerFrameCount - 1,
             timescale: analyzerTimeScale)
         lock.lock()
         guard !stopped, !terminalFailureReported, self.generation == generation,
@@ -618,9 +617,9 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
             return
         }
         lock.unlock()
-        activeFinalization = .init(token: token, resultBoundary: resultBoundary)
+        activeFinalization = .init(token: token, boundary: finalizationBoundary)
         if let latestConsumedResultsFinalizationTime,
-           CMTimeCompare(latestConsumedResultsFinalizationTime, resultBoundary) >= 0 {
+           CMTimeCompare(latestConsumedResultsFinalizationTime, finalizationBoundary) >= 0 {
             let consumed = finalizationState.finalResultsConsumed(
                 token,
                 analyzerAvailable: analyzerReadyForFinalization)
@@ -630,7 +629,7 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
 
         Task { [weak self, analyzer] in
             do {
-                try await analyzer.finalize(through: finalSampleTime)
+                try await analyzer.finalize(through: finalizationBoundary)
             } catch {
                 self?.fail(
                     generation: generation,
@@ -663,7 +662,7 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
         guard let activeFinalization,
               CMTimeCompare(
                 resultsFinalizationTime,
-                activeFinalization.resultBoundary) >= 0 else { return }
+                activeFinalization.boundary) >= 0 else { return }
         let effects = finalizationState.finalResultsConsumed(
             activeFinalization.token,
             analyzerAvailable: analyzerReadyForFinalization)
