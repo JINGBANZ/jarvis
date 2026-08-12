@@ -33,7 +33,7 @@ enum TranscriptionSessionFactory {
                     : .infinity,
                 silenceDurationMs: config.vadSilenceDurationMs,
                 noiseReduction: config.audioNoiseReduction,
-                transcriptBatchingDelay: config.transcriptBatchingDelaySeconds,
+                transcriptBatchingWindow: config.transcriptBatchingWindowSeconds,
                 maxBufferedAudioSeconds: config.maxBufferedAudioSeconds,
                 readyTimeout: config.realtimeReadyTimeoutSeconds,
                 pingInterval: config.realtimePingIntervalSeconds,
@@ -57,7 +57,7 @@ enum TranscriptionSessionFactory {
                     silenceIdleCutoff: speaker == .me
                         ? config.silenceIdleCutoffSeconds
                         : .infinity,
-                    transcriptBatchingDelay: config.transcriptBatchingDelaySeconds,
+                    transcriptBatchingWindow: config.transcriptBatchingWindowSeconds,
                     maxBufferedAudioSeconds: config.maxBufferedAudioSeconds,
                     benchmark: benchmark)
             } else {

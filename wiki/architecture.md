@@ -60,7 +60,7 @@ moments the model judges worthwhile.
 1. The Transcriber emits a **turn-end** event after it finalizes an utterance (GPT-4o uses tuned
    server VAD, GPT Transcribe and GPT Live use local WebRTC VAD plus an explicit acknowledged
    commit, and Apple Speech uses final `SpeechTranscriber` segments; all paths share the same client
-   transcript-batching delay, which groups rapid final fragments but does not establish
+   transcript-batching window, which groups rapid final fragments but does not establish
    cross-speaker chronology),
    or a **silence check** fires (you've gone quiet, maybe stuck). The silence check carries *how
    long* you've been quiet and backs off across a long silence (the interval
@@ -384,7 +384,7 @@ rather than a per-turn screenshot.
   accuracy, while its result stream does not expose usable VAD boundaries; Jarvis therefore sends
   all audio to the transcriber and uses its existing content-free PCM activity detector only to
   request finalization and postpone coaching until the matching final-result boundary is consumed.
-  Both adapters apply the client-side transcript-batching delay to group rapid final fragments;
+  Both adapters apply the client-side transcript-batching window to group rapid final fragments;
   automatic model admission is controlled separately by provider work state, never by extending
   that fixed delay.
 

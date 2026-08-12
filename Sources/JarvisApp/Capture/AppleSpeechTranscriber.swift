@@ -95,7 +95,7 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
         silenceTimeout: TimeInterval,
         silenceMaxInterval: TimeInterval,
         silenceIdleCutoff: TimeInterval = .infinity,
-        transcriptBatchingDelay: TimeInterval,
+        transcriptBatchingWindow: TimeInterval,
         maxBufferedAudioSeconds: TimeInterval,
         finalizationResultTimeout: TimeInterval = 8,
         benchmark: TranscriptionBenchmarkInstrumentation? = nil
@@ -121,7 +121,7 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
             transcript: transcript,
             clock: clock,
             sessionStart: sessionStart,
-            transcriptBatchingDelay: transcriptBatchingDelay,
+            transcriptBatchingWindow: transcriptBatchingWindow,
             silenceTimeout: silenceTimeout,
             silenceMaxInterval: silenceMaxInterval,
             silenceIdleCutoff: silenceIdleCutoff,

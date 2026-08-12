@@ -163,7 +163,7 @@ final class TranscriptionBenchmarkRunner {
             overlayMaxDisplaySeconds: 8,
             vadSilenceDurationMs: 1_000,
             audioNoiseReduction: .off,
-            transcriptBatchingDelaySeconds: 0,
+            transcriptBatchingWindowSeconds: 0,
             maxBufferedAudioSeconds: 120,
             realtimeReadyTimeoutSeconds: 15)
         let sessionStart = clock.now()

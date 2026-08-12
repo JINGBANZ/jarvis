@@ -12,7 +12,7 @@ import Testing
         #expect(c.overlaySecondsPerWord == 0.35)
         #expect(c.overlayMaxDisplaySeconds == 8)
         #expect(c.vadSilenceDurationMs == 1000)
-        #expect(c.transcriptBatchingDelaySeconds == 0.4)
+        #expect(c.transcriptBatchingWindowSeconds == 0.4)
         #expect(c.maxBufferedAudioSeconds == 60)
         #expect(c.realtimeReadyTimeoutSeconds == 10)
         #expect(c.realtimePingIntervalSeconds == 20)

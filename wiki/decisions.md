@@ -1558,7 +1558,7 @@
   finalizes `SpeechAnalyzer` input and does not settle the stream until matching final-result progress
   is consumed from the module stream. A finalized turn also carries its transcript boundary, making
   a delayed transcript-batch callback idempotent after the same line was committed. The manual hint
-  is the explicit immediate exception. The existing transcript-batching delay remains only a
+  is the explicit immediate exception. The existing transcript-batching window remains only a
   rapid-final-fragment grouping mechanism; it is not extended or treated as proof that both streams
   are settled.
 - **Chose:** Keep Activity's bounded in-memory chronology and live DOM as two views of the same

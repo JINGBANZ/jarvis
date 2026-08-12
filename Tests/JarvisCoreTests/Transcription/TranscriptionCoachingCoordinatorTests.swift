@@ -11,7 +11,7 @@ import Testing
             transcript: transcript,
             clock: clock,
             sessionStart: 100,
-            transcriptBatchingDelay: 0,
+            transcriptBatchingWindow: 0,
             events: events)
         guard let pendingTurn = PendingTurnProbe(coordinator) else {
             Issue.record("Could not inspect the coordinator's pending utterance buffer")
@@ -44,19 +44,19 @@ import Testing
         let transcript = RollingTranscript()
         let clock = ManualClock(now: 10)
         let events = CoachingEvents()
-        let transcriptBatchingDelay: TimeInterval = 0.02
+        let transcriptBatchingWindow: TimeInterval = 0.02
         let coordinator = makeCoordinator(
             transcript: transcript,
             clock: clock,
             sessionStart: 10,
-            transcriptBatchingDelay: transcriptBatchingDelay,
+            transcriptBatchingWindow: transcriptBatchingWindow,
             events: events)
 
         let accepted = await recordAndStopBeforeQueuedBatchRuns(coordinator)
         #expect(!accepted.empty)
         #expect(accepted.usable)
 
-        await waitForMainQueue(after: transcriptBatchingDelay * 2)
+        await waitForMainQueue(after: transcriptBatchingWindow * 2)
         #expect(events.turnCount == 0)
         #expect(events.activity == [true, false])
         #expect(transcript.renderFrom(index: 0).text == "[00:00] me: usable")
@@ -86,7 +86,7 @@ import Testing
         transcript: RollingTranscript,
         clock: Clock,
         sessionStart: TimeInterval,
-        transcriptBatchingDelay: TimeInterval = 0.01,
+        transcriptBatchingWindow: TimeInterval = 0.01,
         silenceTimeout: TimeInterval = 60,
         silenceEnabled: Bool = false,
         events: CoachingEvents
@@ -96,7 +96,7 @@ import Testing
             transcript: transcript,
             clock: clock,
             sessionStart: sessionStart,
-            transcriptBatchingDelay: transcriptBatchingDelay,
+            transcriptBatchingWindow: transcriptBatchingWindow,
             silenceTimeout: silenceTimeout,
             silenceMaxInterval: silenceTimeout,
             silenceEnabled: silenceEnabled,

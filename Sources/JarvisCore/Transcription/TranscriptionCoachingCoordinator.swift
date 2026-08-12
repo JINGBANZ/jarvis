@@ -9,7 +9,7 @@ public final class TranscriptionCoachingCoordinator: @unchecked Sendable {
     private let transcript: RollingTranscript
     private let clock: Clock
     private let sessionStart: TimeInterval
-    private let transcriptBatchingDelay: TimeInterval
+    private let transcriptBatchingWindow: TimeInterval
     private let silenceEnabled: Bool
     private let onTurnEnd: @Sendable (_ transcriptBoundary: Int) -> Void
     private let onSilence: @Sendable (TimeInterval) -> Void
@@ -31,7 +31,7 @@ public final class TranscriptionCoachingCoordinator: @unchecked Sendable {
         transcript: RollingTranscript,
         clock: Clock,
         sessionStart: TimeInterval,
-        transcriptBatchingDelay: TimeInterval,
+        transcriptBatchingWindow: TimeInterval,
         silenceTimeout: TimeInterval,
         silenceMaxInterval: TimeInterval,
         silenceIdleCutoff: TimeInterval = .infinity,
@@ -40,12 +40,12 @@ public final class TranscriptionCoachingCoordinator: @unchecked Sendable {
         onSilence: @escaping @Sendable (TimeInterval) -> Void,
         onTranscriptionWorkChanged: @escaping @Sendable (Bool) -> Void
     ) {
-        precondition(transcriptBatchingDelay >= 0 && transcriptBatchingDelay.isFinite)
+        precondition(transcriptBatchingWindow >= 0 && transcriptBatchingWindow.isFinite)
         self.speaker = speaker
         self.transcript = transcript
         self.clock = clock
         self.sessionStart = sessionStart
-        self.transcriptBatchingDelay = transcriptBatchingDelay
+        self.transcriptBatchingWindow = transcriptBatchingWindow
         self.silenceEnabled = silenceEnabled
         self.onTurnEnd = onTurnEnd
         self.onSilence = onSilence
@@ -146,10 +146,10 @@ public final class TranscriptionCoachingCoordinator: @unchecked Sendable {
         guard !stopped, self.generation == generation else { lock.unlock(); return }
         transcriptBatchRevision &+= 1
         let revision = transcriptBatchRevision
-        let delay = transcriptBatchingDelay
+        let window = transcriptBatchingWindow
         lock.unlock()
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + window) { [weak self] in
             self?.publishTranscriptBatch(generation: generation, revision: revision)
         }
     }

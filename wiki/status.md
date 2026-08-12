@@ -54,7 +54,7 @@ share one session time origin and one Foundation-only conversation chronology: s
 model deltas and Activity rows, with stable insertion order only for ties. Every automatic coaching
 attempt waits for both providers to report settled transcription work, so a faster later reply cannot
 cross an earlier utterance into immutable model history. The manual hint remains the explicit
-immediate exception. The client transcript-batching delay still groups rapid final fragments; it is
+immediate exception. The client transcript-batching window still groups rapid final fragments; it is
 not the ordering guarantee. A finalized turn carries its transcript boundary, so its delayed
 transcript-batch callback is consumed if another admitted attempt already committed that line.
 Reconnect-buffered OpenAI audio is pending work even before replacement server VAD creates an item.
