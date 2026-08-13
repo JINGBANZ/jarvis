@@ -52,11 +52,13 @@ if [[ -n "$EXPECTED_RELEASE_TAG" && "$EXPECTED_RELEASE_TAG" != "v$VERSION" ]]; t
   echo "error: expected release tag $EXPECTED_RELEASE_TAG does not match bundled version $VERSION" >&2
   exit 1
 fi
-ARCHITECTURES="$(lipo -archs "$EXTRACTED_APP/Contents/MacOS/$BIN_NAME")"
+EXTRACTED_BIN="$EXTRACTED_APP/Contents/MacOS/$BIN_NAME"
+ARCHITECTURES="$(lipo -archs "$EXTRACTED_BIN")"
 if [[ "$ARCHITECTURES" != "arm64" ]]; then
   echo "error: archived app has unexpected architectures: $ARCHITECTURES" >&2
   exit 1
 fi
+./scripts/check-release-sdk.sh "$EXTRACTED_BIN"
 if [[ ! -f "$EXTRACTED_APP/Contents/Resources/LICENSE" \
       || ! -f "$EXTRACTED_APP/Contents/Resources/THIRD_PARTY_NOTICES.md" ]]; then
   echo "error: archived app is missing required license notices" >&2
