@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.3](https://github.com/JINGBANZ/jarvis/compare/v0.1.2...v0.1.3) (2026-08-13)
+
+
+### Bug Fixes
+
+* **build:** separate development app identity ([#158](https://github.com/JINGBANZ/jarvis/issues/158)) ([1fd3850](https://github.com/JINGBANZ/jarvis/commit/1fd3850690a38a246883ae19509b32940e8b7298))
+* **release:** align distributed app appearance ([#159](https://github.com/JINGBANZ/jarvis/issues/159)) ([28400ab](https://github.com/JINGBANZ/jarvis/commit/28400abb400c893d9a12665870b94d1a1636e185))
+
 ## [0.1.2](https://github.com/JINGBANZ/jarvis/compare/v0.1.1...v0.1.2) (2026-08-12)
 
 
