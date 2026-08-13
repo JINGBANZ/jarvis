@@ -453,6 +453,9 @@
 - **Chose:** Releases are fully automated in `.github/workflows/release.yml`: release-please (`simple` release type) maintains a Release PR from the conventional-commit history and keeps both `Resources/Info.plist` version keys in sync via `x-release-please-version` line annotations; merging it creates a **draft** GitHub Release, and a `macos-15` job runs the test gate, then `scripts/package-app.sh` — one Developer ID signing pass with hardened runtime, timestamp, and the `audio-input` entitlement (hardened runtime otherwise denies the mic), notarization via an App Store Connect API key, staple, **re-zip after stapling** — and publishes the Release only after `Jarvis-<version>.zip` is attached. `package-app.sh` is self-contained rather than layered on `build-app.sh`, whose self-signed-identity creation can prompt for keychain access and hang a headless runner.
 - **Why:** Friends install from the repo's Releases page with zero Gatekeeper friction, and version/CHANGELOG/tag/asset can't drift because no step is manual. Draft-until-attached means a failed sign/notarize run never leaves a public Release without its app.
 - **Rejected:** (a) Sharing the `Jarvis Dev`-signed zip — untrusted on every other Mac; macOS 15 removed the right-click-Open bypass, leaving the buried "Open Anyway" flow. (b) A separate tag-triggered build workflow — tags created with `GITHUB_TOKEN` never trigger other workflows, so it would silently never run; the build job is gated on `release_created` in the same workflow instead. (c) Apple ID + app-specific password for notarization — the API key is the recommended CI method (no 2FA/session coupling, revocable). (d) A DMG — a zip is standard for a small menu-bar app and `notarytool` takes it directly.
+- **Superseded in part by:** 2026-08-12 — Distributed AppKit appearance is pinned to the macOS 26
+  SDK. The release-please, signing, notarization, and publication flow stands; the `macos-15` runner
+  does not.
 - **Detail:** [build-and-run.md → Distribution](./build-and-run.md#distribution--signed-notarized-releases-from-ci); `scripts/package-app.sh`, `release-please-config.json`.
 
 ### 2026-07-17 — Agentic session audit as a dev-side workflow; single-call path kept as fallback
@@ -1615,3 +1618,25 @@
   identity remains; the development bundle now also has a distinct application identity.
 - **Detail:** [build-and-run.md → Packaging and signing](./build-and-run.md#packaging--signing--why-permission-grants-persist),
   `scripts/build-app.sh`, `scripts/check-app-identities.sh`.
+
+### 2026-08-12 — Distributed AppKit appearance is pinned to the macOS 26 SDK
+
+- **Chose:** Build the signed release on the Apple-silicon `macos-26` runner and require the actual
+  Jarvis Mach-O to link macOS SDK 26 or newer. Run that binary check before signing/notarization and
+  repeat it after extracting the final downloadable zip. Keep the Overlay Box scrollable, but set
+  its scroller to AppKit's overlay style with automatic hiding instead of accepting the runtime's
+  SDK-, preference-, or pointing-device-selected default.
+- **Why:** The notarized 0.1.2 app and a local source build contained the same Settings and overlay
+  source, but the downloaded binary linked SDK 15.5 while the local binary linked SDK 26.5. macOS 26
+  deliberately preserves the old control design for apps built with older SDKs, and the implicit
+  Overlay Box scroller became a persistent legacy gutter. Release UI parity is therefore an artifact
+  property, not something source review or a runner label alone proves.
+- **Rejected:** (a) Hand-styling Settings to imitate one SDK—duplicates AppKit and still leaves other
+  standard controls divergent. (b) Changing only the runner label—future image drift or local
+  packaging could silently produce another old-SDK artifact. (c) Removing vertical scrolling from
+  the Overlay Box—hides the symptom by losing access to older coaching tips.
+- **Supersedes in part:** 2026-07-17 — Distribution via release-please + notarized zip on GitHub
+  Releases. Its automation and trust chain stand; its release runner does not.
+- **Detail:** [build-and-run.md → Distribution](./build-and-run.md#distribution--signed-notarized-releases-from-ci),
+  `.github/workflows/release.yml`, `scripts/check-release-sdk.sh`,
+  `Sources/JarvisOverlay/OverlayBoxPanel.swift`.

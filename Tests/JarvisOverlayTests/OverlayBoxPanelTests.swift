@@ -74,6 +74,15 @@ import AppKit
     }
 
     @MainActor @Test
+    func usesAutoHidingOverlayScroller() {
+        let panel = OverlayBoxPanel()
+        #expect(panel.currentScrollerStyle == .overlay,
+                "the box must not inherit a persistent legacy scroller from the release SDK")
+        #expect(panel.scrollersAutohide,
+                "a short history must not leave an unnecessary scrollbar visible")
+    }
+
+    @MainActor @Test
     func appearanceSettersChangeOpacityAndFontSize() {
         let panel = OverlayBoxPanel()
         panel.setOpacity(0.5)

@@ -47,6 +47,7 @@ fi
 echo "▶ swift build -c release"
 swift build -c release
 BIN_PATH="$(swift build -c release --show-bin-path)/$BIN_NAME"
+./scripts/check-release-sdk.sh "$BIN_PATH"
 
 echo "▶ assembling $APP"
 rm -rf "$APP"
