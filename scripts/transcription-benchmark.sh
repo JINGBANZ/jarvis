@@ -40,6 +40,7 @@ if ! [[ "$REPETITIONS" =~ ^[0-9]+$ ]] || (( REPETITIONS < 3 )); then
 fi
 
 BASE="$PWD/.jarvis/transcription-benchmarks"
+APP="Jarvis Dev.app"
 RUN_ID="$(date '+%Y-%m-%d_%H-%M-%S')-$$"
 RUN_DIR="$BASE/$RUN_ID"
 if [[ -L "$PWD/.jarvis" || -L "$BASE" ]]; then
@@ -97,7 +98,7 @@ trap abort_run INT TERM
 
 # `open -W` keeps a waitable launcher alive until the hidden app exits. Both modes observe the abort
 # marker; the signal trap then reaps this waiter so capture cannot outlive the command.
-open -W -n ./Jarvis.app --args "${COMMON_ARGS[@]}" &
+open -W -n "./$APP" --args "${COMMON_ARGS[@]}" &
 APP_WAITER_PID=$!
 wait "$APP_WAITER_PID"
 APP_WAITER_PID=""
