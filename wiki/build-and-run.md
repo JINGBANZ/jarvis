@@ -26,20 +26,33 @@ needs — so a SwiftUI + ScreenCaptureKit binary builds with plain `swift build`
 
 ## Packaging & signing — why permission grants persist
 
-`scripts/build-app.sh` assembles the executable into a hand-built `.app` bundle (the bundle layout
-and the stable bundle id live in the script and `Resources/Info.plist`).
+`scripts/build-app.sh` assembles the executable into a hand-built `Jarvis Dev.app`. The production
+identity remains the source in `Resources/Info.plist`; the development script overrides only the
+assembled bundle's name and bundle id.
 
 **Permission persistence is a signing problem.** macOS TCC keys Screen-Recording, Microphone, and
 System Audio Recording grants to **code signature + bundle id + bundle path**. An ad-hoc signature
 changes every build, so macOS
 forgets the grant and re-prompts on each rebuild. So `build-app.sh` always signs with a **stable
 self-signed identity (`Jarvis Dev`**, created automatically on first build) — there is **no ad-hoc
-fallback**. With the identity, bundle id, and path all fixed, grants persist across rebuilds and
-relaunches. On the first build macOS prompts once to let `codesign` use the new key — click
-**"Always Allow"**.
+fallback**. It produces `Jarvis Dev.app` with bundle id `com.jarvis.coach.dev`; the downloaded
+`Jarvis.app` keeps `com.jarvis.coach` and its Developer ID signature. These intentionally incompatible
+identities give each variant its own TCC grants, Launch Services registration, and bundle-id-backed
+preferences, so both can be installed and run on one Mac without one variant impersonating the
+other. With the development identity, bundle id, and checkout path fixed, its grants persist across
+rebuilds and relaunches. On the first build macOS prompts once to let `codesign` use the new key —
+click **"Always Allow"** — and the first launch requests the development app's own capture grants.
+
+The identity split is not a second data sandbox. Both variants intentionally keep the established
+owner-only API-key and direct-open session storage under `Application Support/Jarvis`; launching the
+development app through `build-app.sh --run` continues to put its sessions in that checkout's
+`.jarvis/`. If a checkout still contains a generated `Jarvis.app` from before the split, move only
+that checkout-local bundle to the Trash so it cannot be launched accidentally; leave
+`/Applications/Jarvis.app` in place.
 
 - Recover a stale *denied* state (which macOS won't re-prompt for) with
-  `tccutil reset Microphone com.jarvis.coach` (or `ScreenCapture`), then relaunch and Allow.
+  `tccutil reset Microphone com.jarvis.coach.dev` (or `ScreenCapture`), then relaunch `Jarvis Dev`
+  and Allow. Use `com.jarvis.coach` only when intentionally resetting the production release.
 - Screen Recording + Microphone are granted by **TCC prompts at first launch**, not an App-Sandbox
   entitlement file. `Permissions.primeAll()` requests them at launch and is idempotent. Core Audio
   requests System Audio Recording when Jarvis first builds its process tap after Start.
@@ -55,20 +68,23 @@ so the archive is rebuilt after stapling). Hardened runtime denies microphone ca
 without the `audio-input` entitlement, so the script signs with `Resources/Jarvis.entitlements`.
 The script then passes that final zip to `scripts/verify-release.sh`, which extracts it into a fresh
 verification directory and checks the exact shipped app's bundle shape, version, arm64 architecture,
-notices, strict code signature, stapled ticket, and Gatekeeper policy result. The pre-compression app
-is not accepted as a proxy for the downloaded artifact.
+linked macOS 26-or-newer SDK, notices, strict code signature, stapled ticket, and Gatekeeper policy
+result. The same SDK guard runs immediately after the release build, before signing or notarization;
+the pre-compression app is not accepted as a proxy for the downloaded artifact.
 
 Releases are cut by `.github/workflows/release.yml`, not by hand: on every push to `main`,
 **release-please** maintains a standing Release PR from the conventional-commit history (bumping both
 version keys in `Resources/Info.plist` via `x-release-please-version` annotations, plus the
 CHANGELOG — config in `release-please-config.json`). Merging that PR creates the GitHub Release **as
-a draft**; a `macos-15` job then runs the test gate, signs/notarizes via repo secrets (the base64
-`.p12` certificate and an App Store Connect API key — names in the workflow), attaches the zip, and
-only then publishes the Release. The publish step also attaches `SHA256SUMS` and prepends the stable
-installation block in `.github/release-header.md` to release-please's generated changelog. A failed
-sign, notarization, or final-archive verification therefore never leaves a public Release without a
-validated app. The publish job lives in the same workflow because tags created with `GITHUB_TOKEN`
-never trigger other workflows.
+a draft**; an Apple-silicon `macos-26` job then runs the test gate, signs/notarizes via repo secrets
+(the base64 `.p12` certificate and an App Store Connect API key — names in the workflow), attaches
+the zip, and only then publishes the Release. The publish step also attaches `SHA256SUMS` and
+prepends the stable installation block in `.github/release-header.md` to release-please's generated
+changelog. A failed sign, notarization, or final-archive verification therefore never leaves a
+public Release without a validated app. The exact runner label and binary guard keep downloaded
+AppKit controls on the same macOS 26 design as local development builds instead of inheriting the
+compatibility appearance of an older linked SDK. The publish job lives in the same workflow because
+tags created with `GITHUB_TOKEN` never trigger other workflows.
 
 `package-app.sh` also runs locally (one-time `xcrun notarytool store-credentials jarvis-notary …`,
 then just run the script) for packaging without CI. Distributed builds require macOS 14.2 or later
@@ -80,13 +96,16 @@ installation steps; provider credentials remain user-supplied in Settings.
 | Command | What it does |
 |---|---|
 | `./scripts/run-tests.sh` | Build + run the unit/offline-pipeline tests (no key, no permissions). |
-| `./scripts/build-app.sh [release\|debug]` | Build, bundle, sign `Jarvis.app` (default `release`). Creates `Jarvis Dev` on first run. |
-| `./scripts/build-app.sh --run` | Same build, then launch. Per-session logs land in the workspace `.jarvis/` (see below). |
+| `./scripts/build-app.sh [release\|debug]` | Build, bundle, sign `Jarvis Dev.app` (default `release`). Creates the `Jarvis Dev` signing identity on first run. |
+| `./scripts/build-app.sh --run` | Same development build, then launch it. Per-session logs land in the workspace `.jarvis/` (see below). |
 
-- **Always launch with `open ./Jarvis.app`**, never the bare binary — running it from a shell makes
+- **Always launch with `open "./Jarvis Dev.app"`**, never the bare binary — running it from a shell makes
   TCC attribute the grant to the *terminal*, so the app reports Microphone, System Audio Recording,
   or Screen Recording as "denied" even when granted. Pass flags with
-  `open ./Jarvis.app --args …`.
+  `open "./Jarvis Dev.app" --args …`.
+- Production and development can stay open together, but the fixed global ⌥⌘J shortcut can belong
+  to only one running process. The second app logs that the shortcut is unavailable; use its menu-bar
+  controls directly or quit the other variant when testing the shortcut.
 - Jarvis does **not** auto-start: choose transcription and Primary brain providers in Settings, meet
   their credential or local sign-in requirements, then **Start / Stop** from the menu. OpenAI keys
   are saved to an owner-only file; `OPENAI_API_KEY` is a headless fallback. The icon shows two states
@@ -143,7 +162,7 @@ runtime). It also sidesteps the `file://` `fetch()` restriction that forced the 
   rendered page. A saved session shows **Open report** instead, avoiding another agent run. The local
   app locates its checkout from the
   workspace `.jarvis/`, a `--repo-dir` launch argument, or the directory containing a locally built
-  `Jarvis.app`; without live source it refuses to run a weaker audit. `./scripts/eval-session.sh
+  app bundle; without live source it refuses to run a weaker audit. `./scripts/eval-session.sh
   [session-dir]` is the terminal launcher for the same Core evaluator.
 
 ## System-audio transcription benchmark

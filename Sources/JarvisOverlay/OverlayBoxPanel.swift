@@ -77,6 +77,10 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         let scroll = NSScrollView(frame: box.bounds)
         scroll.autoresizingMask = [.width, .height]
         scroll.hasVerticalScroller = true
+        // Keep the history scrollable without reserving a persistent legacy-style gutter. AppKit's
+        // preferred style can differ by linked SDK and input device, so this must not be implicit.
+        scroll.scrollerStyle = .overlay
+        scroll.autohidesScrollers = true
         scroll.drawsBackground = false        // let the opaque box show through
         scroll.borderType = .noBorder
 
@@ -251,6 +255,16 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
 
     /// Whether the box can be resized by dragging its edges.
     var isResizable: Bool { panel.isResizable }
+
+    /// Scroller presentation used by the history box.
+    var currentScrollerStyle: NSScroller.Style {
+        textView.enclosingScrollView?.scrollerStyle ?? .legacy
+    }
+
+    /// Whether a non-scrollable history hides its vertical scroller.
+    var scrollersAutohide: Bool {
+        textView.enclosingScrollView?.autohidesScrollers ?? false
+    }
 
     /// Resize the box's content (used by tests; the user resizes by dragging the edges).
     func setContentSize(_ size: NSSize) { panel.setContentSize(size) }

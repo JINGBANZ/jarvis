@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# Build, bundle, and sign Jarvis.app.
+# Build, bundle, and sign Jarvis Dev.app.
 #
 # Signing uses a stable, self-signed identity ("Jarvis Dev") so that macOS TCC permission grants
 # (Microphone, Screen Recording) persist across rebuilds — macOS keys a grant to the code signature,
 # and an identity that changed every build (ad-hoc) would make it re-prompt each time. The identity
 # is created automatically on the first build; there is no separate setup step and no ad-hoc signing.
+# The development bundle also has its own name and bundle id, so it cannot collide with an installed,
+# Developer ID-signed Jarvis release in TCC or Launch Services.
 #
 # Usage:
 #   ./scripts/build-app.sh                build + sign (release)
@@ -23,7 +25,9 @@ for arg in "$@"; do
   esac
 done
 
-APP="Jarvis.app"
+APP_NAME="Jarvis Dev"
+APP="$APP_NAME.app"
+BUNDLE_ID="com.jarvis.coach.dev"
 BIN_NAME="JarvisApp"
 IDENTITY="Jarvis Dev"
 
@@ -72,6 +76,12 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_PATH" "$APP/Contents/MacOS/$BIN_NAME"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 cp Resources/Jarvis.icns "$APP/Contents/Resources/Jarvis.icns"
+# Resources/Info.plist remains the production source of truth. Override only the identity fields in
+# the assembled development bundle so release packaging stays independent and the two variants never
+# share TCC grants or Launch Services registration.
+/usr/bin/plutil -replace CFBundleName -string "$APP_NAME" "$APP/Contents/Info.plist"
+/usr/bin/plutil -replace CFBundleDisplayName -string "$APP_NAME" "$APP/Contents/Info.plist"
+/usr/bin/plutil -replace CFBundleIdentifier -string "$BUNDLE_ID" "$APP/Contents/Info.plist"
 
 echo "▶ signing with '$IDENTITY'"
 codesign --force --deep --sign "$IDENTITY" "$APP"
@@ -81,7 +91,9 @@ echo "✅ built $APP"
 # Always launch via `open`, never the bare binary — launching the executable from a terminal makes
 # macOS attribute the Mic/Screen-Recording grants to the shell, so they look "denied".
 launch() {
-  pkill -f "$APP/Contents/MacOS/$BIN_NAME" 2>/dev/null || true   # replace any running instance
+  # Replace only a development build. The installed production app has a different bundle path and
+  # identity and must be allowed to keep running alongside it.
+  /usr/bin/pkill -f "/${APP_NAME}[.]app/Contents/MacOS/$BIN_NAME" 2>/dev/null || true
   sleep 1
 }
 
@@ -95,7 +107,7 @@ case "$LAUNCH" in
     LOGDIR="$PWD/.jarvis"
     mkdir -p "$LOGDIR"
     chmod 700 "$LOGDIR"
-    echo "▶ launching Jarvis — open Settings → Activity to watch the log; per-session logs in $LOGDIR/<session>"
+    echo "▶ launching $APP_NAME — open Settings → Activity to watch the log; per-session logs in $LOGDIR/<session>"
     open ./"$APP" --args --log-dir "$LOGDIR"
     ;;
   "")

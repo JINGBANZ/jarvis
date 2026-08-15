@@ -1266,7 +1266,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// The agentic evaluator must inspect the live source checkout, not a baked description. Prefer
     /// an explicit launch argument, then the workspace-local `.jarvis/` parent used by build-app.sh,
-    /// then the directory containing a locally built Jarvis.app. A redistributed bundle without a
+    /// then the directory containing a locally built app bundle. A redistributed bundle without a
     /// checkout simply reports evaluation unavailable instead of running a weaker evaluator.
     private func evaluationRepositoryDirectory() -> URL? {
         let args = CommandLine.arguments
