@@ -49,6 +49,8 @@ jobs:
     # AppKit selects the macOS 26 control design from the linked SDK. Pin the release runner instead
     # of following macos-latest so distributed and local macOS 26 builds cannot silently diverge.
     runs-on: macos-26
+    # Keep signing and notarization credentials unavailable until the owner approves the job.
+    environment: release
     # Notarization occasionally stalls on Apple's side; without a cap, a stalled run rides the
     # 6-hour default timeout at the 10x macOS minute multiplier. Normal publishes finish well
     # under this. The cap must clear package-app.sh's `notarytool --wait --timeout 30m` PLUS
