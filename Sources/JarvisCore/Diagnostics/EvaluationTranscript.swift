@@ -77,21 +77,23 @@ enum EvaluationTranscript {
             blocks.append(lines.joined(separator: "\n"))
         }
         guard !blocks.isEmpty else { return "" }
-        // Lead with the deterministic metrics table (computed, not eyeballed) so the auditor
-        // interprets numbers instead of summing usage blobs by hand — the source of the 2026-07-19
-        // audit's cost/cache arithmetic errors. Empty traffic still renders "" (callers guard on it).
+        // Lead with neutral, computed evidence surfaces. They expose what was recorded and preserve
+        // unavailable values without encoding a checklist of incidents the evaluator should find.
+        // Empty traffic still renders "" (callers guard on it).
         let body = blocks.joined(separator: "\n\n")
         let auditEvidence = SessionAuditEvidence.assess(
             trafficJSONL: jsonl,
             attemptsJSONL: attemptsJSONL,
             healthJSON: healthJSON)
-        let triggerMetrics = TriggerQualityMetrics.render(
+        let evidenceIndex = SessionEvidenceIndex.render(
             trafficJSONL: jsonl,
             attemptsJSONL: attemptsJSONL,
             activityJSONL: activityJSONL,
+            healthJSON: healthJSON,
             auditEvidence: auditEvidence)
-        return SessionMetrics.render(jsonl: jsonl, auditEvidence: auditEvidence)
-            + "\n\n" + triggerMetrics + "\n\n" + body
+        return evidenceIndex + "\n\n"
+            + SessionMetrics.render(jsonl: jsonl, auditEvidence: auditEvidence)
+            + "\n\n" + body
     }
 
     private static func renderRequest(_ request: [String: Any], tag: String, streamKey: String,

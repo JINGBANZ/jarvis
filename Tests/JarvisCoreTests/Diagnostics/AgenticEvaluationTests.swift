@@ -45,26 +45,22 @@ import Foundation
         // Preparation never rewrites or filters Activity; the agent receives the complete source file.
         #expect(try String(contentsOf: activityURL, encoding: .utf8) == activityJSONL)
 
-        // The prompt names the session dir, report skeleton, provenance, and evidence discipline,
-        // and the code the auditor is told to verify against.
+        // The prompt names the session inputs and gives the agent a generic evidence workflow.
         #expect(prompt.contains(dir.path))
         #expect(prompt.contains(AgenticEvaluation.transcriptFilename))
-        #expect(prompt.contains("## Context engineering"))
+        #expect(prompt.contains("## Summary"))
+        #expect(prompt.contains("## Findings"))
+        #expect(prompt.contains("## Evidence gaps"))
         #expect(prompt.contains("## Recommendations"))
-        #expect(prompt.contains("[session-proven]"))
-        #expect(prompt.contains("[source-confirmed]"))
-        #expect(prompt.contains("[hypothesis]"))
-        #expect(prompt.contains("[preserve]"))
-        #expect(prompt.contains("Sources/JarvisCore/Prompts/"))
-        #expect(prompt.contains("all predefined model-facing prompt"))
-        #expect(prompt.contains("split by domain"))
-        #expect(prompt.contains("CoachHistory.swift"))
+        #expect(prompt.contains("file, search, and shell tools"))
+        #expect(prompt.contains("Use the repository and session only as read-only evidence"))
+        #expect(prompt.contains("Do not assume the prompt already knows which problem"))
         #expect(prompt.contains(AgenticEvaluation.reportFilename))
         #expect(prompt.contains(ActivityLog.filename))
         #expect(prompt.contains(FileSessionAudit.coachingAttemptsFilename))
-        #expect(prompt.contains("COMPLETE sanitized human-facing coaching record"))
-        #expect(prompt.contains("Read the file itself in full"))
-        #expect(prompt.contains("deliberately NOT filtered, summarized"))
+        #expect(prompt.contains("complete sanitized user-visible event history"))
+        #expect(prompt.contains("Read it directly"))
+        #expect(prompt.contains("Do not run a predefined incident checklist"))
     }
 
     @Test func prepareReplacesTranscriptSoAFailedEvaluatorCanBeRetried() async throws {
@@ -93,43 +89,28 @@ import Foundation
         #expect(permissions?.int16Value == 0o600)
     }
 
-    /// The prompt teaches each provider record and conversation boundary, preserves unavailable
-    /// metrics, requires cardinal counts from the un-elided record, and asks for a self-check.
-    @Test func promptTeachesEnvelopesCacheModelsCountingAndSelfCheck() {
+    /// The evaluator receives neutral measurements and tools, not a growing list of known defects.
+    @Test func promptProvidesGenericEvidenceWorkflowWithoutIncidentChecklist() {
         let prompt = AgenticEvaluation.prompt(sessionDirPath: "/tmp/session")
-        #expect(prompt.contains("deterministic metrics"))
-        #expect(prompt.contains("input_tokens_details.cached_tokens"))
-        #expect(prompt.contains("cache_write_tokens"))
-        #expect(prompt.contains("total_cost_usd"))
-        #expect(prompt.contains("modelUsage"))
-        #expect(prompt.contains("Claude Code warm query"))
-        #expect(prompt.contains("Codex app-server"))
-        #expect(prompt.contains("response.runtime"))
+        #expect(prompt.contains("neutral evidence index"))
+        #expect(prompt.contains("categorical distributions"))
+        #expect(prompt.contains("correlation-field coverage"))
+        #expect(prompt.contains("normalized provider-call telemetry"))
+        #expect(prompt.contains("measurements, not conclusions"))
         #expect(prompt.contains("unavailable, not zero"))
-        #expect(prompt.contains("known (N unavailable)"))
-        #expect(prompt.contains("malformed-record warning"))
-        #expect(prompt.contains("NOT provider calls"))
-        #expect(prompt.contains("actual `brain_facing` request inclusion"))
-        #expect(prompt.contains("do not recompute one from the other"))
-        #expect(prompt.contains("preinitialized query"))
-        #expect(prompt.contains("incremental input"))
-        #expect(prompt.contains("ClaudeCodeRuntime.swift"))
-        #expect(prompt.contains("CodexAppServerRuntime.swift"))
-        // Cardinal counts must come from the un-elided jsonl, not the elided transcript.
         #expect(prompt.contains(FileSessionAudit.brainTrafficFilename))
-        #expect(prompt.contains("MUST be counted here"))
-        #expect(prompt.contains("re-check every number"))
-        #expect(prompt.contains("session-level UX failure"))
-        #expect(prompt.contains("`session ended by error`"))
-        #expect(!prompt.contains("coaching stopped"))
-        #expect(!prompt.contains("session failed"))
-        #expect(prompt.contains("stable event kinds in `k`"))
-        #expect(prompt.contains("## Transcription and trigger quality"))
-        #expect(prompt.contains("NEVER a proxy for an avoidable call"))
-        #expect(prompt.contains("Raw audio is intentionally not retained"))
-        #expect(prompt.contains("never claim a word was mistranscribed"))
-        #expect(prompt.contains("Jarvis brain output generated"))
-        #expect(prompt.contains("At most THREE"))
+        #expect(prompt.contains("Use the raw JSONL for exact values"))
+        #expect(prompt.contains("separate what the session directly shows"))
+        #expect(prompt.contains("at most three concrete actions"))
+        #expect(!prompt.contains("TriggerQualityMetrics"))
+        #expect(!prompt.contains("filler"))
+        #expect(!prompt.contains("stay_silent"))
+        #expect(!prompt.contains("Claude Code warm query"))
+        #expect(!prompt.contains("Codex app-server"))
+        #expect(!prompt.contains("## Transcription and trigger quality"))
+        #expect(!prompt.contains("## Context engineering"))
+        #expect(!prompt.contains("## Issues and errors"))
+        #expect(!prompt.contains("## Coaching quality"))
     }
 
     /// `savedReport` is the Activity viewer's discovery gate: an empty or absent file is not a report.

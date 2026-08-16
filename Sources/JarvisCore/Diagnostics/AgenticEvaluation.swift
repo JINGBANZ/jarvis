@@ -101,8 +101,7 @@ public enum AgenticEvaluation {
         guard !body.isEmpty else { throw EvaluationError.emptyReport }
         let stamp = """
             > _Produced by the agentic evaluator (`\(agentName)` over the repo + session); the auditor \
-            was instructed to separate session evidence, source-confirmed mechanisms, hypotheses, and \
-            behavior to preserve._
+            was instructed to separate observed evidence, source-confirmed facts, and hypotheses._
             """
         let report = "\(stamp)\n\n\(body)\n"
         try replaceOwnerOnlyFile(

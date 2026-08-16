@@ -105,19 +105,21 @@ import Foundation
         #expect(out.contains("assistant → function_call capture_screen({})"))
     }
 
-    /// The transcript now leads with the deterministic metrics table, before the first call block,
-    /// so the auditor reads computed numbers before any usage blob.
-    @Test func transcriptLeadsWithDeterministicMetrics() throws {
+    /// The transcript leads with neutral evidence tools before the first compact traffic block.
+    @Test func transcriptLeadsWithEvidenceIndexAndProviderTelemetry() throws {
         let call = try line(request: ["model": "gpt-5.5", "input": [userItem("hi")]],
                             response: ["status": "completed", "output": [],
                                        "usage": ["input_tokens": 100,
                                                  "input_tokens_details": ["cached_tokens": 40],
                                                  "output_tokens": 12]])
         let out = EvaluationTranscript.render(jsonl: call)
-        #expect(out.hasPrefix("=== deterministic metrics"))
+        #expect(out.hasPrefix("=== session evidence index"))
+        #expect(out.contains("=== provider-call telemetry"))
         #expect(out.contains("| call | tag | provider | model |"))
-        let metrics = try #require(out.range(of: "deterministic metrics"))
+        let index = try #require(out.range(of: "session evidence index"))
+        let metrics = try #require(out.range(of: "provider-call telemetry"))
         let firstCall = try #require(out.range(of: "=== call #1"))
+        #expect(index.lowerBound < metrics.lowerBound)
         #expect(metrics.lowerBound < firstCall.lowerBound)
     }
 
@@ -264,7 +266,8 @@ import Foundation
         #expect(output.contains("queue overflow: 2"))
         #expect(output.contains(
             "known recorded totals: 1 known calls (session total unavailable)"))
-        #expect(output.contains("| turn end | 1 known ("))
+        #expect(output.contains("| coach traffic records | `coach_attempt.id` | 1/1 |"))
+        #expect(output.contains("| `audit-health.json` | present | 1 | 0 |"))
         #expect(output.contains("health marker reports partial evidence; queue overflow: 2"))
         #expect(output.contains("session total unavailable"))
     }

@@ -9,7 +9,7 @@ struct EvalReportPageTests {
 
     @Test func rendersTheReportSkeleton() {
         let markdown = """
-        ## Context engineering
+        ## Findings
         Prompts grew from **1.2k** to `4.9k` tokens (call #3).
 
         ## Recommendations
@@ -20,7 +20,7 @@ struct EvalReportPageTests {
         - second bullet
         """
         let body = EvalReportPage.body(from: markdown)
-        #expect(body.contains("<h2>Context engineering</h2>"))
+        #expect(body.contains("<h2>Findings</h2>"))
         #expect(body.contains("<strong>1.2k</strong>"))
         #expect(body.contains("<code>4.9k</code>"))
         #expect(body.contains("<ol>"))

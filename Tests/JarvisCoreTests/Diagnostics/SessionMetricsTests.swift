@@ -42,7 +42,7 @@ import Foundation
                                                    "output_tokens": 20]])
         let out = SessionMetrics.render(jsonl: "\(first)\n\(second)")
 
-        #expect(out.hasPrefix("=== deterministic metrics"))
+        #expect(out.hasPrefix("=== provider-call telemetry"))
         #expect(out.contains("| 1 | coach | OpenAI API | gpt-5.5 | 200 | 500 | 100 | 40 | 25 | 12 | — |"))
         #expect(out.contains("| 2 | coach | OpenAI API | gpt-5.5 | 200 | 500 | 200 | 0 | 0 | 20 | — |"))
         #expect(out.contains("session totals: 2 calls · input 300 · cache-read 40 · cache-write 25 · output 32 · cost —"))

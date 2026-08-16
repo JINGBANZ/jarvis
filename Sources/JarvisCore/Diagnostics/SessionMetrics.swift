@@ -1,14 +1,9 @@
 import Foundation
 
-/// Deterministic, pure-Swift accounting of a session's brain traffic: per-call and aggregate token /
-/// cache / cost numbers computed straight from `brain-traffic.jsonl` and rendered as a table that
-/// leads the evaluation transcript (see `EvaluationTranscript.render`). Missing telemetry stays
-/// unavailable — it is never silently converted to a factual zero or omitted from a partial total.
-///
-/// Why this exists: the auditor is an LLM, and the 2026-07-19 session audit's factual slips (total
-/// cost off by $0.20, a "cache_creation climbs monotonically" claim that actually zigzagged) all came
-/// from a model doing arithmetic over ~20 JSON usage blobs *by eye*. So we compute the numbers here,
-/// once, correctly, and tell the model to interpret them and never recompute totals itself.
+/// Pure-Swift accounting of a session's provider traffic. It gives the evaluator normalized per-call
+/// and aggregate latency, token, cache, and cost telemetry without deciding whether any value is good
+/// or bad. Missing telemetry stays unavailable — it is never converted to zero or omitted from a
+/// partial total.
 ///
 /// Provider records are handled separately because the same session file can mix them:
 ///   - **OpenAI Responses** — `response.usage`: `input_tokens`, `input_tokens_details.cached_tokens`
@@ -64,9 +59,9 @@ enum SessionMetrics {
 
     // MARK: - Rendering
 
-    /// The metrics block that leads the transcript, or "" when there is no traffic (so callers'
-    /// empty-transcript guards still fire). Record numbering matches `EvaluationTranscript.render`
-    /// exactly and retains gaps for malformed or non-call records in file order.
+    /// The provider telemetry block, or "" when there is no traffic (so callers' empty-transcript
+    /// guards still fire). Record numbering matches `EvaluationTranscript.render` exactly and
+    /// retains gaps for malformed or non-call records in file order.
     static func render(
         jsonl: String,
         auditEvidence: SessionAuditEvidence = .legacy
@@ -80,8 +75,7 @@ enum SessionMetrics {
 
         var lines: [String] = []
         lines.append(
-            "=== deterministic metrics (computed from \(FileSessionAudit.brainTrafficFilename); interpret these — do NOT recompute totals by eye) ===")
-        lines.append(auditEvidence.summary)
+            "=== provider-call telemetry (computed; descriptive, not diagnostic) ===")
         if parsed.malformedCount > 0 {
             lines.append("WARNING: \(parsed.malformedCount) malformed traffic record(s) could not be parsed; all session totals below are partial, not exact.")
         }

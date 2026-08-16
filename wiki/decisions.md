@@ -1321,6 +1321,9 @@
   privacy posture for an evaluator convenience.
 - **Extends:** 2026-07-15 — Brain traffic is recorded per session; one-click LLM audit, and
   2026-07-24 — Session evaluation is agentic-only and reads complete source logs.
+- **Superseded in part by:** 2026-08-16 — Session evaluation is findings-driven, not
+  incident-checklist-driven. Persisted provenance and raw evidence stand; derived trigger/filler
+  verdicts and fixed incident-oriented report instructions do not.
 - **Detail:** [session-audit.md](./session-audit.md),
   [sandbox.md → Data Egress](./sandbox.md#data-egress),
   `Sources/JarvisCore/Diagnostics/CoachingAttemptAuditing.swift`,
@@ -1640,3 +1643,34 @@
 - **Detail:** [build-and-run.md → Distribution](./build-and-run.md#distribution--signed-notarized-releases-from-ci),
   `.github/workflows/release.yml`, `scripts/check-release-sdk.sh`,
   `Sources/JarvisOverlay/OverlayBoxPanel.swift`.
+
+### 2026-08-16 — Session evaluation is findings-driven, not incident-checklist-driven
+
+- **Chose:** Keep the evaluator agentic and read-only, but give it neutral navigation instead of
+  encoded verdicts. `SessionEvidenceIndex` inventories artifact availability, malformed records,
+  categorical distributions, and timestamp/join-field coverage. `SessionMetrics` keeps normalized
+  provider-call status, latency, token, cache, and cost values with explicit unavailable and partial
+  semantics. The agent can inspect the untouched JSONL, screenshots, and live source with file,
+  search, and shell tools. Its report uses only Summary, Findings, Evidence gaps, and Recommendations.
+- **Chose:** Remove `TriggerQualityMetrics` and every named historical failure mode, provider tutorial,
+  source-file checklist, and domain-specific report section from the evaluator prompt. Product
+  invariants remain enforced by runtime code and focused tests; the evaluator independently follows
+  whatever evidence the session exposes.
+- **Why:** Adding each past incident to the report prompt grows without bound, biases the auditor
+  toward known failures, and still cannot cover the next failure shape. Neutral measurements reduce
+  arithmetic and navigation mistakes while the raw artifacts and source tools let the agent form and
+  verify new hypotheses. Separating evidence gaps from findings prevents missing data from becoming
+  a false zero or a confident conclusion.
+- **Rejected:** (a) Continuing to add one deterministic evaluator check per incident—it does not
+  scale and turns the report into a duplicate test suite. (b) Removing computed telemetry as well—it
+  would make the model redo provider-specific arithmetic by eye. (c) Adding a query language or a
+  second executable—the existing `EvalPrep` workflow plus ordinary read-only tools already provides
+  the exploration boundary. (d) Changing runtime behavior, persisted schemas, or retention—the
+  evaluator-only change does not require them.
+- **Supersedes in part:** 2026-08-08 — Session evaluation uses persisted coaching-attempt provenance.
+  The provenance, raw-source authority, completeness labels, and owner-only retention stand; its
+  derived incident checks and fixed report structure do not.
+- **Detail:** [build-and-run.md → The live activity viewer](./build-and-run.md#the-live-activity-viewer),
+  `Sources/JarvisCore/Diagnostics/SessionEvidenceIndex.swift`,
+  `Sources/JarvisCore/Diagnostics/SessionMetrics.swift`,
+  `Sources/JarvisCore/Prompts/JarvisPrompts+Evaluation.swift`.
