@@ -21,7 +21,7 @@ import Testing
               printf '{"loggedIn":true}'
               exit 0
             fi
-            printf '## Context engineering\\nNo issue.\\n'
+            printf '## Summary\\nNo issue.\\n'
             """
         try Data(script.utf8).write(to: executable)
         try FileManager.default.setAttributes(
@@ -41,7 +41,7 @@ import Testing
         let report = try await evaluator.evaluate(sessionDirectory: session)
 
         #expect(report.contains("Produced by the agentic evaluator (`claude`"))
-        #expect(report.contains("## Context engineering"))
+        #expect(report.contains("## Summary"))
         #expect(AgenticEvaluation.savedReport(in: session) == report)
         let reportURL = session.appendingPathComponent(AgenticEvaluation.reportFilename)
         let permissions = try FileManager.default.attributesOfItem(

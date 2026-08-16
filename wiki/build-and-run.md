@@ -155,12 +155,14 @@ runtime). It also sidesteps the `file://` `fetch()` restriction that forced the 
 - Session evaluation is agentic only. After Stop, select a session and click **Evaluate**: the
   read-only Claude Code / Codex agent receives the source checkout plus the complete session
   directory, reads the full `jarvis-activity.jsonl` itself, and correlates first-class attempt
-  provenance with raw brain traffic and screenshots. Its compact input opens with deterministic
-  trigger/filler/telemetry availability counts; older sessions without provenance say unavailable
-  instead of inventing a zero. Growing CLI request history is common-prefix elided with an explicit
-  pointer back to untouched traffic. The agent writes owner-only `eval-report.md` and opens the
-  rendered page. A saved session shows **Open report** instead, avoiding another agent run. The local
-  app locates its checkout from the
+  provenance with raw brain traffic and screenshots. Its compact input opens with a neutral evidence
+  index—artifact health, categorical distributions, and correlation-field coverage—followed by
+  normalized provider-call telemetry. These tables describe recorded facts without declaring a
+  defect; missing or partial values stay unavailable instead of becoming zero. Growing CLI request
+  history is common-prefix elided with an explicit pointer back to untouched traffic. The agent uses
+  read-only file and source-search tools to follow the evidence, then writes a generic Summary /
+  Findings / Evidence gaps / Recommendations report to owner-only `eval-report.md`. A saved session
+  shows **Open report** instead, avoiding another agent run. The local app locates its checkout from the
   workspace `.jarvis/`, a `--repo-dir` launch argument, or the directory containing a locally built
   app bundle; without live source it refuses to run a weaker audit. `./scripts/eval-session.sh
   [session-dir]` is the terminal launcher for the same Core evaluator.
@@ -208,6 +210,5 @@ the human-facing coaching record. The current validation priority lives in
   transcription or coaching events.
 - In Activity, choose the stopped session and click **Evaluate**. Confirm the button shows
   **Evaluating…**, the report opens when the agent finishes, and the button then shows **Open report**.
-  Confirm the report separates transcript input from Jarvis output, attributes coach calls to their
-  trigger and initial/screen-continuation phase, and never presents `stay_silent` as an avoidable-call
-  count.
+  Confirm the report uses the four generic sections, cites concrete session or source anchors for
+  findings, and keeps unavailable evidence in **Evidence gaps** instead of inventing a conclusion.

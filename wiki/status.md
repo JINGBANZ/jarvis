@@ -110,9 +110,12 @@ cannot stop a replacement session; repeated route notifications cannot reset one
 budget. Activity persists stable event kinds and flushes at Stop. The sole evaluator is agentic: it
 receives the complete session directory and reads the full, unfiltered `jarvis-activity.jsonl`
 whenever it needs the user-visible sequence, alongside first-class coaching-attempt provenance, raw
-brain traffic, screenshots, and live source code. Deterministic tables now separate finalized/filler
-lines, local skips, call triggers, initial versus screen-continuation calls, model silence, and known
-versus unavailable provider telemetry. The dedicated
+brain traffic, screenshots, and live source code. A neutral evidence index reports artifact health,
+categorical distributions, and correlation-field coverage; a separate normalized table reports
+provider-call latency, token, cache, and cost telemetry. Both preserve unavailable and partial values
+without declaring findings. The prompt gives the read-only agent file and source-search tools, asks it
+to follow the recorded evidence instead of a historical-incident checklist, and returns generic
+Summary / Findings / Evidence gaps / Recommendations sections. The dedicated
 [session-audit component](./session-audit.md) gives the coach and brain clients only narrow optional
 observer ports, then contains parsing, redaction, serialization, and file I/O behind one bounded
 process worker. Regular Stop drains the old session's producers and closes its audit in a background
@@ -126,7 +129,7 @@ only while that session's normal Stop close is in progress. Surviving partial to
 bounds. CLI failures before actual transport dispatch
 remain separate from provider-call totals, and malformed JSONL likewise makes affected values
 explicitly partial rather than exact-looking. Historical sessions without provenance remain explicitly
-unavailable; `stay_silent` is never treated as an avoidable-call proxy. The compact transcript also
+unavailable. The compact transcript also
 elides a growing one-item CLI history and duplicate response-envelope replies while preserving call
 numbers and untouched-source access. Activity's one-click **Evaluate** action launches that evaluator
 and opens its saved report; the standalone script calls the same Core implementation. The runtime ghost-mode rule
@@ -168,7 +171,7 @@ Run a live chronology smoke on a fresh session: let one speaker finish a longer 
 other gives a short reply, then confirm Activity inserts the question before the reply and the first
 automatic brain request contains that same order. Repeat while a model call is already in flight so
 the queued automatic attempt also waits. This requires live audio permissions and was not exercised
-by the offline gate. Lower-priority evaluator and coaching follow-ups from the session audit remain
+by the offline gate. Lower-priority runtime and coaching follow-ups from the session audit remain
 parked in [issue #151](https://github.com/JINGBANZ/jarvis/issues/151).
 
 Then repeat `./scripts/transcription-benchmark.sh standard` to classify the single GPT Live
@@ -203,9 +206,8 @@ smoke covers app wiring, TCC, audio, and overlay presentation. Exercise one
 audio-route switch: Activity should say listening continues, the
 next turn should include any unsent speech, and capture should recover
 without rotating the session. Stop that session, click **Evaluate**, and confirm the agentic report
-opens, attributes calls to their recorded trigger/phase, distinguishes transcript input from Jarvis
-output, and identifies the temporary miss from the complete Activity log without misclassifying it
-as a stopped conversation. The standard release checklist, including quiet-start capture before system
+opens with the four generic sections, cites exact session or source anchors for material findings,
+and records unsupported conclusions as evidence gaps. The standard release checklist, including quiet-start capture before system
 playback, remains in
 [build-and-run.md](./build-and-run.md).
 
@@ -224,7 +226,7 @@ thin OS shell, verified by the smoke run.
 - `Sources/JarvisCore/Overlay/` — overlay text model + length-proportional timing + fan-out (`OverlayRendering`, `OverlayTiming`, `OverlayAppearance`, `BroadcastOverlay`).
 - `Sources/JarvisCore/Config/` — config + owner-only secrets + transcription/brain/screen preferences (`Config`, `Secrets`, `TranscriptionPreferences`, `BrainPreferences`, `ScreenCapturePreferences`, `ScreenCaptureScope`).
 - `Sources/JarvisCore/Support/` — small shared runtime primitives (`Clock`, `TurnTaskBox`, `RetrySchedule`, `RetryIncident`).
-- `Sources/JarvisCore/Diagnostics/` — logging, always-on event-time-ordered activity with stable persisted event kinds, occurrence/record timing, and fixed typed brain-change/failure notices, privacy-preserving audio continuity and capture-readiness policy, authoritative session-readiness composition, chronology-aware session history, the bounded [session-audit component](./session-audit.md), loss-aware JSONL parsing, deterministic trigger-quality metrics, the read-only agentic audit over the complete session directory, and user-facing errors (`ActivityLog`, `AudioContinuityWitness`, `CaptureReadinessMonitor`, `JarvisReadiness`, `SessionStore`, `BrainTrafficAuditing`, `CoachingAttemptAuditing`, `FileSessionAudit`, `SessionAuditEvidence`, `JSONLRecords`, `TriggerQualityMetrics`, `EvaluationTranscript`, `AgenticEvaluation`, `AgenticEvaluator`, `UserFacingError`).
+- `Sources/JarvisCore/Diagnostics/` — logging, always-on event-time-ordered activity with stable persisted event kinds, occurrence/record timing, and fixed typed brain-change/failure notices, privacy-preserving audio continuity and capture-readiness policy, authoritative session-readiness composition, chronology-aware session history, the bounded [session-audit component](./session-audit.md), loss-aware JSONL parsing, the neutral session evidence index and normalized provider telemetry, the read-only agentic audit over the complete session directory, and user-facing errors (`ActivityLog`, `AudioContinuityWitness`, `CaptureReadinessMonitor`, `JarvisReadiness`, `SessionStore`, `BrainTrafficAuditing`, `CoachingAttemptAuditing`, `FileSessionAudit`, `SessionAuditEvidence`, `JSONLRecords`, `SessionEvidenceIndex`, `SessionMetrics`, `EvaluationTranscript`, `AgenticEvaluation`, `AgenticEvaluator`, `UserFacingError`).
 - `Sources/JarvisCore/Prompts/` — the single Foundation-only audit surface for predefined model-facing text across coaching, history compaction, local-agent protocols, transcription context, and session evaluation (`JarvisPrompts`).
 - `Sources/JarvisOverlay/` — the capture-invisible `NSPanel` surfaces: `OverlayCaptionPanel` (transient), `OverlayBoxPanel` (persistent), `NSPanel+CaptureExclusion`.
 - `Sources/JarvisApp/App/` + `MenuBar/` — entry point, shared authoritative readiness rendering, Start/Stop, `ErrorReporter` (startup alerts plus an unconditional no-presentation runtime policy).
