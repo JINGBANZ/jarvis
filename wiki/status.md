@@ -106,8 +106,8 @@ ephemerality and a message/reasoning event allowlist that aborts a turn on any o
 Saving an API key while running also preserves those live objects: existing Realtime sockets take
 the key on their next reconnect, and an OpenAI brain update remains transactional. Audio
 route rebuilds likewise retry before declaring capture unavailable, and stale capture callbacks
-cannot stop a replacement session; repeated route notifications cannot reset one incident's bounded
-budget. Activity persists stable event kinds and flushes at Stop. The sole evaluator is agentic: it
+cannot stop a new session after Stop → Start; repeated route notifications cannot reset one
+incident's bounded budget. Activity persists stable event kinds and flushes at Stop. The sole evaluator is agentic: it
 receives the complete session directory and reads the full, unfiltered `jarvis-activity.jsonl`
 whenever it needs the user-visible sequence, alongside first-class coaching-attempt provenance, raw
 brain traffic, screenshots, and live source code. A neutral evidence index reports artifact health,
@@ -153,7 +153,20 @@ existing Git/PR history is intentionally preserved after the full-history secret
 credential leak; current-tree machine-specific instructions were generalized instead of rewriting
 repository identity and provenance.
 
+The [lean coaching core architecture](./lean-coaching-core.md) is approved for issue #147. Its
+Phase 0 audit foundation is built; the unified `SessionEvidence` stack, diagnostic migration,
+Activity projection, offline-maintenance changes, adapter direction, and coordinator decomposition
+are not yet implemented. The approved next slice is diagnostics-only and preserves the current
+coaching, routing, Activity, evaluator, and artifact behavior.
+
 ## Next action
+
+For issue #147, implement **Phase 1 — Evidence foundation** from
+[lean-coaching-core.md](./lean-coaching-core.md#phase-1-implementation-contract): generalize the
+settled session-audit transport into one `SessionEvidence` stack and move synchronous `jlog`
+Console/file work behind that same bounded worker. Do not add a dedicated diagnostic worker or move
+Activity yet. All persisted evidence is best effort and may be visibly partial; coaching always
+continues. Preserve the current forward-only fresh-attempt route and capture-heartbeat behavior.
 
 Re-enable the four agent workflows. Their hosted definitions and existing source-level gates are
 ready on `main`; they were disabled during rollout so the old base-branch copies could not target the
@@ -244,5 +257,9 @@ thin OS shell, verified by the smoke run.
 
 ## Not yet built
 
+- **Lean coaching core Phases 1–5** — the approved destination and slice contracts are in
+  [lean-coaching-core.md](./lean-coaching-core.md). Phase 0 audit isolation is built; unified
+  diagnostics, the Activity projection, offline maintenance, plan/adapter direction, and final
+  coordinator decomposition remain future work.
 - **Universal binary** — `Sources/CJarvisAEC/lib/libjarvis-aec.a` is arm64-only; `lipo` in an x86_64 slice if Intel is ever needed.
 - **Neural double-talk canceller** (DTLN / Muesli-style on the same aligned streams) — the escalation if AEC3 over-attenuates the user under loud far audio in practice.

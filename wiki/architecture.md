@@ -12,6 +12,10 @@
 > `Config/Config.swift`); this page is
 > the *why*, the code is the *what*.
 
+> The approved cross-cutting destination for isolating optional runtime work is documented in
+> [lean-coaching-core.md](./lean-coaching-core.md). That page distinguishes the built Phase 0 audit
+> foundation from the unbuilt Phase 1–5 roadmap; the current runtime remains as described here.
+
 ## 1. Vision
 
 Jarvis is a personal, always-on macOS assistant that **coaches you through technical interviews**:
@@ -671,6 +675,11 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
    egress are enforced today; do not claim filesystem isolation until App Sandbox is implemented.
 6. **Self-verifying.** Every build ships with tests and a smoke checklist the agent can run to prove it works.
 7. **One domain, done well.** Ship the technical-interview coach; expand later.
+
+The same principle applies to runtime structure: the
+[lean coaching core contract](./lean-coaching-core.md) keeps only outcome-affecting policy and ports
+on the critical lane, while one shared best-effort evidence stack serves the Activity window and
+detailed agent/evaluator investigation.
 
 How Jarvis is built, signed, tested, and run — and the activity viewer — is its own
 operational page: [build-and-run.md](./build-and-run.md).
