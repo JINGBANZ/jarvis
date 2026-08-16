@@ -1674,3 +1674,41 @@
   `Sources/JarvisCore/Diagnostics/SessionEvidenceIndex.swift`,
   `Sources/JarvisCore/Diagnostics/SessionMetrics.swift`,
   `Sources/JarvisCore/Prompts/JarvisPrompts+Evaluation.swift`.
+
+### 2026-08-16 — Session evidence uses one shared stack and two projections
+
+- **Chose:** Make the issue #147 destination one `SessionEvidence` stack: one versioned
+  `SessionEvent` per occurrence, one count- and byte-bounded mailbox, one worker, one per-session
+  handle and lifecycle, and one completeness contract. An event carries typed detail plus an optional
+  closed, human-safe Activity presentation. The Activity window renders that high-level projection;
+  the owner-only session folder retains the detailed agent/evaluator projection. Audit, diagnostics,
+  Activity, and continuity evidence remain typed categories, not independent persistence stacks.
+- **Chose:** Give all persisted session evidence the same best-effort loss contract. Capacity or
+  persistence failure may lose any category and must leave the session visibly partial when possible;
+  coaching always continues. The shared evidence queue therefore has no priority classes, reserved
+  capacity, backpressure, or writer retries. Critical queues declare separate intentional policies
+  because transcript state, coaching history, route state, and enabled overlay delivery are not
+  optional evidence.
+- **Chose:** Rename capture liveness to **capture heartbeat** and keep it on the critical branch. The
+  existing content-free `AudioContinuityWitness` frame-progress observation directly feeds capture
+  health policy; only an optional diagnostic copy enters `SessionEvidence`. Evidence loss can never
+  change readiness, microphone-only degradation, or stop. Preserve one target per coaching attempt,
+  forward-only fresh-attempt recovery, the three-failure temporary/unknown budget, immediate proven
+  permanent exhaustion, and independent new sessions after Stop → Start.
+- **Why:** The actual workflow has one human consumer—the Activity window—and one detailed consumer—an
+  agent or evaluator inspecting the session folder. Parallel Activity, audit, diagnostic, and
+  telemetry queues would duplicate workers, health, lifecycle, and overload policy without buying a
+  stronger product guarantee. Typed projections keep human copy safe and detailed evidence rich while
+  sharing the simple failure boundary the owner approved.
+- **Rejected:** (a) Dedicated `ActivityEventSink`, `DiagnosticSink`, session-audit, and continuity
+  stacks. (b) A flat human log containing transport and raw-error detail. (c) Priority queues or
+  reserved Activity/audit capacity under a uniform best-effort contract. (d) Letting capture health
+  consume persisted telemetry. (e) Combining the whole migration, target extraction, maintenance,
+  and coordinator decomposition in one refactor.
+- **Supersedes in part:** 2026-08-10 — Session audit persistence is bounded and failure-contained.
+  Its bounded nonblocking transport and honest partial evidence stand; the audit-only scope and
+  separate Activity failure-domain assumption become the Phase 0 foundation of the shared stack.
+- **Extends:** 2026-08-11 — Session audits close once and never reopen. Its monotonic health,
+  independent Stop → Start, and Quit-never-waits semantics apply to the destination evidence stack.
+- **Detail:** [lean-coaching-core.md](./lean-coaching-core.md),
+  [session-audit.md](./session-audit.md).

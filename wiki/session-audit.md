@@ -1,7 +1,10 @@
 # Session Audit
 
-> A diagnostics component that records coaching-attempt provenance and provider traffic without
-> making persistence part of coaching behavior or latency.
+> The built Phase 0 foundation for the approved
+> [lean coaching core](./lean-coaching-core.md): a diagnostics component that records
+> coaching-attempt provenance and provider traffic without making persistence part of coaching
+> behavior or latency. Activity and `jlog` still use separate paths in the current implementation;
+> Phases 1 and 2 consolidate them onto this transport without creating parallel workers.
 
 ## Why It Exists
 
@@ -43,7 +46,7 @@ unavailable. Historical sessions without versioned audit evidence keep their leg
 ## Lifecycle
 
 One Start creates one audit and one owner-only session directory. Regular Stop cancels that session's
-producer tasks, waits for them in a background task, then closes the old audit. A replacement Start
+producer tasks, waits for them in a background task, then closes the old audit. A new Start after Stop
 uses a new directory immediately; it does not wait for the old audit. Activity protects and does not
 evaluate only the session that is still closing.
 

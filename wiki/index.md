@@ -19,7 +19,8 @@
 - **[landscape-survey.md](./landscape-survey.md)** — every tool and product we tried or evaluated, and how each measured up. ("What I tried.")
 - **[fork-evaluation.md](./fork-evaluation.md)** — code-level evaluation of open-source apps as a fork base for the PoC, and why they're all Electron/Tauri rather than native Swift.
 - **[settings-window.md](./settings-window.md)** — the unified Settings window: one menu item → `SettingsWindow` hosting `BrainSection`, `OverlaySection`, `DisplaySection`, and `ActivitySection`; the Brain tab configures the independent transcription provider/model/language or Apple locale, the ordered coaching route (OpenAI API or auto-detected local Claude Code / Codex CLI targets), shared reasoning effort, and the conditionally required OpenAI API key; the Overlay Caption and Overlay Box each have an on/off toggle + size/opacity, persisted via `OverlayAppearance`; the Screen tab picks what `capture_screen` shoots in one dropdown — the active window by default (with an on-device OCR sidecar) or an entire display.
-- **[session-audit.md](./session-audit.md)** — the diagnostics-only session audit: optional execution ports, bounded persistence, Start/Stop/Quit ownership, failure containment, completeness evidence, and the evaluator boundary.
+- **[lean-coaching-core.md](./lean-coaching-core.md)** — the approved issue #147 target architecture and phased roadmap: one critical coaching lane, one shared `SessionEvidence` stack with Activity and agent projections, capture heartbeat, preserved fresh-attempt routing, and the Phase 1 implementation contract.
+- **[session-audit.md](./session-audit.md)** — the built Phase 0 foundation: optional audit ports, bounded persistence, Start/Stop/Quit ownership, failure containment, completeness evidence, and the evaluator boundary.
 
 ## Decisions
 
