@@ -18,13 +18,14 @@ session for an immediate, screen-aware hint.
 
 **Requirements:** an Apple silicon Mac running macOS 14.2 or later. No developer tools are needed.
 
-[**Download the latest signed and notarized release**](https://github.com/JINGBANZ/jarvis/releases/latest)
+[**Download Jarvis for Apple silicon (macOS 14.2+)**](https://github.com/JINGBANZ/jarvis/releases/latest/download/Jarvis.dmg)
 
-1. Under **Assets**, download `Jarvis-<version>.zip` and double-click it to extract the app.
-2. Move `Jarvis.app` to **Applications**, then open it. Jarvis appears in the menu bar rather than
-   the Dock.
-3. Allow Microphone access and, for screen-aware hints, Screen Recording when macOS prompts.
-4. From the menu-bar icon, open **Settings**, choose transcription and brain providers, add any
+1. Open `Jarvis.dmg`.
+2. In the Finder window, drag `Jarvis.app` onto the **Applications** shortcut.
+3. Eject the Jarvis disk image, then open Jarvis from **Applications**. Jarvis appears in the menu
+   bar rather than the Dock.
+4. Allow Microphone access and, for screen-aware hints, Screen Recording when macOS prompts.
+5. From the menu-bar icon, open **Settings**, choose transcription and brain providers, add any
    credential those providers require, then select **Start Jarvis**. Allow System Audio Recording
    when Start requests it so Jarvis can hear the other side.
 

@@ -62,15 +62,17 @@ that checkout-local bundle to the Trash so it cannot be launched accidentally; l
 The `Jarvis Dev` identity above is a **local-dev** device: on any other Mac it's untrusted and
 Gatekeeper blocks the app. Distributable builds go through `scripts/package-app.sh`, which builds and
 signs the bundle once with a **Developer ID Application** certificate — hardened runtime + secure
-timestamp (both notarization requirements) — submits it to Apple's notary service, staples the
-ticket, and re-zips the stapled bundle into `Jarvis-<version>.zip` (a zip itself can't be stapled,
-so the archive is rebuilt after stapling). Hardened runtime denies microphone capture outright
-without the `audio-input` entitlement, so the script signs with `Resources/Jarvis.entitlements`.
-The script then passes that final zip to `scripts/verify-release.sh`, which extracts it into a fresh
-verification directory and checks the exact shipped app's bundle shape, version, arm64 architecture,
-linked macOS 26-or-newer SDK, notices, strict code signature, stapled ticket, and Gatekeeper policy
-result. The same SDK guard runs immediately after the release build, before signing or notarization;
-the pre-compression app is not accepted as a proxy for the downloaded artifact.
+timestamp (both notarization requirements) — with the `audio-input` entitlement that hardened runtime
+requires for microphone capture. It places the signed app beside an `Applications` shortcut in
+`Jarvis.dmg`, signs and notarizes that outer disk image, then staples the ticket to the exact file
+users download.
+
+The script passes that final DMG to `scripts/verify-release.sh`, which verifies the disk image and its
+ticket, mounts it read-only, and requires exactly one regular `Jarvis.app` plus one symbolic link to
+`/Applications`. It checks the mounted app's version, arm64 architecture, linked macOS 26-or-newer
+SDK, notices, strict code signature, and Gatekeeper policy result before detaching the image. The same
+SDK guard runs immediately after the release build, before signing or notarization; the pre-container
+app is not accepted as a proxy for the downloaded artifact.
 
 Releases are cut by `.github/workflows/release.yml`, not by hand: on every push to `main`,
 **release-please** maintains a standing Release PR from the conventional-commit history (bumping both
@@ -78,10 +80,11 @@ version keys in `Resources/Info.plist` via `x-release-please-version` annotation
 CHANGELOG — config in `release-please-config.json`). Merging that PR creates the GitHub Release **as
 a draft**; an Apple-silicon `macos-26` job then runs the test gate, signs/notarizes via repo secrets
 (the base64 `.p12` certificate and an App Store Connect API key — names in the workflow), attaches
-the zip, and only then publishes the Release. The publish step also attaches `SHA256SUMS` and
-prepends the stable installation block in `.github/release-header.md` to release-please's generated
-changelog. A failed sign, notarization, or final-archive verification therefore never leaves a
-public Release without a validated app. The exact runner label and binary guard keep downloaded
+only `Jarvis.dmg`, and then publishes the Release. The stable installation block in
+`.github/release-header.md` links directly to that tag's DMG and explains the in-window drag to
+Applications; GitHub still supplies its automatic source archives. A failed sign, notarization, or
+final-image verification therefore never leaves a public Release without a validated app. The exact
+runner label and binary guard keep downloaded
 AppKit controls on the same macOS 26 design as local development builds instead of inheriting the
 compatibility appearance of an older linked SDK. The publish job lives in the same workflow because
 tags created with `GITHUB_TOKEN` never trigger other workflows.

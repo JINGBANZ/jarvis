@@ -38,7 +38,7 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
-  # Build, sign, notarize, and attach Jarvis-<version>.zip to the Release just created. Gate
+  # Build, sign, notarize, and attach Jarvis.dmg to the Release just created. Gate
   # (tests) and publish share one job — macOS minutes bill at 10x, and re-running the Swift build
   # in a second job would double the cost for no extra safety: any failing step here still aborts
   # before the upload. This deliberately lives in the same workflow rather than a tag-triggered
@@ -113,12 +113,12 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.release-please.outputs.tag_name }}
         run: |
-          archives=(Jarvis-*.zip)
-          if [[ ${#archives[@]} -ne 1 || ! -f "${archives[0]}" ]]; then
-            echo "error: expected exactly one Jarvis release archive" >&2
+          ASSET="Jarvis.dmg"
+          ASSET_LABEL="Jarvis for Apple silicon (macOS 14.2+)"
+          if [[ ! -f "$ASSET" || -L "$ASSET" ]]; then
+            echo "error: expected one regular $ASSET release artifact" >&2
             exit 1
           fi
-          shasum -a 256 "${archives[0]}" > SHA256SUMS
 
           CURRENT_NOTES="$RUNNER_TEMP/current-release-notes.md"
           RELEASE_NOTES="$RUNNER_TEMP/release-notes.md"
@@ -126,7 +126,11 @@ jobs:
           if grep -Fq '<!-- jarvis-release-install -->' "$CURRENT_NOTES"; then
             cp "$CURRENT_NOTES" "$RELEASE_NOTES"
           else
-            cat .github/release-header.md "$CURRENT_NOTES" > "$RELEASE_NOTES"
+            INSTALL_HEADER="$RUNNER_TEMP/release-header.md"
+            DOWNLOAD_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/download/${TAG}/${ASSET}"
+            sed "s|@JARVIS_DOWNLOAD_URL@|$DOWNLOAD_URL|g" \
+              .github/release-header.md > "$INSTALL_HEADER"
+            cat "$INSTALL_HEADER" "$CURRENT_NOTES" > "$RELEASE_NOTES"
           fi
 
           ASSET_NAMES="$RUNNER_TEMP/existing-release-assets.txt"
@@ -138,22 +142,28 @@ jobs:
             exit 1
           fi
           gh release view "$TAG" --json assets --jq '.assets[].name' > "$ASSET_NAMES"
+          UNEXPECTED_ASSETS="$(awk -v expected="$ASSET" '$0 != expected { print }' "$ASSET_NAMES")"
+          if [[ -n "$UNEXPECTED_ASSETS" ]]; then
+            echo "error: refusing to publish with unexpected app assets:" >&2
+            printf '%s\n' "$UNEXPECTED_ASSETS" >&2
+            exit 1
+          fi
           # A retry may encounter either a partial draft or a public Release whose publish response
           # was lost. Draft assets are safe to replace; public assets must never be deleted here.
-          for asset in "${archives[0]}" SHA256SUMS; do
+          for asset in "$ASSET"; do
             if grep -Fxq "$asset" "$ASSET_NAMES"; then
               gh release download "$TAG" --pattern "$asset" --dir "$ASSET_DIR"
               if cmp -s "$asset" "$ASSET_DIR/$asset"; then
                 echo "existing release asset is identical: $asset"
               elif [[ "$RELEASE_IS_DRAFT" == "true" ]]; then
                 echo "replacing different draft release asset: $asset"
-                gh release upload "$TAG" "$asset" --clobber
+                gh release upload "$TAG" "$asset#$ASSET_LABEL" --clobber
               else
                 echo "error: release already has a different $asset; preserving it" >&2
                 exit 1
               fi
             else
-              gh release upload "$TAG" "$asset"
+              gh release upload "$TAG" "$asset#$ASSET_LABEL"
             fi
           done
           gh release edit "$TAG" --notes-file "$RELEASE_NOTES" --draft=false --latest
