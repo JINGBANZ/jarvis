@@ -8,10 +8,14 @@ release_header=".github/release-header.md"
 package_script="scripts/package-app.sh"
 verify_script="scripts/verify-release.sh"
 sdk_guard="scripts/check-release-sdk.sh"
+dmg_settings="scripts/dmg-settings.py"
+dmg_layout_guard="scripts/verify-dmg-layout.py"
+release_requirements="scripts/requirements-release.txt"
 package_guard_call="./scripts/check-release-sdk.sh \"\$BIN_PATH\""
 verify_guard_call="./scripts/check-release-sdk.sh \"\$EXTRACTED_BIN\""
 
-for path in "$workflow" "$ci_workflow" "$release_header" "$package_script" "$verify_script" "$sdk_guard"; do
+for path in "$workflow" "$ci_workflow" "$release_header" "$package_script" "$verify_script" \
+    "$sdk_guard" "$dmg_settings" "$dmg_layout_guard" "$release_requirements"; do
   if [[ ! -f "$path" || -L "$path" ]]; then
     echo "Release configuration guard: $path must be a regular file." >&2
     exit 1
@@ -54,8 +58,26 @@ if ! /usr/bin/grep -Fq 'DMG="Jarvis.dmg"' "$package_script" \
     || ! /usr/bin/grep -Fq 'DMG_IDENTIFIER="com.jarvis.coach.dmg"' "$package_script" \
     || ! /usr/bin/grep -Fq 'codesign --force --timestamp --identifier "$DMG_IDENTIFIER" --sign "$IDENTITY" "$DMG"' \
       "$package_script" \
-    || ! /usr/bin/grep -Fq 'ln -s /Applications "$DMG_STAGE/Applications"' "$package_script"; then
-  echo "Release packaging must create an identified Jarvis.dmg with an Applications shortcut." >&2
+    || ! /usr/bin/grep -Fq 'EXPECTED_DMGBUILD_VERSION="1.6.7"' "$package_script" \
+    || ! /usr/bin/grep -Fq '"$DMGBUILD_PYTHON" -m dmgbuild' "$package_script" \
+    || ! /usr/bin/grep -Fq -- '--settings scripts/dmg-settings.py' "$package_script"; then
+  echo "Release packaging must create an identified Jarvis.dmg with the pinned layout tool." >&2
+  exit 1
+fi
+if ! /usr/bin/grep -Fq 'symlinks = {"Applications": "/Applications"}' "$dmg_settings" \
+    || ! /usr/bin/grep -Fq 'background = "builtin-arrow"' "$dmg_settings" \
+    || ! /usr/bin/grep -Fq 'window_rect = ((100, 100), (640, 280))' "$dmg_settings" \
+    || ! /usr/bin/grep -Fq 'APP_NAME: (140, 120)' "$dmg_settings" \
+    || ! /usr/bin/grep -Fq '"Applications": (500, 120)' "$dmg_settings"; then
+  echo "Release DMG settings must preserve the reviewed arrow-and-drop-target layout." >&2
+  exit 1
+fi
+if ! /usr/bin/grep -Fq -- '--only-binary=:all:' "$release_requirements" \
+    || ! /usr/bin/grep -Fq 'dmgbuild==1.6.7' "$release_requirements" \
+    || ! /usr/bin/grep -Fq -- '--require-hashes' "$workflow" \
+    || ! /usr/bin/grep -Fq -- '--requirement scripts/requirements-release.txt' "$workflow" \
+    || ! /usr/bin/grep -Fq 'DMGBUILD_PYTHON=$RELEASE_TOOLS/bin/python' "$workflow"; then
+  echo "Release workflow must install the hash-pinned DMG layout tool in its own environment." >&2
   exit 1
 fi
 if ! /usr/bin/grep -Fq 'xcrun notarytool submit "$artifact"' "$package_script"; then
@@ -67,6 +89,7 @@ package_flow=(
   'notarize_artifact "$APP_NOTARY_ARCHIVE" "application"'
   'xcrun stapler staple "$APP"'
   'ditto "$APP" "$DMG_STAGE/$APP"'
+  '"$DMGBUILD_PYTHON" -m dmgbuild'
   'notarize_artifact "$DMG" "disk image"'
   'xcrun stapler staple "$DMG"'
   './scripts/verify-release.sh "${verify_args[@]}"'
@@ -88,9 +111,11 @@ if ! /usr/bin/grep -Fq 'hdiutil attach "$DMG" -readonly -nobrowse -mountpoint "$
       "$verify_script" \
     || ! /usr/bin/grep -Fq '"$(readlink "$APPLICATIONS_LINK")" != "/Applications"' \
       "$verify_script" \
+    || ! /usr/bin/grep -Fq '"$DMGBUILD_PYTHON" scripts/verify-dmg-layout.py "$MOUNT_POINT"' \
+      "$verify_script" \
     || ! /usr/bin/grep -Fq 'syspolicy_check distribution "$EXTRACTED_APP" --verbose' \
       "$verify_script"; then
-  echo "Final release verification must inspect the mounted layout and modern system policy." >&2
+  echo "Final release verification must inspect the mounted Finder layout and modern system policy." >&2
   exit 1
 fi
 if ! /usr/bin/grep -Fq 'ASSET="Jarvis.dmg"' "$workflow" \

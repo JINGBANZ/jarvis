@@ -1740,6 +1740,9 @@
 - **Supersedes in part:** 2026-07-17 — Distribution via release-please + notarized zip on GitHub
   Releases. Its release-please flow, Developer ID identity, notarization credentials, and
   draft-until-validated publication semantics stand.
+- **Superseded in part by:** 2026-08-17 — DMG makes the drag-install gesture explicit. The single
+  artifact, two visible targets, owner-driven gesture, and trust chain stand; the unarranged native
+  presentation and rejection of a release-only layout dependency do not.
 - **Detail:** [build-and-run.md → Distribution](./build-and-run.md#distribution--signed-notarized-releases-from-ci),
   `scripts/package-app.sh`, `scripts/verify-release.sh`, `.github/workflows/release.yml`,
   `.github/release-header.md`.
@@ -1760,3 +1763,29 @@
 - **Extends:** 2026-07-17 — Distribution via release-please + notarized zip on GitHub Releases.
 - **Detail:** [build-and-run.md → Distribution](./build-and-run.md#distribution--signed-notarized-releases-from-ci),
   `.github/workflows/release.yml`, `scripts/check-release-config.sh`.
+
+### 2026-08-17 — DMG makes the drag-install gesture explicit
+
+- **Chose:** Keep the single `Jarvis.dmg` and its two visible targets, but present them in a fixed
+  640×280 Finder icon view: a 128-point Jarvis icon on the left, the system Applications folder on
+  the right, and a large arrow between them. Hide the `.app` extension and Finder chrome. Use
+  `dmgbuild` 1.6.7 as a release-only dependency, with it and its two pure-Python dependencies pinned
+  to wheel hashes in `scripts/requirements-release.txt`; it writes `.DS_Store` directly and never
+  launches Finder. Verify the mounted final image's exact visible/hidden entries, background digest,
+  Finder view and window settings, icon positions and sizes, and extension flag before publication.
+- **Why:** The unarranged image contained the correct app and shortcut but did not visually explain
+  their relationship, so a user could open Jarvis from the read-only image instead of installing it.
+  Apple explicitly treats arranged icons, a background, and an Applications symlink as the standard
+  single-app disk-image experience. Encoding and checking the presentation makes that gesture
+  obvious while preserving headless CI and the existing signing, notarization, and Gatekeeper chain.
+- **Rejected:** (a) Keep the plain two-entry image and rely on release-note instructions—the user is
+  already inside Finder when the decision matters. (b) Drive Finder with AppleScript—hosted release
+  jobs should not depend on GUI state or automation permission. (c) Commit generated `.DS_Store` or
+  background binaries—reviewable settings plus a pinned built-in arrow avoid opaque source assets.
+  (d) Add a package installer or make Jarvis move itself—the app remains a single bundle and the
+  installation action remains explicit and owner-controlled.
+- **Supersedes in part:** 2026-08-16 — Distribution uses one drag-install DMG. Its artifact and trust
+  decisions stand; its deliberately uncurated Finder presentation does not.
+- **Detail:** [build-and-run.md → Distribution](./build-and-run.md#distribution--signed-notarized-releases-from-ci),
+  `scripts/dmg-settings.py`, `scripts/verify-dmg-layout.py`, `scripts/package-app.sh`,
+  `.github/workflows/release.yml`.

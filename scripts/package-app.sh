@@ -25,6 +25,17 @@ cd "$(dirname "$0")/.."
 
 APP="Jarvis.app"
 BIN_NAME="JarvisApp"
+DMGBUILD_PYTHON="${DMGBUILD_PYTHON:-python3}"
+EXPECTED_DMGBUILD_VERSION="1.6.7"
+
+if ! "$DMGBUILD_PYTHON" -c \
+    'import dmgbuild, sys; sys.exit(dmgbuild.__version__ != sys.argv[1])' \
+    "$EXPECTED_DMGBUILD_VERSION"; then
+  echo "error: dmgbuild $EXPECTED_DMGBUILD_VERSION is required for the installer layout." >&2
+  echo "       Install scripts/requirements-release.txt in a virtual environment, then pass" >&2
+  echo "       DMGBUILD_PYTHON=/path/to/venv/bin/python." >&2
+  exit 1
+fi
 
 if [[ -z "${IDENTITY:-}" ]]; then
   IDENTITY="$(security find-identity -v -p codesigning \
@@ -103,24 +114,14 @@ if [[ -z "$DMG_STAGE" || "$DMG_STAGE" != "$DMG_STAGE_PREFIX"* \
 fi
 cleanup_dmg_stage() {
   local exit_code=$?
-  local cleanup_safe=true
   trap - EXIT
   if [[ -n "${DMG_STAGE:-}" && -n "${DMG_STAGE_PREFIX:-}" \
         && "$DMG_STAGE" == "$DMG_STAGE_PREFIX"* && -d "$DMG_STAGE" \
         && ! -L "$DMG_STAGE" ]]; then
-    if [[ -L "$DMG_STAGE/Applications" \
-          && "$(readlink "$DMG_STAGE/Applications")" == "/Applications" ]]; then
-      unlink "$DMG_STAGE/Applications"
-    elif [[ -e "$DMG_STAGE/Applications" || -L "$DMG_STAGE/Applications" ]]; then
-      echo "error: refusing to clean an unexpected Applications staging entry" >&2
-      exit_code=1
-      cleanup_safe=false
-    fi
     if find "$DMG_STAGE" -type l -print -quit | grep -q .; then
       echo "error: refusing to clean disk-image staging with an unexpected symbolic link" >&2
       exit_code=1
-      cleanup_safe=false
-    elif [[ "$cleanup_safe" == "true" ]]; then
+    else
       rm -rf -- "$DMG_STAGE"
     fi
   fi
@@ -142,9 +143,11 @@ xcrun stapler validate "$APP"
 
 echo "▶ creating drag-install disk image"
 ditto "$APP" "$DMG_STAGE/$APP"
-ln -s /Applications "$DMG_STAGE/Applications"
 rm -f "$DMG"
-hdiutil create -volname Jarvis -srcfolder "$DMG_STAGE" -fs HFS+ -format UDZO -ov "$DMG"
+"$DMGBUILD_PYTHON" -m dmgbuild \
+  --settings scripts/dmg-settings.py \
+  -D "app=$DMG_STAGE/$APP" \
+  Jarvis "$DMG"
 codesign --force --timestamp --identifier "$DMG_IDENTIFIER" --sign "$IDENTITY" "$DMG"
 codesign --verify --strict --verbose=2 "$DMG"
 

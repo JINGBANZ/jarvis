@@ -67,6 +67,17 @@ jobs:
       - name: Run repository gate
         run: swift build && ./scripts/run-tests.sh
 
+      # dmgbuild writes the curated Finder layout without opening Finder, so the release remains
+      # deterministic on a headless runner. Install only hash-pinned wheels into an ephemeral venv.
+      - name: Install DMG layout tool
+        run: |
+          RELEASE_TOOLS="$RUNNER_TEMP/release-tools"
+          python3 -m venv "$RELEASE_TOOLS"
+          "$RELEASE_TOOLS/bin/python" -m pip install \
+            --require-hashes \
+            --requirement scripts/requirements-release.txt
+          echo "DMGBUILD_PYTHON=$RELEASE_TOOLS/bin/python" >> "$GITHUB_ENV"
+
       # GitHub's documented recipe for signing on a hosted runner: decode the Developer ID
       # certificate into a fresh temporary keychain. set-key-partition-list is what lets codesign
       # use the key without a GUI prompt (which would hang forever headless); the keychain
