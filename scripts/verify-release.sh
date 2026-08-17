@@ -5,9 +5,17 @@ cd "$(dirname "$0")/.."
 
 DMG="${1:-}"
 EXPECTED_RELEASE_TAG="${2:-}"
+DMGBUILD_PYTHON="${DMGBUILD_PYTHON:-python3}"
 if [[ $# -gt 2 || -z "$DMG" || ! -f "$DMG" || -L "$DMG" ]]; then
   echo "usage: $0 Jarvis.dmg [v<version>]" >&2
   exit 2
+fi
+
+if ! "$DMGBUILD_PYTHON" -c 'from ds_store import DSStore' 2>/dev/null; then
+  echo "error: the pinned release-layout dependencies are required to verify the DMG." >&2
+  echo "       Install scripts/requirements-release.txt in a virtual environment, then pass" >&2
+  echo "       DMGBUILD_PYTHON=/path/to/venv/bin/python." >&2
+  exit 1
 fi
 DMG="$(cd "$(dirname "$DMG")" && pwd)/$(basename "$DMG")"
 if [[ "$(basename "$DMG")" != "Jarvis.dmg" ]]; then
@@ -63,14 +71,17 @@ MOUNTED=true
 EXTRACTED_APP="$MOUNT_POINT/$APP"
 APPLICATIONS_LINK="$MOUNT_POINT/Applications"
 ENTRY_COUNT="$(find "$MOUNT_POINT" -mindepth 1 -maxdepth 1 -print | wc -l | tr -d '[:space:]')"
-if [[ "$ENTRY_COUNT" != "2" || ! -d "$EXTRACTED_APP" || -L "$EXTRACTED_APP" ]]; then
-  echo "error: final disk image must contain one regular $APP bundle and one Applications shortcut" >&2
+if [[ "$ENTRY_COUNT" != "4" || ! -d "$EXTRACTED_APP" || -L "$EXTRACTED_APP" \
+      || ! -f "$MOUNT_POINT/.DS_Store" || -L "$MOUNT_POINT/.DS_Store" \
+      || ! -f "$MOUNT_POINT/.background.tiff" || -L "$MOUNT_POINT/.background.tiff" ]]; then
+  echo "error: final disk image must contain the two visible install targets and exact layout metadata" >&2
   exit 1
 fi
 if [[ ! -L "$APPLICATIONS_LINK" || "$(readlink "$APPLICATIONS_LINK")" != "/Applications" ]]; then
   echo "error: final disk image must contain an Applications shortcut targeting /Applications" >&2
   exit 1
 fi
+"$DMGBUILD_PYTHON" scripts/verify-dmg-layout.py "$MOUNT_POINT"
 
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \
   "$EXTRACTED_APP/Contents/Info.plist")"

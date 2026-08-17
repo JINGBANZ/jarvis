@@ -64,25 +64,34 @@ Gatekeeper blocks the app. Distributable builds go through `scripts/package-app.
 signs the bundle once with a **Developer ID Application** certificate — hardened runtime + secure
 timestamp (both notarization requirements) — with the `audio-input` entitlement that hardened runtime
 requires for microphone capture. It submits a temporary zip of that app to Apple's notary service,
-staples and validates the app's ticket, then places the stapled app beside an `Applications` shortcut
-in `Jarvis.dmg`. It signs and notarizes that outer disk image separately, then staples the container's
-ticket to the exact file users download. Both layers therefore remain verifiable offline.
+staples and validates the app's ticket, then uses the hash-pinned release-only `dmgbuild` tool to
+place the stapled app beside an `Applications` shortcut in `Jarvis.dmg`. The mounted Finder window is
+a fixed icon view: Jarvis on the left, Applications on the right, and a large arrow between them,
+with the extension and window chrome hidden. `dmgbuild` writes that metadata directly rather than
+automating Finder, so the hosted runner does not need a GUI session. The script signs and notarizes
+the outer disk image separately, then staples the container's ticket to the exact file users
+download. Both layers therefore remain verifiable offline.
 
 The script passes that final DMG to `scripts/verify-release.sh`, which verifies the disk image and its
-ticket, mounts it read-only, and requires exactly one regular `Jarvis.app` plus one symbolic link to
-`/Applications`. It checks the mounted app's version, arm64 architecture, linked macOS 26-or-newer
-SDK, notices, strict code signature, and Gatekeeper policy result before detaching the image. The same
-SDK guard runs immediately after the release build, before signing or notarization; the pre-container
-app is not accepted as a proxy for the downloaded artifact.
+ticket, mounts it read-only, and requires exactly the two visible install targets plus the hidden
+Finder metadata and arrow background. `scripts/verify-dmg-layout.py` reads the final `.DS_Store` and
+checks the icon view, window size, chrome, icon size and positions, background link and digest, and
+hidden `.app` extension. Release verification also checks the Applications target, mounted app
+version, arm64 architecture, linked macOS 26-or-newer SDK, notices, strict code signature, and
+Gatekeeper policy result before detaching the image. The same SDK guard runs immediately after the
+release build, before signing or notarization; the pre-container app is not accepted as a proxy for
+the downloaded artifact.
 
 Releases are cut by `.github/workflows/release.yml`, not by hand: on every push to `main`,
 **release-please** maintains a standing Release PR from the conventional-commit history (bumping both
 version keys in `Resources/Info.plist` via `x-release-please-version` annotations, plus the
 CHANGELOG — config in `release-please-config.json`). Merging that PR is the manual release approval:
 it creates the GitHub Release **as a draft**, with no second deployment approval. An Apple-silicon
-`macos-26` job then runs the test gate, signs/notarizes with secrets scoped to the main-only `release`
-environment (the base64 `.p12` certificate and an App Store Connect API key — names in the workflow),
-attaches only `Jarvis.dmg`, and then publishes the Release. The stable installation block in
+`macos-26` job then runs the test gate, installs only the hash-pinned pure-Python wheels in
+`scripts/requirements-release.txt` into an ephemeral environment, and signs/notarizes with secrets
+scoped to the main-only `release` environment (the base64 `.p12` certificate and an App Store Connect
+API key — names in the workflow). It attaches only `Jarvis.dmg`, then publishes the Release. The
+stable installation block in
 `.github/release-header.md` links directly to that tag's DMG and explains the in-window drag to
 Applications; GitHub still supplies its automatic source archives. A failed sign, notarization, or
 final-image verification therefore never leaves a public Release without a validated app. The exact
@@ -91,9 +100,11 @@ AppKit controls on the same macOS 26 design as local development builds instead 
 compatibility appearance of an older linked SDK. The publish job lives in the same workflow because
 tags created with `GITHUB_TOKEN` never trigger other workflows.
 
-`package-app.sh` also runs locally (one-time `xcrun notarytool store-credentials jarvis-notary …`,
-then just run the script) for packaging without CI. Distributed builds require macOS 14.2 or later
-and run on Apple silicon only because `libjarvis-aec.a` is arm64-only. The README owns the user
+`package-app.sh` also runs locally for packaging without CI. Create a virtual environment, install
+`scripts/requirements-release.txt` with `--require-hashes`, and pass its interpreter through
+`DMGBUILD_PYTHON`; notarization also needs the one-time
+`xcrun notarytool store-credentials jarvis-notary …` setup. Distributed builds require macOS 14.2 or
+later and run on Apple silicon only because `libjarvis-aec.a` is arm64-only. The README owns the user
 installation steps; provider credentials remain user-supplied in Settings.
 
 ## Running
