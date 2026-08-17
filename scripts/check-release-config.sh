@@ -3,6 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 workflow=".github/workflows/release.yml"
+ci_workflow=".github/workflows/ci.yml"
 release_header=".github/release-header.md"
 package_script="scripts/package-app.sh"
 verify_script="scripts/verify-release.sh"
@@ -10,7 +11,7 @@ sdk_guard="scripts/check-release-sdk.sh"
 package_guard_call="./scripts/check-release-sdk.sh \"\$BIN_PATH\""
 verify_guard_call="./scripts/check-release-sdk.sh \"\$EXTRACTED_BIN\""
 
-for path in "$workflow" "$release_header" "$package_script" "$verify_script" "$sdk_guard"; do
+for path in "$workflow" "$ci_workflow" "$release_header" "$package_script" "$verify_script" "$sdk_guard"; do
   if [[ ! -f "$path" || -L "$path" ]]; then
     echo "Release configuration guard: $path must be a regular file." >&2
     exit 1
@@ -19,6 +20,18 @@ done
 
 if ! /usr/bin/grep -Eq '^[[:space:]]*runs-on:[[:space:]]*macos-26[[:space:]]*$' "$workflow"; then
   echo "Release publish job must use the Apple-silicon macos-26 runner." >&2
+  exit 1
+fi
+for checkout_workflow in "$workflow" "$ci_workflow"; do
+  if ! /usr/bin/grep -Eq \
+      '^[[:space:]]*-[[:space:]]*uses:[[:space:]]*actions/checkout@[0-9a-f]{40}[[:space:]]*#[[:space:]]*v([5-9]|[1-9][0-9]+)\.' \
+      "$checkout_workflow"; then
+    echo "$checkout_workflow must pin a Node 24-based actions/checkout release (v5+)." >&2
+    exit 1
+  fi
+done
+if ! /usr/bin/grep -Eq '^[[:space:]]*timeout-minutes:[[:space:]]*75[[:space:]]*$' "$workflow"; then
+  echo "Release publish timeout must cover both bounded notarization waits." >&2
   exit 1
 fi
 if ! /usr/bin/grep -Fq "$package_guard_call" "$package_script"; then
@@ -41,11 +54,32 @@ if ! /usr/bin/grep -Fq 'DMG="Jarvis.dmg"' "$package_script" \
   echo "Release packaging must create an identified Jarvis.dmg with an Applications shortcut." >&2
   exit 1
 fi
-if ! /usr/bin/grep -Fq 'xcrun notarytool submit "$DMG"' "$package_script" \
-    || ! /usr/bin/grep -Fq 'xcrun stapler staple "$DMG"' "$package_script"; then
-  echo "Release packaging must notarize and staple the final disk image." >&2
+if ! /usr/bin/grep -Fq 'xcrun notarytool submit "$artifact"' "$package_script"; then
+  echo "Release packaging must submit each distribution layer through the shared notarization path." >&2
   exit 1
 fi
+package_flow=(
+  'ditto -c -k --keepParent "$APP" "$APP_NOTARY_ARCHIVE"'
+  'notarize_artifact "$APP_NOTARY_ARCHIVE" "application"'
+  'xcrun stapler staple "$APP"'
+  'ditto "$APP" "$DMG_STAGE/$APP"'
+  'notarize_artifact "$DMG" "disk image"'
+  'xcrun stapler staple "$DMG"'
+  './scripts/verify-release.sh "${verify_args[@]}"'
+)
+previous_flow_line=0
+for flow_step in "${package_flow[@]}"; do
+  if ! flow_match="$(/usr/bin/grep -nF -m 1 -- "$flow_step" "$package_script")"; then
+    echo "Release packaging is missing required step: $flow_step" >&2
+    exit 1
+  fi
+  flow_line="${flow_match%%:*}"
+  if (( flow_line <= previous_flow_line )); then
+    echo "Release packaging step is out of order: $flow_step" >&2
+    exit 1
+  fi
+  previous_flow_line="$flow_line"
+done
 if ! /usr/bin/grep -Fq 'hdiutil attach "$DMG" -readonly -nobrowse -mountpoint "$MOUNT_POINT"' \
       "$verify_script" \
     || ! /usr/bin/grep -Fq '"$(readlink "$APPLICATIONS_LINK")" != "/Applications"' \

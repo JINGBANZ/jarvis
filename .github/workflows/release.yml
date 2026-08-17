@@ -53,11 +53,11 @@ jobs:
     environment: release
     # Notarization occasionally stalls on Apple's side; without a cap, a stalled run rides the
     # 6-hour default timeout at the 10x macOS minute multiplier. Normal publishes finish well
-    # under this. The cap must clear package-app.sh's `notarytool --wait --timeout 30m` PLUS
-    # the checkout/test/build/sign work ahead of it — at 30m the job could be killed mid-wait,
-    # leaving a draft release without its asset. 45m keeps the backstop while giving notary its
-    # full 30m window.
-    timeout-minutes: 45
+    # under this. The cap must clear package-app.sh's two sequential
+    # `notarytool --wait --timeout 30m` calls PLUS checkout/test/build/sign work — otherwise the job
+    # could be killed during the outer-container wait, leaving a draft release without its asset.
+    # 75m keeps the backstop while giving both submissions their full bounded windows.
+    timeout-minutes: 75
     permissions:
       contents: write # upload the release asset
     steps:

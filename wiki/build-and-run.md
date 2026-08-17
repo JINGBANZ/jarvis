@@ -63,9 +63,10 @@ The `Jarvis Dev` identity above is a **local-dev** device: on any other Mac it's
 Gatekeeper blocks the app. Distributable builds go through `scripts/package-app.sh`, which builds and
 signs the bundle once with a **Developer ID Application** certificate — hardened runtime + secure
 timestamp (both notarization requirements) — with the `audio-input` entitlement that hardened runtime
-requires for microphone capture. It places the signed app beside an `Applications` shortcut in
-`Jarvis.dmg`, signs and notarizes that outer disk image, then staples the ticket to the exact file
-users download.
+requires for microphone capture. It submits a temporary zip of that app to Apple's notary service,
+staples and validates the app's ticket, then places the stapled app beside an `Applications` shortcut
+in `Jarvis.dmg`. It signs and notarizes that outer disk image separately, then staples the container's
+ticket to the exact file users download. Both layers therefore remain verifiable offline.
 
 The script passes that final DMG to `scripts/verify-release.sh`, which verifies the disk image and its
 ticket, mounts it read-only, and requires exactly one regular `Jarvis.app` plus one symbolic link to
