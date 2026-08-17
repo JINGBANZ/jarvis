@@ -14,7 +14,7 @@ import Testing
         let preferences = TranscriptionPreferences(defaults: freshDefaults())
         #expect(preferences.provider == .openAI)
         #expect(preferences.openAIModel == .gpt4oTranscribe)
-        #expect(preferences.openAILanguageProfile == .automatic)
+        #expect(preferences.openAIExpectedLanguages.isEmpty)
         #expect(preferences.appleSpeechLocaleIdentifier == Locale.current.identifier)
     }
 
@@ -23,18 +23,18 @@ import Testing
         let written = TranscriptionPreferences(defaults: defaults)
         written.provider = .appleSpeech
         written.openAIModel = .gptLiveTranscribe
-        written.openAILanguageProfile = .englishAndMandarinChinese
+        written.openAIExpectedLanguages = [.mandarinChinese, .english, .mandarinChinese]
         written.appleSpeechLocaleIdentifier = "zh-CN"
 
         let read = TranscriptionPreferences(defaults: defaults)
         #expect(read.provider == .appleSpeech)
         #expect(read.openAIModel == .gptLiveTranscribe)
-        #expect(read.openAILanguageProfile == .englishAndMandarinChinese)
+        #expect(read.openAIExpectedLanguages == [.english, .mandarinChinese])
         #expect(read.appleSpeechLocaleIdentifier == "zh-CN")
         #expect(read.configuration == TranscriptionConfiguration(
             provider: .appleSpeech,
             openAIModel: .gptLiveTranscribe,
-            openAILanguageProfile: .englishAndMandarinChinese,
+            openAIExpectedLanguages: [.english, .mandarinChinese],
             appleSpeechLocaleIdentifier: "zh-CN"))
     }
 
@@ -43,7 +43,7 @@ import Testing
         let written = TranscriptionPreferences(defaults: defaults)
         written.provider = .openAI
         written.openAIModel = .gptTranscribe
-        written.openAILanguageProfile = .mandarinChinese
+        written.openAIExpectedLanguages = [.mandarinChinese]
         written.appleSpeechLocaleIdentifier = "en-US"
 
         let read = TranscriptionPreferences(defaults: defaults)
@@ -51,7 +51,7 @@ import Testing
         #expect(read.configuration == TranscriptionConfiguration(
             provider: .openAI,
             openAIModel: .gptTranscribe,
-            openAILanguageProfile: .mandarinChinese,
+            openAIExpectedLanguages: [.mandarinChinese],
             appleSpeechLocaleIdentifier: "en-US"))
     }
 
@@ -59,13 +59,37 @@ import Testing
         let defaults = freshDefaults()
         defaults.set("future-provider", forKey: "transcription.provider")
         defaults.set("future-model", forKey: "transcription.openai.model")
-        defaults.set(
-            "future-profile",
-            forKey: "transcription.openai.language-profile")
+        defaults.set(["future-language"], forKey: "transcription.openai.expected-languages")
         let preferences = TranscriptionPreferences(defaults: defaults)
         #expect(preferences.provider == .openAI)
         #expect(preferences.openAIModel == .gpt4oTranscribe)
-        #expect(preferences.openAILanguageProfile == .automatic)
+        #expect(preferences.openAIExpectedLanguages.isEmpty)
+    }
+
+    @Test func fixedLegacyProfilesMigrateToIndividualLanguages() {
+        let legacyProfiles: [(String, [OpenAITranscriptionLanguage])] = [
+            ("automatic", []),
+            ("english", [.english]),
+            ("mandarin-chinese", [.mandarinChinese]),
+            ("english-and-mandarin-chinese", [.english, .mandarinChinese]),
+        ]
+
+        for (rawValue, expected) in legacyProfiles {
+            let defaults = freshDefaults()
+            defaults.set(rawValue, forKey: "transcription.openai.language-profile")
+            #expect(TranscriptionPreferences(defaults: defaults).openAIExpectedLanguages == expected)
+        }
+    }
+
+    @Test func savingExpectedLanguagesReplacesLegacyProfile() {
+        let defaults = freshDefaults()
+        defaults.set("english", forKey: "transcription.openai.language-profile")
+        let preferences = TranscriptionPreferences(defaults: defaults)
+
+        preferences.openAIExpectedLanguages = [.mandarinChinese]
+
+        #expect(preferences.openAIExpectedLanguages == [.mandarinChinese])
+        #expect(defaults.object(forKey: "transcription.openai.language-profile") == nil)
     }
 
     @Test func displayNamesAndCredentialRequirementsAreStable() {
@@ -79,8 +103,8 @@ import Testing
                 == "GPT Transcribe")
         #expect(OpenAITranscriptionModel.gptLiveTranscribe.displayName
                 == "GPT Live Transcribe")
-        #expect(OpenAITranscriptionLanguageProfile.englishAndMandarinChinese.displayName
-                == "English + Mandarin Chinese")
+        #expect(OpenAITranscriptionLanguage.english.displayName == "English")
+        #expect(OpenAITranscriptionLanguage.mandarinChinese.displayName == "Mandarin")
         #expect(OpenAITranscriptionModel.gpt4oTranscribe.turnDetectionStrategy == .serverVAD)
         #expect(OpenAITranscriptionModel.gptTranscribe.turnDetectionStrategy == .clientCommit)
         #expect(OpenAITranscriptionModel.gptLiveTranscribe.turnDetectionStrategy == .clientCommit)
@@ -90,12 +114,12 @@ import Testing
         let openAI = TranscriptionConfiguration(
             provider: .openAI,
             openAIModel: .gptLiveTranscribe,
-            openAILanguageProfile: .automatic,
+            openAIExpectedLanguages: [],
             appleSpeechLocaleIdentifier: "en-US")
         let apple = TranscriptionConfiguration(
             provider: .appleSpeech,
             openAIModel: .gptLiveTranscribe,
-            openAILanguageProfile: .automatic,
+            openAIExpectedLanguages: [],
             appleSpeechLocaleIdentifier: "en-US")
 
         #expect(openAI.turnDetectionStrategy == .clientCommit)
@@ -106,12 +130,12 @@ import Testing
         let openAI = TranscriptionConfiguration(
             provider: .openAI,
             openAIModel: .gptTranscribe,
-            openAILanguageProfile: .automatic,
+            openAIExpectedLanguages: [],
             appleSpeechLocaleIdentifier: "en-US")
         let apple = TranscriptionConfiguration(
             provider: .appleSpeech,
             openAIModel: .gptTranscribe,
-            openAILanguageProfile: .automatic,
+            openAIExpectedLanguages: [],
             appleSpeechLocaleIdentifier: "en-US")
 
         #expect(openAI.turnDetectionStrategy == .clientCommit)

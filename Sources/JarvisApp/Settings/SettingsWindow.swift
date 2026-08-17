@@ -62,8 +62,8 @@ final class SettingsWindow: NSObject, NSWindowDelegate, NSTabViewDelegate {
         self.tabView = tabView
     }
 
-    /// Compatibility wrapper for a future compact fixed-layout section. The four built-in sections
-    /// fill the tab through `SettingsPageView`.
+    /// Compatibility wrapper for a future compact fixed-layout section. Built-in sections fill the
+    /// tab through `SettingsPageView`.
     private static func topPinned(_ view: NSView) -> NSView {
         let container = NSView(frame: view.frame)
         // Flexible bottom + equal flexible side margins: pinned top, centered horizontally.

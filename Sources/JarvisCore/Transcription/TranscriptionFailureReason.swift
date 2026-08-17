@@ -18,7 +18,7 @@ public enum TranscriptionFailureReason: CaseIterable, Sendable, Equatable {
         case .quotaExceeded:
             "the OpenAI API quota is exhausted; check billing"
         case .authenticationFailed:
-            "OpenAI rejected the API key; check Settings → Brain"
+            "OpenAI rejected the API key; check Settings → Connections"
         case .accessDenied:
             "OpenAI denied transcription access; check your API project"
         case .configurationRejected:

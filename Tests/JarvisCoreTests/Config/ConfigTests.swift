@@ -69,4 +69,18 @@ import Testing
         let store = EnvSecretStore(environment: [:])
         #expect(store.apiKey() == nil)
     }
+
+    @Test func chainedSecretStoreUsesFirstAvailableKey() {
+        let fallback = ChainedSecretStore([
+            EnvSecretStore(environment: [:]),
+            EnvSecretStore(environment: ["OPENAI_API_KEY": "sk-fallback"]),
+        ])
+        #expect(fallback.apiKey() == "sk-fallback")
+
+        let primary = ChainedSecretStore([
+            EnvSecretStore(environment: ["OPENAI_API_KEY": "sk-primary"]),
+            EnvSecretStore(environment: ["OPENAI_API_KEY": "sk-fallback"]),
+        ])
+        #expect(primary.apiKey() == "sk-primary")
+    }
 }

@@ -144,25 +144,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menuBar = MenuBarController()
         renderReadinessStatus(readiness.status)
 
-        // Unified Settings window: brain (provider + model + API key) + overlay appearance + the
-        // activity log. A pasted key is stored but does not auto-start. While running, it updates
-        // future Realtime connections and transactionally replaces only an OpenAI brain—never the
-        // capture/transcript pipeline.
+        // Unified Settings window: Brain owns behavior; Connections owns shared authentication.
+        // A pasted key is stored but does not auto-start. While running, it updates future Realtime
+        // connections and transactionally replaces only an OpenAI brain—never the capture/transcript
+        // pipeline.
+        let cliDetector = AgentCLIDetector()
         brainSection = BrainSection(
             preferences: brainPreferences,
-            detector: AgentCLIDetector(),
+            detector: cliDetector,
             onPreferencesChanged: { [weak self] change, clis in
                 self?.applyBrainPreferencesToRunningSession(
                     detectedCLIs: clis,
                     update: change == .topology ? .topologyEdit : .effortEdit)
             },
+            transcriptionPreferences: transcriptionPreferences)
+        let connectionsSection = ConnectionsSection(
+            detector: cliDetector,
             keyStore: secretFile,
-            transcriptionPreferences: transcriptionPreferences,
             onKeySaved: { [weak self] key in
                 self?.applySavedAPIKeyToRunningSession(key)
             })
         let sections: [SettingsSection] = [
             brainSection,
+            connectionsSection,
             OverlaySection(appearance: appearance, caption: overlayCaption, box: overlayBox),
             DisplaySection(preferences: screenPreferences),
             ActivitySection(viewer: activityViewer),
@@ -706,8 +710,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             jlog(
                 "Jarvis transcription: provider=OpenAI "
                     + "model=\(transcriptionConfiguration.openAIModel.rawValue) "
-                    + "language-profile="
-                    + transcriptionConfiguration.openAILanguageProfile.rawValue)
+                    + "expected-languages="
+                    + (transcriptionConfiguration.openAIExpectedLanguages.isEmpty
+                        ? "automatic"
+                        : transcriptionConfiguration.openAIExpectedLanguages
+                            .map(\.rawValue).joined(separator: ",")))
         case .appleSpeech:
             jlog(
                 "Jarvis transcription: provider=Apple Speech "

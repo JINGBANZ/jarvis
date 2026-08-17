@@ -191,14 +191,14 @@ import Testing
         #expect(off["noise_reduction"] == nil)
     }
 
-    @Test func languageProfilesUseEachModelsSupportedWireField() throws {
+    @Test func expectedLanguagesUseEachModelsSupportedWireField() throws {
         func transcription(
             model: OpenAITranscriptionModel,
-            profile: OpenAITranscriptionLanguageProfile
+            languages: [OpenAITranscriptionLanguage]
         ) throws -> [String: Any] {
             let payload = RealtimeSession.sessionUpdate(
                 model: model,
-                languageProfile: profile)
+                expectedLanguages: languages)
             let data = try JSONSerialization.data(withJSONObject: payload)
             let object = try JSONSerialization.jsonObject(with: data) as! [String: Any]
             let session = object["session"] as! [String: Any]
@@ -209,67 +209,67 @@ import Testing
 
         let gpt4oEnglish = try transcription(
             model: .gpt4oTranscribe,
-            profile: .english)
+            languages: [.english])
         #expect(gpt4oEnglish["language"] as? String == "en")
         #expect(gpt4oEnglish["languages"] == nil)
 
         let gpt4oMandarin = try transcription(
             model: .gpt4oTranscribe,
-            profile: .mandarinChinese)
+            languages: [.mandarinChinese])
         #expect(gpt4oMandarin["language"] as? String == "zh")
         #expect(gpt4oMandarin["languages"] == nil)
 
         let gpt4oMixed = try transcription(
             model: .gpt4oTranscribe,
-            profile: .englishAndMandarinChinese)
+            languages: [.english, .mandarinChinese])
         #expect(gpt4oMixed["language"] == nil)
         #expect(gpt4oMixed["languages"] == nil)
 
         let transcribeEnglish = try transcription(
             model: .gptTranscribe,
-            profile: .english)
+            languages: [.english])
         #expect(transcribeEnglish["language"] == nil)
         #expect(transcribeEnglish["languages"] as? [String] == ["en"])
 
         let transcribeMandarin = try transcription(
             model: .gptTranscribe,
-            profile: .mandarinChinese)
+            languages: [.mandarinChinese])
         #expect(transcribeMandarin["language"] == nil)
         #expect(transcribeMandarin["languages"] as? [String] == ["zh-cn"])
 
         let transcribeMixed = try transcription(
             model: .gptTranscribe,
-            profile: .englishAndMandarinChinese)
+            languages: [.mandarinChinese, .english, .mandarinChinese])
         #expect(transcribeMixed["language"] == nil)
         #expect(transcribeMixed["languages"] as? [String] == ["en", "zh-cn"])
 
         let transcribeAutomatic = try transcription(
             model: .gptTranscribe,
-            profile: .automatic)
+            languages: [])
         #expect(transcribeAutomatic["language"] == nil)
         #expect(transcribeAutomatic["languages"] == nil)
 
         let liveEnglish = try transcription(
             model: .gptLiveTranscribe,
-            profile: .english)
+            languages: [.english])
         #expect(liveEnglish["language"] == nil)
         #expect(liveEnglish["languages"] as? [String] == ["en"])
 
         let liveMandarin = try transcription(
             model: .gptLiveTranscribe,
-            profile: .mandarinChinese)
+            languages: [.mandarinChinese])
         #expect(liveMandarin["language"] == nil)
         #expect(liveMandarin["languages"] as? [String] == ["zh-cn"])
 
         let liveMixed = try transcription(
             model: .gptLiveTranscribe,
-            profile: .englishAndMandarinChinese)
+            languages: [.english, .mandarinChinese])
         #expect(liveMixed["language"] == nil)
         #expect(liveMixed["languages"] as? [String] == ["en", "zh-cn"])
 
         let liveAutomatic = try transcription(
             model: .gptLiveTranscribe,
-            profile: .automatic)
+            languages: [])
         #expect(liveAutomatic["language"] == nil)
         #expect(liveAutomatic["languages"] == nil)
     }

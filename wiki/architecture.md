@@ -374,10 +374,9 @@ rather than a per-turn screenshot.
   commit endpoints from classic WebRTC VAD running locally on each post-AEC 48 kHz stream. GPT
   Transcribe and GPT Live receive fixed role-aware recording context; GPT Live also requests low
   transcription delay. Jarvis does not send vocabulary keywords. Automatic is the default language
-  profile and sends no language hint. A
-  single-language profile guides recognition without translating, while the English + Mandarin
-  profile supplies both expectations to GPT Transcribe and GPT Live and leaves GPT-4o automatic
-  because the older model accepts at most one language hint. GPT Transcribe's completion-language
+  selection and sends no language hint. A single expected language guides recognition without
+  translating. Multiple selections are supplied to GPT Transcribe and GPT Live and leave GPT-4o
+  automatic because the older model accepts at most one language hint. GPT Transcribe's completion-language
   metadata is logged for diagnosis without entering Activity or model context. This is one
   session-level expectation shared by both speakers, not a language decision per turn; either
   speaker may switch within a sentence. The macOS 26+ opt-in is Apple `SpeechAnalyzer` with one
@@ -470,7 +469,7 @@ provider-route policy, and traffic recording are unchanged — only the transpor
   logout. An empty, failed, or drifted feature catalog only narrows the disable set that is passed —
   it never widens what a Codex thread may do, which the sandbox and event allowlist bound. Settings availability
   discovery probes every supported CLI; Start probes only the CLI providers present in the
-  configured route. Saving the transcription API key probes no CLI.
+  configured route. Saving the OpenAI API key probes no CLI.
 - **The OpenAI key is conditional**: it is required when OpenAI supplies transcription or appears
   anywhere in the configured brain route. Apple Speech plus a CLI-only route starts without it. The
   session evaluator independently runs through a separate, explicit one-shot agentic audit over the
@@ -536,8 +535,8 @@ successful rebuild resets it for a later incident.
 The always-on legs are built to survive transient failure rather than die on it:
 
 - **Transcription selection is explicit and session-scoped.** Start snapshots one complete
-  provider-specific configuration for both speaker endpoints: provider plus OpenAI model/language
-  profile, or provider plus Apple locale. Changing Settings affects the next Start, reconnects keep
+  provider-specific configuration for both speaker endpoints: provider plus OpenAI model and
+  expected-language list, or provider plus Apple locale. Changing Settings affects the next Start, reconnects keep
   the same snapshot, and neither adapter silently sends audio to the other provider after failure. A
   microphone-side terminal failure ends the unusable session; a system-audio-side failure degrades
   to microphone-only with fixed Activity copy.

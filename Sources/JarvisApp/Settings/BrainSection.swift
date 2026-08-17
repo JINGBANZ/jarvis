@@ -3,9 +3,9 @@ import JarvisCore
 
 /// Minimal Brain Settings surface: one provider route, one reasoning-effort row, and transcription.
 ///
-/// Provider/model ordering is edited by `ProviderRouteEditor`; credentials remain isolated in
-/// `APIKeyControls`. This section only composes those modules, refreshes CLI availability, and
-/// applies completed preference edits at the running driver's between-attempt boundary.
+/// Provider/model ordering is edited by `ProviderRouteEditor`; shared authentication lives in the
+/// Connections tab. This section composes behavior controls, refreshes CLI availability, and applies
+/// completed preference edits at the running driver's between-attempt boundary.
 @MainActor
 final class BrainSection: NSObject, SettingsSection {
     enum PreferenceChange: Equatable {
@@ -27,7 +27,7 @@ final class BrainSection: NSObject, SettingsSection {
     private let detector: AgentCLIDetector
     private let onPreferencesChanged:
         (PreferenceChange, [BrainProvider: DetectedAgentCLI]?) -> Void
-    private let apiKey: APIKeyControls
+    private let transcription: TranscriptionControls
 
     private var pageView: SettingsPageView?
     private var scrollView: SettingsScrollView?
@@ -49,17 +49,12 @@ final class BrainSection: NSObject, SettingsSection {
         detector: AgentCLIDetector,
         onPreferencesChanged:
             @escaping (PreferenceChange, [BrainProvider: DetectedAgentCLI]?) -> Void,
-        keyStore: FileSecretStore,
-        transcriptionPreferences: TranscriptionPreferences,
-        onKeySaved: @escaping (String) -> Void
+        transcriptionPreferences: TranscriptionPreferences
     ) {
         self.preferences = preferences
         self.detector = detector
         self.onPreferencesChanged = onPreferencesChanged
-        self.apiKey = APIKeyControls(
-            store: keyStore,
-            preferences: transcriptionPreferences,
-            onKeySaved: onKeySaved)
+        self.transcription = TranscriptionControls(preferences: transcriptionPreferences)
     }
 
     func makeView() -> NSView {
@@ -97,13 +92,13 @@ final class BrainSection: NSObject, SettingsSection {
             equalToConstant: Self.reasoningHeight).isActive = true
         stack.addArrangedSubview(reasoningCard)
 
-        let transcriptionCard = apiKey.makeView { [weak self] height in
+        let transcriptionCard = transcription.makeView { [weak self] height in
             self?.transcriptionHeightConstraint?.constant = height
             self?.recalculateDocumentHeight()
         }
         transcriptionCard.translatesAutoresizingMaskIntoConstraints = false
         let transcriptionHeight = transcriptionCard.heightAnchor.constraint(
-            equalToConstant: apiKey.preferredHeight)
+            equalToConstant: transcription.preferredHeight)
         transcriptionHeight.isActive = true
         transcriptionHeightConstraint = transcriptionHeight
         stack.addArrangedSubview(transcriptionCard)
@@ -202,7 +197,7 @@ final class BrainSection: NSObject, SettingsSection {
         let visibleHeights = [
             providerEditor?.preferredHeight,
             Self.reasoningHeight,
-            apiKey.preferredHeight,
+            transcription.preferredHeight,
         ].compactMap { $0 }
         let contentHeight = visibleHeights.reduce(0, +)
             + CGFloat(max(0, visibleHeights.count - 1)) * SettingsStyle.sectionSpacing

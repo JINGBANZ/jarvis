@@ -17,6 +17,7 @@ import Testing
         #expect(UserFacingError.noAPIKey.severity == .fatal)
         #expect(UserFacingError.noAPIKey.severity.showsAlert)
         #expect(UserFacingError.noAPIKey.message.contains("transcription provider or brain route"))
+        #expect(UserFacingError.noAPIKey.message.contains("Connections"))
         #expect(UserFacingError.noAPIKey.sessionEndReason == .openAIAPIKeyMissing)
     }
 

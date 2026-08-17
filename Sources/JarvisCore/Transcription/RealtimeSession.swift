@@ -15,8 +15,8 @@ public enum RealtimeSession {
     ///
     /// GPT-4o accepts the legacy singular `language` hint. GPT Transcribe and GPT Live accept the
     /// plural `languages` list and a free-form recording context; GPT Live also receives the low
-    /// streaming-delay setting. Mixed-language GPT-4o sessions omit `language` and use the model's
-    /// automatic recognition. No literal keyword hints are sent.
+    /// streaming-delay setting. GPT-4o sessions with zero or multiple expected languages omit
+    /// `language` and use automatic recognition. No literal keyword hints are sent.
     ///
     /// GPT-4o uses `server_vad`; `silenceDurationMs` tunes how long a pause must last before the
     /// server ends the turn. GPT Transcribe and GPT Live require committed-turn transcription, so
@@ -30,20 +30,21 @@ public enum RealtimeSession {
     public static func sessionUpdate(
         model: OpenAITranscriptionModel,
         speaker: Speaker = .me,
-        languageProfile: OpenAITranscriptionLanguageProfile = .automatic,
+        expectedLanguages: [OpenAITranscriptionLanguage] = [],
         silenceDurationMs: Int = 1000,
         noiseReduction: String? = "near_field"
     ) -> [String: Any] {
+        let expectedLanguages = OpenAITranscriptionLanguage.canonicalizing(expectedLanguages)
         var transcription: [String: Any] = ["model": model.rawValue]
         switch model {
         case .gpt4oTranscribe:
-            if let language = languageProfile.singularLanguageHint {
-                transcription["language"] = language
+            if expectedLanguages.count == 1, let language = expectedLanguages.first {
+                transcription["language"] = language.singularHint
             }
         case .gptTranscribe, .gptLiveTranscribe:
             transcription["prompt"] = JarvisPrompts.Transcription.context(for: speaker)
-            if let languages = languageProfile.multipleLanguageHints {
-                transcription["languages"] = languages
+            if !expectedLanguages.isEmpty {
+                transcription["languages"] = expectedLanguages.map(\.multipleHint)
             }
             if model == .gptLiveTranscribe {
                 transcription["delay"] = "low"

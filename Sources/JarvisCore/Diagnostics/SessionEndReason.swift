@@ -23,7 +23,7 @@ public enum SessionEndReason: Sendable, Equatable {
         case .replacedByNewSession:
             "session ended because a new session started"
         case .openAIAPIKeyMissing:
-            "session ended by error — the OpenAI API key is missing; check Settings → Brain"
+            "session ended by error — the OpenAI API key is missing; check Settings → Connections"
         case .brainProviderNotConfigured:
             "session ended by error — no Primary brain provider is configured; check Settings → Brain"
         case .permissionsMissing:

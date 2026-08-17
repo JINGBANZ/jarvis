@@ -35,7 +35,7 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         maximumRetries: 6, initialDelay: 1, maximumDelay: 30)
     private var apiKey: String
     private let model: OpenAITranscriptionModel
-    private let languageProfile: OpenAITranscriptionLanguageProfile
+    private let expectedLanguages: [OpenAITranscriptionLanguage]
     /// Who this socket is transcribing: `.me` (mic) or `.them` (system audio). Two transcribers run
     /// in parallel — one per side — feeding the same `RollingTranscript`, so the coach sees both.
     private let speaker: Speaker
@@ -92,7 +92,7 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
     init(
         apiKey: String,
         model: OpenAITranscriptionModel,
-        languageProfile: OpenAITranscriptionLanguageProfile,
+        expectedLanguages: [OpenAITranscriptionLanguage],
         speaker: Speaker = .me,
         transcript: RollingTranscript,
         clock: Clock,
@@ -115,7 +115,7 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
     ) {
         self.apiKey = apiKey
         self.model = model
-        self.languageProfile = languageProfile
+        self.expectedLanguages = OpenAITranscriptionLanguage.canonicalizing(expectedLanguages)
         self.speaker = speaker
         self.clock = clock
         self.sessionStart = sessionStart
@@ -240,7 +240,10 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         invalidateConnectionTimers()
         jlog(
             "Jarvis realtime [\(speaker.rawValue)]: opening socket #\(socketGeneration) "
-                + "model=\(model.rawValue) language-profile=\(languageProfile.rawValue)")
+                + "model=\(model.rawValue) expected-languages="
+                + (expectedLanguages.isEmpty
+                    ? "automatic"
+                    : expectedLanguages.map(\.rawValue).joined(separator: ",")))
         task.resume()
         configureSession()
         receiveLoop(task: task, generation: socketGeneration)
@@ -286,7 +289,7 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         send(json: RealtimeSession.sessionUpdate(
             model: model,
             speaker: speaker,
-            languageProfile: languageProfile,
+            expectedLanguages: expectedLanguages,
             silenceDurationMs: silenceDurationMs,
             noiseReduction: profile))
     }

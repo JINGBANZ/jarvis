@@ -8,7 +8,8 @@ public final class TranscriptionPreferences {
     private enum Key {
         static let provider = "transcription.provider"
         static let openAIModel = "transcription.openai.model"
-        static let openAILanguageProfile = "transcription.openai.language-profile"
+        static let openAIExpectedLanguages = "transcription.openai.expected-languages"
+        static let legacyOpenAILanguageProfile = "transcription.openai.language-profile"
         static let appleSpeechLocale = "transcription.apple-speech.locale"
     }
 
@@ -42,16 +43,21 @@ public final class TranscriptionPreferences {
         }
     }
 
-    public var openAILanguageProfile: OpenAITranscriptionLanguageProfile {
+    /// Every language speakers may use. An empty list means automatic detection.
+    public var openAIExpectedLanguages: [OpenAITranscriptionLanguage] {
         get {
-            guard let raw = defaults.string(forKey: Key.openAILanguageProfile),
-                  let profile = OpenAITranscriptionLanguageProfile(rawValue: raw) else {
-                return .automatic
+            if defaults.object(forKey: Key.openAIExpectedLanguages) != nil {
+                let languages = (defaults.stringArray(forKey: Key.openAIExpectedLanguages) ?? [])
+                    .compactMap(OpenAITranscriptionLanguage.init(rawValue:))
+                return OpenAITranscriptionLanguage.canonicalizing(languages)
             }
-            return profile
+            return Self.languagesFromLegacyProfile(
+                defaults.string(forKey: Key.legacyOpenAILanguageProfile))
         }
         set {
-            defaults.set(newValue.rawValue, forKey: Key.openAILanguageProfile)
+            let languages = OpenAITranscriptionLanguage.canonicalizing(newValue)
+            defaults.set(languages.map(\.rawValue), forKey: Key.openAIExpectedLanguages)
+            defaults.removeObject(forKey: Key.legacyOpenAILanguageProfile)
         }
     }
 
@@ -76,7 +82,24 @@ public final class TranscriptionPreferences {
         TranscriptionConfiguration(
             provider: provider,
             openAIModel: openAIModel,
-            openAILanguageProfile: openAILanguageProfile,
+            openAIExpectedLanguages: openAIExpectedLanguages,
             appleSpeechLocaleIdentifier: appleSpeechLocaleIdentifier)
+    }
+
+    /// Existing installations persisted one of four fixed combination values. Read those values
+    /// until the user next edits the new list, then write only the scalable representation.
+    private static func languagesFromLegacyProfile(
+        _ rawValue: String?
+    ) -> [OpenAITranscriptionLanguage] {
+        switch rawValue {
+        case "english":
+            [.english]
+        case "mandarin-chinese":
+            [.mandarinChinese]
+        case "english-and-mandarin-chinese":
+            [.english, .mandarinChinese]
+        default:
+            []
+        }
     }
 }
