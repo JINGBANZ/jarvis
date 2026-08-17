@@ -139,10 +139,11 @@ discovery is a pure file probe over $PATH + the known install dirs, while Claude
 non-billing `auth status --json` command under a short timeout because account metadata can outlive
 an expired OAuth session. Codex keeps using its auth-file marker and a bounded capability probe.
 Settings runs these probes asynchronously and keeps local-provider controls selectable while the
-first result is pending. The provider menus then show **signed in**, **signed out**, or **sign-in
-unknown**; a confirmed logout refuses Start, while an unavailable auth probe does not falsely claim
-logout. An empty, failed, or changed Codex feature catalog only narrows the disable flags that are
-passed; it never widens what a coaching thread may do.
+first result is pending. After detection, the route menus show provider names only and omit
+confirmed-missing, signed-out, or otherwise unselectable alternatives; Connections owns provider
+status text. An unavailable auth probe does not falsely claim logout. An empty, failed, or changed
+Codex feature catalog only narrows the disable flags that are passed; it never widens what a
+coaching thread may do.
 
 Before first-time setup, Primary shows **Choose provider…**, its model menu is disabled, and **Add
 fallback** is disabled. Selecting Primary creates the first valid route. Older installations that
@@ -170,7 +171,7 @@ activation. The runtime never returns to the primary or an exhausted row. When e
 exhausted, coaching stops and Activity receives fixed typed route-exhausted copy; request details and
 attempt counts remain in `jarvis-debug.log`.
 
-Confirmed-missing or signed-out targets are disabled for new selection while editing; an existing
+Confirmed-missing or signed-out targets are hidden from new selection while editing; an existing
 saved row stays visible so the user can repair or remove it. If a configured fallback becomes
 unavailable after Start, activation skips it and moves forward without inventing provider requests
 solely to consume the failure budget. Runtime movement through the route never changes the saved

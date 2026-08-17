@@ -18,6 +18,7 @@ final class BrainTargetRowView: NSView {
     private let titleLabel: NSTextField
     private let statusLabel: NSTextField?
     private let providerPopup: NSPopUpButton
+    private let providers: [BrainProvider]
     private let modelPopup: NSPopUpButton
     private let trailingView: NSView?
     private let placesActionsBelow: Bool
@@ -32,7 +33,6 @@ final class BrainTargetRowView: NSView {
         title: String,
         status: String? = nil,
         target: BrainTarget?,
-        providerTitle: (BrainProvider) -> String,
         canSelectProvider: (BrainProvider) -> Bool,
         canSelectModel: (BrainModel) -> Bool,
         trailingBadge: String? = nil,
@@ -58,21 +58,23 @@ final class BrainTargetRowView: NSView {
 
         let providerPopup = NSPopUpButton()
         providerPopup.menu?.autoenablesItems = false
+        let providers = BrainProvider.allCases.filter {
+            $0 == target?.provider || canSelectProvider($0)
+        }
+        self.providers = providers
         if target == nil {
             providerPopup.addItem(withTitle: "Choose provider…")
         }
-        providerPopup.addItems(withTitles: BrainProvider.allCases.map(providerTitle))
+        providerPopup.addItems(withTitles: providers.map(\.displayName))
         let providerIndexOffset = target == nil ? 1 : 0
         self.providerIndexOffset = providerIndexOffset
-        if let target {
-            providerPopup.selectItem(
-                at: (BrainProvider.allCases.firstIndex(of: target.provider) ?? 0)
-                    + providerIndexOffset)
+        if let target, let selected = providers.firstIndex(of: target.provider) {
+            providerPopup.selectItem(at: selected + providerIndexOffset)
         } else {
             providerPopup.selectItem(at: 0)
         }
         providerPopup.setAccessibilityLabel("\(title) provider")
-        for (index, provider) in BrainProvider.allCases.enumerated() {
+        for (index, provider) in providers.enumerated() {
             providerPopup.item(at: index + providerIndexOffset)?.isEnabled =
                 provider == target?.provider || canSelectProvider(provider)
         }
@@ -227,8 +229,8 @@ final class BrainTargetRowView: NSView {
 
     @objc private func providerChanged(_ sender: NSPopUpButton) {
         let index = sender.indexOfSelectedItem - providerIndexOffset
-        guard BrainProvider.allCases.indices.contains(index) else { return }
-        onProviderChanged(BrainProvider.allCases[index])
+        guard providers.indices.contains(index) else { return }
+        onProviderChanged(providers[index])
     }
 
     @objc private func modelChanged(_ sender: NSPopUpButton) {

@@ -58,9 +58,6 @@ final class ProviderRouteEditor: NSObject {
             title: "Primary",
             status: primaryTarget != nil && primaryTarget == activeTarget ? "In use" : nil,
             target: primaryTarget,
-            providerTitle: { [weak self] provider in
-                self?.providerTitle(for: provider) ?? provider.displayName
-            },
             canSelectProvider: { [weak self] provider in
                 self?.availablePrimaryModel(for: provider) != nil
             },
@@ -86,9 +83,6 @@ final class ProviderRouteEditor: NSObject {
                 title: title,
                 status: target == activeTarget ? "In use" : nil,
                 target: target,
-                providerTitle: { [weak self] provider in
-                    self?.providerTitle(for: provider) ?? provider.displayName
-                },
                 canSelectProvider: { [weak self] provider in
                     self?.canSelect(provider: provider, replacingTargetAt: index) ?? false
                 },
@@ -159,18 +153,6 @@ final class ProviderRouteEditor: NSObject {
             y: top,
             width: max(200, width - 32),
             height: rowHeight)
-    }
-
-    private func providerTitle(for provider: BrainProvider) -> String {
-        guard provider.usesLocalCLI, let detectedCLIs else { return provider.displayName }
-        guard let cli = detectedCLIs[provider] else {
-            return "\(provider.displayName) — not installed"
-        }
-        switch cli.authenticationStatus {
-        case .signedIn: return "\(provider.displayName) — signed in"
-        case .signedOut: return "\(provider.displayName) — signed out"
-        case .unknown: return "\(provider.displayName) — sign-in unknown"
-        }
     }
 
     private func availablePrimaryModel(for provider: BrainProvider) -> BrainModel? {

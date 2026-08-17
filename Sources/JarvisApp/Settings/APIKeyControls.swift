@@ -58,16 +58,21 @@ final class APIKeyControls: NSObject {
         action.identifier = NSUserInterfaceItemIdentifier("openai-key-action")
         self.actionButton = action
 
-        let trailingSpacer = NSView()
-        trailingSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        trailingSpacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        let controls = NSStackView(views: [trailingSpacer, statusBadge, action])
-        controls.orientation = .horizontal
-        controls.alignment = .centerY
-        controls.distribution = .fill
-        controls.spacing = 8
+        let trailingControls = NSStackView(views: [statusBadge, action])
+        trailingControls.orientation = .horizontal
+        trailingControls.alignment = .centerY
+        trailingControls.spacing = 8
         statusBadge.setContentHuggingPriority(.required, for: .horizontal)
         action.setContentHuggingPriority(.required, for: .horizontal)
+
+        let controls = NSView()
+        trailingControls.translatesAutoresizingMaskIntoConstraints = false
+        controls.addSubview(trailingControls)
+        NSLayoutConstraint.activate([
+            trailingControls.leadingAnchor.constraint(greaterThanOrEqualTo: controls.leadingAnchor),
+            trailingControls.trailingAnchor.constraint(equalTo: controls.trailingAnchor),
+            trailingControls.centerYAnchor.constraint(equalTo: controls.centerYAnchor),
+        ])
         let row = SettingsRowView(
             title: "API key",
             detail: "Used by OpenAI brain and transcription",

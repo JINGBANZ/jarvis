@@ -7,7 +7,7 @@ final class ExpectedLanguagePicker: NSView {
     private var selectedLanguages: [OpenAITranscriptionLanguage]
     private let onChange: ([OpenAITranscriptionLanguage]) -> Void
     private let chipStack = NSStackView()
-    private let manageButton = NSButton()
+    private let editButton = NSButton()
     private let popover = NSPopover()
     private var optionButtons: [NSButton] = []
     private var usesCompactSummary = false
@@ -28,12 +28,12 @@ final class ExpectedLanguagePicker: NSView {
         chipStack.layer?.masksToBounds = true
         addSubview(chipStack)
 
-        manageButton.title = "Manage…"
-        manageButton.bezelStyle = .rounded
-        manageButton.target = self
-        manageButton.action = #selector(showOptions)
-        manageButton.setAccessibilityLabel("Manage expected transcription languages")
-        addSubview(manageButton)
+        editButton.title = "Edit"
+        editButton.bezelStyle = .rounded
+        editButton.target = self
+        editButton.action = #selector(showOptions)
+        editButton.setAccessibilityLabel("Edit expected transcription languages")
+        addSubview(editButton)
 
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
@@ -49,13 +49,13 @@ final class ExpectedLanguagePicker: NSView {
 
     override func layout() {
         super.layout()
-        let buttonWidth: CGFloat = 82
-        manageButton.frame = NSRect(
+        let buttonWidth = max(50, ceil(editButton.fittingSize.width))
+        editButton.frame = NSRect(
             x: max(0, bounds.width - buttonWidth),
             y: 0,
             width: buttonWidth,
             height: 32)
-        let availableChipWidth = max(0, manageButton.frame.minX - 8)
+        let availableChipWidth = max(0, editButton.frame.minX - 8)
         let chipWidth = min(availableChipWidth, ceil(chipStack.fittingSize.width))
         chipStack.frame = NSRect(
             x: availableChipWidth - chipWidth,
@@ -155,8 +155,8 @@ final class ExpectedLanguagePicker: NSView {
 
     @objc private func showOptions() {
         renderSelection()
-        popover.show(relativeTo: manageButton.bounds, // ghost-mode-allowed: explicit Settings action
-                     of: manageButton,
+        popover.show(relativeTo: editButton.bounds, // ghost-mode-allowed: explicit Settings action
+                     of: editButton,
                      preferredEdge: .maxY)
     }
 
