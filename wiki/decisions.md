@@ -1786,6 +1786,32 @@
   installation action remains explicit and owner-controlled.
 - **Supersedes in part:** 2026-08-16 — Distribution uses one drag-install DMG. Its artifact and trust
   decisions stand; its deliberately uncurated Finder presentation does not.
+- **Superseded in part by:** 2026-08-17 — DMG layout does not mutate the signed app. The fixed icon
+  view, arrow, Applications shortcut, and headless layout generation stand; forced extension hiding
+  and its FinderInfo validation do not.
 - **Detail:** [build-and-run.md → Distribution](./build-and-run.md#distribution--signed-notarized-releases-from-ci),
   `scripts/dmg-settings.py`, `scripts/verify-dmg-layout.py`, `scripts/package-app.sh`,
   `.github/workflows/release.yml`.
+
+### 2026-08-17 — DMG layout does not mutate the signed app
+
+- **Chose:** Keep the guided Finder window, but do not force-hide the `Jarvis.app` extension or add
+  any FinderInfo extended attribute to the signed bundle. Keep strict signature verification of the
+  mounted app and make the release configuration guard reject both the extension-hiding setting and
+  a verifier that depends on `com.apple.FinderInfo`.
+- **Why:** The v0.1.6 release proved the two requirements incompatible. `dmgbuild` implements forced
+  extension hiding with `SetFile -a E` after the stapled app enters the image, which attaches
+  `com.apple.FinderInfo`; the final `codesign --verify --strict` then correctly rejects the exact app
+  users would install. Both app and DMG notarization had succeeded, so weakening final verification
+  would publish an artifact whose embedded bundle no longer satisfies the signing contract.
+- **Rejected:** (a) Remove or relax strict signature verification—the invalid downloadable artifact
+  is the defect, not the guard. (b) Add a post-layout re-sign and re-notarization cycle—it creates a
+  second app trust path solely for cosmetic metadata, which must still be absent when strict
+  verification runs. (c) Drop the guided layout—the arrow, icon positions, and Applications shortcut
+  do not mutate the app and remain useful. (d) Add a second packaging implementation only to hide the
+  extension—the small cosmetic difference does not justify another trust path.
+- **Supersedes in part:** 2026-08-17 — DMG makes the drag-install gesture explicit. Its guided layout
+  stands; forced extension hiding and its validation do not.
+- **Detail:** [build-and-run.md → Distribution](./build-and-run.md#distribution--signed-notarized-releases-from-ci),
+  `scripts/dmg-settings.py`, `scripts/verify-dmg-layout.py`, `scripts/check-release-config.sh`,
+  `scripts/verify-release.sh`.

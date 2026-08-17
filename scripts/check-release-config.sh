@@ -72,6 +72,13 @@ if ! /usr/bin/grep -Fq 'symlinks = {"Applications": "/Applications"}' "$dmg_sett
   echo "Release DMG settings must preserve the reviewed arrow-and-drop-target layout." >&2
   exit 1
 fi
+# dmgbuild implements extension hiding with SetFile -a E, which attaches com.apple.FinderInfo to
+# the signed app. Strict code-signature verification rejects that metadata after the DMG is mounted.
+if /usr/bin/grep -Fq 'hide_extensions' "$dmg_settings" \
+    || /usr/bin/grep -Fq 'com.apple.FinderInfo' "$dmg_layout_guard"; then
+  echo "Release DMG layout must not attach FinderInfo metadata to the signed app." >&2
+  exit 1
+fi
 if ! /usr/bin/grep -Fq -- '--only-binary=:all:' "$release_requirements" \
     || ! /usr/bin/grep -Fq 'dmgbuild==1.6.7' "$release_requirements" \
     || ! /usr/bin/grep -Fq -- '--require-hashes' "$workflow" \
@@ -112,6 +119,8 @@ if ! /usr/bin/grep -Fq 'hdiutil attach "$DMG" -readonly -nobrowse -mountpoint "$
     || ! /usr/bin/grep -Fq '"$(readlink "$APPLICATIONS_LINK")" != "/Applications"' \
       "$verify_script" \
     || ! /usr/bin/grep -Fq '"$DMGBUILD_PYTHON" scripts/verify-dmg-layout.py "$MOUNT_POINT"' \
+      "$verify_script" \
+    || ! /usr/bin/grep -Fq 'codesign --verify --strict --verbose=2 "$EXTRACTED_APP"' \
       "$verify_script" \
     || ! /usr/bin/grep -Fq 'syspolicy_check distribution "$EXTRACTED_APP" --verbose' \
       "$verify_script"; then

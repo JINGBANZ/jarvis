@@ -17,7 +17,6 @@ if application.name != APP_NAME or application.is_symlink() or not application.i
 # Finder metadata and bundled arrow directly, so this layout is deterministic without a GUI session.
 files = [(str(application), APP_NAME)]
 symlinks = {"Applications": "/Applications"}
-hide_extensions = [APP_NAME]
 
 format = "UDZO"
 filesystem = "HFS+"

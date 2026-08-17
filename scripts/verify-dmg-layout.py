@@ -2,7 +2,6 @@
 
 import hashlib
 import struct
-import subprocess
 import sys
 from pathlib import Path
 
@@ -18,7 +17,6 @@ EXPECTED_ICON_LOCATIONS = {
     APPLICATIONS_NAME: (500, 120),
 }
 EXPECTED_WINDOW_BOUNDS = "{{100, 100}, {640, 280}}"
-FINDER_EXTENSION_HIDDEN = 0x0010
 
 
 def fail(message: str) -> None:
@@ -135,21 +133,6 @@ def main() -> None:
                 expected_location,
                 f"Finder position for {filename}",
             )
-
-    try:
-        finder_info_hex = subprocess.check_output(
-            ["/usr/bin/xattr", "-px", "com.apple.FinderInfo", mount_point / APP_NAME],
-            stderr=subprocess.DEVNULL,
-            text=True,
-        )
-        finder_info = bytes.fromhex(finder_info_hex)
-    except (OSError, subprocess.CalledProcessError, ValueError):
-        fail("Jarvis.app is missing its Finder presentation metadata")
-    if len(finder_info) < 10:
-        fail("Jarvis.app has incomplete Finder presentation metadata")
-    finder_flags = int.from_bytes(finder_info[8:10], byteorder="big")
-    if finder_flags & FINDER_EXTENSION_HIDDEN == 0:
-        fail("Finder metadata must display the application as Jarvis without the .app extension")
 
     print("Disk image Finder layout passed.")
 
