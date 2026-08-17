@@ -1743,3 +1743,20 @@
 - **Detail:** [build-and-run.md → Distribution](./build-and-run.md#distribution--signed-notarized-releases-from-ci),
   `scripts/package-app.sh`, `scripts/verify-release.sh`, `.github/workflows/release.yml`,
   `.github/release-header.md`.
+
+### 2026-08-17 — Merging the Release PR is the release approval
+
+- **Chose:** Keep the Developer ID and notarization secrets in the `release` environment and retain
+  its `main`-only deployment policy, but require no environment reviewer. Merging the release-please
+  PR is the sole manual release authorization; that merge alone lets the gated publish job continue.
+- **Why:** The Release PR exposes the exact version, changelog, and commits for owner review. Asking
+  the same owner to approve the resulting deployment again adds ceremony without strengthening the
+  trust boundary. The draft Release, repository Gate, signing, two-layer notarization, final-image
+  verification, and fail-closed asset reconciliation still prevent an invalid public release.
+- **Rejected:** (a) Keeping a second required-reviewer prompt after the Release PR merge—duplicate
+  authorization. (b) Removing the environment binding or moving its credentials to repository
+  scope—the five release-only secrets would become unavailable or unnecessarily broad. (c)
+  publishing on every push to `main`—only a merged release-please PR sets `release_created`.
+- **Extends:** 2026-07-17 — Distribution via release-please + notarized zip on GitHub Releases.
+- **Detail:** [build-and-run.md → Distribution](./build-and-run.md#distribution--signed-notarized-releases-from-ci),
+  `.github/workflows/release.yml`, `scripts/check-release-config.sh`.

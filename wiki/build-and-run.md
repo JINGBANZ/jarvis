@@ -78,10 +78,11 @@ app is not accepted as a proxy for the downloaded artifact.
 Releases are cut by `.github/workflows/release.yml`, not by hand: on every push to `main`,
 **release-please** maintains a standing Release PR from the conventional-commit history (bumping both
 version keys in `Resources/Info.plist` via `x-release-please-version` annotations, plus the
-CHANGELOG — config in `release-please-config.json`). Merging that PR creates the GitHub Release **as
-a draft**; an Apple-silicon `macos-26` job then runs the test gate, signs/notarizes via repo secrets
-(the base64 `.p12` certificate and an App Store Connect API key — names in the workflow), attaches
-only `Jarvis.dmg`, and then publishes the Release. The stable installation block in
+CHANGELOG — config in `release-please-config.json`). Merging that PR is the manual release approval:
+it creates the GitHub Release **as a draft**, with no second deployment approval. An Apple-silicon
+`macos-26` job then runs the test gate, signs/notarizes with secrets scoped to the main-only `release`
+environment (the base64 `.p12` certificate and an App Store Connect API key — names in the workflow),
+attaches only `Jarvis.dmg`, and then publishes the Release. The stable installation block in
 `.github/release-header.md` links directly to that tag's DMG and explains the in-window drag to
 Applications; GitHub still supplies its automatic source archives. A failed sign, notarization, or
 final-image verification therefore never leaves a public Release without a validated app. The exact
