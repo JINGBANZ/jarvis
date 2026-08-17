@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.5](https://github.com/JINGBANZ/jarvis/compare/v0.1.4...v0.1.5) (2026-08-17)
+
+
+### Bug Fixes
+
+* **release:** staple app before packaging dmg ([#166](https://github.com/JINGBANZ/jarvis/issues/166)) ([1eca91f](https://github.com/JINGBANZ/jarvis/commit/1eca91f10351dd54530efd5d904dcdc017917158))
+
 ## [0.1.4](https://github.com/JINGBANZ/jarvis/compare/v0.1.3...v0.1.4) (2026-08-17)
 
 
