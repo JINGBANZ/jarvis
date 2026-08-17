@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.4](https://github.com/JINGBANZ/jarvis/compare/v0.1.3...v0.1.4) (2026-08-17)
+
+
+### Features
+
+* **release:** distribute jarvis as a dmg ([#164](https://github.com/JINGBANZ/jarvis/issues/164)) ([231662c](https://github.com/JINGBANZ/jarvis/commit/231662cae98707b147b3d6d8ebe7c2422a183a5b))
+
 ## [0.1.3](https://github.com/JINGBANZ/jarvis/compare/v0.1.2...v0.1.3) (2026-08-13)
 
 
