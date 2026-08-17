@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 
 import hashlib
+import struct
 import subprocess
 import sys
 from pathlib import Path
 
 from ds_store import DSStore
+from mac_alias import Alias
 
 
 APP_NAME = "Jarvis.app"
@@ -33,6 +35,53 @@ def record(store: DSStore, filename: str, code: str):
 def require_equal(actual, expected, description: str) -> None:
     if actual != expected:
         fail(f"{description} is {actual!r}; expected {expected!r}")
+
+
+def alias_text(value):
+    return value.decode("utf-8") if isinstance(value, bytes) else value
+
+
+def verify_background_alias(alias_data, background_path: Path) -> None:
+    if not isinstance(alias_data, (bytes, bytearray)):
+        fail("Finder background alias is not binary Alias data")
+
+    try:
+        actual = Alias.from_bytes(bytes(alias_data))
+    except (OverflowError, TypeError, UnicodeError, ValueError, struct.error):
+        fail("Finder background alias is malformed")
+
+    if actual.volume is None or actual.target is None:
+        fail("Finder background alias has no target identity")
+
+    try:
+        expected = Alias.for_file(str(background_path))
+    except OSError:
+        fail("could not read the mounted arrow background identity")
+
+    identity_fields = (
+        ("volume name", alias_text(actual.volume.name), alias_text(expected.volume.name)),
+        ("volume creation date", actual.volume.creation_date, expected.volume.creation_date),
+        ("volume filesystem", actual.volume.fs_type, expected.volume.fs_type),
+        ("volume disk type", actual.volume.disk_type, expected.volume.disk_type),
+        ("volume filesystem id", actual.volume.fs_id, expected.volume.fs_id),
+        ("target kind", actual.target.kind, expected.target.kind),
+        (
+            "target filename",
+            alias_text(actual.target.filename),
+            alias_text(expected.target.filename),
+        ),
+        ("target folder id", actual.target.folder_cnid, expected.target.folder_cnid),
+        ("target catalog id", actual.target.cnid, expected.target.cnid),
+        ("target creation date", actual.target.creation_date, expected.target.creation_date),
+        ("target Carbon path", actual.target.carbon_path, expected.target.carbon_path),
+        (
+            "target POSIX path",
+            alias_text(actual.target.posix_path),
+            alias_text(expected.target.posix_path),
+        ),
+    )
+    for field, actual_value, expected_value in identity_fields:
+        require_equal(actual_value, expected_value, f"Finder background alias {field}")
 
 
 def main() -> None:
@@ -71,8 +120,10 @@ def main() -> None:
 
         icon_settings = record(store, ".", "icvp")
         require_equal(icon_settings.get("backgroundType"), 2, "Finder background type")
-        if not icon_settings.get("backgroundImageAlias"):
+        background_alias = icon_settings.get("backgroundImageAlias")
+        if not background_alias:
             fail("Finder metadata does not point to the arrow background")
+        verify_background_alias(background_alias, background_path)
         require_equal(icon_settings.get("arrangeBy"), "none", "Finder icon arrangement")
         require_equal(icon_settings.get("labelOnBottom"), True, "Finder icon label position")
         require_equal(icon_settings.get("textSize"), 16.0, "Finder label size")
