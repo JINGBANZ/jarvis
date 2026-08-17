@@ -41,9 +41,9 @@ its tab is visible** rather than for the whole time the window is open.
 One user-resizable window size for every tab — 820×600 by default, minimum 560×460. Switching tabs
 never resizes the window; whatever size the user set stays. Every built-in section returns
 `fillsTab == true` and uses `SettingsPageView`, so page margins and headers expand consistently while
-cards and trailing controls adapt to the available width. Brain and Overlay put their variable-height
-cards in `SettingsScrollView`; Screen and Activity use the same page shell without an unnecessary
-outer scroll view.
+cards and trailing controls adapt to the available width. Brain, Connections, and Overlay put their
+variable-height cards in `SettingsScrollView`; Screen and Activity use the same page shell without an
+unnecessary outer scroll view.
 
 ### Shared visual system
 
@@ -54,7 +54,7 @@ The tabs share four AppKit primitives rather than styling their controls indepen
 - `SettingsCardView` owns the rounded group boundary and optional title/detail header.
 - `SettingsRowView` owns label/help typography, row height, separators, and responsive trailing
   control alignment.
-- `SettingsStyle` owns the spacing, corner radius, and sizing tokens used by all three.
+- `SettingsStyle` owns the spacing, corner radius, and sizing tokens used throughout Settings.
 
 Sections still own their behavior and concrete controls. The visual primitives do not read or write
 preferences, start probes, load Activity, or know about another tab. Activity keeps its `WKWebView`
@@ -64,12 +64,13 @@ lazy lifecycle; its adaptive light/dark feed is simply framed by the same page a
 
 | Section class | Tab title | Always present | Description |
 |---|---|---|---|
-| `BrainSection` | "Brain" | yes | Everything that decides who answers a coaching attempt, plus the independent transcription configuration, in one scrolling page: the primary provider/model, an ordered editable fallback list, the reasoning-effort row, transcription provider/model/language-or-locale controls, and OpenAI API-key controls. A live status badge mirrors the active brain provider without moving the saved route. Saving a key never restarts a live conversation: established OpenAI Realtime endpoints stay connected and use it on a later reconnect. Valid Brain-route changes take effect between coaching attempts while running; transcription changes take effect on the next Start. |
+| `BrainSection` | "Brain" | yes | Behavior that decides who answers and what Jarvis hears, in one scrolling stack: the primary provider/model, an ordered editable fallback list, reasoning effort, and transcription provider/model/expected-languages-or-locale controls. A live status badge mirrors the active brain provider without moving the saved route. Valid Brain-route changes take effect between coaching attempts while running; transcription changes take effect on the next Start. The OpenAI transcription row reads credential readiness from the same managed-file-then-environment chain as Start. |
+| `ConnectionsSection` | "Connections" | yes | Shared authentication and provider readiness in three stacked cards. OpenAI exposes the Jarvis-managed API-key editor; Claude Code and Codex CLI report their externally managed local-account state without importing or changing those accounts. Saving a key never restarts a live conversation: established OpenAI Realtime endpoints stay connected and use it on a later reconnect. |
 | `OverlaySection` | "Overlay" | yes | Two matching cards, one per overlay surface — **Overlay Caption** (the transient on-screen tip) and **Overlay Box** (the persistent response history). Each card has an icon, description, On/Off toggle, and the same Text Size + Opacity row layout. When a surface is **on** its rows and live sample appear only while the Overlay tab is selected (`didBecomeActive`/`didResignActive`); when **off**, its rows and sample are hidden and the card collapses. Persists via `OverlayAppearance`. |
 | `DisplaySection` | "Screen" | yes | One **Screen capture** card with the capture-scope dropdown — **Active window** (default) or one **Entire display** entry per connected display — followed by a concise fallback/privacy callout. Persists via `ScreenCapturePreferences` and applies to the next screenshot. |
 | `ActivitySection` | "Activity" | yes | Embeds the `ActivityViewer` content (`makeContentView()` / `teardown()`) in the shared page/card shell so the adaptive light/dark feed stretches with the window. Its compact toolbar shows the selected session's exact directory ID with **Copy ID**. A session without a report shows **Evaluate**: one click runs the sole `AgenticEvaluator` through a locally installed Claude Code / Codex CLI over the source checkout plus the complete session directory, writes owner-only `eval-report.md`, and opens it. While it runs the button shows **Evaluating…**; afterward it becomes **Open report**, which reopens the saved result without another model run. The agent reads the full unfiltered `jarvis-activity.jsonl` whenever it needs the user-visible sequence and correlates it with `coaching-attempts.jsonl`, `brain-traffic.jsonl`, screenshots, and live source. The derived transcript leads with a neutral artifact/distribution/correlation-field index and normalized provider-call telemetry; missing evidence remains unavailable, and neither table declares a defect. The findings-driven prompt gives the read-only agent file and source-search tools instead of a historical-incident checklist, and the report uses generic Summary / Findings / Evidence gaps / Recommendations sections. `scripts/eval-session.sh` is a second launcher for this same Core evaluator, not another evaluation path. `EvalReportPage` renders the markdown as `eval-report.html`; **Copy as Markdown** hands the raw report to an agent chat. Evaluation, report opening, and history clearing stay disabled through the live coaching/teardown lifecycle. |
 
-`AppDelegate` builds the section list at launch and passes it to `SettingsWindow`. All four tabs are
+`AppDelegate` builds the section list at launch and passes it to `SettingsWindow`. All five tabs are
 always present, but each tab's content is created lazily on first selection during that open.
 
 ## Activation-Policy Switch
@@ -78,9 +79,9 @@ always present, but each tab's content is created lazily on first selection duri
 `show()` promotes the activation policy to `.regular` so the window can become key and accept
 paste/keyboard input. `windowWillClose(_:)` drops it back to `.accessory`. This is the same pattern
 the old API-key dialog and activity viewer each learned independently — now consolidated in one
-place. Initial Brain controls render from preferences and the latest cached CLI status immediately;
-CLI status and capability subprocesses run away from the main actor and update those controls when
-they finish, so their bounded timeouts cannot delay presentation.
+place. Initial Brain controls render from preferences immediately. Brain and Connections run CLI
+status and capability subprocesses away from the main actor and update their controls when those
+probes finish, so bounded timeouts cannot delay presentation.
 
 ## Overlay Appearance
 
@@ -191,11 +192,13 @@ enabled only when the running Mac and OS expose `SpeechTranscriber`; selecting i
 
 With OpenAI selected, **Model** offers **GPT-4o Transcribe** (the default), opt-in **GPT
 Transcribe**, and opt-in **GPT Live Transcribe** for session-by-session comparison. **Expected
-languages** offers Automatic (the default), English, Mandarin Chinese, and English + Mandarin
-Chinese. Automatic sends no language hint. A single-language selection guides recognition but does
-not translate. The profile is one immutable Start-time expectation shared by `me` and `them`, so the
-transcription model—not a Jarvis per-turn classifier—handles a speaker switching languages inside
-one sentence. Model-specific language, context, and turn-detection behavior is defined in
+languages** is a multi-select generated from the supported language values; English and Mandarin
+Chinese are currently available and can be selected independently. No selection means Automatic and
+sends no language hint. One selection guides recognition but does not translate. Multiple selections
+are sent to GPT Transcribe and GPT Live; GPT-4o remains automatic because it accepts at most one
+language hint. The canonical list is one immutable Start-time expectation shared by `me` and `them`,
+so the transcription model—not a Jarvis per-turn classifier—handles a speaker switching languages
+inside one sentence. Model-specific language, context, and turn-detection behavior is defined in
 [architecture.md](./architecture.md#models-and-apis).
 
 With Apple Speech selected, **Conversation locale** is populated from
@@ -205,17 +208,18 @@ pipeline. Apple Speech uses one locale for the whole session, so Settings explic
 OpenAI for English/Mandarin code-switching. Jarvis does not run parallel Apple transcribers, and the
 runtime never falls back to OpenAI implicitly if the Apple analyzer fails.
 
-The **OpenAI API key** row remains visible because OpenAI may supply either transcription or one of
-the configured brain targets. Its action is **Add API key** or **Edit**—there is no persistent
-saved-status sentence. The key is required only when OpenAI is selected for transcription or appears
-anywhere in the brain route; Apple Speech plus a CLI-only route can start without one.
+The OpenAI provider row shows **Connected** when the same credential chain used by Start can read a
+key: the owner-only managed file first, then `OPENAI_API_KEY` as the headless fallback. This is a
+read-only behavior status; shared credential editing belongs to Connections.
 
 Reads are validated: a persisted primary model id no longer in that provider's catalog uses the
 provider default without rewriting the invalid value, while invalid fallback rows are removed during
 route normalization. An unrecognized provider/effort likewise uses its existing default rather than
 reaching the API. Transcription preferences are validated independently: unknown OpenAI model ids
-use GPT-4o, unknown language profiles use Automatic, and an unsupported Apple locale fails visibly
-at Start rather than choosing a different language. A running `CoachDriver` applies valid brain edits
+use GPT-4o; unknown or duplicate expected-language values are discarded and the remaining values use
+stable declaration order; an empty list means Automatic. Existing fixed-profile preferences are read
+into the matching list until the user edits it. An unsupported Apple locale fails visibly at Start
+rather than choosing a different language. A running `CoachDriver` applies valid brain edits
 atomically at the coaching-attempt boundary while transcript, client-managed history, audio
 pipeline, and session logs continue unchanged. A provider, model, or route-order edit replaces the route for the next
 attempt and resets the session-local cursor to the newly selected primary. The new active local
@@ -228,9 +232,7 @@ A reasoning-effort edit instead rebuilds the clients at the current forward-only
 its failure counts. An attempt already in flight keeps its snapshotted client and remains
 authoritative: its success or failure updates route health normally, and the new effort begins with
 the next attempt. The replacement at the preserved active cursor—whether primary or fallback—starts
-preparing immediately; replacements behind that cursor are terminated without being prepared. Saving
-the OpenAI API key likewise preserves route health, but refreshes only OpenAI clients and OpenAI
-transcription reconnect credentials; it never probes or replaces a CLI client.
+preparing immediately; replacements behind that cursor are terminated without being prepared.
 
 A local-CLI target is preflighted first. A confirmed missing binary or signed-out account cannot
 activate; the running route stays intact and Activity records fixed settings-not-applied copy.
@@ -241,9 +243,27 @@ query or Codex's app-server is unavailable, that provider attempt fails and foll
 fresh-attempt route policy. Neither CLI ever falls back to a one-shot command.
 
 Brain-route choices persist via `BrainPreferences`, while the independent transcription provider,
-OpenAI model/language profile, and Apple locale persist via `TranscriptionPreferences`. Their files
+OpenAI model/expected-language list, and Apple locale persist via `TranscriptionPreferences`. Their files
 are the single sources for UserDefaults keys, defaults, and validation (the brain model catalogs live in
 `Sources/JarvisCore/Brain/BrainModelCatalog.swift`).
+
+## Connections
+
+The Connections tab owns authentication shared across Brain and Transcription. Its three stacked
+cards are **OpenAI API**, **Claude Code**, and **Codex CLI**. The OpenAI card reports and edits only
+the Jarvis-managed owner-only file through `APIKeyControls`; its action is **Add API key** or **Edit**.
+The `OPENAI_API_KEY` fallback remains usable by Start and the Brain readiness label but is deliberately
+not presented as a Jarvis-managed saved key.
+
+Claude Code and Codex CLI keep authentication in their own tools. Connections runs the existing
+bounded `AgentCLIDetector` probes and reports **Signed in**, **Signed out**, **Sign-in unknown**, or
+**Not installed** without opening a login flow or storing another secret. The page's compact ready
+count includes a managed OpenAI key and confirmed signed-in local accounts.
+
+An OpenAI key is required only when OpenAI is selected for transcription or appears anywhere in the
+brain route; Apple Speech plus a CLI-only route can start without one. Saving a managed key while a
+session runs preserves route health, refreshes only OpenAI brain clients and future OpenAI
+transcription reconnect credentials, and never probes or replaces a CLI client.
 
 ## Capture Scope
 
@@ -296,9 +316,12 @@ fallback or a later capture.
 | `Sources/JarvisApp/Settings/SettingsRowView.swift` | Shared label/help/trailing-control row |
 | `Sources/JarvisApp/Settings/SettingsScrollView.swift` | Viewport-change adapter for variable-height card documents |
 | `Sources/JarvisApp/Settings/BrainSection.swift` | Minimal Brain tab composition: Provider + Reasoning effort + Transcription |
+| `Sources/JarvisApp/Settings/ConnectionsSection.swift` | Shared OpenAI credential editor + external CLI account readiness |
 | `Sources/JarvisApp/Settings/BrainTargetRowView.swift` | Shared inline provider/model row for primary and fallback targets |
 | `Sources/JarvisApp/Settings/ProviderRouteEditor.swift` | Unified Primary + ordered fallback card and persistence mutations |
-| `Sources/JarvisApp/Settings/APIKeyControls.swift` | Transcription provider + collapsed API-key editor |
+| `Sources/JarvisApp/Settings/TranscriptionControls.swift` | Transcription provider/model/language-or-locale behavior card |
+| `Sources/JarvisApp/Settings/ExpectedLanguagePicker.swift` | Scalable expected-language chips + multi-select popover |
+| `Sources/JarvisApp/Settings/APIKeyControls.swift` | Collapsed Jarvis-managed OpenAI API-key editor |
 | `Sources/JarvisCore/Transcription/TranscriptionProvider.swift` | Provider identities, labels, and OpenAI-key requirement |
 | `Sources/JarvisCore/Config/TranscriptionPreferences.swift` | Persisted provider selection; absent/unknown values default to OpenAI |
 | `Sources/JarvisApp/Settings/OverlaySection.swift` | Overlay-appearance tab |

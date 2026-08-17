@@ -9,7 +9,8 @@ import JarvisCore
 @MainActor
 final class TranscriptionControls: NSObject {
     private let preferences: TranscriptionPreferences
-    private let keyStore: FileSecretStore
+    /// Read-only startup credential chain. Connections keeps editing scoped to `FileSecretStore`.
+    private let credentialStore: any SecretStore
 
     private var card: SettingsCardView?
     private var onHeightChanged: ((CGFloat) -> Void)?
@@ -26,9 +27,9 @@ final class TranscriptionControls: NSObject {
             + CGFloat(preferences.provider == .openAI ? 3 : 2) * SettingsStyle.rowHeight
     }
 
-    init(preferences: TranscriptionPreferences, keyStore: FileSecretStore) {
+    init(preferences: TranscriptionPreferences, credentialStore: any SecretStore) {
         self.preferences = preferences
-        self.keyStore = keyStore
+        self.credentialStore = credentialStore
     }
 
     func makeView(onHeightChanged: @escaping (CGFloat) -> Void) -> NSView {
@@ -142,7 +143,7 @@ final class TranscriptionControls: NSObject {
     func refreshConnectionStatus() {
         switch preferences.provider {
         case .openAI:
-            let connected = keyStore.apiKey() != nil
+            let connected = credentialStore.apiKey() != nil
             providerStatus?.stringValue = connected ? "Connected" : "Needs key"
             providerStatus?.textColor = connected ? .systemGreen : .systemOrange
         case .appleSpeech:

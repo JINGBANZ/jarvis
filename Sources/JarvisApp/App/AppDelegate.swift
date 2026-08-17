@@ -157,7 +157,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     detectedCLIs: clis,
                     update: change == .topology ? .topologyEdit : .effortEdit)
             },
-            keyStore: secretFile,
+            credentialStore: secrets,
             transcriptionPreferences: transcriptionPreferences)
         let connectionsSection = ConnectionsSection(
             detector: cliDetector,

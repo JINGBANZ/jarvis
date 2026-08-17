@@ -49,7 +49,7 @@ final class BrainSection: NSObject, SettingsSection {
         detector: AgentCLIDetector,
         onPreferencesChanged:
             @escaping (PreferenceChange, [BrainProvider: DetectedAgentCLI]?) -> Void,
-        keyStore: FileSecretStore,
+        credentialStore: any SecretStore,
         transcriptionPreferences: TranscriptionPreferences
     ) {
         self.preferences = preferences
@@ -57,7 +57,7 @@ final class BrainSection: NSObject, SettingsSection {
         self.onPreferencesChanged = onPreferencesChanged
         self.transcription = TranscriptionControls(
             preferences: transcriptionPreferences,
-            keyStore: keyStore)
+            credentialStore: credentialStore)
     }
 
     func makeView() -> NSView {
