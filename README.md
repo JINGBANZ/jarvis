@@ -16,15 +16,12 @@ session for an immediate, screen-aware hint.
 
 ## Install Jarvis
 
-**Requirements:** an Apple silicon Mac running macOS 14.2 or later. No developer tools are needed.
+Requires an Apple silicon Mac running macOS 14.2 or later. No developer tools are needed.
 
-[**Download Jarvis for Apple silicon (macOS 14.2+)**](https://github.com/JINGBANZ/jarvis/releases/latest/download/Jarvis.dmg)
+[**Download Jarvis**](https://github.com/JINGBANZ/jarvis/releases/latest/download/Jarvis.dmg)
 
-After installing, open Jarvis from **Applications**. It appears in the menu bar rather than the Dock.
-Allow Microphone access and, for screen-aware hints, Screen Recording when macOS prompts. From the
-menu-bar icon, open **Settings**, choose transcription and brain providers, add any credential those
-providers require, then select **Start Jarvis**. Allow System Audio Recording when Start requests it
-so Jarvis can hear the other side.
+Open Jarvis from **Applications**, configure its providers in **Settings**, then select **Start
+Jarvis**. macOS will request the permissions Jarvis needs.
 
 ## How it works
 
@@ -39,12 +36,9 @@ flowchart TD
     G["⌥⌘J<br/>Ask for a hint"] --> F
 ```
 
-The detailed loop and its design rationale live in the
-[architecture guide](./wiki/architecture.md).
+## Build from source
 
-## Developer quick start
-
-Building locally additionally requires Swift 6 and the macOS Command Line Tools.
+Requires Swift 6 and the macOS Command Line Tools.
 
 ```bash
 git clone https://github.com/JINGBANZ/jarvis.git
@@ -52,12 +46,12 @@ cd jarvis
 ./scripts/build-app.sh --run
 ```
 
-`--run` builds and launches `Jarvis Dev.app`, which has separate macOS permissions from an installed
-`Jarvis.app`. On first use, choose **Always Allow** for its signing key, then grant its capture permissions.
+See [Build and run](./wiki/build-and-run.md) for signing, permissions, and troubleshooting.
 
-For signing details, permission recovery, and other commands, see
-[Build and run](./wiki/build-and-run.md). Always launch the app through the build script or `open`,
-not by running its bare executable.
+## Project links
+
+[Wiki](./wiki/index.md) · [Contributing](./CONTRIBUTING.md) · [Security](./SECURITY.md) ·
+[License](./LICENSE) · [Third-party notices](./THIRD_PARTY_NOTICES.md)
 
 ## Privacy
 
@@ -68,20 +62,3 @@ not by running its bare executable.
   OpenAI coaching requests currently enable server-side storage for debugging.
 
 See [Privacy and security](./wiki/sandbox.md) for the complete egress and retention model.
-
-## Learn more
-
-Start at the [wiki index](./wiki/index.md), or jump directly to:
-
-- [Architecture](./wiki/architecture.md) — design, components, and data flow
-- [Build and run](./wiki/build-and-run.md) — setup, signing, permissions, and troubleshooting
-- [Privacy and security](./wiki/sandbox.md) — local data, provider egress, retention, and isolation
-- [Project status](./wiki/status.md) — what is built and what comes next
-
-Contributions are welcome; read [CONTRIBUTING.md](./CONTRIBUTING.md) before opening a pull request.
-Report security issues through the private process in [SECURITY.md](./SECURITY.md).
-
-## License
-
-Jarvis is licensed under the [Apache License 2.0](./LICENSE). Bundled third-party components are
-listed in [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md).
