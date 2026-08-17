@@ -67,16 +67,17 @@ requires for microphone capture. It submits a temporary zip of that app to Apple
 staples and validates the app's ticket, then uses the hash-pinned release-only `dmgbuild` tool to
 place the stapled app beside an `Applications` shortcut in `Jarvis.dmg`. The mounted Finder window is
 a fixed icon view: Jarvis on the left, Applications on the right, and a large arrow between them,
-with the extension and window chrome hidden. `dmgbuild` writes that metadata directly rather than
-automating Finder, so the hosted runner does not need a GUI session. The script signs and notarizes
-the outer disk image separately, then staples the container's ticket to the exact file users
-download. Both layers therefore remain verifiable offline.
+with the window chrome hidden. `dmgbuild` writes that layout metadata directly rather than automating
+Finder, so the hosted runner does not need a GUI session. It deliberately leaves the signed app free
+of FinderInfo extended attributes, which strict code-signature verification rejects. The script signs
+and notarizes the outer disk image separately, then staples the container's ticket to the exact file
+users download. Both layers therefore remain verifiable offline.
 
 The script passes that final DMG to `scripts/verify-release.sh`, which verifies the disk image and its
 ticket, mounts it read-only, and requires exactly the two visible install targets plus the hidden
 Finder metadata and arrow background. `scripts/verify-dmg-layout.py` reads the final `.DS_Store` and
 checks the icon view, window size, chrome, icon size and positions, background link and digest, and
-hidden `.app` extension. Release verification also checks the Applications target, mounted app
+Applications target position. Release verification also checks the Applications target, mounted app
 version, arm64 architecture, linked macOS 26-or-newer SDK, notices, strict code signature, and
 Gatekeeper policy result before detaching the image. The same SDK guard runs immediately after the
 release build, before signing or notarization; the pre-container app is not accepted as a proxy for
