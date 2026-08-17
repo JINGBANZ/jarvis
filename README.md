@@ -16,7 +16,7 @@ session for an immediate, screen-aware hint.
 
 ## Install Jarvis
 
-Requires an Apple silicon Mac running macOS 14.2 or later. No developer tools are needed.
+Requires an Apple silicon Mac running macOS 14.2 or later.
 
 [**Download Jarvis**](https://github.com/JINGBANZ/jarvis/releases/latest/download/Jarvis.dmg)
 
@@ -36,7 +36,7 @@ flowchart TD
     G["⌥⌘J<br/>Ask for a hint"] --> F
 ```
 
-## Build from source
+## Developer quick start
 
 Requires Swift 6 and the macOS Command Line Tools.
 
