@@ -22,6 +22,10 @@ if ! /usr/bin/grep -Eq '^[[:space:]]*runs-on:[[:space:]]*macos-26[[:space:]]*$' 
   echo "Release publish job must use the Apple-silicon macos-26 runner." >&2
   exit 1
 fi
+if ! /usr/bin/grep -Eq '^[[:space:]]*environment:[[:space:]]*release[[:space:]]*$' "$workflow"; then
+  echo "Release publish job must bind the environment-scoped signing secrets." >&2
+  exit 1
+fi
 for checkout_workflow in "$workflow" "$ci_workflow"; do
   if ! /usr/bin/grep -Eq \
       '^[[:space:]]*-[[:space:]]*uses:[[:space:]]*actions/checkout@[0-9a-f]{40}[[:space:]]*#[[:space:]]*v([5-9]|[1-9][0-9]+)\.' \
