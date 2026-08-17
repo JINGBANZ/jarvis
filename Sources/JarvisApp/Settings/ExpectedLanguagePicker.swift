@@ -155,7 +155,9 @@ final class ExpectedLanguagePicker: NSView {
 
     @objc private func showOptions() {
         renderSelection()
-        popover.show(relativeTo: manageButton.bounds, of: manageButton, preferredEdge: .maxY)
+        popover.show(relativeTo: manageButton.bounds, // ghost-mode-allowed: explicit Settings action
+                     of: manageButton,
+                     preferredEdge: .maxY)
     }
 
     @objc private func languageToggled(_ sender: NSButton) {

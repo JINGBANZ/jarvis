@@ -5,7 +5,7 @@ cd "$(dirname "$0")/.."
 # Any AppKit call that can reveal Jarvis must be an explicit, reviewed exception. Keeping the marker
 # on the exact call site makes a newly introduced alert/window/browser/sound fail the normal gate
 # instead of relying on a future manual audit to notice it.
-pattern='NSAlert\(|(NSApp|NSApplication\.shared)\.(activate|setActivationPolicy)|makeKeyAndOrderFront|\.makeKey\(|orderFrontRegardless|\.orderFront\(|beginSheet\(|NSWorkspace\.shared\.open|NSSound|AudioServicesPlaySystemSound|requestUserAttention|UNUserNotification|NSUserNotification|\.runModal\('
+pattern='NSAlert\(|(NSApp|NSApplication\.shared)\.(activate|setActivationPolicy)|makeKeyAndOrderFront|\.makeKey\(|orderFrontRegardless|\.orderFront\(|beginSheet\(|\.show\(relativeTo:|NSWorkspace\.shared\.open|NSSound|AudioServicesPlaySystemSound|requestUserAttention|UNUserNotification|NSUserNotification|\.runModal\('
 
 scan_status=0
 matches="$(/usr/bin/grep -RInE "$pattern" Sources/JarvisApp Sources/JarvisOverlay)" || scan_status=$?

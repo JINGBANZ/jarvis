@@ -129,9 +129,18 @@ final class TranscriptionControls: NSObject {
         modelRow?.isHidden = !usesOpenAI
         languagesRow?.isHidden = !usesOpenAI
         localeRow?.isHidden = usesOpenAI
+        refreshLanguageDetail()
         card?.frame.size.height = preferredHeight
         layoutRows()
         onHeightChanged?(preferredHeight)
+    }
+
+    private func refreshLanguageDetail() {
+        let gpt4oIgnoresSelection = preferences.openAIModel == .gpt4oTranscribe
+            && preferences.openAIExpectedLanguages.count > 1
+        languagesRow?.setDetail(gpt4oIgnoresSelection
+            ? "GPT-4o treats multiple selections as Automatic"
+            : "No selection means Automatic")
     }
 
     private func layoutRows() {
@@ -169,11 +178,13 @@ final class TranscriptionControls: NSObject {
             return
         }
         preferences.openAIModel = model
+        refreshLanguageDetail()
         jlog("Jarvis: \(model.displayName) selected for the next Start.")
     }
 
     private func languagesChanged(_ languages: [OpenAITranscriptionLanguage]) {
         preferences.openAIExpectedLanguages = languages
+        refreshLanguageDetail()
         let selection = languages.isEmpty
             ? "automatic"
             : languages.map(\.displayName).joined(separator: ", ")

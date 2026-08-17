@@ -18,7 +18,7 @@ public extension UserFacingError {
     /// OpenAI, so the requested route cannot be constructed.
     static var noAPIKey: UserFacingError {
         .init(title: "No OpenAI API key set",
-              message: "The selected transcription provider or brain route uses OpenAI. Open \u{201C}Settings\u{2026}\u{201D} \u{2192} Brain, paste your OpenAI API key, then press Start.",
+              message: "The selected transcription provider or brain route uses OpenAI. Open \u{201C}Settings\u{2026}\u{201D} \u{2192} Connections, paste your OpenAI API key, then press Start.",
               severity: .fatal,
               sessionEndReason: .openAIAPIKeyMissing)
     }

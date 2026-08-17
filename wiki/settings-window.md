@@ -196,7 +196,8 @@ languages** is a multi-select generated from the supported language values; Engl
 are currently available and can be selected independently. No selection means Automatic and
 sends no language hint. One selection guides recognition but does not translate. Multiple selections
 are sent to GPT Transcribe and GPT Live; GPT-4o remains automatic because it accepts at most one
-language hint. The canonical list is one immutable Start-time expectation shared by `me` and `them`,
+language hint, and the row says so whenever GPT-4o has multiple selections. The canonical list is one
+immutable Start-time expectation shared by `me` and `them`,
 so the transcription model—not a Jarvis per-turn classifier—handles a speaker switching languages
 inside one sentence. Model-specific language, context, and turn-detection behavior is defined in
 [architecture.md](./architecture.md#models-and-apis).

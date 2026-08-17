@@ -49,6 +49,12 @@ final class SettingsRowView: NSView {
         fatalError("init(coder:) has not been implemented")
     }
 
+    func setDetail(_ detail: String?) {
+        detailLabel.stringValue = detail ?? ""
+        detailLabel.isHidden = detail == nil
+        needsLayout = true
+    }
+
     override func layout() {
         super.layout()
 
