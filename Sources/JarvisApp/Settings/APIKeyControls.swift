@@ -75,7 +75,6 @@ final class APIKeyControls: NSObject {
         ])
         let row = SettingsRowView(
             title: "API key",
-            detail: "Used by OpenAI brain and transcription",
             controlView: controls,
             controlSize: NSSize(width: 220, height: 32),
             showsSeparator: false)

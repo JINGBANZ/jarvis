@@ -110,7 +110,6 @@ final class ConnectionsSection: NSObject, SettingsSection {
         statusLabels[provider] = status
         let row = SettingsRowView(
             title: "Local account",
-            detail: "Authentication stays managed by \(provider.displayName)",
             controlView: status,
             controlSize: NSSize(width: 150, height: 20),
             showsSeparator: false)

@@ -72,7 +72,7 @@ final class ExpectedLanguagePicker: NSView {
 
     private func buildPopover() {
         let rowHeight: CGFloat = 28
-        let height = 76 + CGFloat(OpenAITranscriptionLanguage.allCases.count) * rowHeight
+        let height = 48 + CGFloat(OpenAITranscriptionLanguage.allCases.count) * rowHeight
         let controller = NSViewController()
         controller.view = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: height))
 
@@ -94,14 +94,6 @@ final class ExpectedLanguagePicker: NSView {
             optionButtons.append(option)
             y -= rowHeight
         }
-
-        let note = NSTextField(wrappingLabelWithString:
-            "Leave all unselected to detect languages automatically.")
-        note.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        note.textColor = .secondaryLabelColor
-        note.maximumNumberOfLines = 2
-        note.frame = NSRect(x: 16, y: 12, width: 268, height: 34)
-        controller.view.addSubview(note)
 
         popover.behavior = .transient
         popover.contentSize = controller.view.frame.size
