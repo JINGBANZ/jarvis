@@ -45,6 +45,27 @@ else
   notary=(--keychain-profile "${NOTARY_PROFILE:-jarvis-notary}")
 fi
 
+notarize_artifact() {
+  local artifact="$1"
+  local description="$2"
+  local submit_json
+  local notary_status
+  local submission_id
+
+  echo "▶ submitting $description to Apple's notary service (usually 1-5 min)"
+  submit_json="$(xcrun notarytool submit "$artifact" "${notary[@]}" \
+    --wait --timeout 30m --output-format json)" || true
+  echo "$submit_json"
+  notary_status="$(plutil -extract status raw -o - - <<<"$submit_json" 2>/dev/null || true)"
+  if [[ "$notary_status" != "Accepted" ]]; then
+    # The submission log names the exact offending file and reason — fetch it before failing.
+    submission_id="$(plutil -extract id raw -o - - <<<"$submit_json" 2>/dev/null || true)"
+    [[ -n "$submission_id" ]] && xcrun notarytool log "$submission_id" "${notary[@]}" || true
+    echo "error: $description notarization did not complete (status: ${notary_status:-unknown})" >&2
+    return 1
+  fi
+}
+
 echo "▶ swift build -c release"
 swift build -c release
 BIN_PATH="$(swift build -c release --show-bin-path)/$BIN_NAME"
@@ -107,6 +128,18 @@ cleanup_dmg_stage() {
 }
 trap cleanup_dmg_stage EXIT
 
+APP_NOTARY_ARCHIVE="$DMG_STAGE/Jarvis-app.zip"
+echo "▶ preparing application for notarization"
+ditto -c -k --keepParent "$APP" "$APP_NOTARY_ARCHIVE"
+notarize_artifact "$APP_NOTARY_ARCHIVE" "application"
+rm -f "$APP_NOTARY_ARCHIVE"
+
+# The app must carry its own ticket before it is sealed inside the final disk image. Otherwise the
+# mounted artifact fails the same offline distribution policy that users rely on after copying it.
+echo "▶ stapling application"
+xcrun stapler staple "$APP"
+xcrun stapler validate "$APP"
+
 echo "▶ creating drag-install disk image"
 ditto "$APP" "$DMG_STAGE/$APP"
 ln -s /Applications "$DMG_STAGE/Applications"
@@ -115,21 +148,11 @@ hdiutil create -volname Jarvis -srcfolder "$DMG_STAGE" -fs HFS+ -format UDZO -ov
 codesign --force --timestamp --identifier "$DMG_IDENTIFIER" --sign "$IDENTITY" "$DMG"
 codesign --verify --strict --verbose=2 "$DMG"
 
-# Submit the outermost container so Apple's ticket covers the exact disk image users download.
-echo "▶ submitting to Apple's notary service (usually 1-5 min)"
-submit_json="$(xcrun notarytool submit "$DMG" "${notary[@]}" --wait --timeout 30m --output-format json)" || true
-echo "$submit_json"
-status="$(plutil -extract status raw -o - - <<<"$submit_json" 2>/dev/null || true)"
-if [[ "$status" != "Accepted" ]]; then
-  # The submission log names the exact offending file and reason — fetch it before failing.
-  id="$(plutil -extract id raw -o - - <<<"$submit_json" 2>/dev/null || true)"
-  [[ -n "$id" ]] && xcrun notarytool log "$id" "${notary[@]}" || true
-  echo "error: notarization did not complete (status: ${status:-unknown})" >&2
-  exit 1
-fi
+notarize_artifact "$DMG" "disk image"
 
-# A disk image can carry its ticket, so the exact notarized file remains the final artifact.
-echo "▶ stapling"
+# The outer ticket covers the exact container users download as well as the app ticket already
+# embedded inside it.
+echo "▶ stapling disk image"
 xcrun stapler staple "$DMG"
 
 # Verify the exact disk image users receive, not only the pre-container bundle. A packaging mistake
