@@ -157,14 +157,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     detectedCLIs: clis,
                     update: change == .topology ? .topologyEdit : .effortEdit)
             },
-            credentialStore: secrets,
             transcriptionPreferences: transcriptionPreferences)
         let connectionsSection = ConnectionsSection(
             detector: cliDetector,
             keyStore: secretFile,
             onKeySaved: { [weak self] key in
                 self?.applySavedAPIKeyToRunningSession(key)
-                self?.brainSection.refreshConnectionStatus()
             })
         let sections: [SettingsSection] = [
             brainSection,

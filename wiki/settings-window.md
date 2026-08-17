@@ -64,7 +64,7 @@ lazy lifecycle; its adaptive light/dark feed is simply framed by the same page a
 
 | Section class | Tab title | Always present | Description |
 |---|---|---|---|
-| `BrainSection` | "Brain" | yes | Behavior that decides who answers and what Jarvis hears, in one scrolling stack: the primary provider/model, an ordered editable fallback list, reasoning effort, and transcription provider/model/expected-languages-or-locale controls. A live status badge mirrors the active brain provider without moving the saved route. Valid Brain-route changes take effect between coaching attempts while running; transcription changes take effect on the next Start. The OpenAI transcription row reads credential readiness from the same managed-file-then-environment chain as Start. |
+| `BrainSection` | "Brain" | yes | Behavior that decides who answers and what Jarvis hears, in one scrolling stack: the primary provider/model, an ordered editable fallback list, reasoning effort, and transcription provider/model/expected-languages-or-locale controls. A live status badge mirrors the active brain provider without moving the saved route. Valid Brain-route changes take effect between coaching attempts while running; transcription changes take effect on the next Start. |
 | `ConnectionsSection` | "Connections" | yes | Shared authentication and provider readiness in three stacked cards. OpenAI exposes the Jarvis-managed API-key editor; Claude Code and Codex CLI report their externally managed local-account state without importing or changing those accounts. Saving a key never restarts a live conversation: established OpenAI Realtime endpoints stay connected and use it on a later reconnect. |
 | `OverlaySection` | "Overlay" | yes | Two matching cards, one per overlay surface — **Overlay Caption** (the transient on-screen tip) and **Overlay Box** (the persistent response history). Each card has an icon, description, On/Off toggle, and the same Text Size + Opacity row layout. When a surface is **on** its rows and live sample appear only while the Overlay tab is selected (`didBecomeActive`/`didResignActive`); when **off**, its rows and sample are hidden and the card collapses. Persists via `OverlayAppearance`. |
 | `DisplaySection` | "Screen" | yes | One **Screen capture** card with the capture-scope dropdown — **Active window** (default) or one **Entire display** entry per connected display — followed by a concise fallback/privacy callout. Persists via `ScreenCapturePreferences` and applies to the next screenshot. |
@@ -193,7 +193,7 @@ enabled only when the running Mac and OS expose `SpeechTranscriber`; selecting i
 With OpenAI selected, **Model** offers **GPT-4o Transcribe** (the default), opt-in **GPT
 Transcribe**, and opt-in **GPT Live Transcribe** for session-by-session comparison. **Expected
 languages** is a multi-select generated from the supported language values; English and Mandarin
-Chinese are currently available and can be selected independently. No selection means Automatic and
+are currently available and can be selected independently. No selection means Automatic and
 sends no language hint. One selection guides recognition but does not translate. Multiple selections
 are sent to GPT Transcribe and GPT Live; GPT-4o remains automatic because it accepts at most one
 language hint. The canonical list is one immutable Start-time expectation shared by `me` and `them`,
@@ -207,10 +207,6 @@ current macOS locale. Start downloads or reuses that selected model before repla
 pipeline. Apple Speech uses one locale for the whole session, so Settings explicitly recommends
 OpenAI for English/Mandarin code-switching. Jarvis does not run parallel Apple transcribers, and the
 runtime never falls back to OpenAI implicitly if the Apple analyzer fails.
-
-The OpenAI provider row shows **Connected** when the same credential chain used by Start can read a
-key: the owner-only managed file first, then `OPENAI_API_KEY` as the headless fallback. This is a
-read-only behavior status; shared credential editing belongs to Connections.
 
 Reads are validated: a persisted primary model id no longer in that provider's catalog uses the
 provider default without rewriting the invalid value, while invalid fallback rows are removed during
@@ -252,8 +248,8 @@ are the single sources for UserDefaults keys, defaults, and validation (the brai
 The Connections tab owns authentication shared across Brain and Transcription. Its three stacked
 cards are **OpenAI API**, **Claude Code**, and **Codex CLI**. The OpenAI card reports and edits only
 the Jarvis-managed owner-only file through `APIKeyControls`; its action is **Add API key** or **Edit**.
-The `OPENAI_API_KEY` fallback remains usable by Start and the Brain readiness label but is deliberately
-not presented as a Jarvis-managed saved key.
+The `OPENAI_API_KEY` fallback remains usable by Start but is deliberately not presented as a
+Jarvis-managed saved key.
 
 Claude Code and Codex CLI keep authentication in their own tools. Connections runs the existing
 bounded `AgentCLIDetector` probes and reports **Signed in**, **Signed out**, **Sign-in unknown**, or

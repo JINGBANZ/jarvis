@@ -55,10 +55,12 @@ final class ExpectedLanguagePicker: NSView {
             y: 0,
             width: buttonWidth,
             height: 32)
+        let availableChipWidth = max(0, manageButton.frame.minX - 8)
+        let chipWidth = min(availableChipWidth, ceil(chipStack.fittingSize.width))
         chipStack.frame = NSRect(
-            x: 0,
+            x: availableChipWidth - chipWidth,
             y: 4,
-            width: max(0, manageButton.frame.minX - 8),
+            width: chipWidth,
             height: 24)
 
         let shouldUseCompactSummary = bounds.width < 290
@@ -132,6 +134,7 @@ final class ExpectedLanguagePicker: NSView {
         setAccessibilityValue(selectedLanguages.isEmpty
             ? "Automatic"
             : selectedLanguages.map(\.displayName).joined(separator: ", "))
+        needsLayout = true
     }
 
     private func makeChip(_ title: String, isAutomatic: Bool) -> NSTextField {

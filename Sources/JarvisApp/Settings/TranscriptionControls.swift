@@ -9,8 +9,6 @@ import JarvisCore
 @MainActor
 final class TranscriptionControls: NSObject {
     private let preferences: TranscriptionPreferences
-    /// Read-only startup credential chain. Connections keeps editing scoped to `FileSecretStore`.
-    private let credentialStore: any SecretStore
 
     private var card: SettingsCardView?
     private var onHeightChanged: ((CGFloat) -> Void)?
@@ -18,7 +16,6 @@ final class TranscriptionControls: NSObject {
     private var modelRow: SettingsRowView?
     private var languagesRow: SettingsRowView?
     private var localeRow: SettingsRowView?
-    private var providerStatus: NSTextField?
     private var localePopup: NSPopUpButton?
     private var localeLoadTask: Task<Void, Never>?
 
@@ -27,9 +24,8 @@ final class TranscriptionControls: NSObject {
             + CGFloat(preferences.provider == .openAI ? 3 : 2) * SettingsStyle.rowHeight
     }
 
-    init(preferences: TranscriptionPreferences, credentialStore: any SecretStore) {
+    init(preferences: TranscriptionPreferences) {
         self.preferences = preferences
-        self.credentialStore = credentialStore
     }
 
     func makeView(onHeightChanged: @escaping (CGFloat) -> Void) -> NSView {
@@ -66,22 +62,10 @@ final class TranscriptionControls: NSObject {
         provider.setAccessibilityLabel("Transcription provider")
         provider.identifier = NSUserInterfaceItemIdentifier("transcription-provider")
 
-        let providerStatus = NSTextField(labelWithString: "")
-        providerStatus.font = .boldSystemFont(ofSize: NSFont.smallSystemFontSize)
-        providerStatus.alignment = .right
-        self.providerStatus = providerStatus
-        let providerControls = NSStackView(views: [provider, providerStatus])
-        providerControls.orientation = .horizontal
-        providerControls.alignment = .centerY
-        providerControls.distribution = .fill
-        providerControls.spacing = 8
-        provider.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        providerStatus.setContentHuggingPriority(.required, for: .horizontal)
         let providerRow = SettingsRowView(
             title: "Provider",
             detail: "Applies on the next Start",
-            controlView: providerControls,
-            controlSize: NSSize(width: 310, height: 32))
+            controlView: provider)
         content.addSubview(providerRow)
         self.providerRow = providerRow
 
@@ -140,26 +124,12 @@ final class TranscriptionControls: NSObject {
         return card
     }
 
-    func refreshConnectionStatus() {
-        switch preferences.provider {
-        case .openAI:
-            let connected = credentialStore.apiKey() != nil
-            providerStatus?.stringValue = connected ? "Connected" : "Needs key"
-            providerStatus?.textColor = connected ? .systemGreen : .systemOrange
-        case .appleSpeech:
-            providerStatus?.stringValue = "On device"
-            providerStatus?.textColor = .systemGreen
-        }
-        providerStatus?.setAccessibilityLabel(providerStatus?.stringValue ?? "")
-    }
-
     private func applyState() {
         let usesOpenAI = preferences.provider == .openAI
         modelRow?.isHidden = !usesOpenAI
         languagesRow?.isHidden = !usesOpenAI
         localeRow?.isHidden = usesOpenAI
         card?.frame.size.height = preferredHeight
-        refreshConnectionStatus()
         layoutRows()
         onHeightChanged?(preferredHeight)
     }

@@ -14,7 +14,7 @@ public enum OpenAITranscriptionLanguage: String, CaseIterable, Codable, Sendable
         case .english:
             "English"
         case .mandarinChinese:
-            "Mandarin Chinese"
+            "Mandarin"
         }
     }
 

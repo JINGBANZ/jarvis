@@ -104,7 +104,7 @@ import Testing
         #expect(OpenAITranscriptionModel.gptLiveTranscribe.displayName
                 == "GPT Live Transcribe")
         #expect(OpenAITranscriptionLanguage.english.displayName == "English")
-        #expect(OpenAITranscriptionLanguage.mandarinChinese.displayName == "Mandarin Chinese")
+        #expect(OpenAITranscriptionLanguage.mandarinChinese.displayName == "Mandarin")
         #expect(OpenAITranscriptionModel.gpt4oTranscribe.turnDetectionStrategy == .serverVAD)
         #expect(OpenAITranscriptionModel.gptTranscribe.turnDetectionStrategy == .clientCommit)
         #expect(OpenAITranscriptionModel.gptLiveTranscribe.turnDetectionStrategy == .clientCommit)

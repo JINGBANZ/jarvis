@@ -58,7 +58,10 @@ final class APIKeyControls: NSObject {
         action.identifier = NSUserInterfaceItemIdentifier("openai-key-action")
         self.actionButton = action
 
-        let controls = NSStackView(views: [statusBadge, action])
+        let trailingSpacer = NSView()
+        trailingSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        trailingSpacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let controls = NSStackView(views: [trailingSpacer, statusBadge, action])
         controls.orientation = .horizontal
         controls.alignment = .centerY
         controls.distribution = .fill

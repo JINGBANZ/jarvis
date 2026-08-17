@@ -49,15 +49,12 @@ final class BrainSection: NSObject, SettingsSection {
         detector: AgentCLIDetector,
         onPreferencesChanged:
             @escaping (PreferenceChange, [BrainProvider: DetectedAgentCLI]?) -> Void,
-        credentialStore: any SecretStore,
         transcriptionPreferences: TranscriptionPreferences
     ) {
         self.preferences = preferences
         self.detector = detector
         self.onPreferencesChanged = onPreferencesChanged
-        self.transcription = TranscriptionControls(
-            preferences: transcriptionPreferences,
-            credentialStore: credentialStore)
+        self.transcription = TranscriptionControls(preferences: transcriptionPreferences)
     }
 
     func makeView() -> NSView {
@@ -143,12 +140,7 @@ final class BrainSection: NSObject, SettingsSection {
     }
 
     func didBecomeActive() {
-        transcription.refreshConnectionStatus()
         refreshDetection()
-    }
-
-    func refreshConnectionStatus() {
-        transcription.refreshConnectionStatus()
     }
 
     private func makeReasoningCard() -> SettingsCardView {

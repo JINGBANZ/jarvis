@@ -15,7 +15,7 @@ before `speak`; a fresh screenshot/OCR satisfies that request, while a fully sta
 answered without a reflexive capture. The independent Transcription setting keeps **OpenAI as the
 default**, keeps **GPT-4o Transcribe** as its default model, adds opt-in **GPT Transcribe** and
 **GPT Live Transcribe**, and adds opt-in, on-device **Apple Speech** on macOS 26 or later. OpenAI
-language expectations default to Automatic rather than English; English and Mandarin Chinese are
+language expectations default to Automatic rather than English; English and Mandarin are
 independent multi-select session-level hints rather than fixed combination profiles or per-turn
 language choices. One Start snapshots the provider, OpenAI model/expected-language list, or Apple
 locale for both `me` and `them`; there
