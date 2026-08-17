@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Package Jarvis.app for distribution: Developer ID signing + notarization + stapling.
-# Produces Jarvis-<version>.zip, which opens on any Apple silicon Mac (macOS 14.2+) with no
-# Gatekeeper friction. Driven locally or by CI (.github/workflows/release.yml).
+# Produces Jarvis.dmg, which presents the app beside an Applications shortcut on any Apple silicon
+# Mac (macOS 14.2+) with no Gatekeeper friction. Driven locally or by CI
+# (.github/workflows/release.yml).
 #
 # Deliberately self-contained rather than layered on build-app.sh: the dev script's self-signed
 # "Jarvis Dev" identity exists only so local TCC grants persist, and creating it can prompt for
@@ -64,14 +65,59 @@ codesign --force --options runtime --timestamp \
   --sign "$IDENTITY" "$APP"
 codesign --verify --strict --verbose=2 "$APP"
 
-VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")"
-ZIP="Jarvis-$VERSION.zip"
+DMG="Jarvis.dmg"
+DMG_IDENTIFIER="com.jarvis.coach.dmg"
+DMG_ROOT="$PWD/.build"
+if [[ -L "$DMG_ROOT" ]]; then
+  echo "error: disk-image staging root must not be a symbolic link" >&2
+  exit 1
+fi
+mkdir -p "$DMG_ROOT"
+DMG_STAGE_PREFIX="$DMG_ROOT/jarvis-dmg-stage."
+DMG_STAGE="$(mktemp -d "${DMG_STAGE_PREFIX}XXXXXX")"
+if [[ -z "$DMG_STAGE" || "$DMG_STAGE" != "$DMG_STAGE_PREFIX"* \
+      || ! -d "$DMG_STAGE" || -L "$DMG_STAGE" ]]; then
+  echo "error: couldn't create a safe disk-image staging directory" >&2
+  exit 1
+fi
+cleanup_dmg_stage() {
+  local exit_code=$?
+  local cleanup_safe=true
+  trap - EXIT
+  if [[ -n "${DMG_STAGE:-}" && -n "${DMG_STAGE_PREFIX:-}" \
+        && "$DMG_STAGE" == "$DMG_STAGE_PREFIX"* && -d "$DMG_STAGE" \
+        && ! -L "$DMG_STAGE" ]]; then
+    if [[ -L "$DMG_STAGE/Applications" \
+          && "$(readlink "$DMG_STAGE/Applications")" == "/Applications" ]]; then
+      unlink "$DMG_STAGE/Applications"
+    elif [[ -e "$DMG_STAGE/Applications" || -L "$DMG_STAGE/Applications" ]]; then
+      echo "error: refusing to clean an unexpected Applications staging entry" >&2
+      exit_code=1
+      cleanup_safe=false
+    fi
+    if find "$DMG_STAGE" -type l -print -quit | grep -q .; then
+      echo "error: refusing to clean disk-image staging with an unexpected symbolic link" >&2
+      exit_code=1
+      cleanup_safe=false
+    elif [[ "$cleanup_safe" == "true" ]]; then
+      rm -rf -- "$DMG_STAGE"
+    fi
+  fi
+  exit "$exit_code"
+}
+trap cleanup_dmg_stage EXIT
 
-# ditto (not zip/Finder) preserves the extended attributes the signature lives alongside.
+echo "▶ creating drag-install disk image"
+ditto "$APP" "$DMG_STAGE/$APP"
+ln -s /Applications "$DMG_STAGE/Applications"
+rm -f "$DMG"
+hdiutil create -volname Jarvis -srcfolder "$DMG_STAGE" -fs HFS+ -format UDZO -ov "$DMG"
+codesign --force --timestamp --identifier "$DMG_IDENTIFIER" --sign "$IDENTITY" "$DMG"
+codesign --verify --strict --verbose=2 "$DMG"
+
+# Submit the outermost container so Apple's ticket covers the exact disk image users download.
 echo "▶ submitting to Apple's notary service (usually 1-5 min)"
-rm -f "$ZIP"
-ditto -c -k --keepParent "$APP" "$ZIP"
-submit_json="$(xcrun notarytool submit "$ZIP" "${notary[@]}" --wait --timeout 30m --output-format json)" || true
+submit_json="$(xcrun notarytool submit "$DMG" "${notary[@]}" --wait --timeout 30m --output-format json)" || true
 echo "$submit_json"
 status="$(plutil -extract status raw -o - - <<<"$submit_json" 2>/dev/null || true)"
 if [[ "$status" != "Accepted" ]]; then
@@ -82,18 +128,15 @@ if [[ "$status" != "Accepted" ]]; then
   exit 1
 fi
 
-# Staple the ticket to the .app so Gatekeeper trusts it offline, then RE-zip: a zip itself cannot
-# be stapled, so the shipped archive must be rebuilt from the stapled bundle.
+# A disk image can carry its ticket, so the exact notarized file remains the final artifact.
 echo "▶ stapling"
-xcrun stapler staple "$APP"
-rm -f "$ZIP"
-ditto -c -k --keepParent "$APP" "$ZIP"
+xcrun stapler staple "$DMG"
 
-# Verify the exact archive users receive, not only the pre-compression bundle. A packaging mistake
+# Verify the exact disk image users receive, not only the pre-container bundle. A packaging mistake
 # must leave the draft Release unpublished even if signing and notarization already succeeded.
-verify_args=("$ZIP")
+verify_args=("$DMG")
 if [[ -n "${EXPECTED_RELEASE_TAG:-}" ]]; then
   verify_args+=("$EXPECTED_RELEASE_TAG")
 fi
 ./scripts/verify-release.sh "${verify_args[@]}"
-echo "✅ $ZIP is notarized and ready to distribute (Apple silicon, macOS 14.2+)"
+echo "✅ $DMG is notarized and ready to distribute (Apple silicon, macOS 14.2+)"

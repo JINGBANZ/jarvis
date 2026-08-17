@@ -456,6 +456,9 @@
 - **Superseded in part by:** 2026-08-12 — Distributed AppKit appearance is pinned to the macOS 26
   SDK. The release-please, signing, notarization, and publication flow stands; the `macos-15` runner
   does not.
+- **Superseded in part by:** 2026-08-16 — Distribution uses one drag-install DMG. The automated
+  release, signing, notarization, and draft-until-validated trust chain stands; the zip container,
+  separate checksum asset, and manual move instructions do not.
 - **Detail:** [build-and-run.md → Distribution](./build-and-run.md#distribution--signed-notarized-releases-from-ci); `scripts/package-app.sh`, `release-please-config.json`.
 
 ### 2026-07-17 — Agentic session audit as a dev-side workflow; single-call path kept as fallback
@@ -1712,3 +1715,31 @@
   independent Stop → Start, and Quit-never-waits semantics apply to the destination evidence stack.
 - **Detail:** [lean-coaching-core.md](./lean-coaching-core.md),
   [session-audit.md](./session-audit.md).
+
+### 2026-08-16 — Distribution uses one drag-install DMG
+
+- **Chose:** Publish one stable `Jarvis.dmg` app artifact per GitHub Release. Its mounted root
+  contains exactly the signed `Jarvis.app` and an `Applications` shortcut targeting
+  `/Applications`; the release notes and README link directly to the DMG and tell the user to drag
+  the app onto that shortcut in the Finder window. The pipeline signs and notarizes the outer disk
+  image, staples it, mounts the final file read-only, and verifies both the container layout and the
+  app trust chain before publication. GitHub's automatic source archives remain outside this
+  project-controlled asset count.
+- **Why:** A single clearly labelled binary removes the choice between an app archive and a checksum
+  file, while the familiar app-to-Applications gesture keeps installation visible and owner-driven.
+  A stable filename supports one direct latest-release URL; the release tag and bundled Info.plist
+  remain the version authorities.
+- **Rejected:** (a) Keeping the zip plus `SHA256SUMS`—it leaves installation and asset selection to
+  the user, while GitHub already records the uploaded asset digest. (b) Moving the running app into
+  `/Applications` on first launch—downloaded apps can run from a translocated read-only location,
+  and an app should not silently relocate itself. (c) A signed installer package—it adds an
+  installer and elevated installation semantics that a single app bundle does not need. (d) A
+  third-party DMG-layout dependency or CI-driven Finder automation for cosmetic positioning—the
+  native two-entry image provides the required drag target without another release dependency or a
+  GUI session on the hosted runner.
+- **Supersedes in part:** 2026-07-17 — Distribution via release-please + notarized zip on GitHub
+  Releases. Its release-please flow, Developer ID identity, notarization credentials, and
+  draft-until-validated publication semantics stand.
+- **Detail:** [build-and-run.md → Distribution](./build-and-run.md#distribution--signed-notarized-releases-from-ci),
+  `scripts/package-app.sh`, `scripts/verify-release.sh`, `.github/workflows/release.yml`,
+  `.github/release-header.md`.

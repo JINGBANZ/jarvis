@@ -145,8 +145,10 @@ repository's `main` branch; retained third-party Actions are SHA-pinned and Depe
 Public docs disclose the current unsandboxed boundary, contribution and private-reporting paths are
 present, and the latest GitHub Release carries a Developer ID-signed, notarized Apple silicon app.
 The release workflow builds with the macOS 26 SDK while retaining a macOS 14.2 deployment target,
-then re-extracts and checks that linked SDK in the final zip as the user receives it and attaches a
-SHA-256 checksum; the app bundle carries the Apache license plus third-party notices. Local builds
+then signs and notarizes one stable `Jarvis.dmg`, mounts that final image, and checks its two-item
+drag-install layout, Applications target, linked SDK, signature, ticket, and Gatekeeper result. The
+next release uploads that DMG as its only Jarvis-built asset and links to it directly; GitHub's
+automatic source archives remain. The app bundle carries the Apache license plus third-party notices. Local builds
 use the independent `Jarvis Dev.app` / `com.jarvis.coach.dev` identity while releases retain
 `Jarvis.app` / `com.jarvis.coach`, so their TCC grants and preferences can coexist on one Mac. The
 existing Git/PR history is intentionally preserved after the full-history secret scan found no
@@ -250,7 +252,7 @@ thin OS shell, verified by the smoke run.
 - `Sources/EvalPrep/main.swift` — the Foundation-only terminal entry point for the same `AgenticEvaluator` Activity invokes; `scripts/eval-session.sh` runs it over the repo + session dir.
 - `Sources/CJarvisAEC/lib/libjarvis-aec.a` — the prebuilt, zero-dylib WebRTC AEC3 + classic VAD native edge (the `CJarvisAEC` target; rebuilt by `scripts/build-aec.sh`).
 - `scripts/build-app.sh` — the local self-signed `Jarvis Dev.app` build with an independent bundle id and TCC identity; its production plist source remains unchanged.
-- `.github/workflows/` + `scripts/package-app.sh` + `scripts/check-release-sdk.sh` + `scripts/verify-release.sh` — hosted automation only: owner-gated development agents, the repository gate on pull requests, then a macOS-26-SDK release-please Release PR → Developer ID-signed, notarized, stapled, re-extracted, SDK/Gatekeeper-checked `Jarvis-<version>.zip` with Apache and third-party notices plus `SHA256SUMS` attached to a GitHub Release ([build-and-run.md → Distribution](./build-and-run.md#distribution--signed-notarized-releases-from-ci)).
+- `.github/workflows/` + `scripts/package-app.sh` + `scripts/check-release-sdk.sh` + `scripts/verify-release.sh` — hosted automation only: owner-gated development agents, the repository gate on pull requests, then a macOS-26-SDK release-please Release PR → Developer ID-signed, notarized, stapled, mounted, layout/SDK/Gatekeeper-checked `Jarvis.dmg` with an Applications shortcut and bundled Apache and third-party notices; that DMG is the Release's only Jarvis-built asset ([build-and-run.md → Distribution](./build-and-run.md#distribution--signed-notarized-releases-from-ci)).
 - `AGENTS.md` + `.github/workflows/sync-shared-rules.yml` — project-specific agent guidance with a
   machine-managed shared-rules block that syncs weekly from `JINGBANZ/rules`; `CLAUDE.md` imports the
   same canonical file.
