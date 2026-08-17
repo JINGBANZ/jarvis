@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.6](https://github.com/JINGBANZ/jarvis/compare/v0.1.5...v0.1.6) (2026-08-17)
+
+
+### Features
+
+* **release:** add guided DMG installer layout ([#169](https://github.com/JINGBANZ/jarvis/issues/169)) ([d1da170](https://github.com/JINGBANZ/jarvis/commit/d1da170c4786e4992a321d5a0a34756af5981f3c))
+* **settings:** separate shared connections from brain ([#170](https://github.com/JINGBANZ/jarvis/issues/170)) ([2a9ff0f](https://github.com/JINGBANZ/jarvis/commit/2a9ff0f698d34a7ac0d3ae76e3a7a716e42f2c56))
+
 ## [0.1.5](https://github.com/JINGBANZ/jarvis/compare/v0.1.4...v0.1.5) (2026-08-17)
 
 
