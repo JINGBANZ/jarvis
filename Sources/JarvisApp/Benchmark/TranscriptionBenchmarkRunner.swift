@@ -149,7 +149,7 @@ final class TranscriptionBenchmarkRunner {
         let configuration = TranscriptionConfiguration(
             provider: arm.provider,
             openAIModel: arm.model ?? .gpt4oTranscribe,
-            openAILanguageProfile: arm.languageProfile ?? .automatic,
+            openAIExpectedLanguages: arm.languageProfile?.expectedLanguages ?? [],
             appleSpeechLocaleIdentifier: arm.localeIdentifier ?? "en_US")
         // Keep production ping/pong timing. The benchmark trips the transport failure path directly;
         // accelerated probes can add a second artificial fault while the provider processes replay.

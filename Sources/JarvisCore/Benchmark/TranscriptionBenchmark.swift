@@ -12,6 +12,25 @@ public enum TranscriptionBenchmark {
         case bilingual
     }
 
+    /// Fixed hint variants retained in benchmark summaries. Production preferences use an open
+    /// list of individual languages; the benchmark keeps these stable cases so older result files
+    /// remain decodable under schema version 1.
+    public enum LanguageProfile: String, Codable, Sendable {
+        case automatic
+        case english
+        case mandarinChinese = "mandarin-chinese"
+        case englishAndMandarinChinese = "english-and-mandarin-chinese"
+
+        public var expectedLanguages: [OpenAITranscriptionLanguage] {
+            switch self {
+            case .automatic: []
+            case .english: [.english]
+            case .mandarinChinese: [.mandarinChinese]
+            case .englishAndMandarinChinese: [.english, .mandarinChinese]
+            }
+        }
+    }
+
     public struct Phrase: Codable, Equatable, Sendable {
         public let id: String
         public let language: Language
@@ -50,7 +69,7 @@ public enum TranscriptionBenchmark {
         public let id: String
         public let provider: TranscriptionProvider
         public let model: OpenAITranscriptionModel?
-        public let languageProfile: OpenAITranscriptionLanguageProfile?
+        public let languageProfile: LanguageProfile?
         public let localeIdentifier: String?
         public let phrase: Phrase
 
@@ -58,7 +77,7 @@ public enum TranscriptionBenchmark {
             id: String,
             provider: TranscriptionProvider,
             model: OpenAITranscriptionModel?,
-            languageProfile: OpenAITranscriptionLanguageProfile?,
+            languageProfile: LanguageProfile?,
             localeIdentifier: String?,
             phrase: Phrase
         ) {
@@ -74,7 +93,7 @@ public enum TranscriptionBenchmark {
     public static var standardArms: [Arm] {
         let openAI = OpenAITranscriptionModel.allCases.flatMap { model in
             phrases.map { phrase in
-                let profile: OpenAITranscriptionLanguageProfile = switch phrase.language {
+                let profile: LanguageProfile = switch phrase.language {
                 case .english: .english
                 case .mandarin: .mandarinChinese
                 case .bilingual: .englishAndMandarinChinese

@@ -21,7 +21,7 @@ enum TranscriptionSessionFactory {
             RealtimeTranscriber(
                 apiKey: apiKey,
                 model: configuration.openAIModel,
-                languageProfile: configuration.openAILanguageProfile,
+                expectedLanguages: configuration.openAIExpectedLanguages,
                 speaker: speaker,
                 transcript: transcript,
                 clock: clock,
