@@ -18,6 +18,10 @@ secrets.env
 *.pfx
 auth.json
 
+# Release artifacts built at the repo root by scripts/package-app.sh and scripts/generate-appcast.sh
+Jarvis.dmg
+appcast.xml
+
 # Dev-mode activity/debug logs (screen-derived content — never commit)
 .jarvis/
 

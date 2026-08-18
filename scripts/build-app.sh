@@ -72,8 +72,12 @@ BIN_PATH="$(swift build -c "$CONFIG" --show-bin-path)/$BIN_NAME"
 
 echo "▶ assembling $APP"
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks"
 cp "$BIN_PATH" "$APP/Contents/MacOS/$BIN_NAME"
+# Sparkle is linked dynamically, so the framework must be embedded even though the development
+# bundle has no update feed — without it dyld cannot start the app at all.
+ditto "$(dirname "$BIN_PATH")/Sparkle.framework" "$APP/Contents/Frameworks/Sparkle.framework"
+rm -rf "$APP/Contents/Frameworks/Sparkle.framework/Versions/Current/XPCServices"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 cp Resources/Jarvis.icns "$APP/Contents/Resources/Jarvis.icns"
 # Resources/Info.plist remains the production source of truth. Override only the identity fields in
@@ -82,6 +86,10 @@ cp Resources/Jarvis.icns "$APP/Contents/Resources/Jarvis.icns"
 /usr/bin/plutil -replace CFBundleName -string "$APP_NAME" "$APP/Contents/Info.plist"
 /usr/bin/plutil -replace CFBundleDisplayName -string "$APP_NAME" "$APP/Contents/Info.plist"
 /usr/bin/plutil -replace CFBundleIdentifier -string "$BUNDLE_ID" "$APP/Contents/Info.plist"
+# A development build is signed with the local "Jarvis Dev" identity, so Sparkle could never install
+# the Developer ID release over it anyway. Removing the feed leaves the app with no updater at all,
+# and the menu omits "Check for Updates" rather than offering an action that must fail.
+/usr/bin/plutil -remove SUFeedURL "$APP/Contents/Info.plist"
 
 echo "▶ signing with '$IDENTITY'"
 codesign --force --deep --sign "$IDENTITY" "$APP"

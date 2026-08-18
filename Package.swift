@@ -22,6 +22,11 @@ let jarvisAppSwiftSettings: [SwiftSetting] = forceAppleSpeechFallback
 let package = Package(
     name: "Jarvis",
     platforms: [.macOS("14.2")],
+    dependencies: [
+        // Sparkle ships as a prebuilt XCFramework through a remote binary target, so it resolves and
+        // links under Command Line Tools alone — no Xcode project, matching how this package builds.
+        .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.9.6"),
+    ],
     targets: [
         .target(name: "JarvisCore"),
         // The AppKit overlay lives in its own library target (not the executable) so it can be
@@ -43,8 +48,16 @@ let package = Package(
         ),
         .executableTarget(
             name: "JarvisApp",
-            dependencies: ["JarvisCore", "JarvisOverlay", "CJarvisAEC"],
-            swiftSettings: jarvisAppSwiftSettings
+            dependencies: [
+                "JarvisCore", "JarvisOverlay", "CJarvisAEC",
+                .product(name: "Sparkle", package: "Sparkle"),
+            ],
+            swiftSettings: jarvisAppSwiftSettings,
+            // Sparkle is a dynamic framework embedded at Contents/Frameworks by the packaging
+            // scripts; SwiftPM builds a bare executable, so the bundle rpath is set here.
+            linkerSettings: [
+                .unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"]),
+            ]
         ),
         // The dev-side CLI half of the agentic session audit (see AgenticEvaluation): renders a
         // session's traffic to a compact transcript and prints the agent task prompt. A separate,

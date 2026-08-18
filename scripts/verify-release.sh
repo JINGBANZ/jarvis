@@ -102,7 +102,21 @@ if [[ ! -f "$EXTRACTED_APP/Contents/Resources/LICENSE" \
   exit 1
 fi
 
-codesign --verify --strict --verbose=2 "$EXTRACTED_APP"
+EXTRACTED_SPARKLE="$EXTRACTED_APP/Contents/Frameworks/Sparkle.framework"
+if [[ ! -d "$EXTRACTED_SPARKLE" || -L "$EXTRACTED_SPARKLE" ]]; then
+  echo "error: disk-image app is missing the embedded Sparkle updater framework" >&2
+  exit 1
+fi
+# Sandbox-only helpers must never reach users: they cannot run in this non-sandboxed app, and
+# shipping them would put unreachable code inside the notarized bundle.
+if [[ -e "$EXTRACTED_SPARKLE/Versions/Current/XPCServices" ]]; then
+  echo "error: disk-image app ships Sparkle's sandbox-only XPC services" >&2
+  exit 1
+fi
+
+# --deep for verification only: the app now seals Sparkle's update helpers, and every nested
+# signature must hold in the artifact users mount.
+codesign --verify --strict --deep --verbose=2 "$EXTRACTED_APP"
 # syspolicy_check runs the modern macOS distribution checks; keep spctl as the direct Gatekeeper
 # policy assertion already used by the release contract.
 syspolicy_check distribution "$EXTRACTED_APP" --verbose

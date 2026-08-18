@@ -18,6 +18,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var overlayCaption: OverlayCaptionPanel!   // transient on-screen tip
     private var overlayBox: OverlayBoxPanel!            // persistent, movable history of every spoken response
     private var menuBar: MenuBarController!
+    /// Sparkle, for the menu bar's explicit update check. Nil in a development bundle.
+    private var updates: UpdateController?
     private var settingsWindow: SettingsWindow!
     private var brainSection: BrainSection!
     private let appearance = OverlayAppearance()
@@ -141,7 +143,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         overlayBox.setOpacity(appearance.boxOpacity)
         overlayBox.setEnabled(appearance.boxEnabled)   // on by default — shows the history box at launch
 
-        menuBar = MenuBarController()
+        // No updater in a development bundle (no feed URL), so the menu omits the item entirely.
+        updates = UpdateController()
+        menuBar = MenuBarController(
+            updateAvailability: updates.map { updater in { updater.canCheckForUpdates } },
+            onCheckForUpdates: updates.map { updater in { updater.checkForUpdates() } })
         renderReadinessStatus(readiness.status)
 
         // Unified Settings window: Brain owns behavior; Connections owns shared authentication.

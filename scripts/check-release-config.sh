@@ -11,11 +11,12 @@ sdk_guard="scripts/check-release-sdk.sh"
 dmg_settings="scripts/dmg-settings.py"
 dmg_layout_guard="scripts/verify-dmg-layout.py"
 release_requirements="scripts/requirements-release.txt"
+appcast_script="scripts/generate-appcast.sh"
 package_guard_call="./scripts/check-release-sdk.sh \"\$BIN_PATH\""
 verify_guard_call="./scripts/check-release-sdk.sh \"\$EXTRACTED_BIN\""
 
 for path in "$workflow" "$ci_workflow" "$release_header" "$package_script" "$verify_script" \
-    "$sdk_guard" "$dmg_settings" "$dmg_layout_guard" "$release_requirements"; do
+    "$sdk_guard" "$dmg_settings" "$dmg_layout_guard" "$release_requirements" "$appcast_script"; do
   if [[ ! -f "$path" || -L "$path" ]]; then
     echo "Release configuration guard: $path must be a regular file." >&2
     exit 1
@@ -87,11 +88,48 @@ if ! /usr/bin/grep -Fq -- '--only-binary=:all:' "$release_requirements" \
   echo "Release workflow must install the hash-pinned DMG layout tool in its own environment." >&2
   exit 1
 fi
+# The updater is only as trustworthy as the signature over what it downloads. Hold the whole chain:
+# the sandbox-only helpers are dropped, every nested binary is sealed with the hardened runtime
+# before the app, and the feed is signed over the stapled disk image users actually receive.
+if ! /usr/bin/grep -Fq 'rm -rf "$SPARKLE/Versions/Current/XPCServices"' "$package_script" \
+    || ! /usr/bin/grep -Fq \
+      'for nested in Versions/Current/Autoupdate Versions/Current/Updater.app; do' \
+      "$package_script" \
+    || ! /usr/bin/grep -Fq \
+      'codesign --force --options runtime --timestamp --sign "$IDENTITY" "$SPARKLE"' \
+      "$package_script"; then
+  echo "Release packaging must embed Sparkle without its sandbox-only services and seal each nested binary." >&2
+  exit 1
+fi
+if ! /usr/bin/grep -Fq 'EXTRACTED_SPARKLE="$EXTRACTED_APP/Contents/Frameworks/Sparkle.framework"' \
+      "$verify_script" \
+    || ! /usr/bin/grep -Fq 'codesign --verify --strict --deep --verbose=2 "$EXTRACTED_APP"' \
+      "$verify_script"; then
+  echo "Final release verification must inspect the embedded updater and every nested signature." >&2
+  exit 1
+fi
+if ! /usr/bin/grep -Fq './scripts/generate-appcast.sh Jarvis.dmg "$TAG" "$NOTES_HTML"' "$workflow" \
+    || ! /usr/bin/grep -Fq 'SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}' \
+      "$workflow"; then
+  echo "Release publication must sign the update feed with the release-scoped Sparkle key." >&2
+  exit 1
+fi
+# The signing key must be proven to be the one installed copies verify against, and the notes must be
+# escaped so they cannot break out of the feed's CDATA section into markup.
+if ! /usr/bin/grep -Fq 'if [[ "$DERIVED_PUBLIC_KEY" != "$(plist_value SUPublicEDKey)" ]]; then' \
+      "$appcast_script" \
+    || ! /usr/bin/grep -Fq "]]]]><![CDATA[>" "$appcast_script" \
+    || ! /usr/bin/grep -Fq 'releases/download/$TAG/Jarvis.dmg' "$appcast_script"; then
+  echo "Appcast generation must pin the enclosure to its tag, prove the signing key matches SUPublicEDKey, and split CDATA terminators." >&2
+  exit 1
+fi
 if ! /usr/bin/grep -Fq 'xcrun notarytool submit "$artifact"' "$package_script"; then
   echo "Release packaging must submit each distribution layer through the shared notarization path." >&2
   exit 1
 fi
 package_flow=(
+  'ditto "$(dirname "$BIN_PATH")/Sparkle.framework" "$SPARKLE"'
+  'codesign --force --options runtime --timestamp --sign "$IDENTITY" "$SPARKLE"'
   'ditto -c -k --keepParent "$APP" "$APP_NOTARY_ARCHIVE"'
   'notarize_artifact "$APP_NOTARY_ARCHIVE" "application"'
   'xcrun stapler staple "$APP"'
@@ -120,18 +158,18 @@ if ! /usr/bin/grep -Fq 'hdiutil attach "$DMG" -readonly -nobrowse -mountpoint "$
       "$verify_script" \
     || ! /usr/bin/grep -Fq '"$DMGBUILD_PYTHON" scripts/verify-dmg-layout.py "$MOUNT_POINT"' \
       "$verify_script" \
-    || ! /usr/bin/grep -Fq 'codesign --verify --strict --verbose=2 "$EXTRACTED_APP"' \
-      "$verify_script" \
     || ! /usr/bin/grep -Fq 'syspolicy_check distribution "$EXTRACTED_APP" --verbose' \
       "$verify_script"; then
   echo "Final release verification must inspect the mounted Finder layout and modern system policy." >&2
   exit 1
 fi
-if ! /usr/bin/grep -Fq 'ASSET="Jarvis.dmg"' "$workflow" \
-    || ! /usr/bin/grep -Fq 'UNEXPECTED_ASSETS="$(awk -v expected="$ASSET"' \
+if ! /usr/bin/grep -Fq 'APP_ASSET="Jarvis.dmg"' "$workflow" \
+    || ! /usr/bin/grep -Fq 'APPCAST_ASSET="appcast.xml"' "$workflow" \
+    || ! /usr/bin/grep -Fq 'ASSETS=("$APP_ASSET" "$APPCAST_ASSET")' "$workflow" \
+    || ! /usr/bin/grep -Fq 'UNEXPECTED_ASSETS="$(grep -Fxv -f "$EXPECTED_NAMES" "$ASSET_NAMES" || true)"' \
       "$workflow" \
-    || ! /usr/bin/grep -Fq 'for asset in "$ASSET"; do' "$workflow"; then
-  echo "Release publication must upload only the stable Jarvis.dmg app artifact." >&2
+    || ! /usr/bin/grep -Fq 'for asset in "${ASSETS[@]}"; do' "$workflow"; then
+  echo "Release publication must upload exactly the Jarvis.dmg app artifact and its appcast." >&2
   exit 1
 fi
 if /usr/bin/grep -Fq 'SHA256SUMS' "$workflow" \

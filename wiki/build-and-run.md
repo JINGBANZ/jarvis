@@ -91,7 +91,8 @@ it creates the GitHub Release **as a draft**, with no second deployment approval
 `macos-26` job then runs the test gate, installs only the hash-pinned pure-Python wheels in
 `scripts/requirements-release.txt` into an ephemeral environment, and signs/notarizes with secrets
 scoped to the main-only `release` environment (the base64 `.p12` certificate and an App Store Connect
-API key — names in the workflow). It attaches only `Jarvis.dmg`, then publishes the Release. The
+API key — names in the workflow). It attaches `Jarvis.dmg` and the `appcast.xml` update feed described
+below, rejects any other asset, then publishes the Release. The
 stable installation block in
 `.github/release-header.md` links directly to that tag's DMG and explains the in-window drag to
 Applications; GitHub still supplies its automatic source archives. A failed sign, notarization, or
@@ -107,6 +108,43 @@ tags created with `GITHUB_TOKEN` never trigger other workflows.
 `xcrun notarytool store-credentials jarvis-notary …` setup. Distributed builds require macOS 14.2 or
 later and run on Apple silicon only because `libjarvis-aec.a` is arm64-only. The README owns the user
 installation steps; provider credentials remain user-supplied in Settings.
+
+## In-app updates — Sparkle over the release feed
+
+The menu bar's **Check for Updates** item runs [Sparkle](https://sparkle-project.org) against the
+`appcast.xml` asset published beside each release, so an installed Jarvis can replace itself with the
+newest signed disk image instead of the user re-downloading by hand. `SUFeedURL` points at
+`/releases/latest/download/appcast.xml`, which GitHub resolves to the newest published Release;
+`scripts/generate-appcast.sh` renders the feed after packaging, pinning the enclosure to the release's
+own tag so a signed item keeps naming the exact bytes it covers once "latest" moves on.
+
+Sparkle resolves under Command Line Tools alone: it is a remote binary target carrying a prebuilt
+XCFramework, so no `.xcodeproj` is needed to consume it. SwiftPM leaves `Sparkle.framework` beside the
+executable and both bundle scripts embed it at `Contents/Frameworks`, which is what the `JarvisApp`
+target's rpath names. Sparkle's XPC services exist only to install updates from inside an App Sandbox;
+Jarvis is not sandboxed (see [sandbox.md](./sandbox.md)), so they are deleted at embed time rather
+than notarized as unreachable code. The framework brings the bundle's only nested code, so
+`package-app.sh` seals it inside-out — the update helpers, the framework, then the app — and release
+verification requires every nested signature to hold in the mounted artifact.
+
+Two independent signatures gate an install: the EdDSA signature the feed records over the disk image,
+checked against `SUPublicEDKey`, and the Developer ID signature, which Sparkle requires to match the
+running app. That second check is also why TCC grants survive an update — macOS keys them to a code
+signature that does not change between releases. The EdDSA private key is held as the
+`SPARKLE_ED_PRIVATE_KEY` secret in the same `release` environment as the signing and notarization
+credentials, and `generate-appcast.sh` reads it on standard input so it never reaches a process list.
+Losing it would strand every installed copy on its current version. Before signing, the script derives
+the key's public half and requires it to equal `SUPublicEDKey`: signing and verifying with one private
+key proves only that the key is well-formed, so without this a rotated or mistyped secret would
+publish a feed that every installed copy silently rejects until the next release.
+
+Checks are user-initiated only. `SUEnableAutomaticChecks` is false, which stops both scheduled
+background checks and Sparkle's first-launch prompt offering to enable them — either would present UI
+on an autonomous path. The item is also disabled while a session is live, because an update dialog is
+not one of the presentation paths the [runtime safety boundary](../AGENTS.md) permits during the live
+pipeline, and installing quits and relaunches the app. Development bundles have no updater at all:
+`build-app.sh` strips `SUFeedURL`, `UpdateController` fails to initialize without it, and the menu
+omits the item rather than offering an action that a self-signed build could never complete.
 
 ## Running
 
@@ -223,6 +261,9 @@ the human-facing coaching record. The current validation priority lives in
   controls and preview follow the toggle, and confirm the choice survives relaunch.
 - Validate realtime recovery with `./scripts/transcription-benchmark.sh reconnect`; do not disable the
   Mac's network connection. Confirm its summary reports both scoped-interruption phrases exactly once.
+- Confirm the development build's menu has **no** update item. In a signed release build, confirm
+  **Check for Updates** is greyed out while a session runs, is enabled once stopped, and reports the
+  app is up to date when run against the current release.
 - Choose **Stop Jarvis** and confirm Activity ends with `session ended by user`, with no later
   transcription or coaching events.
 - In Activity, choose the stopped session and click **Evaluate**. Confirm the button shows

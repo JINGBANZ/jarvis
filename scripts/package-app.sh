@@ -84,18 +84,32 @@ BIN_PATH="$(swift build -c release --show-bin-path)/$BIN_NAME"
 
 echo "▶ assembling $APP"
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks"
 cp "$BIN_PATH" "$APP/Contents/MacOS/$BIN_NAME"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 cp Resources/Jarvis.icns "$APP/Contents/Resources/Jarvis.icns"
 cp LICENSE THIRD_PARTY_NOTICES.md "$APP/Contents/Resources/"
 
+# Sparkle powers the menu bar's explicit update check. SwiftPM leaves the framework beside the
+# executable; the bundle needs it at Contents/Frameworks, which is what the target's rpath names.
+SPARKLE="$APP/Contents/Frameworks/Sparkle.framework"
+ditto "$(dirname "$BIN_PATH")/Sparkle.framework" "$SPARKLE"
+# Sparkle's XPC services exist only to install updates from inside an App Sandbox. Jarvis is not
+# sandboxed, so shipping them would notarize and distribute code that can never run.
+rm -rf "$SPARKLE/Versions/Current/XPCServices"
+
 echo "▶ signing (hardened runtime + timestamp)"
-# No --deep: the bundle is a single statically-linked executable with no nested code.
+# Sparkle brings the bundle's only nested code, and codesign seals inner code before outer: the
+# update helpers, then the framework, then the app. Not --deep, which Apple documents as unsuitable
+# for signing distributed code because it cannot apply the right entitlements per nested binary.
+for nested in Versions/Current/Autoupdate Versions/Current/Updater.app; do
+  codesign --force --options runtime --timestamp --sign "$IDENTITY" "$SPARKLE/$nested"
+done
+codesign --force --options runtime --timestamp --sign "$IDENTITY" "$SPARKLE"
 codesign --force --options runtime --timestamp \
   --entitlements Resources/Jarvis.entitlements \
   --sign "$IDENTITY" "$APP"
-codesign --verify --strict --verbose=2 "$APP"
+codesign --verify --strict --deep --verbose=2 "$APP"
 
 DMG="Jarvis.dmg"
 DMG_IDENTIFIER="com.jarvis.coach.dmg"
