@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.7](https://github.com/JINGBANZ/jarvis/compare/v0.1.6...v0.1.7) (2026-08-17)
+
+
+### Bug Fixes
+
+* **release:** preserve signed app integrity ([#173](https://github.com/JINGBANZ/jarvis/issues/173)) ([c95c240](https://github.com/JINGBANZ/jarvis/commit/c95c2405962f3e808ee0413d45bca37da631a427))
+
 ## [0.1.6](https://github.com/JINGBANZ/jarvis/compare/v0.1.5...v0.1.6) (2026-08-17)
 
 
