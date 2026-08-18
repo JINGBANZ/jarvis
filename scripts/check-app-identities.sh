@@ -18,6 +18,14 @@ plist_value() {
 [[ "$(plist_value CFBundleIdentifier)" == "com.jarvis.coach" ]] \
   || fail "Resources/Info.plist must keep the production bundle id com.jarvis.coach."
 
+[[ "$(plist_value SUFeedURL)" == https://github.com/*/releases/latest/download/appcast.xml ]] \
+  || fail "Resources/Info.plist must point Sparkle at the published appcast asset."
+[[ "$(plist_value SUEnableAutomaticChecks)" == "false" ]] \
+  || fail "Sparkle must never schedule its own checks or prompt to enable them."
+# A placeholder here would ship an app that cannot verify any update it downloads.
+[[ "$(plist_value SUPublicEDKey)" =~ ^[A-Za-z0-9+/]{43}=$ ]] \
+  || fail "Resources/Info.plist must carry a real base64 Ed25519 SUPublicEDKey."
+
 dev_script="scripts/build-app.sh"
 for required in \
   'APP_NAME="Jarvis Dev"' \
@@ -25,7 +33,8 @@ for required in \
   'BUNDLE_ID="com.jarvis.coach.dev"' \
   '/usr/bin/plutil -replace CFBundleName -string "$APP_NAME" "$APP/Contents/Info.plist"' \
   '/usr/bin/plutil -replace CFBundleDisplayName -string "$APP_NAME" "$APP/Contents/Info.plist"' \
-  '/usr/bin/plutil -replace CFBundleIdentifier -string "$BUNDLE_ID" "$APP/Contents/Info.plist"'
+  '/usr/bin/plutil -replace CFBundleIdentifier -string "$BUNDLE_ID" "$APP/Contents/Info.plist"' \
+  '/usr/bin/plutil -remove SUFeedURL "$APP/Contents/Info.plist"'
 do
   /usr/bin/grep -Fqx "$required" "$dev_script" \
     || fail "$dev_script must assemble Jarvis Dev.app with its independent bundle identity."

@@ -114,6 +114,28 @@ jobs:
           export NOTARY_KEY_PATH
           ./scripts/package-app.sh
 
+      # Sparkle's feed. Signed here rather than in package-app.sh because stapling rewrites the disk
+      # image: the EdDSA signature has to cover the exact bytes the release serves. The release notes
+      # are rendered through GitHub's own Markdown API so the update dialog shows the same text as
+      # the Release page, without adding a Markdown converter to the toolchain.
+      - name: Sign the update and render the appcast
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          NOTES_MD="$RUNNER_TEMP/appcast-notes.md"
+          NOTES_HTML="$RUNNER_TEMP/appcast-notes.html"
+          gh release view "$TAG" --json body --jq .body > "$NOTES_MD"
+          # A release with an empty body is publishable, so it must not fail the feed: the appcast
+          # simply carries no description and Sparkle shows the update without notes.
+          if [[ -s "$NOTES_MD" ]]; then
+            gh api --method POST /markdown -f mode=gfm -f text="$(cat "$NOTES_MD")" > "$NOTES_HTML"
+            ./scripts/generate-appcast.sh Jarvis.dmg "$TAG" "$NOTES_HTML"
+          else
+            ./scripts/generate-appcast.sh Jarvis.dmg "$TAG"
+          fi
+
       # The Release is created as a draft (release-please-config.json), so a failed build/sign/
       # notarize/verify run never leaves a public Release without its app — publishing happens only
       # after the assets and user-facing install notes are ready. force-tag-creation makes
@@ -125,12 +147,25 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.release-please.outputs.tag_name }}
         run: |
-          ASSET="Jarvis.dmg"
-          ASSET_LABEL="Jarvis for Apple silicon (macOS 14.2+)"
-          if [[ ! -f "$ASSET" || -L "$ASSET" ]]; then
-            echo "error: expected one regular $ASSET release artifact" >&2
-            exit 1
-          fi
+          # Two assets, both load-bearing: the disk image users install, and the Sparkle feed the
+          # installed app reads to find its successor. macOS ships bash 3.2, so labels come from a
+          # case statement rather than an associative array.
+          APP_ASSET="Jarvis.dmg"
+          APPCAST_ASSET="appcast.xml"
+          ASSETS=("$APP_ASSET" "$APPCAST_ASSET")
+          asset_label() {
+            case "$1" in
+              "$APP_ASSET") echo "Jarvis for Apple silicon (macOS 14.2+)" ;;
+              "$APPCAST_ASSET") echo "Sparkle update feed" ;;
+              *) echo "error: no label for release asset $1" >&2; return 1 ;;
+            esac
+          }
+          for asset in "${ASSETS[@]}"; do
+            if [[ ! -f "$asset" || -L "$asset" ]]; then
+              echo "error: expected one regular $asset release artifact" >&2
+              exit 1
+            fi
+          done
 
           CURRENT_NOTES="$RUNNER_TEMP/current-release-notes.md"
           RELEASE_NOTES="$RUNNER_TEMP/release-notes.md"
@@ -154,7 +189,9 @@ jobs:
             exit 1
           fi
           gh release view "$TAG" --json assets --jq '.assets[].name' > "$ASSET_NAMES"
-          UNEXPECTED_ASSETS="$(awk -v expected="$ASSET" '$0 != expected { print }' "$ASSET_NAMES")"
+          EXPECTED_NAMES="$RUNNER_TEMP/expected-release-assets.txt"
+          printf '%s\n' "${ASSETS[@]}" > "$EXPECTED_NAMES"
+          UNEXPECTED_ASSETS="$(grep -Fxv -f "$EXPECTED_NAMES" "$ASSET_NAMES" || true)"
           if [[ -n "$UNEXPECTED_ASSETS" ]]; then
             echo "error: refusing to publish with unexpected app assets:" >&2
             printf '%s\n' "$UNEXPECTED_ASSETS" >&2
@@ -162,20 +199,21 @@ jobs:
           fi
           # A retry may encounter either a partial draft or a public Release whose publish response
           # was lost. Draft assets are safe to replace; public assets must never be deleted here.
-          for asset in "$ASSET"; do
+          for asset in "${ASSETS[@]}"; do
+            LABEL="$(asset_label "$asset")"
             if grep -Fxq "$asset" "$ASSET_NAMES"; then
               gh release download "$TAG" --pattern "$asset" --dir "$ASSET_DIR"
               if cmp -s "$asset" "$ASSET_DIR/$asset"; then
                 echo "existing release asset is identical: $asset"
               elif [[ "$RELEASE_IS_DRAFT" == "true" ]]; then
                 echo "replacing different draft release asset: $asset"
-                gh release upload "$TAG" "$asset#$ASSET_LABEL" --clobber
+                gh release upload "$TAG" "$asset#$LABEL" --clobber
               else
                 echo "error: release already has a different $asset; preserving it" >&2
                 exit 1
               fi
             else
-              gh release upload "$TAG" "$asset#$ASSET_LABEL"
+              gh release upload "$TAG" "$asset#$LABEL"
             fi
           done
           gh release edit "$TAG" --notes-file "$RELEASE_NOTES" --draft=false --latest

@@ -1,14 +1,16 @@
 import AppKit
 import JarvisCore
 
-/// Menu-bar status item: Start/Stop, Settings, Quit, then the build version — every item in the
-/// standard icon+title format (see `NSMenuItem+Standard.swift`). It renders the same overall
-/// `JarvisReadiness.Status` as Activity; no connection/capture policy is duplicated in this AppKit
-/// adapter.
+/// Menu-bar status item: Start/Stop, Settings, Check for Updates, Quit, then the build version —
+/// every command in the standard icon+title format (see `NSMenuItem+Standard.swift`). It renders the
+/// same overall `JarvisReadiness.Status` as Activity; no connection/capture policy is duplicated in
+/// this AppKit adapter.
 @MainActor
 final class MenuBarController: NSObject {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let startStopItem = NSMenuItem.standard("Start Jarvis", symbol: "play.fill", keyEquivalent: "s")
+    /// Nil in a development bundle, which carries no update feed — see `UpdateController`.
+    private let updateItem: NSMenuItem?
     private(set) var status: JarvisReadiness.Status = .stopped
     /// Whether a pipeline exists, including its startup/reconnect windows.
     var isRunning: Bool { status.keepsSessionActive }
@@ -19,20 +21,42 @@ final class MenuBarController: NSObject {
     var onStop: (() -> Void)?
     /// Fired when the user picks "Settings…". Opens the unified Settings window.
     var onOpenSettings: (() -> Void)?
+    /// Fired when the user picks "Check for Updates…". Answers whether Sparkle can start a check, so
+    /// the item can render its own availability without this adapter importing Sparkle.
+    private let updateAvailability: (() -> Bool)?
+    private let onCheckForUpdates: (() -> Void)?
 
-    override init() {
+    /// - Parameters:
+    ///   - updateAvailability: whether an update check can start right now, or nil when this build
+    ///     has no updater at all — the item is then omitted rather than shown disabled forever.
+    ///   - onCheckForUpdates: runs the explicit check.
+    init(updateAvailability: (() -> Bool)? = nil, onCheckForUpdates: (() -> Void)? = nil) {
+        self.updateAvailability = updateAvailability
+        self.onCheckForUpdates = onCheckForUpdates
+        updateItem = updateAvailability == nil
+            ? nil
+            : .standard("Check for Updates…", symbol: "arrow.down.circle")
         super.init()
         startStopItem.target = self
         startStopItem.action = #selector(toggleStartStop)
+        updateItem?.target = self
+        updateItem?.action = #selector(checkForUpdates)
         let menu = NSMenu()
         menu.items = [
             startStopItem,
             .standard("Settings…", symbol: "gearshape",
                       action: #selector(openSettings), target: self, keyEquivalent: ","),
+        ]
+        if let updateItem { menu.items.append(updateItem) }
+        menu.items.append(contentsOf: [
             .standard("Quit Jarvis", symbol: "power",
                       action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"),
             Self.versionItem(),
-        ]
+        ])
+        // The item's availability depends on live session state, so resolve it when the menu opens
+        // rather than caching it at build time.
+        menu.autoenablesItems = false
+        menu.delegate = self
         statusItem.menu = menu
         refreshUI()
     }
@@ -70,10 +94,16 @@ final class MenuBarController: NSObject {
 
         let item = NSMenuItem()
         item.view = container
+        // The menu disables automatic validation so the update item can resolve its own availability
+        // when the menu opens, so this caption states the inert state AppKit would otherwise infer
+        // from its missing action.
+        item.isEnabled = false
         return item
     }
 
     @objc private func openSettings() { onOpenSettings?() }
+
+    @objc private func checkForUpdates() { onCheckForUpdates?() }
 
     @objc private func toggleStartStop() {
         if status.keepsSessionActive {
@@ -91,6 +121,18 @@ final class MenuBarController: NSObject {
         button.image = status.isReady ? MenuBarIcon.running : MenuBarIcon.stopped
         button.title = ""
         button.toolTip = status.menuDescription
+    }
+}
+
+extension MenuBarController: NSMenuDelegate {
+    /// An update installs by quitting and relaunching Jarvis, and its dialog is not one of the
+    /// presentation paths the runtime safety boundary permits during a live session — so the check is
+    /// offered only while stopped, and only when Sparkle has no check already in flight.
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        guard let updateItem, let updateAvailability else { return }
+        let running = status.keepsSessionActive
+        updateItem.isEnabled = !running && updateAvailability()
+        updateItem.toolTip = running ? "Stop Jarvis to check for updates" : nil
     }
 }
 

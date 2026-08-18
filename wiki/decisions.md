@@ -1815,3 +1815,29 @@
 - **Detail:** [build-and-run.md → Distribution](./build-and-run.md#distribution--signed-notarized-releases-from-ci),
   `scripts/dmg-settings.py`, `scripts/verify-dmg-layout.py`, `scripts/check-release-config.sh`,
   `scripts/verify-release.sh`.
+
+### 2026-08-18 — Sparkle updates the installed app, and only when asked
+
+- **Chose:** Add a menu-bar **Check for Updates…** item backed by Sparkle 2, reading an `appcast.xml`
+  asset published beside `Jarvis.dmg` on each Release. Checks are user-initiated only; the item is
+  disabled while a session is live and absent from development builds. Sparkle's sandbox-only XPC
+  services are dropped before signing, and the feed's EdDSA key lives in the existing `release`
+  environment.
+- **Why:** Updating meant either adopting Sparkle or hand-writing a downloader that replaces the
+  running bundle. Sparkle is the standard for Developer ID distribution and already implements the
+  two checks that matter — an EdDSA signature over the downloaded image, plus a Developer ID identity
+  match with the running app — so the reused code is exactly the security-critical part. A remote
+  binary target carrying a prebuilt XCFramework resolves under Command Line Tools, which was verified
+  before committing to the approach, so the repo keeps building without an `.xcodeproj`. Manual-only
+  checking is what keeps the updater inside the runtime safety boundary: a scheduled check, or
+  Sparkle's first-launch prompt about enabling one, would present UI on an autonomous path.
+- **Rejected:** (a) A custom updater over the GitHub Releases API—it would reimplement signature
+  verification and self-replacement, the parts most costly to get subtly wrong, to avoid a dependency
+  that costs packaging work instead. (b) A menu item that merely opens the release page—it leaves the
+  user doing the install by hand, which is the thing being removed. (c) Sparkle's stock 24-hour
+  background check, gated on idle—useful, but it adds lifecycle coordination and an autonomous
+  presentation path in exchange for saving one click. (d) Shipping the XPC services because Sparkle
+  bundles them—they cannot run outside an App Sandbox, so they would only notarize dead code.
+- **Detail:** [build-and-run.md → In-app updates](./build-and-run.md#in-app-updates--sparkle-over-the-release-feed),
+  `Sources/JarvisApp/Updates/UpdateController.swift`, `scripts/generate-appcast.sh`,
+  `scripts/package-app.sh`, `scripts/check-release-config.sh`.
