@@ -18,7 +18,10 @@ plist_value() {
 [[ "$(plist_value CFBundleIdentifier)" == "com.jarvis.coach" ]] \
   || fail "Resources/Info.plist must keep the production bundle id com.jarvis.coach."
 
-[[ "$(plist_value SUFeedURL)" == https://github.com/*/releases/latest/download/appcast.xml ]] \
+# Exact, not a glob: `*` matches `/` in a bash pattern, so a wildcard here would accept a feed
+# hosted under any account — and this field decides where installed copies fetch their updates.
+[[ "$(plist_value SUFeedURL)" \
+   == "https://github.com/JINGBANZ/jarvis/releases/latest/download/appcast.xml" ]] \
   || fail "Resources/Info.plist must point Sparkle at the published appcast asset."
 [[ "$(plist_value SUEnableAutomaticChecks)" == "false" ]] \
   || fail "Sparkle must never schedule its own checks or prompt to enable them."
