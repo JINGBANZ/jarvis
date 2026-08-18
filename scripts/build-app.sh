@@ -77,7 +77,8 @@ cp "$BIN_PATH" "$APP/Contents/MacOS/$BIN_NAME"
 # Sparkle is linked dynamically, so the framework must be embedded even though the development
 # bundle has no update feed — without it dyld cannot start the app at all.
 ditto "$(dirname "$BIN_PATH")/Sparkle.framework" "$APP/Contents/Frameworks/Sparkle.framework"
-rm -rf "$APP/Contents/Frameworks/Sparkle.framework/Versions/Current/XPCServices"
+rm -rf "$APP/Contents/Frameworks/Sparkle.framework/Versions/Current/XPCServices" \
+       "$APP/Contents/Frameworks/Sparkle.framework/XPCServices"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 cp Resources/Jarvis.icns "$APP/Contents/Resources/Jarvis.icns"
 # Resources/Info.plist remains the production source of truth. Override only the identity fields in
