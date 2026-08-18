@@ -132,8 +132,22 @@ cleanup_dmg_stage() {
   if [[ -n "${DMG_STAGE:-}" && -n "${DMG_STAGE_PREFIX:-}" \
         && "$DMG_STAGE" == "$DMG_STAGE_PREFIX"* && -d "$DMG_STAGE" \
         && ! -L "$DMG_STAGE" ]]; then
-    if find "$DMG_STAGE" -type l -print -quit | grep -q .; then
-      echo "error: refusing to clean disk-image staging with an unexpected symbolic link" >&2
+    # A versioned framework is built out of relative symlinks (Versions/Current plus the aliases
+    # beside it), so the staged app legitimately contains them. What must never appear is a link
+    # resolving outside the staging directory — the only way this cleanup could reach anything else.
+    # A dangling link resolves to nothing and is treated as escaping, so the check fails closed.
+    stage_real="$(cd "$DMG_STAGE" && pwd -P)"
+    escaping_links=""
+    while IFS= read -r link; do
+      target="$(cd "$(dirname "$link")" 2>/dev/null && realpath "$(readlink "$link")" 2>/dev/null)" || true
+      case "$target" in
+        "$stage_real"/*) ;;
+        *) escaping_links="$escaping_links$link"$'\n' ;;
+      esac
+    done < <(find "$DMG_STAGE" -type l)
+    if [ -n "$escaping_links" ]; then
+      echo "error: refusing to clean disk-image staging with a symbolic link outside it:" >&2
+      printf '%s' "$escaping_links" >&2
       exit_code=1
     else
       rm -rf -- "$DMG_STAGE"
