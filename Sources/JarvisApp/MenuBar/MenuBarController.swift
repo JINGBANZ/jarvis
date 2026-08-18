@@ -1,9 +1,10 @@
 import AppKit
 import JarvisCore
 
-/// Menu-bar status item: Start/Stop, Settings, Quit — every item in the standard icon+title format
-/// (see `NSMenuItem+Standard.swift`). It renders the same overall `JarvisReadiness.Status` as Activity;
-/// no connection/capture policy is duplicated in this AppKit adapter.
+/// Menu-bar status item: the build version, then Start/Stop, Settings, Quit — every item in the
+/// standard icon+title format (see `NSMenuItem+Standard.swift`). It renders the same overall
+/// `JarvisReadiness.Status` as Activity; no connection/capture policy is duplicated in this AppKit
+/// adapter.
 @MainActor
 final class MenuBarController: NSObject {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -25,6 +26,8 @@ final class MenuBarController: NSObject {
         startStopItem.action = #selector(toggleStartStop)
         let menu = NSMenu()
         menu.items = [
+            Self.versionItem(),
+            .separator(),
             startStopItem,
             .standard("Settings…", symbol: "gearshape",
                       action: #selector(openSettings), target: self, keyEquivalent: ","),
@@ -39,6 +42,15 @@ final class MenuBarController: NSObject {
     func setStatus(_ status: JarvisReadiness.Status) {
         self.status = status
         refreshUI()
+    }
+
+    /// The running build's marketing version, so a user reporting an issue can read it off the menu
+    /// without opening Settings. `Resources/Info.plist` is the single source (release-please rewrites
+    /// it), and both the release and the development bundle carry it. No action means AppKit renders
+    /// it as a disabled caption rather than a clickable command.
+    private static func versionItem() -> NSMenuItem {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
+        return .standard("Version \(version ?? "unknown")", symbol: "info.circle")
     }
 
     @objc private func openSettings() { onOpenSettings?() }
