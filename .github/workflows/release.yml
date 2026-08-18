@@ -174,7 +174,7 @@ jobs:
             cp "$CURRENT_NOTES" "$RELEASE_NOTES"
           else
             INSTALL_HEADER="$RUNNER_TEMP/release-header.md"
-            DOWNLOAD_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/download/${TAG}/${ASSET}"
+            DOWNLOAD_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/download/${TAG}/${APP_ASSET}"
             sed "s|@JARVIS_DOWNLOAD_URL@|$DOWNLOAD_URL|g" \
               .github/release-header.md > "$INSTALL_HEADER"
             cat "$INSTALL_HEADER" "$CURRENT_NOTES" > "$RELEASE_NOTES"

@@ -114,10 +114,13 @@ if ! /usr/bin/grep -Fq './scripts/generate-appcast.sh Jarvis.dmg "$TAG" "$NOTES_
   echo "Release publication must sign the update feed with the release-scoped Sparkle key." >&2
   exit 1
 fi
-if ! /usr/bin/grep -Fq '"$SIGN_UPDATE" --ed-key-file - --verify "$DMG" "$SIGNATURE"' \
+# The signing key must be proven to be the one installed copies verify against, and the notes must be
+# escaped so they cannot break out of the feed's CDATA section into markup.
+if ! /usr/bin/grep -Fq 'if [[ "$DERIVED_PUBLIC_KEY" != "$(plist_value SUPublicEDKey)" ]]; then' \
       "$appcast_script" \
+    || ! /usr/bin/grep -Fq "]]]]><![CDATA[>" "$appcast_script" \
     || ! /usr/bin/grep -Fq 'releases/download/$TAG/Jarvis.dmg' "$appcast_script"; then
-  echo "Appcast generation must pin the enclosure to its tag and verify the signature it records." >&2
+  echo "Appcast generation must pin the enclosure to its tag, prove the signing key matches SUPublicEDKey, and split CDATA terminators." >&2
   exit 1
 fi
 if ! /usr/bin/grep -Fq 'xcrun notarytool submit "$artifact"' "$package_script"; then

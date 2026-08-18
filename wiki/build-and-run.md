@@ -133,7 +133,10 @@ running app. That second check is also why TCC grants survive an update — macO
 signature that does not change between releases. The EdDSA private key is held as the
 `SPARKLE_ED_PRIVATE_KEY` secret in the same `release` environment as the signing and notarization
 credentials, and `generate-appcast.sh` reads it on standard input so it never reaches a process list.
-Losing it would strand every installed copy on its current version.
+Losing it would strand every installed copy on its current version. Before signing, the script derives
+the key's public half and requires it to equal `SUPublicEDKey`: signing and verifying with one private
+key proves only that the key is well-formed, so without this a rotated or mistyped secret would
+publish a feed that every installed copy silently rejects until the next release.
 
 Checks are user-initiated only. `SUEnableAutomaticChecks` is false, which stops both scheduled
 background checks and Sparkle's first-launch prompt offering to enable them — either would present UI

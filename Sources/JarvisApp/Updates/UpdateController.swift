@@ -27,6 +27,7 @@ final class UpdateController {
 
     /// Runs an explicit check, presenting Sparkle's standard UI for the result either way.
     func checkForUpdates() {
+        // ghost-mode-allowed: explicit menu action, offered only while no session is live
         controller.updater.checkForUpdates()
     }
 }
