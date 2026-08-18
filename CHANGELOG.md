@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.8](https://github.com/JINGBANZ/jarvis/compare/v0.1.7...v0.1.8) (2026-08-18)
+
+
+### Features
+
+* **menubar:** add check for updates via sparkle ([#177](https://github.com/JINGBANZ/jarvis/issues/177)) ([5d5fd34](https://github.com/JINGBANZ/jarvis/commit/5d5fd344e7b8080efa65ae9311ebd6f23f31102b))
+* **menubar:** show the build version in the menu ([#175](https://github.com/JINGBANZ/jarvis/issues/175)) ([28815cb](https://github.com/JINGBANZ/jarvis/commit/28815cbc11021ac95437186e8dac760c1628841f))
+
 ## [0.1.7](https://github.com/JINGBANZ/jarvis/compare/v0.1.6...v0.1.7) (2026-08-17)
 
 
