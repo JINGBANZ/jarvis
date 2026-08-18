@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.9](https://github.com/JINGBANZ/jarvis/compare/v0.1.8...v0.1.9) (2026-08-18)
+
+
+### Bug Fixes
+
+* **release:** allow framework symlinks when cleaning dmg staging ([#179](https://github.com/JINGBANZ/jarvis/issues/179)) ([4c0dae1](https://github.com/JINGBANZ/jarvis/commit/4c0dae155973ad2e96c7122b49353bf2cd517b86))
+
 ## [0.1.8](https://github.com/JINGBANZ/jarvis/compare/v0.1.7...v0.1.8) (2026-08-18)
 
 
