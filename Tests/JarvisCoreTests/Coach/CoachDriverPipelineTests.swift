@@ -2372,11 +2372,15 @@ private func waitForSemaphore(_ semaphore: DispatchSemaphore) async {
     }
 }
 
-/// The main actor is deliberately blocked before the route task starts. Yielding here lets that task
-/// commit its lock-protected notice and park at the actor hop before the test refreshes clients.
+/// The main actor is deliberately blocked before the route task starts, so once that task reaches
+/// its delivery hop it parks there until the test releases it — a state that waiting longer can only
+/// help us reach. Yielding reschedules *this* task and never hands the route task any CPU of its
+/// own, so on a loaded machine the refresh below could land before the notice was even committed,
+/// and the delivery would then carry the refreshed callback instead of the original one. Sleeping
+/// gives the route task real scheduling opportunities rather than spinning through this one.
 private func allowPendingRouteDeliveryToReachMainActor() async {
-    for _ in 0..<1_000 {
-        await Task.yield()
+    for _ in 0..<300 {
+        try? await Task.sleep(for: .milliseconds(1))
     }
 }
 

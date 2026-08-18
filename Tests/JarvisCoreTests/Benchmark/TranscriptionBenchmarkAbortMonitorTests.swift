@@ -9,6 +9,7 @@ struct TranscriptionBenchmarkAbortMonitorTests {
         let directory = ActivityLogTests.tmp()
         defer { try? FileManager.default.removeItem(at: directory) }
         let marker = directory.appendingPathComponent("abort")
+        let setupFinished = SetupCompletionFlag()
         let operation = Task {
             try await TranscriptionBenchmarkAbortMonitor.run(
                 marker: marker,
@@ -16,6 +17,7 @@ struct TranscriptionBenchmarkAbortMonitorTests {
             ) {
                 await withCheckedContinuation { continuation in
                     DispatchQueue.global().asyncAfter(deadline: .now() + 1) {
+                        setupFinished.set()
                         continuation.resume(returning: "finished")
                     }
                 }
@@ -23,14 +25,16 @@ struct TranscriptionBenchmarkAbortMonitorTests {
         }
 
         try await Task.sleep(for: .milliseconds(50))
-        let abortStartedAt = ContinuousClock.now
         try Data().write(to: marker)
         do {
             _ = try await operation.value
             Issue.record("expected the abort marker to win the setup race")
         } catch TranscriptionBenchmarkAbortMonitor.Failure.aborted {
-            let elapsed = abortStartedAt.duration(to: .now)
-            #expect(elapsed < .milliseconds(500))
+            // Ordering, not wall clock: "did not wait for the operation" is exactly "returned while
+            // the operation was still outstanding". A loaded machine can delay this return by
+            // hundreds of milliseconds with the monitor never having waited on anything, which an
+            // elapsed-time budget misreads as a regression.
+            #expect(!setupFinished.isSet)
         } catch {
             Issue.record("expected an aborted failure, got \(error)")
         }
@@ -49,4 +53,12 @@ struct TranscriptionBenchmarkAbortMonitorTests {
 
         #expect(value == "prepared")
     }
+}
+
+/// `@unchecked Sendable` is safe because `lock` guards `completed`.
+private final class SetupCompletionFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var completed = false
+    var isSet: Bool { lock.withLock { completed } }
+    func set() { lock.withLock { completed = true } }
 }

@@ -175,20 +175,34 @@ import Testing
             captureDirectory: directory,
             executable: executable)
 
-        let capture = Task.detached { runner.capture(arguments: []) }
-        try await waitForFile(exitedFile, pollNanoseconds: 500_000)
-        // Repeat across the window: with no pending-request latch, a request that arrives once the
-        // call has returned is a no-op, so over-asking cannot itself poison the runner.
-        for _ in 0..<200 {
-            runner.cancelCapture()
-            try await Task.sleep(nanoseconds: 500_000)
+        // That window is only as wide as the read and delete take, and a loaded machine can starve
+        // the wait below past its close — every request then lands on a finished call and is
+        // correctly a no-op, which is a missed race rather than a regression. Re-run it instead of
+        // failing on a window we never entered; a held-over request is still caught by the
+        // follow-up capture on whichever attempt does land inside it.
+        var landedInWindow = false
+        attempts: for _ in 0..<20 {
+            try? FileManager.default.removeItem(at: exitedFile)
+            let capture = Task.detached { runner.capture(arguments: []) }
+            try await waitForFile(exitedFile, pollNanoseconds: 500_000)
+            // Repeat across the window: with no pending-request latch, a request that arrives once
+            // the call has returned is a no-op, so over-asking cannot itself poison the runner.
+            for _ in 0..<200 {
+                runner.cancelCapture()
+                try await Task.sleep(nanoseconds: 500_000)
+            }
+            switch await capture.value {
+            case .cancelled:
+                landedInWindow = true
+                break attempts
+            case .captured:
+                continue attempts
+            case .failed, .cleanupFailed:
+                Issue.record("the raced capture must not fail outright")
+                break attempts
+            }
         }
-        switch await capture.value {
-        case .cancelled:
-            break
-        case .captured, .failed, .cleanupFailed:
-            Issue.record("expected the in-flight capture to answer the cancellation itself")
-        }
+        try #require(landedInWindow, "never landed a cancellation inside the post-exit window")
 
         // The request belonged to that capture. An unrelated later one must still shoot.
         switch runner.capture(arguments: []) {
