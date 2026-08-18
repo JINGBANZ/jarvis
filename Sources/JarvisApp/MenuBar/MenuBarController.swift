@@ -1,9 +1,10 @@
 import AppKit
 import JarvisCore
 
-/// Menu-bar status item: Start/Stop, Settings, Quit — every item in the standard icon+title format
-/// (see `NSMenuItem+Standard.swift`). It renders the same overall `JarvisReadiness.Status` as Activity;
-/// no connection/capture policy is duplicated in this AppKit adapter.
+/// Menu-bar status item: Start/Stop, Settings, Quit, then the build version — every item in the
+/// standard icon+title format (see `NSMenuItem+Standard.swift`). It renders the same overall
+/// `JarvisReadiness.Status` as Activity; no connection/capture policy is duplicated in this AppKit
+/// adapter.
 @MainActor
 final class MenuBarController: NSObject {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -30,6 +31,7 @@ final class MenuBarController: NSObject {
                       action: #selector(openSettings), target: self, keyEquivalent: ","),
             .standard("Quit Jarvis", symbol: "power",
                       action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"),
+            Self.versionItem(),
         ]
         statusItem.menu = menu
         refreshUI()
@@ -39,6 +41,36 @@ final class MenuBarController: NSObject {
     func setStatus(_ status: JarvisReadiness.Status) {
         self.status = status
         refreshUI()
+    }
+
+    /// The running build's marketing version, so a user reporting an issue can read it off the menu
+    /// without opening Settings. `Resources/Info.plist` is the single source (release-please rewrites
+    /// it), and both the release and the development bundle carry it.
+    ///
+    /// The one item that skips the icon+title command format: it is a non-interactive footer caption,
+    /// and centering needs the whole item width. A plain title would be drawn after the leading
+    /// state/image column and centered only within what remains, so the caption is a custom view —
+    /// AppKit sizes an item view to the menu's width, and the label spans it.
+    private static func versionItem() -> NSMenuItem {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
+        let label = NSTextField(labelWithString: version.map { "v\($0)" } ?? "version unknown")
+        label.font = .menuFont(ofSize: NSFont.smallSystemFontSize)
+        label.textColor = .disabledControlTextColor
+        label.alignment = .center
+        label.translatesAutoresizingMaskIntoConstraints = false
+
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 160, height: 22))
+        container.autoresizingMask = [.width]
+        container.addSubview(label)
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            label.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            label.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+        ])
+
+        let item = NSMenuItem()
+        item.view = container
+        return item
     }
 
     @objc private func openSettings() { onOpenSettings?() }

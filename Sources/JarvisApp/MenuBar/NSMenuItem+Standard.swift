@@ -1,8 +1,10 @@
 import AppKit
 
-/// The one standard format for items in the Jarvis menu-bar menu: an SF Symbol icon followed by the
-/// title. Build every item through `standard(...)` — and restyle mutable ones with `applyStandard` —
-/// so new entries automatically match; never hand-construct a bare `NSMenuItem` for the menu.
+/// The one standard format for commands in the Jarvis menu-bar menu: an SF Symbol icon followed by
+/// the title. Build every command through `standard(...)` — and restyle mutable ones with
+/// `applyStandard` — so new entries automatically match; never hand-construct a bare `NSMenuItem` for
+/// a command. The footer version caption is the sole exception: it is not a command, and centering it
+/// needs a custom item view (see `MenuBarController.versionItem()`).
 @MainActor
 extension NSMenuItem {
     static func standard(_ title: String, symbol: String,
