@@ -1,6 +1,6 @@
 # Menu-bar update via Sparkle
 
-> Design agreed 2026-08-18. Scope contract for the PR that adds a "Check for Updates…" item to the
+> Design agreed 2026-08-18. Scope contract for the PR that adds a "Check for Updates" item to the
 > Jarvis menu bar.
 
 ## Goal
@@ -32,7 +32,7 @@ App-Sandboxed, so they are deleted at embed time and never signed or notarized.
 
 ## How an update runs
 
-1. The user picks **Check for Updates…**. Nothing before this point touches the network.
+1. The user picks **Check for Updates**. Nothing before this point touches the network.
 2. Sparkle GETs `SUFeedURL` — `https://github.com/JINGBANZ/jarvis/releases/latest/download/appcast.xml`.
    GitHub resolves `/releases/latest/` to the newest non-draft, non-prerelease release.
 3. Sparkle compares the appcast's `sparkle:version` with the running `CFBundleVersion`. Equal or
@@ -74,7 +74,7 @@ automatically?" prompt, which would itself be an autonomous presentation.
 - `Sources/JarvisApp/Updates/UpdateController.swift` — new. A thin adapter over
   `SPUStandardUpdaterController`. Its initializer fails when `SUFeedURL` is absent, which is how
   development builds end up with no updater rather than a build-time flag.
-- `Sources/JarvisApp/MenuBar/MenuBarController.swift` — a "Check for Updates…" item between
+- `Sources/JarvisApp/MenuBar/MenuBarController.swift` — a "Check for Updates" item between
   Settings… and Quit, built with the existing `.standard(...)` helper. Omitted when there is no
   updater; disabled while the session is active.
 - `Sources/JarvisApp/App/AppDelegate.swift` — owns the controller, wires the callback.

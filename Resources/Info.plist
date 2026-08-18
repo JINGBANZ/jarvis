@@ -14,7 +14,7 @@
   <key>CFBundleIconFile</key><string>Jarvis.icns</string>
   <key>LSMinimumSystemVersion</key><string>14.2</string>
   <key>LSUIElement</key><true/>
-  <!-- Sparkle, for the menu bar's "Check for Updates…" item. The feed is the appcast.xml asset
+  <!-- Sparkle, for the menu bar's "Check for Updates" item. The feed is the appcast.xml asset
        published beside Jarvis.dmg on each Release; /releases/latest/ resolves to the newest
        published one. scripts/build-app.sh removes SUFeedURL from the development bundle, which is
        how a local build ends up with no updater at all.

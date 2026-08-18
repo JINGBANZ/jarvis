@@ -1,7 +1,7 @@
 import Foundation
 import Sparkle
 
-/// Sparkle adapter for the menu bar's "Check for Updates…" item.
+/// Sparkle adapter for the menu bar's "Check for Updates" item.
 ///
 /// Checks are user-initiated only: `SUEnableAutomaticChecks` is false in `Info.plist` (which also
 /// suppresses Sparkle's first-launch "check automatically?" prompt) and scheduled checks stay off

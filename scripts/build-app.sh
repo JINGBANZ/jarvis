@@ -88,7 +88,7 @@ cp Resources/Jarvis.icns "$APP/Contents/Resources/Jarvis.icns"
 /usr/bin/plutil -replace CFBundleIdentifier -string "$BUNDLE_ID" "$APP/Contents/Info.plist"
 # A development build is signed with the local "Jarvis Dev" identity, so Sparkle could never install
 # the Developer ID release over it anyway. Removing the feed leaves the app with no updater at all,
-# and the menu omits "Check for Updates…" rather than offering an action that must fail.
+# and the menu omits "Check for Updates" rather than offering an action that must fail.
 /usr/bin/plutil -remove SUFeedURL "$APP/Contents/Info.plist"
 
 echo "▶ signing with '$IDENTITY'"

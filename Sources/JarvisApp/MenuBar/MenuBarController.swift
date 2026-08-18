@@ -21,7 +21,7 @@ final class MenuBarController: NSObject {
     var onStop: (() -> Void)?
     /// Fired when the user picks "Settings…". Opens the unified Settings window.
     var onOpenSettings: (() -> Void)?
-    /// Fired when the user picks "Check for Updates…". Answers whether Sparkle can start a check, so
+    /// Fired when the user picks "Check for Updates". Answers whether Sparkle can start a check, so
     /// the item can render its own availability without this adapter importing Sparkle.
     private let updateAvailability: (() -> Bool)?
     private let onCheckForUpdates: (() -> Void)?
@@ -35,7 +35,7 @@ final class MenuBarController: NSObject {
         self.onCheckForUpdates = onCheckForUpdates
         updateItem = updateAvailability == nil
             ? nil
-            : .standard("Check for Updates…", symbol: "arrow.down.circle")
+            : .standard("Check for Updates", symbol: "arrow.down.circle")
         super.init()
         startStopItem.target = self
         startStopItem.action = #selector(toggleStartStop)

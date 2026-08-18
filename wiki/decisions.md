@@ -1818,7 +1818,7 @@
 
 ### 2026-08-18 — Sparkle updates the installed app, and only when asked
 
-- **Chose:** Add a menu-bar **Check for Updates…** item backed by Sparkle 2, reading an `appcast.xml`
+- **Chose:** Add a menu-bar **Check for Updates** item backed by Sparkle 2, reading an `appcast.xml`
   asset published beside `Jarvis.dmg` on each Release. Checks are user-initiated only; the item is
   disabled while a session is live and absent from development builds. Sparkle's sandbox-only XPC
   services are dropped before signing, and the feed's EdDSA key lives in the existing `release`

@@ -111,7 +111,7 @@ installation steps; provider credentials remain user-supplied in Settings.
 
 ## In-app updates — Sparkle over the release feed
 
-The menu bar's **Check for Updates…** item runs [Sparkle](https://sparkle-project.org) against the
+The menu bar's **Check for Updates** item runs [Sparkle](https://sparkle-project.org) against the
 `appcast.xml` asset published beside each release, so an installed Jarvis can replace itself with the
 newest signed disk image instead of the user re-downloading by hand. `SUFeedURL` points at
 `/releases/latest/download/appcast.xml`, which GitHub resolves to the newest published Release;
@@ -259,7 +259,7 @@ the human-facing coaching record. The current validation priority lives in
 - Validate realtime recovery with `./scripts/transcription-benchmark.sh reconnect`; do not disable the
   Mac's network connection. Confirm its summary reports both scoped-interruption phrases exactly once.
 - Confirm the development build's menu has **no** update item. In a signed release build, confirm
-  **Check for Updates…** is greyed out while a session runs, is enabled once stopped, and reports the
+  **Check for Updates** is greyed out while a session runs, is enabled once stopped, and reports the
   app is up to date when run against the current release.
 - Choose **Stop Jarvis** and confirm Activity ends with `session ended by user`, with no later
   transcription or coaching events.
