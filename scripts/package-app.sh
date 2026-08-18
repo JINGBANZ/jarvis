@@ -95,8 +95,10 @@ cp LICENSE THIRD_PARTY_NOTICES.md "$APP/Contents/Resources/"
 SPARKLE="$APP/Contents/Frameworks/Sparkle.framework"
 ditto "$(dirname "$BIN_PATH")/Sparkle.framework" "$SPARKLE"
 # Sparkle's XPC services exist only to install updates from inside an App Sandbox. Jarvis is not
-# sandboxed, so shipping them would notarize and distribute code that can never run.
-rm -rf "$SPARKLE/Versions/Current/XPCServices"
+# sandboxed, so shipping them would notarize and distribute code that can never run. A versioned
+# framework exposes each versioned directory through a top-level alias, so the alias goes too —
+# leaving it behind would ship a symlink pointing at something no longer there.
+rm -rf "$SPARKLE/Versions/Current/XPCServices" "$SPARKLE/XPCServices"
 
 echo "▶ signing (hardened runtime + timestamp)"
 # Sparkle brings the bundle's only nested code, and codesign seals inner code before outer: the
