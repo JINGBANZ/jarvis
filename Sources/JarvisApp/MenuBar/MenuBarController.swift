@@ -10,7 +10,8 @@ final class MenuBarController: NSObject {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let startStopItem = NSMenuItem.standard("Start Jarvis", symbol: "play.fill", keyEquivalent: "s")
     /// Nil in a development bundle, which carries no update feed — see `UpdateController`.
-    private let updateItem: NSMenuItem?
+    /// Not private: `MenuBarController+MenuDelegate.swift` refreshes it when the menu opens.
+    let updateItem: NSMenuItem?
     private(set) var status: JarvisReadiness.Status = .stopped
     /// Whether a pipeline exists, including its startup/reconnect windows.
     var isRunning: Bool { status.keepsSessionActive }
@@ -23,7 +24,8 @@ final class MenuBarController: NSObject {
     var onOpenSettings: (() -> Void)?
     /// Fired when the user picks "Check for Updates". Answers whether Sparkle can start a check, so
     /// the item can render its own availability without this adapter importing Sparkle.
-    private let updateAvailability: (() -> Bool)?
+    /// Not private for the same reason as `updateItem`.
+    let updateAvailability: (() -> Bool)?
     private let onCheckForUpdates: (() -> Void)?
 
     /// - Parameters:
@@ -121,18 +123,6 @@ final class MenuBarController: NSObject {
         button.image = status.isReady ? MenuBarIcon.running : MenuBarIcon.stopped
         button.title = ""
         button.toolTip = status.menuDescription
-    }
-}
-
-extension MenuBarController: NSMenuDelegate {
-    /// An update installs by quitting and relaunching Jarvis, and its dialog is not one of the
-    /// presentation paths the runtime safety boundary permits during a live session — so the check is
-    /// offered only while stopped, and only when Sparkle has no check already in flight.
-    func menuNeedsUpdate(_ menu: NSMenu) {
-        guard let updateItem, let updateAvailability else { return }
-        let running = status.keepsSessionActive
-        updateItem.isEnabled = !running && updateAvailability()
-        updateItem.toolTip = running ? "Stop Jarvis to check for updates" : nil
     }
 }
 
