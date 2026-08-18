@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.10](https://github.com/JINGBANZ/jarvis/compare/v0.1.9...v0.1.10) (2026-08-18)
+
+
+### Bug Fixes
+
+* **release:** remove sparkle's top-level xpc services alias ([#181](https://github.com/JINGBANZ/jarvis/issues/181)) ([f81758e](https://github.com/JINGBANZ/jarvis/commit/f81758eb8a2e3a45fe460b5ce54c31ccb6a32775))
+
 ## [0.1.9](https://github.com/JINGBANZ/jarvis/compare/v0.1.8...v0.1.9) (2026-08-18)
 
 
