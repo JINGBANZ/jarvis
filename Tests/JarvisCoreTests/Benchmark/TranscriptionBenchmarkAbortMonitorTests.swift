@@ -9,32 +9,28 @@ struct TranscriptionBenchmarkAbortMonitorTests {
         let directory = ActivityLogTests.tmp()
         defer { try? FileManager.default.removeItem(at: directory) }
         let marker = directory.appendingPathComponent("abort")
-        let setupFinished = SetupCompletionFlag()
-        let operation = Task {
+        // The operation ignores the cancellation the monitor sends it and stays outstanding until
+        // this test releases it, which is what makes the claim decidable by ordering alone. Racing
+        // a timed operation instead left the assertion measuring how promptly a loaded machine
+        // happened to schedule the abort rather than whether the abort waited for anything.
+        let setup = ManualSetupOperation()
+        defer { setup.release() }
+        let monitored = Task {
             try await TranscriptionBenchmarkAbortMonitor.run(
                 marker: marker,
                 pollInterval: .milliseconds(5)
             ) {
-                await withCheckedContinuation { continuation in
-                    DispatchQueue.global().asyncAfter(deadline: .now() + 1) {
-                        setupFinished.set()
-                        continuation.resume(returning: "finished")
-                    }
-                }
+                await setup.run()
             }
         }
 
-        try await Task.sleep(for: .milliseconds(50))
+        await setup.waitUntilStarted()
         try Data().write(to: marker)
         do {
-            _ = try await operation.value
+            _ = try await monitored.value
             Issue.record("expected the abort marker to win the setup race")
         } catch TranscriptionBenchmarkAbortMonitor.Failure.aborted {
-            // Ordering, not wall clock: "did not wait for the operation" is exactly "returned while
-            // the operation was still outstanding". A loaded machine can delay this return by
-            // hundreds of milliseconds with the monitor never having waited on anything, which an
-            // elapsed-time budget misreads as a regression.
-            #expect(!setupFinished.isSet)
+            #expect(!setup.hasFinished)
         } catch {
             Issue.record("expected an aborted failure, got \(error)")
         }
@@ -55,10 +51,69 @@ struct TranscriptionBenchmarkAbortMonitorTests {
     }
 }
 
-/// `@unchecked Sendable` is safe because `lock` guards `completed`.
-private final class SetupCompletionFlag: @unchecked Sendable {
+/// Setup work that begins when the monitor runs it and finishes only when the test releases it,
+/// standing in for a non-cooperative operation such as a model download that ignores cancellation.
+/// `@unchecked Sendable` is safe because `lock` guards every stored property.
+private final class ManualSetupOperation: @unchecked Sendable {
     private let lock = NSLock()
-    private var completed = false
-    var isSet: Bool { lock.withLock { completed } }
-    func set() { lock.withLock { completed = true } }
+    private var startWaiter: CheckedContinuation<Void, Never>?
+    private var releaseWaiter: CheckedContinuation<Void, Never>?
+    private var didStart = false
+    private var didRelease = false
+    private var didFinish = false
+
+    var hasFinished: Bool { lock.withLock { didFinish } }
+
+    func run() async -> String {
+        reportStarted()
+        await waitForRelease()
+        lock.withLock { didFinish = true }
+        return "finished"
+    }
+
+    func waitUntilStarted() async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let alreadyStarted: Bool = lock.withLock {
+                guard didStart else {
+                    startWaiter = continuation
+                    return false
+                }
+                return true
+            }
+            if alreadyStarted { continuation.resume() }
+        }
+    }
+
+    func release() {
+        let waiter: CheckedContinuation<Void, Never>? = lock.withLock {
+            didRelease = true
+            let waiting = releaseWaiter
+            releaseWaiter = nil
+            return waiting
+        }
+        waiter?.resume()
+    }
+
+    private func reportStarted() {
+        let waiter: CheckedContinuation<Void, Never>? = lock.withLock {
+            didStart = true
+            let waiting = startWaiter
+            startWaiter = nil
+            return waiting
+        }
+        waiter?.resume()
+    }
+
+    private func waitForRelease() async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let alreadyReleased: Bool = lock.withLock {
+                guard didRelease else {
+                    releaseWaiter = continuation
+                    return false
+                }
+                return true
+            }
+            if alreadyReleased { continuation.resume() }
+        }
+    }
 }

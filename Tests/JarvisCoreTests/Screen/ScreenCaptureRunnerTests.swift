@@ -156,6 +156,11 @@ import Testing
     /// finished" as "still pending", so a request landing in the window between the helper exiting
     /// and `capture(arguments:)` deregistering — the transient JPEG's read and deletion sit in it —
     /// silently cancelled the *next* screenshot instead.
+    ///
+    /// Landing inside that window depends on how long the read and delete happen to take, so this
+    /// asserts only what holds either way: the capture answers its own request and nothing survives
+    /// to reach the next one. That the request counts at all once the helper is gone is pinned by
+    /// `aCancellationArrivingAfterTheHelperExitedStillMarksItsOwnCommand`.
     @Test func cancellationLosingTheRaceWithTheHelperCancelsOnlyItsOwnCapture() async throws {
         let directory = try makeDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -175,34 +180,24 @@ import Testing
             captureDirectory: directory,
             executable: executable)
 
-        // That window is only as wide as the read and delete take, and a loaded machine can starve
-        // the wait below past its close — every request then lands on a finished call and is
-        // correctly a no-op, which is a missed race rather than a regression. Re-run it instead of
-        // failing on a window we never entered; a held-over request is still caught by the
-        // follow-up capture on whichever attempt does land inside it.
-        var landedInWindow = false
-        attempts: for _ in 0..<20 {
-            try? FileManager.default.removeItem(at: exitedFile)
-            let capture = Task.detached { runner.capture(arguments: []) }
-            try await waitForFile(exitedFile, pollNanoseconds: 500_000)
-            // Repeat across the window: with no pending-request latch, a request that arrives once
-            // the call has returned is a no-op, so over-asking cannot itself poison the runner.
-            for _ in 0..<200 {
-                runner.cancelCapture()
-                try await Task.sleep(nanoseconds: 500_000)
-            }
-            switch await capture.value {
-            case .cancelled:
-                landedInWindow = true
-                break attempts
-            case .captured:
-                continue attempts
-            case .failed, .cleanupFailed:
-                Issue.record("the raced capture must not fail outright")
-                break attempts
-            }
+        let capture = Task.detached { runner.capture(arguments: []) }
+        try await waitForFile(exitedFile, pollNanoseconds: 500_000)
+        // Repeat across the window: with no pending-request latch, a request that arrives once the
+        // call has returned is a no-op, so over-asking cannot itself poison the runner.
+        for _ in 0..<200 {
+            runner.cancelCapture()
+            try await Task.sleep(nanoseconds: 500_000)
         }
-        try #require(landedInWindow, "never landed a cancellation inside the post-exit window")
+        switch await capture.value {
+        case .cancelled, .captured:
+            // Both are correct, and which one happens comes down to how fast the read and delete
+            // were: the request either landed inside the window and was answered here, or arrived
+            // after the call had already returned and was a no-op. What has to hold either way is
+            // that it did not survive — that is the assertion below.
+            break
+        case .failed, .cleanupFailed:
+            Issue.record("the raced capture must not fail outright")
+        }
 
         // The request belonged to that capture. An unrelated later one must still shoot.
         switch runner.capture(arguments: []) {
@@ -212,6 +207,27 @@ import Testing
             Issue.record("a later capture must not inherit a spent cancellation request")
         }
         #expect(try transientJPEGs(in: directory).isEmpty)
+    }
+
+    /// The half of the regression a capture-level test can only aim at: once the helper has exited,
+    /// a cancellation still belongs to the command it was issued against. Marking it is what makes
+    /// `capture(arguments:)` report `.cancelled` on its way out rather than leaving the request to
+    /// be answered by the next screenshot.
+    @Test func aCancellationArrivingAfterTheHelperExitedStillMarksItsOwnCommand() throws {
+        let directory = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let executable = try makeExecutable(in: directory, script: "#!/bin/sh\nexit 0\n")
+        let command = ScreenCaptureRunner.Command(
+            executable: executable,
+            arguments: [],
+            output: directory.appendingPathComponent("capture.jpg"))
+
+        // Run to completion first: the helper is already gone when the request arrives, which is
+        // the state the capture call is in while it reads and deletes the transient JPEG.
+        _ = command.run()
+        command.cancel()
+
+        #expect(command.wasCancelled)
     }
 
     /// Regression: `cancelCapture()` with nothing in flight must be a no-op. `CoachDriver`'s

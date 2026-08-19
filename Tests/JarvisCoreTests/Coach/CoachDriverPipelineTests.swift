@@ -1146,14 +1146,124 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(refreshedFallback.calls.count == 1)
     }
 
-    @Test func refreshingClientsCannotDropOrRedirectACommittedSkip() async {
+    /// Regression: a route notice belongs to the callback it was committed against. A client
+    /// refresh landing after the commit but before the delivery crosses to the main actor may
+    /// neither redirect the notice onto the replacement callback nor drop it.
+    ///
+    /// The commit and the delivery are driven directly because that is the only way to sit inside
+    /// that window. Under `handleTrigger` the two are adjacent within a single task with nothing
+    /// observable in between, so a test can only guess when the commit landed — and a guess that
+    /// lands early silently asserts nothing while a guess that lands late fails for no reason.
+    @Test func aCommittedSkipIsDeliveredToTheCallbackItWasCommittedAgainst() async throws {
+        let unavailableTarget = BrainTarget(provider: .claudeCode, modelID: "claude-sonnet-5")
+        let availableTarget = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
+        let originalSkip = RouteTargetRecorder()
+        let refreshedSkip = RouteTargetRecorder()
+        let driver = CoachDriver(
+            config: .default,
+            transcript: RollingTranscript(),
+            route: ConfiguredBrainRoute(
+                targets: [
+                    ConfiguredBrainTarget(
+                        unavailable: unavailableTarget,
+                        detail: "Claude Code is signed out"),
+                    ConfiguredBrainTarget(
+                        target: availableTarget,
+                        brain: ScriptedBrain(script: [
+                            .init(toolCalls: [.staySilent(callId: "old-client")]),
+                        ])),
+                ],
+                onSkipped: { originalSkip.record($0) }),
+            screen: FakeScreen(),
+            overlay: FakeOverlay(),
+            clock: ManualClock(),
+            automaticAttemptDelay: { _ in })
+
+        let committed = try #require(driver.takeBrainSelectionStep().skipped)
+        #expect(driver.refreshBrainRouteClients(ConfiguredBrainRoute(
+            targets: [
+                ConfiguredBrainTarget(
+                    unavailable: unavailableTarget,
+                    detail: "Claude Code is still signed out"),
+                ConfiguredBrainTarget(
+                    target: availableTarget,
+                    brain: ScriptedBrain(script: [
+                        .init(toolCalls: [.staySilent(callId: "new-client")]),
+                    ])),
+            ],
+            onSkipped: { refreshedSkip.record($0) })))
+        await driver.deliverRouteSkip(committed)
+
+        #expect(originalSkip.targets == [unavailableTarget])
+        #expect(refreshedSkip.targets.isEmpty)
+    }
+
+    /// The paired transition commits the target the route left behind together with the callback
+    /// live at that moment, so the same refresh window must not redirect or drop it either.
+    @Test func aCommittedAdvanceIsDeliveredToTheCallbackItWasCommittedAgainst() async throws {
+        let unavailableTarget = BrainTarget(provider: .claudeCode, modelID: "claude-sonnet-5")
+        let availableTarget = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
+        let originalAdvance = RouteTransitionRecorder()
+        let refreshedAdvance = RouteTransitionRecorder()
+        let driver = CoachDriver(
+            config: .default,
+            transcript: RollingTranscript(),
+            route: ConfiguredBrainRoute(
+                targets: [
+                    ConfiguredBrainTarget(
+                        unavailable: unavailableTarget,
+                        detail: "Claude Code is signed out"),
+                    ConfiguredBrainTarget(
+                        target: availableTarget,
+                        brain: ScriptedBrain(script: [
+                            .init(toolCalls: [.staySilent(callId: "old-client")]),
+                        ])),
+                ],
+                onAdvanced: { originalAdvance.record(from: $0, to: $1) }),
+            screen: FakeScreen(),
+            overlay: FakeOverlay(),
+            clock: ManualClock(),
+            automaticAttemptDelay: { _ in })
+
+        // The first step skips the unavailable head and remembers where the route came from; the
+        // second commits the transition onto the target that can actually run.
+        _ = driver.takeBrainSelectionStep()
+        let committed = try #require(driver.takeBrainSelectionStep().advanced)
+        #expect(driver.refreshBrainRouteClients(ConfiguredBrainRoute(
+            targets: [
+                ConfiguredBrainTarget(
+                    unavailable: unavailableTarget,
+                    detail: "Claude Code is still signed out"),
+                ConfiguredBrainTarget(
+                    target: availableTarget,
+                    brain: ScriptedBrain(script: [
+                        .init(toolCalls: [.staySilent(callId: "new-client")]),
+                    ])),
+            ],
+            onAdvanced: { refreshedAdvance.record(from: $0, to: $1) })))
+        await driver.deliverRouteAdvance(committed)
+
+        #expect(originalAdvance.events == [
+            .init(from: unavailableTarget, to: availableTarget),
+        ])
+        #expect(refreshedAdvance.events.isEmpty)
+    }
+
+    /// The other half of the contract, driven end to end: a refresh raised from inside the notice
+    /// itself must not repeat that notice on the replacement callback, and the attempt that
+    /// follows must run on the replacement client rather than the one the route started with.
+    @Test func refreshingClientsDuringASkipRetargetsOnlyTheFollowingAttempt() async {
         let unavailableTarget = BrainTarget(provider: .claudeCode, modelID: "claude-sonnet-5")
         let availableTarget = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
         let originalAvailable = ScriptedBrain(script: [
             .init(toolCalls: [.staySilent(callId: "old-client")]),
         ])
+        let refreshedAvailable = ScriptedBrain(script: [
+            .init(toolCalls: [.staySilent(callId: "new-client")]),
+        ])
         let originalSkip = RouteTargetRecorder()
         let refreshedSkip = RouteTargetRecorder()
+        let holder = CoachDriverHolder()
         let transcript = RollingTranscript()
         let driver = CoachDriver(
             config: .default,
@@ -1165,112 +1275,88 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
                         detail: "Claude Code is signed out"),
                     ConfiguredBrainTarget(target: availableTarget, brain: originalAvailable),
                 ],
-                onSkipped: { originalSkip.record($0) }),
+                onSkipped: { target in
+                    originalSkip.record(target)
+                    holder.refreshClients(ConfiguredBrainRoute(
+                        targets: [
+                            ConfiguredBrainTarget(
+                                unavailable: unavailableTarget,
+                                detail: "Claude Code is still signed out"),
+                            ConfiguredBrainTarget(
+                                target: availableTarget,
+                                brain: refreshedAvailable),
+                        ],
+                        onSkipped: { refreshedSkip.record($0) }))
+                }),
             screen: FakeScreen(),
             overlay: FakeOverlay(),
             clock: ManualClock(),
             automaticAttemptDelay: { _ in })
+        holder.install(driver)
         transcript.append(.init(speaker: .me, text: "skip without losing the notice", at: 0))
 
-        let mainActorEntered = DispatchSemaphore(value: 0)
-        let releaseMainActor = DispatchSemaphore(value: 0)
-        let mainActorBlocker = Task { @MainActor in
-            blockMainActor(entered: mainActorEntered, release: releaseMainActor)
-        }
-        await waitForSemaphore(mainActorEntered)
-        async let outcome = driver.handleTrigger(.turnEnd)
-        await allowPendingRouteDeliveryToReachMainActor()
-
-        let refreshedAvailable = ScriptedBrain(script: [
-            .init(toolCalls: [.staySilent(callId: "new-client")]),
-        ])
-        #expect(driver.refreshBrainRouteClients(ConfiguredBrainRoute(
-            targets: [
-                ConfiguredBrainTarget(
-                    unavailable: unavailableTarget,
-                    detail: "Claude Code is still signed out"),
-                ConfiguredBrainTarget(target: availableTarget, brain: refreshedAvailable),
-            ],
-            onSkipped: { refreshedSkip.record($0) })))
-
-        releaseMainActor.signal()
-        await mainActorBlocker.value
-        #expect(await outcome == .silentByModel)
+        #expect(await driver.handleTrigger(.turnEnd) == .silentByModel)
         #expect(originalSkip.targets == [unavailableTarget])
         #expect(refreshedSkip.targets.isEmpty)
         #expect(originalAvailable.calls.isEmpty)
         #expect(refreshedAvailable.calls.count == 1)
     }
 
-    @Test func refreshingClientsCannotDropOrRedirectACommittedAdvance() async {
-        let primaryTarget = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
-        let fallbackTarget = BrainTarget(provider: .claudeCode, modelID: "claude-sonnet-5")
-        let responseGate = AsyncGate()
-        let originalPrimary = GatedThrowingBrain(
-            gate: responseGate,
-            error: BrainFailure(
-                disposition: .permanent,
-                detail: "primary permanently failed"))
-        let originalFallback = ScriptedBrain(script: [
-            .init(toolCalls: [.staySilent(callId: "old-fallback")]),
+    /// The same shape around a transition. The selection committed alongside the advance is stale
+    /// once the refresh bumps the route revision, so it must be discarded and re-taken against the
+    /// replacement client instead of running the client the route had already chosen.
+    @Test func refreshingClientsDuringAnAdvanceRetargetsOnlyTheFollowingAttempt() async {
+        let unavailableTarget = BrainTarget(provider: .claudeCode, modelID: "claude-sonnet-5")
+        let availableTarget = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
+        let originalAvailable = ScriptedBrain(script: [
+            .init(toolCalls: [.staySilent(callId: "old-client")]),
+        ])
+        let refreshedAvailable = ScriptedBrain(script: [
+            .init(toolCalls: [.staySilent(callId: "new-client")]),
         ])
         let originalAdvance = RouteTransitionRecorder()
         let refreshedAdvance = RouteTransitionRecorder()
+        let holder = CoachDriverHolder()
         let transcript = RollingTranscript()
         let driver = CoachDriver(
             config: .default,
             transcript: transcript,
             route: ConfiguredBrainRoute(
                 targets: [
-                    ConfiguredBrainTarget(target: primaryTarget, brain: originalPrimary),
-                    ConfiguredBrainTarget(target: fallbackTarget, brain: originalFallback),
+                    ConfiguredBrainTarget(
+                        unavailable: unavailableTarget,
+                        detail: "Claude Code is signed out"),
+                    ConfiguredBrainTarget(target: availableTarget, brain: originalAvailable),
                 ],
-                onAdvanced: {
-                    originalAdvance.record(from: $0, to: $1)
+                onAdvanced: { previous, current in
+                    originalAdvance.record(from: previous, to: current)
+                    holder.refreshClients(ConfiguredBrainRoute(
+                        targets: [
+                            ConfiguredBrainTarget(
+                                unavailable: unavailableTarget,
+                                detail: "Claude Code is still signed out"),
+                            ConfiguredBrainTarget(
+                                target: availableTarget,
+                                brain: refreshedAvailable),
+                        ],
+                        onAdvanced: { refreshedAdvance.record(from: $0, to: $1) }))
                 }),
             screen: FakeScreen(),
             overlay: FakeOverlay(),
             clock: ManualClock(),
             automaticAttemptDelay: { _ in })
+        holder.install(driver)
         transcript.append(.init(speaker: .me, text: "advance without losing the notice", at: 0))
 
-        async let outcome = driver.handleTrigger(.turnEnd)
-        await responseGate.waitUntilEntered()
-        let mainActorEntered = DispatchSemaphore(value: 0)
-        let releaseMainActor = DispatchSemaphore(value: 0)
-        let mainActorBlocker = Task { @MainActor in
-            blockMainActor(entered: mainActorEntered, release: releaseMainActor)
-        }
-        await waitForSemaphore(mainActorEntered)
-        await responseGate.release()
-        await allowPendingRouteDeliveryToReachMainActor()
-
-        let refreshedPrimary = ThrowingBrain(error: BrainFailure(
-            disposition: .permanent,
-            detail: "refreshed primary should not run"))
-        let refreshedFallback = ScriptedBrain(script: [
-            .init(toolCalls: [.staySilent(callId: "new-fallback")]),
-        ])
-        #expect(driver.refreshBrainRouteClients(ConfiguredBrainRoute(
-            targets: [
-                ConfiguredBrainTarget(target: primaryTarget, brain: refreshedPrimary),
-                ConfiguredBrainTarget(target: fallbackTarget, brain: refreshedFallback),
-            ],
-            onAdvanced: {
-                refreshedAdvance.record(from: $0, to: $1)
-            })))
-
-        releaseMainActor.signal()
-        await mainActorBlocker.value
-        #expect(await outcome == .silentByModel)
+        #expect(await driver.handleTrigger(.turnEnd) == .silentByModel)
         #expect(originalAdvance.events == [
-            .init(from: primaryTarget, to: fallbackTarget),
+            .init(from: unavailableTarget, to: availableTarget),
         ])
         #expect(refreshedAdvance.events.isEmpty)
-        #expect(originalFallback.calls.isEmpty)
-        #expect(refreshedPrimary.callCount == 0)
-        #expect(refreshedFallback.calls.count == 1)
+        #expect(originalAvailable.calls.isEmpty)
+        #expect(refreshedAvailable.calls.count == 1)
     }
+
 
     @Test func inFlightSuccessAcrossClientRefreshResetsTheFailureSequence() async {
         let primaryTarget = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
@@ -2372,18 +2458,6 @@ private func waitForSemaphore(_ semaphore: DispatchSemaphore) async {
     }
 }
 
-/// The main actor is deliberately blocked before the route task starts, so once that task reaches
-/// its delivery hop it parks there until the test releases it — a state that waiting longer can only
-/// help us reach. Yielding reschedules *this* task and never hands the route task any CPU of its
-/// own, so on a loaded machine the refresh below could land before the notice was even committed,
-/// and the delivery would then carry the refreshed callback instead of the original one. Sleeping
-/// gives the route task real scheduling opportunities rather than spinning through this one.
-private func allowPendingRouteDeliveryToReachMainActor() async {
-    for _ in 0..<300 {
-        try? await Task.sleep(for: .milliseconds(1))
-    }
-}
-
 /// `@unchecked Sendable` is safe because `lock` guards the recorded route transitions.
 private final class RouteTransitionRecorder: @unchecked Sendable {
     struct Event: Equatable {
@@ -2431,6 +2505,10 @@ private final class CoachDriverHolder: @unchecked Sendable {
 
     func updateRoute(_ route: ConfiguredBrainRoute) {
         lock.withLock { driver }?.updateBrainRoute(route)
+    }
+
+    func refreshClients(_ route: ConfiguredBrainRoute) {
+        lock.withLock { driver }?.refreshBrainRouteClients(route)
     }
 }
 

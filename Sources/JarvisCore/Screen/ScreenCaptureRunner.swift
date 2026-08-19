@@ -20,7 +20,11 @@ public final class ScreenCaptureRunner: @unchecked Sendable {
 
     /// `@unchecked Sendable` is justified because `lock` guards `started`, `finished`, `cancelled`,
     /// and `identity` — the whole mutable process lifecycle this command owns.
-    private final class Command: @unchecked Sendable {
+    // Module-visible rather than private so the cancel-after-exit contract below can be driven
+    // directly. Through `capture(arguments:)` that state is only reachable inside the window where
+    // the helper has exited and the transient JPEG is still being read and deleted, which a test
+    // can aim at but never be sure of entering.
+    final class Command: @unchecked Sendable {
         enum Result {
             case exited(Int32)
             case failed

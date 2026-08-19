@@ -60,7 +60,9 @@ public final class CoachDriver: @unchecked Sendable {
         let transcriptBoundary: Int?
     }
 
-    private struct AttemptBrain {
+    // Module-visible only because `BrainSelectionStep` carries one; see the note on the route
+    // delivery types below.
+    struct AttemptBrain {
         let routeRevision: UInt
         let routeTopologyRevision: UInt
         let routeIndex: Int
@@ -104,7 +106,8 @@ public final class CoachDriver: @unchecked Sendable {
         let result: AttemptResult
     }
 
-    private struct RouteExhaustionDelivery {
+    // Module-visible only because `BrainSelectionStep` carries one; see the note below.
+    struct RouteExhaustionDelivery {
         let generation: UInt
         let topologyRevision: UInt
         let target: BrainTarget
@@ -114,23 +117,31 @@ public final class CoachDriver: @unchecked Sendable {
         let callback: (@MainActor @Sendable (BrainTarget, BrainFailure) -> Void)?
     }
 
+    // Committing a route notice and delivering it are deliberately separate phases: the commit
+    // captures the callback under `stateLock`, and the delivery replays that captured callback
+    // after crossing to the main actor, so a client refresh in between can neither drop nor
+    // redirect it. The two phases and their delivery types are module-visible rather than private
+    // so a test can drive them in sequence. Through the public async API they are adjacent within
+    // one task with nothing observable in between, which leaves a test only able to guess when the
+    // commit landed — a race that no amount of waiting closes.
+
     /// A route-health notice committed under the lock and consumed once after crossing to the main
     /// actor. Client-only refreshes preserve it; an explicit topology edit supersedes it.
-    private struct RouteSkipDelivery {
+    struct RouteSkipDelivery {
         let topologyRevision: UInt
         let target: BrainTarget
         let callback: (@MainActor @Sendable (BrainTarget) -> Void)?
     }
 
     /// The paired target transition committed when the next constructible target is selected.
-    private struct RouteAdvanceDelivery {
+    struct RouteAdvanceDelivery {
         let topologyRevision: UInt
         let previous: BrainTarget
         let current: BrainTarget
         let callback: (@MainActor @Sendable (BrainTarget, BrainTarget) -> Void)?
     }
 
-    private struct BrainSelectionStep {
+    struct BrainSelectionStep {
         var selected: AttemptBrain? = nil
         var advanced: RouteAdvanceDelivery? = nil
         var skipped: RouteSkipDelivery? = nil
@@ -523,7 +534,7 @@ public final class CoachDriver: @unchecked Sendable {
         }
     }
 
-    private func takeBrainSelectionStep() -> BrainSelectionStep {
+    func takeBrainSelectionStep() -> BrainSelectionStep {
         stateLock.lock()
         defer { stateLock.unlock() }
         guard !routeIsExhausted else {
@@ -711,7 +722,7 @@ public final class CoachDriver: @unchecked Sendable {
         }
     }
 
-    private func deliverRouteSkip(_ delivery: RouteSkipDelivery) async {
+    func deliverRouteSkip(_ delivery: RouteSkipDelivery) async {
         guard let callback = delivery.callback else { return }
         await MainActor.run {
             guard isCurrentRouteTopologyRevision(delivery.topologyRevision) else {
@@ -722,7 +733,7 @@ public final class CoachDriver: @unchecked Sendable {
         }
     }
 
-    private func deliverRouteAdvance(_ delivery: RouteAdvanceDelivery) async {
+    func deliverRouteAdvance(_ delivery: RouteAdvanceDelivery) async {
         guard let callback = delivery.callback else { return }
         await MainActor.run {
             guard isCurrentRouteTopologyRevision(delivery.topologyRevision) else {
