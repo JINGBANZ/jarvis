@@ -6,7 +6,9 @@
 > does **not** apply, because the rejected alternative is exactly what you don't want to lose. A
 > running list, newest last, each entry dated. When a decision is reversed, **supersede it in place**
 > (add the `Superseded by` / `Supersedes` lines); never delete it. The *how it works* lives in the
-> core design pages — the `Detail:` line links to it rather than restating it here.
+> core design pages — the `Detail:` line links to it rather than restating it here. A few decisions earn
+> a full record in [`adr/`](./adr/README.md); those entries stay here and gain an `**ADR:**` line beside
+> `Detail:`, so this page remains the complete index.
 
 ### 2026-06-13 — Build our own proactive coach
 
@@ -1841,3 +1843,21 @@
 - **Detail:** [build-and-run.md → In-app updates](./build-and-run.md#in-app-updates--sparkle-over-the-release-feed),
   `Sources/JarvisApp/Updates/UpdateController.swift`, `scripts/generate-appcast.sh`,
   `scripts/package-app.sh`, `scripts/check-release-config.sh`.
+
+### 2026-08-19 — The decision log stays the index; ADRs are a promotion, not a replacement
+
+- **Chose:** Keep [`decisions.md`](./decisions.md) as the one chronological index of every load-bearing
+  decision, and add [`adr/`](./adr/README.md) for the few whose options comparison outgrows a four-line
+  entry. A promoted decision keeps its log entry and gains an `**ADR:**` link; entries never move out.
+  This reverses Convention 8's previous "no numbered ADR folder" rule.
+- **Why:** The log's four-line shape is what keeps 100+ entries readable, and it is the right record for
+  almost every decision — but it cannot carry a genuine multi-option trade-off analysis, so that
+  reasoning was going unwritten. Promotion on an earned bar (same test as Convention 7) buys the depth
+  without fragmenting the index: there is still exactly one place to look for what was decided.
+- **Rejected:** (a) Migrating all 102 existing entries into numbered ADRs—mechanical churn that would
+  trade a readable log for a directory of stubs, the fragmentation Convention 8 was written against.
+  (b) Keeping the log alone and writing long entries—the sync-and-cross-link burden reappears inside one
+  file, and the log stops being scannable. (c) Adding `adr/` without amending Convention 8—the wiki
+  would forbid on one page what it practices on another, and a fresh agent would hit the contradiction.
+- **Detail:** [AGENTS.md → Convention 8](./AGENTS.md#8-log-every-decision-in-one-place-promote-to-a-numbered-adr-when-one-is-earned),
+  [adr/README.md](./adr/README.md), `docs/agents/domain.md`.

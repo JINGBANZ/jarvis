@@ -25,7 +25,11 @@
 ## Decisions
 
 - **[decisions.md](./decisions.md)** — the decision log: what was chosen and why, with the rejected
-  alternative. One page, no ADR folder by design; see [AGENTS.md](./AGENTS.md) → Convention 8.
+  alternative. Every load-bearing decision has an entry here, newest last; this is the complete
+  chronological index.
+- **[adr/](./adr/README.md)** — full architecture decision records, for the few decisions whose options
+  comparison doesn't fit a log entry. Each links back to its `decisions.md` entry. When a decision earns
+  one, and the numbering and supersede rules: see [AGENTS.md](./AGENTS.md) → Convention 8.
 
 ## Meta
 

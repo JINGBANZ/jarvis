@@ -125,6 +125,24 @@ Foundation-only logic in `JarvisCore`; keep AppKit, audio, capture, and other OS
 - Command Line Tools are sufficient; no Xcode project exists. The committed AEC archive is arm64-only.
 - Launch the signed app through `./scripts/build-app.sh --run` / `open`, never the bare executable.
 
+## Agent skills
+
+### Issue tracker
+
+Issues and specs live as GitHub issues on `JINGBANZ/jarvis`, driven through the `gh` CLI. See
+`docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five canonical triage roles, each label string equal to its name: `needs-triage`, `needs-info`,
+`ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context. The wiki is the design source of truth: `wiki/index.md` to navigate,
+`wiki/decisions.md` for the decision log, `wiki/adr/` for the decisions that earned a full record, and a
+root `CONTEXT.md` glossary once one exists. See `docs/agents/domain.md`.
+
 ## Further context
 
 - Start with `wiki/index.md` and `wiki/status.md`; the full security posture is in `wiki/sandbox.md`.

@@ -36,7 +36,7 @@ substantive edits.
 Describe the system as it is now; after a change a page should read as if the old concept never existed.
 Delete on sight: "X was removed / replaced / deprecated"; "originally Y, now Z"; "Previously…", "No
 longer…", "Used to be…"; `~~struck~~` items; obsolete non-goals. The *why it changed* lives only in the
-git log and the decision log ([Convention 8](#8-log-load-bearing-decisions-in-one-place-dont-accumulate-decision-files)).
+git log and the decision log ([Convention 8](#8-log-every-decision-in-one-place-promote-to-a-numbered-adr-when-one-is-earned)).
 
 ### 4. Reference source; don't paste code.
 
@@ -52,8 +52,8 @@ Document each fact on one page; elsewhere, **link** to it. Two copies drift, and
 ### 6. Don't create empty pages.
 
 If you can't write three meaningful sentences on a topic, don't make a page — an indexed `TODO` stub is
-worse than a missing one. Exception: the scaffold pages (`index.md`, `status.md`, `decisions.md`) exist
-for structure and stay even when near-empty — but a `status.md` left full of `<placeholders>` after work
+worse than a missing one. Exception: the scaffold pages (`index.md`, `status.md`, `decisions.md`,
+[`adr/README.md`](./adr/README.md)) exist for structure and stay even when near-empty — but a `status.md` left full of `<placeholders>` after work
 starts is the stub this forbids.
 
 ### 7. Default to extending a page. Promote to a new page only when earned.
@@ -72,16 +72,39 @@ until flat stops working; let taxonomy emerge. **Adding / renaming / removing a 
 [`index.md`](./index.md) in the same edit** (a page not in the index is invisible); keep it a lightweight
 map, not a second copy.
 
-### 8. Log load-bearing decisions in one place. Don't accumulate decision files.
+### 8. Log every decision in one place. Promote to a numbered ADR when one is earned.
 
-Decisions go in one running log, [`decisions.md`](./decisions.md): one dated entry each (what you chose,
-why, what you rejected), newest last. No numbered ADR folder — that's its own sync-and-cross-link burden.
-It's a dedicated page, not part of [`status.md`](./status.md): status is volatile current-state, the log
-is durable. Log only genuinely **load-bearing, non-obvious** choices — ones a reader would re-litigate or
-a dead end they'd re-walk; skip what the code or PR already explains. This is the **one** place past
-rationale persists, so [Convention 3](#3-write-in-the-present-dont-narrate-refactors) does *not* apply to
-it. **Supersede, don't rewrite:** when a later decision reverses an earlier one, leave it and append
-`**Superseded by:** <entry>` — the lifecycle a numbered ADR would carry, in one line.
+Every load-bearing decision gets a dated entry in the one running log, [`decisions.md`](./decisions.md):
+what you chose, why, what you rejected, newest last. It's a dedicated page, not part of
+[`status.md`](./status.md): status is volatile current-state, the log is durable. Log only genuinely
+**load-bearing, non-obvious** choices — ones a reader would re-litigate or a dead end they'd re-walk;
+skip what the code or PR already explains. This is the **one** place past rationale persists, so
+[Convention 3](#3-write-in-the-present-dont-narrate-refactors) does *not* apply to it or to
+[`adr/`](./adr/).
+
+**Most decisions stop at the log entry** — four lines is the whole record, and the log stays readable
+because of it. Promote one to a full record in [`adr/`](./adr/) only when the entry can't carry it:
+
+- **The comparison is the value** — options were genuinely weighed, and a reader needs the trade-offs,
+  not just the outcome.
+- **It constrains work across several pages or subsystems** — the kind of choice you point at repeatedly
+  while reviewing unrelated changes.
+- **You expect it re-litigated** — write the rejected options down in enough detail to close the argument
+  next time.
+
+Same bar as [Convention 7](#7-default-to-extending-a-page-promote-to-a-new-page-only-when-earned): the
+log is the default, an ADR is earned. A promoted decision keeps its `decisions.md` entry and gains an
+`**ADR:**` link line beside `Detail:` — the log stays the complete chronological index, and the ADR holds
+the depth. Never move an entry out of the log.
+
+**ADR files** are `adr/NNNN-<kebab-slug>.md`, numbered from `0001`, zero-padded, monotonic, never reused
+even if an ADR is abandoned. Each opens with a `**Status:**` line (`Accepted`, or
+`Superseded by [ADR-NNNN](./NNNN-<slug>.md)`) and a `**Date:**` line, then Context / Decision /
+Alternatives considered / Consequences. [`adr/README.md`](./adr/README.md) holds the template.
+
+**Supersede, don't rewrite** — in both places. When a later decision reverses an earlier one, leave the
+original and append `**Superseded by:** <entry>`; on an ADR, flip its `**Status:**` line and add
+`**Supersedes:**` to the new one. A reversed decision is exactly the thing you don't want to lose.
 
 ### 9. Run health checks, not only per-change updates.
 
@@ -102,7 +125,8 @@ documented behavior without a doc update is incomplete; stale docs erode trust f
    "Not yet built" items (log why in `decisions.md` if load-bearing); update phase + next action.
 2. **Core page(s)** — create or update in place, present tense; touch every page whose meaning the change
    alters, not just the nearest one.
-3. **[`decisions.md`](./decisions.md)** — log any load-bearing decision.
+3. **[`decisions.md`](./decisions.md)** — log any load-bearing decision; add an
+   [`adr/`](./adr/) record if it earns one ([Convention 8](#8-log-every-decision-in-one-place-promote-to-a-numbered-adr-when-one-is-earned)).
 4. **[`index.md`](./index.md)** — update if a page was added, renamed, or removed.
 5. **Links** — confirm every link and file pointer in touched pages still resolves.
 6. **Duplicated facts** — code ↔ wiki, page ↔ page, code ↔ config: collapse to one source or link
