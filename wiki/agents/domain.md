@@ -1,86 +1,80 @@
 # Domain Docs
 
-How the engineering skills should consume this repo's domain documentation when exploring the codebase.
+Which documentation to read before exploring the codebase, and where a decision gets recorded once you
+make one.
 
-This repo keeps its design documentation in `wiki/`, not in scattered per-directory docs. The wiki is
-the design source of truth — what the system is, how it works, and why.
+This repo keeps its design documentation in [`wiki/`](../index.md) — the source of truth for what the
+system is, how it works, and why. There are no per-directory doc folders and no `CONTEXT-MAP.md`; it is
+a single-context repo.
 
 ## Before exploring, read these
 
-- **`wiki/index.md`** — the navigation layer. Every wiki page is listed there; a page not in the index
-  does not exist.
-- **`wiki/status.md`** — where the project is right now and what to do next. Read this before assuming
-  anything is built.
-- **`wiki/decisions.md`** — the running decision log, newest last. Check it for the area you're about to
-  touch before proposing a direction; a rejected alternative is recorded there for a reason.
-- **`wiki/adr/`** — full architecture decision records for the decisions that earned one. The log entry
-  in `decisions.md` links to its ADR; read the ADR when you need the options comparison, not just the
-  outcome.
-- **`CONTEXT.md`** at the repo root, if it exists — the domain glossary.
+- **[`index.md`](../index.md)** — the navigation layer. Every page is listed there; a page not in the
+  index doesn't exist. Read it before grepping the wiki.
+- **[`status.md`](../status.md)** — what is actually built and what to do next. Read it before assuming
+  a feature exists: the design pages describe intent, this one describes reality.
+- **[`decisions.md`](../decisions.md)** — the running log, newest last. Check it for the area you're
+  about to touch **before** proposing a direction. A rejected alternative is recorded there precisely so
+  it doesn't get re-proposed.
+- **[`adr/`](../adr/README.md)** — full records for the decisions that earned one. The `decisions.md`
+  entry links to its ADR; read the ADR when you need the options comparison rather than the outcome.
+- **The design page for the area you're touching** — `architecture.md` for the coaching loop,
+  `sandbox.md` for the security and isolation model, `build-and-run.md` for toolchain and packaging,
+  and the rest per `index.md`.
 
-Single-context repo: one root `CONTEXT.md`, one `wiki/adr/`. There is no `CONTEXT-MAP.md` and no
-per-directory ADR folders.
+There is no `CONTEXT.md` glossary at the root yet. If one appears, read it too. Until then the wiki
+carries the project's vocabulary. Don't flag its absence or propose creating one upfront —
+`/domain-modeling` writes it when terms actually need resolving.
 
-If any of these files don't exist, **proceed silently**. Don't flag their absence; don't suggest creating
-them upfront. The `/domain-modeling` skill (reached via `/grill-with-docs` and
-`/improve-codebase-architecture`) creates them lazily when terms or decisions actually get resolved.
+Operational facts — targets, commands, the Gate, the runtime safety boundaries — live in the root
+[`AGENTS.md`](../../AGENTS.md), not here and not in the wiki.
 
-## File structure
+## Recording a decision
 
-```
-/
-├── CONTEXT.md              ← domain glossary (created lazily)
-├── wiki/
-│   ├── index.md            ← navigation layer; update when adding a page
-│   ├── status.md           ← current state
-│   ├── decisions.md        ← the running decision log (every load-bearing decision)
-│   ├── adr/
-│   │   ├── 0001-<slug>.md  ← full records, for decisions that earned one
-│   │   └── 0002-<slug>.md
-│   ├── agents/             ← this directory: agent tooling config, not design docs
-│   └── <design pages>.md
-└── Sources/
-```
+**Every** load-bearing, non-obvious decision gets a dated entry in [`decisions.md`](../decisions.md).
+Most stop there; the four-line entry is the whole record, and the log stays readable because of it.
 
-## Writing a decision
+Promote to a numbered ADR in [`adr/`](../adr/README.md) only when the entry can't carry it: the options
+were genuinely weighed and the comparison is the value, the decision constrains several subsystems, or
+you expect it re-litigated and want the rejected options closed off in detail. A promoted decision keeps
+its log entry and gains an `ADR:` link — entries never move out of the log.
 
-**Every** load-bearing, non-obvious decision gets a dated entry in `wiki/decisions.md`. Most decisions
-stop there — the entry is the whole record.
+[`../AGENTS.md`](../AGENTS.md) → Convention 8 holds the entry format, the ADR template, numbering, and
+the supersede rule. Read it before writing either.
 
-Promote to a numbered ADR in `wiki/adr/` only when the entry can't carry it: the options were genuinely
-weighed and the comparison itself is the value, the decision constrains work across several pages or
-subsystems, or you expect it to be re-litigated and want the rejected options closed off in detail.
-When you write one, the `decisions.md` entry stays and gains an `**ADR:**` link.
+## Editing the wiki
 
-`wiki/AGENTS.md` → Convention 8 holds the entry format, the ADR template, numbering, and the
-supersede rule. Read it before writing either.
+[`../AGENTS.md`](../AGENTS.md) governs every edit under `wiki/`. It is not the root `AGENTS.md`, and it
+is not optional. The rules that most often catch agents out:
 
-## Read the wiki's rules before editing the wiki
-
-`wiki/AGENTS.md` governs every edit under `wiki/`. It is not optional and it is not the same as the root
-`AGENTS.md`. The rules that most often bite:
-
-- **Edit in place** — never dated or `v2` copies (Convention 1).
-- **Read the full page before editing it** (Convention 2).
-- **Write in the present** — don't narrate refactors; the *why it changed* lives in `decisions.md`
-  and `wiki/adr/` only (Convention 3).
-- **Reference source, don't paste code** (Convention 4).
+- **Edit in place** — never a dated or `v2` copy (Convention 1).
+- **Read the full page before editing it** — a local edit contradicting a distant section is the most
+  common failure (Convention 2).
+- **Write in the present** — don't narrate refactors. After a change the page should read as if the old
+  concept never existed; the *why it changed* lives only in `decisions.md` and `adr/` (Convention 3).
+- **Reference source, don't paste code** — signatures, config values, and constants drift the moment
+  they're copied; point at the path or symbol (Convention 4).
 - **Adding, renaming, or removing a page means updating `index.md` in the same edit** (Convention 7).
+- **Doc updates ship in the same PR as the code**, never as a later cleanup (keep-in-sync checklist).
 
-## Use the glossary's vocabulary
+This directory is the exception: it holds configuration in the skills' formats, not design prose, and is
+exempt from the page conventions above.
 
-When your output names a domain concept (in an issue title, a refactor proposal, a hypothesis, a test
-name), use the term as defined in `CONTEXT.md`, or as the wiki spells it. Don't drift to synonyms the
-glossary explicitly avoids.
+## Use the project's vocabulary
 
-If the concept you need isn't in the glossary yet, that's a signal — either you're inventing language the
-project doesn't use (reconsider) or there's a real gap (note it for `/domain-modeling`).
+When your output names a domain concept — an issue title, a refactor proposal, a hypothesis, a test name
+— spell it the way the wiki and the code spell it. One entity named two ways is exactly the drift a
+health check (Convention 9) exists to catch.
 
-## Flag decision conflicts
+If the concept you need has no name in the wiki, that's a signal: either you're inventing language the
+project doesn't use (reconsider), or there's a real gap (note it for `/domain-modeling`).
 
-If your output contradicts a recorded decision, surface it explicitly rather than silently overriding:
+## Flag conflicts rather than overriding them
 
-> _Contradicts ADR-0007 (event-sourced orders) — but worth reopening because…_
+If your output contradicts a recorded decision, say so explicitly:
 
-A contradiction between a page and the code is information, not an error to paper over. Flag it to a
-human rather than silently rewriting the page — it may encode intent the code drifted from.
+> _Contradicts the 2026-07-18 entry on technical-interview context — but worth reopening because…_
+
+If a page and the code disagree and no decision explains the gap, that's drift. Treat the code as truth
+for *what*, but flag it to a human instead of silently rewriting the page — it may encode intent the
+code drifted from.
