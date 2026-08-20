@@ -18,7 +18,8 @@ import Testing
                 ConfiguredBrainTarget(target: target, brain: brain),
             ]),
             screen: FakeScreen(), overlay: FakeOverlay(), clock: clock,
-            automaticAttemptDelay: { _ in }
+            automaticAttemptDelay: { _ in },
+            activityLog: ActivityLog()
         )
         return (driver, transcript)
     }

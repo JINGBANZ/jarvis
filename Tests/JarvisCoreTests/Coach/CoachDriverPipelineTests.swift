@@ -171,11 +171,13 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     }
 }
 
-// `.serialized`: the activity-log end-to-end tests drive the shared `ActivityLog` singleton.
-// Serializing the suite keeps their enable()/disable() calls from racing each other — they are the
-// only code that enables the shared log, so no other suite can collide.
-@Suite(.serialized) struct CoachDriverPipelineTests {
-    private func makeDriver(brain: BrainClient, brainProvider: BrainProvider? = nil,
+// Each test that reads activity owns the `ActivityLog` it hands its driver, so a snapshot holds
+// that test's rows and nothing else. Being the only suite that *enables* the shared log was never
+// enough on its own: every driver alive anywhere in the process appended to whichever log happened
+// to be enabled, so a peer suite's rows landed in these snapshots.
+@Suite struct CoachDriverPipelineTests {
+    private func makeDriver(activityLog: ActivityLog = ActivityLog(),
+                            brain: BrainClient, brainProvider: BrainProvider? = nil,
                             summarizer: BrainClient? = nil,
                             screen: ScreenCapturing = FakeScreen(),
                             overlay: OverlayRendering = FakeOverlay(),
@@ -198,7 +200,8 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             config: config, transcript: transcript,
             route: route, screen: screen, overlay: overlay, clock: clock,
             coachingAttempts: coachingAttempts,
-            automaticAttemptDelay: automaticAttemptDelay
+            automaticAttemptDelay: automaticAttemptDelay,
+            activityLog: activityLog
         )
         return (driver, transcript)
     }
@@ -209,7 +212,8 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         overlay: OverlayRendering = FakeOverlay(),
         onAdvanced: (@Sendable (BrainTarget, BrainTarget) -> Void)? = nil,
         onSkipped: (@Sendable (BrainTarget) -> Void)? = nil,
-        onExhausted: (@MainActor @Sendable (BrainTarget, BrainFailure) -> Void)? = nil
+        onExhausted: (@MainActor @Sendable (BrainTarget, BrainFailure) -> Void)? = nil,
+        activityLog: ActivityLog = ActivityLog()
     ) -> (CoachDriver, RollingTranscript) {
         let transcript = RollingTranscript()
         let route = ConfiguredBrainRoute(
@@ -227,7 +231,8 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
                 screen: screen,
                 overlay: overlay,
                 clock: ManualClock(),
-                automaticAttemptDelay: { _ in }),
+                automaticAttemptDelay: { _ in },
+                activityLog: activityLog),
             transcript)
     }
 
@@ -321,14 +326,14 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     /// the activity log as a genuine, owner-only JPEG rendered as a clickable thumbnail linked to
     /// the full image — the behaviour verified by hand, now automated against regressions.
     ///
-    /// This drives the shared `ActivityLog` singleton through the real typed activity-event path.
-    /// `disable()` in defer resets the singleton afterwards.
+    /// This drives a test-owned `ActivityLog` through the real typed activity-event path.
     @Test func screenshotLandsInActivityLogAsValidJpeg() async throws {
         let dir = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("jarvis-e2e-\(ProcessInfo.processInfo.globallyUniqueString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        defer { ActivityLog.shared.disable(); try? FileManager.default.removeItem(at: dir) }
-        ActivityLog.shared.enable(directory: dir)
+        let activityLog = ActivityLog()
+        defer { activityLog.disable(); try? FileManager.default.removeItem(at: dir) }
+        activityLog.enable(directory: dir)
 
         let clock = ManualClock(now: 100)
         let brain = ScriptedBrain(script: [
@@ -339,20 +344,21 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
                                              argumentsJSON: #"{"lines":["Watch the off-by-one there."]}"#)]),
         ])
         let screen = FakeScreen(payload: TestFixtures.tinyJpegBase64)   // a real JPEG, like screencapture
-        let (driver, transcript) = makeDriver(brain: brain, screen: screen, clock: clock)
+        let (driver, transcript) = makeDriver(
+            activityLog: activityLog, brain: brain, screen: screen, clock: clock)
         transcript.append(.init(speaker: .me, text: "here's my solution", at: 100))
 
         await driver.handleTrigger(.turnEnd)
 
         // attach() runs on the activity log's serial queue (a sync barrier after the async record()
         // calls), so everything is persisted before we assert.
-        _ = ActivityLog.shared.attach { _ in }
+        _ = activityLog.attach { _ in }
         let jsonl = try String(contentsOf: dir.appendingPathComponent("jarvis-activity.jsonl"), encoding: .utf8)
         #expect(jsonl.contains("looking at your screen"))   // the capture line
         #expect(jsonl.contains("shot-"))                     // line references the saved screenshot
 
-        // Find OUR screenshot by exact byte-match to the fixture (not just "first valid JPEG"), so a
-        // peer test sharing the singleton can't be mistaken for ours. This proves the capture
+        // Match the fixture byte for byte rather than taking the first valid JPEG, so this asserts
+        // on the image the capture actually persisted. This proves the capture
         // round-tripped to disk unchanged. Then assert it's owner-only.
         let shots = try FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)
             .filter { $0.lastPathComponent.hasPrefix("shot-") && $0.pathExtension == "jpg" }
@@ -368,23 +374,24 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     /// A hotkey trigger leaves no "🗣 heard:" transcript line (the user pressed a key, didn't speak),
     /// so the manual hint must record its OWN activity line — including the synthetic message we
     /// pre-fill as the user's request — so the viewer shows what the shortcut sent to the brain.
-    /// Drives the shared `ActivityLog` like the screenshot e2e above; the suite is `.serialized` so
-    /// the shared-log tests don't race.
+    /// Drives a test-owned `ActivityLog` like the screenshot e2e above.
     @Test func manualHintTriggerAndPrefilledMessageLandInActivityLog() async throws {
         let dir = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("jarvis-hintlog-\(ProcessInfo.processInfo.globallyUniqueString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        defer { ActivityLog.shared.disable(); try? FileManager.default.removeItem(at: dir) }
-        ActivityLog.shared.enable(directory: dir)
+        let activityLog = ActivityLog()
+        defer { activityLog.disable(); try? FileManager.default.removeItem(at: dir) }
+        activityLog.enable(directory: dir)
 
         let clock = ManualClock(now: 100)
         let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s", lines: ["use a hash map"])])])
-        let (driver, transcript) = makeDriver(brain: brain, clock: clock)
+        let (driver, transcript) = makeDriver(
+            activityLog: activityLog, brain: brain, clock: clock)
         transcript.append(.init(speaker: .me, text: "stuck on two-sum", at: 100))
 
         await driver.handleTrigger(.manualHint)
 
-        _ = ActivityLog.shared.attach { _ in }   // sync barrier: all async record()s have landed
+        _ = activityLog.attach { _ in }   // sync barrier: all async record()s have landed
         let jsonl = try String(contentsOf: dir.appendingPathComponent("jarvis-activity.jsonl"), encoding: .utf8)
         // The trigger marker carries the pre-filled synthetic request ("…pressed the hint shortcut…").
         #expect(jsonl.contains("hint shortcut"))
@@ -396,18 +403,20 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let dir = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("jarvis-activity-boundary-\(ProcessInfo.processInfo.globallyUniqueString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        defer { ActivityLog.shared.disable(); try? FileManager.default.removeItem(at: dir) }
+        let activityLog = ActivityLog()
+        defer { activityLog.disable(); try? FileManager.default.removeItem(at: dir) }
         JarvisLog.enableFileLogging(directory: dir)
-        ActivityLog.shared.enable(directory: dir)
+        activityLog.enable(directory: dir)
 
         let brain = ScriptedBrain(script: [
             .init(toolCalls: [.speak(callId: "s", lines: ["activity-boundary-tip-417"])])
         ])
-        let (driver, _) = makeDriver(brain: brain, clock: ManualClock(now: 417))
+        let (driver, _) = makeDriver(
+            activityLog: activityLog, brain: brain, clock: ManualClock(now: 417))
 
         #expect(await driver.handleTrigger(.silence(secondsQuiet: 417)) == .spoke)
 
-        _ = ActivityLog.shared.attach { _ in }   // sync barrier: all async records have landed
+        _ = activityLog.attach { _ in }   // sync barrier: all async records have landed
         let jsonl = try String(contentsOf: dir.appendingPathComponent("jarvis-activity.jsonl"), encoding: .utf8)
         #expect(jsonl.contains("activity-boundary-tip-417"))
         #expect(!jsonl.contains("quiet for 417s"))
@@ -424,23 +433,24 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             .appendingPathComponent(
                 "jarvis-attempt-failure-\(ProcessInfo.processInfo.globallyUniqueString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        defer { ActivityLog.shared.disable(); try? FileManager.default.removeItem(at: dir) }
-        ActivityLog.shared.enable(directory: dir)
+        let activityLog = ActivityLog()
+        defer { activityLog.disable(); try? FileManager.default.removeItem(at: dir) }
+        activityLog.enable(directory: dir)
 
         let brain = ScriptedThrowBrain(script: [
             nil,
             nil,
             .init(toolCalls: [.speak(callId: "recovered", lines: ["recovered coaching"])]),
         ])
-        let (driver, transcript) = makeDriver(brain: brain, clock: ManualClock(now: 0))
+        let (driver, transcript) = makeDriver(
+            activityLog: activityLog, brain: brain, clock: ManualClock(now: 0))
         transcript.append(.init(speaker: .me, text: "keep listening after failures", at: 0))
 
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
 
-        let snapshot = ActivityLog.shared.attach { _ in }
-        // Activity is process-global: another suite can emit while this test owns the enabled log.
-        // Anchor on our unique recovery, then inspect the two relevant failures before it instead of
-        // assuming the global snapshot has only our rows.
+        let snapshot = activityLog.attach { _ in }
+        // Anchor on the recovery row and inspect the two failures before it: this asserts the
+        // ordering around the recovery rather than the log's total length.
         let recoveryIndex = try #require(
             snapshot.rows.firstIndex { $0.contains("recovered coaching") })
         let failureRows = snapshot.rows[..<recoveryIndex].filter {
@@ -549,19 +559,21 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let dir = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("jarvis-silent-action-\(ProcessInfo.processInfo.globallyUniqueString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        defer { ActivityLog.shared.disable(); try? FileManager.default.removeItem(at: dir) }
-        ActivityLog.shared.enable(directory: dir)
+        let activityLog = ActivityLog()
+        defer { activityLog.disable(); try? FileManager.default.removeItem(at: dir) }
+        activityLog.enable(directory: dir)
 
         let brain = ScriptedBrain(script: [
             .init(toolCalls: [.staySilent(callId: "quiet")],
                   rawToolCalls: [RawToolCall(id: "quiet", name: "stay_silent", argumentsJSON: "{}")])
         ])
-        let (driver, transcript) = makeDriver(brain: brain, clock: ManualClock(now: 0))
+        let (driver, transcript) = makeDriver(
+            activityLog: activityLog, brain: brain, clock: ManualClock(now: 0))
         transcript.append(.init(speaker: .me, text: "thinking about the columns", at: 0))
 
         #expect(await driver.handleTrigger(.turnEnd) == .silentByModel)
 
-        let snapshot = ActivityLog.shared.attach { _ in }
+        let snapshot = activityLog.attach { _ in }
         #expect(snapshot.rows.count == 1)
         #expect(snapshot.rows[0].contains("stayed silent"))
     }
@@ -572,8 +584,9 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let dir = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("jarvis-failed-screen-action-\(ProcessInfo.processInfo.globallyUniqueString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        defer { ActivityLog.shared.disable(); try? FileManager.default.removeItem(at: dir) }
-        ActivityLog.shared.enable(directory: dir)
+        let activityLog = ActivityLog()
+        defer { activityLog.disable(); try? FileManager.default.removeItem(at: dir) }
+        activityLog.enable(directory: dir)
 
         let brain = ScriptedBrain(script: [
             .init(toolCalls: [.captureScreen(callId: "capture")],
@@ -581,13 +594,14 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             .init(toolCalls: [.staySilent(callId: "quiet")],
                   rawToolCalls: [RawToolCall(id: "quiet", name: "stay_silent", argumentsJSON: "{}")]),
         ])
-        let (driver, transcript) = makeDriver(brain: brain, screen: UnavailableScreen(),
-                                              clock: ManualClock(now: 0))
+        let (driver, transcript) = makeDriver(
+            activityLog: activityLog, brain: brain, screen: UnavailableScreen(),
+            clock: ManualClock(now: 0))
         transcript.append(.init(speaker: .me, text: "look at this", at: 0))
 
         #expect(await driver.handleTrigger(.turnEnd) == .silentByModel)
 
-        let snapshot = ActivityLog.shared.attach { _ in }
+        let snapshot = activityLog.attach { _ in }
         #expect(snapshot.rows.count == 2)
         #expect(snapshot.rows[0].contains("couldn't view your screen"))
         #expect(snapshot.rows[0].contains("screen capture failed"))
@@ -1146,14 +1160,124 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(refreshedFallback.calls.count == 1)
     }
 
-    @Test func refreshingClientsCannotDropOrRedirectACommittedSkip() async {
+    /// Regression: a route notice belongs to the callback it was committed against. A client
+    /// refresh landing after the commit but before the delivery crosses to the main actor may
+    /// neither redirect the notice onto the replacement callback nor drop it.
+    ///
+    /// The commit and the delivery are driven directly because that is the only way to sit inside
+    /// that window. Under `handleTrigger` the two are adjacent within a single task with nothing
+    /// observable in between, so a test can only guess when the commit landed — and a guess that
+    /// lands early silently asserts nothing while a guess that lands late fails for no reason.
+    @Test func aCommittedSkipIsDeliveredToTheCallbackItWasCommittedAgainst() async throws {
+        let unavailableTarget = BrainTarget(provider: .claudeCode, modelID: "claude-sonnet-5")
+        let availableTarget = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
+        let originalSkip = RouteTargetRecorder()
+        let refreshedSkip = RouteTargetRecorder()
+        let driver = CoachDriver(
+            config: .default,
+            transcript: RollingTranscript(),
+            route: ConfiguredBrainRoute(
+                targets: [
+                    ConfiguredBrainTarget(
+                        unavailable: unavailableTarget,
+                        detail: "Claude Code is signed out"),
+                    ConfiguredBrainTarget(
+                        target: availableTarget,
+                        brain: ScriptedBrain(script: [
+                            .init(toolCalls: [.staySilent(callId: "old-client")]),
+                        ])),
+                ],
+                onSkipped: { originalSkip.record($0) }),
+            screen: FakeScreen(),
+            overlay: FakeOverlay(),
+            clock: ManualClock(),
+            automaticAttemptDelay: { _ in })
+
+        let committed = try #require(driver.takeBrainSelectionStep().skipped)
+        #expect(driver.refreshBrainRouteClients(ConfiguredBrainRoute(
+            targets: [
+                ConfiguredBrainTarget(
+                    unavailable: unavailableTarget,
+                    detail: "Claude Code is still signed out"),
+                ConfiguredBrainTarget(
+                    target: availableTarget,
+                    brain: ScriptedBrain(script: [
+                        .init(toolCalls: [.staySilent(callId: "new-client")]),
+                    ])),
+            ],
+            onSkipped: { refreshedSkip.record($0) })))
+        await driver.deliverRouteSkip(committed)
+
+        #expect(originalSkip.targets == [unavailableTarget])
+        #expect(refreshedSkip.targets.isEmpty)
+    }
+
+    /// The paired transition commits the target the route left behind together with the callback
+    /// live at that moment, so the same refresh window must not redirect or drop it either.
+    @Test func aCommittedAdvanceIsDeliveredToTheCallbackItWasCommittedAgainst() async throws {
+        let unavailableTarget = BrainTarget(provider: .claudeCode, modelID: "claude-sonnet-5")
+        let availableTarget = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
+        let originalAdvance = RouteTransitionRecorder()
+        let refreshedAdvance = RouteTransitionRecorder()
+        let driver = CoachDriver(
+            config: .default,
+            transcript: RollingTranscript(),
+            route: ConfiguredBrainRoute(
+                targets: [
+                    ConfiguredBrainTarget(
+                        unavailable: unavailableTarget,
+                        detail: "Claude Code is signed out"),
+                    ConfiguredBrainTarget(
+                        target: availableTarget,
+                        brain: ScriptedBrain(script: [
+                            .init(toolCalls: [.staySilent(callId: "old-client")]),
+                        ])),
+                ],
+                onAdvanced: { originalAdvance.record(from: $0, to: $1) }),
+            screen: FakeScreen(),
+            overlay: FakeOverlay(),
+            clock: ManualClock(),
+            automaticAttemptDelay: { _ in })
+
+        // The first step skips the unavailable head and remembers where the route came from; the
+        // second commits the transition onto the target that can actually run.
+        _ = driver.takeBrainSelectionStep()
+        let committed = try #require(driver.takeBrainSelectionStep().advanced)
+        #expect(driver.refreshBrainRouteClients(ConfiguredBrainRoute(
+            targets: [
+                ConfiguredBrainTarget(
+                    unavailable: unavailableTarget,
+                    detail: "Claude Code is still signed out"),
+                ConfiguredBrainTarget(
+                    target: availableTarget,
+                    brain: ScriptedBrain(script: [
+                        .init(toolCalls: [.staySilent(callId: "new-client")]),
+                    ])),
+            ],
+            onAdvanced: { refreshedAdvance.record(from: $0, to: $1) })))
+        await driver.deliverRouteAdvance(committed)
+
+        #expect(originalAdvance.events == [
+            .init(from: unavailableTarget, to: availableTarget),
+        ])
+        #expect(refreshedAdvance.events.isEmpty)
+    }
+
+    /// The other half of the contract, driven end to end: a refresh raised from inside the notice
+    /// itself must not repeat that notice on the replacement callback, and the attempt that
+    /// follows must run on the replacement client rather than the one the route started with.
+    @Test func refreshingClientsDuringASkipRetargetsOnlyTheFollowingAttempt() async {
         let unavailableTarget = BrainTarget(provider: .claudeCode, modelID: "claude-sonnet-5")
         let availableTarget = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
         let originalAvailable = ScriptedBrain(script: [
             .init(toolCalls: [.staySilent(callId: "old-client")]),
         ])
+        let refreshedAvailable = ScriptedBrain(script: [
+            .init(toolCalls: [.staySilent(callId: "new-client")]),
+        ])
         let originalSkip = RouteTargetRecorder()
         let refreshedSkip = RouteTargetRecorder()
+        let holder = CoachDriverHolder()
         let transcript = RollingTranscript()
         let driver = CoachDriver(
             config: .default,
@@ -1165,112 +1289,88 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
                         detail: "Claude Code is signed out"),
                     ConfiguredBrainTarget(target: availableTarget, brain: originalAvailable),
                 ],
-                onSkipped: { originalSkip.record($0) }),
+                onSkipped: { target in
+                    originalSkip.record(target)
+                    holder.refreshClients(ConfiguredBrainRoute(
+                        targets: [
+                            ConfiguredBrainTarget(
+                                unavailable: unavailableTarget,
+                                detail: "Claude Code is still signed out"),
+                            ConfiguredBrainTarget(
+                                target: availableTarget,
+                                brain: refreshedAvailable),
+                        ],
+                        onSkipped: { refreshedSkip.record($0) }))
+                }),
             screen: FakeScreen(),
             overlay: FakeOverlay(),
             clock: ManualClock(),
             automaticAttemptDelay: { _ in })
+        holder.install(driver)
         transcript.append(.init(speaker: .me, text: "skip without losing the notice", at: 0))
 
-        let mainActorEntered = DispatchSemaphore(value: 0)
-        let releaseMainActor = DispatchSemaphore(value: 0)
-        let mainActorBlocker = Task { @MainActor in
-            blockMainActor(entered: mainActorEntered, release: releaseMainActor)
-        }
-        await waitForSemaphore(mainActorEntered)
-        async let outcome = driver.handleTrigger(.turnEnd)
-        await allowPendingRouteDeliveryToReachMainActor()
-
-        let refreshedAvailable = ScriptedBrain(script: [
-            .init(toolCalls: [.staySilent(callId: "new-client")]),
-        ])
-        #expect(driver.refreshBrainRouteClients(ConfiguredBrainRoute(
-            targets: [
-                ConfiguredBrainTarget(
-                    unavailable: unavailableTarget,
-                    detail: "Claude Code is still signed out"),
-                ConfiguredBrainTarget(target: availableTarget, brain: refreshedAvailable),
-            ],
-            onSkipped: { refreshedSkip.record($0) })))
-
-        releaseMainActor.signal()
-        await mainActorBlocker.value
-        #expect(await outcome == .silentByModel)
+        #expect(await driver.handleTrigger(.turnEnd) == .silentByModel)
         #expect(originalSkip.targets == [unavailableTarget])
         #expect(refreshedSkip.targets.isEmpty)
         #expect(originalAvailable.calls.isEmpty)
         #expect(refreshedAvailable.calls.count == 1)
     }
 
-    @Test func refreshingClientsCannotDropOrRedirectACommittedAdvance() async {
-        let primaryTarget = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
-        let fallbackTarget = BrainTarget(provider: .claudeCode, modelID: "claude-sonnet-5")
-        let responseGate = AsyncGate()
-        let originalPrimary = GatedThrowingBrain(
-            gate: responseGate,
-            error: BrainFailure(
-                disposition: .permanent,
-                detail: "primary permanently failed"))
-        let originalFallback = ScriptedBrain(script: [
-            .init(toolCalls: [.staySilent(callId: "old-fallback")]),
+    /// The same shape around a transition. The selection committed alongside the advance is stale
+    /// once the refresh bumps the route revision, so it must be discarded and re-taken against the
+    /// replacement client instead of running the client the route had already chosen.
+    @Test func refreshingClientsDuringAnAdvanceRetargetsOnlyTheFollowingAttempt() async {
+        let unavailableTarget = BrainTarget(provider: .claudeCode, modelID: "claude-sonnet-5")
+        let availableTarget = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
+        let originalAvailable = ScriptedBrain(script: [
+            .init(toolCalls: [.staySilent(callId: "old-client")]),
+        ])
+        let refreshedAvailable = ScriptedBrain(script: [
+            .init(toolCalls: [.staySilent(callId: "new-client")]),
         ])
         let originalAdvance = RouteTransitionRecorder()
         let refreshedAdvance = RouteTransitionRecorder()
+        let holder = CoachDriverHolder()
         let transcript = RollingTranscript()
         let driver = CoachDriver(
             config: .default,
             transcript: transcript,
             route: ConfiguredBrainRoute(
                 targets: [
-                    ConfiguredBrainTarget(target: primaryTarget, brain: originalPrimary),
-                    ConfiguredBrainTarget(target: fallbackTarget, brain: originalFallback),
+                    ConfiguredBrainTarget(
+                        unavailable: unavailableTarget,
+                        detail: "Claude Code is signed out"),
+                    ConfiguredBrainTarget(target: availableTarget, brain: originalAvailable),
                 ],
-                onAdvanced: {
-                    originalAdvance.record(from: $0, to: $1)
+                onAdvanced: { previous, current in
+                    originalAdvance.record(from: previous, to: current)
+                    holder.refreshClients(ConfiguredBrainRoute(
+                        targets: [
+                            ConfiguredBrainTarget(
+                                unavailable: unavailableTarget,
+                                detail: "Claude Code is still signed out"),
+                            ConfiguredBrainTarget(
+                                target: availableTarget,
+                                brain: refreshedAvailable),
+                        ],
+                        onAdvanced: { refreshedAdvance.record(from: $0, to: $1) }))
                 }),
             screen: FakeScreen(),
             overlay: FakeOverlay(),
             clock: ManualClock(),
             automaticAttemptDelay: { _ in })
+        holder.install(driver)
         transcript.append(.init(speaker: .me, text: "advance without losing the notice", at: 0))
 
-        async let outcome = driver.handleTrigger(.turnEnd)
-        await responseGate.waitUntilEntered()
-        let mainActorEntered = DispatchSemaphore(value: 0)
-        let releaseMainActor = DispatchSemaphore(value: 0)
-        let mainActorBlocker = Task { @MainActor in
-            blockMainActor(entered: mainActorEntered, release: releaseMainActor)
-        }
-        await waitForSemaphore(mainActorEntered)
-        await responseGate.release()
-        await allowPendingRouteDeliveryToReachMainActor()
-
-        let refreshedPrimary = ThrowingBrain(error: BrainFailure(
-            disposition: .permanent,
-            detail: "refreshed primary should not run"))
-        let refreshedFallback = ScriptedBrain(script: [
-            .init(toolCalls: [.staySilent(callId: "new-fallback")]),
-        ])
-        #expect(driver.refreshBrainRouteClients(ConfiguredBrainRoute(
-            targets: [
-                ConfiguredBrainTarget(target: primaryTarget, brain: refreshedPrimary),
-                ConfiguredBrainTarget(target: fallbackTarget, brain: refreshedFallback),
-            ],
-            onAdvanced: {
-                refreshedAdvance.record(from: $0, to: $1)
-            })))
-
-        releaseMainActor.signal()
-        await mainActorBlocker.value
-        #expect(await outcome == .silentByModel)
+        #expect(await driver.handleTrigger(.turnEnd) == .silentByModel)
         #expect(originalAdvance.events == [
-            .init(from: primaryTarget, to: fallbackTarget),
+            .init(from: unavailableTarget, to: availableTarget),
         ])
         #expect(refreshedAdvance.events.isEmpty)
-        #expect(originalFallback.calls.isEmpty)
-        #expect(refreshedPrimary.callCount == 0)
-        #expect(refreshedFallback.calls.count == 1)
+        #expect(originalAvailable.calls.isEmpty)
+        #expect(refreshedAvailable.calls.count == 1)
     }
+
 
     @Test func inFlightSuccessAcrossClientRefreshResetsTheFailureSequence() async {
         let primaryTarget = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
@@ -2372,14 +2472,6 @@ private func waitForSemaphore(_ semaphore: DispatchSemaphore) async {
     }
 }
 
-/// The main actor is deliberately blocked before the route task starts. Yielding here lets that task
-/// commit its lock-protected notice and park at the actor hop before the test refreshes clients.
-private func allowPendingRouteDeliveryToReachMainActor() async {
-    for _ in 0..<1_000 {
-        await Task.yield()
-    }
-}
-
 /// `@unchecked Sendable` is safe because `lock` guards the recorded route transitions.
 private final class RouteTransitionRecorder: @unchecked Sendable {
     struct Event: Equatable {
@@ -2427,6 +2519,10 @@ private final class CoachDriverHolder: @unchecked Sendable {
 
     func updateRoute(_ route: ConfiguredBrainRoute) {
         lock.withLock { driver }?.updateBrainRoute(route)
+    }
+
+    func refreshClients(_ route: ConfiguredBrainRoute) {
+        lock.withLock { driver }?.refreshBrainRouteClients(route)
     }
 }
 
