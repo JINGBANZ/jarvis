@@ -1849,7 +1849,8 @@
 - **Chose:** Keep [`decisions.md`](./decisions.md) as the one chronological index of every load-bearing
   decision, and add [`adr/`](./adr/README.md) for the few whose options comparison outgrows a four-line
   entry. A promoted decision keeps its log entry and gains an `**ADR:**` link; entries never move out.
-  This reverses Convention 8's previous "no numbered ADR folder" rule.
+  This reverses Convention 8's previous "no numbered ADR folder" rule. Agent tooling config lives
+  alongside it in [`agents/`](./agents/), so `wiki/` is the single documentation tree.
 - **Why:** The log's four-line shape is what keeps 100+ entries readable, and it is the right record for
   almost every decision — but it cannot carry a genuine multi-option trade-off analysis, so that
   reasoning was going unwritten. Promotion on an earned bar (same test as Convention 7) buys the depth
@@ -1860,4 +1861,4 @@
   file, and the log stops being scannable. (c) Adding `adr/` without amending Convention 8—the wiki
   would forbid on one page what it practices on another, and a fresh agent would hit the contradiction.
 - **Detail:** [AGENTS.md → Convention 8](./AGENTS.md#8-log-every-decision-in-one-place-promote-to-a-numbered-adr-when-one-is-earned),
-  [adr/README.md](./adr/README.md), `docs/agents/domain.md`.
+  [adr/README.md](./adr/README.md), [agents/domain.md](./agents/domain.md).

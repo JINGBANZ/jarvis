@@ -34,6 +34,11 @@
 ## Meta
 
 - **[AGENTS.md](./AGENTS.md)** — conventions for maintaining this wiki. Read before editing any wiki file.
+- **[agents/](./agents/)** — configuration the engineering skills read, not design documentation:
+  [issue-tracker.md](./agents/issue-tracker.md) (where issues live and the `gh` commands to work them),
+  [triage-labels.md](./agents/triage-labels.md) (the five triage roles → this repo's label strings), and
+  [domain.md](./agents/domain.md) (which docs to read before exploring, and how to record a decision).
+  Edit these directly to retarget a skill; `/setup-matt-pocock-skills` regenerates them from scratch.
 
 ## What Jarvis Is, In One Sentence
 

@@ -58,7 +58,7 @@ starts is the stub this forbids.
 
 ### 7. Default to extending a page. Promote to a new page only when earned.
 
-Start as a section in an existing page; don't pre-create `worker.md` / `wiki/agents/`. Promote to its
+Start as a section in an existing page; don't pre-create `worker.md` / `wiki/transcription/`. Promote to its
 own page only when one holds:
 
 - **It's drowning its host** — past ~20% of the parent, or far deeper than its neighbors.
@@ -142,6 +142,12 @@ A change isn't done until a fresh agent could reconstruct what's built and where
 - **Tutorials / quickstarts / user guides** — those serve external users; they go in `README.md`.
 - **Generated artifacts, logs, runtime output**, and **anything the code already states**
   ([Convention 4](#4-reference-source-dont-paste-code)).
+
+One exception, by design: [`agents/`](./agents/) holds configuration the engineering skills read — issue
+tracker, triage labels, domain-doc pointers — not design documentation. Its files follow the skills'
+formats rather than the page conventions above, so don't rewrite them into wiki voice or fold them into a
+design page. They are still listed in [`index.md`](./index.md), so a health check
+([Convention 9](#9-run-health-checks-not-only-per-change-updates)) shouldn't read them as orphans.
 
 ## If you get stuck
 

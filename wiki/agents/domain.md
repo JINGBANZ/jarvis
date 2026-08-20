@@ -37,6 +37,7 @@ them upfront. The `/domain-modeling` skill (reached via `/grill-with-docs` and
 │   ├── adr/
 │   │   ├── 0001-<slug>.md  ← full records, for decisions that earned one
 │   │   └── 0002-<slug>.md
+│   ├── agents/             ← this directory: agent tooling config, not design docs
 │   └── <design pages>.md
 └── Sources/
 ```

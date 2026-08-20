@@ -130,18 +130,18 @@ Foundation-only logic in `JarvisCore`; keep AppKit, audio, capture, and other OS
 ### Issue tracker
 
 Issues and specs live as GitHub issues on `JINGBANZ/jarvis`, driven through the `gh` CLI. See
-`docs/agents/issue-tracker.md`.
+`wiki/agents/issue-tracker.md`.
 
 ### Triage labels
 
 The five canonical triage roles, each label string equal to its name: `needs-triage`, `needs-info`,
-`ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+`ready-for-agent`, `ready-for-human`, `wontfix`. See `wiki/agents/triage-labels.md`.
 
 ### Domain docs
 
 Single-context. The wiki is the design source of truth: `wiki/index.md` to navigate,
 `wiki/decisions.md` for the decision log, `wiki/adr/` for the decisions that earned a full record, and a
-root `CONTEXT.md` glossary once one exists. See `docs/agents/domain.md`.
+root `CONTEXT.md` glossary once one exists. See `wiki/agents/domain.md`.
 
 ## Further context
 
