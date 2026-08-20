@@ -26,7 +26,8 @@ private final class FailingScreen: ScreenCapturing, @unchecked Sendable {
                 ConfiguredBrainTarget(target: target, brain: brain),
             ]),
             screen: screen, overlay: overlay, clock: clock,
-            automaticAttemptDelay: { _ in }
+            automaticAttemptDelay: { _ in },
+            activityLog: ActivityLog()
         )
         return (driver, transcript)
     }

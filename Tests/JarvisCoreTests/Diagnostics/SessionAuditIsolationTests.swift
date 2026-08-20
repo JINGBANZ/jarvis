@@ -417,7 +417,8 @@ import Testing
             overlay: overlay,
             clock: ManualClock(),
             coachingAttempts: coachingAttempts,
-            automaticAttemptDelay: { _ in })
+            automaticAttemptDelay: { _ in },
+            activityLog: ActivityLog())
         transcript.append(.init(
             speaker: .me,
             text: "compare audit observer behavior",
