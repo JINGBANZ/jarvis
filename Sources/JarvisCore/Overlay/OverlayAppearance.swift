@@ -93,6 +93,40 @@ public final class OverlayAppearance {
         }
     }
 
+    /// Width in points of the box, as the user last dragged it.
+    public var boxWidth: Double {
+        get {
+            guard defaults.object(forKey: Defaults.Overlay.Box.widthKey) != nil else {
+                return Defaults.Overlay.Box.width
+            }
+            return Self.clamp(
+                defaults.double(forKey: Defaults.Overlay.Box.widthKey),
+                to: Defaults.Overlay.Box.widthRange)
+        }
+        set {
+            defaults.set(
+                Self.clamp(newValue, to: Defaults.Overlay.Box.widthRange),
+                forKey: Defaults.Overlay.Box.widthKey)
+        }
+    }
+
+    /// Height in points of the box, as the user last dragged it.
+    public var boxHeight: Double {
+        get {
+            guard defaults.object(forKey: Defaults.Overlay.Box.heightKey) != nil else {
+                return Defaults.Overlay.Box.height
+            }
+            return Self.clamp(
+                defaults.double(forKey: Defaults.Overlay.Box.heightKey),
+                to: Defaults.Overlay.Box.heightRange)
+        }
+        set {
+            defaults.set(
+                Self.clamp(newValue, to: Defaults.Overlay.Box.heightRange),
+                forKey: Defaults.Overlay.Box.heightKey)
+        }
+    }
+
     /// Whether the persistent box is shown. On by default.
     public var boxEnabled: Bool {
         get {
@@ -132,6 +166,12 @@ public protocol OverlayCaptionApplying: AnyObject {
 public protocol OverlayBoxApplying: AnyObject {
     func setOpacity(_ opacity: Double)
     func setFontSize(_ points: Double)
+    /// Restore the box to the size the user last dragged it to. Applied once at launch; a
+    /// programmatic resize must not read back as a user edit.
+    func setContentSize(width: Double, height: Double)
+    /// Called once per finished resize drag with the box's new content size, so the app can persist
+    /// it. Never fires for `setContentSize(width:height:)`.
+    var onSizeChanged: ((Double, Double) -> Void)? { get set }
     /// Show or hide the box live, mirroring the persisted setting.
     func setEnabled(_ enabled: Bool)
     /// Show the box with sample text (on) or restore the real log and prior visibility (off) so size

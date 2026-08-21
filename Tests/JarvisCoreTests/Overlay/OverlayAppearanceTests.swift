@@ -26,6 +26,8 @@ import Foundation
         #expect(a.boxEnabled == Defaults.Overlay.Box.enabled)
         #expect(a.captionEnabled == false)
         #expect(a.boxEnabled == true)
+        #expect(a.boxWidth == Defaults.Overlay.Box.width)
+        #expect(a.boxHeight == Defaults.Overlay.Box.height)
     }
 
     @Test func roundTripsThroughDefaults() {
@@ -36,6 +38,8 @@ import Foundation
         OverlayAppearance(defaults: d).boxFontSize = 20
         OverlayAppearance(defaults: d).captionEnabled = true
         OverlayAppearance(defaults: d).boxEnabled = false
+        OverlayAppearance(defaults: d).boxWidth = 512
+        OverlayAppearance(defaults: d).boxHeight = 448
         let reloaded = OverlayAppearance(defaults: d)
         #expect(reloaded.captionFontSize == 22)
         #expect(reloaded.captionBackgroundOpacity == 0.9)
@@ -43,6 +47,9 @@ import Foundation
         #expect(reloaded.boxFontSize == 20)
         #expect(reloaded.captionEnabled == true)
         #expect(reloaded.boxEnabled == false)
+        // The size the user dragged the box to must survive a relaunch unchanged.
+        #expect(reloaded.boxWidth == 512)
+        #expect(reloaded.boxHeight == 448)
     }
 
     @Test func clampsOutOfRange() {
@@ -51,6 +58,10 @@ import Foundation
         a.captionBackgroundOpacity = 999
         a.boxOpacity = 999
         a.boxFontSize = 999
+        a.boxWidth = 99_999
+        a.boxHeight = 99_999
+        #expect(a.boxWidth == Defaults.Overlay.Box.widthRange.upperBound)
+        #expect(a.boxHeight == Defaults.Overlay.Box.heightRange.upperBound)
         #expect(a.captionFontSize == Defaults.Overlay.Caption.fontSizeRange.upperBound)
         #expect(a.captionBackgroundOpacity == Defaults.Overlay.Caption.opacityRange.upperBound)
         #expect(a.boxOpacity == Defaults.Overlay.Box.opacityRange.upperBound)
@@ -60,6 +71,10 @@ import Foundation
         a.captionBackgroundOpacity = 0
         a.boxOpacity = 0
         a.boxFontSize = 1
+        a.boxWidth = 0
+        a.boxHeight = 0
+        #expect(a.boxWidth == Defaults.Overlay.Box.widthRange.lowerBound)
+        #expect(a.boxHeight == Defaults.Overlay.Box.heightRange.lowerBound)
         #expect(a.captionFontSize == Defaults.Overlay.Caption.fontSizeRange.lowerBound)
         #expect(a.captionBackgroundOpacity == Defaults.Overlay.Caption.opacityRange.lowerBound)
         #expect(a.boxOpacity == Defaults.Overlay.Box.opacityRange.lowerBound)

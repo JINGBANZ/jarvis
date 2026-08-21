@@ -133,6 +133,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         overlayBox = OverlayBoxPanel()
         overlayBox.setFontSize(appearance.boxFontSize)
         overlayBox.setOpacity(appearance.boxOpacity)
+        overlayBox.setContentSize(width: appearance.boxWidth, height: appearance.boxHeight)
+        // The panel reports a finished resize drag; persistence stays here, beside the other
+        // overlay settings, so the panel keeps knowing nothing about UserDefaults.
+        overlayBox.onSizeChanged = { [appearance] width, height in
+            appearance.boxWidth = width
+            appearance.boxHeight = height
+        }
         overlayBox.setEnabled(appearance.boxEnabled)   // on by default — shows the history box at launch
 
         // No updater in a development bundle (no feed URL), so the menu omits the item entirely.

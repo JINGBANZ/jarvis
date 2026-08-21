@@ -112,6 +112,18 @@ public enum Defaults {
             public static let opacityKey = "overlayBox.opacity"
             public static let opacity: Double = 1.0
             public static let opacityRange: ClosedRange<Double> = 0.40...1.0
+
+            // The box is the one surface the user sizes directly, by dragging its edges. The lower
+            // bounds are the panel's own `minSize`, so the drag floor and the persisted floor cannot
+            // drift apart. The upper bounds only reject a corrupted plist value: 4096 pt clears any
+            // display's logical size (a 6K XDR is 3008 pt wide), so it never limits a real drag.
+            public static let widthKey = "overlayBox.width"
+            public static let width: Double = 380
+            public static let widthRange: ClosedRange<Double> = 240...4096
+
+            public static let heightKey = "overlayBox.height"
+            public static let height: Double = 320
+            public static let heightRange: ClosedRange<Double> = 140...4096
         }
     }
 }

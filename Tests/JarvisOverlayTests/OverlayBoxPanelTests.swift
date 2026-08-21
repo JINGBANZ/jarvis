@@ -1,5 +1,6 @@
 import Testing
 import AppKit
+import JarvisCore
 @testable import JarvisOverlay
 
 /// Tests for the Overlay Box (the persistent response-history window): it must stay excluded from
@@ -68,9 +69,60 @@ import AppKit
     func isResizableAndHonorsAResize() {
         let panel = OverlayBoxPanel()
         #expect(panel.isResizable, "the box must be resizable by dragging its edges")
-        panel.setContentSize(NSSize(width: 500, height: 400))
+        panel.setContentSize(width: 500, height: 400)
         #expect(panel.currentContentSize.width == 500)
         #expect(panel.currentContentSize.height == 400)
+    }
+
+    @MainActor @Test
+    func startsAtTheDefaultSizeUntilOneIsRestored() {
+        let panel = OverlayBoxPanel()
+        // Convert explicitly: an implicit CGFloat/Double comparison inside #expect fails even for
+        // bit-identical values, because the macro rewrites the expression around the conversion.
+        #expect(Double(panel.currentContentSize.width) == Defaults.Overlay.Box.width)
+        #expect(Double(panel.currentContentSize.height) == Defaults.Overlay.Box.height)
+    }
+
+    /// The drag floor must match the persisted floor, so a dragged size always survives a round trip
+    /// through `OverlayAppearance` unchanged.
+    @MainActor @Test
+    func minimumSizeMatchesThePersistedRangeFloor() {
+        let panel = OverlayBoxPanel()
+        #expect(Double(panel.minimumContentSize.width)
+            == Defaults.Overlay.Box.widthRange.lowerBound)
+        #expect(Double(panel.minimumContentSize.height)
+            == Defaults.Overlay.Box.heightRange.lowerBound)
+    }
+
+    @MainActor @Test
+    func reportsTheNewSizeWhenAResizeDragFinishes() {
+        let panel = OverlayBoxPanel()
+        var reported: [(Double, Double)] = []
+        panel.onSizeChanged = { reported.append(($0, $1)) }
+
+        // Drive the real AppKit callback rather than a test-only seam: this is the delegate method
+        // the window server invokes when the user lets go of a resized edge.
+        panel.setContentSize(width: 520, height: 430)
+        panel.windowDidEndLiveResize(
+            Notification(name: NSWindow.didEndLiveResizeNotification))
+
+        #expect(reported.count == 1)
+        #expect(reported.first?.0 == 520)
+        #expect(reported.first?.1 == 430)
+    }
+
+    /// Restoring a saved size at launch must not read back as a user edit; otherwise every launch
+    /// would rewrite the preference from whatever AppKit happened to settle on.
+    @MainActor @Test
+    func restoringASavedSizeDoesNotReportAUserResize() {
+        let panel = OverlayBoxPanel()
+        var reportCount = 0
+        panel.onSizeChanged = { _, _ in reportCount += 1 }
+
+        panel.setContentSize(width: 460, height: 360)
+
+        #expect(reportCount == 0)
+        #expect(panel.currentContentSize.width == 460)
     }
 
     @MainActor @Test

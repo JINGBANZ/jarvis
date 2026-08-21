@@ -26,6 +26,8 @@ import Testing
         #expect(Defaults.Overlay.Box.enabledKey == "overlayBox.enabled")
         #expect(Defaults.Overlay.Box.fontSizeKey == "overlayBox.fontSize")
         #expect(Defaults.Overlay.Box.opacityKey == "overlayBox.opacity")
+        #expect(Defaults.Overlay.Box.widthKey == "overlayBox.width")
+        #expect(Defaults.Overlay.Box.heightKey == "overlayBox.height")
     }
 
     /// OpenAI keeps the pre-provider key so existing installs keep their model selection.
@@ -72,6 +74,8 @@ import Testing
         #expect(Defaults.Overlay.Caption.opacityRange == 0.40...1.0)
         #expect(Defaults.Overlay.Box.fontSize == 14)
         #expect(Defaults.Overlay.Box.opacity == 1.0)
+        #expect(Defaults.Overlay.Box.width == 380)
+        #expect(Defaults.Overlay.Box.height == 320)
         // The two surfaces default opposite ways: caption off, box on.
         #expect(Defaults.Overlay.Caption.enabled == false)
         #expect(Defaults.Overlay.Box.enabled == true)
@@ -87,6 +91,8 @@ import Testing
             (Defaults.Overlay.Caption.opacityRange, Defaults.Overlay.Caption.opacity),
             (Defaults.Overlay.Box.fontSizeRange, Defaults.Overlay.Box.fontSize),
             (Defaults.Overlay.Box.opacityRange, Defaults.Overlay.Box.opacity),
+            (Defaults.Overlay.Box.widthRange, Defaults.Overlay.Box.width),
+            (Defaults.Overlay.Box.heightRange, Defaults.Overlay.Box.height),
         ]
         for (range, value) in pairs {
             #expect(range.contains(value))
