@@ -16,10 +16,10 @@ import JarvisCore
 /// `onSizeChanged` and accepts a restored size through `setContentSize`, leaving persistence to
 /// `OverlayAppearance` — the same split the font-size and opacity settings already use.
 @MainActor
-public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplying, NSWindowDelegate {
+public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplying {
     private let panel: NSPanel
     /// The layer-backed, opaque rounded fill behind the text — its alpha is the box's opacity.
-    private let box: NSView
+    private let box: ResizeReportingView
     private let textView: NSTextView
     /// White level of the box fill; the opacity setting only varies the alpha, keeping this constant.
     private static let boxWhite: CGFloat = 0.10
@@ -79,7 +79,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         panel.isMovableByWindowBackground = true   // drag anywhere on the box to move it
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
-        let box = NSView(frame: panel.contentRect(forFrameRect: panel.frame))
+        let box = ResizeReportingView(frame: panel.contentRect(forFrameRect: panel.frame))
         box.wantsLayer = true
         box.layer?.backgroundColor = NSColor(white: Self.boxWhite, alpha: 1).cgColor   // opaque by default
         box.layer?.cornerRadius = 12
@@ -117,8 +117,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         box.addSubview(scroll)
         panel.contentView = box
         super.init()
-        // Only `windowDidEndLiveResize` is wanted, so one delegate on the panel is enough.
-        panel.delegate = self
+        box.onEndLiveResize = { [weak self] in self?.reportContentSize() }
         // Centered on screen initially; the user can drag it anywhere from there (the frame persists
         // across menu toggles, since hide() only orders it out).
         panel.center()
@@ -225,9 +224,9 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         panel.setContentSize(NSSize(width: width, height: height))
     }
 
-    /// One callback per finished drag rather than per frame: `windowDidResize` fires continuously
-    /// while the edge is moving, which would rewrite the preference dozens of times per gesture.
-    public func windowDidEndLiveResize(_ notification: Notification) {
+    /// One callback per finished drag rather than per frame: a per-frame hook would rewrite the
+    /// preference dozens of times per gesture.
+    private func reportContentSize() {
         let size = panel.contentRect(forFrameRect: panel.frame).size
         onSizeChanged?(Double(size.width), Double(size.height))
     }
@@ -298,6 +297,26 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
 
     /// The smallest size a drag can reach — lets tests assert it matches the persisted floor.
     var minimumContentSize: NSSize { panel.minSize }
+
+    /// Drives the same AppKit entry point that ends a user resize drag — lets tests assert that a
+    /// finished drag is reported exactly once.
+    func endLiveResize() { box.viewDidEndLiveResize() }
+}
+
+/// The box's content view, which reports the end of a user resize drag.
+///
+/// AppKit sends `viewDidEndLiveResize` to the views in a window being live-resized, once the drag
+/// finishes. Overriding it here rather than assigning `NSWindow.delegate`: a delegate assignment
+/// drives AppKit into window-server-dependent setup that blocks indefinitely on a machine with no
+/// GUI session, which hung every main-actor test on CI. A view subclass needs none of that
+/// machinery, and AppKit calls it only for a real drag — never for a programmatic `setContentSize`.
+private final class ResizeReportingView: NSView {
+    var onEndLiveResize: (() -> Void)?
+
+    override func viewDidEndLiveResize() {
+        super.viewDidEndLiveResize()
+        onEndLiveResize?()
+    }
 }
 
 /// An NSTextView that lets a click-drag move the borderless window instead of being swallowed by the

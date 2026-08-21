@@ -100,11 +100,10 @@ import JarvisCore
         var reported: [(Double, Double)] = []
         panel.onSizeChanged = { reported.append(($0, $1)) }
 
-        // Drive the real AppKit callback rather than a test-only seam: this is the delegate method
-        // the window server invokes when the user lets go of a resized edge.
+        // Drive the real AppKit entry point rather than a test-only seam: `endLiveResize` is what
+        // the window calls when the user lets go of a resized edge.
         panel.setContentSize(width: 520, height: 430)
-        panel.windowDidEndLiveResize(
-            Notification(name: NSWindow.didEndLiveResizeNotification))
+        panel.endLiveResize()
 
         #expect(reported.count == 1)
         #expect(reported.first?.0 == 520)
