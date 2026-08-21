@@ -3,22 +3,12 @@ import Foundation
 /// Persisted brain selection: a primary provider/model target, an ordered list of fallback targets,
 /// the `BrainModel` remembered *per provider*, and the `ReasoningEffort` applied to whichever target
 /// is active. Backed by UserDefaults; each provider keeps its remembered model independently.
-/// Reads normalize stale providers/models and exact route duplicates before they reach the runtime.
+/// Every key and default comes from `Defaults.Brain`; reads normalize stale providers/models and
+/// exact route duplicates before they reach the runtime.
 /// Foundation-only so it stays unit-testable in JarvisCore; inject a `UserDefaults(suiteName:)` in
 /// tests. Mirrors `OverlayAppearance`.
 public final class BrainPreferences {
     private let defaults: UserDefaults
-
-    private enum Key {
-        static let provider = "brain.provider"
-        static let fallbackTargets = "brain.fallbackTargets"
-        static let effort = "brain.reasoningEffort"
-        /// The OpenAI model keeps the pre-provider key ("brain.model") so existing installs keep
-        /// their selection; CLI providers store under a suffixed key each.
-        static func model(for provider: BrainProvider) -> String {
-            provider == .openAI ? "brain.model" : "brain.model.\(provider.rawValue)"
-        }
-    }
 
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -27,12 +17,12 @@ public final class BrainPreferences {
     /// The selected brain provider. Absent or unrecognized → the direct OpenAI API.
     public var provider: BrainProvider {
         get {
-            guard let raw = defaults.string(forKey: Key.provider),
-                  let provider = BrainProvider(rawValue: raw) else { return .openAI }
+            guard let raw = defaults.string(forKey: Defaults.Brain.providerKey),
+                  let provider = BrainProvider(rawValue: raw) else { return Defaults.Brain.provider }
             return provider
         }
         set {
-            defaults.set(newValue.rawValue, forKey: Key.provider)
+            defaults.set(newValue.rawValue, forKey: Defaults.Brain.providerKey)
             fallbackTargets = fallbackTargets
         }
     }
@@ -43,7 +33,7 @@ public final class BrainPreferences {
     /// migrations. New UI and startup paths use this optional value so an untouched installation
     /// can truthfully present "Choose provider…" instead of implying that setup is complete.
     public var configuredPrimaryTarget: BrainTarget? {
-        guard let raw = defaults.string(forKey: Key.provider),
+        guard let raw = defaults.string(forKey: Defaults.Brain.providerKey),
               let provider = BrainProvider(rawValue: raw) else { return nil }
         return BrainTarget(provider: provider, modelID: model(for: provider).id)
     }
@@ -59,9 +49,10 @@ public final class BrainPreferences {
     /// removed; order and same-provider/different-model targets are preserved.
     public var fallbackTargets: [BrainTarget] {
         get {
-            let candidates = (defaults.array(forKey: Key.fallbackTargets) ?? []).compactMap {
-                persistedTarget(from: $0)
+            guard let stored = defaults.array(forKey: Defaults.Brain.fallbackTargetsKey) else {
+                return Defaults.Brain.fallbackTargets
             }
+            let candidates = stored.compactMap { persistedTarget(from: $0) }
             let normalized = BrainRoute(
                 primary: primaryTarget, fallbackTargets: candidates).fallbackTargets
             persistFallbackTargets(normalized)
@@ -77,10 +68,10 @@ public final class BrainPreferences {
     public var route: BrainRoute {
         get { BrainRoute(primary: primaryTarget, fallbackTargets: fallbackTargets) }
         set {
-            defaults.set(newValue.primary.provider.rawValue, forKey: Key.provider)
+            defaults.set(newValue.primary.provider.rawValue, forKey: Defaults.Brain.providerKey)
             defaults.set(
                 newValue.primary.modelID,
-                forKey: Key.model(for: newValue.primary.provider))
+                forKey: Defaults.Brain.modelKey(for: newValue.primary.provider))
             persistFallbackTargets(newValue.fallbackTargets)
         }
     }
@@ -98,15 +89,15 @@ public final class BrainPreferences {
     }
 
     public func model(for provider: BrainProvider) -> BrainModel {
-        guard let id = defaults.string(forKey: Key.model(for: provider)),
+        guard let id = defaults.string(forKey: Defaults.Brain.modelKey(for: provider)),
               let model = BrainModelCatalog.model(id: id, for: provider) else {
-            return BrainModelCatalog.defaultModel(for: provider)
+            return Defaults.Brain.model(for: provider)
         }
         return model
     }
 
     public func setModel(_ model: BrainModel, for provider: BrainProvider) {
-        defaults.set(model.id, forKey: Key.model(for: provider))
+        defaults.set(model.id, forKey: Defaults.Brain.modelKey(for: provider))
         if provider == self.provider {
             fallbackTargets = fallbackTargets
         }
@@ -115,11 +106,11 @@ public final class BrainPreferences {
     /// The reasoning effort, applied to whichever model is selected. Absent or unrecognized → default.
     public var effort: ReasoningEffort {
         get {
-            guard let raw = defaults.string(forKey: Key.effort),
-                  let effort = ReasoningEffort(rawValue: raw) else { return .default }
+            guard let raw = defaults.string(forKey: Defaults.Brain.effortKey),
+                  let effort = ReasoningEffort(rawValue: raw) else { return Defaults.Brain.effort }
             return effort
         }
-        set { defaults.set(newValue.rawValue, forKey: Key.effort) }
+        set { defaults.set(newValue.rawValue, forKey: Defaults.Brain.effortKey) }
     }
 
     private func persistedTarget(from value: Any) -> BrainTarget? {
@@ -135,6 +126,6 @@ public final class BrainPreferences {
     private func persistFallbackTargets(_ targets: [BrainTarget]) {
         defaults.set(targets.map {
             ["provider": $0.provider.rawValue, "modelID": $0.modelID]
-        }, forKey: Key.fallbackTargets)
+        }, forKey: Defaults.Brain.fallbackTargetsKey)
     }
 }

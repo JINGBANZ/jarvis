@@ -13,17 +13,17 @@ import Foundation
 
     @Test func defaultsWhenUnset() {
         let a = OverlayAppearance(defaults: freshDefaults())
-        #expect(a.captionFontSize == Config.overlayCaptionFontSizeDefault)
-        #expect(a.captionBackgroundOpacity == Config.overlayCaptionOpacityDefault)
-        #expect(a.boxOpacity == Config.overlayBoxOpacityDefault)
-        #expect(a.boxFontSize == Config.overlayBoxFontSizeDefault)
+        #expect(a.captionFontSize == Defaults.Overlay.Caption.fontSize)
+        #expect(a.captionBackgroundOpacity == Defaults.Overlay.Caption.opacity)
+        #expect(a.boxOpacity == Defaults.Overlay.Box.opacity)
+        #expect(a.boxFontSize == Defaults.Overlay.Box.fontSize)
     }
 
     /// The two surfaces default opposite ways: the caption off, the box on.
     @Test func enabledDefaults() {
         let a = OverlayAppearance(defaults: freshDefaults())
-        #expect(a.captionEnabled == Config.overlayCaptionEnabledDefault)
-        #expect(a.boxEnabled == Config.overlayBoxEnabledDefault)
+        #expect(a.captionEnabled == Defaults.Overlay.Caption.enabled)
+        #expect(a.boxEnabled == Defaults.Overlay.Box.enabled)
         #expect(a.captionEnabled == false)
         #expect(a.boxEnabled == true)
     }
@@ -51,19 +51,19 @@ import Foundation
         a.captionBackgroundOpacity = 999
         a.boxOpacity = 999
         a.boxFontSize = 999
-        #expect(a.captionFontSize == Config.overlayCaptionFontSizeRange.upperBound)
-        #expect(a.captionBackgroundOpacity == Config.overlayCaptionOpacityRange.upperBound)
-        #expect(a.boxOpacity == Config.overlayBoxOpacityRange.upperBound)
-        #expect(a.boxFontSize == Config.overlayBoxFontSizeRange.upperBound)
+        #expect(a.captionFontSize == Defaults.Overlay.Caption.fontSizeRange.upperBound)
+        #expect(a.captionBackgroundOpacity == Defaults.Overlay.Caption.opacityRange.upperBound)
+        #expect(a.boxOpacity == Defaults.Overlay.Box.opacityRange.upperBound)
+        #expect(a.boxFontSize == Defaults.Overlay.Box.fontSizeRange.upperBound)
 
         a.captionFontSize = 1
         a.captionBackgroundOpacity = 0
         a.boxOpacity = 0
         a.boxFontSize = 1
-        #expect(a.captionFontSize == Config.overlayCaptionFontSizeRange.lowerBound)
-        #expect(a.captionBackgroundOpacity == Config.overlayCaptionOpacityRange.lowerBound)
-        #expect(a.boxOpacity == Config.overlayBoxOpacityRange.lowerBound)
-        #expect(a.boxFontSize == Config.overlayBoxFontSizeRange.lowerBound)
+        #expect(a.captionFontSize == Defaults.Overlay.Caption.fontSizeRange.lowerBound)
+        #expect(a.captionBackgroundOpacity == Defaults.Overlay.Caption.opacityRange.lowerBound)
+        #expect(a.boxOpacity == Defaults.Overlay.Box.opacityRange.lowerBound)
+        #expect(a.boxFontSize == Defaults.Overlay.Box.fontSizeRange.lowerBound)
     }
 
     @Test func nonFiniteInputFallsBackToFinite() {
@@ -74,8 +74,8 @@ import Foundation
             a.captionBackgroundOpacity = bad
             #expect(a.captionFontSize.isFinite)
             #expect(a.captionBackgroundOpacity.isFinite)
-            #expect(Config.overlayCaptionFontSizeRange.contains(a.captionFontSize))
-            #expect(Config.overlayCaptionOpacityRange.contains(a.captionBackgroundOpacity))
+            #expect(Defaults.Overlay.Caption.fontSizeRange.contains(a.captionFontSize))
+            #expect(Defaults.Overlay.Caption.opacityRange.contains(a.captionBackgroundOpacity))
         }
     }
 }

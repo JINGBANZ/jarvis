@@ -21,9 +21,6 @@ public enum ReasoningEffort: String, CaseIterable, Sendable {
         }
     }
 
-    /// `low` keeps a coaching turn fast (sub-2s target) while still allowing tool calls.
-    public static let `default`: ReasoningEffort = .low
-
     /// The combined `max_output_tokens` budget to pair with this effort. On the Responses API this
     /// cap covers reasoning + visible output + formatting tokens *together*, so it must clear the
     /// whole reasoning pass before any tip is emitted — otherwise the run comes back

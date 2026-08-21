@@ -1,16 +1,10 @@
 import Foundation
 
-/// Persisted transcription choices. Unknown values retain the established provider/model defaults;
-/// language expectations default to automatic so Jarvis never silently assumes English.
+/// Persisted transcription choices; every key and default comes from `Defaults.Transcription`.
+/// Unknown values retain the established provider/model defaults; language expectations default to
+/// automatic so Jarvis never silently assumes English.
 public final class TranscriptionPreferences {
     private let defaults: UserDefaults
-
-    private enum Key {
-        static let provider = "transcription.provider"
-        static let openAIModel = "transcription.openai.model"
-        static let openAIExpectedLanguages = "transcription.openai.expected-languages"
-        static let appleSpeechLocale = "transcription.apple-speech.locale"
-    }
 
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -18,40 +12,45 @@ public final class TranscriptionPreferences {
 
     public var provider: TranscriptionProvider {
         get {
-            guard let raw = defaults.string(forKey: Key.provider),
+            guard let raw = defaults.string(forKey: Defaults.Transcription.providerKey),
                   let provider = TranscriptionProvider(rawValue: raw) else {
-                return .openAI
+                return Defaults.Transcription.provider
             }
             return provider
         }
         set {
-            defaults.set(newValue.rawValue, forKey: Key.provider)
+            defaults.set(newValue.rawValue, forKey: Defaults.Transcription.providerKey)
         }
     }
 
     public var openAIModel: OpenAITranscriptionModel {
         get {
-            guard let raw = defaults.string(forKey: Key.openAIModel),
+            guard let raw = defaults.string(forKey: Defaults.Transcription.openAIModelKey),
                   let model = OpenAITranscriptionModel(rawValue: raw) else {
-                return .gpt4oTranscribe
+                return Defaults.Transcription.openAIModel
             }
             return model
         }
         set {
-            defaults.set(newValue.rawValue, forKey: Key.openAIModel)
+            defaults.set(newValue.rawValue, forKey: Defaults.Transcription.openAIModelKey)
         }
     }
 
     /// Every language speakers may use. An empty list means automatic detection.
     public var openAIExpectedLanguages: [OpenAITranscriptionLanguage] {
         get {
-            let languages = (defaults.stringArray(forKey: Key.openAIExpectedLanguages) ?? [])
-                .compactMap(OpenAITranscriptionLanguage.init(rawValue:))
-            return OpenAITranscriptionLanguage.canonicalizing(languages)
+            guard let stored = defaults.stringArray(
+                forKey: Defaults.Transcription.openAIExpectedLanguagesKey) else {
+                return Defaults.Transcription.openAIExpectedLanguages
+            }
+            return OpenAITranscriptionLanguage.canonicalizing(
+                stored.compactMap(OpenAITranscriptionLanguage.init(rawValue:)))
         }
         set {
             let languages = OpenAITranscriptionLanguage.canonicalizing(newValue)
-            defaults.set(languages.map(\.rawValue), forKey: Key.openAIExpectedLanguages)
+            defaults.set(
+                languages.map(\.rawValue),
+                forKey: Defaults.Transcription.openAIExpectedLanguagesKey)
         }
     }
 
@@ -60,14 +59,15 @@ public final class TranscriptionPreferences {
     /// the user can correct it before Start.
     public var appleSpeechLocaleIdentifier: String {
         get {
-            guard let identifier = defaults.string(forKey: Key.appleSpeechLocale),
+            guard let identifier = defaults.string(
+                forKey: Defaults.Transcription.appleSpeechLocaleKey),
                   !identifier.isEmpty else {
-                return Locale.current.identifier
+                return Defaults.Transcription.appleSpeechLocaleIdentifier
             }
             return identifier
         }
         set {
-            defaults.set(newValue, forKey: Key.appleSpeechLocale)
+            defaults.set(newValue, forKey: Defaults.Transcription.appleSpeechLocaleKey)
         }
     }
 

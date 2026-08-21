@@ -57,7 +57,7 @@ public final class OverlayCaptionPanel: NSObject, OverlayRendering, OverlayCapti
         panel.level = .floating
         panel.isFloatingPanel = true
         panel.hidesOnDeactivate = false
-        panel.backgroundColor = NSColor.black.withAlphaComponent(CGFloat(Config.overlayCaptionOpacityDefault))
+        panel.backgroundColor = NSColor.black.withAlphaComponent(CGFloat(Defaults.Overlay.Caption.opacity))
         panel.isOpaque = false
         panel.hasShadow = true
         panel.ignoresMouseEvents = true
@@ -67,7 +67,7 @@ public final class OverlayCaptionPanel: NSObject, OverlayRendering, OverlayCapti
 
         label = NSTextField(wrappingLabelWithString: "")
         label.textColor = .white
-        label.font = .systemFont(ofSize: CGFloat(Config.overlayCaptionFontSizeDefault), weight: .medium)
+        label.font = .systemFont(ofSize: CGFloat(Defaults.Overlay.Caption.fontSize), weight: .medium)
         label.alignment = .center
         label.translatesAutoresizingMaskIntoConstraints = false
         label.backgroundColor = .clear

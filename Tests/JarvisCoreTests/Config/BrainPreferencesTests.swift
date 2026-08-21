@@ -14,7 +14,7 @@ import Foundation
     @Test func defaultsWhenUnset() {
         let p = BrainPreferences(defaults: freshDefaults())
         #expect(p.model == BrainModelCatalog.defaultModel(for: .openAI))
-        #expect(p.effort == .default)
+        #expect(p.effort == Defaults.Brain.effort)
         #expect(p.primaryTarget == BrainTarget(
             provider: .openAI,
             modelID: BrainModelCatalog.defaultModel(for: .openAI).id))
@@ -45,7 +45,7 @@ import Foundation
     @Test func unknownStoredEffortFallsBackToDefault() {
         let d = freshDefaults()
         d.set("extreme", forKey: "brain.reasoningEffort")
-        #expect(BrainPreferences(defaults: d).effort == .default)
+        #expect(BrainPreferences(defaults: d).effort == Defaults.Brain.effort)
     }
 
     @Test func providerDefaultsToOpenAIAndRoundTrips() {

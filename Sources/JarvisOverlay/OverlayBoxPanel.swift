@@ -21,7 +21,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     private static let boxWhite: CGFloat = 0.10
     /// Point size of the response text; the timestamp is rendered a couple points smaller. Driven by
     /// the Settings slider via `setFontSize`.
-    private var fontSize: CGFloat = CGFloat(Config.overlayBoxFontSizeDefault)
+    private var fontSize: CGFloat = CGFloat(Defaults.Overlay.Box.fontSize)
     /// While the Settings appearance tab is open, the box shows sample text (not the real log) so size
     /// and opacity changes are visible even with no responses yet. Restored on close.
     private var isPreviewing = false
