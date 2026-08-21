@@ -105,28 +105,6 @@ import Foundation
         #expect((d.array(forKey: "brain.fallbackTargets") ?? []).count == expected.count)
     }
 
-    @Test func legacyScalarFallbackMigratesWithRememberedModel() {
-        let d = freshDefaults()
-        d.set(BrainProvider.claudeCode.rawValue, forKey: "brain.fallbackProvider")
-        d.set("claude-opus-5", forKey: "brain.model.\(BrainProvider.claudeCode.rawValue)")
-
-        let p = BrainPreferences(defaults: d)
-        #expect(p.fallbackTargets == [
-            BrainTarget(provider: .claudeCode, modelID: "claude-opus-5")
-        ])
-        #expect(d.object(forKey: "brain.fallbackTargets") != nil)
-        #expect(d.object(forKey: "brain.fallbackProvider") == nil)
-        #expect(BrainPreferences(defaults: d).fallbackTargets == p.fallbackTargets)
-    }
-
-    @Test func invalidLegacyFallbackMigratesToEmptyRoute() {
-        let d = freshDefaults()
-        d.set("future-provider", forKey: "brain.fallbackProvider")
-        #expect(BrainPreferences(defaults: d).fallbackTargets.isEmpty)
-        #expect(d.object(forKey: "brain.fallbackTargets") != nil)
-        #expect(d.object(forKey: "brain.fallbackProvider") == nil)
-    }
-
     @Test func primaryChangeRemovesOnlyItsExactDuplicate() {
         let d = freshDefaults()
         let p = BrainPreferences(defaults: d)

@@ -9,7 +9,6 @@ public final class TranscriptionPreferences {
         static let provider = "transcription.provider"
         static let openAIModel = "transcription.openai.model"
         static let openAIExpectedLanguages = "transcription.openai.expected-languages"
-        static let legacyOpenAILanguageProfile = "transcription.openai.language-profile"
         static let appleSpeechLocale = "transcription.apple-speech.locale"
     }
 
@@ -46,18 +45,13 @@ public final class TranscriptionPreferences {
     /// Every language speakers may use. An empty list means automatic detection.
     public var openAIExpectedLanguages: [OpenAITranscriptionLanguage] {
         get {
-            if defaults.object(forKey: Key.openAIExpectedLanguages) != nil {
-                let languages = (defaults.stringArray(forKey: Key.openAIExpectedLanguages) ?? [])
-                    .compactMap(OpenAITranscriptionLanguage.init(rawValue:))
-                return OpenAITranscriptionLanguage.canonicalizing(languages)
-            }
-            return Self.languagesFromLegacyProfile(
-                defaults.string(forKey: Key.legacyOpenAILanguageProfile))
+            let languages = (defaults.stringArray(forKey: Key.openAIExpectedLanguages) ?? [])
+                .compactMap(OpenAITranscriptionLanguage.init(rawValue:))
+            return OpenAITranscriptionLanguage.canonicalizing(languages)
         }
         set {
             let languages = OpenAITranscriptionLanguage.canonicalizing(newValue)
             defaults.set(languages.map(\.rawValue), forKey: Key.openAIExpectedLanguages)
-            defaults.removeObject(forKey: Key.legacyOpenAILanguageProfile)
         }
     }
 
@@ -84,22 +78,5 @@ public final class TranscriptionPreferences {
             openAIModel: openAIModel,
             openAIExpectedLanguages: openAIExpectedLanguages,
             appleSpeechLocaleIdentifier: appleSpeechLocaleIdentifier)
-    }
-
-    /// Existing installations persisted one of four fixed combination values. Read those values
-    /// until the user next edits the new list, then write only the scalable representation.
-    private static func languagesFromLegacyProfile(
-        _ rawValue: String?
-    ) -> [OpenAITranscriptionLanguage] {
-        switch rawValue {
-        case "english":
-            [.english]
-        case "mandarin-chinese":
-            [.mandarinChinese]
-        case "english-and-mandarin-chinese":
-            [.english, .mandarinChinese]
-        default:
-            []
-        }
     }
 }

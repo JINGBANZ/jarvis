@@ -12,8 +12,6 @@ public final class BrainPreferences {
     private enum Key {
         static let provider = "brain.provider"
         static let fallbackTargets = "brain.fallbackTargets"
-        /// Read once to migrate installs from the superseded scalar fallback preference.
-        static let fallbackProvider = "brain.fallbackProvider"
         static let effort = "brain.reasoningEffort"
         /// The OpenAI model keeps the pre-provider key ("brain.model") so existing installs keep
         /// their selection; CLI providers store under a suffixed key each.
@@ -57,29 +55,21 @@ public final class BrainPreferences {
 
     /// Ordered, explicitly authorized fallback provider/model targets.
     ///
-    /// Reads also migrate the legacy scalar provider key. Unknown providers/models, exact primary
-    /// duplicates, and repeated fallback targets are removed; order and same-provider/different-model
-    /// targets are preserved.
+    /// Unknown providers/models, exact primary duplicates, and repeated fallback targets are
+    /// removed; order and same-provider/different-model targets are preserved.
     public var fallbackTargets: [BrainTarget] {
         get {
-            if defaults.object(forKey: Key.fallbackTargets) == nil {
-                return migrateLegacyFallback()
-            }
-
             let candidates = (defaults.array(forKey: Key.fallbackTargets) ?? []).compactMap {
                 persistedTarget(from: $0)
             }
             let normalized = BrainRoute(
                 primary: primaryTarget, fallbackTargets: candidates).fallbackTargets
             persistFallbackTargets(normalized)
-            defaults.removeObject(forKey: Key.fallbackProvider)
             return normalized
         }
         set {
-            let normalized = BrainRoute(
-                primary: primaryTarget, fallbackTargets: newValue).fallbackTargets
-            persistFallbackTargets(normalized)
-            defaults.removeObject(forKey: Key.fallbackProvider)
+            persistFallbackTargets(BrainRoute(
+                primary: primaryTarget, fallbackTargets: newValue).fallbackTargets)
         }
     }
 
@@ -92,7 +82,6 @@ public final class BrainPreferences {
                 newValue.primary.modelID,
                 forKey: Key.model(for: newValue.primary.provider))
             persistFallbackTargets(newValue.fallbackTargets)
-            defaults.removeObject(forKey: Key.fallbackProvider)
         }
     }
 
@@ -131,26 +120,6 @@ public final class BrainPreferences {
             return effort
         }
         set { defaults.set(newValue.rawValue, forKey: Key.effort) }
-    }
-
-    private func migrateLegacyFallback() -> [BrainTarget] {
-        let candidates: [BrainTarget]
-        if let raw = defaults.string(forKey: Key.fallbackProvider),
-           let legacyProvider = BrainProvider(rawValue: raw) {
-            candidates = [
-                BrainTarget(
-                    provider: legacyProvider,
-                    modelID: model(for: legacyProvider).id)
-            ]
-        } else {
-            candidates = []
-        }
-
-        let normalized = BrainRoute(
-            primary: primaryTarget, fallbackTargets: candidates).fallbackTargets
-        persistFallbackTargets(normalized)
-        defaults.removeObject(forKey: Key.fallbackProvider)
-        return normalized
     }
 
     private func persistedTarget(from value: Any) -> BrainTarget? {
