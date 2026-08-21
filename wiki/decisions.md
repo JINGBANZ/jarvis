@@ -1862,3 +1862,22 @@
   would forbid on one page what it practices on another, and a fresh agent would hit the contradiction.
 - **Detail:** [AGENTS.md → Convention 8](./AGENTS.md#8-log-every-decision-in-one-place-promote-to-a-numbered-adr-when-one-is-earned),
   [adr/README.md](./adr/README.md), [agents/domain.md](./agents/domain.md).
+
+### 2026-08-21 — The issue worker is paused so filing an issue is not executing it
+
+- **Chose:** Disable the Issue Worker workflow (`gh workflow disable "Issue Worker"`), leaving
+  `.github/workflows/issue-worker.yml` in place and unedited. Issue Opener stays active.
+- **Why:** The worker fires on `issues: [opened]` and implements every issue a write-permission author
+  files, so there was no way to record work without immediately doing it — an issue tracker with no
+  inbox. The engineering skills in [`agents/`](./agents/) publish issues as their normal output, and
+  `to-tickets` filing a batch would have started a matching batch of concurrent agent runs and PRs.
+  Pausing restores a plain backlog; the docs then describe filing as filing rather than working around
+  the trigger.
+- **Rejected:** (a) Documenting the behavior and having every skill work around it — the constraint
+  leaks into `issue-tracker.md`, `triage-labels.md`, and each skill's judgment about when it is safe to
+  publish. (b) Deleting the trigger from the workflow file—an `issues` event runs the default branch's
+  copy, so the change only takes effect at merge, and it discards the automation instead of pausing it.
+  (c) Gating the worker on a label—more moving parts than the problem needs while it is unwanted.
+- **Detail:** The pause is repo state, not code: `gh workflow list --all` shows `disabled_manually`, and
+  `gh workflow enable "Issue Worker"` restores it. Issue Opener still files one issue daily at 19:07 UTC,
+  which now waits for a human. [agents/issue-tracker.md](./agents/issue-tracker.md).

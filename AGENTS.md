@@ -129,9 +129,8 @@ Foundation-only logic in `JarvisCore`; keep AppKit, audio, capture, and other OS
 
 ### Issue tracker
 
-Issues and specs live as GitHub issues on `JINGBANZ/jarvis`, driven through the `gh` CLI. Opening an
-issue starts an autonomous agent that implements it and opens a PR, so filing is executing — read
-`wiki/agents/issue-tracker.md` before creating one.
+Issues and specs live as GitHub issues on `JINGBANZ/jarvis`, driven through the `gh` CLI. See
+`wiki/agents/issue-tracker.md`.
 
 ### Triage labels
 

@@ -28,12 +28,12 @@ gh label create ready-for-human --description "Requires human implementation"   
 
 Reuse `wontfix` as-is rather than creating a duplicate.
 
-## `ready-for-agent` does not dispatch an agent
+## `ready-for-agent` describes, it doesn't dispatch
 
-Worth stating plainly, because the name suggests otherwise: this repo already runs an agent on every
-issue the moment it is opened (see [issue-tracker.md](./issue-tracker.md)). By the time a triage pass
-labels anything, that run has happened. The label records a judgment about the issue's specification
-quality — it doesn't start, stop, or re-queue work, and neither does `needs-info` or `wontfix`.
+No automation reads these labels. `ready-for-agent` records a judgment that the issue is specified well
+enough for an AFK agent to pick up — applying it starts nothing. The repo's issue worker, which would
+have run an agent at open time regardless of labels, is currently paused (see
+[issue-tracker.md](./issue-tracker.md)).
 
 ## Labels triage doesn't own
 

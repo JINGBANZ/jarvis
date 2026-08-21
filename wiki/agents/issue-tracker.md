@@ -4,34 +4,25 @@ Issues and specs live as GitHub issues on [`JINGBANZ/jarvis`](https://github.com
 the `gh` CLI; it infers the repo from the clone you're standing in, so no `--repo` flag is needed —
 including from a worktree under `.claude/worktrees/`.
 
-## Opening an issue starts an agent — read this first
+## Automation: the issue worker is paused
 
-`.github/workflows/issue-worker.yml` fires on `issues: [opened]`. When the author has write, maintain, or
-admin permission (you, running as the owner), an autonomous agent immediately picks the issue up,
-implements it end to end, runs the suite, and opens a PR ending in `Fixes #<n>` — or, if the issue isn't
-actionable as written, comments there explaining why instead. Nothing about this is opt-in and no label
-gates it.
+`.github/workflows/issue-worker.yml` fires on `issues: [opened]` and, for an author with write
+permission, runs an agent that implements the issue end to end and opens a PR. **It is currently
+disabled**, so filing an issue here just files it. Publish tickets freely.
 
-What that means for the skills:
+The pause is repo state rather than a code change — the workflow file is untouched. `gh workflow list
+--all` reports it as `disabled_manually`; `gh workflow enable "Issue Worker"` restores it. If it is ever
+turned back on, filing becomes executing: a batch of tickets becomes a batch of concurrent agent runs
+and PRs, started together regardless of any blocking edges between them. Re-read this section before
+publishing in bulk if the status above has changed.
 
-- **Filing is executing.** There is no inbox here. Don't open an issue as a note-to-self, a placeholder,
-  or a "let's discuss" — it will be built.
-- **A batch of tickets is a batch of agents.** `/to-tickets` publishing eight issues starts eight
-  concurrent runs and can produce eight PRs. Publish only tickets you want implemented now; hold the
-  rest until you do.
-- **`ready-for-agent` is a description, not a trigger.** The run already happened at open time. Applying
-  the label later doesn't start one, and no triage label can call one back — cancel the workflow run
-  instead.
-- **Dependency order is advisory to the agents, not enforced.** They start together regardless of the
-  blocking edges recorded below.
-
-`.github/workflows/issue-opener.yml` also files an issue on its own, daily at 19:07 UTC (03:07 Beijing, UTC+8),
-which then trips the worker. An unfamiliar recent issue may be its work, not yours.
+`.github/workflows/issue-opener.yml` is still active and files an issue on its own daily at 19:07 UTC
+(03:07 Beijing, UTC+8). With the worker paused, those issues wait for someone to pick them up instead of
+being worked automatically.
 
 ## Operations
 
-- **Create**: `gh issue create --title "..." --body "..."` — heredoc for multi-line bodies. See the
-  warning above before you run it.
+- **Create**: `gh issue create --title "..." --body "..."` — heredoc for multi-line bodies.
 - **Read**: `gh issue view <number> --comments`
 - **List**: `gh issue list --state open --json number,title,body,labels,comments --jq '[.[] | {number, title, body, labels: [.labels[].name], comments: [.comments[].body]}]'`,
   adding `--label` / `--state` filters as needed.
@@ -101,5 +92,3 @@ any body-text fallback.
 - **Claim**: `gh issue edit <n> --add-assignee @me` — the session's first write.
 - **Resolve**: `gh issue comment <n> --body "<answer>"`, `gh issue close <n>`, then append a context
   pointer to the map's Decisions-so-far.
-
-Remember that every child ticket you file starts its own agent run.
