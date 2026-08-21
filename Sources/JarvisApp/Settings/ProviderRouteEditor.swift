@@ -53,16 +53,16 @@ final class ProviderRouteEditor: NSObject {
         fallbackRows.forEach { $0.removeFromSuperview() }
         fallbackRows.removeAll()
 
-        let primaryTarget = preferences.configuredPrimaryTarget
+        let primaryTarget = preferences.primaryTarget
         let primary = BrainTargetRowView(
             title: "Primary",
-            status: primaryTarget != nil && primaryTarget == activeTarget ? "In use" : nil,
+            status: primaryTarget == activeTarget ? "In use" : nil,
             target: primaryTarget,
             canSelectProvider: { [weak self] provider in
                 self?.availablePrimaryModel(for: provider) != nil
             },
             canSelectModel: { [weak self] model in
-                guard let self, let primaryTarget else { return false }
+                guard let self else { return false }
                 let candidate = BrainTarget(
                     provider: primaryTarget.provider, modelID: model.id)
                 return candidate == primaryTarget
@@ -108,8 +108,7 @@ final class ProviderRouteEditor: NSObject {
             fallbackRows.append(row)
         }
 
-        addButton.isEnabled =
-            preferences.configuredPrimaryTarget != nil && nextAvailableTarget() != nil
+        addButton.isEnabled = nextAvailableTarget() != nil
         if let content = view.contentView {
             // Rows are rebuilt on each edit. Keep Add last in accessibility and keyboard order.
             addButton.removeFromSuperview()
@@ -156,7 +155,7 @@ final class ProviderRouteEditor: NSObject {
     }
 
     private func availablePrimaryModel(for provider: BrainProvider) -> BrainModel? {
-        let currentProvider = preferences.configuredPrimaryTarget?.provider
+        let currentProvider = preferences.primaryTarget.provider
         guard isAvailableForNewSelection(provider) || provider == currentProvider else {
             return nil
         }
@@ -204,14 +203,14 @@ final class ProviderRouteEditor: NSObject {
     }
 
     private func isDuplicate(_ candidate: BrainTarget, replacingTargetAt index: Int?) -> Bool {
-        if candidate == preferences.configuredPrimaryTarget { return true }
+        if candidate == preferences.primaryTarget { return true }
         return preferences.fallbackTargets.enumerated().contains {
             $0.offset != index && $0.element == candidate
         }
     }
 
     private func nextAvailableTarget() -> BrainTarget? {
-        guard let primary = preferences.configuredPrimaryTarget else { return nil }
+        let primary = preferences.primaryTarget
         let configuredProviders = Set(
             [primary.provider] + preferences.fallbackTargets.map(\.provider))
         let providers = BrainProvider.allCases.filter { !configuredProviders.contains($0) }
@@ -241,7 +240,7 @@ final class ProviderRouteEditor: NSObject {
     }
 
     private func primaryModelChanged(to model: BrainModel) {
-        guard let primary = preferences.configuredPrimaryTarget else { return }
+        let primary = preferences.primaryTarget
         let candidate = BrainTarget(provider: primary.provider, modelID: model.id)
         guard candidate == primary || !preferences.fallbackTargets.contains(candidate) else {
             NSSound.beep() // ghost-mode-allowed: explicit user action in Settings

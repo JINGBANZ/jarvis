@@ -95,14 +95,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         MainMenu.install() // an Edit menu so ⌘X/⌘C/⌘V/⌘A work in the Settings text fields
         networkDiagnostics.start()
 
-        // Before this release OpenAI was an implicit primary, so a usable existing installation may
-        // have a transcription key but no persisted provider key. Preserve that legacy selection.
-        // A genuinely untouched install has neither and remains unconfigured for the first-open UI.
-        if brainPreferences.configuredPrimaryTarget == nil,
-           secrets.apiKey()?.isEmpty == false {
-            brainPreferences.provider = .openAI
-        }
-
         // The activity viewer lives for the whole app run, but a *session* is one coaching run: each
         // Start opens a fresh session dir + logs (see `beginNewSession`). No session exists until the
         // first Start, so the viewer starts with no current session to browse.
@@ -200,10 +192,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             fire()
         }
 
-        if brainPreferences.configuredRoute == nil {
-            jlog("Jarvis: no brain provider yet — choose one in Settings, then press Start.")
-        } else if transcriptionPreferences.provider.requiresOpenAIAPIKey(
-            for: brainPreferences.configuredRoute
+        if transcriptionPreferences.provider.requiresOpenAIAPIKey(
+            for: brainPreferences.route
         ), secrets.apiKey()?.isEmpty != false {
             jlog("Jarvis: no OpenAI API key yet — paste it in Settings, then press Start.")
         } else {
@@ -422,11 +412,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let coachDriver, transcriber != nil, let sessionDirectory = currentSessionDir else {
             return
         }
-        guard let route = brainPreferences.configuredRoute else {
-            jlog("Jarvis: can't apply brain settings — no primary provider.")
-            ActivityLog.shared.record(.settingsChangeNotApplied)
-            return
-        }
+        let route = brainPreferences.route
         let key = apiKeyOverride ?? secrets.apiKey() ?? ""
         guard !route.targets.contains(where: { $0.provider == .openAI }) || !key.isEmpty else {
             jlog("Jarvis: can't apply brain settings — an OpenAI target has no API key.")
@@ -484,8 +470,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let transcriber else { return }
         (transcriber as? RealtimeTranscriber)?.updateAPIKey(key)
         (themTranscriber as? RealtimeTranscriber)?.updateAPIKey(key)
-        guard let route = brainPreferences.configuredRoute,
-              route.targets.contains(where: { $0.provider == .openAI }) else {
+        guard brainPreferences.route.targets.contains(where: { $0.provider == .openAI }) else {
             jlog("Jarvis: saved API key will apply to future OpenAI transcription connections.")
             return
         }
@@ -506,7 +491,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             wasRunning ? .runtime : .startup
         let transcriptionConfiguration = transcriptionPreferences.configuration
         let transcriptionProvider = transcriptionConfiguration.provider
-        let brainRoute = brainPreferences.configuredRoute
+        let brainRoute = brainPreferences.route
         let key = secrets.apiKey() ?? ""
         let requiresOpenAIKey = transcriptionProvider.requiresOpenAIAPIKey(for: brainRoute)
         let preparesAppleSpeech = transcriptionProvider == .appleSpeech
@@ -544,18 +529,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 ActivityLog.shared.record(.settingsChangeNotApplied)
             }
             errorReporter.reportImmediately(.noAPIKey, context: reportContext)
-            return false
-        }
-        guard let brainRoute else {
-            observeReadiness(
-                .brainPreparation(.blocked(.providerNotConfigured)),
-                for: readinessSession)
-            jlog("Jarvis: can't start — no primary provider.")
-            if wasRunning {
-                ActivityLog.shared.record(.settingsChangeNotApplied)
-            }
-            errorReporter.reportImmediately(
-                .brainProviderNotConfigured, context: reportContext)
             return false
         }
 
@@ -633,7 +606,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 || (self.secrets.apiKey() ?? "") == key
             guard credentialIsCurrent,
                   self.transcriptionPreferences.configuration == transcriptionConfiguration,
-                  self.brainPreferences.configuredRoute == brainRoute else {
+                  self.brainPreferences.route == brainRoute else {
                 self.pendingStartTask = nil
                 self.cancelReadinessAttempt(readinessSession)
                 return

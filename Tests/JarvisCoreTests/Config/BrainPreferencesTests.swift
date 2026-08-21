@@ -20,8 +20,7 @@ import Foundation
             modelID: BrainModelCatalog.defaultModel(for: .openAI).id))
         #expect(p.fallbackTargets.isEmpty)
         #expect(p.route.targets == [p.primaryTarget])
-        #expect(p.configuredPrimaryTarget == nil)
-        #expect(p.configuredRoute == nil)
+        #expect(p.primaryTarget.provider == Defaults.Brain.provider)
     }
 
     @Test func roundTripsThroughDefaults() {
@@ -54,15 +53,15 @@ import Foundation
         #expect(BrainPreferences(defaults: d).fallbackTargets.isEmpty)
         BrainPreferences(defaults: d).provider = .claudeCode
         #expect(BrainPreferences(defaults: d).provider == .claudeCode)
-        #expect(BrainPreferences(defaults: d).configuredPrimaryTarget?.provider == .claudeCode)
-        #expect(BrainPreferences(defaults: d).configuredRoute?.primary.provider == .claudeCode)
+        #expect(BrainPreferences(defaults: d).primaryTarget.provider == .claudeCode)
+        #expect(BrainPreferences(defaults: d).route.primary.provider == .claudeCode)
     }
 
     @Test func unknownStoredProviderFallsBackToOpenAI() {
         let d = freshDefaults()
         d.set("gemini-cli", forKey: "brain.provider")
         #expect(BrainPreferences(defaults: d).provider == .openAI)
-        #expect(BrainPreferences(defaults: d).configuredPrimaryTarget == nil)
+        #expect(BrainPreferences(defaults: d).primaryTarget.provider == .openAI)
     }
 
     @Test func orderedFallbackTargetsRoundTrip() {
@@ -137,7 +136,6 @@ import Foundation
         p.route = route
 
         #expect(BrainPreferences(defaults: d).route == route)
-        #expect(BrainPreferences(defaults: d).configuredRoute == route)
         #expect(d.object(forKey: "brain.routeCursor") == nil)
         #expect(d.object(forKey: "brain.routeFailureCount") == nil)
     }

@@ -14,7 +14,7 @@ public final class BrainPreferences {
         self.defaults = defaults
     }
 
-    /// The selected brain provider. Absent or unrecognized → the direct OpenAI API.
+    /// The selected brain provider. Absent or unrecognized → `Defaults.Brain.provider`.
     public var provider: BrainProvider {
         get {
             guard let raw = defaults.string(forKey: Defaults.Brain.providerKey),
@@ -25,17 +25,6 @@ public final class BrainPreferences {
             defaults.set(newValue.rawValue, forKey: Defaults.Brain.providerKey)
             fallbackTargets = fallbackTargets
         }
-    }
-
-    /// The explicitly selected primary target, or `nil` before first-time setup.
-    ///
-    /// `provider` retains its historical OpenAI default for source compatibility and legacy
-    /// migrations. New UI and startup paths use this optional value so an untouched installation
-    /// can truthfully present "Choose provider…" instead of implying that setup is complete.
-    public var configuredPrimaryTarget: BrainTarget? {
-        guard let raw = defaults.string(forKey: Defaults.Brain.providerKey),
-              let provider = BrainProvider(rawValue: raw) else { return nil }
-        return BrainTarget(provider: provider, modelID: model(for: provider).id)
     }
 
     /// The selected provider and its remembered model.
@@ -74,12 +63,6 @@ public final class BrainPreferences {
                 forKey: Defaults.Brain.modelKey(for: newValue.primary.provider))
             persistFallbackTargets(newValue.fallbackTargets)
         }
-    }
-
-    /// The complete route only after the user (or a legacy-install migration) selected a primary.
-    public var configuredRoute: BrainRoute? {
-        guard let primary = configuredPrimaryTarget else { return nil }
-        return BrainRoute(primary: primary, fallbackTargets: fallbackTargets)
     }
 
     /// The selected model for the *current* provider. Absent or unknown id → that provider's default.
