@@ -72,8 +72,8 @@ import Testing
         #expect(Defaults.Overlay.Caption.fontSizeRange == 12...32)
         #expect(Defaults.Overlay.Caption.opacity == 0.78)
         #expect(Defaults.Overlay.Caption.opacityRange == 0.40...1.0)
-        #expect(Defaults.Overlay.Box.fontSize == 14)
-        #expect(Defaults.Overlay.Box.opacity == 1.0)
+        #expect(Defaults.Overlay.Box.fontSize == 25)
+        #expect(Defaults.Overlay.Box.opacity == 0.45)
         #expect(Defaults.Overlay.Box.width == 380)
         #expect(Defaults.Overlay.Box.height == 320)
         // The two surfaces default opposite ways: caption off, box on.

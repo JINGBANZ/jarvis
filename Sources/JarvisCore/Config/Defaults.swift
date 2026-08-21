@@ -106,11 +106,13 @@ public enum Defaults {
             public static let enabled = true
 
             public static let fontSizeKey = "overlayBox.fontSize"
-            public static let fontSize: Double = 14
+            public static let fontSize: Double = 25
             public static let fontSizeRange: ClosedRange<Double> = 12...32
 
+            /// Dimmed rather than opaque, so the box sits over a busy screen without dominating it.
+            /// One notch above the floor shared with the caption.
             public static let opacityKey = "overlayBox.opacity"
-            public static let opacity: Double = 1.0
+            public static let opacity: Double = 0.45
             public static let opacityRange: ClosedRange<Double> = 0.40...1.0
 
             // The box is the one surface the user sizes directly, by dragging its edges. The lower
