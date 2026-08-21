@@ -91,8 +91,10 @@ Runtime movement never changes preferences; exhausting the finite route stops co
 typed Activity event. That route is implemented as immutable provider/model values, a pure
 Foundation-only session cursor, a single-flight fresh-attempt scheduler, and the ordered Settings
 Provider editor with one uninterrupted Primary/fallback route, separate Coaching and Transcription
-cards, and a Connections tab for shared authentication. A first-open install remains
-unconfigured until Primary is chosen. Local coaching uses persistent runtimes rather than launching
+cards, and a Connections tab for shared authentication. A first-open install already holds a complete
+route: Primary defaults to the OpenAI API, matching the transcription default so one credential covers
+both. Every user setting's key, default, and valid range is declared in one place,
+[`Defaults`](../Sources/JarvisCore/Config/Defaults.swift). Local coaching uses persistent runtimes rather than launching
 one process per model turn. Claude Code keeps
 one initialized safe-mode query ready for the active target and leases it across an attempt's
 complete tool loop while preparing its replacement. It disables built-in tools, settings sources,
