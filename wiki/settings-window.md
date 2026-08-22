@@ -92,12 +92,19 @@ on/off flag, a font size, and an opacity; the box additionally carries its width
 The two surfaces default opposite ways — the caption **off**, the box **on** — so a first run shows
 the durable history rather than a flashing caption. `AppDelegate` applies both enabled flags at launch.
 
+Opacity governs the background fill only, so both surfaces accept 0%: a text-only surface with no
+backdrop, not a hidden one. The On/Off toggle stays the only thing that hides a surface. Both share
+one range because the tab presents their sliders identically. A corrupted non-finite stored value
+restores the setting's own default rather than the range floor, which at 0% would read as breakage.
+
 The box is the one surface the user sizes directly, by dragging its edges. `OverlayBoxPanel` reports a
 finished drag through `onSizeChanged` and accepts a restored size through `setContentSize`, so the
-panel never touches UserDefaults and the size round-trips like every other appearance value.
-`windowDidEndLiveResize` is the hook rather than `windowDidResize`, which fires per frame while the
-edge moves; a programmatic resize raises no live-resize notification, so restoring a saved size at
-launch cannot read back as a user edit. The panel's `minSize` derives from the persisted range floors,
+panel never touches UserDefaults and the size round-trips like every other appearance value. The hook
+is `viewDidEndLiveResize` on the box's content view: AppKit sends it once the drag finishes, unlike a
+per-frame resize signal that would rewrite the preference dozens of times per gesture. Assigning
+`NSWindow.delegate` would reach the same event but blocks AppKit on a machine with no GUI session,
+hanging every main-actor test on CI. A programmatic resize raises no live-resize signal at all, so
+restoring a saved size at launch cannot read back as a user edit. The panel's `minSize` derives from the persisted range floors,
 so the drag floor and the clamp floor cannot drift apart.
 
 `OverlaySection` applies changes live through two protocols, with no direct dependency on the AppKit

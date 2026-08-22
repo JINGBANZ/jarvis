@@ -82,6 +82,10 @@ public enum Defaults {
     /// The two capture-invisible coaching surfaces. Each has an on/off flag, a font size in points,
     /// and an opacity; the ranges are the clamp bounds applied on every read and write.
     ///
+    /// Opacity governs only the background fill, so 0 means a text-only surface with no backdrop,
+    /// not a hidden one — the enabled flag is the only thing that hides a surface. Both surfaces
+    /// share one range because the Overlay tab presents their sliders identically.
+    ///
     /// The surfaces default opposite ways — the caption off, the box on — so a first run shows the
     /// durable history rather than a flashing caption.
     public enum Overlay {
@@ -97,7 +101,7 @@ public enum Defaults {
 
             public static let opacityKey = "overlayCaption.backgroundOpacity"
             public static let opacity: Double = 0.78
-            public static let opacityRange: ClosedRange<Double> = 0.40...1.0
+            public static let opacityRange: ClosedRange<Double> = 0...1.0
         }
 
         /// The persistent, movable history of recent responses.
@@ -110,21 +114,20 @@ public enum Defaults {
             public static let fontSizeRange: ClosedRange<Double> = 12...32
 
             /// Dimmed rather than opaque, so the box sits over a busy screen without dominating it.
-            /// One notch above the floor shared with the caption.
             public static let opacityKey = "overlayBox.opacity"
             public static let opacity: Double = 0.45
-            public static let opacityRange: ClosedRange<Double> = 0.40...1.0
+            public static let opacityRange: ClosedRange<Double> = 0...1.0
 
             // The box is the one surface the user sizes directly, by dragging its edges. The lower
             // bounds are the panel's own `minSize`, so the drag floor and the persisted floor cannot
             // drift apart. The upper bounds only reject a corrupted plist value: 4096 pt clears any
             // display's logical size (a 6K XDR is 3008 pt wide), so it never limits a real drag.
             public static let widthKey = "overlayBox.width"
-            public static let width: Double = 380
+            public static let width: Double = 520
             public static let widthRange: ClosedRange<Double> = 240...4096
 
             public static let heightKey = "overlayBox.height"
-            public static let height: Double = 320
+            public static let height: Double = 440
             public static let heightRange: ClosedRange<Double> = 140...4096
         }
     }

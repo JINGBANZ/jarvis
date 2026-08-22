@@ -21,11 +21,15 @@ public final class OverlayAppearance {
             }
             return Self.clamp(
                 defaults.double(forKey: Defaults.Overlay.Caption.fontSizeKey),
-                to: Defaults.Overlay.Caption.fontSizeRange)
+                to: Defaults.Overlay.Caption.fontSizeRange,
+                fallback: Defaults.Overlay.Caption.fontSize)
         }
         set {
             defaults.set(
-                Self.clamp(newValue, to: Defaults.Overlay.Caption.fontSizeRange),
+                Self.clamp(
+                    newValue,
+                    to: Defaults.Overlay.Caption.fontSizeRange,
+                    fallback: Defaults.Overlay.Caption.fontSize),
                 forKey: Defaults.Overlay.Caption.fontSizeKey)
         }
     }
@@ -37,11 +41,15 @@ public final class OverlayAppearance {
             }
             return Self.clamp(
                 defaults.double(forKey: Defaults.Overlay.Caption.opacityKey),
-                to: Defaults.Overlay.Caption.opacityRange)
+                to: Defaults.Overlay.Caption.opacityRange,
+                fallback: Defaults.Overlay.Caption.opacity)
         }
         set {
             defaults.set(
-                Self.clamp(newValue, to: Defaults.Overlay.Caption.opacityRange),
+                Self.clamp(
+                    newValue,
+                    to: Defaults.Overlay.Caption.opacityRange,
+                    fallback: Defaults.Overlay.Caption.opacity),
                 forKey: Defaults.Overlay.Caption.opacityKey)
         }
     }
@@ -67,11 +75,15 @@ public final class OverlayAppearance {
             }
             return Self.clamp(
                 defaults.double(forKey: Defaults.Overlay.Box.fontSizeKey),
-                to: Defaults.Overlay.Box.fontSizeRange)
+                to: Defaults.Overlay.Box.fontSizeRange,
+                fallback: Defaults.Overlay.Box.fontSize)
         }
         set {
             defaults.set(
-                Self.clamp(newValue, to: Defaults.Overlay.Box.fontSizeRange),
+                Self.clamp(
+                    newValue,
+                    to: Defaults.Overlay.Box.fontSizeRange,
+                    fallback: Defaults.Overlay.Box.fontSize),
                 forKey: Defaults.Overlay.Box.fontSizeKey)
         }
     }
@@ -84,11 +96,15 @@ public final class OverlayAppearance {
             }
             return Self.clamp(
                 defaults.double(forKey: Defaults.Overlay.Box.opacityKey),
-                to: Defaults.Overlay.Box.opacityRange)
+                to: Defaults.Overlay.Box.opacityRange,
+                fallback: Defaults.Overlay.Box.opacity)
         }
         set {
             defaults.set(
-                Self.clamp(newValue, to: Defaults.Overlay.Box.opacityRange),
+                Self.clamp(
+                    newValue,
+                    to: Defaults.Overlay.Box.opacityRange,
+                    fallback: Defaults.Overlay.Box.opacity),
                 forKey: Defaults.Overlay.Box.opacityKey)
         }
     }
@@ -101,11 +117,15 @@ public final class OverlayAppearance {
             }
             return Self.clamp(
                 defaults.double(forKey: Defaults.Overlay.Box.widthKey),
-                to: Defaults.Overlay.Box.widthRange)
+                to: Defaults.Overlay.Box.widthRange,
+                fallback: Defaults.Overlay.Box.width)
         }
         set {
             defaults.set(
-                Self.clamp(newValue, to: Defaults.Overlay.Box.widthRange),
+                Self.clamp(
+                    newValue,
+                    to: Defaults.Overlay.Box.widthRange,
+                    fallback: Defaults.Overlay.Box.width),
                 forKey: Defaults.Overlay.Box.widthKey)
         }
     }
@@ -118,11 +138,15 @@ public final class OverlayAppearance {
             }
             return Self.clamp(
                 defaults.double(forKey: Defaults.Overlay.Box.heightKey),
-                to: Defaults.Overlay.Box.heightRange)
+                to: Defaults.Overlay.Box.heightRange,
+                fallback: Defaults.Overlay.Box.height)
         }
         set {
             defaults.set(
-                Self.clamp(newValue, to: Defaults.Overlay.Box.heightRange),
+                Self.clamp(
+                    newValue,
+                    to: Defaults.Overlay.Box.heightRange,
+                    fallback: Defaults.Overlay.Box.height),
                 forKey: Defaults.Overlay.Box.heightKey)
         }
     }
@@ -139,9 +163,15 @@ public final class OverlayAppearance {
     }
 
     /// Clamp into `r`. Non-finite input (NaN/±inf — e.g. a corrupted plist value) falls back to the
-    /// lower bound rather than propagating to `systemFont(ofSize:)` / `withAlphaComponent(:)`.
-    private static func clamp(_ v: Double, to r: ClosedRange<Double>) -> Double {
-        guard v.isFinite else { return r.lowerBound }
+    /// setting's own default rather than propagating to `systemFont(ofSize:)` /
+    /// `withAlphaComponent(:)`. The default, not the lower bound: an opacity floor of 0 would turn a
+    /// corrupted value into an invisible backdrop, which reads as breakage rather than a fallback.
+    private static func clamp(
+        _ v: Double,
+        to r: ClosedRange<Double>,
+        fallback: Double
+    ) -> Double {
+        guard v.isFinite else { return fallback }
         return min(max(v, r.lowerBound), r.upperBound)
     }
 }

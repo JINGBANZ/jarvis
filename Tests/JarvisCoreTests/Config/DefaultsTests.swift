@@ -71,11 +71,14 @@ import Testing
         #expect(Defaults.Overlay.Caption.fontSize == 18)
         #expect(Defaults.Overlay.Caption.fontSizeRange == 12...32)
         #expect(Defaults.Overlay.Caption.opacity == 0.78)
-        #expect(Defaults.Overlay.Caption.opacityRange == 0.40...1.0)
+        #expect(Defaults.Overlay.Caption.opacityRange == 0...1.0)
         #expect(Defaults.Overlay.Box.fontSize == 25)
         #expect(Defaults.Overlay.Box.opacity == 0.45)
-        #expect(Defaults.Overlay.Box.width == 380)
-        #expect(Defaults.Overlay.Box.height == 320)
+        #expect(Defaults.Overlay.Box.opacityRange == 0...1.0)
+        // Both surfaces expose one opacity range, because the Overlay tab presents them alike.
+        #expect(Defaults.Overlay.Box.opacityRange == Defaults.Overlay.Caption.opacityRange)
+        #expect(Defaults.Overlay.Box.width == 520)
+        #expect(Defaults.Overlay.Box.height == 440)
         // The two surfaces default opposite ways: caption off, box on.
         #expect(Defaults.Overlay.Caption.enabled == false)
         #expect(Defaults.Overlay.Box.enabled == true)

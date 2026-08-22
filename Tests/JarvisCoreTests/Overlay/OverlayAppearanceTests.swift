@@ -81,16 +81,33 @@ import Foundation
         #expect(a.boxFontSize == Defaults.Overlay.Box.fontSizeRange.lowerBound)
     }
 
-    @Test func nonFiniteInputFallsBackToFinite() {
+    @Test func nonFiniteInputFallsBackToTheDefault() {
         // A corrupted plist value (NaN/±inf) must never reach systemFont(ofSize:)/withAlphaComponent:.
+        // It restores the setting's default: with an opacity floor of 0, falling back to the lower
+        // bound would turn corruption into an invisible surface.
         let a = OverlayAppearance(defaults: freshDefaults())
         for bad in [Double.nan, .infinity, -.infinity] {
             a.captionFontSize = bad
             a.captionBackgroundOpacity = bad
-            #expect(a.captionFontSize.isFinite)
-            #expect(a.captionBackgroundOpacity.isFinite)
-            #expect(Defaults.Overlay.Caption.fontSizeRange.contains(a.captionFontSize))
-            #expect(Defaults.Overlay.Caption.opacityRange.contains(a.captionBackgroundOpacity))
+            a.boxOpacity = bad
+            a.boxWidth = bad
+            a.boxHeight = bad
+            #expect(a.captionFontSize == Defaults.Overlay.Caption.fontSize)
+            #expect(a.captionBackgroundOpacity == Defaults.Overlay.Caption.opacity)
+            #expect(a.boxOpacity == Defaults.Overlay.Box.opacity)
+            #expect(a.boxWidth == Defaults.Overlay.Box.width)
+            #expect(a.boxHeight == Defaults.Overlay.Box.height)
         }
+    }
+
+    /// 0% is a reachable, meaningful setting — a text-only surface with no backdrop — so it must
+    /// survive a round trip rather than being clamped away.
+    @Test func fullyTransparentOpacityIsPersistable() {
+        let d = freshDefaults()
+        OverlayAppearance(defaults: d).boxOpacity = 0
+        OverlayAppearance(defaults: d).captionBackgroundOpacity = 0
+        let reloaded = OverlayAppearance(defaults: d)
+        #expect(reloaded.boxOpacity == 0)
+        #expect(reloaded.captionBackgroundOpacity == 0)
     }
 }
