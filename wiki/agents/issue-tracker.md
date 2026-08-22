@@ -59,16 +59,6 @@ to triage. If that changes, `yes` runs PRs through the same labels and states as
   `gh pr view <number> --comments`.
 - **Comment / label / close**: `gh pr comment`, `gh pr edit --add-label`/`--remove-label`, `gh pr close`.
 
-## Working an issue
-
-The repo's own rules in [`../../AGENTS.md`](../../AGENTS.md) govern the change itself, not this file.
-The ones that bite when closing an issue out: work in an isolated worktree, never commit to `main`,
-[Conventional Commits](https://www.conventionalcommits.org/), run the Gate
-(`swift build && ./scripts/run-tests.sh`) and show its output, and open a PR — which squash-merges with
-the PR number in the subject.
-
-Link the PR to its issue with `Fixes #<n>` in the body so the merge closes it.
-
 ## Wayfinding operations
 
 Used by `/wayfinder`. The **map** is one issue; **child** issues are its tickets. Both GitHub features

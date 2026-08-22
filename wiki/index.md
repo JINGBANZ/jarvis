@@ -25,20 +25,14 @@
 ## Decisions
 
 - **[decisions.md](./decisions.md)** — the decision log: what was chosen and why, with the rejected
-  alternative. Every load-bearing decision has an entry here, newest last; this is the complete
-  chronological index.
-- **[adr/](./adr/README.md)** — full architecture decision records, for the few decisions whose options
-  comparison doesn't fit a log entry. Each links back to its `decisions.md` entry. When a decision earns
-  one, and the numbering and supersede rules: see [AGENTS.md](./AGENTS.md) → Convention 8.
+  alternative. One page, no ADR folder by design; see [AGENTS.md](./AGENTS.md) → Convention 8.
 
 ## Meta
 
 - **[AGENTS.md](./AGENTS.md)** — conventions for maintaining this wiki. Read before editing any wiki file.
 - **[agents/](./agents/)** — configuration the engineering skills read, not design documentation:
-  [issue-tracker.md](./agents/issue-tracker.md) (where issues live and the `gh` commands to work them),
-  [triage-labels.md](./agents/triage-labels.md) (the five triage roles → this repo's label strings), and
-  [domain.md](./agents/domain.md) (which docs to read before exploring, and how to record a decision).
-  Edit these directly to retarget a skill; `/setup-matt-pocock-skills` regenerates them from scratch.
+  [issue-tracker.md](./agents/issue-tracker.md), [triage-labels.md](./agents/triage-labels.md), and
+  [domain.md](./agents/domain.md). Edit them directly to retarget a skill.
 
 ## What Jarvis Is, In One Sentence
 

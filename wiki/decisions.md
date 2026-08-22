@@ -6,9 +6,7 @@
 > does **not** apply, because the rejected alternative is exactly what you don't want to lose. A
 > running list, newest last, each entry dated. When a decision is reversed, **supersede it in place**
 > (add the `Superseded by` / `Supersedes` lines); never delete it. The *how it works* lives in the
-> core design pages — the `Detail:` line links to it rather than restating it here. A few decisions earn
-> a full record in [`adr/`](./adr/README.md); those entries stay here and gain an `**ADR:**` line beside
-> `Detail:`, so this page remains the complete index.
+> core design pages — the `Detail:` line links to it rather than restating it here.
 
 ### 2026-06-13 — Build our own proactive coach
 
@@ -1401,6 +1399,8 @@
   `.github/workflows/issue-opener.yml`, `.github/workflows/issue-worker.yml`.
 - **Superseded in part by:** 2026-08-12 — Shared development workflows track `main`. The hosted
   runner and trigger gates stand; full-SHA pinning of first-party reusable workflows does not.
+- **Superseded in part by:** 2026-08-21 — The issue worker is paused so filing an issue is not
+  executing it. Issue Worker is disabled; the rest of this entry stands.
 
 ### 2026-08-10 — The reconnect benchmark faults only Jarvis's transcription transport
 
@@ -1844,25 +1844,6 @@
   `Sources/JarvisApp/Updates/UpdateController.swift`, `scripts/generate-appcast.sh`,
   `scripts/package-app.sh`, `scripts/check-release-config.sh`.
 
-### 2026-08-19 — The decision log stays the index; ADRs are a promotion, not a replacement
-
-- **Chose:** Keep [`decisions.md`](./decisions.md) as the one chronological index of every load-bearing
-  decision, and add [`adr/`](./adr/README.md) for the few whose options comparison outgrows a four-line
-  entry. A promoted decision keeps its log entry and gains an `**ADR:**` link; entries never move out.
-  This reverses Convention 8's previous "no numbered ADR folder" rule. Agent tooling config lives
-  alongside it in [`agents/`](./agents/), so `wiki/` is the single documentation tree.
-- **Why:** The log's four-line shape is what keeps 100+ entries readable, and it is the right record for
-  almost every decision — but it cannot carry a genuine multi-option trade-off analysis, so that
-  reasoning was going unwritten. Promotion on an earned bar (same test as Convention 7) buys the depth
-  without fragmenting the index: there is still exactly one place to look for what was decided.
-- **Rejected:** (a) Migrating all 102 existing entries into numbered ADRs—mechanical churn that would
-  trade a readable log for a directory of stubs, the fragmentation Convention 8 was written against.
-  (b) Keeping the log alone and writing long entries—the sync-and-cross-link burden reappears inside one
-  file, and the log stops being scannable. (c) Adding `adr/` without amending Convention 8—the wiki
-  would forbid on one page what it practices on another, and a fresh agent would hit the contradiction.
-- **Detail:** [AGENTS.md → Convention 8](./AGENTS.md#8-log-every-decision-in-one-place-promote-to-a-numbered-adr-when-one-is-earned),
-  [adr/README.md](./adr/README.md), [agents/domain.md](./agents/domain.md).
-
 ### 2026-08-21 — The issue worker is paused so filing an issue is not executing it
 
 - **Chose:** Disable the Issue Worker workflow (`gh workflow disable "Issue Worker"`), leaving
@@ -1871,13 +1852,14 @@
   files, so there was no way to record work without immediately doing it — an issue tracker with no
   inbox. The engineering skills in [`agents/`](./agents/) publish issues as their normal output, and
   `to-tickets` filing a batch would have started a matching batch of concurrent agent runs and PRs.
-  Pausing restores a plain backlog; the docs then describe filing as filing rather than working around
-  the trigger.
 - **Rejected:** (a) Documenting the behavior and having every skill work around it — the constraint
-  leaks into `issue-tracker.md`, `triage-labels.md`, and each skill's judgment about when it is safe to
-  publish. (b) Deleting the trigger from the workflow file—an `issues` event runs the default branch's
-  copy, so the change only takes effect at merge, and it discards the automation instead of pausing it.
-  (c) Gating the worker on a label—more moving parts than the problem needs while it is unwanted.
+  leaks into each skill's judgment about when it is safe to publish. (b) Deleting the trigger from the
+  workflow file—an `issues` event runs the default branch's copy, so the change only takes effect at
+  merge, and it discards the automation instead of pausing it. (c) Gating the worker on a label—more
+  moving parts than the problem needs while it is unwanted.
 - **Detail:** The pause is repo state, not code: `gh workflow list --all` shows `disabled_manually`, and
   `gh workflow enable "Issue Worker"` restores it. Issue Opener still files one issue daily at 19:07 UTC,
   which now waits for a human. [agents/issue-tracker.md](./agents/issue-tracker.md).
+- **Supersedes in part:** 2026-08-10 — Public repositories keep hosted, owner-gated agent automation.
+  The hosted runners and trigger gates stand; retaining Issue Worker and the automatic Opener → Worker
+  chain does not.

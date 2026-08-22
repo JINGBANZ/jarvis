@@ -16,8 +16,6 @@ a single-context repo.
 - **[`decisions.md`](../decisions.md)** — the running log, newest last. Check it for the area you're
   about to touch **before** proposing a direction. A rejected alternative is recorded there precisely so
   it doesn't get re-proposed.
-- **[`adr/`](../adr/README.md)** — full records for the decisions that earned one. The `decisions.md`
-  entry links to its ADR; read the ADR when you need the options comparison rather than the outcome.
 - **The design page for the area you're touching** — `architecture.md` for the coaching loop,
   `sandbox.md` for the security and isolation model, `build-and-run.md` for toolchain and packaging,
   and the rest per `index.md`.
@@ -31,34 +29,19 @@ Operational facts — targets, commands, the Gate, the runtime safety boundaries
 
 ## Recording a decision
 
-**Every** load-bearing, non-obvious decision gets a dated entry in [`decisions.md`](../decisions.md).
-Most stop there; the four-line entry is the whole record, and the log stays readable because of it.
-
-Promote to a numbered ADR in [`adr/`](../adr/README.md) only when the entry can't carry it: the options
-were genuinely weighed and the comparison is the value, the decision constrains several subsystems, or
-you expect it re-litigated and want the rejected options closed off in detail. A promoted decision keeps
-its log entry and gains an `ADR:` link — entries never move out of the log.
-
-[`../AGENTS.md`](../AGENTS.md) → Convention 8 holds the entry format, the ADR template, numbering, and
-the supersede rule. Read it before writing either.
+Every load-bearing, non-obvious decision gets a dated entry in [`decisions.md`](../decisions.md) — what
+you chose, why, what you rejected, newest last. That one running log is the whole mechanism; there is no
+ADR folder, by design. [`../AGENTS.md`](../AGENTS.md) → Convention 8 holds the entry format and the
+supersede rule.
 
 ## Editing the wiki
 
-[`../AGENTS.md`](../AGENTS.md) governs every edit under `wiki/`. It is not the root `AGENTS.md`, and it
-is not optional. The rules that most often catch agents out:
+[`../AGENTS.md`](../AGENTS.md) governs every edit under `wiki/` — edit in place, read the full page
+first, write in the present, reference source instead of pasting code, update `index.md` when adding a
+page, and ship doc changes in the same PR as the code. Read it before touching any wiki file; it is not
+the same file as the root `AGENTS.md`.
 
-- **Edit in place** — never a dated or `v2` copy (Convention 1).
-- **Read the full page before editing it** — a local edit contradicting a distant section is the most
-  common failure (Convention 2).
-- **Write in the present** — don't narrate refactors. After a change the page should read as if the old
-  concept never existed; the *why it changed* lives only in `decisions.md` and `adr/` (Convention 3).
-- **Reference source, don't paste code** — signatures, config values, and constants drift the moment
-  they're copied; point at the path or symbol (Convention 4).
-- **Adding, renaming, or removing a page means updating `index.md` in the same edit** (Convention 7).
-- **Doc updates ship in the same PR as the code**, never as a later cleanup (keep-in-sync checklist).
-
-This directory is the exception: it holds configuration in the skills' formats, not design prose, and is
-exempt from the page conventions above.
+This directory is the exception: it holds configuration in the skills' formats, not design prose.
 
 ## Use the project's vocabulary
 
