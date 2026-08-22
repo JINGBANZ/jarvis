@@ -60,7 +60,9 @@ public final class CoachDriver: @unchecked Sendable {
         let transcriptBoundary: Int?
     }
 
-    private struct AttemptBrain {
+    // Module-visible only because `BrainSelectionStep` carries one; see the note on the route
+    // delivery types below.
+    struct AttemptBrain {
         let routeRevision: UInt
         let routeTopologyRevision: UInt
         let routeIndex: Int
@@ -104,7 +106,8 @@ public final class CoachDriver: @unchecked Sendable {
         let result: AttemptResult
     }
 
-    private struct RouteExhaustionDelivery {
+    // Module-visible only because `BrainSelectionStep` carries one; see the note below.
+    struct RouteExhaustionDelivery {
         let generation: UInt
         let topologyRevision: UInt
         let target: BrainTarget
@@ -114,23 +117,31 @@ public final class CoachDriver: @unchecked Sendable {
         let callback: (@MainActor @Sendable (BrainTarget, BrainFailure) -> Void)?
     }
 
+    // Committing a route notice and delivering it are deliberately separate phases: the commit
+    // captures the callback under `stateLock`, and the delivery replays that captured callback
+    // after crossing to the main actor, so a client refresh in between can neither drop nor
+    // redirect it. The two phases and their delivery types are module-visible rather than private
+    // so a test can drive them in sequence. Through the public async API they are adjacent within
+    // one task with nothing observable in between, which leaves a test only able to guess when the
+    // commit landed — a race that no amount of waiting closes.
+
     /// A route-health notice committed under the lock and consumed once after crossing to the main
     /// actor. Client-only refreshes preserve it; an explicit topology edit supersedes it.
-    private struct RouteSkipDelivery {
+    struct RouteSkipDelivery {
         let topologyRevision: UInt
         let target: BrainTarget
         let callback: (@MainActor @Sendable (BrainTarget) -> Void)?
     }
 
     /// The paired target transition committed when the next constructible target is selected.
-    private struct RouteAdvanceDelivery {
+    struct RouteAdvanceDelivery {
         let topologyRevision: UInt
         let previous: BrainTarget
         let current: BrainTarget
         let callback: (@MainActor @Sendable (BrainTarget, BrainTarget) -> Void)?
     }
 
-    private struct BrainSelectionStep {
+    struct BrainSelectionStep {
         var selected: AttemptBrain? = nil
         var advanced: RouteAdvanceDelivery? = nil
         var skipped: RouteSkipDelivery? = nil
@@ -138,6 +149,11 @@ public final class CoachDriver: @unchecked Sendable {
         var exhaustion: RouteExhaustionDelivery? = nil
         var alreadyExhausted = false
     }
+
+    /// Injected rather than reached for through `ActivityLog.shared` so each driver records into
+    /// its own log. The activity log is process-wide state: with a singleton, any two drivers alive
+    /// at once — which is every parallel test — append to whichever log happens to be enabled.
+    private let activityLog: ActivityLog
 
     public init(
         config: Config,
@@ -148,8 +164,10 @@ public final class CoachDriver: @unchecked Sendable {
         clock: Clock,
         sessionStart: TimeInterval? = nil,
         coachingAttempts: (any CoachingAttemptAuditing)? = nil,
-        automaticAttemptDelay: AutomaticAttemptDelay? = nil
+        automaticAttemptDelay: AutomaticAttemptDelay? = nil,
+        activityLog: ActivityLog = .shared
     ) {
+        self.activityLog = activityLog
         self.config = config
         self.transcript = transcript
         self.configuredRoute = route
@@ -523,7 +541,7 @@ public final class CoachDriver: @unchecked Sendable {
         }
     }
 
-    private func takeBrainSelectionStep() -> BrainSelectionStep {
+    func takeBrainSelectionStep() -> BrainSelectionStep {
         stateLock.lock()
         defer { stateLock.unlock() }
         guard !routeIsExhausted else {
@@ -711,7 +729,7 @@ public final class CoachDriver: @unchecked Sendable {
         }
     }
 
-    private func deliverRouteSkip(_ delivery: RouteSkipDelivery) async {
+    func deliverRouteSkip(_ delivery: RouteSkipDelivery) async {
         guard let callback = delivery.callback else { return }
         await MainActor.run {
             guard isCurrentRouteTopologyRevision(delivery.topologyRevision) else {
@@ -722,7 +740,7 @@ public final class CoachDriver: @unchecked Sendable {
         }
     }
 
-    private func deliverRouteAdvance(_ delivery: RouteAdvanceDelivery) async {
+    func deliverRouteAdvance(_ delivery: RouteAdvanceDelivery) async {
         guard let callback = delivery.callback else { return }
         await MainActor.run {
             guard isCurrentRouteTopologyRevision(delivery.topologyRevision) else {
@@ -834,7 +852,7 @@ public final class CoachDriver: @unchecked Sendable {
                 case .retry(let failureCount, let advanced):
                     routeChanged = false
                     if !advanced {
-                        ActivityLog.shared.record(
+                        activityLog.record(
                             .coachingTurnFailed(provider: attempt.target.provider))
                     }
                     let policy = failure.disposition == .permanent
@@ -948,7 +966,7 @@ public final class CoachDriver: @unchecked Sendable {
         if reason == .manualHint && !work.manualHintPrepared {
             if let prompt = context.promptLine {
                 jlog("⌨️ hint shortcut — \(prompt)")
-                ActivityLog.shared.record(.manualHint(prompt: prompt))
+                activityLog.record(.manualHint(prompt: prompt))
             }
             let screen = self.screen
             let shot = await Self.captureScreen(using: screen)
@@ -958,7 +976,7 @@ public final class CoachDriver: @unchecked Sendable {
             }
             if let shot {
                 jlog("👁 looking at your screen")
-                ActivityLog.shared.record(.screenViewed(imageBase64JPEG: shot.imageBase64))
+                activityLog.record(.screenViewed(imageBase64JPEG: shot.imageBase64))
                 var observations: [ChatMessage] = [.userImage(shot.imageBase64)]
                 turnMessages.append(.userImage(shot.imageBase64))
                 if let text = shot.recognizedText {
@@ -970,7 +988,7 @@ public final class CoachDriver: @unchecked Sendable {
                 work.observations = observations
             } else {
                 jlog("👁 screenshot failed")
-                ActivityLog.shared.record(.screenViewFailed)
+                activityLog.record(.screenViewFailed)
                 work.observations = [
                     .user(JarvisPrompts.Coach.manualHintCaptureFailed),
                 ]
@@ -1074,7 +1092,7 @@ public final class CoachDriver: @unchecked Sendable {
                     }
                     if let shot {
                         jlog("👁 looking at your screen")
-                        ActivityLog.shared.record(.screenViewed(imageBase64JPEG: shot.imageBase64))
+                        activityLog.record(.screenViewed(imageBase64JPEG: shot.imageBase64))
                         if let text = shot.recognizedText {
                             jlog("🔤 read \(text.count(where: { $0 == "\n" }) + 1) lines of on-screen text")
                         }
@@ -1086,7 +1104,7 @@ public final class CoachDriver: @unchecked Sendable {
                         ]
                     } else {
                         jlog("👁 screenshot failed")
-                        ActivityLog.shared.record(.screenViewFailed)
+                        activityLog.record(.screenViewFailed)
                         work.observations = [
                             .user(JarvisPrompts.Coach.earlierCaptureFailed),
                         ]
@@ -1121,7 +1139,7 @@ public final class CoachDriver: @unchecked Sendable {
                         return .cancelled
                     }
                     jlog("💬 \(lines.joined(separator: " "))")
-                    ActivityLog.shared.record(.tip(lines: lines))
+                    activityLog.record(.tip(lines: lines))
                     overlay.render(
                         lines,
                         perLineSeconds: lines.map {
@@ -1142,7 +1160,7 @@ public final class CoachDriver: @unchecked Sendable {
                         return .cancelled
                     }
                     jlog("… nothing useful to add, staying silent")
-                    ActivityLog.shared.record(.stayedSilent)
+                    activityLog.record(.stayedSilent)
                     commitIfWorthKeeping(turnMessages, deltaText: substantiveDeltaText)
                     commitTranscript(through: delta.upTo)
                     return .completed(.silentByModel)

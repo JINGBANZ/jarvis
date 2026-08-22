@@ -14,6 +14,9 @@ public final class TranscriptionCoachingCoordinator: @unchecked Sendable {
     private let onTurnEnd: @Sendable (_ transcriptBoundary: Int) -> Void
     private let onSilence: @Sendable (TimeInterval) -> Void
     private let onTranscriptionWorkChanged: @Sendable (Bool) -> Void
+    /// Injected for the same reason as `CoachDriver`'s: heard speech must land in this session's
+    /// log rather than whichever one is globally enabled.
+    private let activityLog: ActivityLog
 
     private let lock = NSLock()
     private let pending = UtteranceBuffer()
@@ -38,9 +41,11 @@ public final class TranscriptionCoachingCoordinator: @unchecked Sendable {
         silenceEnabled: Bool,
         onTurnEnd: @escaping @Sendable (_ transcriptBoundary: Int) -> Void,
         onSilence: @escaping @Sendable (TimeInterval) -> Void,
-        onTranscriptionWorkChanged: @escaping @Sendable (Bool) -> Void
+        onTranscriptionWorkChanged: @escaping @Sendable (Bool) -> Void,
+        activityLog: ActivityLog = .shared
     ) {
         precondition(transcriptBatchingWindow >= 0 && transcriptBatchingWindow.isFinite)
+        self.activityLog = activityLog
         self.speaker = speaker
         self.transcript = transcript
         self.clock = clock
@@ -111,7 +116,7 @@ public final class TranscriptionCoachingCoordinator: @unchecked Sendable {
         let generation = generation
         // Activity and model context share the same speech-time chronology. Transcript completion
         // time remains visible in debug, but it must not decide conversation order.
-        ActivityLog.shared.record(
+        activityLog.record(
             .heard(speaker: speaker, text: text),
             at: Date(timeIntervalSince1970: sessionStart + at))
         jlog("🗣 heard (\(speaker.rawValue)): \"\(text)\" (\(source))")
