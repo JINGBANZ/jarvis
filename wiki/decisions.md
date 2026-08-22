@@ -1891,3 +1891,30 @@
   a separate, owner-level call about who is still running that release.
 - **Detail:** [settings-window.md](./settings-window.md),
   `Sources/JarvisCore/Config/Defaults.swift`, `Sources/JarvisCore/Config/BrainPreferences.swift`.
+
+### 2026-08-22 — Tips borrow the user's vocabulary instead of merely reading plainly
+
+- **Chose:** The coach's `# Tip style` now grounds word choice: name things with the words already on
+  the captured screen or in what either speaker said, never use an unfamiliar term as if it were
+  shared, and gloss a genuinely necessary new term on first use because accuracy outranks brevity.
+  The existing clause became "easy to read **and understand** under pressure".
+- **Why:** A live coding session produced a hint that sat well inside the overlay line budget and was
+  still unusable, because it named the central idea with a term that appeared nowhere in the user's
+  context; the same failure recurred later in that session with an unglossed symbol, which the user
+  said aloud they did not know. Brevity was never the defect. The 2026-06-18 "plain-language hints"
+  decision constrained reading effort rather than vocabulary, so it could not catch this — a short,
+  plainly-worded tip is still opaque when its nouns are unshared. Grounding is also free at inference
+  time: the screen text and the transcript are already in the request.
+- **Rejected:** (a) ASD-STE100 compliance — built for aerospace maintenance documentation that is
+  re-read at leisure, its ~900-word dictionary cannot fit in a prompt or be verified, and its rules
+  (mandatory articles, 20–25-word sentences) push tips *longer* against a ~12-word overlay budget. Its
+  Technical Names rule (a specialized term needs an approved source, not informal usage) and its
+  one-word-one-meaning rule are the parts that apply, and the grounding clause encodes them.
+  (b) A clause forbidding a near-synonym of a term already on screen, and a separate
+  terminology-consistency clause — both are subsumed: borrowing the screen's words already forbids the
+  substitution and produces consistency for free. (c) Restricting grounding to the user's own words —
+  interviewer questions are first-class coaching input ([architecture.md §2](./architecture.md#2-core-loop)),
+  so their vocabulary is in front of the user too. (d) A further OCR-verification clause — the Context
+  section already states unconditionally that the screenshot image is ground truth. (e) Shortening
+  tips further — brevity was never the defect.
+- **Detail:** `Sources/JarvisCore/Prompts/JarvisPrompts+Coach.swift` → `# Tip style`.
