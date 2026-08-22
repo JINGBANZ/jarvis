@@ -108,9 +108,9 @@ restoring a saved size at launch cannot read back as a user edit. The panel's `m
 so the drag floor and the clamp floor cannot drift apart.
 
 `OverlaySection` applies changes live through two protocols, with no direct dependency on the AppKit
-panels: `OverlayCaptionApplying` (`setFontSize` / `setBackgroundOpacity` / `setEnabled` /
-`showAppearancePreview`, conformed by `OverlayCaptionPanel`) and `OverlayBoxApplying` (`setFontSize` /
-`setOpacity` / `setEnabled` / `showAppearancePreview`, conformed by `OverlayBoxPanel`). All values
+panels: `OverlayCaptionApplying`, conformed by `OverlayCaptionPanel`, and `OverlayBoxApplying`,
+conformed by `OverlayBoxPanel`. Both are declared in
+[`OverlayAppearance.swift`](../Sources/JarvisCore/Overlay/OverlayAppearance.swift). All values
 round-trip through `OverlayAppearance` so they survive an app relaunch.
 
 `setEnabled(false)` on the caption suppresses coaching tips (dropping any in-flight/queued tip); on

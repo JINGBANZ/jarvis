@@ -94,6 +94,28 @@ import JarvisCore
             == Defaults.Overlay.Box.heightRange.lowerBound)
     }
 
+    /// Position is not persisted, so the box is centered at launch. Restoring a saved size must land
+    /// it where a natively-centered window of that size sits: AppKit's `setContentSize` pins the
+    /// top-left, which would push a box larger than the default down and to the right.
+    ///
+    /// Compared against a reference panel rather than the pre-resize center, because `NSWindow
+    /// .center()` deliberately places a window slightly above true center — so the geometric center
+    /// legitimately moves with height.
+    @MainActor @Test
+    func restoringASavedSizeLandsWhereACenteredWindowOfThatSizeSits() {
+        let panel = OverlayBoxPanel()
+        panel.setContentSize(width: 900, height: 700)
+
+        let reference = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 900, height: 700),
+            styleMask: [.nonactivatingPanel, .borderless, .resizable],
+            backing: .buffered, defer: false)
+        reference.center()
+
+        #expect(abs(panel.currentFrame.origin.x - reference.frame.origin.x) < 1)
+        #expect(abs(panel.currentFrame.origin.y - reference.frame.origin.y) < 1)
+    }
+
     @MainActor @Test
     func reportsTheNewSizeWhenAResizeDragFinishes() {
         let panel = OverlayBoxPanel()

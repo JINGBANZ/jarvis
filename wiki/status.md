@@ -212,8 +212,8 @@ question and confirm it can answer without an unnecessary capture. Finish the in
 provider smoke: confirm Settings shows it signed in, then confirm a coaching turn and screen request.
 While that session runs, switch providers and confirm the next completed turn preserves context and
 adds the provider-only success notice to Activity; then exercise a failed replacement and confirm
-the pending conversation is preserved. Verify the first-open Brain state (no Primary selection and
-disabled model/Add fallback) plus the Connections **Add API key** state, then configure multiple fallbacks and force a temporary
+the pending conversation is preserved. Verify the first-open Brain state (the OpenAI API selected as Primary,
+with its model and Add fallback usable) plus the Connections **Add API key** state, then configure multiple fallbacks and force a temporary
 failure-budget transition, a proven-permanent one-attempt transition, an unavailable-target skip, and
 final route exhaustion. Confirm no provider-specific tool state crosses attempts and verify a
 successful fallback remains active without changing preferences. Configure Codex as Primary and

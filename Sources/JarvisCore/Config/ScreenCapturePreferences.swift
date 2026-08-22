@@ -19,11 +19,17 @@ public final class ScreenCapturePreferences: @unchecked Sendable {
     }
 
     /// Which display entire-display captures shoot, as the 1-based index `screencapture -D`
-    /// counts (1 = main display). Absent or < 1 → 1. Ignored in active-window scope.
+    /// counts (1 = main display). Absent → the declared default; stored values below the floor
+    /// clamp to it. Ignored in active-window scope.
     public var displayIndex: Int {
         get {
-            max(Defaults.Screen.displayIndexMinimum,
-                defaults.integer(forKey: Defaults.Screen.displayIndexKey))
+            // `integer(forKey:)` cannot distinguish an absent key from a stored 0, so check
+            // presence first — otherwise the declared default is dead and changing it does nothing.
+            guard defaults.object(forKey: Defaults.Screen.displayIndexKey) != nil else {
+                return Defaults.Screen.displayIndex
+            }
+            return max(Defaults.Screen.displayIndexMinimum,
+                       defaults.integer(forKey: Defaults.Screen.displayIndexKey))
         }
         set {
             defaults.set(
