@@ -1216,6 +1216,9 @@ public final class CoachDriver: @unchecked Sendable {
     /// would destroy the first's summary along with real turns. A skipped or failed run simply
     /// retries from a fresh prefix after the next completed attempt.
     private func startCompactionIfIdle(using client: BrainClient) {
+        // Check the threshold before spawning: most completed attempts are nowhere near it, and a
+        // task per attempt would be pure churn on the shared executor.
+        guard history.estimatedTokens > config.historyCompactionTokenThreshold else { return }
         stateLock.lock()
         guard !isCompacting else {
             stateLock.unlock()
