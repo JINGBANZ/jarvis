@@ -18,8 +18,6 @@ import Testing
         #expect(Defaults.Transcription.openAIExpectedLanguagesKey
             == "transcription.openai.expected-languages")
         #expect(Defaults.Transcription.appleSpeechLocaleKey == "transcription.apple-speech.locale")
-        #expect(Defaults.Transcription.legacyOpenAILanguageProfileKey
-            == "transcription.openai.language-profile")
         #expect(Defaults.Screen.scopeKey == "screen.captureScope")
         #expect(Defaults.Screen.displayIndexKey == "screen.captureDisplayIndex")
         #expect(Defaults.Overlay.Caption.enabledKey == "overlayCaption.enabled")

@@ -56,12 +56,6 @@ public enum Defaults {
         /// Empty means automatic detection — Jarvis never silently assumes English.
         public static let openAIExpectedLanguages: [OpenAITranscriptionLanguage] = []
 
-        /// Releases 0.1.2 through 0.1.5 stored the language choice as one of four fixed combination
-        /// strings under this key, and only wrote the scalable list above once the user next edited
-        /// the setting. An install that set a language then and never touched it again still holds
-        /// only this key, so reads fall back to it. Retire it once those releases are unsupported.
-        public static let legacyOpenAILanguageProfileKey = "transcription.openai.language-profile"
-
         public static let appleSpeechLocaleKey = "transcription.apple-speech.locale"
         /// A visible initial suggestion only; Settings resolves and displays the supported
         /// equivalent so the user can correct it before Start. Computed, not stored, because the

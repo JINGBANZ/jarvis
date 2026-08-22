@@ -1,7 +1,6 @@
 import Foundation
 
-/// Persisted transcription choices; every key and default comes from `Defaults.Transcription`,
-/// including the released language-profile key still read for installs that never re-edited it.
+/// Persisted transcription choices; every key and default comes from `Defaults.Transcription`.
 /// Unknown values retain the established provider/model defaults; language expectations default to
 /// automatic so Jarvis never silently assumes English.
 public final class TranscriptionPreferences {
@@ -42,8 +41,7 @@ public final class TranscriptionPreferences {
         get {
             guard let stored = defaults.stringArray(
                 forKey: Defaults.Transcription.openAIExpectedLanguagesKey) else {
-                return Self.languagesFromLegacyProfile(
-                    defaults.string(forKey: Defaults.Transcription.legacyOpenAILanguageProfileKey))
+                return Defaults.Transcription.openAIExpectedLanguages
             }
             return OpenAITranscriptionLanguage.canonicalizing(
                 stored.compactMap(OpenAITranscriptionLanguage.init(rawValue:)))
@@ -53,8 +51,6 @@ public final class TranscriptionPreferences {
             defaults.set(
                 languages.map(\.rawValue),
                 forKey: Defaults.Transcription.openAIExpectedLanguagesKey)
-            defaults.removeObject(
-                forKey: Defaults.Transcription.legacyOpenAILanguageProfileKey)
         }
     }
 
@@ -72,23 +68,6 @@ public final class TranscriptionPreferences {
         }
         set {
             defaults.set(newValue, forKey: Defaults.Transcription.appleSpeechLocaleKey)
-        }
-    }
-
-    /// Releases 0.1.2-0.1.5 persisted one of four fixed combination values. Read those until the
-    /// user next edits the list, which replaces them with the scalable representation.
-    private static func languagesFromLegacyProfile(
-        _ rawValue: String?
-    ) -> [OpenAITranscriptionLanguage] {
-        switch rawValue {
-        case "english":
-            [.english]
-        case "mandarin-chinese":
-            [.mandarinChinese]
-        case "english-and-mandarin-chinese":
-            [.english, .mandarinChinese]
-        default:
-            Defaults.Transcription.openAIExpectedLanguages
         }
     }
 
