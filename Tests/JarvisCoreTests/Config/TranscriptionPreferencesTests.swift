@@ -66,6 +66,42 @@ import Testing
         #expect(preferences.openAIExpectedLanguages.isEmpty)
     }
 
+    /// Releases 0.1.2-0.1.5 wrote only this key, so dropping it would silently reset a real user's
+    /// language choice to Automatic.
+    @Test func releasedLanguageProfilesStillResolve() {
+        let legacyProfiles: [(String, [OpenAITranscriptionLanguage])] = [
+            ("automatic", []),
+            ("english", [.english]),
+            ("mandarin-chinese", [.mandarinChinese]),
+            ("english-and-mandarin-chinese", [.english, .mandarinChinese]),
+        ]
+
+        for (rawValue, expected) in legacyProfiles {
+            let defaults = freshDefaults()
+            defaults.set(rawValue, forKey: "transcription.openai.language-profile")
+            #expect(TranscriptionPreferences(defaults: defaults).openAIExpectedLanguages == expected)
+        }
+    }
+
+    @Test func savingExpectedLanguagesReplacesTheLegacyProfile() {
+        let defaults = freshDefaults()
+        defaults.set("english", forKey: "transcription.openai.language-profile")
+        let preferences = TranscriptionPreferences(defaults: defaults)
+
+        preferences.openAIExpectedLanguages = [.mandarinChinese]
+
+        #expect(preferences.openAIExpectedLanguages == [.mandarinChinese])
+        #expect(defaults.object(forKey: "transcription.openai.language-profile") == nil)
+    }
+
+    /// An explicitly emptied list is Automatic and must not fall back through the legacy key.
+    @Test func anEmptySavedListWinsOverALegacyProfile() {
+        let defaults = freshDefaults()
+        defaults.set("english", forKey: "transcription.openai.language-profile")
+        TranscriptionPreferences(defaults: defaults).openAIExpectedLanguages = []
+        #expect(TranscriptionPreferences(defaults: defaults).openAIExpectedLanguages.isEmpty)
+    }
+
     @Test func displayNamesAndCredentialRequirementsAreStable() {
         #expect(TranscriptionProvider.openAI.displayName == "OpenAI")
         #expect(TranscriptionProvider.openAI.requiresOpenAIAPIKey)

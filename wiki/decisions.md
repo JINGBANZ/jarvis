@@ -1867,12 +1867,18 @@
   `ReasoningEffort.default` alongside `Defaults.Brain.effort` — two homes for `low` is the exact
   problem being fixed. (c) Keeping the unconfigured state and adding an onboarding flow to explain
   it — that is a larger surface built to justify a state whose value did not survive inspection.
-- **Also:** Three "legacy install" migrations went with it — `brain.fallbackProvider`,
-  `transcription.openai.language-profile`, and the launch-time key-present-but-no-provider fixup.
-  None of those keys was ever written by a released build: each was introduced and superseded inside
-  one feature branch, and the migration repairing that branch's own dev machine rode onto main
-  through the squash merge. Their tests each wrote the legacy key before reading it back, so they
-  confirmed only their own setup. Before writing a migration, check whether the key it reads has ever
-  shipped — `git tag --contains <commit>` on the commit that wrote it.
+- **Also:** Two migrations went with it. `brain.fallbackProvider` was never written by any released
+  build — it was introduced and superseded inside one feature branch, and the migration repairing
+  that branch's own dev machine rode onto main through the squash merge, where the scalar key only
+  ever appears as a read. The launch-time key-present-but-no-provider fixup is subsumed by the
+  explicit OpenAI default, which covers the same installs.
+  `transcription.openai.language-profile` is **not** in that category and is deliberately kept: it
+  was the primary storage in 0.1.2-0.1.5 with a real setter, and 0.1.6 only writes the replacement
+  list once the user next edits the setting, so a real install can still hold only the old key.
+  Deleting it would silently reset a saved English/Mandarin choice to Automatic.
+- **Checking this:** presence of a key in an old commit proves nothing — what matters is whether a
+  *released* commit **wrote** it. Look for `defaults.set(..., forKey:)` on that key in the tree at
+  the merge commit, then `git tag --contains <sha>`. A key that appears only in reads and
+  `removeObject` calls never shipped as storage.
 - **Detail:** [settings-window.md](./settings-window.md),
   `Sources/JarvisCore/Config/Defaults.swift`, `Sources/JarvisCore/Config/BrainPreferences.swift`.
