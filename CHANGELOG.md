@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.11](https://github.com/JINGBANZ/jarvis/compare/v0.1.10...v0.1.11) (2026-08-22)
+
+
+### Bug Fixes
+
+* **coach:** ground tip vocabulary in what the user can already see ([#186](https://github.com/JINGBANZ/jarvis/issues/186)) ([fdc3714](https://github.com/JINGBANZ/jarvis/commit/fdc3714f5d6f13cfba75cdf580ab73f406d0dbc5))
+
 ## [0.1.10](https://github.com/JINGBANZ/jarvis/compare/v0.1.9...v0.1.10) (2026-08-18)
 
 
