@@ -30,6 +30,9 @@
 ## Meta
 
 - **[AGENTS.md](./AGENTS.md)** — conventions for maintaining this wiki. Read before editing any wiki file.
+- **[agents/](./agents/)** — configuration the engineering skills read, not design documentation:
+  [issue-tracker.md](./agents/issue-tracker.md), [triage-labels.md](./agents/triage-labels.md), and
+  [domain.md](./agents/domain.md). Edit them directly to retarget a skill.
 
 ## What Jarvis Is, In One Sentence
 

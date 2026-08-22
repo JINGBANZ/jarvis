@@ -1399,6 +1399,8 @@
   `.github/workflows/issue-opener.yml`, `.github/workflows/issue-worker.yml`.
 - **Superseded in part by:** 2026-08-12 — Shared development workflows track `main`. The hosted
   runner and trigger gates stand; full-SHA pinning of first-party reusable workflows does not.
+- **Superseded in part by:** 2026-08-21 — The issue worker is paused so filing an issue is not
+  executing it. Issue Worker is disabled; the rest of this entry stands.
 
 ### 2026-08-10 — The reconnect benchmark faults only Jarvis's transcription transport
 
@@ -1841,6 +1843,26 @@
 - **Detail:** [build-and-run.md → In-app updates](./build-and-run.md#in-app-updates--sparkle-over-the-release-feed),
   `Sources/JarvisApp/Updates/UpdateController.swift`, `scripts/generate-appcast.sh`,
   `scripts/package-app.sh`, `scripts/check-release-config.sh`.
+
+### 2026-08-21 — The issue worker is paused so filing an issue is not executing it
+
+- **Chose:** Disable the Issue Worker workflow (`gh workflow disable "Issue Worker"`), leaving
+  `.github/workflows/issue-worker.yml` in place and unedited. Issue Opener stays active.
+- **Why:** The worker fires on `issues: [opened]` and implements every issue a write-permission author
+  files, so there was no way to record work without immediately doing it — an issue tracker with no
+  inbox. The engineering skills in [`agents/`](./agents/) publish issues as their normal output, and
+  `to-tickets` filing a batch would have started a matching batch of concurrent agent runs and PRs.
+- **Rejected:** (a) Documenting the behavior and having every skill work around it — the constraint
+  leaks into each skill's judgment about when it is safe to publish. (b) Deleting the trigger from the
+  workflow file—an `issues` event runs the default branch's copy, so the change only takes effect at
+  merge, and it discards the automation instead of pausing it. (c) Gating the worker on a label—more
+  moving parts than the problem needs while it is unwanted.
+- **Detail:** The pause is repo state, not code: `gh workflow list --all` shows `disabled_manually`, and
+  `gh workflow enable "Issue Worker"` restores it. Issue Opener still files one issue daily at 19:07 UTC,
+  which now waits for a human. [agents/issue-tracker.md](./agents/issue-tracker.md).
+- **Supersedes in part:** 2026-08-10 — Public repositories keep hosted, owner-gated agent automation.
+  The hosted runners and trigger gates stand; retaining Issue Worker and the automatic Opener → Worker
+  chain does not.
 
 ### 2026-08-22 — Tips borrow the user's vocabulary instead of merely reading plainly
 
