@@ -73,7 +73,7 @@ import Testing
             toolChoice: .auto,
             timeout: BrainWorkloadTimeout.historyCompaction)
 
-        #expect(BrainWorkloadTimeout.historyCompaction == 15)
+        #expect(BrainWorkloadTimeout.historyCompaction == 45)
         #expect(claudeSummarizer.configuration.timeout
                 == BrainWorkloadTimeout.historyCompaction)
         #expect(codexSummarizer.configuration.timeout
@@ -83,26 +83,25 @@ import Testing
         codexSummarizer.terminate()
     }
 
-    @Test func auxiliaryResponseDoesNotRestartItsDeadlineAfterSetup() async throws {
+    /// Setup and inference are budgeted separately, so a slow runtime start cannot quietly shorten
+    /// the model's deadline. Sharing one budget is what left history compaction unable to finish:
+    /// a ~2s cold start came straight off a 15s ceiling the summarizer already could not meet.
+    @Test func auxiliarySetupDoesNotShortenTheInferenceDeadline() async throws {
         let (client, backend) = client(
             workDir: try makeWorkDir(),
             replies: [#"{"tool":"stay_silent","arguments":{}}"#],
-            timeout: 0.05,
-            openDelay: 0.15)
+            timeout: 0.5,
+            openDelay: 0.2)
 
-        do {
-            _ = try await client.respond(
-                messages: [.system("coach prompt"), .user("hello")],
-                tools: coachTools,
-                toolChoice: .required)
-            Issue.record("expected the setup-plus-inference deadline to expire")
-        } catch {
-            #expect(error.localizedDescription.contains("timed out"))
-        }
+        _ = try await client.respond(
+            messages: [.system("coach prompt"), .user("hello")],
+            tools: coachTools,
+            toolChoice: .required)
 
         let turns = await backend.turns
         let finishCount = await backend.finishCount
-        #expect(turns.isEmpty)
+        // The turn carries the whole configured budget, not the remainder setup left behind.
+        #expect(turns.map(\.timeout) == [0.5])
         #expect(finishCount == 1)
     }
 
