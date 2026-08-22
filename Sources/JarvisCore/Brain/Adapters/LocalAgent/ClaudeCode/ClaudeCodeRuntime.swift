@@ -319,7 +319,7 @@ private final class ClaudeCodeQuery: @unchecked Sendable {
             let remaining = deadline.timeIntervalSinceNow
             guard remaining > 0 else {
                 process.terminateNow()
-                throw Self.error("Claude response timed out")
+                throw Self.deadlineExpired()
             }
             let line = try await process.nextLine(timeout: remaining)
             guard let payload = try? JSONSerialization.jsonObject(
@@ -334,10 +334,20 @@ private final class ClaudeCodeQuery: @unchecked Sendable {
         Int((end - start) / 1_000_000)
     }
 
+    /// Marks the deadline expiring between reads, so `describingTurnFailure` can restate it with the
+    /// same budget and stream detail it gives a timeout raised inside the read itself.
+    private static func deadlineExpired() -> NSError {
+        NSError(domain: "ClaudeCodeRuntime", code: NSURLErrorTimedOut,
+                userInfo: [NSLocalizedDescriptionKey: "Claude response timed out"])
+    }
+
     /// The process layer reports how long its final read waited, which is not the turn's budget: a
     /// turn that streams progress right up to the deadline leaves a sub-second last slice, which
     /// surfaced as the useless "timed out after 0s". Restate the failure against the budget that
     /// actually expired, and name the stream events that were in flight when it did.
+    ///
+    /// The original description is kept verbatim: `AgentRuntimeProcess` appends the CLI's stderr tail
+    /// to its timeout, and that tail is often the most decisive evidence there is.
     private static func describingTurnFailure(
         _ error: Error,
         budget: TimeInterval,
@@ -345,12 +355,15 @@ private final class ClaudeCodeQuery: @unchecked Sendable {
         trace: StreamTrace
     ) -> Error {
         let nsError = error as NSError
-        guard nsError.domain == AgentRuntimeProcess.errorDomain,
-              nsError.code == NSURLErrorTimedOut else { return error }
+        let isRuntimeTimeout = nsError.domain == AgentRuntimeProcess.errorDomain
+            && nsError.code == NSURLErrorTimedOut
+        let isDeadlineBetweenReads = nsError.domain == "ClaudeCodeRuntime"
+            && nsError.code == NSURLErrorTimedOut
+        guard isRuntimeTimeout || isDeadlineBetweenReads else { return error }
         let elapsed = milliseconds(from: dispatchedAt, to: DispatchTime.now().uptimeNanoseconds)
         return Self.error(
             "Claude did not finish the turn within \(Int(budget))s "
-            + "(elapsed \(elapsed)ms; \(trace.summary))")
+            + "(elapsed \(elapsed)ms; \(trace.summary)) — \(nsError.localizedDescription)")
     }
 
     /// A throttled or rejected rate limit is the one discarded stream event that explains a stalled
