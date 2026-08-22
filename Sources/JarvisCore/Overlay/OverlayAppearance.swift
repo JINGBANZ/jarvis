@@ -151,6 +151,21 @@ public final class OverlayAppearance {
         }
     }
 
+    /// The saved box size, shrunk to fit `available` — the visible area of the screen the box will
+    /// open on. A box dragged large on an external display would otherwise open wider or taller than
+    /// a laptop screen, putting its resize edges out of reach, and sizing is drag-only so Settings
+    /// offers nothing to recover with. Passing `nil` (no screen) returns the saved size unchanged.
+    ///
+    /// The screen lookup itself stays in the app: `NSScreen` access inside the panel's initializer
+    /// blocks AppKit on a host with no GUI session.
+    public func boxSize(fittingInto available: CGSize?) -> CGSize {
+        let saved = CGSize(width: boxWidth, height: boxHeight)
+        guard let available else { return saved }
+        return CGSize(
+            width: min(saved.width, available.width),
+            height: min(saved.height, available.height))
+    }
+
     /// Whether the persistent box is shown. On by default.
     public var boxEnabled: Bool {
         get {

@@ -104,17 +104,6 @@ import JarvisCore
         #expect(panel.currentContentSize.height == 700)
     }
 
-    /// A size dragged on an external display must not open larger than the screen Jarvis launches
-    /// on, or the resize edges land out of reach with no Settings control to shrink the box.
-    @MainActor @Test
-    func aSavedSizeLargerThanTheScreenIsFittedToIt() {
-        // Skipped on a headless host, which has no screen to fit to.
-        guard let visible = NSScreen.main?.visibleFrame.size else { return }
-        let panel = OverlayBoxPanel(contentSize: NSSize(width: 99_999, height: 99_999))
-        #expect(panel.currentContentSize.width <= visible.width)
-        #expect(panel.currentContentSize.height <= visible.height)
-    }
-
     /// The panel must carry the registered opacity on its own, not only when AppDelegate applies it.
     @MainActor @Test
     func usesTheRegisteredOpacityBeforeAnySetterRuns() {
