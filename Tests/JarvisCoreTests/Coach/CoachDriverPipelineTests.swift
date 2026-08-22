@@ -3,34 +3,56 @@ import Testing
 @testable import JarvisCore
 
 /// Mock brain: replays a script of responses and records the messages + tool-choice it saw.
+///
+/// `@unchecked Sendable` is safe because every mutable property is accessed only under `lock`. The
+/// lock is load-bearing rather than decorative: as a summarizer this double is driven from the
+/// detached compaction task while the test polls its counters, so unsynchronized access would be a
+/// genuine data race on the arrays' COW buffers.
 final class ScriptedBrain: BrainClient, @unchecked Sendable {
-    private(set) var calls: [[ChatMessage]] = []
-    private(set) var toolChoices: [ToolChoice] = []
-    private(set) var requestContexts: [CoachingRequestContext?] = []
-    private(set) var preparationCount = 0
+    private let lock = NSLock()
+    private var _calls: [[ChatMessage]] = []
+    private var _toolChoices: [ToolChoice] = []
+    private var _requestContexts: [CoachingRequestContext?] = []
+    private var _preparationCount = 0
+    var calls: [[ChatMessage]] { lock.withLock { _calls } }
+    var toolChoices: [ToolChoice] { lock.withLock { _toolChoices } }
+    var requestContexts: [CoachingRequestContext?] { lock.withLock { _requestContexts } }
+    var preparationCount: Int { lock.withLock { _preparationCount } }
     let script: [BrainResponse]
     init(script: [BrainResponse]) { self.script = script }
     func respond(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice) async throws -> BrainResponse {
-        calls.append(messages)
-        toolChoices.append(toolChoice)
-        requestContexts.append(CoachingRequestAttribution.current)
-        return script[min(calls.count - 1, script.count - 1)]
+        let index = lock.withLock { () -> Int in
+            _calls.append(messages)
+            _toolChoices.append(toolChoice)
+            _requestContexts.append(CoachingRequestAttribution.current)
+            return _calls.count - 1
+        }
+        return script[min(index, script.count - 1)]
     }
-    func prepare() { preparationCount += 1 }
+    func prepare() { lock.withLock { _preparationCount += 1 } }
 }
 
 /// A brain whose per-call script can be a response OR a throw (nil), recording the messages it saw —
 /// to verify what survives a failed turn and reaches the next one.
+///
+/// `@unchecked Sendable` is safe for the same reason as `ScriptedBrain`: all mutable state is
+/// accessed under `lock`, which the detached compaction path makes necessary rather than optional.
 final class ScriptedThrowBrain: BrainClient, @unchecked Sendable {
-    private(set) var calls: [[ChatMessage]] = []
-    private(set) var requestContexts: [CoachingRequestContext?] = []
+    private let lock = NSLock()
+    private var _calls: [[ChatMessage]] = []
+    private var _requestContexts: [CoachingRequestContext?] = []
     private var idx = 0
+    var calls: [[ChatMessage]] { lock.withLock { _calls } }
+    var requestContexts: [CoachingRequestContext?] { lock.withLock { _requestContexts } }
     let script: [BrainResponse?]
     init(script: [BrainResponse?]) { self.script = script }
     func respond(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice) async throws -> BrainResponse {
-        calls.append(messages)
-        requestContexts.append(CoachingRequestAttribution.current)
-        let r = script[min(idx, script.count - 1)]; idx += 1
+        let r = lock.withLock { () -> BrainResponse? in
+            _calls.append(messages)
+            _requestContexts.append(CoachingRequestAttribution.current)
+            let reply = script[min(idx, script.count - 1)]; idx += 1
+            return reply
+        }
         guard let r else { throw NSError(domain: "test", code: 500) }
         return r
     }
@@ -2828,6 +2850,9 @@ final class CaptureThenGatedFailureThenSpeakingBrain: BrainClient, @unchecked Se
 
 /// A summarizer that parks mid-summary, so a test can observe the triggering attempt completing
 /// without it.
+///
+/// `@unchecked Sendable` is safe because `calls` is only ever touched under `lock`; the detached
+/// compaction task and the polling test task would otherwise race on it.
 private final class GatedSummarizer: BrainClient, @unchecked Sendable {
     private let gate: AsyncGate
     private let summary: String
