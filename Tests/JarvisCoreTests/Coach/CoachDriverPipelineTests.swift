@@ -2144,6 +2144,8 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         transcript.append(.init(speaker: .me, text: "and some more detail about the grid", at: 1))
         await driver.handleTrigger(.turnEnd)   // a second message pushes past the threshold → compaction
 
+        // Compaction runs off the attempt path, so wait for it rather than assuming it already ran.
+        #expect(await waitUntilAsync { summarizer.calls.count == 1 })
         #expect(summarizer.calls.count == 1)   // the summarizer (not the coach brain) wrote it
         transcript.append(.init(speaker: .me, text: "next idea entirely", at: 5))
         await driver.handleTrigger(.turnEnd)
@@ -2171,6 +2173,36 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let second = brain.calls[1].compactMap(\.text).joined(separator: "\n")
         #expect(second.contains("a reasonably long problem statement to remember"))   // nothing lost
         #expect(recorder.failures.isEmpty)   // auxiliary failure never enters route health
+        // Compaction runs off the attempt path, so confirm the failing path was actually exercised
+        // rather than silently skipped — the history assertion above would hold either way.
+        #expect(await waitUntilAsync { summarizer.calls.count >= 1 })
+    }
+
+    /// Compaction is auxiliary and must never hold the coaching slot. A summary still being written
+    /// cannot delay the attempt that triggered it: otherwise every compaction spends its whole
+    /// budget as dead air, and speech arriving meanwhile batches behind it instead of being coached.
+    @Test func compactionDoesNotBlockTheAttempt() async {
+        let clock = ManualClock(now: 0)
+        let brain = ScriptedBrain(script: [
+            .init(toolCalls: [.staySilent(callId: "quiet")]),
+        ])
+        let gate = AsyncGate()
+        let summarizer = GatedSummarizer(gate: gate, summary: "PROBLEM: parked mid-summary.")
+        let (driver, transcript) = makeDriver(brain: brain, summarizer: summarizer, clock: clock,
+                                              config: Config(historyCompactionTokenThreshold: 5))
+        transcript.append(.init(speaker: .me, text: "a reasonably long problem statement to remember", at: 0))
+        await driver.handleTrigger(.turnEnd)
+        transcript.append(.init(speaker: .me, text: "next thought", at: 5))
+
+        let outcome = await turnOutcomeBeforeTimeout {
+            await driver.handleTrigger(.turnEnd)
+        }
+
+        // The attempt completed…
+        #expect(outcome == .silentByModel)
+        // …while the summarizer was still parked, never having been released.
+        #expect(await waitUntilAsync { await gate.hasEntered })
+        await gate.release()
     }
 
     // MARK: - Observability: structured turn outcomes
@@ -2791,6 +2823,35 @@ final class CaptureThenGatedFailureThenSpeakingBrain: BrainClient, @unchecked Se
                         argumentsJSON: #"{"lines":["used saved observation"]}"#),
                 ])
         }
+    }
+}
+
+/// A summarizer that parks mid-summary, so a test can observe the triggering attempt completing
+/// without it.
+private final class GatedSummarizer: BrainClient, @unchecked Sendable {
+    private let gate: AsyncGate
+    private let summary: String
+    private let lock = NSLock()
+    private var calls = 0
+
+    var callCount: Int { lock.withLock { calls } }
+
+    init(gate: AsyncGate, summary: String) {
+        self.gate = gate
+        self.summary = summary
+    }
+
+    func respond(messages: [ChatMessage], tools: [ToolDef],
+                 toolChoice: ToolChoice) async throws -> BrainResponse {
+        lock.withLock { calls += 1 }
+        // Release on cancellation so a regression fails the test instead of hanging it: `AsyncGate`
+        // parks on a plain continuation, which a cancelled enclosing task group would wait on forever.
+        await withTaskCancellationHandler {
+            await gate.enter()
+        } onCancel: {
+            Task { await gate.release() }
+        }
+        return BrainResponse(toolCalls: [], outputText: summary)
     }
 }
 

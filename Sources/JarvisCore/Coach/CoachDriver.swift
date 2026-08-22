@@ -43,6 +43,8 @@ public final class CoachDriver: @unchecked Sendable {
     private var exhaustionDeliveryGeneration: UInt = 0
     private var pendingExhaustionDeliveryGeneration: UInt?
     private var isHandling = false
+    /// Guards the single off-path compaction run (see `startCompactionIfIdle`).
+    private var isCompacting = false
     /// Transcript is committed only by a complete, non-truncated `speak` or `stay_silent`.
     private var committedTranscriptCount = 0
     /// Natural triggers coalesce while an attempt or automatic pending-work wait owns the slot.
@@ -1178,7 +1180,7 @@ public final class CoachDriver: @unchecked Sendable {
 
         await conversation.finish()
         if case .completed = result {
-            await compactIfNeeded(using: attempt)
+            startCompactionIfIdle(using: attempt.summarizer ?? attempt.brain)
         }
         return AttemptExecution(id: attemptID, result: result)
     }
@@ -1208,12 +1210,31 @@ public final class CoachDriver: @unchecked Sendable {
 
     // MARK: - History compaction
 
+    /// Compaction is auxiliary, so it runs off the attempt path: awaiting it here would spend its
+    /// whole budget as dead air, batching newly finalized speech behind a summary nobody is waiting
+    /// for. One run at a time — two overlapping runs each replace `0..<prefixCount`, so the second
+    /// would destroy the first's summary along with real turns. A skipped or failed run simply
+    /// retries from a fresh prefix after the next completed attempt.
+    private func startCompactionIfIdle(using client: BrainClient) {
+        stateLock.lock()
+        guard !isCompacting else {
+            stateLock.unlock()
+            return
+        }
+        isCompacting = true
+        stateLock.unlock()
+        Task.detached(priority: .utility) { [self] in
+            await compactIfNeeded(using: client)
+            stateLock.withLock { isCompacting = false }
+        }
+    }
+
     /// Auxiliary compaction fails soft and never counts against provider route health.
-    private func compactIfNeeded(using attempt: AttemptBrain) async {
+    private func compactIfNeeded(using client: BrainClient) async {
         guard history.estimatedTokens > config.historyCompactionTokenThreshold else { return }
         guard let (oldest, count) = history.compactionPrefix() else { return }
         do {
-            let response = try await (attempt.summarizer ?? attempt.brain).respond(
+            let response = try await client.respond(
                 messages: [
                     .system(JarvisPrompts.HistorySummary.system),
                     .user(JarvisPrompts.HistorySummary.input(oldest)),
