@@ -57,10 +57,9 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     /// - Parameter contentSize: the size the user last dragged the box to. Taken at construction so
     ///   the panel is built at its final size and centered once, rather than being resized after the
     ///   fact — `setContentSize` pins the top-left, so a later resize would leave the box off-centre,
-    ///   and a second `center()` is an AppKit call this panel does not need. The caller is
-    ///   responsible for fitting it to a screen (see `OverlayAppearance.boxSize(fittingInto:)`);
-    ///   this panel deliberately queries no screen, because doing so in `init` blocks AppKit on a
-    ///   host with no GUI session and hangs every main-actor test.
+    ///   and a second `center()` is an AppKit call this panel does not need. This panel queries no
+    ///   screen at all: `NSScreen` access in `init` blocks AppKit on a host with no GUI session and
+    ///   hangs every main-actor test.
     public init(contentSize: NSSize = NSSize(
         width: Defaults.Overlay.Box.width,
         height: Defaults.Overlay.Box.height)

@@ -100,38 +100,6 @@ import Foundation
         }
     }
 
-    /// A box dragged large on an external display must not open with its resize edges off a
-    /// smaller screen, because sizing is drag-only and Settings cannot shrink it.
-    @Test func boxSizeIsFittedToTheAvailableScreen() {
-        let a = OverlayAppearance(defaults: freshDefaults())
-        a.boxWidth = 1600
-        a.boxHeight = 1200
-
-        let fitted = a.boxSize(fittingInto: CGSize(width: 1440, height: 845))
-
-        #expect(fitted.width == 1440)
-        #expect(fitted.height == 845)
-    }
-
-    @Test func boxSizeThatAlreadyFitsIsUnchanged() {
-        let a = OverlayAppearance(defaults: freshDefaults())
-        a.boxWidth = 520
-        a.boxHeight = 440
-
-        let fitted = a.boxSize(fittingInto: CGSize(width: 1440, height: 845))
-
-        #expect(fitted.width == 520)
-        #expect(fitted.height == 440)
-    }
-
-    /// No screen to fit to (a headless host) must not shrink the box to nothing.
-    @Test func boxSizeWithoutAScreenIsTheSavedSize() {
-        let a = OverlayAppearance(defaults: freshDefaults())
-        let fitted = a.boxSize(fittingInto: nil)
-        #expect(fitted.width == a.boxWidth)
-        #expect(fitted.height == a.boxHeight)
-    }
-
     /// 0% is a reachable, meaningful setting — a text-only surface with no backdrop — so it must
     /// survive a round trip rather than being clamped away.
     @Test func fullyTransparentOpacityIsPersistable() {

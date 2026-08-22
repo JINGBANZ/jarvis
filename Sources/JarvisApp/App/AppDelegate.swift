@@ -130,10 +130,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         overlayCaption.setBackgroundOpacity(appearance.captionBackgroundOpacity)
         overlayCaption.setEnabled(appearance.captionEnabled)   // off by default
 
-        // Fit the saved size to this screen, so a box dragged large on an external display cannot
-        // open with its resize edges off a smaller one.
-        overlayBox = OverlayBoxPanel(
-            contentSize: appearance.boxSize(fittingInto: NSScreen.main?.visibleFrame.size))
+        overlayBox = OverlayBoxPanel(contentSize: NSSize(
+            width: appearance.boxWidth, height: appearance.boxHeight))
         overlayBox.setFontSize(appearance.boxFontSize)
         overlayBox.setOpacity(appearance.boxOpacity)
         // The panel reports a finished resize drag; persistence stays here, beside the other
