@@ -19,7 +19,7 @@ public struct CLIBrainClient: BrainClient, Sendable {
         provider: BrainProvider,
         executable: URL,
         model: String,
-        reasoningEffort: String = ReasoningEffort.default.rawValue,
+        reasoningEffort: String = Defaults.Brain.effort.rawValue,
         workDirectory: URL,
         timeout: TimeInterval = BrainWorkloadTimeout.liveCoaching,
         traffic: (any BrainTrafficAuditing)? = nil,

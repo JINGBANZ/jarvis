@@ -333,7 +333,7 @@ private func speakResponseBody(arguments: String) -> Data {
     }
 
     /// A default-constructed client encodes the *default effort's* budget, not a magic number — this
-    /// pins the single source of truth (`ReasoningEffort.default.maxOutputTokens`) so the client
+    /// pins the single source of truth (`Defaults.Brain.effort.maxOutputTokens`) so the client
     /// default can't silently drift back to a hardcoded value.
     @Test func defaultMaxOutputTokensTracksDefaultEffort() async throws {
         let box = CapturedBody()
@@ -341,7 +341,7 @@ private func speakResponseBody(arguments: String) -> Data {
                                        send: { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
         _ = try await client.respond(messages: [.user("hi")], tools: coachTools)
         let body = String(data: box.get() ?? Data(), encoding: .utf8) ?? ""
-        #expect(body.contains("\"max_output_tokens\":\(ReasoningEffort.default.maxOutputTokens)"))
+        #expect(body.contains("\"max_output_tokens\":\(Defaults.Brain.effort.maxOutputTokens)"))
     }
 
     /// Tools are sent with `strict:true` so the model's function-call arguments are schema-guaranteed

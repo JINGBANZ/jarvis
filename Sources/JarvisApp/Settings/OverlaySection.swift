@@ -42,12 +42,12 @@ final class OverlaySection: NSObject, SettingsSection {
             enabled: appearance.captionEnabled,
             enableAction: #selector(captionEnabledChanged),
             sizeValue: appearance.captionFontSize,
-            sizeRange: Config.overlayCaptionFontSizeRange,
+            sizeRange: Defaults.Overlay.Caption.fontSizeRange,
             sizeAction: #selector(captionSizeChanged),
             sizeAccessibilityLabel: "Overlay caption text size",
             opacityTitle: "Background opacity",
             opacityValue: appearance.captionBackgroundOpacity,
-            opacityRange: Config.overlayCaptionOpacityRange,
+            opacityRange: Defaults.Overlay.Caption.opacityRange,
             opacityAction: #selector(captionOpacityChanged),
             opacityAccessibilityLabel: "Overlay caption background opacity")
 
@@ -59,12 +59,12 @@ final class OverlaySection: NSObject, SettingsSection {
             enabled: appearance.boxEnabled,
             enableAction: #selector(boxEnabledChanged),
             sizeValue: appearance.boxFontSize,
-            sizeRange: Config.overlayBoxFontSizeRange,
+            sizeRange: Defaults.Overlay.Box.fontSizeRange,
             sizeAction: #selector(boxSizeChanged),
             sizeAccessibilityLabel: "Overlay box text size",
             opacityTitle: "Opacity",
             opacityValue: appearance.boxOpacity,
-            opacityRange: Config.overlayBoxOpacityRange,
+            opacityRange: Defaults.Overlay.Box.opacityRange,
             opacityAction: #selector(boxOpacityChanged),
             opacityAccessibilityLabel: "Overlay box opacity")
 

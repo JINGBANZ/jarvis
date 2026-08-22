@@ -9,19 +9,23 @@ import JarvisCore
 ///
 /// Like the caption it is excluded from all screen capture (so it stays invisible in a screen share
 /// and the brain never reads it back) and has no window chrome. Unlike the caption it accepts mouse
-/// events: drag anywhere to move it, scroll to read the backlog. Settings switches it on/off; each
-/// fresh Start clears it.
+/// events: drag anywhere to move it, scroll to read the backlog, drag its edges to resize it.
+/// Settings switches it on/off; each fresh Start clears it.
+///
+/// The panel itself never touches UserDefaults: it reports a finished resize through
+/// `onSizeChanged` and takes the restored size as an `init` parameter, leaving persistence to
+/// `OverlayAppearance` — the same split the font-size and opacity settings already use.
 @MainActor
 public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplying {
     private let panel: NSPanel
     /// The layer-backed, opaque rounded fill behind the text — its alpha is the box's opacity.
-    private let box: NSView
+    private let box: ResizeReportingView
     private let textView: NSTextView
     /// White level of the box fill; the opacity setting only varies the alpha, keeping this constant.
     private static let boxWhite: CGFloat = 0.10
     /// Point size of the response text; the timestamp is rendered a couple points smaller. Driven by
     /// the Settings slider via `setFontSize`.
-    private var fontSize: CGFloat = CGFloat(Config.overlayBoxFontSizeDefault)
+    private var fontSize: CGFloat = CGFloat(Defaults.Overlay.Box.fontSize)
     /// While the Settings appearance tab is open, the box shows sample text (not the real log) so size
     /// and opacity changes are visible even with no responses yet. Restored on close.
     private var isPreviewing = false
@@ -29,6 +33,8 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     /// because the Settings preview can show the box without the user asking. The preview restores to
     /// this on close — so the box's on/off state can never disagree with the persisted setting.
     private var userWantsShown = false
+    /// Reports the box's new content size once a resize drag finishes.
+    public var onSizeChanged: ((Double, Double) -> Void)?
     /// Stand-in responses shown during the Settings preview.
     private static let sampleEntries: [(stamp: String, text: String)] = [
         ("10:30:00", "Ask about the time complexity of that loop."),
@@ -48,14 +54,27 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         return f
     }()
 
-    public override init() {
+    /// - Parameter contentSize: the size the user last dragged the box to. Taken at construction so
+    ///   the panel is built at its final size and centered once, rather than being resized after the
+    ///   fact — `setContentSize` pins the top-left, so a later resize would leave the box off-centre,
+    ///   and a second `center()` is an AppKit call this panel does not need. This panel queries no
+    ///   screen at all: `NSScreen` access in `init` blocks AppKit on a host with no GUI session and
+    ///   hangs every main-actor test.
+    public init(contentSize: NSSize = NSSize(
+        width: Defaults.Overlay.Box.width,
+        height: Defaults.Overlay.Box.height)
+    ) {
         // `.resizable` lets the user drag the borderless box's edges to resize it (no visible chrome,
         // but the window server still provides edge resizing on a resizable window). `minSize` keeps it
         // from being shrunk to nothing.
-        panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 380, height: 320),
-                        styleMask: [.nonactivatingPanel, .borderless, .resizable],
-                        backing: .buffered, defer: false)
-        panel.minSize = NSSize(width: 240, height: 140)
+        panel = NSPanel(
+            contentRect: NSRect(origin: .zero, size: contentSize),
+            styleMask: [.nonactivatingPanel, .borderless, .resizable],
+            backing: .buffered, defer: false)
+        // The drag floor is the persisted floor, so a dragged size always survives a round trip.
+        panel.minSize = NSSize(
+            width: Defaults.Overlay.Box.widthRange.lowerBound,
+            height: Defaults.Overlay.Box.heightRange.lowerBound)
         panel.level = .floating
         panel.isFloatingPanel = true
         panel.hidesOnDeactivate = false
@@ -67,9 +86,13 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         panel.isMovableByWindowBackground = true   // drag anywhere on the box to move it
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
-        let box = NSView(frame: panel.contentRect(forFrameRect: panel.frame))
+        let box = ResizeReportingView(frame: panel.contentRect(forFrameRect: panel.frame))
         box.wantsLayer = true
-        box.layer?.backgroundColor = NSColor(white: Self.boxWhite, alpha: 1).cgColor   // opaque by default
+        // From the registry, like `fontSize` above: a literal here would be a second default that
+        // silently disagrees with `Defaults.Overlay.Box.opacity` for any caller but `AppDelegate`.
+        box.layer?.backgroundColor = NSColor(
+            white: Self.boxWhite,
+            alpha: CGFloat(Defaults.Overlay.Box.opacity)).cgColor
         box.layer?.cornerRadius = 12
         box.layer?.masksToBounds = true
         self.box = box
@@ -105,6 +128,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         box.addSubview(scroll)
         panel.contentView = box
         super.init()
+        box.onEndLiveResize = { [weak self] in self?.reportContentSize() }
         // Centered on screen initially; the user can drag it anywhere from there (the frame persists
         // across menu toggles, since hide() only orders it out).
         panel.center()
@@ -205,6 +229,13 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         refreshText()
     }
 
+    /// One callback per finished drag rather than per frame: a per-frame hook would rewrite the
+    /// preference dozens of times per gesture.
+    private func reportContentSize() {
+        let size = panel.contentRect(forFrameRect: panel.frame).size
+        onSizeChanged?(Double(size.width), Double(size.height))
+    }
+
     /// Switch the box on or off, live — `show()` / `hide()` (which carry the capture-exclusion re-assert
     /// and the preview-aware visibility handling).
     public func setEnabled(_ enabled: Bool) {
@@ -266,11 +297,35 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         textView.enclosingScrollView?.autohidesScrollers ?? false
     }
 
-    /// Resize the box's content (used by tests; the user resizes by dragging the edges).
-    func setContentSize(_ size: NSSize) { panel.setContentSize(size) }
-
     /// The box's current content size — lets tests assert resize/min-size behavior.
     var currentContentSize: NSSize { panel.contentRect(forFrameRect: panel.frame).size }
+
+    /// Resize the box's content (used by tests; the user resizes by dragging the edges, and the
+    /// restored size arrives through `init`).
+    func setContentSize(_ size: NSSize) { panel.setContentSize(size) }
+
+    /// The smallest size a drag can reach — lets tests assert it matches the persisted floor.
+    var minimumContentSize: NSSize { panel.minSize }
+
+    /// Drives the same AppKit entry point that ends a user resize drag — lets tests assert that a
+    /// finished drag is reported exactly once.
+    func endLiveResize() { box.viewDidEndLiveResize() }
+}
+
+/// The box's content view, which reports the end of a user resize drag.
+///
+/// AppKit sends `viewDidEndLiveResize` to the views in a window being live-resized, once the drag
+/// finishes. Overriding it here rather than assigning `NSWindow.delegate`: a delegate assignment
+/// drives AppKit into window-server-dependent setup that blocks indefinitely on a machine with no
+/// GUI session, which hung every main-actor test on CI. A view subclass needs none of that
+/// machinery, and AppKit calls it only for a real drag — never for a programmatic `setContentSize`.
+private final class ResizeReportingView: NSView {
+    var onEndLiveResize: (() -> Void)?
+
+    override func viewDidEndLiveResize() {
+        super.viewDidEndLiveResize()
+        onEndLiveResize?()
+    }
 }
 
 /// An NSTextView that lets a click-drag move the borderless window instead of being swallowed by the

@@ -233,8 +233,7 @@ final class BrainSection: NSObject, SettingsSection {
     }
 
     private func preferencesDidChange(_ change: PreferenceChange) {
-        guard let route = preferences.configuredRoute else { return }
-        let providers = route.targets.map(\.provider)
+        let providers = preferences.route.targets.map(\.provider)
         guard providers.contains(where: \.usesLocalCLI) else {
             pendingPreferenceChange = nil
             onPreferencesChanged(change, [:])
