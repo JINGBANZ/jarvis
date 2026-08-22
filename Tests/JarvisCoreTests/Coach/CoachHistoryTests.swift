@@ -108,12 +108,39 @@ import Testing
     @Test func compactReplacesPrefixWithSummary() {
         let h = CoachHistory()
         h.commit([.user("old one"), .user("old two"), .user("recent")])
-        h.compact(prefixCount: 2, summary: "the gist")
+        let revision = h.compactionPrefix()!.revision
+        #expect(h.compact(prefixCount: 2, summary: "the gist", revision: revision))
         let texts = h.snapshot().compactMap(\.text)
         #expect(texts.count == 2)
         #expect(texts[0].contains("the gist"))
         #expect(texts[0].contains("condensed"))
         #expect(texts[1] == "recent")
+    }
+
+    /// Compaction reads history on one task and writes the summary back much later from another. A
+    /// capture committed in between collapses superseded OCR *inside* the snapshotted prefix, so
+    /// applying the older summary would reintroduce the screen text that collapse just retired —
+    /// exactly the stale-context failure OCR invalidation exists to prevent. The summary is dropped
+    /// and history left untouched; the next completed attempt compacts from a fresh prefix.
+    @Test func compactRejectsASummaryWrittenAgainstSupersededScreenText() {
+        let h = CoachHistory()
+        let ocr = JarvisPrompts.Coach.recognizedText("int hl = countHeight(root.left);")
+        h.commit([.init(role: .tool, text: ocr, toolCallId: "c1"), .user("first")])
+        let stale = h.compactionPrefix()!
+
+        // A newer capture lands while the summary is still being written.
+        h.commit([.init(role: .tool, text: JarvisPrompts.Coach.recognizedText("fixed line"),
+                        toolCallId: "c2")])
+
+        #expect(!h.compact(prefixCount: stale.count, summary: "old screen said hl", revision: stale.revision))
+        let texts = h.snapshot().compactMap(\.text).joined(separator: "\n")
+        #expect(!texts.contains("old screen said hl"))                     // summary dropped
+        #expect(texts.contains(JarvisPrompts.Coach.supersededRecognizedTextStub))  // collapse survives
+
+        // A fresh prefix compacts normally.
+        let fresh = h.compactionPrefix()!
+        #expect(h.compact(prefixCount: fresh.count, summary: "the gist", revision: fresh.revision))
+        #expect(h.snapshot().compactMap(\.text).joined().contains("the gist"))
     }
 
     /// The estimate scales with text — precision doesn't matter, monotonicity does. A committed

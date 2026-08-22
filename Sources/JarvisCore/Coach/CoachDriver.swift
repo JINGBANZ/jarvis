@@ -1232,7 +1232,7 @@ public final class CoachDriver: @unchecked Sendable {
     /// Auxiliary compaction fails soft and never counts against provider route health.
     private func compactIfNeeded(using client: BrainClient) async {
         guard history.estimatedTokens > config.historyCompactionTokenThreshold else { return }
-        guard let (oldest, count) = history.compactionPrefix() else { return }
+        guard let (oldest, count, revision) = history.compactionPrefix() else { return }
         do {
             let response = try await client.respond(
                 messages: [
@@ -1245,7 +1245,10 @@ public final class CoachDriver: @unchecked Sendable {
                 jlog("… memory compaction returned nothing — keeping full history for now")
                 return
             }
-            history.compact(prefixCount: count, summary: summary)
+            guard history.compact(prefixCount: count, summary: summary, revision: revision) else {
+                jlog("… discarded a summary written against superseded screen text — will retry later")
+                return
+            }
             jlog("… condensed session memory to ~\(history.estimatedTokens) tokens")
         } catch {
             jlog("… memory compaction failed (will retry later): \(error.localizedDescription)")

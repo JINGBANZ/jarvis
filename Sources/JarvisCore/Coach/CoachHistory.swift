@@ -13,6 +13,11 @@ import Foundation
 public final class CoachHistory: @unchecked Sendable {
     private let lock = NSLock()
     private var messages: [ChatMessage] = []
+    /// Bumped whenever committed messages are rewritten in place rather than merely appended to.
+    /// Compaction reads history, then writes a summary of it much later from another task; growth in
+    /// the tail is safe for that, but an in-place OCR collapse is not, because the summary would
+    /// reintroduce the very screen text the collapse just retired.
+    private var rewriteRevision: UInt = 0
 
     public init() {}
 
@@ -53,6 +58,7 @@ public final class CoachHistory: @unchecked Sendable {
         let ocrHeader = JarvisPrompts.Coach.recognizedTextHeader
         if let newest = turn.lastIndex(where: { $0.text?.contains(ocrHeader) == true }) {
             messages = messages.map(Self.collapsingSupersededOCR)
+            rewriteRevision &+= 1
             // One tool loop may capture more than once — only the turn's newest OCR stays verbatim.
             for i in turn.indices where i < newest { turn[i] = Self.collapsingSupersededOCR(turn[i]) }
         }
@@ -128,7 +134,8 @@ public final class CoachHistory: @unchecked Sendable {
     /// estimated tokens — clamped to at least one message (a single oversized message must still be
     /// compactable) and never the whole history (the newest turn stays verbatim). Returns nil only
     /// when there's a single message or none, i.e. nothing meaningful to split.
-    public func compactionPrefix(fraction: Double = 0.6) -> (messages: [ChatMessage], count: Int)? {
+    public func compactionPrefix(fraction: Double = 0.6)
+        -> (messages: [ChatMessage], count: Int, revision: UInt)? {
         lock.lock(); defer { lock.unlock() }
         guard messages.count > 1 else { return nil }
         let budget = Int(Double(Self.estimate(messages)) * fraction)
@@ -139,16 +146,25 @@ public final class CoachHistory: @unchecked Sendable {
             used += cost; count += 1
         }
         count = min(max(count, 1), messages.count - 1)
-        return (Array(messages.prefix(count)), count)
+        return (Array(messages.prefix(count)), count, rewriteRevision)
     }
 
     /// Replace the oldest `prefixCount` messages with a single summary message. Tolerates the tail
     /// having grown while the summary was being written — only the exact prefix handed out by
     /// `compactionPrefix` is replaced. One deliberate prompt-cache miss; cache-hot again afterwards.
-    public func compact(prefixCount: Int, summary: String) {
+    ///
+    /// Rejects a summary written against a since-rewritten prefix, reporting whether it applied. The
+    /// summary is produced off the attempt path, so a capture committed meanwhile can collapse OCR
+    /// inside that prefix; applying the older summary would put the retired screen text straight back
+    /// into history and let a later tip cite code the user has already changed. Dropping it is safe —
+    /// history is unchanged and the next completed attempt compacts again from a fresh prefix.
+    @discardableResult
+    public func compact(prefixCount: Int, summary: String, revision: UInt) -> Bool {
         lock.lock(); defer { lock.unlock() }
-        guard prefixCount > 0, prefixCount <= messages.count else { return }
+        guard prefixCount > 0, prefixCount <= messages.count else { return false }
+        guard revision == rewriteRevision else { return false }
         let head = ChatMessage.user(JarvisPrompts.Coach.condensedHistory(summary))
         messages.replaceSubrange(0..<prefixCount, with: [head])
+        return true
     }
 }
