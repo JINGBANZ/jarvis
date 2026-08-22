@@ -66,7 +66,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         // but the window server still provides edge resizing on a resizable window). `minSize` keeps it
         // from being shrunk to nothing.
         panel = NSPanel(
-            contentRect: NSRect(origin: .zero, size: contentSize),
+            contentRect: NSRect(origin: .zero, size: Self.fitted(contentSize)),
             styleMask: [.nonactivatingPanel, .borderless, .resizable],
             backing: .buffered, defer: false)
         // The drag floor is the persisted floor, so a dragged size always survives a round trip.
@@ -86,7 +86,11 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
 
         let box = ResizeReportingView(frame: panel.contentRect(forFrameRect: panel.frame))
         box.wantsLayer = true
-        box.layer?.backgroundColor = NSColor(white: Self.boxWhite, alpha: 1).cgColor   // opaque by default
+        // From the registry, like `fontSize` above: a literal here would be a second default that
+        // silently disagrees with `Defaults.Overlay.Box.opacity` for any caller but `AppDelegate`.
+        box.layer?.backgroundColor = NSColor(
+            white: Self.boxWhite,
+            alpha: CGFloat(Defaults.Overlay.Box.opacity)).cgColor
         box.layer?.cornerRadius = 12
         box.layer?.masksToBounds = true
         self.box = box
@@ -293,6 +297,17 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
 
     /// The box's current content size — lets tests assert resize/min-size behavior.
     var currentContentSize: NSSize { panel.contentRect(forFrameRect: panel.frame).size }
+
+    /// Shrink a restored size to the screen it is opening on. A box dragged large on an external
+    /// display would otherwise open wider or taller than a laptop screen, putting its resize edges
+    /// out of reach — and Settings has no size control to recover with, because sizing is drag-only.
+    /// Leaves the size alone when no screen is available, which is only the headless test host.
+    private static func fitted(_ size: NSSize) -> NSSize {
+        guard let visible = NSScreen.main?.visibleFrame.size else { return size }
+        return NSSize(
+            width: min(size.width, visible.width),
+            height: min(size.height, visible.height))
+    }
 
     /// Resize the box's content (used by tests; the user resizes by dragging the edges, and the
     /// restored size arrives through `init`).
