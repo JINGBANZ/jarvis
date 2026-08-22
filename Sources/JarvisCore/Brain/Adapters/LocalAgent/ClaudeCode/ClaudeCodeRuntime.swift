@@ -241,8 +241,18 @@ private final class ClaudeCodeQuery: @unchecked Sendable {
 
         var firstAssistantAt: UInt64?
         var assistantText: String?
+        var trace = StreamTrace()
         while true {
-            let (line, payload) = try await nextPayloadWithLine(deadline: deadline)
+            let line: AgentRuntimeProcess.Line
+            let payload: [String: Any]
+            do {
+                (line, payload) = try await nextPayloadWithLine(deadline: deadline)
+            } catch {
+                throw Self.describingTurnFailure(
+                    error, budget: turn.timeout, dispatchedAt: dispatchedAt, trace: trace)
+            }
+            trace.record(payload)
+            Self.logIfRateLimited(payload)
             switch payload["type"] as? String {
             case "assistant":
                 if firstAssistantAt == nil {
@@ -324,6 +334,35 @@ private final class ClaudeCodeQuery: @unchecked Sendable {
         Int((end - start) / 1_000_000)
     }
 
+    /// The process layer reports how long its final read waited, which is not the turn's budget: a
+    /// turn that streams progress right up to the deadline leaves a sub-second last slice, which
+    /// surfaced as the useless "timed out after 0s". Restate the failure against the budget that
+    /// actually expired, and name the stream events that were in flight when it did.
+    private static func describingTurnFailure(
+        _ error: Error,
+        budget: TimeInterval,
+        dispatchedAt: UInt64,
+        trace: StreamTrace
+    ) -> Error {
+        let nsError = error as NSError
+        guard nsError.domain == AgentRuntimeProcess.errorDomain,
+              nsError.code == NSURLErrorTimedOut else { return error }
+        let elapsed = milliseconds(from: dispatchedAt, to: DispatchTime.now().uptimeNanoseconds)
+        return Self.error(
+            "Claude did not finish the turn within \(Int(budget))s "
+            + "(elapsed \(elapsed)ms; \(trace.summary))")
+    }
+
+    /// A throttled or rejected rate limit is the one discarded stream event that explains a stalled
+    /// turn by itself, so it reaches the debug log instead of being dropped with the rest.
+    private static func logIfRateLimited(_ payload: [String: Any]) {
+        guard payload["type"] as? String == "rate_limit_event",
+              let info = payload["rate_limit_info"] as? [String: Any],
+              let status = info["status"] as? String,
+              status != "allowed" else { return }
+        jlog("Jarvis: Claude Code rate limit \(status) — \(jsonDescription(info))")
+    }
+
     private static func jsonDescription(_ object: Any) -> String {
         (try? JSONSerialization.data(withJSONObject: object))
             .map { String(decoding: $0, as: UTF8.self) } ?? String(describing: object)
@@ -332,5 +371,28 @@ private final class ClaudeCodeQuery: @unchecked Sendable {
     private static func error(_ detail: String) -> NSError {
         NSError(domain: "ClaudeCodeRuntime", code: 1,
                 userInfo: [NSLocalizedDescriptionKey: detail])
+    }
+}
+
+/// A tally of what the CLI streamed during one turn.
+///
+/// Jarvis acts only on `assistant` and `result`, but the events it discards are the only evidence of
+/// why a turn stalled: a timeout behind a run of `system/thinking_tokens` is a slow model, while one
+/// that goes quiet after `rate_limit_event` is not. Counting them costs nothing and turns an opaque
+/// timeout into a diagnosable one.
+private struct StreamTrace {
+    private var counts: [String: Int] = [:]
+
+    mutating func record(_ payload: [String: Any]) {
+        let type = payload["type"] as? String ?? "unknown"
+        let kind = (payload["subtype"] as? String).map { "\(type)/\($0)" } ?? type
+        counts[kind, default: 0] += 1
+    }
+
+    var summary: String {
+        guard !counts.isEmpty else { return "no stream events" }
+        return counts.sorted { $0.key < $1.key }
+            .map { "\($0.key)×\($0.value)" }
+            .joined(separator: " ")
     }
 }
