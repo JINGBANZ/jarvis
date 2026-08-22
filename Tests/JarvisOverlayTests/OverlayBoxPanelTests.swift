@@ -69,7 +69,7 @@ import JarvisCore
     func isResizableAndHonorsAResize() {
         let panel = OverlayBoxPanel()
         #expect(panel.isResizable, "the box must be resizable by dragging its edges")
-        panel.setContentSize(width: 500, height: 400)
+        panel.setContentSize(NSSize(width: 500, height: 400))
         #expect(panel.currentContentSize.width == 500)
         #expect(panel.currentContentSize.height == 400)
     }
@@ -94,26 +94,14 @@ import JarvisCore
             == Defaults.Overlay.Box.heightRange.lowerBound)
     }
 
-    /// Position is not persisted, so the box is centered at launch. Restoring a saved size must land
-    /// it where a natively-centered window of that size sits: AppKit's `setContentSize` pins the
-    /// top-left, which would push a box larger than the default down and to the right.
-    ///
-    /// Compared against a reference panel rather than the pre-resize center, because `NSWindow
-    /// .center()` deliberately places a window slightly above true center — so the geometric center
-    /// legitimately moves with height.
+    /// The saved size arrives through `init`, so the panel is built at its final size and centered
+    /// once. Placement needs no assertion of its own: with no post-construction resize, nothing is
+    /// left to push the box off the centre `init` chose.
     @MainActor @Test
-    func restoringASavedSizeLandsWhereACenteredWindowOfThatSizeSits() {
-        let panel = OverlayBoxPanel()
-        panel.setContentSize(width: 900, height: 700)
-
-        let reference = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 900, height: 700),
-            styleMask: [.nonactivatingPanel, .borderless, .resizable],
-            backing: .buffered, defer: false)
-        reference.center()
-
-        #expect(abs(panel.currentFrame.origin.x - reference.frame.origin.x) < 1)
-        #expect(abs(panel.currentFrame.origin.y - reference.frame.origin.y) < 1)
+    func isConstructedAtASavedSize() {
+        let panel = OverlayBoxPanel(contentSize: NSSize(width: 900, height: 700))
+        #expect(panel.currentContentSize.width == 900)
+        #expect(panel.currentContentSize.height == 700)
     }
 
     @MainActor @Test
@@ -124,7 +112,7 @@ import JarvisCore
 
         // Drive the real AppKit entry point rather than a test-only seam: `endLiveResize` is what
         // the window calls when the user lets go of a resized edge.
-        panel.setContentSize(width: 520, height: 430)
+        panel.setContentSize(NSSize(width: 520, height: 430))
         panel.endLiveResize()
 
         #expect(reported.count == 1)
@@ -132,15 +120,15 @@ import JarvisCore
         #expect(reported.first?.1 == 430)
     }
 
-    /// Restoring a saved size at launch must not read back as a user edit; otherwise every launch
-    /// would rewrite the preference from whatever AppKit happened to settle on.
+    /// A programmatic resize must not read back as a user edit; otherwise a launch could rewrite
+    /// the preference from whatever AppKit happened to settle on.
     @MainActor @Test
-    func restoringASavedSizeDoesNotReportAUserResize() {
+    func aProgrammaticResizeDoesNotReportAUserResize() {
         let panel = OverlayBoxPanel()
         var reportCount = 0
         panel.onSizeChanged = { _, _ in reportCount += 1 }
 
-        panel.setContentSize(width: 460, height: 360)
+        panel.setContentSize(NSSize(width: 460, height: 360))
 
         #expect(reportCount == 0)
         #expect(panel.currentContentSize.width == 460)

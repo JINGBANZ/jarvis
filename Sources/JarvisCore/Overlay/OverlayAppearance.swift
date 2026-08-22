@@ -196,11 +196,8 @@ public protocol OverlayCaptionApplying: AnyObject {
 public protocol OverlayBoxApplying: AnyObject {
     func setOpacity(_ opacity: Double)
     func setFontSize(_ points: Double)
-    /// Restore the box to the size the user last dragged it to. Applied once at launch; a
-    /// programmatic resize must not read back as a user edit.
-    func setContentSize(width: Double, height: Double)
     /// Called once per finished resize drag with the box's new content size, so the app can persist
-    /// it. Never fires for `setContentSize(width:height:)`.
+    /// it. The restored size is supplied at construction instead, so it never fires for one.
     var onSizeChanged: ((Double, Double) -> Void)? { get set }
     /// Show or hide the box live, mirroring the persisted setting.
     func setEnabled(_ enabled: Bool)

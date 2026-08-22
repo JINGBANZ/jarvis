@@ -13,7 +13,7 @@ import JarvisCore
 /// Settings switches it on/off; each fresh Start clears it.
 ///
 /// The panel itself never touches UserDefaults: it reports a finished resize through
-/// `onSizeChanged` and accepts a restored size through `setContentSize`, leaving persistence to
+/// `onSizeChanged` and takes the restored size as an `init` parameter, leaving persistence to
 /// `OverlayAppearance` — the same split the font-size and opacity settings already use.
 @MainActor
 public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplying {
@@ -54,14 +54,19 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         return f
     }()
 
-    public override init() {
+    /// - Parameter contentSize: the size the user last dragged the box to. Taken at construction so
+    ///   the panel is built at its final size and centered once, rather than being resized after the
+    ///   fact — `setContentSize` pins the top-left, so a later resize would leave the box off-centre,
+    ///   and a second `center()` is an AppKit call this panel does not need.
+    public init(contentSize: NSSize = NSSize(
+        width: Defaults.Overlay.Box.width,
+        height: Defaults.Overlay.Box.height)
+    ) {
         // `.resizable` lets the user drag the borderless box's edges to resize it (no visible chrome,
         // but the window server still provides edge resizing on a resizable window). `minSize` keeps it
         // from being shrunk to nothing.
         panel = NSPanel(
-            contentRect: NSRect(
-                x: 0, y: 0,
-                width: Defaults.Overlay.Box.width, height: Defaults.Overlay.Box.height),
+            contentRect: NSRect(origin: .zero, size: contentSize),
             styleMask: [.nonactivatingPanel, .borderless, .resizable],
             backing: .buffered, defer: false)
         // The drag floor is the persisted floor, so a dragged size always survives a round trip.
@@ -218,17 +223,6 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         refreshText()
     }
 
-    /// Restore the size the user last dragged the box to. AppKit raises no live-resize signal for a
-    /// programmatic resize, so this cannot be mistaken for a user edit and written back.
-    ///
-    /// Re-centers afterwards: `setContentSize` pins the frame's top-left, so a box larger than the
-    /// default would otherwise land down and to the right of the centered position `init` chose.
-    /// Position is not persisted, so centered-at-launch is the whole contract.
-    public func setContentSize(width: Double, height: Double) {
-        panel.setContentSize(NSSize(width: width, height: height))
-        panel.center()
-    }
-
     /// One callback per finished drag rather than per frame: a per-frame hook would rewrite the
     /// preference dozens of times per gesture.
     private func reportContentSize() {
@@ -300,8 +294,9 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     /// The box's current content size — lets tests assert resize/min-size behavior.
     var currentContentSize: NSSize { panel.contentRect(forFrameRect: panel.frame).size }
 
-    /// The panel's current frame in screen coordinates — lets tests assert placement.
-    var currentFrame: NSRect { panel.frame }
+    /// Resize the box's content (used by tests; the user resizes by dragging the edges, and the
+    /// restored size arrives through `init`).
+    func setContentSize(_ size: NSSize) { panel.setContentSize(size) }
 
     /// The smallest size a drag can reach — lets tests assert it matches the persisted floor.
     var minimumContentSize: NSSize { panel.minSize }

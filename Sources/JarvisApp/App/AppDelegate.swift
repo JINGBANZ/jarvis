@@ -130,10 +130,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         overlayCaption.setBackgroundOpacity(appearance.captionBackgroundOpacity)
         overlayCaption.setEnabled(appearance.captionEnabled)   // off by default
 
-        overlayBox = OverlayBoxPanel()
+        overlayBox = OverlayBoxPanel(contentSize: NSSize(
+            width: appearance.boxWidth, height: appearance.boxHeight))
         overlayBox.setFontSize(appearance.boxFontSize)
         overlayBox.setOpacity(appearance.boxOpacity)
-        overlayBox.setContentSize(width: appearance.boxWidth, height: appearance.boxHeight)
         // The panel reports a finished resize drag; persistence stays here, beside the other
         // overlay settings, so the panel keeps knowing nothing about UserDefaults.
         overlayBox.onSizeChanged = { [appearance] width, height in
