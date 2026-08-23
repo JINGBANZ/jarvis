@@ -5,14 +5,6 @@ import Testing
 /// loudness of each canonical failure so a regression (e.g. silently downgrading a capture failure, or
 /// making the graceful "them"-socket degrade pop a modal) is caught without a UI session.
 @Suite struct UserFacingErrorCatalogTests {
-    @Test func unconfiguredBrainProviderIsFatal() {
-        let error = UserFacingError.brainProviderNotConfigured
-        #expect(error.severity == .fatal)
-        #expect(error.severity.showsAlert)
-        #expect(error.message.contains("Primary provider"))
-        #expect(error.sessionEndReason == .brainProviderNotConfigured)
-    }
-
     @Test func noAPIKeyIsFatal() {
         #expect(UserFacingError.noAPIKey.severity == .fatal)
         #expect(UserFacingError.noAPIKey.severity.showsAlert)

@@ -1842,6 +1842,56 @@
   `Sources/JarvisApp/Updates/UpdateController.swift`, `scripts/generate-appcast.sh`,
   `scripts/package-app.sh`, `scripts/check-release-config.sh`.
 
+### 2026-08-21 — One registry owns every user-setting default; OpenAI is an explicit primary
+
+- **Chose:** Declare every user-facing setting's UserDefaults key, default value, and valid range in
+  one file, [`Defaults`](../Sources/JarvisCore/Config/Defaults.swift). The four accessor types keep
+  their validation, clamping, and normalization but hold no literals; `Config` keeps only runtime
+  tunables the user never sees. In the same pass, make the OpenAI API an explicit primary brain
+  provider rather than leaving a fresh install unconfigured.
+- **Why:** The defaults had scattered by accident of history — the overlay's lived in `Config` as
+  statics while the brain, transcription, and screen defaults were inline literals inside their own
+  accessors, so nobody could answer "what does a new install actually get?" without reading four
+  files. One registry makes that answerable and makes adding a setting a single edit plus one
+  accessor. The unconfigured brain state was a separate cost: it blocked Start with an error and no
+  onboarding, while the default route already required an OpenAI key anyway (transcription defaults
+  to OpenAI, and `requiresOpenAIAPIKey(for:)` is true if either the ears or any brain target is
+  OpenAI). So the honesty it bought was theoretical — silent metering could only reach a user who had
+  already saved a key deliberately — and it was worse even for the CLI-provider user, who hit "no
+  primary provider", fixed it, then hit "no API key" on the next Start. Removing it deletes the
+  optional route views, a readiness blocker, an error-catalog entry, a session-end reason, and the
+  placeholder row.
+- **Rejected:** (a) Merging all four preference types into one `UserSettings.swift` to reach a
+  literal single file — it produces a ~450-line grab-bag mixing route normalization with overlay
+  clamping and breaks one-type-per-file, for the sake of one fewer edit. (b) Keeping
+  `ReasoningEffort.default` alongside `Defaults.Brain.effort` — two homes for `low` is the exact
+  problem being fixed. (c) Keeping the unconfigured state and adding an onboarding flow to explain
+  it — that is a larger surface built to justify a state whose value did not survive inspection.
+- **Also:** Three preference migrations went with it, for two different reasons.
+  `brain.fallbackProvider` was never written by any released build — it was introduced and
+  superseded inside one feature branch, and the migration repairing that branch's own dev machine
+  rode onto main through the squash merge, where the scalar key only ever appears as a read. The
+  launch-time key-present-but-no-provider fixup is subsumed by the explicit OpenAI default, which
+  covers the same installs.
+  `transcription.openai.language-profile` is a different case and is dropped as an **accepted
+  loss**, not as dead code: it really was the primary storage in 0.1.2-0.1.5 with a real setter, and
+  0.1.6 only writes the replacement `expected-languages` list once the user next edits the setting.
+  An install last configured on 0.1.2-0.1.5 that never revisited the setting therefore holds only
+  the old key, and dropping the read silently resets its saved English/Mandarin choice to Automatic
+  — no error, no Activity entry, just weaker code-switching until the user notices and re-picks.
+  The owner confirmed no such install exists (the key is absent from this machine's own preferences,
+  and the project is in active development without a user base), which is exactly the project
+  context AGENTS.md requires before removing an obsolete path. Carrying ~15 lines and three tests to
+  protect a hypothetical install is the "legacy baggage" the same rule forbids. Reinstate the reader
+  if the project ever gains users who upgrade across that range.
+- **Checking this:** presence of a key in an old commit proves nothing about whether it shipped —
+  what matters is whether a *released* commit **wrote** it. Look for `defaults.set(..., forKey:)` on
+  that key in the tree at the merge commit, then `git tag --contains <sha>`. A key appearing only in
+  reads and `removeObject` calls never shipped as storage. Deciding to drop a key that *did* ship is
+  a separate, owner-level call about who is still running that release.
+- **Detail:** [settings-window.md](./settings-window.md),
+  `Sources/JarvisCore/Config/Defaults.swift`, `Sources/JarvisCore/Config/BrainPreferences.swift`.
+
 ### 2026-08-22 — Tips borrow the user's vocabulary instead of merely reading plainly
 
 - **Chose:** The coach's `# Tip style` now grounds word choice: name things with the words already on

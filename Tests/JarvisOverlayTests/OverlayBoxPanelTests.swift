@@ -1,5 +1,6 @@
 import Testing
 import AppKit
+import JarvisCore
 @testable import JarvisOverlay
 
 /// Tests for the Overlay Box (the persistent response-history window): it must stay excluded from
@@ -71,6 +72,73 @@ import AppKit
         panel.setContentSize(NSSize(width: 500, height: 400))
         #expect(panel.currentContentSize.width == 500)
         #expect(panel.currentContentSize.height == 400)
+    }
+
+    @MainActor @Test
+    func startsAtTheDefaultSizeUntilOneIsRestored() {
+        let panel = OverlayBoxPanel()
+        // Convert explicitly: an implicit CGFloat/Double comparison inside #expect fails even for
+        // bit-identical values, because the macro rewrites the expression around the conversion.
+        #expect(Double(panel.currentContentSize.width) == Defaults.Overlay.Box.width)
+        #expect(Double(panel.currentContentSize.height) == Defaults.Overlay.Box.height)
+    }
+
+    /// The drag floor must match the persisted floor, so a dragged size always survives a round trip
+    /// through `OverlayAppearance` unchanged.
+    @MainActor @Test
+    func minimumSizeMatchesThePersistedRangeFloor() {
+        let panel = OverlayBoxPanel()
+        #expect(Double(panel.minimumContentSize.width)
+            == Defaults.Overlay.Box.widthRange.lowerBound)
+        #expect(Double(panel.minimumContentSize.height)
+            == Defaults.Overlay.Box.heightRange.lowerBound)
+    }
+
+    /// The saved size arrives through `init`, so the panel is built at its final size and centered
+    /// once. Placement needs no assertion of its own: with no post-construction resize, nothing is
+    /// left to push the box off the centre `init` chose.
+    @MainActor @Test
+    func isConstructedAtASavedSize() {
+        let panel = OverlayBoxPanel(contentSize: NSSize(width: 900, height: 700))
+        #expect(panel.currentContentSize.width == 900)
+        #expect(panel.currentContentSize.height == 700)
+    }
+
+    /// The panel must carry the registered opacity on its own, not only when AppDelegate applies it.
+    @MainActor @Test
+    func usesTheRegisteredOpacityBeforeAnySetterRuns() {
+        let panel = OverlayBoxPanel()
+        #expect(abs(panel.currentBoxOpacity - CGFloat(Defaults.Overlay.Box.opacity)) < 0.001)
+    }
+
+    @MainActor @Test
+    func reportsTheNewSizeWhenAResizeDragFinishes() {
+        let panel = OverlayBoxPanel()
+        var reported: [(Double, Double)] = []
+        panel.onSizeChanged = { reported.append(($0, $1)) }
+
+        // Drive the real AppKit entry point rather than a test-only seam: `endLiveResize` is what
+        // the window calls when the user lets go of a resized edge.
+        panel.setContentSize(NSSize(width: 520, height: 430))
+        panel.endLiveResize()
+
+        #expect(reported.count == 1)
+        #expect(reported.first?.0 == 520)
+        #expect(reported.first?.1 == 430)
+    }
+
+    /// A programmatic resize must not read back as a user edit; otherwise a launch could rewrite
+    /// the preference from whatever AppKit happened to settle on.
+    @MainActor @Test
+    func aProgrammaticResizeDoesNotReportAUserResize() {
+        let panel = OverlayBoxPanel()
+        var reportCount = 0
+        panel.onSizeChanged = { _, _ in reportCount += 1 }
+
+        panel.setContentSize(NSSize(width: 460, height: 360))
+
+        #expect(reportCount == 0)
+        #expect(panel.currentContentSize.width == 460)
     }
 
     @MainActor @Test
