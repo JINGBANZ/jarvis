@@ -120,9 +120,13 @@ final class MenuBarController: NSObject {
         startStopItem.applyStandard(title: status.keepsSessionActive ? "Stop Jarvis" : "Start Jarvis",
                                     symbol: status.keepsSessionActive ? "stop.fill" : "play.fill")
         guard let button = statusItem.button else { return }
-        button.image = status.isReady ? MenuBarIcon.running : MenuBarIcon.stopped
+        button.image = status.iconSignal.map(MenuBarIcon.live) ?? MenuBarIcon.stopped
         button.title = ""
         button.toolTip = status.menuDescription
+        // The glyph deliberately gives checking and recovering the same reading, and the button has
+        // no title, so without this VoiceOver would call every reconnect a startup. The button is the
+        // accessibility element, so its label — not the image's — is what has to name the real state.
+        button.setAccessibilityLabel(status.menuDescription)
     }
 }
 
@@ -136,9 +140,16 @@ private extension JarvisReadiness.Status {
         }
     }
 
-    var isReady: Bool {
-        if case .ready = self { return true }
-        return false
+    /// How the status item renders this status, or nil for the stopped glyph. Startup and recovery
+    /// both light the icon: they are sessions in progress, and rendering them as stopped told the
+    /// user Jarvis was off for the several seconds it takes to come up.
+    var iconSignal: MenuBarIcon.Signal? {
+        switch self {
+        case .checking, .recovering: .working
+        case .ready: .ready
+        case .blocked: .blocked
+        case .stopped: nil
+        }
     }
 
     var menuDescription: String {
