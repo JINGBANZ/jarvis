@@ -218,6 +218,15 @@ final class AgentRuntimeProcess: @unchecked Sendable {
         try Task.checkCancellation()
     }
 
+    /// Signal end of input. The persistent stream-json protocols keep stdin open for the life of the
+    /// process, but a one-shot `codex exec` reads its whole prompt until EOF and will not start work
+    /// without it.
+    func closeStdin() {
+        writeLock.lock()
+        defer { writeLock.unlock() }
+        try? stdin.close()
+    }
+
     private func write(_ data: Data) throws {
         writeLock.lock()
         defer { writeLock.unlock() }

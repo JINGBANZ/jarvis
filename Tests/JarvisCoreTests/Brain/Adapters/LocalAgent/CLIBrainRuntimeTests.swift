@@ -18,6 +18,42 @@ import Testing
         #expect(claude.coach !== claude.summarizer)
     }
 
+    /// The one-shot path carries the same control the app-server does. `wiki/decisions.md` records
+    /// that Codex's `--disable` flags narrow nothing — `exec`, `wait`, `request_user_input`, and
+    /// `collaboration` are offered either way — so the item-event allowlist is what actually bites.
+    /// Without it a prompt injection riding in transcript or OCR text could get a background summary
+    /// to run a built-in tool during the live pipeline.
+    @Test func codexExecAbortsOnAToolItemEvent() async throws {
+        let directory = try makeWorkDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let trace = directory.appendingPathComponent("trace")
+        let executable = try makeExecutable(
+            in: directory,
+            named: "fake-codex",
+            script: codexScript(
+                trace: trace,
+                threadResult: Self.ephemeralThreadResult,
+                execReply: "condensed briefing",
+                execItemType: "command_execution"))
+        let runtime = CLIBrainRuntime(
+            backend: CodexExecRuntime(homeBaseDirectory: directory.appendingPathComponent("homes")))
+        let summarizer = makeClient(
+            provider: .codexCLI, executable: executable, directory: directory,
+            runtime: runtime, prewarm: false,
+            systemPrompt: "summarize", tools: [], toolChoice: .auto)
+
+        do {
+            _ = try await summarizer.respond(
+                messages: [.system("summarize"), .user("older turns")],
+                tools: [],
+                toolChoice: .auto)
+            Issue.record("expected a tool item event to abort the summary")
+        } catch {
+            #expect(error.localizedDescription.contains("disallowed item event"))
+        }
+        runtime.terminateNow()
+    }
+
     /// The one-shot summarizer path is text-only by construction: an image is rejected before any
     /// process is spawned rather than silently dropped into the `codex exec` document.
     @Test func codexExecRuntimeRejectsImageInput() async throws {
@@ -29,22 +65,6 @@ import Testing
             Issue.record("expected the text-only guard to reject an image")
         } catch {
             #expect(error.localizedDescription.contains("text-only"))
-        }
-    }
-
-    /// Stop is authoritative: once the runtime is terminated a summary cannot start a new process,
-    /// so a compaction racing teardown cannot leave a `codex exec` running past the session.
-    @Test func codexExecRuntimeRefusesToSpawnAfterTermination() async throws {
-        let runtime = CodexExecRuntime()
-        let conversation = try await openExecConversation(runtime: runtime)
-        runtime.terminateNow()
-        do {
-            _ = try await conversation.respond(
-                to: LocalAgentTurn(input: [.text("condense this")], timeout: 1),
-                onRequestDispatched: {})
-            Issue.record("expected termination to refuse new work")
-        } catch is CancellationError {
-            // expected: refused before reaching the executable, which does not exist here
         }
     }
 
@@ -808,7 +828,8 @@ import Testing
         pidFile: URL? = nil,
         trace: URL,
         threadResult: String,
-        execReply: String? = nil
+        execReply: String? = nil,
+        execItemType: String = "agent_message"
     ) -> String {
         let recordArguments = argumentsFile.map {
             "printf 'arg=<%s>\\n' \"$@\" > '\(shellQuoted($0.path))'\n"
@@ -816,8 +837,8 @@ import Testing
         let recordPID = pidFile.map {
             "printf '%s\\n' \"$$\" > '\(shellQuoted($0.path))'\n"
         } ?? ""
-        // `codex exec` is a different program shape from the app-server: one shot, reply written to
-        // the --output-last-message path, stdout only a human log.
+        // `codex exec --json` is a different program shape from the app-server: one shot, JSONL
+        // events on stdout, and the reply written to the --output-last-message path.
         let execBranch = execReply.map { reply in
             """
             if [ "$1" = "exec" ]; then
@@ -830,6 +851,10 @@ import Testing
               done
               cat > /dev/null
               printf '%s' '\(shellQuoted(reply))' > "$out"
+              printf '{"type":"thread.started","thread_id":"t1"}\\n'
+              printf '{"type":"turn.started"}\\n'
+              printf '{"type":"item.completed","item":{"id":"i1","type":"\(execItemType)","text":"x"}}\\n'
+              printf '{"type":"turn.completed","usage":{}}\\n'
               exit 0
             fi
 

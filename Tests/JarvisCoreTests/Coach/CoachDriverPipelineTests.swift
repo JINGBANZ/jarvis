@@ -2227,6 +2227,38 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         await gate.release()
     }
 
+    /// Compaction runs off the attempt path, so the turn box that Stop cancels does not own it.
+    /// Session teardown must cancel and drain it itself, or a summary keeps a provider process alive
+    /// and billing after the user stopped, and can still be writing when the audit seals.
+    @Test func sessionTeardownCancelsAndDrainsCompaction() async {
+        let clock = ManualClock(now: 0)
+        let brain = ScriptedBrain(script: [
+            .init(toolCalls: [.staySilent(callId: "quiet")]),
+        ])
+        let gate = AsyncGate()
+        let summarizer = GatedSummarizer(gate: gate, summary: "never applied")
+        let (driver, transcript) = makeDriver(brain: brain, summarizer: summarizer, clock: clock,
+                                              config: Config(historyCompactionTokenThreshold: 5))
+        transcript.append(.init(speaker: .me, text: "a reasonably long problem statement to remember", at: 0))
+        await driver.handleTrigger(.turnEnd)
+        transcript.append(.init(speaker: .me, text: "next thought", at: 5))
+        await driver.handleTrigger(.turnEnd)
+        #expect(await waitUntilAsync { await gate.hasEntered })
+
+        // Teardown hands back the in-flight pass so the caller can drain it.
+        let drained = driver.cancelBackgroundWork()
+        #expect(drained != nil)
+        await gate.release()
+        await drained?.value
+
+        // The cancelled summary never reached history: the next request still carries the raw turns.
+        transcript.append(.init(speaker: .me, text: "third thought", at: 9))
+        await driver.handleTrigger(.turnEnd)
+        let third = brain.calls[2].compactMap(\.text).joined(separator: "\n")
+        #expect(!third.contains("never applied"))
+        #expect(third.contains("a reasonably long problem statement to remember"))
+    }
+
     // MARK: - Observability: structured turn outcomes
 
     @Test func spokeOutcome() async {

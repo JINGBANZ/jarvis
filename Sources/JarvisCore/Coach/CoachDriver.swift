@@ -45,6 +45,10 @@ public final class CoachDriver: @unchecked Sendable {
     private var isHandling = false
     /// Guards the single off-path compaction run (see `startCompactionIfIdle`).
     private var isCompacting = false
+    /// A compaction asked for while one was already running, run once the current pass ends.
+    private var compactionRequested = false
+    /// The in-flight pass, so session teardown can cancel and drain it.
+    private var compactionTask: Task<Void, Never>?
     /// Transcript is committed only by a complete, non-truncated `speak` or `stay_silent`.
     private var committedTranscriptCount = 0
     /// Natural triggers coalesce while an attempt or automatic pending-work wait owns the slot.
@@ -1221,15 +1225,57 @@ public final class CoachDriver: @unchecked Sendable {
         guard history.estimatedTokens > config.historyCompactionTokenThreshold else { return }
         stateLock.lock()
         guard !isCompacting else {
+            // Coalesce rather than drop. An attempt landing mid-summary is also the attempt whose
+            // fresh OCR can invalidate that summary, so without this the rejected pass and the
+            // skipped request cancel each other out and history stays over the threshold.
+            compactionRequested = true
             stateLock.unlock()
             return
         }
         isCompacting = true
-        stateLock.unlock()
-        Task.detached(priority: .utility) { [self] in
-            await compactIfNeeded(using: client)
-            stateLock.withLock { isCompacting = false }
+        compactionRequested = false
+        let task = Task.detached(priority: .utility) { [self] in
+            await runCompactionPasses(using: client)
         }
+        compactionTask = task
+        stateLock.unlock()
+    }
+
+    /// Run compaction until nothing more is pending, so a pass that ends without compacting — a
+    /// summary rejected as stale, or one skipped while another ran — is retried instead of waiting
+    /// for a further completed attempt.
+    private func runCompactionPasses(using client: BrainClient) async {
+        while true {
+            await compactIfNeeded(using: client)
+            let overThreshold = history.estimatedTokens > config.historyCompactionTokenThreshold
+            let runAgain: Bool = stateLock.withLock {
+                guard compactionRequested, overThreshold, !Task.isCancelled else {
+                    isCompacting = false
+                    compactionTask = nil
+                    return false
+                }
+                compactionRequested = false
+                return true
+            }
+            if !runAgain { return }
+        }
+    }
+
+    /// Cancel background work that must not outlive the session, handing back the task so teardown
+    /// can drain it before sealing the audit.
+    ///
+    /// Compaction runs off the attempt path, so `TurnTaskBox` does not own it. Without this a
+    /// summary keeps a provider process alive and billing after Stop, and can still be writing when
+    /// the session audit closes.
+    @discardableResult
+    public func cancelBackgroundWork() -> Task<Void, Never>? {
+        stateLock.lock()
+        compactionRequested = false
+        let task = compactionTask
+        compactionTask = nil
+        stateLock.unlock()
+        task?.cancel()
+        return task
     }
 
     /// Auxiliary compaction fails soft and never counts against provider route health.
@@ -1248,6 +1294,9 @@ public final class CoachDriver: @unchecked Sendable {
                 jlog("… memory compaction returned nothing — keeping full history for now")
                 return
             }
+            // A summary that lands as teardown cancels must not mutate history on the way out: the
+            // session is over and the provider may simply have won the race.
+            guard !Task.isCancelled else { return }
             guard history.compact(prefixCount: count, summary: summary, revision: revision) else {
                 jlog("… discarded a summary written against superseded screen text — will retry later")
                 return

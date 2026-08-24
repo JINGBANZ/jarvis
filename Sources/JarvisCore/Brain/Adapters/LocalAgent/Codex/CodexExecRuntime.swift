@@ -6,16 +6,26 @@ import Foundation
 /// time. Sharing it with history compaction made a background summary able to fail the *next*
 /// coaching attempt, and three such failures exhaust the target and advance the route — an auxiliary
 /// chore taking out a brain provider. Spawning a short-lived process per summary removes the
-/// contention rather than scheduling around it: there is nothing to share.
+/// contention rather than scheduling around it: there is nothing to share, and no ~100MB app-server
+/// stays resident all session for a few seconds of work every few minutes.
 ///
-/// This is deliberately not a coaching path. It is text-only, keeps no state between turns, and has
-/// nothing to warm, which is exactly why it cannot collide with the coach.
+/// The transport differs from the coach's; the safety envelope does not. `wiki/decisions.md` records
+/// that Codex's `--disable` flags narrow nothing — the model is offered `exec`, `wait`,
+/// `request_user_input`, and `collaboration` either way — and that the runtime item-event allowlist
+/// is the control that actually bites. So this streams `codex exec --json` and applies the same
+/// deny-by-default allowlist the app-server enforces, killing the process on anything else. Auth and
+/// config isolation reuse the app-server's private `CODEX_HOME`.
 struct CodexExecRuntime: LocalAgentRuntimeBackend {
     private let supportedFeatures: Set<String>
-    private let runs = ExecRunRegistry()
+    private let homeBaseDirectory: URL
+    private let lifetime = AgentRuntimeLifetime()
 
-    init(supportedFeatures: Set<String> = []) {
+    init(
+        supportedFeatures: Set<String> = [],
+        homeBaseDirectory: URL = CodexRuntimeHome.defaultBaseDirectory
+    ) {
         self.supportedFeatures = supportedFeatures
+        self.homeBaseDirectory = homeBaseDirectory
     }
 
     /// Nothing to warm: the process is the unit of work and lives only for one turn.
@@ -35,70 +45,129 @@ struct CodexExecRuntime: LocalAgentRuntimeBackend {
         return CodexExecConversation(
             configuration: configuration,
             supportedFeatures: supportedFeatures,
-            runs: runs)
+            homeBaseDirectory: homeBaseDirectory,
+            lifetime: lifetime)
     }
 
     func terminateNow() {
-        runs.cancelAll()
+        lifetime.terminateAll()
     }
 }
 
-/// One `codex exec` invocation.
+/// One `codex exec` invocation, streamed so a disallowed item can be caught while it happens.
 private struct CodexExecConversation: LocalAgentConversation {
     let configuration: LocalAgentConversationConfiguration
     let supportedFeatures: Set<String>
-    let runs: ExecRunRegistry
+    let homeBaseDirectory: URL
+    let lifetime: AgentRuntimeLifetime
+
+    /// The event stream a decision-only turn needs. Deny by default: Codex grows new tool item types
+    /// over time, so an unrecognized one aborts rather than being waved through. `error` is a report,
+    /// not an action, so it rides along and the turn is judged by its outcome.
+    private static let allowedItemTypes: Set<String> = [
+        "user_message",
+        "agent_message",
+        "reasoning",
+        "error",
+    ]
 
     func respond(
         to turn: LocalAgentTurn,
         onRequestDispatched: @Sendable () -> Void
     ) async throws -> LocalAgentTurnResult {
         try Task.checkCancellation()
-        // `codex exec` prints a human-formatted log to stdout; the reply itself lands in this file.
-        // It holds transcript-derived text, so it stays inside the owner-only session directory and
-        // is removed as soon as the turn ends.
+        let deadline = Date().addingTimeInterval(turn.timeout)
+        // `codex exec` prints a human log to stdout under `--json` it prints events; the reply itself
+        // lands in this file. It holds transcript-derived text, so it stays inside the owner-only
+        // session directory and is removed as soon as the turn ends.
         let replyFile = configuration.workDirectory
             .appendingPathComponent("codex-summary-\(UUID().uuidString.prefix(8)).txt")
-        defer { try? FileManager.default.removeItem(at: replyFile) }
+        let home = try CodexRuntimeHome.create(in: homeBaseDirectory)
+        defer {
+            try? FileManager.default.removeItem(at: replyFile)
+            try? FileManager.default.removeItem(at: home)
+        }
 
-        let invocation = AgentCLIRun(
+        let document = try document(for: turn)
+        let process = try AgentRuntimeProcess(
             executable: configuration.executable,
             arguments: arguments(replyFile: replyFile),
-            stdin: try document(for: turn),
             workingDirectory: configuration.workDirectory,
-            timeout: turn.timeout)
+            removingEnvironmentVariables: ["ANTHROPIC_API_KEY", "CLAUDECODE"],
+            environmentOverrides: ["CODEX_HOME": home.path])
+        try lifetime.register(process)
+        defer {
+            lifetime.unregister(process)
+            process.terminateNow()
+        }
 
         let dispatchedAt = DispatchTime.now().uptimeNanoseconds
+        try await process.sendLine(document, timeout: max(0.01, deadline.timeIntervalSinceNow))
+        process.closeStdin()   // exec reads its prompt to EOF before starting work
         onRequestDispatched()
-        let output = try await runs.run(invocation)
-        let completedAt = DispatchTime.now().uptimeNanoseconds
 
-        let reply = (try? String(contentsOf: replyFile, encoding: .utf8))?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard output.exitCode == 0 else {
-            throw Self.error(
-                "codex exec failed (exit \(output.exitCode))"
-                + (output.stderr.isEmpty ? "" : "; stderr: \(Self.tail(output.stderr))"))
+        var firstAssistantAt: UInt64?
+        while true {
+            let remaining = deadline.timeIntervalSinceNow
+            guard remaining > 0 else {
+                throw Self.error("codex exec timed out after \(Int(turn.timeout))s")
+            }
+            let line = try await process.nextLine(timeout: remaining)
+            guard let event = try? JSONSerialization.jsonObject(
+                with: Data(line.text.utf8)) as? [String: Any] else {
+                continue   // `--json` still emits the odd human line; only events matter
+            }
+            try Self.rejectDisallowedItem(event)
+            switch event["type"] as? String {
+            case "item.started", "item.completed":
+                if firstAssistantAt == nil, Self.isAgentMessage(event) {
+                    firstAssistantAt = line.observedAt
+                }
+            case "turn.failed":
+                throw Self.error("codex exec turn failed: \(Self.jsonDescription(event))")
+            case "turn.completed":
+                let reply = (try? String(contentsOf: replyFile, encoding: .utf8))?
+                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                guard !reply.isEmpty else {
+                    throw Self.error("codex exec produced no reply")
+                }
+                return LocalAgentTurnResult(
+                    reply: reply,
+                    metadata: nil,
+                    dispatchedAt: dispatchedAt,
+                    firstAssistantAt: firstAssistantAt,
+                    completedAt: line.observedAt)
+            default:
+                continue
+            }
         }
-        guard !reply.isEmpty else {
-            throw Self.error("codex exec produced no reply")
-        }
-        return LocalAgentTurnResult(
-            reply: reply,
-            metadata: nil,
-            dispatchedAt: dispatchedAt,
-            firstAssistantAt: nil,
-            completedAt: completedAt)
     }
 
     func finish() async {}
+
+    /// The app-server aborts a turn on any item event outside its message/reasoning allowlist. This
+    /// path carries the same control: the disable flags are documented as narrowing nothing, so
+    /// without it a prompt injection riding in transcript or OCR text could get a summary to run a
+    /// built-in tool during the live pipeline.
+    private static func rejectDisallowedItem(_ event: [String: Any]) throws {
+        guard let type = event["type"] as? String, type.hasPrefix("item.") else { return }
+        guard let item = event["item"] as? [String: Any],
+              let itemType = item["type"] as? String,
+              allowedItemTypes.contains(itemType) else {
+            throw error("codex exec emitted a disallowed item event: \(jsonDescription(event))")
+        }
+    }
+
+    private static func isAgentMessage(_ event: [String: Any]) -> Bool {
+        (event["item"] as? [String: Any])?["type"] as? String == "agent_message"
+    }
 
     /// Mirrors the hardening the coaching path applies: a read-only sandbox, no user config, project
     /// docs, or MCP servers, and every advertised agentic feature switched off. Codex is a coding
     /// agent even under `exec`, and this call is a text condensation, not an errand.
     private func arguments(replyFile: URL) -> [String] {
         var args = [
-            "exec", "--skip-git-repo-check", "--sandbox", "read-only", "--ephemeral",
+            "exec", "--json", "--skip-git-repo-check", "--sandbox", "read-only", "--ephemeral",
             "--ignore-user-config", "--ignore-rules",
             "--output-last-message", replyFile.path,
             "-c", "mcp_servers={}",
@@ -128,66 +197,20 @@ private struct CodexExecConversation: LocalAgentConversation {
                 throw Self.error("the one-shot Codex runtime is text-only")
             }
         }
-        var document = Self.directResponseInstruction + "\n\n"
+        var document = JarvisPrompts.LocalAgent.codexDirectResponse + "\n\n"
         if !configuration.instructions.isEmpty {
             document += configuration.instructions + "\n\n"
         }
         return document + blocks.joined(separator: "\n\n")
     }
 
-    private static let directResponseInstruction = """
-        Answer this request immediately without inspecting files, running commands, browsing,
-        planning, delegating, or invoking any Codex built-in tool. Reply with the requested text
-        and nothing else.
-        """
-
-    private static func tail(_ text: String, limit: Int = 512) -> String {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.count <= limit ? trimmed : String(trimmed.suffix(limit))
+    private static func jsonDescription(_ object: Any) -> String {
+        (try? JSONSerialization.data(withJSONObject: object))
+            .map { String(decoding: $0, as: UTF8.self) } ?? String(describing: object)
     }
 
     private static func error(_ detail: String) -> NSError {
         NSError(domain: "CodexExecRuntime", code: 1,
                 userInfo: [NSLocalizedDescriptionKey: detail])
-    }
-}
-
-/// In-flight one-shot runs, so Stop keeps a synchronous kill path.
-///
-/// `AgentCLIProcessRunner` terminates its child when its task is cancelled, so holding the task is
-/// enough to kill the process. `@unchecked Sendable` is justified because `tasks` and `isTerminated`
-/// are only ever touched under `lock`.
-private final class ExecRunRegistry: @unchecked Sendable {
-    private let lock = NSLock()
-    private var tasks: [UUID: Task<AgentCLIOutput, Error>] = [:]
-    private var isTerminated = false
-
-    func run(_ invocation: AgentCLIRun) async throws -> AgentCLIOutput {
-        let id = UUID()
-        // Deciding and spawning under one lock is what makes Stop authoritative: checking first and
-        // spawning after would leave a window where a run launches just as termination lands, and
-        // that process would outlive the session.
-        let task: Task<AgentCLIOutput, Error> = try lock.withLock {
-            if isTerminated { throw CancellationError() }
-            let task = Task { try await AgentCLIProcessRunner.run(invocation) }
-            tasks[id] = task
-            return task
-        }
-        defer { lock.withLock { _ = tasks.removeValue(forKey: id) } }
-        return try await withTaskCancellationHandler {
-            try await task.value
-        } onCancel: {
-            task.cancel()
-        }
-    }
-
-    func cancelAll() {
-        let inFlight: [Task<AgentCLIOutput, Error>] = lock.withLock {
-            isTerminated = true
-            let all = Array(tasks.values)
-            tasks.removeAll()
-            return all
-        }
-        inFlight.forEach { $0.cancel() }
     }
 }
