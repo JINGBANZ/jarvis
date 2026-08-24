@@ -164,8 +164,8 @@ omits the item rather than offering an action that a self-signed build could nev
 - Jarvis does **not** auto-start: choose transcription and Primary brain providers in Settings, meet
   their credential or local sign-in requirements, then **Start / Stop** from the menu. OpenAI keys
   are saved to an owner-only file; `OPENAI_API_KEY` is a headless fallback. The icon is a quiet
-  monochrome tile while stopped and a lit Listening Lens while a session exists: amber while starting
-  or reconnecting, violet once ready, red when a requirement needs attention.
+  monochrome tile while stopped and a lit Listening Lens in every other state: amber while starting or
+  reconnecting, violet once ready, red when a Start is blocked by a requirement needing attention.
 
 ## The live activity viewer
 
