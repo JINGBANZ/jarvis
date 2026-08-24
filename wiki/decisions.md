@@ -1842,31 +1842,79 @@
   `Sources/JarvisApp/Updates/UpdateController.swift`, `scripts/generate-appcast.sh`,
   `scripts/package-app.sh`, `scripts/check-release-config.sh`.
 
-### 2026-08-24 — The live menu-bar icon is drawn, and every live state lights it
+### 2026-08-21 — One registry owns every user-setting default; OpenAI is an explicit primary
 
-- **Chose:** Keep the stopped glyph exactly as it is — the downsampled application icon, drained of
-  colour — and draw the live states as flat vector art on a state-coloured plate instead: amber while
-  checking or recovering, violet once ready, red when blocked. Both renderings share the tile's corner
-  radius and footprint, so going live changes the icon's colour, never its shape.
-- **Why:** The application icon is a photographic render, and its gradients, glass highlight, and
-  wireframe sphere do not survive 18 points however much colour is poured into them — saturation alone
-  is the weakest signal a person can be asked to notice in peripheral vision. Drawn artwork stays crisp
-  at the only size the glyph is ever seen at. Lighting the icon for checking and recovering fixes a
-  real defect rather than a cosmetic one: those states, and every blocked session, previously rendered
-  identically to stopped, so the menu bar claimed Jarvis was off through the several seconds of startup
-  and through any reconnect. Checking and recovering deliberately share one reading — both mean
-  "working on it" to someone glancing up — and the button's accessibility label carries the exact
-  status for anyone who needs the distinction.
-- **Rejected:** (a) Recolouring or tinting the shipping tile — cheapest, but it inherits the softness
-  that caused the problem. (b) A corner presence dot in the Slack/Zoom idiom — legible and familiar,
-  but a foreign object pasted onto the lens, and it covers artwork to say what the artwork can say
-  itself. (c) A pulsing or breathing icon — the strongest possible signal, and available later on top
-  of this without redrawing anything, but a permanently animating status item costs a timer for the
-  whole session and is the thing that gets an app called distracting. (d) A level meter beside the
-  glyph — unmissable and doubles as a microphone check, but menu-bar width is scarce and a continuous
-  public readout of whether someone is speaking is a privacy surface, not a default. (e) Rendering
-  blocked as stopped, which is technically truthful and practically useless: you pressed Start and
-  nothing appears to have happened.
-- **Detail:** `Sources/JarvisApp/MenuBar/MenuBarIcon.swift`,
-  `Sources/JarvisApp/MenuBar/MenuBarController.swift`,
-  [architecture.md → Components](./architecture.md#3-components), [build-and-run.md](./build-and-run.md).
+- **Chose:** Declare every user-facing setting's UserDefaults key, default value, and valid range in
+  one file, [`Defaults`](../Sources/JarvisCore/Config/Defaults.swift). The four accessor types keep
+  their validation, clamping, and normalization but hold no literals; `Config` keeps only runtime
+  tunables the user never sees. In the same pass, make the OpenAI API an explicit primary brain
+  provider rather than leaving a fresh install unconfigured.
+- **Why:** The defaults had scattered by accident of history — the overlay's lived in `Config` as
+  statics while the brain, transcription, and screen defaults were inline literals inside their own
+  accessors, so nobody could answer "what does a new install actually get?" without reading four
+  files. One registry makes that answerable and makes adding a setting a single edit plus one
+  accessor. The unconfigured brain state was a separate cost: it blocked Start with an error and no
+  onboarding, while the default route already required an OpenAI key anyway (transcription defaults
+  to OpenAI, and `requiresOpenAIAPIKey(for:)` is true if either the ears or any brain target is
+  OpenAI). So the honesty it bought was theoretical — silent metering could only reach a user who had
+  already saved a key deliberately — and it was worse even for the CLI-provider user, who hit "no
+  primary provider", fixed it, then hit "no API key" on the next Start. Removing it deletes the
+  optional route views, a readiness blocker, an error-catalog entry, a session-end reason, and the
+  placeholder row.
+- **Rejected:** (a) Merging all four preference types into one `UserSettings.swift` to reach a
+  literal single file — it produces a ~450-line grab-bag mixing route normalization with overlay
+  clamping and breaks one-type-per-file, for the sake of one fewer edit. (b) Keeping
+  `ReasoningEffort.default` alongside `Defaults.Brain.effort` — two homes for `low` is the exact
+  problem being fixed. (c) Keeping the unconfigured state and adding an onboarding flow to explain
+  it — that is a larger surface built to justify a state whose value did not survive inspection.
+- **Also:** Three preference migrations went with it, for two different reasons.
+  `brain.fallbackProvider` was never written by any released build — it was introduced and
+  superseded inside one feature branch, and the migration repairing that branch's own dev machine
+  rode onto main through the squash merge, where the scalar key only ever appears as a read. The
+  launch-time key-present-but-no-provider fixup is subsumed by the explicit OpenAI default, which
+  covers the same installs.
+  `transcription.openai.language-profile` is a different case and is dropped as an **accepted
+  loss**, not as dead code: it really was the primary storage in 0.1.2-0.1.5 with a real setter, and
+  0.1.6 only writes the replacement `expected-languages` list once the user next edits the setting.
+  An install last configured on 0.1.2-0.1.5 that never revisited the setting therefore holds only
+  the old key, and dropping the read silently resets its saved English/Mandarin choice to Automatic
+  — no error, no Activity entry, just weaker code-switching until the user notices and re-picks.
+  The owner confirmed no such install exists (the key is absent from this machine's own preferences,
+  and the project is in active development without a user base), which is exactly the project
+  context AGENTS.md requires before removing an obsolete path. Carrying ~15 lines and three tests to
+  protect a hypothetical install is the "legacy baggage" the same rule forbids. Reinstate the reader
+  if the project ever gains users who upgrade across that range.
+- **Checking this:** presence of a key in an old commit proves nothing about whether it shipped —
+  what matters is whether a *released* commit **wrote** it. Look for `defaults.set(..., forKey:)` on
+  that key in the tree at the merge commit, then `git tag --contains <sha>`. A key appearing only in
+  reads and `removeObject` calls never shipped as storage. Deciding to drop a key that *did* ship is
+  a separate, owner-level call about who is still running that release.
+- **Detail:** [settings-window.md](./settings-window.md),
+  `Sources/JarvisCore/Config/Defaults.swift`, `Sources/JarvisCore/Config/BrainPreferences.swift`.
+
+### 2026-08-22 — Tips borrow the user's vocabulary instead of merely reading plainly
+
+- **Chose:** The coach's `# Tip style` now grounds word choice: name things with the words already on
+  the captured screen or in what either speaker said, never use an unfamiliar term as if it were
+  shared, and gloss a genuinely necessary new term on first use because accuracy outranks brevity.
+  The existing clause became "easy to read **and understand** under pressure".
+- **Why:** A live coding session produced a hint that sat well inside the overlay line budget and was
+  still unusable, because it named the central idea with a term that appeared nowhere in the user's
+  context; the same failure recurred later in that session with an unglossed symbol, which the user
+  said aloud they did not know. Brevity was never the defect. The 2026-06-18 "plain-language hints"
+  decision constrained reading effort rather than vocabulary, so it could not catch this — a short,
+  plainly-worded tip is still opaque when its nouns are unshared. Grounding is also free at inference
+  time: the screen text and the transcript are already in the request.
+- **Rejected:** (a) ASD-STE100 compliance — built for aerospace maintenance documentation that is
+  re-read at leisure, its ~900-word dictionary cannot fit in a prompt or be verified, and its rules
+  (mandatory articles, 20–25-word sentences) push tips *longer* against a ~12-word overlay budget. Its
+  Technical Names rule (a specialized term needs an approved source, not informal usage) and its
+  one-word-one-meaning rule are the parts that apply, and the grounding clause encodes them.
+  (b) A clause forbidding a near-synonym of a term already on screen, and a separate
+  terminology-consistency clause — both are subsumed: borrowing the screen's words already forbids the
+  substitution and produces consistency for free. (c) Restricting grounding to the user's own words —
+  interviewer questions are first-class coaching input ([architecture.md §2](./architecture.md#2-core-loop)),
+  so their vocabulary is in front of the user too. (d) A further OCR-verification clause — the Context
+  section already states unconditionally that the screenshot image is ground truth. (e) Shortening
+  tips further — brevity was never the defect.
+- **Detail:** `Sources/JarvisCore/Prompts/JarvisPrompts+Coach.swift` → `# Tip style`.

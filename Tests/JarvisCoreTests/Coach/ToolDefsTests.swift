@@ -107,6 +107,25 @@ import Testing
         #expect(!JarvisPrompts.Coach.system.contains("never the whole answer"))
     }
 
+    /// A live session shipped "compare left spine height vs right spine height" — inside the line
+    /// budget, but built on a term that appeared nowhere on the user's screen. Tips borrow the
+    /// vocabulary already in front of the user; a genuinely necessary new term is glossed, not
+    /// dropped, because accuracy outranks brevity.
+    @Test func coachPromptGroundsTipVocabularyInWhatTheUserAlreadySees() {
+        let prompt = JarvisPrompts.Coach.system.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        #expect(prompt.contains("Name things with the words already in front of \"me\""))
+        // Either speaker: the interviewer's spoken terms are also in front of the user, and
+        // interviewer questions are first-class coaching input.
+        #expect(prompt.contains("on the captured screen, or in what either speaker said"))
+        // "use", not "introduce": saying "I'm not familiar with X" would otherwise make X a term
+        // "me" has said, and so licence reusing it unglossed.
+        #expect(prompt.contains("Do not use an unfamiliar term as if it were shared"))
+        #expect(prompt.contains("gloss it on first use"))
+        #expect(prompt.contains("accuracy outranks brevity"))
+        // The old rule only constrained reading effort; "spine" was easy to read and still opaque.
+        #expect(prompt.contains("easy to read and understand under pressure"))
+    }
+
     /// Silence is a TOOL now: the prompt must direct the model to stay_silent (never free text),
     /// or a required tool_choice would leave it no sanctioned way to stay quiet.
     @Test func coachPromptDirectsSilenceToTheStaySilentTool() {

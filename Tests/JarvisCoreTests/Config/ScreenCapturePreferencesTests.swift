@@ -12,7 +12,10 @@ import Foundation
     }
 
     @Test func defaultsToMainDisplayWhenUnset() {
-        #expect(ScreenCapturePreferences(defaults: freshDefaults()).displayIndex == 1)
+        // Against the registry, not a literal: an absent key must return the *declared* default, so
+        // that changing it in one place actually changes what a new install gets.
+        #expect(ScreenCapturePreferences(defaults: freshDefaults()).displayIndex
+            == Defaults.Screen.displayIndex)
     }
 
     @Test func roundTripsThroughDefaults() {
