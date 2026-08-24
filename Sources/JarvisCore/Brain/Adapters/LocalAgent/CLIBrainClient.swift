@@ -192,7 +192,7 @@ public struct CLIBrainClient: BrainClient, Sendable {
             "provider": provider.rawValue,
             "model": configuration.model.isEmpty ? "(CLI default)" : configuration.model,
             "executable": configuration.executable.path,
-            "runtime": provider == .claudeCode ? "warm-query" : "app-server",
+            "runtime": runtime.auditLabel,
             "instructions": expectedInstructions,
             "input": auditInput,
         ]
@@ -240,7 +240,7 @@ public struct CLIBrainClient: BrainClient, Sendable {
             tag: trafficTag,
             request: requestRecord ?? Self.recordData([
                 "provider": provider.rawValue,
-                "runtime": provider == .claudeCode ? "warm-query" : "app-server",
+                "runtime": runtime.auditLabel,
             ]),
             response: nil,
             status: nil,

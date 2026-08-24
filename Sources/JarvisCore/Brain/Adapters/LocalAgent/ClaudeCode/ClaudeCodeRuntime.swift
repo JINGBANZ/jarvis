@@ -9,6 +9,7 @@ actor ClaudeCodeRuntime: LocalAgentRuntimeBackend {
         let task: Task<ClaudeCodeQuery, Error>
     }
 
+    let auditLabel = "warm-query"
     private let lifetime = AgentRuntimeLifetime()
     private var configuration: LocalAgentConversationConfiguration?
     private var ready: ClaudeCodeQuery?

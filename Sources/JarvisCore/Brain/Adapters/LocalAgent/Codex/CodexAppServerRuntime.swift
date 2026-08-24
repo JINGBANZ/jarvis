@@ -12,6 +12,7 @@ import Foundation
 /// use. On top of that this runtime rejects any server request or item event outside the
 /// message/reasoning allowlist, which catches built-in families the disable list never named.
 actor CodexAppServerRuntime: LocalAgentRuntimeBackend {
+    nonisolated let auditLabel = "app-server"
     /// Thread teardown is best-effort cleanup, not model inference. A wedged unsubscribe must not
     /// hold the attempt open for the turn's much longer response deadline.
     private static let threadCleanupTimeout: TimeInterval = 1

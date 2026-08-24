@@ -24,7 +24,8 @@ import Testing
         let backend = FakeLocalAgentRuntime(
             replies: replies,
             openDelay: openDelay,
-            failBeforeDispatch: failBeforeDispatch)
+            failBeforeDispatch: failBeforeDispatch,
+            auditLabel: provider == .claudeCode ? "warm-query" : "app-server")
         let runtime = CLIBrainRuntime(backend: backend)
         let client = CLIBrainClient(
             provider: provider,
@@ -255,7 +256,8 @@ import Testing
             openError: NSError(
                 domain: "test",
                 code: 7,
-                userInfo: [NSLocalizedDescriptionKey: "app-server unavailable"]))
+                userInfo: [NSLocalizedDescriptionKey: "app-server unavailable"]),
+            auditLabel: "app-server")
         let runtime = CLIBrainRuntime(backend: backend)
         let client = CLIBrainClient(
             provider: .codexCLI,
@@ -523,6 +525,8 @@ import Testing
 }
 
 private actor FakeLocalAgentRuntime: LocalAgentRuntimeBackend {
+    // Stand in for the transport being faked, so audit-fidelity assertions stay meaningful.
+    nonisolated let auditLabel: String
     struct RecordedTurn: Sendable {
         let text: String
         let imageCount: Int
@@ -544,8 +548,10 @@ private actor FakeLocalAgentRuntime: LocalAgentRuntimeBackend {
         replies: [String],
         openError: (any Error)? = nil,
         openDelay: TimeInterval = 0,
-        failBeforeDispatch: Bool = false
+        failBeforeDispatch: Bool = false,
+        auditLabel: String = "warm-query"
     ) {
+        self.auditLabel = auditLabel
         self.replies = replies
         self.openError = openError
         self.openDelay = openDelay

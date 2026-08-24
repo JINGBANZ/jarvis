@@ -37,6 +37,10 @@ protocol LocalAgentConversation: Sendable {
 }
 
 protocol LocalAgentRuntimeBackend: Sendable {
+    /// Names the transport in the session audit. A provider no longer implies one — Codex coaches
+    /// over an app-server while its summaries run as one-shot `codex exec` — and the evaluator is
+    /// meant to diagnose the latency and failures of a specific transport.
+    var auditLabel: String { get }
     func prepare(for configuration: LocalAgentConversationConfiguration) async throws
     func openConversation(
         for configuration: LocalAgentConversationConfiguration,
@@ -81,6 +85,7 @@ public final class CLIBrainRuntime: @unchecked Sendable {
     }
 
     private let backend: any LocalAgentRuntimeBackend
+    var auditLabel: String { backend.auditLabel }
     private let ownerLock = NSLock()
     private var ownerCount = 0
     private var isTerminated = false
