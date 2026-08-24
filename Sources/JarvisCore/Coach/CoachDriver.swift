@@ -49,6 +49,8 @@ public final class CoachDriver: @unchecked Sendable {
     private var compactionRequested = false
     /// The in-flight pass, so session teardown can cancel and drain it.
     private var compactionTask: Task<Void, Never>?
+    /// Latched by teardown: no further background pass may start on a stopped session.
+    private var backgroundWorkStopped = false
     /// Transcript is committed only by a complete, non-truncated `speak` or `stay_silent`.
     private var committedTranscriptCount = 0
     /// Natural triggers coalesce while an attempt or automatic pending-work wait owns the slot.
@@ -1224,6 +1226,13 @@ public final class CoachDriver: @unchecked Sendable {
         // task per attempt would be pure churn on the shared executor.
         guard history.estimatedTokens > config.historyCompactionTokenThreshold else { return }
         stateLock.lock()
+        // Stop is final. A turn suspended in `conversation.finish()` when teardown ran resumes after
+        // `cancelBackgroundWork` already looked for a task, and would otherwise start a fresh
+        // provider request that nothing is left to drain.
+        guard !backgroundWorkStopped else {
+            stateLock.unlock()
+            return
+        }
         guard !isCompacting else {
             // Coalesce rather than drop. An attempt landing mid-summary is also the attempt whose
             // fresh OCR can invalidate that summary, so without this the rejected pass and the
@@ -1270,6 +1279,7 @@ public final class CoachDriver: @unchecked Sendable {
     @discardableResult
     public func cancelBackgroundWork() -> Task<Void, Never>? {
         stateLock.lock()
+        backgroundWorkStopped = true
         compactionRequested = false
         let task = compactionTask
         compactionTask = nil

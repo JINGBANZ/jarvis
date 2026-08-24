@@ -78,21 +78,13 @@ private struct CodexExecConversation: LocalAgentConversation {
     ) async throws -> LocalAgentTurnResult {
         try Task.checkCancellation()
         let deadline = Date().addingTimeInterval(turn.timeout)
-        // `codex exec` prints a human log to stdout under `--json` it prints events; the reply itself
-        // lands in this file. It holds transcript-derived text, so it stays inside the owner-only
-        // session directory and is removed as soon as the turn ends.
-        let replyFile = configuration.workDirectory
-            .appendingPathComponent("codex-summary-\(UUID().uuidString.prefix(8)).txt")
         let home = try CodexRuntimeHome.create(in: homeBaseDirectory)
-        defer {
-            try? FileManager.default.removeItem(at: replyFile)
-            try? FileManager.default.removeItem(at: home)
-        }
+        defer { try? FileManager.default.removeItem(at: home) }
 
         let document = try document(for: turn)
         let process = try AgentRuntimeProcess(
             executable: configuration.executable,
-            arguments: arguments(replyFile: replyFile),
+            arguments: arguments(),
             workingDirectory: configuration.workDirectory,
             removingEnvironmentVariables: ["ANTHROPIC_API_KEY", "CLAUDECODE"],
             environmentOverrides: ["CODEX_HOME": home.path])
@@ -108,6 +100,7 @@ private struct CodexExecConversation: LocalAgentConversation {
         onRequestDispatched()
 
         var firstAssistantAt: UInt64?
+        var reply = ""
         while true {
             let remaining = deadline.timeIntervalSinceNow
             guard remaining > 0 else {
@@ -121,19 +114,23 @@ private struct CodexExecConversation: LocalAgentConversation {
             try Self.rejectDisallowedItem(event)
             switch event["type"] as? String {
             case "item.started", "item.completed":
-                if firstAssistantAt == nil, Self.isAgentMessage(event) {
-                    firstAssistantAt = line.observedAt
+                guard Self.isAgentMessage(event) else { continue }
+                if firstAssistantAt == nil { firstAssistantAt = line.observedAt }
+                // The reply is read from the event, never from `--output-last-message`: that file is
+                // written only after the process exits, so reading it at `turn.completed` finds
+                // nothing. Measured against codex-cli — the item text is byte-identical to the file.
+                if let text = (event["item"] as? [String: Any])?["text"] as? String, !text.isEmpty {
+                    reply = text
                 }
             case "turn.failed":
                 throw Self.error("codex exec turn failed: \(Self.jsonDescription(event))")
             case "turn.completed":
-                let reply = (try? String(contentsOf: replyFile, encoding: .utf8))?
-                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                guard !reply.isEmpty else {
+                let trimmed = reply.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else {
                     throw Self.error("codex exec produced no reply")
                 }
                 return LocalAgentTurnResult(
-                    reply: reply,
+                    reply: trimmed,
                     metadata: nil,
                     dispatchedAt: dispatchedAt,
                     firstAssistantAt: firstAssistantAt,
@@ -166,11 +163,10 @@ private struct CodexExecConversation: LocalAgentConversation {
     /// Mirrors the hardening the coaching path applies: a read-only sandbox, no user config, project
     /// docs, or MCP servers, and every advertised agentic feature switched off. Codex is a coding
     /// agent even under `exec`, and this call is a text condensation, not an errand.
-    private func arguments(replyFile: URL) -> [String] {
+    private func arguments() -> [String] {
         var args = [
             "exec", "--json", "--skip-git-repo-check", "--sandbox", "read-only", "--ephemeral",
             "--ignore-user-config", "--ignore-rules",
-            "--output-last-message", replyFile.path,
             "-c", "mcp_servers={}",
             "-c", "project_root_markers=[]",
             "-c", "project_doc_max_bytes=0",

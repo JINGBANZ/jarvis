@@ -843,17 +843,10 @@ import Testing
             """
             if [ "$1" = "exec" ]; then
               printf 'input: exec\\n' >> '\(shellQuoted(trace.path))'
-              out=""
-              prev=""
-              for arg in "$@"; do
-                if [ "$prev" = "--output-last-message" ]; then out="$arg"; fi
-                prev="$arg"
-              done
               cat > /dev/null
-              printf '%s' '\(shellQuoted(reply))' > "$out"
               printf '{"type":"thread.started","thread_id":"t1"}\\n'
               printf '{"type":"turn.started"}\\n'
-              printf '{"type":"item.completed","item":{"id":"i1","type":"\(execItemType)","text":"x"}}\\n'
+              printf '{"type":"item.completed","item":{"id":"i1","type":"\(execItemType)","text":"\(shellQuoted(reply))"}}\\n'
               printf '{"type":"turn.completed","usage":{}}\\n'
               exit 0
             fi
