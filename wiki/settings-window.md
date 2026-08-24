@@ -85,25 +85,38 @@ probes finish, so bounded timeouts cannot delay presentation.
 
 ## Overlay Appearance
 
-Overlay appearance is persisted through `OverlayAppearance` (UserDefaults) with defaults and valid
-ranges defined in `Config`:
-
-| Property | Default | Range | UserDefaults key |
-|---|---|---|---|
-| Caption enabled | off | on/off | `overlayCaption.enabled` |
-| Caption font size | 18 pt | 12–32 pt | `overlayCaption.fontSize` |
-| Caption background opacity | 0.78 (78%) | 0.40–1.00 (40–100%) | `overlayCaption.backgroundOpacity` |
-| Box enabled | on | on/off | `overlayBox.enabled` |
-| Box font size | 14 pt | 12–32 pt | `overlayBox.fontSize` |
-| Box opacity | 1.00 (100%) | 0.40–1.00 (40–100%) | `overlayBox.opacity` |
+Overlay appearance is persisted through `OverlayAppearance`; every key, default, and clamp range is
+declared in [`Defaults.Overlay`](../Sources/JarvisCore/Config/Defaults.swift). Each surface carries an
+on/off flag, a font size, and an opacity; the box additionally carries its width and height.
 
 The two surfaces default opposite ways — the caption **off**, the box **on** — so a first run shows
 the durable history rather than a flashing caption. `AppDelegate` applies both enabled flags at launch.
 
+Opacity governs the background fill only, so both surfaces accept 0%: a text-only surface with no
+backdrop, not a hidden one. The On/Off toggle stays the only thing that hides a surface. Both share
+one range because the tab presents their sliders identically. A corrupted non-finite stored value
+restores the setting's own default rather than the range floor, which at 0% would read as breakage.
+
+The box is the one surface the user sizes directly, by dragging its edges. `OverlayBoxPanel` reports a
+finished drag through `onSizeChanged` and takes the restored size as an `init` parameter, so the panel
+never touches UserDefaults and the size round-trips like every other appearance value. Construction,
+not a later `setContentSize`, is what applies it: `setContentSize` pins the frame's top-left, so
+resizing after the fact would leave a larger-than-default box off the centre `init` chose, and
+re-centring afterwards would mean a second `center()` call. Building the panel at its final size and
+centring once keeps placement correct by construction and keeps the AppKit surface minimal — which
+matters here, because this panel is built on a CI runner with no GUI session.
+
+The drag hook is `viewDidEndLiveResize` on the box's content view: AppKit sends it once the drag
+finishes, unlike a per-frame resize signal that would rewrite the preference dozens of times per
+gesture. Assigning `NSWindow.delegate` would reach the same event but blocks AppKit without a GUI
+session, hanging every main-actor test on CI. A programmatic resize raises no live-resize signal at
+all, so nothing Jarvis does to the panel can read back as a user edit. The panel's `minSize` derives from the persisted range floors,
+so the drag floor and the clamp floor cannot drift apart.
+
 `OverlaySection` applies changes live through two protocols, with no direct dependency on the AppKit
-panels: `OverlayCaptionApplying` (`setFontSize` / `setBackgroundOpacity` / `setEnabled` /
-`showAppearancePreview`, conformed by `OverlayCaptionPanel`) and `OverlayBoxApplying` (`setFontSize` /
-`setOpacity` / `setEnabled` / `showAppearancePreview`, conformed by `OverlayBoxPanel`). All values
+panels: `OverlayCaptionApplying`, conformed by `OverlayCaptionPanel`, and `OverlayBoxApplying`,
+conformed by `OverlayBoxPanel`. Both are declared in
+[`OverlayAppearance.swift`](../Sources/JarvisCore/Overlay/OverlayAppearance.swift). All values
 round-trip through `OverlayAppearance` so they survive an app relaunch.
 
 `setEnabled(false)` on the caption suppresses coaching tips (dropping any in-flight/queued tip); on
@@ -145,10 +158,11 @@ status text. An unavailable auth probe does not falsely claim logout. An empty, 
 Codex feature catalog only narrows the disable flags that are passed; it never widens what a
 coaching thread may do.
 
-Before first-time setup, Primary shows **Choose provider…**, its model menu is disabled, and **Add
-fallback** is disabled. Selecting Primary creates the first valid route. Older installations that
-already have an OpenAI key retain the historical OpenAI brain default through a one-time
-compatibility migration instead of being forced through setup again.
+A fresh install opens on the **OpenAI API** as Primary, so the Brain tab always shows a complete,
+usable route and Start never fails for want of a provider choice. That default costs the user nothing
+extra: transcription defaults to OpenAI too, so the same one credential covers both, and a user who
+wants a subscription-backed CLI brain changes Primary and Transcription in one visit. There is no
+"unconfigured" state — the saved route is always complete.
 
 **Fallbacks.** Below the primary, an ordered list contains zero or more explicitly authorized
 provider/model targets. **Add fallback** appends a row; each row has provider and model menus,
@@ -181,8 +195,9 @@ list. Stop → Start begins at the saved primary again.
 OpenAI API and Codex CLI share one concrete model list; Claude Code exposes the current concrete
 release in each supported family. Each provider remembers its own model; without a valid preference,
 the first entry in that provider's catalog is selected. The **Reasoning effort** picker
-(`ReasoningEffort`: None / Low / Medium / High, default Low) is stored once and applies uniformly to
-whichever provider is active. `CLIBrainClient` maps it onto Claude Code's `--effort` and Codex's
+(`ReasoningEffort`: None / Low / Medium / High) is stored once and applies uniformly to whichever
+provider is active; its default lives with the others in
+[`Defaults.Brain`](../Sources/JarvisCore/Config/Defaults.swift). `CLIBrainClient` maps it onto Claude Code's `--effort` and Codex's
 per-thread `model_reasoning_effort`; both CLI scales start at `low`, so None clamps to Low while the
 three shared levels pass through.
 
@@ -241,9 +256,10 @@ query or Codex's app-server is unavailable, that provider attempt fails and foll
 fresh-attempt route policy. Neither CLI ever falls back to a one-shot command.
 
 Brain-route choices persist via `BrainPreferences`, while the independent transcription provider,
-OpenAI model/expected-language list, and Apple locale persist via `TranscriptionPreferences`. Their files
-are the single sources for UserDefaults keys, defaults, and validation (the brain model catalogs live in
-`Sources/JarvisCore/Brain/BrainModelCatalog.swift`).
+OpenAI model/expected-language list, and Apple locale persist via `TranscriptionPreferences`. Those
+types own validation and normalization; every key and default value they read comes from
+[`Defaults`](../Sources/JarvisCore/Config/Defaults.swift), and the per-provider model lists from
+`Sources/JarvisCore/Brain/BrainModelCatalog.swift`.
 
 ## Connections
 
@@ -297,10 +313,8 @@ from an old entire-display selection never steers them. A transient-file cleanup
 ordinary capture failure: it poisons the session-local runner and returns without a window/display
 fallback or a later capture.
 
-| Setting | Default | UserDefaults key |
-|---|---|---|
-| Capture scope | `activeWindow` | `screen.captureScope` |
-| Entire-display display | `1` (main display) | `screen.captureDisplayIndex` |
+Both values, their keys, and the main-display floor are declared in
+[`Defaults.Screen`](../Sources/JarvisCore/Config/Defaults.swift).
 
 ## Key Files
 
@@ -321,7 +335,6 @@ fallback or a later capture.
 | `Sources/JarvisApp/Settings/ExpectedLanguagePicker.swift` | Scalable expected-language chips + multi-select popover |
 | `Sources/JarvisApp/Settings/APIKeyControls.swift` | Collapsed Jarvis-managed OpenAI API-key editor |
 | `Sources/JarvisCore/Transcription/TranscriptionProvider.swift` | Provider identities, labels, and OpenAI-key requirement |
-| `Sources/JarvisCore/Config/TranscriptionPreferences.swift` | Persisted provider selection; absent/unknown values default to OpenAI |
 | `Sources/JarvisApp/Settings/OverlaySection.swift` | Overlay-appearance tab |
 | `Sources/JarvisApp/Settings/OverlaySurfaceSettingsView.swift` | One reusable overlay-surface card and its slider/readout rows |
 | `Sources/JarvisApp/Settings/DisplaySection.swift` | Capture-scope tab (scope + display in one dropdown) |
@@ -332,12 +345,13 @@ fallback or a later capture.
 | `Sources/JarvisCore/Brain/BrainModelCatalog.swift` | Curated per-provider model lists (`BrainModel`) |
 | `Sources/JarvisCore/Brain/ReasoningEffort.swift` | The four effort levels |
 | `Sources/JarvisCore/Diagnostics/AgenticEvaluator.swift` | Read-only Claude Code / Codex session audit invoked by Activity and `EvalPrep` |
+| `Sources/JarvisCore/Config/Defaults.swift` | Every user setting's key, default, and valid range |
 | `Sources/JarvisCore/Config/BrainPreferences.swift` | UserDefaults persistence + route validation |
 | `Sources/JarvisCore/Coach/CoachDriver.swift` | Between-attempt route application and attempt orchestration |
 | `Sources/JarvisCore/Config/ScreenCapturePreferences.swift` | Capture scope + display persistence + clamping |
 | `Sources/JarvisCore/Screen/ScreenCapture.swift` | `ScreenCaptureCLI` — reads the selection at capture time, falls back to the main display |
-| `Sources/JarvisCore/Config/Config.swift` | `overlayCaption*`/`overlayBox*` size + opacity ranges, enabled + appearance defaults |
 | `Sources/JarvisCore/Overlay/OverlayAppearance.swift` | UserDefaults persistence; `OverlayCaptionApplying` + `OverlayBoxApplying` protocols |
+| `Sources/JarvisCore/Config/TranscriptionPreferences.swift` | Persisted transcription selection + validation |
 | `Sources/JarvisCore/Overlay/BroadcastOverlay.swift` | Fans one `render` out to the caption + box |
 | `Sources/JarvisOverlay/OverlayCaptionPanel.swift` | The Overlay Caption; `OverlayCaptionApplying` conformance |
 | `Sources/JarvisOverlay/OverlayBoxPanel.swift` | The Overlay Box; `OverlayBoxApplying` conformance |

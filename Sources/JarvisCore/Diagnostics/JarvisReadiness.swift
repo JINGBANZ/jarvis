@@ -38,7 +38,6 @@ public final class JarvisReadiness {
     }
 
     public enum BrainBlocker: Sendable, Equatable {
-        case providerNotConfigured
         case providerUnavailable
     }
 

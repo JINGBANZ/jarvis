@@ -13,19 +13,21 @@ import Foundation
 
     @Test func defaultsWhenUnset() {
         let a = OverlayAppearance(defaults: freshDefaults())
-        #expect(a.captionFontSize == Config.overlayCaptionFontSizeDefault)
-        #expect(a.captionBackgroundOpacity == Config.overlayCaptionOpacityDefault)
-        #expect(a.boxOpacity == Config.overlayBoxOpacityDefault)
-        #expect(a.boxFontSize == Config.overlayBoxFontSizeDefault)
+        #expect(a.captionFontSize == Defaults.Overlay.Caption.fontSize)
+        #expect(a.captionBackgroundOpacity == Defaults.Overlay.Caption.opacity)
+        #expect(a.boxOpacity == Defaults.Overlay.Box.opacity)
+        #expect(a.boxFontSize == Defaults.Overlay.Box.fontSize)
     }
 
     /// The two surfaces default opposite ways: the caption off, the box on.
     @Test func enabledDefaults() {
         let a = OverlayAppearance(defaults: freshDefaults())
-        #expect(a.captionEnabled == Config.overlayCaptionEnabledDefault)
-        #expect(a.boxEnabled == Config.overlayBoxEnabledDefault)
+        #expect(a.captionEnabled == Defaults.Overlay.Caption.enabled)
+        #expect(a.boxEnabled == Defaults.Overlay.Box.enabled)
         #expect(a.captionEnabled == false)
         #expect(a.boxEnabled == true)
+        #expect(a.boxWidth == Defaults.Overlay.Box.width)
+        #expect(a.boxHeight == Defaults.Overlay.Box.height)
     }
 
     @Test func roundTripsThroughDefaults() {
@@ -36,6 +38,8 @@ import Foundation
         OverlayAppearance(defaults: d).boxFontSize = 20
         OverlayAppearance(defaults: d).captionEnabled = true
         OverlayAppearance(defaults: d).boxEnabled = false
+        OverlayAppearance(defaults: d).boxWidth = 512
+        OverlayAppearance(defaults: d).boxHeight = 448
         let reloaded = OverlayAppearance(defaults: d)
         #expect(reloaded.captionFontSize == 22)
         #expect(reloaded.captionBackgroundOpacity == 0.9)
@@ -43,6 +47,9 @@ import Foundation
         #expect(reloaded.boxFontSize == 20)
         #expect(reloaded.captionEnabled == true)
         #expect(reloaded.boxEnabled == false)
+        // The size the user dragged the box to must survive a relaunch unchanged.
+        #expect(reloaded.boxWidth == 512)
+        #expect(reloaded.boxHeight == 448)
     }
 
     @Test func clampsOutOfRange() {
@@ -51,31 +58,56 @@ import Foundation
         a.captionBackgroundOpacity = 999
         a.boxOpacity = 999
         a.boxFontSize = 999
-        #expect(a.captionFontSize == Config.overlayCaptionFontSizeRange.upperBound)
-        #expect(a.captionBackgroundOpacity == Config.overlayCaptionOpacityRange.upperBound)
-        #expect(a.boxOpacity == Config.overlayBoxOpacityRange.upperBound)
-        #expect(a.boxFontSize == Config.overlayBoxFontSizeRange.upperBound)
+        a.boxWidth = 99_999
+        a.boxHeight = 99_999
+        #expect(a.boxWidth == Defaults.Overlay.Box.widthRange.upperBound)
+        #expect(a.boxHeight == Defaults.Overlay.Box.heightRange.upperBound)
+        #expect(a.captionFontSize == Defaults.Overlay.Caption.fontSizeRange.upperBound)
+        #expect(a.captionBackgroundOpacity == Defaults.Overlay.Caption.opacityRange.upperBound)
+        #expect(a.boxOpacity == Defaults.Overlay.Box.opacityRange.upperBound)
+        #expect(a.boxFontSize == Defaults.Overlay.Box.fontSizeRange.upperBound)
 
         a.captionFontSize = 1
         a.captionBackgroundOpacity = 0
         a.boxOpacity = 0
         a.boxFontSize = 1
-        #expect(a.captionFontSize == Config.overlayCaptionFontSizeRange.lowerBound)
-        #expect(a.captionBackgroundOpacity == Config.overlayCaptionOpacityRange.lowerBound)
-        #expect(a.boxOpacity == Config.overlayBoxOpacityRange.lowerBound)
-        #expect(a.boxFontSize == Config.overlayBoxFontSizeRange.lowerBound)
+        a.boxWidth = 0
+        a.boxHeight = 0
+        #expect(a.boxWidth == Defaults.Overlay.Box.widthRange.lowerBound)
+        #expect(a.boxHeight == Defaults.Overlay.Box.heightRange.lowerBound)
+        #expect(a.captionFontSize == Defaults.Overlay.Caption.fontSizeRange.lowerBound)
+        #expect(a.captionBackgroundOpacity == Defaults.Overlay.Caption.opacityRange.lowerBound)
+        #expect(a.boxOpacity == Defaults.Overlay.Box.opacityRange.lowerBound)
+        #expect(a.boxFontSize == Defaults.Overlay.Box.fontSizeRange.lowerBound)
     }
 
-    @Test func nonFiniteInputFallsBackToFinite() {
+    @Test func nonFiniteInputFallsBackToTheDefault() {
         // A corrupted plist value (NaN/±inf) must never reach systemFont(ofSize:)/withAlphaComponent:.
+        // It restores the setting's default: with an opacity floor of 0, falling back to the lower
+        // bound would turn corruption into an invisible surface.
         let a = OverlayAppearance(defaults: freshDefaults())
         for bad in [Double.nan, .infinity, -.infinity] {
             a.captionFontSize = bad
             a.captionBackgroundOpacity = bad
-            #expect(a.captionFontSize.isFinite)
-            #expect(a.captionBackgroundOpacity.isFinite)
-            #expect(Config.overlayCaptionFontSizeRange.contains(a.captionFontSize))
-            #expect(Config.overlayCaptionOpacityRange.contains(a.captionBackgroundOpacity))
+            a.boxOpacity = bad
+            a.boxWidth = bad
+            a.boxHeight = bad
+            #expect(a.captionFontSize == Defaults.Overlay.Caption.fontSize)
+            #expect(a.captionBackgroundOpacity == Defaults.Overlay.Caption.opacity)
+            #expect(a.boxOpacity == Defaults.Overlay.Box.opacity)
+            #expect(a.boxWidth == Defaults.Overlay.Box.width)
+            #expect(a.boxHeight == Defaults.Overlay.Box.height)
         }
+    }
+
+    /// 0% is a reachable, meaningful setting — a text-only surface with no backdrop — so it must
+    /// survive a round trip rather than being clamped away.
+    @Test func fullyTransparentOpacityIsPersistable() {
+        let d = freshDefaults()
+        OverlayAppearance(defaults: d).boxOpacity = 0
+        OverlayAppearance(defaults: d).captionBackgroundOpacity = 0
+        let reloaded = OverlayAppearance(defaults: d)
+        #expect(reloaded.boxOpacity == 0)
+        #expect(reloaded.captionBackgroundOpacity == 0)
     }
 }

@@ -5,15 +5,6 @@ import Foundation
 /// runtime severity may reveal UI. Dynamic copy composed at the failure site (e.g. a capture reason)
 /// is passed through. Call sites reference these so the policy is centralized and unit-testable.
 public extension UserFacingError {
-    /// First-time setup has not selected a primary brain provider, so no route can be constructed.
-    static var brainProviderNotConfigured: UserFacingError {
-        .init(
-            title: "Choose a provider",
-            message: "Open Settings → Brain and choose a Primary provider, then press Start.",
-            severity: .fatal,
-            sessionEndReason: .brainProviderNotConfigured)
-    }
-
     /// No API key on Start when either transcription or one of the configured brain targets uses
     /// OpenAI, so the requested route cannot be constructed.
     static var noAPIKey: UserFacingError {

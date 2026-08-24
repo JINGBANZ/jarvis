@@ -14,7 +14,7 @@ import Testing
     }
 
     @Test func defaultIsLow() {
-        #expect(ReasoningEffort.default == .low)
+        #expect(Defaults.Brain.effort == .low)
     }
 
     /// The combined cap scales with effort and never sits at the old flat 768 that starved high-effort
