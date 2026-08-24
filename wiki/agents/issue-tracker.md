@@ -25,8 +25,9 @@ being worked automatically.
 
 - **Create**: `gh issue create --title "..." --body "..."` — heredoc for multi-line bodies.
 - **Read**: `gh issue view <number> --comments`
-- **List**: `gh issue list --state open --json number,title,body,labels,comments --jq '[.[] | {number, title, body, labels: [.labels[].name], comments: [.comments[].body]}]'`,
-  adding `--label` / `--state` filters as needed.
+- **List**: `gh issue list --state open --limit 200 --json number,title,body,labels,comments --jq '[.[] | {number, title, body, labels: [.labels[].name], comments: [.comments[].body]}]'`,
+  adding `--label` / `--state` filters as needed. Keep the explicit `--limit`: `gh issue list` defaults
+  to 30 and truncates silently, so a triage pass would act on a partial set without knowing it.
 - **Comment**: `gh issue comment <number> --body "..."`
 - **Label**: `gh issue edit <number> --add-label "..."` / `--remove-label "..."`
 - **Close**: `gh issue close <number> --comment "..."`
