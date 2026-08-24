@@ -10,11 +10,12 @@ including from a worktree under `.claude/worktrees/`.
 permission, runs an agent that implements the issue end to end and opens a PR. **It is currently
 disabled**, so filing an issue here just files it. Publish tickets freely.
 
-The pause is repo state rather than a code change — the workflow file is untouched. `gh workflow list
---all` reports it as `disabled_manually`; `gh workflow enable "Issue Worker"` restores it. If it is ever
-turned back on, filing becomes executing: a batch of tickets becomes a batch of concurrent agent runs
-and PRs, started together regardless of any blocking edges between them. Re-read this section before
-publishing in bulk if the status above has changed.
+The pause is repo state rather than a code change — the workflow file is untouched, so nothing in a
+`git pull` reveals it and this file cannot tell you the current status. **Before filing issues in bulk,
+run `gh workflow list --all` and confirm Issue Worker reads `disabled_manually`.** If it reads `active`,
+filing is executing again: a batch of tickets becomes a batch of concurrent agent runs and PRs, started
+together regardless of any blocking edges between them — don't bulk-file until it is paused again.
+`gh workflow enable "Issue Worker"` is what turns it back on.
 
 `.github/workflows/issue-opener.yml` is still active and files an issue on its own daily at 19:07 UTC
 (03:07 Beijing, UTC+8). With the worker paused, those issues wait for someone to pick them up instead of
@@ -44,18 +45,20 @@ unqualified `#142` is much more likely a PR. Resolve with `gh pr view <n>`, fall
 **PRs as a request surface: no.** _(Set to `yes` if this repo starts treating external PRs as feature
 requests; `/triage` reads this flag.)_
 
-Every PR here is the owner's or `github-actions[bot]`'s release-please PR, so there is nothing external
-to triage. If that changes, `yes` runs PRs through the same labels and states as issues:
+Every PR here is the owner's, `github-actions[bot]`'s release-please PR, or a `dependabot[bot]` bump
+(`.github/dependabot.yml` runs weekly), so there is no external human contribution to triage. If that changes, `yes` runs PRs through the same labels and states as issues:
 
 - **Read**: `gh pr view <number> --comments`, plus `gh pr diff <number>`.
 - **List external PRs**: `authorAssociation` is not a `gh pr list --json` field — it exists only on the
   REST API, as `author_association`:
   ```sh
   gh api "repos/{owner}/{repo}/pulls?state=open&per_page=100" --jq \
-    '[.[] | select(.author_association == "CONTRIBUTOR" or .author_association == "FIRST_TIME_CONTRIBUTOR" or .author_association == "NONE")
+    '[.[] | select((.author_association == "CONTRIBUTOR" or .author_association == "FIRST_TIME_CONTRIBUTOR" or .author_association == "NONE") and .user.type != "Bot")
         | {number, title, body, author: .user.login, labels: [.labels[].name]}]'
   ```
-  That drops `OWNER`/`MEMBER`/`COLLABORATOR`. The payload carries no comments — read those per PR with
+  That drops `OWNER`/`MEMBER`/`COLLABORATOR`, and the `.user.type` test drops app bots — release-please
+  and dependabot both report `CONTRIBUTOR`, and their labels must not be touched (see
+  [triage-labels.md](./triage-labels.md)). The payload carries no comments — read those per PR with
   `gh pr view <number> --comments`.
 - **Comment / label / close**: `gh pr comment`, `gh pr edit --add-label`/`--remove-label`, `gh pr close`.
 
