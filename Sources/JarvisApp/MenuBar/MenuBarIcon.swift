@@ -231,10 +231,12 @@ private extension MenuBarIcon.Signal {
         }
     }
 
+    /// Describes the picture, not the session — `MenuBarController` labels the button itself with
+    /// the exact status, and one image is shared by checking and recovering.
     var accessibilityDescription: String {
         switch self {
         case .ready:   "Jarvis is listening"
-        case .working: "Jarvis is starting"
+        case .working: "Jarvis is connecting"
         case .blocked: "Jarvis needs attention"
         }
     }

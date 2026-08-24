@@ -1841,3 +1841,32 @@
 - **Detail:** [build-and-run.md → In-app updates](./build-and-run.md#in-app-updates--sparkle-over-the-release-feed),
   `Sources/JarvisApp/Updates/UpdateController.swift`, `scripts/generate-appcast.sh`,
   `scripts/package-app.sh`, `scripts/check-release-config.sh`.
+
+### 2026-08-24 — The live menu-bar icon is drawn, and every live state lights it
+
+- **Chose:** Keep the stopped glyph exactly as it is — the downsampled application icon, drained of
+  colour — and draw the live states as flat vector art on a state-coloured plate instead: amber while
+  checking or recovering, violet once ready, red when blocked. Both renderings share the tile's corner
+  radius and footprint, so going live changes the icon's colour, never its shape.
+- **Why:** The application icon is a photographic render, and its gradients, glass highlight, and
+  wireframe sphere do not survive 18 points however much colour is poured into them — saturation alone
+  is the weakest signal a person can be asked to notice in peripheral vision. Drawn artwork stays crisp
+  at the only size the glyph is ever seen at. Lighting the icon for checking and recovering fixes a
+  real defect rather than a cosmetic one: those states, and every blocked session, previously rendered
+  identically to stopped, so the menu bar claimed Jarvis was off through the several seconds of startup
+  and through any reconnect. Checking and recovering deliberately share one reading — both mean
+  "working on it" to someone glancing up — and the button's accessibility label carries the exact
+  status for anyone who needs the distinction.
+- **Rejected:** (a) Recolouring or tinting the shipping tile — cheapest, but it inherits the softness
+  that caused the problem. (b) A corner presence dot in the Slack/Zoom idiom — legible and familiar,
+  but a foreign object pasted onto the lens, and it covers artwork to say what the artwork can say
+  itself. (c) A pulsing or breathing icon — the strongest possible signal, and available later on top
+  of this without redrawing anything, but a permanently animating status item costs a timer for the
+  whole session and is the thing that gets an app called distracting. (d) A level meter beside the
+  glyph — unmissable and doubles as a microphone check, but menu-bar width is scarce and a continuous
+  public readout of whether someone is speaking is a privacy surface, not a default. (e) Rendering
+  blocked as stopped, which is technically truthful and practically useless: you pressed Start and
+  nothing appears to have happened.
+- **Detail:** `Sources/JarvisApp/MenuBar/MenuBarIcon.swift`,
+  `Sources/JarvisApp/MenuBar/MenuBarController.swift`,
+  [architecture.md → Components](./architecture.md#3-components), [build-and-run.md](./build-and-run.md).

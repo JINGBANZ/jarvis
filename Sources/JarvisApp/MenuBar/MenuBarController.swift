@@ -123,6 +123,10 @@ final class MenuBarController: NSObject {
         button.image = status.iconSignal.map(MenuBarIcon.live) ?? MenuBarIcon.stopped
         button.title = ""
         button.toolTip = status.menuDescription
+        // The glyph deliberately gives checking and recovering the same reading, and the button has
+        // no title, so without this VoiceOver would call every reconnect a startup. The button is the
+        // accessibility element, so its label — not the image's — is what has to name the real state.
+        button.setAccessibilityLabel(status.menuDescription)
     }
 }
 
