@@ -2183,6 +2183,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(condensed.contains("condensed"))
         #expect(condensed.contains("PROBLEM: tic-tac-toe columns."))
         #expect(!condensed.contains("the problem statement goes on"))   // raw early turn replaced
+        await driver.cancelBackgroundWork()?.value
     }
 
     /// Compaction fails soft: if the summarizer errors, the full history simply rides along.
@@ -2206,6 +2207,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         // Compaction runs off the attempt path, so confirm the failing path was actually exercised
         // rather than silently skipped — the history assertion above would hold either way.
         #expect(await waitUntilAsync { summarizer.calls.count >= 1 })
+        await driver.cancelBackgroundWork()?.value
     }
 
     /// Compaction is auxiliary and must never hold the coaching slot. A summary still being written
@@ -2233,6 +2235,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         // …while the summarizer was still parked, never having been released.
         #expect(await waitUntilAsync { await gate.hasEntered })
         await gate.release()
+        await driver.cancelBackgroundWork()?.value
     }
 
     /// Compaction runs off the attempt path, so the turn box that Stop cancels does not own it.
