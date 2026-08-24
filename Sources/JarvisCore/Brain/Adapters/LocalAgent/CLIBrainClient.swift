@@ -95,14 +95,17 @@ public struct CLIBrainClient: BrainClient, Sendable {
     }
 
     /// Auxiliary callers such as memory compaction still use the simple `respond` surface. It opens
-    /// and closes a provider-native conversation under one setup-plus-inference deadline; it never
-    /// falls back to a per-turn command.
+    /// and closes a provider-native conversation, then gives inference its own full deadline; it
+    /// never falls back to a per-turn command.
+    ///
+    /// Setup and inference are budgeted separately on purpose. Charging a cold runtime start to the
+    /// inference deadline silently shortens the model's budget by however long the process took to
+    /// come up, which is exactly what made compaction unable to finish.
     public func respond(messages: [ChatMessage], tools: [ToolDef],
                         toolChoice: ToolChoice) async throws -> BrainResponse {
-        let deadline = Date().addingTimeInterval(configuration.timeout)
         let conversation = try await makeConversation(
-            openDeadline: deadline,
-            responseDeadline: deadline)
+            openDeadline: Date().addingTimeInterval(configuration.timeout),
+            responseDeadline: nil)
         do {
             let response = try await conversation.respond(
                 messages: messages, tools: tools, toolChoice: toolChoice)

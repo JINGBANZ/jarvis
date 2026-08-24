@@ -184,7 +184,7 @@ private func speakResponseBody(arguments: String) -> Data {
         _ = try await defaultClient.respond(messages: [.user("condense this")], tools: [])
 
         #expect(BrainWorkloadTimeout.liveCoaching == 15)
-        #expect(BrainWorkloadTimeout.historyCompaction == 15)
+        #expect(BrainWorkloadTimeout.historyCompaction == 45)
         #expect(timeouts.values == [
             BrainWorkloadTimeout.historyCompaction,
             BrainWorkloadTimeout.liveCoaching,

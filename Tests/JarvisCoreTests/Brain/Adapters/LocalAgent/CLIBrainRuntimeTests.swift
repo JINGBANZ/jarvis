@@ -4,14 +4,86 @@ import Testing
 @testable import JarvisCore
 
 @Suite(.serialized) struct CLIBrainRuntimeTests {
-    @Test func runtimeSetEncapsulatesProviderSpecificSharing() {
+    /// The summarizer never shares the coach's runtime, for either provider. Codex's app-server
+    /// admits one conversation at a time, so a shared runtime let an off-path summary fail the next
+    /// coaching attempt — and three counted failures exhaust the target and advance the route.
+    /// Compaction must not be able to cost a brain provider.
+    @Test func runtimeSetNeverSharesTheCoachRuntimeWithTheSummarizer() {
         let sharedCodex = CLIBrainRuntime(provider: .codexCLI)
         let codex = LocalAgentRuntimeSet(provider: .codexCLI, sharedCoach: sharedCodex)
         #expect(codex.coach === sharedCodex)
-        #expect(codex.summarizer === sharedCodex)
+        #expect(codex.summarizer !== sharedCodex)
 
         let claude = LocalAgentRuntimeSet(provider: .claudeCode)
         #expect(claude.coach !== claude.summarizer)
+    }
+
+    /// The one-shot path carries the same control the app-server does. `wiki/decisions.md` records
+    /// that Codex's `--disable` flags narrow nothing — `exec`, `wait`, `request_user_input`, and
+    /// `collaboration` are offered either way — so the item-event allowlist is what actually bites.
+    /// Without it a prompt injection riding in transcript or OCR text could get a background summary
+    /// to run a built-in tool during the live pipeline.
+    @Test func codexExecAbortsOnAToolItemEvent() async throws {
+        let directory = try makeWorkDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let trace = directory.appendingPathComponent("trace")
+        let executable = try makeExecutable(
+            in: directory,
+            named: "fake-codex",
+            script: codexScript(
+                trace: trace,
+                threadResult: Self.ephemeralThreadResult,
+                execReply: "condensed briefing",
+                execItemType: "command_execution"))
+        let runtime = CLIBrainRuntime(
+            backend: CodexExecRuntime(homeBaseDirectory: directory.appendingPathComponent("homes")))
+        let summarizer = makeClient(
+            provider: .codexCLI, executable: executable, directory: directory,
+            runtime: runtime, prewarm: false,
+            systemPrompt: "summarize", tools: [], toolChoice: .auto)
+
+        do {
+            _ = try await summarizer.respond(
+                messages: [.system("summarize"), .user("older turns")],
+                tools: [],
+                toolChoice: .auto)
+            Issue.record("expected a tool item event to abort the summary")
+        } catch {
+            #expect(error.localizedDescription.contains("disallowed item event"))
+        }
+        runtime.terminateNow()
+    }
+
+    /// The one-shot summarizer path is text-only by construction: an image is rejected before any
+    /// process is spawned rather than silently dropped into the `codex exec` document.
+    @Test func codexExecRuntimeRejectsImageInput() async throws {
+        let conversation = try await openExecConversation()
+        do {
+            _ = try await conversation.respond(
+                to: LocalAgentTurn(input: [.imageJPEG(base64: "QUJD")], timeout: 1),
+                onRequestDispatched: {})
+            Issue.record("expected the text-only guard to reject an image")
+        } catch {
+            #expect(error.localizedDescription.contains("text-only"))
+        }
+    }
+
+    private func openExecConversation(
+        runtime: CodexExecRuntime = CodexExecRuntime()
+    ) async throws -> any LocalAgentConversation {
+        let workDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CodexExecRuntimeTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: workDir, withIntermediateDirectories: true)
+        return try await runtime.openConversation(
+            for: LocalAgentConversationConfiguration(
+                provider: .codexCLI,
+                executable: URL(fileURLWithPath: "/fake/bin/codex"),
+                model: "",
+                reasoningEffort: "low",
+                workDirectory: workDir,
+                instructions: "condense the session so far",
+                timeout: 5),
+            deadline: Date().addingTimeInterval(5))
     }
 
     @Test func cancellingClaudePreparationStopsTheInitializingProcess() async throws {
@@ -354,50 +426,55 @@ import Testing
                 """)
     }
 
-    /// Codex gives coach and summarizer one shared app-server, and `openConversation` refuses a
-    /// second thread while one is active. `CoachDriver` finishes the coaching lease before memory
-    /// compaction starts; this pins that ordering so compaction cannot start on a still-open thread.
-    @Test func sharedCodexRuntimeServesCoachingThenCompaction() async throws {
+    /// Compaction must never contend with coaching. Codex's app-server admits one conversation at a
+    /// time, so while the two shared a runtime an off-path summary made the *next* coaching attempt
+    /// fail to open — and three counted failures exhaust the target and advance the route. The
+    /// summarizer now spawns a one-shot `codex exec`, so it runs while a coaching conversation is
+    /// still open and the app-server never sees a second thread.
+    @Test func codexCompactionRunsWithoutTouchingTheCoachAppServer() async throws {
         let directory = try makeWorkDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let trace = directory.appendingPathComponent("trace")
         let executable = try makeExecutable(
             in: directory,
             named: "fake-codex",
-            script: codexScript(trace: trace, threadResult: Self.ephemeralThreadResult))
+            script: codexScript(
+                trace: trace,
+                threadResult: Self.ephemeralThreadResult,
+                execReply: "condensed briefing"))
         let runtime = CLIBrainRuntime(
             provider: .codexCLI,
             codexRuntimeBaseDirectory: directory.appendingPathComponent("agent-runtimes"))
         let runtimes = LocalAgentRuntimeSet(provider: .codexCLI, sharedCoach: runtime)
-        #expect(runtimes.coach === runtimes.summarizer)
+        #expect(runtimes.coach !== runtimes.summarizer)
         let coach = makeClient(
             provider: .codexCLI, executable: executable, directory: directory,
             runtime: runtimes.coach, prewarm: false)
-        // The summarizer has its own prompt, tools, and model — sharing is safe for Codex only
-        // because those travel per `thread/start`, not in the app-server's launch identity.
         let summarizer = makeClient(
             provider: .codexCLI, executable: executable, directory: directory,
             runtime: runtimes.summarizer, prewarm: false,
             systemPrompt: "summarize", tools: [], toolChoice: .auto)
 
-        // The coaching attempt: a lease held across a turn, then explicitly finished.
+        // Hold the coaching conversation open across the summary. Under the shared runtime this is
+        // exactly the collision that failed a coaching attempt.
         let conversation = try await coach.makeConversation()
         _ = try await conversation.respond(
             messages: [.system("coach prompt"), .user("help")],
             tools: coachTools,
             toolChoice: .required)
-        await conversation.finish()
 
-        // Compaction immediately afterwards must find the shared runtime free for a new thread.
         let summary = try await summarizer.respond(
             messages: [.system("summarize"), .user("older turns")],
             tools: [],
             toolChoice: .auto)
-        _ = summary
-        runtime.terminateNow()
+        #expect(summary.outputText == "condensed briefing")
 
-        // One app-server, two sequential threads.
-        #expect(requests(method: "thread/start", in: trace).count == 2)
+        await conversation.finish()
+        runtime.terminateNow()
+        runtimes.summarizer.terminateNow()
+
+        // One app-server, one thread: compaction never opened one.
+        #expect(requests(method: "thread/start", in: trace).count == 1)
         #expect(requests(method: "initialize", in: trace).count == 1)
     }
 
@@ -750,7 +827,9 @@ import Testing
         argumentsFile: URL? = nil,
         pidFile: URL? = nil,
         trace: URL,
-        threadResult: String
+        threadResult: String,
+        execReply: String? = nil,
+        execItemType: String = "agent_message"
     ) -> String {
         let recordArguments = argumentsFile.map {
             "printf 'arg=<%s>\\n' \"$@\" > '\(shellQuoted($0.path))'\n"
@@ -758,9 +837,25 @@ import Testing
         let recordPID = pidFile.map {
             "printf '%s\\n' \"$$\" > '\(shellQuoted($0.path))'\n"
         } ?? ""
+        // `codex exec --json` is a different program shape from the app-server: one shot, JSONL
+        // events on stdout, and the reply written to the --output-last-message path.
+        let execBranch = execReply.map { reply in
+            """
+            if [ "$1" = "exec" ]; then
+              printf 'input: exec\\n' >> '\(shellQuoted(trace.path))'
+              cat > /dev/null
+              printf '{"type":"thread.started","thread_id":"t1"}\\n'
+              printf '{"type":"turn.started"}\\n'
+              printf '{"type":"item.completed","item":{"id":"i1","type":"\(execItemType)","text":"\(shellQuoted(reply))"}}\\n'
+              printf '{"type":"turn.completed","usage":{}}\\n'
+              exit 0
+            fi
+
+            """
+        } ?? ""
         return """
             #!/bin/sh
-            \(recordPID)\(recordArguments)while IFS= read -r line; do
+            \(execBranch)\(recordPID)\(recordArguments)while IFS= read -r line; do
               printf 'input: %s\\n' "$line" >> '\(shellQuoted(trace.path))'
               request_id=$(printf '%s' "$line" | sed -n 's/.*"id":\\([0-9][0-9]*\\).*/\\1/p')
               method=$(printf '%s' "$line" | sed -n 's/.*"method":"\\([^"]*\\)".*/\\1/p' | tr -d '\\\\')

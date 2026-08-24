@@ -43,6 +43,14 @@ public final class CoachDriver: @unchecked Sendable {
     private var exhaustionDeliveryGeneration: UInt = 0
     private var pendingExhaustionDeliveryGeneration: UInt?
     private var isHandling = false
+    /// Guards the single off-path compaction run (see `startCompactionIfIdle`).
+    private var isCompacting = false
+    /// A compaction asked for while one was already running, run once the current pass ends.
+    private var compactionRequested = false
+    /// The in-flight pass, so session teardown can cancel and drain it.
+    private var compactionTask: Task<Void, Never>?
+    /// Latched by teardown: no further background pass may start on a stopped session.
+    private var backgroundWorkStopped = false
     /// Transcript is committed only by a complete, non-truncated `speak` or `stay_silent`.
     private var committedTranscriptCount = 0
     /// Natural triggers coalesce while an attempt or automatic pending-work wait owns the slot.
@@ -1178,7 +1186,7 @@ public final class CoachDriver: @unchecked Sendable {
 
         await conversation.finish()
         if case .completed = result {
-            await compactIfNeeded(using: attempt)
+            startCompactionIfIdle(using: attempt.summarizer ?? attempt.brain)
         }
         return AttemptExecution(id: attemptID, result: result)
     }
@@ -1208,12 +1216,84 @@ public final class CoachDriver: @unchecked Sendable {
 
     // MARK: - History compaction
 
-    /// Auxiliary compaction fails soft and never counts against provider route health.
-    private func compactIfNeeded(using attempt: AttemptBrain) async {
+    /// Compaction is auxiliary, so it runs off the attempt path: awaiting it here would spend its
+    /// whole budget as dead air, batching newly finalized speech behind a summary nobody is waiting
+    /// for. One run at a time — two overlapping runs each replace `0..<prefixCount`, so the second
+    /// would destroy the first's summary along with real turns. A skipped or failed run simply
+    /// retries from a fresh prefix after the next completed attempt.
+    private func startCompactionIfIdle(using client: BrainClient) {
+        // Check the threshold before spawning: most completed attempts are nowhere near it, and a
+        // task per attempt would be pure churn on the shared executor.
         guard history.estimatedTokens > config.historyCompactionTokenThreshold else { return }
-        guard let (oldest, count) = history.compactionPrefix() else { return }
+        stateLock.lock()
+        // Stop is final. A turn suspended in `conversation.finish()` when teardown ran resumes after
+        // `cancelBackgroundWork` already looked for a task, and would otherwise start a fresh
+        // provider request that nothing is left to drain.
+        guard !backgroundWorkStopped else {
+            stateLock.unlock()
+            return
+        }
+        guard !isCompacting else {
+            // Coalesce rather than drop. An attempt landing mid-summary is also the attempt whose
+            // fresh OCR can invalidate that summary, so without this the rejected pass and the
+            // skipped request cancel each other out and history stays over the threshold.
+            compactionRequested = true
+            stateLock.unlock()
+            return
+        }
+        isCompacting = true
+        compactionRequested = false
+        let task = Task.detached(priority: .utility) { [self] in
+            await runCompactionPasses(using: client)
+        }
+        compactionTask = task
+        stateLock.unlock()
+    }
+
+    /// Run compaction until nothing more is pending, so a pass that ends without compacting — a
+    /// summary rejected as stale, or one skipped while another ran — is retried instead of waiting
+    /// for a further completed attempt.
+    private func runCompactionPasses(using client: BrainClient) async {
+        while true {
+            await compactIfNeeded(using: client)
+            let overThreshold = history.estimatedTokens > config.historyCompactionTokenThreshold
+            let runAgain: Bool = stateLock.withLock {
+                guard compactionRequested, overThreshold, !Task.isCancelled else {
+                    isCompacting = false
+                    compactionTask = nil
+                    return false
+                }
+                compactionRequested = false
+                return true
+            }
+            if !runAgain { return }
+        }
+    }
+
+    /// Cancel background work that must not outlive the session, handing back the task so teardown
+    /// can drain it before sealing the audit.
+    ///
+    /// Compaction runs off the attempt path, so `TurnTaskBox` does not own it. Without this a
+    /// summary keeps a provider process alive and billing after Stop, and can still be writing when
+    /// the session audit closes.
+    @discardableResult
+    public func cancelBackgroundWork() -> Task<Void, Never>? {
+        stateLock.lock()
+        backgroundWorkStopped = true
+        compactionRequested = false
+        let task = compactionTask
+        compactionTask = nil
+        stateLock.unlock()
+        task?.cancel()
+        return task
+    }
+
+    /// Auxiliary compaction fails soft and never counts against provider route health.
+    private func compactIfNeeded(using client: BrainClient) async {
+        guard history.estimatedTokens > config.historyCompactionTokenThreshold else { return }
+        guard let (oldest, count, revision) = history.compactionPrefix() else { return }
         do {
-            let response = try await (attempt.summarizer ?? attempt.brain).respond(
+            let response = try await client.respond(
                 messages: [
                     .system(JarvisPrompts.HistorySummary.system),
                     .user(JarvisPrompts.HistorySummary.input(oldest)),
@@ -1224,7 +1304,13 @@ public final class CoachDriver: @unchecked Sendable {
                 jlog("… memory compaction returned nothing — keeping full history for now")
                 return
             }
-            history.compact(prefixCount: count, summary: summary)
+            // A summary that lands as teardown cancels must not mutate history on the way out: the
+            // session is over and the provider may simply have won the race.
+            guard !Task.isCancelled else { return }
+            guard history.compact(prefixCount: count, summary: summary, revision: revision) else {
+                jlog("… discarded a summary written against superseded screen text — will retry later")
+                return
+            }
             jlog("… condensed session memory to ~\(history.estimatedTokens) tokens")
         } catch {
             jlog("… memory compaction failed (will retry later): \(error.localizedDescription)")

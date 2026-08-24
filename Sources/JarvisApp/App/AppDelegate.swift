@@ -971,6 +971,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let auditDirectory = currentSessionDir
         sessionAudit = nil
         let cancelled = turns?.cancelAll() ?? []; turns = nil   // cancel any in-flight coaching turn
+        // History compaction runs off the attempt path, so `turns` does not own it. Cancel it here
+        // and drain it below, or a summary keeps a provider process alive and billing after Stop and
+        // can still be writing when the audit seals.
+        let compaction = coachDriver?.cancelBackgroundWork()
         coachDriver = nil
         activeBrainTarget = nil
         pendingBrainChangeFrom = nil
@@ -1003,13 +1007,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ActivityLog.shared.flush()
         if reason == .applicationQuit {
             audit?.abandon()
-        } else if audit != nil || !cancelled.isEmpty {
+        } else if audit != nil || !cancelled.isEmpty || compaction != nil {
             let drainID = UUID()
             let auditPath = auditDirectory?.standardizedFileURL.path
             if !cancelled.isEmpty { pendingTurnDrainIDs.insert(drainID) }
             if let auditPath { closingAuditPaths.insert(auditPath) }
             Task { @MainActor [weak self] in
                 for task in cancelled { await task.value }
+                await compaction?.value
                 ActivityLog.shared.flush()
                 self?.pendingTurnDrainIDs.remove(drainID)
                 self?.activityViewer?.coachingStateDidChange()

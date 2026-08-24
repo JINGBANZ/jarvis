@@ -3,34 +3,56 @@ import Testing
 @testable import JarvisCore
 
 /// Mock brain: replays a script of responses and records the messages + tool-choice it saw.
+///
+/// `@unchecked Sendable` is safe because every mutable property is accessed only under `lock`. The
+/// lock is load-bearing rather than decorative: as a summarizer this double is driven from the
+/// detached compaction task while the test polls its counters, so unsynchronized access would be a
+/// genuine data race on the arrays' COW buffers.
 final class ScriptedBrain: BrainClient, @unchecked Sendable {
-    private(set) var calls: [[ChatMessage]] = []
-    private(set) var toolChoices: [ToolChoice] = []
-    private(set) var requestContexts: [CoachingRequestContext?] = []
-    private(set) var preparationCount = 0
+    private let lock = NSLock()
+    private var _calls: [[ChatMessage]] = []
+    private var _toolChoices: [ToolChoice] = []
+    private var _requestContexts: [CoachingRequestContext?] = []
+    private var _preparationCount = 0
+    var calls: [[ChatMessage]] { lock.withLock { _calls } }
+    var toolChoices: [ToolChoice] { lock.withLock { _toolChoices } }
+    var requestContexts: [CoachingRequestContext?] { lock.withLock { _requestContexts } }
+    var preparationCount: Int { lock.withLock { _preparationCount } }
     let script: [BrainResponse]
     init(script: [BrainResponse]) { self.script = script }
     func respond(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice) async throws -> BrainResponse {
-        calls.append(messages)
-        toolChoices.append(toolChoice)
-        requestContexts.append(CoachingRequestAttribution.current)
-        return script[min(calls.count - 1, script.count - 1)]
+        let index = lock.withLock { () -> Int in
+            _calls.append(messages)
+            _toolChoices.append(toolChoice)
+            _requestContexts.append(CoachingRequestAttribution.current)
+            return _calls.count - 1
+        }
+        return script[min(index, script.count - 1)]
     }
-    func prepare() { preparationCount += 1 }
+    func prepare() { lock.withLock { _preparationCount += 1 } }
 }
 
 /// A brain whose per-call script can be a response OR a throw (nil), recording the messages it saw —
 /// to verify what survives a failed turn and reaches the next one.
+///
+/// `@unchecked Sendable` is safe for the same reason as `ScriptedBrain`: all mutable state is
+/// accessed under `lock`, which the detached compaction path makes necessary rather than optional.
 final class ScriptedThrowBrain: BrainClient, @unchecked Sendable {
-    private(set) var calls: [[ChatMessage]] = []
-    private(set) var requestContexts: [CoachingRequestContext?] = []
+    private let lock = NSLock()
+    private var _calls: [[ChatMessage]] = []
+    private var _requestContexts: [CoachingRequestContext?] = []
     private var idx = 0
+    var calls: [[ChatMessage]] { lock.withLock { _calls } }
+    var requestContexts: [CoachingRequestContext?] { lock.withLock { _requestContexts } }
     let script: [BrainResponse?]
     init(script: [BrainResponse?]) { self.script = script }
     func respond(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice) async throws -> BrainResponse {
-        calls.append(messages)
-        requestContexts.append(CoachingRequestAttribution.current)
-        let r = script[min(idx, script.count - 1)]; idx += 1
+        let r = lock.withLock { () -> BrainResponse? in
+            _calls.append(messages)
+            _requestContexts.append(CoachingRequestAttribution.current)
+            let reply = script[min(idx, script.count - 1)]; idx += 1
+            return reply
+        }
         guard let r else { throw NSError(domain: "test", code: 500) }
         return r
     }
@@ -2144,13 +2166,24 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         transcript.append(.init(speaker: .me, text: "and some more detail about the grid", at: 1))
         await driver.handleTrigger(.turnEnd)   // a second message pushes past the threshold → compaction
 
-        #expect(summarizer.calls.count == 1)   // the summarizer (not the coach brain) wrote it
-        transcript.append(.init(speaker: .me, text: "next idea entirely", at: 5))
-        await driver.handleTrigger(.turnEnd)
-        let third = brain.calls[2].compactMap(\.text).joined(separator: "\n")
-        #expect(third.contains("condensed"))
-        #expect(third.contains("PROBLEM: tic-tac-toe columns."))
-        #expect(!third.contains("the problem statement goes on"))   // raw early turn replaced
+        // Compaction runs off the attempt path, and the summarizer's call count only proves the
+        // request was dispatched — the summary is applied later, after that call returns. Drive
+        // turns until the condensed block reaches a request rather than assuming a fixed one does.
+        var condensed = ""
+        for turn in 0..<20 where condensed.isEmpty {
+            transcript.append(.init(speaker: .me, text: "next idea \(turn)", at: 5 + Double(turn)))
+            await driver.handleTrigger(.turnEnd)
+            let latest = (brain.calls.last ?? []).compactMap(\.text).joined(separator: "\n")
+            if latest.contains("PROBLEM: tic-tac-toe columns.") { condensed = latest }
+        }
+
+        // The summarizer wrote it, not the coach brain. Later turns may compact again as history
+        // regrows, so this is a floor rather than an exact count.
+        #expect(summarizer.calls.count >= 1)
+        #expect(condensed.contains("condensed"))
+        #expect(condensed.contains("PROBLEM: tic-tac-toe columns."))
+        #expect(!condensed.contains("the problem statement goes on"))   // raw early turn replaced
+        await driver.cancelBackgroundWork()?.value
     }
 
     /// Compaction fails soft: if the summarizer errors, the full history simply rides along.
@@ -2171,6 +2204,70 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let second = brain.calls[1].compactMap(\.text).joined(separator: "\n")
         #expect(second.contains("a reasonably long problem statement to remember"))   // nothing lost
         #expect(recorder.failures.isEmpty)   // auxiliary failure never enters route health
+        // Compaction runs off the attempt path, so confirm the failing path was actually exercised
+        // rather than silently skipped — the history assertion above would hold either way.
+        #expect(await waitUntilAsync { summarizer.calls.count >= 1 })
+        await driver.cancelBackgroundWork()?.value
+    }
+
+    /// Compaction is auxiliary and must never hold the coaching slot. A summary still being written
+    /// cannot delay the attempt that triggered it: otherwise every compaction spends its whole
+    /// budget as dead air, and speech arriving meanwhile batches behind it instead of being coached.
+    @Test func compactionDoesNotBlockTheAttempt() async {
+        let clock = ManualClock(now: 0)
+        let brain = ScriptedBrain(script: [
+            .init(toolCalls: [.staySilent(callId: "quiet")]),
+        ])
+        let gate = AsyncGate()
+        let summarizer = GatedSummarizer(gate: gate, summary: "PROBLEM: parked mid-summary.")
+        let (driver, transcript) = makeDriver(brain: brain, summarizer: summarizer, clock: clock,
+                                              config: Config(historyCompactionTokenThreshold: 5))
+        transcript.append(.init(speaker: .me, text: "a reasonably long problem statement to remember", at: 0))
+        await driver.handleTrigger(.turnEnd)
+        transcript.append(.init(speaker: .me, text: "next thought", at: 5))
+
+        let outcome = await turnOutcomeBeforeTimeout {
+            await driver.handleTrigger(.turnEnd)
+        }
+
+        // The attempt completed…
+        #expect(outcome == .silentByModel)
+        // …while the summarizer was still parked, never having been released.
+        #expect(await waitUntilAsync { await gate.hasEntered })
+        await gate.release()
+        await driver.cancelBackgroundWork()?.value
+    }
+
+    /// Compaction runs off the attempt path, so the turn box that Stop cancels does not own it.
+    /// Session teardown must cancel and drain it itself, or a summary keeps a provider process alive
+    /// and billing after the user stopped, and can still be writing when the audit seals.
+    @Test func sessionTeardownCancelsAndDrainsCompaction() async {
+        let clock = ManualClock(now: 0)
+        let brain = ScriptedBrain(script: [
+            .init(toolCalls: [.staySilent(callId: "quiet")]),
+        ])
+        let gate = AsyncGate()
+        let summarizer = GatedSummarizer(gate: gate, summary: "never applied")
+        let (driver, transcript) = makeDriver(brain: brain, summarizer: summarizer, clock: clock,
+                                              config: Config(historyCompactionTokenThreshold: 5))
+        transcript.append(.init(speaker: .me, text: "a reasonably long problem statement to remember", at: 0))
+        await driver.handleTrigger(.turnEnd)
+        transcript.append(.init(speaker: .me, text: "next thought", at: 5))
+        await driver.handleTrigger(.turnEnd)
+        #expect(await waitUntilAsync { await gate.hasEntered })
+
+        // Teardown hands back the in-flight pass so the caller can drain it.
+        let drained = driver.cancelBackgroundWork()
+        #expect(drained != nil)
+        await gate.release()
+        await drained?.value
+
+        // The cancelled summary never reached history: the next request still carries the raw turns.
+        transcript.append(.init(speaker: .me, text: "third thought", at: 9))
+        await driver.handleTrigger(.turnEnd)
+        let third = brain.calls[2].compactMap(\.text).joined(separator: "\n")
+        #expect(!third.contains("never applied"))
+        #expect(third.contains("a reasonably long problem statement to remember"))
     }
 
     // MARK: - Observability: structured turn outcomes
@@ -2791,6 +2888,38 @@ final class CaptureThenGatedFailureThenSpeakingBrain: BrainClient, @unchecked Se
                         argumentsJSON: #"{"lines":["used saved observation"]}"#),
                 ])
         }
+    }
+}
+
+/// A summarizer that parks mid-summary, so a test can observe the triggering attempt completing
+/// without it.
+///
+/// `@unchecked Sendable` is safe because `calls` is only ever touched under `lock`; the detached
+/// compaction task and the polling test task would otherwise race on it.
+private final class GatedSummarizer: BrainClient, @unchecked Sendable {
+    private let gate: AsyncGate
+    private let summary: String
+    private let lock = NSLock()
+    private var calls = 0
+
+    var callCount: Int { lock.withLock { calls } }
+
+    init(gate: AsyncGate, summary: String) {
+        self.gate = gate
+        self.summary = summary
+    }
+
+    func respond(messages: [ChatMessage], tools: [ToolDef],
+                 toolChoice: ToolChoice) async throws -> BrainResponse {
+        lock.withLock { calls += 1 }
+        // Release on cancellation so a regression fails the test instead of hanging it: `AsyncGate`
+        // parks on a plain continuation, which a cancelled enclosing task group would wait on forever.
+        await withTaskCancellationHandler {
+            await gate.enter()
+        } onCancel: {
+            Task { await gate.release() }
+        }
+        return BrainResponse(toolCalls: [], outputText: summary)
     }
 }
 
