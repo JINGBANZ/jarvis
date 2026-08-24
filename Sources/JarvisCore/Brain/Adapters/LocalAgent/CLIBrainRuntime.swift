@@ -36,7 +36,19 @@ protocol LocalAgentConversation: Sendable {
     func finish() async
 }
 
+/// How a local-agent turn reached its provider, named in the session audit's request record.
+///
+/// The transports do not share a usage schema — Claude's warm query carries the Anthropic envelope,
+/// `codex exec` reports OpenAI-shaped totals under its own key names, and the app-server reports
+/// none — so a reader of the audit needs the transport to know which shape, if any, to expect.
+enum LocalAgentTransport: String, Sendable {
+    case warmQuery = "warm-query"
+    case appServer = "app-server"
+    case oneShotExec = "one-shot-exec"
+}
+
 protocol LocalAgentRuntimeBackend: Sendable {
+    var transport: LocalAgentTransport { get }
     func prepare(for configuration: LocalAgentConversationConfiguration) async throws
     func openConversation(
         for configuration: LocalAgentConversationConfiguration,
@@ -81,6 +93,7 @@ public final class CLIBrainRuntime: @unchecked Sendable {
     }
 
     private let backend: any LocalAgentRuntimeBackend
+    var transport: LocalAgentTransport { backend.transport }
     private let ownerLock = NSLock()
     private var ownerCount = 0
     private var isTerminated = false

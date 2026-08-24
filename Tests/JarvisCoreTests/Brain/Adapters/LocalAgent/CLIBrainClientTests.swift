@@ -23,6 +23,7 @@ import Testing
     ) -> (CLIBrainClient, FakeLocalAgentRuntime) {
         let backend = FakeLocalAgentRuntime(
             replies: replies,
+            transport: provider == .claudeCode ? .warmQuery : .appServer,
             openDelay: openDelay,
             failBeforeDispatch: failBeforeDispatch)
         let runtime = CLIBrainRuntime(backend: backend)
@@ -252,6 +253,7 @@ import Testing
         let traffic = await FileSessionAudit.readyForTesting(directory: workDir)
         let backend = FakeLocalAgentRuntime(
             replies: [],
+            transport: .appServer,
             openError: NSError(
                 domain: "test",
                 code: 7,
@@ -529,6 +531,9 @@ private actor FakeLocalAgentRuntime: LocalAgentRuntimeBackend {
         let timeout: TimeInterval
     }
 
+    /// The real backend this fake stands in for, so audit assertions see the transport name the
+    /// simulated runtime would have written.
+    nonisolated let transport: LocalAgentTransport
     private var replies: [String]
     private let openError: (any Error)?
     private let openDelay: TimeInterval
@@ -542,10 +547,12 @@ private actor FakeLocalAgentRuntime: LocalAgentRuntimeBackend {
 
     init(
         replies: [String],
+        transport: LocalAgentTransport = .warmQuery,
         openError: (any Error)? = nil,
         openDelay: TimeInterval = 0,
         failBeforeDispatch: Bool = false
     ) {
+        self.transport = transport
         self.replies = replies
         self.openError = openError
         self.openDelay = openDelay

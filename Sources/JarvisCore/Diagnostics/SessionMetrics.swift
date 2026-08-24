@@ -15,6 +15,10 @@ import Foundation
 ///     sidecar models (e.g. its haiku pass), which the call-level `usage` alone would hide.
 ///   - **Codex app-server** — the response record has no token, cache, or cost usage, so those
 ///     values remain unavailable rather than becoming zero.
+///   - **Codex one-shot `exec`** (the summarizer) — `response.runtime.usage`, in Codex's own key
+///     names: `input_tokens` (cached input included), `cached_input_tokens`,
+///     `cache_write_input_tokens`, and `output_tokens` (reasoning output included). No cost.
+///     Which Codex transport served a call is read from the request record's `runtime` name.
 enum SessionMetrics {
     /// One row of the per-call table. `perModel` attributes this call's usage to the concrete
     /// model(s) that served it (a CLI turn can touch a main model plus a sidecar).
@@ -207,6 +211,20 @@ enum SessionMetrics {
                                                        cacheWrite: call.cacheWrite, output: call.output,
                                                        cost: call.cost, calls: 1)
                 }
+            } else if request?["runtime"] as? String == LocalAgentTransport.oneShotExec.rawValue,
+                      let usage = (response?["runtime"] as? [String: Any])?["usage"]
+                        as? [String: Any] {
+                // Keyed on the transport, not on the envelope: both Codex transports record their
+                // completed turn under `response.runtime`, and only `codex exec` spells usage this
+                // way. `input_tokens` counts cached input and `output_tokens` includes reasoning
+                // output, as in OpenAI's schema. No per-call cost is reported.
+                call.input = int(usage["input_tokens"])
+                call.cacheRead = int(usage["cached_input_tokens"])
+                call.cacheWrite = int(usage["cache_write_input_tokens"])
+                call.output = int(usage["output_tokens"])
+                call.perModel[model] = ModelTotals(input: call.input, cacheRead: call.cacheRead,
+                                                   cacheWrite: call.cacheWrite, output: call.output,
+                                                   cost: nil, calls: 1)
             } else if let usage = response?["usage"] as? [String: Any] {
                 call.input = int(usage["input_tokens"])
                 let details = usage["input_tokens_details"] as? [String: Any]
