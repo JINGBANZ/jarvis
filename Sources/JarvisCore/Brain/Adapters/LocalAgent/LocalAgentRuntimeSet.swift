@@ -2,8 +2,12 @@ import Foundation
 
 /// Provider runtimes needed by one configured local-agent target.
 ///
-/// Codex can host independently configured coach and summarizer threads on one app-server. Claude
-/// fixes its model and system prompt when a query starts, so those roles need separate runtimes.
+/// The summarizer always gets a runtime of its own. Claude needs one because a query fixes its model
+/// and system prompt when it starts. Codex needs one because its app-server admits a single
+/// conversation at a time: sharing it let a background summary fail the next coaching attempt, and
+/// three such failures exhaust the target. Codex's summarizer spawns a short-lived `codex exec` per
+/// summary instead of holding a second app-server open for the whole session to do a few seconds of
+/// work.
 public struct LocalAgentRuntimeSet: Sendable {
     public let coach: CLIBrainRuntime
     public let summarizer: CLIBrainRuntime
@@ -19,7 +23,8 @@ public struct LocalAgentRuntimeSet: Sendable {
             codexSupportedFeatures: codexSupportedFeatures)
         self.coach = coach
         self.summarizer = provider == .codexCLI
-            ? coach
+            ? CLIBrainRuntime(
+                backend: CodexExecRuntime(supportedFeatures: codexSupportedFeatures))
             : CLIBrainRuntime(
                 provider: provider,
                 codexSupportedFeatures: codexSupportedFeatures)
