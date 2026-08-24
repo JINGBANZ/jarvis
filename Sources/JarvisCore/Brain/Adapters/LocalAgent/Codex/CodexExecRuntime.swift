@@ -16,7 +16,6 @@ import Foundation
 /// deny-by-default allowlist the app-server enforces, killing the process on anything else. Auth and
 /// config isolation reuse the app-server's private `CODEX_HOME`.
 struct CodexExecRuntime: LocalAgentRuntimeBackend {
-    let auditLabel = "one-shot-exec"
     private let supportedFeatures: Set<String>
     private let homeBaseDirectory: URL
     private let lifetime = AgentRuntimeLifetime()
