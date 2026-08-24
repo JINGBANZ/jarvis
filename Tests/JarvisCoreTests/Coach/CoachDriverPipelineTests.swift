@@ -2166,15 +2166,23 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         transcript.append(.init(speaker: .me, text: "and some more detail about the grid", at: 1))
         await driver.handleTrigger(.turnEnd)   // a second message pushes past the threshold → compaction
 
-        // Compaction runs off the attempt path, so wait for it rather than assuming it already ran.
-        #expect(await waitUntilAsync { summarizer.calls.count == 1 })
-        #expect(summarizer.calls.count == 1)   // the summarizer (not the coach brain) wrote it
-        transcript.append(.init(speaker: .me, text: "next idea entirely", at: 5))
-        await driver.handleTrigger(.turnEnd)
-        let third = brain.calls[2].compactMap(\.text).joined(separator: "\n")
-        #expect(third.contains("condensed"))
-        #expect(third.contains("PROBLEM: tic-tac-toe columns."))
-        #expect(!third.contains("the problem statement goes on"))   // raw early turn replaced
+        // Compaction runs off the attempt path, and the summarizer's call count only proves the
+        // request was dispatched — the summary is applied later, after that call returns. Drive
+        // turns until the condensed block reaches a request rather than assuming a fixed one does.
+        var condensed = ""
+        for turn in 0..<20 where condensed.isEmpty {
+            transcript.append(.init(speaker: .me, text: "next idea \(turn)", at: 5 + Double(turn)))
+            await driver.handleTrigger(.turnEnd)
+            let latest = (brain.calls.last ?? []).compactMap(\.text).joined(separator: "\n")
+            if latest.contains("PROBLEM: tic-tac-toe columns.") { condensed = latest }
+        }
+
+        // The summarizer wrote it, not the coach brain. Later turns may compact again as history
+        // regrows, so this is a floor rather than an exact count.
+        #expect(summarizer.calls.count >= 1)
+        #expect(condensed.contains("condensed"))
+        #expect(condensed.contains("PROBLEM: tic-tac-toe columns."))
+        #expect(!condensed.contains("the problem statement goes on"))   // raw early turn replaced
     }
 
     /// Compaction fails soft: if the summarizer errors, the full history simply rides along.
