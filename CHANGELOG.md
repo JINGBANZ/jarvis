@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.12](https://github.com/JINGBANZ/jarvis/compare/v0.1.11...v0.1.12) (2026-08-24)
+
+
+### Features
+
+* **app:** light the menu-bar icon while a session is live ([#189](https://github.com/JINGBANZ/jarvis/issues/189)) ([725e1bc](https://github.com/JINGBANZ/jarvis/commit/725e1bcc54269a8fcbfd70e258dff9fc43e76ed1))
+
+
+### Bug Fixes
+
+* make coaching turns diagnosable and history compaction actually work ([#187](https://github.com/JINGBANZ/jarvis/issues/187)) ([7fdb6a4](https://github.com/JINGBANZ/jarvis/commit/7fdb6a4bf2af72c8b5d3516559f7824a074aab7d))
+
 ## [0.1.11](https://github.com/JINGBANZ/jarvis/compare/v0.1.10...v0.1.11) (2026-08-22)
 
 

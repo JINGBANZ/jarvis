@@ -7,8 +7,8 @@
   <key>CFBundleIdentifier</key><string>com.jarvis.coach</string>
   <!-- Versions are bumped by release-please (the generic updater rewrites the semver on any line
        carrying the annotation) — don't edit them by hand. -->
-  <key>CFBundleVersion</key><string>0.1.11</string> <!-- x-release-please-version -->
-  <key>CFBundleShortVersionString</key><string>0.1.11</string> <!-- x-release-please-version -->
+  <key>CFBundleVersion</key><string>0.1.12</string> <!-- x-release-please-version -->
+  <key>CFBundleShortVersionString</key><string>0.1.12</string> <!-- x-release-please-version -->
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleExecutable</key><string>JarvisApp</string>
   <key>CFBundleIconFile</key><string>Jarvis.icns</string>
