@@ -62,7 +62,7 @@ import Testing
     @Test func codexExecSummaryRecordsItsTransportAndTokenUsage() async throws {
         let directory = try makeWorkDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
-        let traffic = await FileSessionAudit.readyForTesting(directory: directory)
+        let traffic = RecordingTrafficAudit()
         let executable = try makeExecutable(
             in: directory,
             named: "fake-codex",
@@ -84,18 +84,16 @@ import Testing
             toolChoice: .auto)
         #expect(summary.outputText == "condensed briefing")
         runtime.terminateNow()
-        _ = await traffic.closeForTesting()
 
-        let jsonl = try String(
-            contentsOf: directory.appendingPathComponent(FileSessionAudit.brainTrafficFilename),
-            encoding: .utf8)
-        let line = try #require(jsonl.split(separator: "\n").first)
-        let entry = try #require(
-            try JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any])
-        #expect((entry["request"] as? [String: Any])?["runtime"] as? String == "one-shot-exec")
+        let event = try #require(traffic.recorded.first)
+        let request = try #require(
+            try JSONSerialization.jsonObject(with: event.request) as? [String: Any])
+        #expect(request["runtime"] as? String == "one-shot-exec")
+        let responseBody = try #require(event.response)
+        let response = try #require(
+            try JSONSerialization.jsonObject(with: responseBody) as? [String: Any])
         let usage = try #require(
-            ((entry["response"] as? [String: Any])?["runtime"] as? [String: Any])?["usage"]
-                as? [String: Any])
+            (response["runtime"] as? [String: Any])?["usage"] as? [String: Any])
         #expect(usage["input_tokens"] as? Int == 17102)
         #expect(usage["cached_input_tokens"] as? Int == 9984)
         #expect(usage["cache_write_input_tokens"] as? Int == 0)
@@ -1044,5 +1042,27 @@ import Testing
         arguments.indices.dropLast().contains {
             arguments[$0] == first && arguments[$0 + 1] == second
         }
+    }
+}
+
+/// Captures the exact bytes the client hands the audit port, synchronously on the calling thread.
+///
+/// This suite is serialized and every test in it spawns real subprocesses that hold GCD threads, so
+/// a file-backed `FileSessionAudit` would add a background worker queue plus two waits with no
+/// deadline — its readiness spin and its close — either of which hangs the whole suite forever if
+/// that queue is slow to be scheduled. The record's JSONL round-trip is covered by
+/// `FileSessionAuditTrafficTests`; what matters here is what `CLIBrainClient` emits.
+///
+/// `@unchecked Sendable` is justified because `lock` guards the only mutable state.
+private final class RecordingTrafficAudit: BrainTrafficAuditing, @unchecked Sendable {
+    private let lock = NSLock()
+    private var events: [BrainTrafficAuditEvent] = []
+
+    var recorded: [BrainTrafficAuditEvent] {
+        lock.withLock { events }
+    }
+
+    func record(_ event: BrainTrafficAuditEvent) {
+        lock.withLock { events.append(event) }
     }
 }
