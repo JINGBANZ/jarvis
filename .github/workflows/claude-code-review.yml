@@ -8,7 +8,12 @@ on:
 
 jobs:
   review:
-    if: github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]'
+    # release-please's standing Release PR carries only generated version bumps (CHANGELOG,
+    # Info.plist, manifest) — nothing an author wrote and nothing a review can improve.
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository
+      && github.actor != 'dependabot[bot]'
+      && !startsWith(github.head_ref, 'release-please--')
     uses: JINGBANZ/workflows/.github/workflows/claude-code-review.yml@main
     permissions:
       contents: read
