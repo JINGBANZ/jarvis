@@ -63,6 +63,7 @@ actor CodexAppServerRuntime: LocalAgentRuntimeBackend {
         let supportedFeatures: Set<String>
     }
 
+    nonisolated let transport = LocalAgentTransport.appServer
     private let runtimeBaseDirectory: URL
     private let supportedFeatures: Set<String>
     private let lifetime = AgentRuntimeLifetime()

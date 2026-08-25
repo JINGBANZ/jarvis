@@ -16,6 +16,7 @@ import Foundation
 /// deny-by-default allowlist the app-server enforces, killing the process on anything else. Auth and
 /// config isolation reuse the app-server's private `CODEX_HOME`.
 struct CodexExecRuntime: LocalAgentRuntimeBackend {
+    let transport = LocalAgentTransport.oneShotExec
     private let supportedFeatures: Set<String>
     private let homeBaseDirectory: URL
     private let lifetime = AgentRuntimeLifetime()
@@ -128,9 +129,11 @@ private struct CodexExecConversation: LocalAgentConversation {
                 guard !trimmed.isEmpty else {
                     throw Self.error("codex exec produced no reply")
                 }
+                // The completed turn carries the turn's token usage; keeping it is what lets the
+                // session audit account for a compaction summary instead of reporting it unknown.
                 return LocalAgentTurnResult(
                     reply: trimmed,
-                    metadata: nil,
+                    metadata: try? JSONSerialization.data(withJSONObject: event),
                     dispatchedAt: dispatchedAt,
                     firstAssistantAt: firstAssistantAt,
                     completedAt: line.observedAt)

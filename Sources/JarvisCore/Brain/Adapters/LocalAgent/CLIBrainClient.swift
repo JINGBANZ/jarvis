@@ -192,7 +192,7 @@ public struct CLIBrainClient: BrainClient, Sendable {
             "provider": provider.rawValue,
             "model": configuration.model.isEmpty ? "(CLI default)" : configuration.model,
             "executable": configuration.executable.path,
-            "runtime": provider == .claudeCode ? "warm-query" : "app-server",
+            "runtime": runtime.transport.rawValue,
             "instructions": expectedInstructions,
             "input": auditInput,
         ]
@@ -240,7 +240,7 @@ public struct CLIBrainClient: BrainClient, Sendable {
             tag: trafficTag,
             request: requestRecord ?? Self.recordData([
                 "provider": provider.rawValue,
-                "runtime": provider == .claudeCode ? "warm-query" : "app-server",
+                "runtime": runtime.transport.rawValue,
             ]),
             response: nil,
             status: nil,
@@ -255,7 +255,8 @@ public struct CLIBrainClient: BrainClient, Sendable {
         if let metadata = result.metadata,
            let object = try? JSONSerialization.jsonObject(with: metadata) {
             // Keep Claude's established `response.cli` envelope so deterministic session metrics
-            // retain usage/cache/cost telemetry. Codex's completed-turn metadata has no usage.
+            // retain usage/cache/cost telemetry. Codex's completed turn goes under `runtime`, where
+            // the metrics reader pairs it with the request's transport name to read its usage.
             record[provider == .claudeCode ? "cli" : "runtime"] = object
         }
         return Self.recordData(record)

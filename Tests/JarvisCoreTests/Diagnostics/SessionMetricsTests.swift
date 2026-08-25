@@ -98,6 +98,27 @@ import Foundation
         #expect(out.contains("| claude-opus-4-8 | 1 | 4 | 1285 | 12000 | 200 | $1.4000 |"))
     }
 
+    /// The one-shot `codex exec` summarizer records its completed turn, whose usage uses Codex's own
+    /// key names. Reading it keeps compaction token accounting in the session totals; before it the
+    /// values were rendered unavailable even though the transport had supplied them. No per-call
+    /// cost is reported, so cost stays unavailable.
+    @Test func rendersCodexOneShotExecUsage() throws {
+        let call = try line(
+            request: ["provider": "codex-cli", "model": "gpt-5.4", "runtime": "one-shot-exec"],
+            response: ["reply": "condensed",
+                       "runtime": ["type": "turn.completed",
+                                   "usage": ["input_tokens": 17102,
+                                             "cached_input_tokens": 9984,
+                                             "cache_write_input_tokens": 0,
+                                             "output_tokens": 5,
+                                             "reasoning_output_tokens": 0]]])
+        let out = SessionMetrics.render(jsonl: call)
+
+        #expect(out.contains("| 1 | coach | Codex CLI | gpt-5.4 | 200 | 500 | 17102 | 9984 | 0 | 5 | — |"))
+        #expect(out.contains("session totals: 1 calls · input 17102 · cache-read 9984 · cache-write 0 · output 5 · cost —"))
+        #expect(out.contains("| gpt-5.4 | 1 | 17102 | 9984 | 0 | 5 | — |"))
+    }
+
     /// Codex's recorded response has no usage envelope. Successful execution must not become a
     /// deterministic claim that the call consumed zero tokens and cost nothing.
     @Test func rendersCodexUsageAsUnavailable() throws {

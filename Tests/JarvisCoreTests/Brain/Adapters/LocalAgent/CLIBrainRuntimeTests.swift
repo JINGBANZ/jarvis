@@ -54,6 +54,52 @@ import Testing
         runtime.terminateNow()
     }
 
+    /// The one-shot summary's `turn.completed` event carries the turn's token usage. Discarding it
+    /// left every Codex compaction in the session audit with unavailable input, cache, and output
+    /// values even though the transport had reported them. The request record must also name the
+    /// transport, because `codex exec` spells its usage keys differently from the app-server's
+    /// schema and the metrics reader has to know which one it is holding.
+    @Test func codexExecSummaryRecordsItsTransportAndTokenUsage() async throws {
+        let directory = try makeWorkDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let traffic = RecordingTrafficAudit()
+        let executable = try makeExecutable(
+            in: directory,
+            named: "fake-codex",
+            script: codexScript(
+                trace: directory.appendingPathComponent("trace"),
+                threadResult: Self.ephemeralThreadResult,
+                execReply: "condensed briefing",
+                execUsage: #"{"input_tokens":17102,"cached_input_tokens":9984,"cache_write_input_tokens":0,"output_tokens":5,"reasoning_output_tokens":0}"#))
+        let runtime = CLIBrainRuntime(
+            backend: CodexExecRuntime(homeBaseDirectory: directory.appendingPathComponent("homes")))
+        let summarizer = makeClient(
+            provider: .codexCLI, executable: executable, directory: directory,
+            runtime: runtime, prewarm: false, traffic: traffic,
+            systemPrompt: "summarize", tools: [], toolChoice: .auto)
+
+        let summary = try await summarizer.respond(
+            messages: [.system("summarize"), .user("older turns")],
+            tools: [],
+            toolChoice: .auto)
+        #expect(summary.outputText == "condensed briefing")
+        runtime.terminateNow()
+
+        let event = try #require(traffic.recorded.first)
+        let request = try #require(
+            try JSONSerialization.jsonObject(with: event.request) as? [String: Any])
+        #expect(request["runtime"] as? String == "one-shot-exec")
+        let responseBody = try #require(event.response)
+        let response = try #require(
+            try JSONSerialization.jsonObject(with: responseBody) as? [String: Any])
+        let usage = try #require(
+            (response["runtime"] as? [String: Any])?["usage"] as? [String: Any])
+        #expect(usage["input_tokens"] as? Int == 17102)
+        #expect(usage["cached_input_tokens"] as? Int == 9984)
+        #expect(usage["cache_write_input_tokens"] as? Int == 0)
+        #expect(usage["output_tokens"] as? Int == 5)
+    }
+
     /// The one-shot summarizer path is text-only by construction: an image is rejected before any
     /// process is spawned rather than silently dropped into the `codex exec` document.
     @Test func codexExecRuntimeRejectsImageInput() async throws {
@@ -785,6 +831,7 @@ import Testing
         directory: URL,
         runtime: CLIBrainRuntime,
         prewarm: Bool,
+        traffic: (any BrainTrafficAuditing)? = nil,
         systemPrompt: String = "coach prompt",
         tools: [ToolDef] = coachTools,
         toolChoice: ToolChoice = .required,
@@ -796,6 +843,7 @@ import Testing
             model: "",
             workDirectory: directory,
             timeout: timeout,
+            traffic: traffic,
             systemPrompt: systemPrompt,
             tools: tools,
             toolChoice: toolChoice,
@@ -829,7 +877,8 @@ import Testing
         trace: URL,
         threadResult: String,
         execReply: String? = nil,
-        execItemType: String = "agent_message"
+        execItemType: String = "agent_message",
+        execUsage: String = "{}"
     ) -> String {
         let recordArguments = argumentsFile.map {
             "printf 'arg=<%s>\\n' \"$@\" > '\(shellQuoted($0.path))'\n"
@@ -847,7 +896,7 @@ import Testing
               printf '{"type":"thread.started","thread_id":"t1"}\\n'
               printf '{"type":"turn.started"}\\n'
               printf '{"type":"item.completed","item":{"id":"i1","type":"\(execItemType)","text":"\(shellQuoted(reply))"}}\\n'
-              printf '{"type":"turn.completed","usage":{}}\\n'
+              printf '{"type":"turn.completed","usage":%s}\\n' '\(execUsage)'
               exit 0
             fi
 
@@ -993,5 +1042,27 @@ import Testing
         arguments.indices.dropLast().contains {
             arguments[$0] == first && arguments[$0 + 1] == second
         }
+    }
+}
+
+/// Captures the exact bytes the client hands the audit port, synchronously on the calling thread.
+///
+/// This suite is serialized and every test in it spawns real subprocesses that hold GCD threads, so
+/// a file-backed `FileSessionAudit` would add a background worker queue plus two waits with no
+/// deadline — its readiness spin and its close — either of which hangs the whole suite forever if
+/// that queue is slow to be scheduled. The record's JSONL round-trip is covered by
+/// `FileSessionAuditTrafficTests`; what matters here is what `CLIBrainClient` emits.
+///
+/// `@unchecked Sendable` is justified because `lock` guards the only mutable state.
+private final class RecordingTrafficAudit: BrainTrafficAuditing, @unchecked Sendable {
+    private let lock = NSLock()
+    private var events: [BrainTrafficAuditEvent] = []
+
+    var recorded: [BrainTrafficAuditEvent] {
+        lock.withLock { events }
+    }
+
+    func record(_ event: BrainTrafficAuditEvent) {
+        lock.withLock { events.append(event) }
     }
 }
