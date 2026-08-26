@@ -8,26 +8,6 @@ import Testing
 // A few cases deliberately park the synchronous disk edge. Keep their gates serial so the parallel
 // repository test run never consumes several cooperative-pool threads on test-only blockers.
 @Suite(.serialized) struct SessionAuditIsolationTests {
-    private struct CoachingSnapshot: Equatable {
-        let outcome: TurnOutcome
-        let providerRequests: [Data]
-        let renderedTips: [[String]]
-    }
-
-    /// `@unchecked Sendable`: the lock protects all captured requests.
-    private final class RequestCapture: @unchecked Sendable {
-        private let lock = NSLock()
-        private var storage: [Data] = []
-
-        func append(_ request: Data) {
-            lock.withLock { storage.append(request) }
-        }
-
-        var requests: [Data] {
-            lock.withLock { storage }
-        }
-    }
-
     /// Holds the worker in its first open while mailbox admission remains available.
     private final class BlockingOpenWriter: SessionAuditWriting, @unchecked Sendable {
         let openEntered = DispatchSemaphore(value: 0)
@@ -160,51 +140,100 @@ import Testing
         }
     }
 
-    @Test func coachingIsIdenticalWithNoAuditOrAnEnabledOverloadedOrFailingAudit() async throws {
+    @Test func coachingIsIdenticalAcrossAbsentEnabledFullBlockedOversizeAndFailingEvidence()
+        async throws {
+        let absent = await CoachingParityHarness.run()
+
+        // The invariant is only as strong as the scenario behind it, so pin the baseline: both
+        // terminal outcomes, one provider request per attempt (3 primary + 1 tip + 3 final), the
+        // delivered tip, and all three route transition kinds in delivery order.
+        #expect(absent.outcomes == [.spoke, .brainError])
+        #expect(absent.providerRequests.count == 7)
+        #expect(absent.overlayEvents.map(\.lines) == [["same tip"]])
+        #expect(absent.routeTransitions == [
+            .skipped(CoachingParityHarness.unavailableTarget),
+            .advanced(
+                from: CoachingParityHarness.primaryTarget,
+                to: CoachingParityHarness.finalTarget),
+            .exhausted(CoachingParityHarness.finalTarget),
+        ])
+
         let enabledDirectory = ActivityLogTests.tmp()
-        let overloadedDirectory = ActivityLogTests.tmp()
+        let fullDirectory = ActivityLogTests.tmp()
+        let blockedDirectory = ActivityLogTests.tmp()
+        let oversizeDirectory = ActivityLogTests.tmp()
         let failingDirectory = ActivityLogTests.tmp()
         defer {
             try? FileManager.default.removeItem(at: enabledDirectory)
-            try? FileManager.default.removeItem(at: overloadedDirectory)
+            try? FileManager.default.removeItem(at: fullDirectory)
+            try? FileManager.default.removeItem(at: blockedDirectory)
+            try? FileManager.default.removeItem(at: oversizeDirectory)
             try? FileManager.default.removeItem(at: failingDirectory)
         }
 
+        // Enabled: a healthy audit records everything and closes complete.
         let enabled = FileSessionAudit(
             directory: enabledDirectory,
             worker: SessionAuditWorker(limits: .production, writer: SessionAuditFileWriter()))
-        let enabledSnapshot = await runCoaching(traffic: enabled, coachingAttempts: enabled)
+        let enabledSnapshot = await CoachingParityHarness.run(
+            observers: .init(brainTraffic: enabled, coachingAttempts: enabled))
         #expect(await enabled.close() == .complete)
 
-        let noAuditSnapshot = await runCoaching()
+        // Full: a one-event mailbox behind a parked open overflows, losing records.
+        let fullWriter = BlockingOpenWriter()
+        let full = FileSessionAudit(
+            directory: fullDirectory,
+            worker: SessionAuditWorker(
+                limits: .init(maxEventCount: 1, maxRetainedBytes: 4_096),
+                writer: fullWriter))
+        await wait(for: fullWriter.openEntered)
+        let fullSnapshot = await CoachingParityHarness.run(
+            observers: .init(brainTraffic: full, coachingAttempts: full))
+        fullWriter.releaseOpen()
+        #expect(await full.close() == .partial)
+        #expect((try healthMarker(in: fullDirectory)["queue_overflow"] as? Int ?? 0) > 0)
 
+        // Blocked: the worker never leaves its first open during the whole run. Nothing is lost
+        // under production limits, so the evidence still closes complete after release.
+        let blockedWriter = BlockingOpenWriter()
+        let blocked = FileSessionAudit(
+            directory: blockedDirectory,
+            worker: SessionAuditWorker(limits: .production, writer: blockedWriter))
+        await wait(for: blockedWriter.openEntered)
+        let blockedSnapshot = await CoachingParityHarness.run(
+            observers: .init(brainTraffic: blocked, coachingAttempts: blocked))
+        blockedWriter.releaseOpen()
+        #expect(await blocked.close() == .complete)
+
+        // Oversize: every brain-traffic record (a full request body) exceeds the retained-byte
+        // cap outright and is dropped.
+        let oversize = FileSessionAudit(
+            directory: oversizeDirectory,
+            worker: SessionAuditWorker(
+                limits: .init(maxEventCount: 256, maxRetainedBytes: 256),
+                writer: SessionAuditFileWriter()))
+        await waitForHealthMarker(in: oversizeDirectory)
+        let oversizeSnapshot = await CoachingParityHarness.run(
+            observers: .init(brainTraffic: oversize, coachingAttempts: oversize))
+        #expect(await oversize.close() == .partial)
+        #expect((try healthMarker(in: oversizeDirectory)["oversize_record"] as? Int ?? 0) > 0)
+
+        // Failing: the first file append fails; later records still persist.
         let failingWriter = FailFirstAppendWriter()
         let failing = FileSessionAudit(
             directory: failingDirectory,
             worker: SessionAuditWorker(limits: .production, writer: failingWriter))
         await wait(for: failingWriter.openCompleted)
-        let failingSnapshot = await runCoaching(traffic: failing, coachingAttempts: failing)
+        let failingSnapshot = await CoachingParityHarness.run(
+            observers: .init(brainTraffic: failing, coachingAttempts: failing))
         #expect(await failing.close() == .partial)
         #expect(failingWriter.appendCount > 1)
 
-        let blockingWriter = BlockingOpenWriter()
-        let overloadedWorker = SessionAuditWorker(
-            limits: .init(maxEventCount: 1, maxRetainedBytes: 4_096),
-            writer: blockingWriter)
-        let overloaded = FileSessionAudit(
-            directory: overloadedDirectory,
-            worker: overloadedWorker)
-        await wait(for: blockingWriter.openEntered)
-        let overloadedSnapshot = await runCoaching(
-            traffic: overloaded,
-            coachingAttempts: overloaded)
-        blockingWriter.releaseOpen()
-        #expect(await overloaded.close() == .partial)
-        #expect((try healthMarker(in: overloadedDirectory)["queue_overflow"] as? Int ?? 0) > 0)
-
-        #expect(enabledSnapshot == noAuditSnapshot)
-        #expect(enabledSnapshot == overloadedSnapshot)
-        #expect(enabledSnapshot == failingSnapshot)
+        #expect(enabledSnapshot == absent)
+        #expect(fullSnapshot == absent)
+        #expect(blockedSnapshot == absent)
+        #expect(oversizeSnapshot == absent)
+        #expect(failingSnapshot == absent)
     }
 
     @Test func aFullQueueDropsOnlyThatRecordAndLaterRecordingContinues() async throws {
@@ -377,57 +406,6 @@ import Testing
         #expect(try Data(contentsOf: trafficURL) == trafficBefore)
         #expect(try Data(contentsOf: healthURL) == healthBefore)
         #expect(try healthMarker(in: directory)["state"] as? String == "complete")
-    }
-
-    private func runCoaching(
-        traffic: (any BrainTrafficAuditing)? = nil,
-        coachingAttempts: (any CoachingAttemptAuditing)? = nil
-    ) async -> CoachingSnapshot {
-        let requests = RequestCapture()
-        let response = Data(
-            #"{"status":"completed","output":[{"type":"function_call","call_id":"s1","name":"speak","arguments":"{\"lines\":[\"same tip\"]}"}]}"#.utf8)
-        let client = OpenAIBrainClient(
-            apiKey: "test-key",
-            model: "gpt-5.5",
-            traffic: traffic,
-            send: { request in
-                let body = request.httpBody ?? Data()
-                let object = try JSONSerialization.jsonObject(with: body)
-                requests.append(try JSONSerialization.data(
-                    withJSONObject: object,
-                    options: [.sortedKeys]))
-                return (
-                    response,
-                    HTTPURLResponse(
-                        url: request.url!,
-                        statusCode: 200,
-                        httpVersion: nil,
-                        headerFields: nil))
-            })
-        let target = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
-        let overlay = FakeOverlay()
-        let transcript = RollingTranscript()
-        let driver = CoachDriver(
-            config: .default,
-            transcript: transcript,
-            route: ConfiguredBrainRoute(targets: [
-                ConfiguredBrainTarget(target: target, brain: client),
-            ]),
-            screen: FakeScreen(),
-            overlay: overlay,
-            clock: ManualClock(),
-            coachingAttempts: coachingAttempts,
-            automaticAttemptDelay: { _ in },
-            activityLog: ActivityLog())
-        transcript.append(.init(
-            speaker: .me,
-            text: "compare audit observer behavior",
-            at: 1))
-
-        return CoachingSnapshot(
-            outcome: await driver.handleTrigger(.turnEnd),
-            providerRequests: requests.requests,
-            renderedTips: overlay.rendered)
     }
 
     private func recordTraffic(_ audit: FileSessionAudit, tag: String) {
