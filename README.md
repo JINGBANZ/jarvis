@@ -1,8 +1,8 @@
 # Jarvis
 
-Jarvis is an experimental, open-source macOS coach for technical meetings. It follows microphone
-and system-audio conversations, checks the screen when visual context helps, and shows concise
-guidance in overlays designed to stay out of screen capture.
+Jarvis is an experimental, open-source, voice-driven macOS coaching agent for technical
+conversations. It listens to both sides, checks the screen when useful, and gives brief prompts
+while you think.
 
 Jarvis coaches proactively and stays quiet when it has nothing useful to add. Press **⌥⌘J** during a
 session for an immediate, screen-aware hint.
