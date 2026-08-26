@@ -221,7 +221,7 @@ runtime). It also sidesteps the `file://` `fetch()` restriction that forced the 
   shows **Open report** instead, avoiding another agent run. The local app locates its checkout from the
   workspace `.jarvis/`, a `--repo-dir` launch argument, or the directory containing a locally built
   app bundle; without live source it refuses to run a weaker audit. `./scripts/eval-session.sh
-  [session-dir]` is the terminal launcher for the same Core evaluator.
+  [session-dir]` is the terminal launcher for the same `JarvisEvaluation` evaluator.
 
 ## System-audio transcription benchmark
 
