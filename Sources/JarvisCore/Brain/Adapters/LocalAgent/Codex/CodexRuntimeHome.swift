@@ -5,7 +5,10 @@ import Foundation
 /// The home lives outside both the source checkout and retained session directories. A crash can
 /// therefore leave an owner-only runtime directory behind without exposing its auth symlink to the
 /// completed-session evaluator.
-enum CodexRuntimeHome {
+///
+/// Public only for `removeLegacyHomes`: the adapter owns the legacy prefix, and evaluation
+/// preflight in `JarvisEvaluation` must fail closed on it before exposing a session to the auditor.
+public enum CodexRuntimeHome {
     static let directoryPrefix = "codex-runtime-"
     private static let legacySessionDirectoryPrefix = ".codex-runtime-"
 
@@ -60,7 +63,7 @@ enum CodexRuntimeHome {
 
     /// Old review builds created the auth-bearing home inside a session. Evaluation must fail closed
     /// if one cannot be removed, because that session is about to be exposed to an agentic auditor.
-    static func removeLegacyHomes(from sessionDirectory: URL) throws {
+    public static func removeLegacyHomes(from sessionDirectory: URL) throws {
         let fileManager = FileManager.default
         let children = try fileManager.contentsOfDirectory(
             at: sessionDirectory,

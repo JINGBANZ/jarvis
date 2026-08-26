@@ -1,5 +1,6 @@
 import Foundation
 import JarvisCore
+import JarvisEvaluation
 
 // eval-prep: the thin dev-side CLI entry point for the same agentic evaluator Activity uses.
 //

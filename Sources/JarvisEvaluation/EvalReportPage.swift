@@ -1,4 +1,5 @@
 import Foundation
+import JarvisCore
 
 /// Renders a saved evaluation report (`eval-report.md`) as a self-contained HTML page so "Open
 /// report" can hand it to the user's browser. The markdown stays the on-disk source of truth — it's

@@ -1,4 +1,5 @@
 import Foundation
+import JarvisCore
 
 /// A neutral inventory of the persisted inputs available to the session evaluator. It exposes
 /// record health, categorical distributions, and correlation-field coverage without encoding an

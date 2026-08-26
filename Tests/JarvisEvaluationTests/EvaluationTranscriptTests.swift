@@ -1,6 +1,7 @@
 import Testing
 import Foundation
-@testable import JarvisCore
+import JarvisCore
+@testable import JarvisEvaluation
 
 @Suite struct EvaluationTranscriptTests {
     /// One traffic line in the on-disk shape `FileSessionAudit` writes.

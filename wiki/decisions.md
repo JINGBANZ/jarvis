@@ -1940,3 +1940,29 @@
   section already states unconditionally that the screenshot image is ground truth. (e) Shortening
   tips further — brevity was never the defect.
 - **Detail:** `Sources/JarvisCore/Prompts/JarvisPrompts+Coach.swift` → `# Tip style`.
+
+### 2026-08-26 — Sealed-session evaluation lives in its own JarvisEvaluation target
+
+- **Chose:** Extract the sealed-session analysis stack — evidence index, session metrics,
+  transcript rendering, the agentic evaluation/evaluator pair, the HTML report page, loss-aware
+  JSONL parsing, and the evaluation prompt — from `JarvisCore` into the `JarvisEvaluation` library
+  target, which depends inward on Core. `JarvisApp`'s Evaluate flow and `EvalPrep` both consume
+  it; its tests live in `JarvisEvaluationTests`. A pure move: no parsing, prompt, metric, report,
+  or CLI-invocation behavior changed, verified by byte-identical `EvalPrep` output on the same
+  session directory.
+- **Chose:** Widen exactly two Core symbols to public for the boundary: `LocalAgentTransport`,
+  whose raw values are persisted traffic-record schema the metrics parser keys on, and
+  `CodexRuntimeHome.removeLegacyHomes`, the fail-closed legacy-home sweep evaluation runs before
+  exposing a session directory to an agentic CLI.
+- **Why:** The architecture contract's strongest trigger for a new target — a second executable
+  consumer — plus a compiler-enforced guarantee that live coaching can never reach sealed-session
+  analysis. Landing it before the Phase 1/2 evidence migration means the code moves once, while
+  the persisted evidence format is stable.
+- **Rejected:** (a) Duplicating the transport string inside the parser — persisted-schema
+  constants keep one source of truth. (b) Deleting the legacy-home sweep instead of publicizing
+  it — in-session runtime homes came only from pre-#115 review builds, never a released tag, but
+  review-era session directories may still exist on disk; dropping the sweep is a separate owner
+  decision. (c) A shared test-support target for the audit fixtures — two small copies in test
+  land beat a third library target.
+- **Detail:** [lean-coaching-core.md → Phase 3 Implementation Contract](./lean-coaching-core.md#phase-3-implementation-contract--evaluation-extraction),
+  `Package.swift`, `Sources/JarvisEvaluation/`.

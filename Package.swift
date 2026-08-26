@@ -29,6 +29,11 @@ let package = Package(
     ],
     targets: [
         .target(name: "JarvisCore"),
+        // The sealed-session evaluation stack (evidence index, metrics, transcript rendering, the
+        // agentic evaluator, report page). Extracted per wiki/lean-coaching-core.md Phase 3: two
+        // executable consumers (JarvisApp's Evaluate flow and EvalPrep) plus a compiler-enforced
+        // "never reads live coaching state" boundary. Foundation-only; depends inward on JarvisCore.
+        .target(name: "JarvisEvaluation", dependencies: ["JarvisCore"]),
         // The AppKit overlay lives in its own library target (not the executable) so it can be
         // imported by tests — see Tests/JarvisOverlayTests for the screen-capture invisibility checks.
         .target(name: "JarvisOverlay", dependencies: ["JarvisCore"]),
@@ -49,7 +54,7 @@ let package = Package(
         .executableTarget(
             name: "JarvisApp",
             dependencies: [
-                "JarvisCore", "JarvisOverlay", "CJarvisAEC",
+                "JarvisCore", "JarvisEvaluation", "JarvisOverlay", "CJarvisAEC",
                 .product(name: "Sparkle", package: "Sparkle"),
             ],
             swiftSettings: jarvisAppSwiftSettings,
@@ -62,14 +67,18 @@ let package = Package(
         // The dev-side CLI half of the agentic session audit (see AgenticEvaluation): renders a
         // session's traffic to a compact transcript and prints the agent task prompt. A separate,
         // Foundation-only executable so it builds/runs on any machine and scripts/eval-session.sh can
-        // reuse Core's transcript rendering instead of reimplementing it in bash.
+        // reuse JarvisEvaluation's transcript rendering instead of reimplementing it in bash.
         .executableTarget(
             name: "EvalPrep",
-            dependencies: ["JarvisCore"]
+            dependencies: ["JarvisEvaluation", "JarvisCore"]
         ),
         .testTarget(
             name: "JarvisCoreTests",
             dependencies: ["JarvisCore"]
+        ),
+        .testTarget(
+            name: "JarvisEvaluationTests",
+            dependencies: ["JarvisEvaluation", "JarvisCore"]
         ),
         .testTarget(
             name: "JarvisOverlayTests",

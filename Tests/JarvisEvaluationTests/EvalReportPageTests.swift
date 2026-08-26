@@ -1,7 +1,8 @@
 import Foundation
 import Testing
 
-@testable import JarvisCore
+import JarvisCore
+@testable import JarvisEvaluation
 
 @Suite("EvalReportPage")
 struct EvalReportPageTests {

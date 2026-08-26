@@ -1,8 +1,9 @@
 # Lean Coaching Core
 
 > The approved target architecture and phased implementation contract for
-> [issue #147](https://github.com/JINGBANZ/jarvis/issues/147). Phase 0 is built. Phase 1 is the next
-> implementation slice; the later phases describe the reviewed destination, not shipped behavior.
+> [issue #147](https://github.com/JINGBANZ/jarvis/issues/147). Phase 0 and Phase 3's
+> evaluation-extraction slice are built. Phase 1 is the next implementation slice; the remaining
+> phases describe the reviewed destination, not shipped behavior.
 
 > **Owner review result:** This contract supersedes the issue body's proposed independent Activity,
 > audit, diagnostic, and continuity-telemetry stacks and its earlier phase ordering. The issue remains
@@ -184,7 +185,7 @@ editing.
 | 0 — Audit baseline | **Built** in [#146](https://github.com/JINGBANZ/jarvis/issues/146) / [PR #149](https://github.com/JINGBANZ/jarvis/pull/149) | One process-level count/byte-bounded audit worker, per-session handle, monotonic health, and independent Stop/Start lifecycle | Evaluator audit only; Activity and `jlog` remain separate today |
 | 1 — Evidence foundation | **Next slice** | Generalize the settled audit transport into `SessionEvidence` and route diagnostics through it without another worker | Activity remains on its existing path until Phase 2 |
 | 2 — Activity projection | Approved destination | Render and persist Activity through `SessionEvent`, show incomplete evidence in the Activity window, and remove Activity's independent persistence path | Human copy remains a closed safe projection; no debug detail enters Activity |
-| 3 — Offline work | Approved destination | Give evaluation a shared compiler boundary when justified by the app and `EvalPrep`; make history compaction preemptible and move pruning off Start | Failure keeps full history and surviving session evidence |
+| 3 — Offline work | Evaluation extraction **built** in [#202](https://github.com/JINGBANZ/jarvis/issues/202); compaction and pruning remain the approved destination | Give evaluation a shared compiler boundary when justified by the app and `EvalPrep`; make history compaction preemptible and move pruning off Start | Failure keeps full history and surviving session evidence |
 | 4 — Plans and adapters | Approved destination | Use immutable plan revisions at explicit between-attempt boundaries and move provider, process, screen, and file adapters outward | Live setting changes and fresh-attempt routing semantics remain intact |
 | 5 — Decomposition | Approved destination | Split the `CoachDriver` facade and `AppDelegate` only after ports and state ownership settle | Structure changes; observable coaching and lifecycle behavior do not |
 
@@ -242,6 +243,82 @@ new `DiagnosticSink` service beside it.
 - Live microphone or network-interruption validation is not required for this diagnostics-only slice;
   do not run it without explicit owner consent.
 
+## Phase 3 Implementation Contract — Evaluation extraction
+
+The first Phase 3 slice ([issue #202](https://github.com/JINGBANZ/jarvis/issues/202)) moves the
+sealed-session evaluation stack out of `JarvisCore` into the `JarvisEvaluation` library target. It
+clears the architecture contract's bar for a new target on two triggers at once: a second
+executable consumer (`JarvisApp`'s Activity Evaluate flow and the `EvalPrep` CLI) and a
+compiler-enforced boundary (sealed-session analysis can never read live coaching state). The slice
+is a pure move — no parsing format, prompt, metric, report, or CLI-invocation behavior changes.
+Preemptible history compaction and moving pruning off Start are the rest of Phase 3 and freeze
+their own contract before implementation.
+
+### Target shape
+
+- `JarvisEvaluation` depends inward on `JarvisCore` only and stays Foundation-only.
+  `JarvisCore` cannot depend back on it; the SwiftPM dependency graph is the enforcement, and no
+  separate guard script exists for this rule.
+- `Sources/JarvisEvaluation/` holds the sealed-session stack, moved unchanged apart from
+  `import JarvisCore`: `SessionEvidenceIndex`, `SessionMetrics`, `EvaluationTranscript`,
+  `SessionAuditEvidence`, `AgenticEvaluation`, `AgenticEvaluator`, `EvalReportPage`,
+  `JSONLRecords`, and `JarvisPrompts+Evaluation` (still an extension of Core's public
+  `JarvisPrompts` namespace, so predefined model-facing text remains auditable under that one
+  name). `JSONLRecords` moves although the issue body does not list it: it is loss-aware parsing
+  consumed only by the sealed-session readers; nothing on the live path parses JSONL.
+- Core keeps the live recording side — `FileSessionAudit` with its worker/writer, the typed audit
+  events and observer ports, `ActivityLog`, `SessionStore`, `jlog` — and the LocalAgent CLI
+  plumbing (`AgentCLIDetector`, `AgentCLIProcessRunner`, `CodexRuntimeHome`), which the live brain
+  path shares. The boundary reads: Core records evidence; `JarvisEvaluation` reads it after Stop.
+- Two Core symbols become public for the boundary; everything else the stack reads already was:
+  - `LocalAgentTransport` — its raw values are part of the persisted traffic-record schema
+    (`request.runtime`), and `SessionMetrics` keys the `codex exec` usage shape on it. One source
+    of truth beats duplicating the string in the parser.
+  - `CodexRuntimeHome.removeLegacyHomes` — evaluation preflight fails closed by sweeping legacy
+    in-session auth-bearing runtime homes before exposing a session to the agentic auditor; the
+    adapter keeps ownership of the legacy prefix.
+
+### Expected behavior
+
+- Evaluation output is byte-identical for the same session directory: evidence index, telemetry
+  tables, compact transcript, agent prompt, report stamp, HTML report page, artifact filenames,
+  owner-only `0600` permissions, and atomic replace semantics.
+- `JarvisApp` (Activity's Evaluate / Open report flow with its existing ghost-lifecycle gating)
+  and `EvalPrep` consume `JarvisEvaluation`; `scripts/eval-session.sh` works unchanged.
+
+### Failure and accepted degradation
+
+- Nothing new. The typed `EvaluationError` surface, the fail-closed legacy-home sweep, the
+  no-traffic and missing-Activity aborts, and older-report preservation on a failed run carry over
+  unchanged.
+- With evaluation symbols gone from `JarvisCore`, a future live-path reference to sealed-session
+  analysis is a compile error rather than a review catch.
+
+### Non-goals
+
+- The compaction/pruning half of Phase 3, and all Phase 1/2 `SessionEvidence` work.
+- Any behavior, schema, filename, prompt, or persisted-format change.
+- Widening Core's public API beyond the two named symbols; compatibility shims or re-exports.
+- Adding `JarvisEvaluation` to the ghost-mode scan: the target is Foundation-only and
+  presentation-free like Core, and the scan set still covers exactly the OS-bound targets.
+- Deleting the legacy-home sweep. Git history shows in-session runtime homes came only from
+  pre-#115 review builds, never a released tag; dropping the sweep for good is a separate owner
+  decision about data still on disk.
+
+### Completion criteria
+
+- `swift build` proves the boundary: `JarvisEvaluation` depends on `JarvisCore` only, `JarvisApp`
+  and `EvalPrep` link the new target, and no sealed-session evaluation code remains under
+  `Sources/JarvisCore`.
+- The six evaluation test suites move to `JarvisEvaluationTests` with assertions unchanged —
+  imports and local test support only. `JarvisCoreTests` neither keeps evaluation tests nor gains
+  a dependency on `JarvisEvaluation`; its one `JSONLRecords` test helper is replaced with a local
+  parse.
+- `EvalPrep` renders byte-identical `eval-transcript.txt`, agent prompt, and `eval-report.html`
+  for the same session directory before and after the move, verified offline without an agent run.
+- The Gate passes: `swift build && ./scripts/run-tests.sh`. The live Evaluate-click check stays in
+  the standard app smoke, not in this slice's gate.
+
 ## Source Handoff
 
 The implementation agent should begin with these current boundaries:
@@ -256,9 +333,9 @@ The implementation agent should begin with these current boundaries:
   [`ActivityLog.swift`](../Sources/JarvisCore/Diagnostics/ActivityLog.swift) and
   [`ActivityViewer.swift`](../Sources/JarvisApp/Viewer/ActivityViewer.swift).
 - Current sealed-session analysis:
-  [`SessionEvidenceIndex.swift`](../Sources/JarvisCore/Diagnostics/SessionEvidenceIndex.swift) is the
-  evaluator's descriptive index over persisted files. It is an offline consumer, not the future live
-  `SessionEvidence` admission stack.
+  [`SessionEvidenceIndex.swift`](../Sources/JarvisEvaluation/SessionEvidenceIndex.swift) is the
+  evaluator's descriptive index over persisted files. It is an offline consumer in the extracted
+  `JarvisEvaluation` target, not the future live `SessionEvidence` admission stack.
 - Capture-heartbeat source and critical policy:
   [`AudioContinuityWitness.swift`](../Sources/JarvisCore/Diagnostics/AudioContinuityWitness.swift),
   [`RealtimeContinuityReporter.swift`](../Sources/JarvisApp/Capture/RealtimeContinuityReporter.swift),

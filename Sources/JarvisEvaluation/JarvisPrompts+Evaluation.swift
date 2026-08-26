@@ -1,4 +1,5 @@
 import Foundation
+import JarvisCore
 
 extension JarvisPrompts {
     enum Evaluation {

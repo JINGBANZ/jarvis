@@ -1,10 +1,11 @@
 import Foundation
 import Testing
-@testable import JarvisCore
+import JarvisCore
+@testable import JarvisEvaluation
 
 @Suite struct AgenticEvaluatorTests {
     @Test func evaluateRunsClaudeAndPersistsOwnerOnlyStampedReport() async throws {
-        let root = ActivityLogTests.tmp()
+        let root = tmp()
         defer { try? FileManager.default.removeItem(at: root) }
         let session = root.appendingPathComponent("session")
         let bin = root.appendingPathComponent("bin")

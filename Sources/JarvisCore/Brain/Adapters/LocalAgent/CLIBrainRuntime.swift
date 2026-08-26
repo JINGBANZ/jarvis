@@ -41,7 +41,11 @@ protocol LocalAgentConversation: Sendable {
 /// The transports do not share a usage schema — Claude's warm query carries the Anthropic envelope,
 /// `codex exec` reports OpenAI-shaped totals under its own key names, and the app-server reports
 /// none — so a reader of the audit needs the transport to know which shape, if any, to expect.
-enum LocalAgentTransport: String, Sendable {
+///
+/// Public because the raw values are part of the persisted traffic-record schema: the sealed-session
+/// parser in `JarvisEvaluation` keys its usage interpretation on them rather than duplicating the
+/// strings.
+public enum LocalAgentTransport: String, Sendable {
     case warmQuery = "warm-query"
     case appServer = "app-server"
     case oneShotExec = "one-shot-exec"
