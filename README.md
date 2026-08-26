@@ -1,18 +1,11 @@
 # Jarvis
 
 Jarvis is an experimental, open-source, voice-driven macOS coaching agent for technical
-conversations. It listens to both sides, checks the screen when useful, and gives brief prompts
+conversations. It listens to both sides, checks the screen when useful, and offers concise guidance
 while you think.
 
 Jarvis coaches proactively and stays quiet when it has nothing useful to add. Press **⌥⌘J** during a
 session for an immediate, screen-aware hint.
-
-> [!WARNING]
-> Jarvis captures microphone and system audio. Depending on your settings, audio, transcript text,
-> and requested screenshots may be sent to the providers you choose. The app is not App-Sandboxed
-> or a production security boundary; it has the filesystem access of your macOS account. Use it only
-> with all required consent and where law, workplace policy, and platform terms allow. Read the full
-> [privacy and security model](./wiki/sandbox.md).
 
 ## Install Jarvis
 
