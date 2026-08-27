@@ -8,7 +8,7 @@ cd "$(dirname "$0")/.."
 pattern='NSAlert\(|(NSApp|NSApplication\.shared)\.(activate|setActivationPolicy)|makeKeyAndOrderFront|\.makeKey\(|orderFrontRegardless|\.orderFront\(|beginSheet\(|\.show\(relativeTo:|NSWorkspace\.shared\.open|NSSound|AudioServicesPlaySystemSound|requestUserAttention|UNUserNotification|NSUserNotification|\.runModal\('
 
 scan_status=0
-matches="$(/usr/bin/grep -RInE "$pattern" Sources/JarvisApp Sources/JarvisOverlay)" || scan_status=$?
+matches="$(/usr/bin/grep -RInE "$pattern" Sources/JarvisApp Sources/JarvisOverlay Sources/JarvisScreenCapture)" || scan_status=$?
 if [ "$scan_status" -gt 1 ]; then
     echo "Ghost-mode presentation API scan failed; refusing to pass without a complete scan." >&2
     exit "$scan_status"

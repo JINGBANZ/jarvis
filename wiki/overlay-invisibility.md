@@ -13,7 +13,7 @@ That caption must be invisible to two distinct audiences:
 1. **Other apps capturing the screen** — the interviewer's Zoom/Meet/Teams share, a QuickTime/OBS
    recording, the macOS screenshot tool.
 2. **Jarvis's own `capture_screen`** — otherwise the brain would read its own coaching text back in
-   the next screenshot (a feedback loop). See [`ScreenCapture.swift`](../Sources/JarvisCore/Screen/ScreenCapture.swift).
+   the next screenshot (a feedback loop). See [`ScreenCaptureCLI.swift`](../Sources/JarvisScreenCapture/ScreenCaptureCLI.swift).
 
 Both are solved by the *same* single flag.
 

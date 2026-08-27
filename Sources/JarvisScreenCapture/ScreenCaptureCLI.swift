@@ -1,12 +1,5 @@
 import Foundation
-
-/// Returns a screenshot (plus optional OCR text) for the brain, or nil on failure.
-public protocol ScreenCapturing: Sendable {
-    func capture() -> ScreenSnapshot?
-    /// Stop an in-flight capture and make `capture()` return only after its helper and transient
-    /// file have been cleaned up.
-    func cancelCapture()
-}
+import JarvisCore
 
 /// Uses the built-in `screencapture -x -t jpg` (silent). In entire-display scope it shoots the
 /// display chosen in Settings (`ScreenCapturePreferences`, read at capture time so a change applies
