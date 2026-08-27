@@ -1966,3 +1966,31 @@
   land beat a third library target.
 - **Detail:** [lean-coaching-core.md → Phase 3 Implementation Contract](./lean-coaching-core.md#phase-3-implementation-contract--evaluation-extraction),
   `Package.swift`, `Sources/JarvisEvaluation/`.
+
+### 2026-08-27 — The OpenAI brain adapter lives in its own JarvisBrainProviders target
+
+- **Chose:** Extract the concrete OpenAI Responses adapter — `OpenAIBrainClient` and its HTTP
+  permanence classification (`BrainFailure+OpenAI`) — from `JarvisCore` into the
+  `JarvisBrainProviders` library target, which depends inward on Core. `JarvisApp` composes it at
+  Start; its tests live in `JarvisBrainProvidersTests`. A pure move: no request-shape,
+  classification, traffic-recording, timeout, or route/attempt behavior changed, pinned by the
+  unchanged coaching parity harness, which still composes the kernel with the real adapter — now
+  imported from the provider target (`JarvisCoreTests` links it for exactly that harness).
+- **Chose:** Widen exactly one Core symbol to public: `BrainFailure.init(_:)`, the provider
+  adapters' unknown-failure → temporary classification entry point. The OpenAI-specific
+  `openAIHTTP` factory moved out of Core instead of widening: the statuses and error codes that
+  prove an unrecoverable OpenAI target are that adapter's reviewed boundary knowledge, not
+  provider-neutral domain, and nothing outside the adapter calls it.
+- **Why:** Concrete adapters were the bulk of the Brain subsystem, and the dependency direction
+  was the defect: Core contained the transports it should only describe. Extracting the smaller
+  adapter first proves the direction with a compiler-enforced boundary while the persisted route
+  and attempt semantics stay pinned by the parity harness.
+- **Rejected:** (a) A third, lower-level contracts target beneath Core (proposed by a review bot
+  during the evaluation extraction, declined by the owner) — the approved module boundaries have
+  provider and evaluation targets depending inward on Core's contracts. (b) Rewriting the parity
+  harness onto a fake brain to keep `JarvisCoreTests` provider-free — that weakens the harness's
+  proof that real adapter classification feeds the route. (c) Moving the local-agent CLI subtree
+  in the same PR — each half fits a single context window; it follows in
+  [#206](https://github.com/JINGBANZ/jarvis/issues/206).
+- **Detail:** [lean-coaching-core.md → Phase 4 Implementation Contract](./lean-coaching-core.md#phase-4-implementation-contract--openai-provider-extraction),
+  `Package.swift`, `Sources/JarvisBrainProviders/`.

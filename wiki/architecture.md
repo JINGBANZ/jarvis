@@ -399,9 +399,13 @@ user's existing Claude **subscription** instead of the metered API key, or a loc
 **Codex** CLI billed to the user's ChatGPT subscription. Both coach through a persistent runtime;
 Codex additionally remains available to the explicit completed-session evaluator.
 
-`BrainClient` is the provider port. Its implementations live under `Brain/Adapters`: the OpenAI
-Responses adapter is separate from the local-agent adapter, which contains shared CLI discovery and
-process infrastructure plus distinct Claude Code and Codex sub-adapters.
+`BrainClient` is the provider port. The OpenAI Responses adapter lives in the
+`JarvisBrainProviders` target, which depends inward on Core and is composed by `JarvisApp` at
+Start ([lean-coaching-core.md → Phase 4
+contract](./lean-coaching-core.md#phase-4-implementation-contract--openai-provider-extraction));
+the local-agent adapter — shared CLI discovery and process infrastructure plus distinct Claude
+Code and Codex sub-adapters — remains under Core's `Brain/Adapters` until its own slice
+([#206](https://github.com/JINGBANZ/jarvis/issues/206)).
 `CLIBrainClient` implements the same port, so `CoachDriver`, the client-managed memory,
 provider-route policy, and traffic recording are unchanged — only the transport differs.
 `LocalAgentRuntimeSet` owns provider-specific coach/summarizer runtime ownership.

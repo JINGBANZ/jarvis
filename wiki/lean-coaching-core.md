@@ -1,9 +1,10 @@
 # Lean Coaching Core
 
 > The approved target architecture and phased implementation contract for
-> [issue #147](https://github.com/JINGBANZ/jarvis/issues/147). Phase 0 and Phase 3's
-> evaluation-extraction slice are built. Phase 1 is the next implementation slice; the remaining
-> phases describe the reviewed destination, not shipped behavior.
+> [issue #147](https://github.com/JINGBANZ/jarvis/issues/147). Phase 0, Phase 3's
+> evaluation-extraction slice, and Phase 4's OpenAI provider slice are built. Phase 1 is the next
+> implementation slice; the remaining phases describe the reviewed destination, not shipped
+> behavior.
 
 > **Owner review result:** This contract supersedes the issue body's proposed independent Activity,
 > audit, diagnostic, and continuity-telemetry stacks and its earlier phase ordering. The issue remains
@@ -186,7 +187,7 @@ editing.
 | 1 — Evidence foundation | **Next slice** | Generalize the settled audit transport into `SessionEvidence` and route diagnostics through it without another worker | Activity remains on its existing path until Phase 2 |
 | 2 — Activity projection | Approved destination | Render and persist Activity through `SessionEvent`, show incomplete evidence in the Activity window, and remove Activity's independent persistence path | Human copy remains a closed safe projection; no debug detail enters Activity |
 | 3 — Offline work | Evaluation extraction **built** in [#202](https://github.com/JINGBANZ/jarvis/issues/202); compaction and pruning remain the approved destination | Give evaluation a shared compiler boundary when justified by the app and `EvalPrep`; make history compaction preemptible and move pruning off Start | Failure keeps full history and surviving session evidence |
-| 4 — Plans and adapters | Approved destination | Use immutable plan revisions at explicit between-attempt boundaries and move provider, process, screen, and file adapters outward | Live setting changes and fresh-attempt routing semantics remain intact |
+| 4 — Plans and adapters | OpenAI provider extraction **built** in [#205](https://github.com/JINGBANZ/jarvis/issues/205); plans, the local-agent move ([#206](https://github.com/JINGBANZ/jarvis/issues/206)), and the remaining process, screen, and file adapters stay the approved destination | Use immutable plan revisions at explicit between-attempt boundaries and move provider, process, screen, and file adapters outward | Live setting changes and fresh-attempt routing semantics remain intact |
 | 5 — Decomposition | Approved destination | Split the `CoachDriver` facade and `AppDelegate` only after ports and state ownership settle | Structure changes; observable coaching and lifecycle behavior do not |
 
 ## Phase 1 Implementation Contract
@@ -318,6 +319,87 @@ their own contract before implementation.
   for the same session directory before and after the move, verified offline without an agent run.
 - The Gate passes: `swift build && ./scripts/run-tests.sh`. The live Evaluate-click check stays in
   the standard app smoke, not in this slice's gate.
+
+## Phase 4 Implementation Contract — OpenAI provider extraction
+
+The first Phase 4 slice ([issue #205](https://github.com/JINGBANZ/jarvis/issues/205)) moves the
+concrete OpenAI adapter out of `JarvisCore` into the `JarvisBrainProviders` library target. It
+clears the architecture contract's bar for a new target on a compiler-enforced boundary: Core
+describes the brain domain but no longer contains a provider transport, so a future live-path
+reference to a concrete provider is a compile error rather than a review catch. The slice is a
+pure move — no request-shape, classification, traffic-recording, timeout, or route/attempt
+behavior changes. The local-agent CLI subtree
+([issue #206](https://github.com/JINGBANZ/jarvis/issues/206)), immutable plan revisions, and the
+remaining process, screen, and file adapters are the rest of Phase 4 and freeze their own
+contracts before implementation.
+
+### Target shape
+
+- `JarvisBrainProviders` depends inward on `JarvisCore` only and stays Foundation-only
+  (`FoundationNetworking` on non-Darwin). The SwiftPM dependency graph is the enforcement, as
+  with `JarvisEvaluation`; the coaching-kernel guard separately keeps `URLSession` out of Core's
+  kernel paths.
+- `Sources/JarvisBrainProviders/OpenAI/` holds the OpenAI Responses adapter, moved unchanged
+  apart from `import JarvisCore`: `OpenAIBrainClient`, plus `BrainFailure+OpenAI` — the OpenAI
+  HTTP permanence proof, which moves although the issue body does not list it: the statuses and
+  error codes proving an unrecoverable OpenAI target are that adapter's reviewed boundary
+  knowledge, not provider-neutral domain, and nothing outside the adapter calls it.
+- Core keeps the provider-neutral brain domain: `BrainClient`/`BrainConversation`, `BrainTarget`,
+  `BrainRoute`, `BrainProvider`, `BrainFailure` with its unknown-error → temporary entry point,
+  `BrainModelCatalog`, `ReasoningEffort`, `BrainWorkloadTimeout`, tool-invocation parsing, and
+  the attempt/observer contracts. The local-agent CLI subtree stays under Core's
+  `Brain/Adapters/LocalAgent` until its own slice.
+- `JarvisApp` composes providers at Start and hands the kernel injected `BrainClient` ports; the
+  kernel's route and scheduling policy never name a concrete adapter.
+- One Core symbol becomes public for the boundary; everything else the adapter reads already was:
+  - `BrainFailure.init(_:)` — every provider adapter's classification entry point for errors it
+    has not proven anything about (unknown → temporary). The local-agent slice needs the same
+    entry point when it moves.
+- The coaching parity harness keeps composing the kernel with the real OpenAI adapter over
+  scripted transports — the same composition `JarvisApp` performs at Start — so
+  `Tests/JarvisCoreTests` links `JarvisBrainProviders` for exactly that harness; Core's own units
+  keep testing against fakes.
+
+### Expected behavior
+
+- Byte-identical provider behavior: request wire shape, `store`/`prompt_cache_key` hardening
+  flags, per-effort token budgets, workload deadlines, HTTP failure classification, and tagged
+  brain-traffic recording.
+- [Fresh-attempt recovery and routing](#fresh-attempt-recovery-and-routing) is untouched: one
+  snapshotted target owns each attempt, no in-attempt replay or provider switch, a temporary or
+  unknown failure exhausts a target only after three failed attempts, only a proven permanent
+  provider-boundary failure exhausts immediately, and the route advances forward-only without
+  rewriting saved preferences. The parity harness's route-transition snapshot is the proof.
+
+### Failure and accepted degradation
+
+- Nothing new, and no accepted data loss. The typed `BrainFailure` dispositions and the
+  unknown-defaults-to-temporary policy carry over unchanged; raw provider detail still stays out
+  of Activity.
+
+### Non-goals
+
+- Moving the local-agent CLI subtree, or restructuring it to fit this slice; that is
+  [#206](https://github.com/JINGBANZ/jarvis/issues/206).
+- A third, lower-level contracts target beneath `JarvisCore`. Reviewed and declined during the
+  evaluation extraction: provider and evaluation targets depend inward on Core's contracts.
+- Any behavior, wire-format, classification, or persisted-schema change; compatibility shims or
+  re-exports.
+- Widening Core's public API beyond the one named symbol.
+- Adding `JarvisBrainProviders` to the ghost-mode scan: the target is Foundation-only and
+  presentation-free like Core, and the scan set still covers exactly the OS-bound targets.
+
+### Completion criteria
+
+- `swift build` proves the boundary: `JarvisBrainProviders` depends on `JarvisCore` only,
+  `JarvisApp` composes it, and no `URLSession` brain transport remains under
+  `Sources/JarvisCore`.
+- The OpenAI adapter tests and the OpenAI classification tests move to
+  `JarvisBrainProvidersTests` with assertions unchanged — imports and local test support only.
+  The provider-neutral `BrainFailure` tests stay in `JarvisCoreTests`.
+- The coaching parity harness passes with its scenario, fakes, and snapshot comparison untouched.
+- The Gate passes: `swift build && ./scripts/run-tests.sh`. Live smoke verification of one OpenAI
+  coaching turn stays in the standard app smoke, performed by a human.
 
 ## Source Handoff
 
