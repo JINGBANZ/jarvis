@@ -15,8 +15,6 @@ jobs:
   work:
     uses: JINGBANZ/workflows/.github/workflows/issue-worker.yml@main
     permissions:
-      contents: write
-      pull-requests: write
       issues: write
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
