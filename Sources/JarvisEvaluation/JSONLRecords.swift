@@ -1,4 +1,5 @@
 import Foundation
+import JarvisCore
 
 /// Parses JSONL without hiding damaged records. Consumers use the stable non-blank record number
 /// for call labels and carry `malformedCount` into availability wording instead of treating a

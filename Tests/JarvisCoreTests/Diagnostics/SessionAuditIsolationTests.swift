@@ -450,7 +450,13 @@ import Testing
             contentsOf: directory.appendingPathComponent(
                 FileSessionAudit.brainTrafficFilename),
             encoding: .utf8)
-        return JSONLRecords.parse(text).objects.compactMap { $0["tag"] as? String }
+        // Local JSONL parse: the loss-aware `JSONLRecords` reader lives with the sealed-session
+        // consumers in JarvisEvaluation, and this test only needs the valid records' tags.
+        return text.split(separator: "\n")
+            .compactMap {
+                (try? JSONSerialization.jsonObject(with: Data($0.utf8))) as? [String: Any]
+            }
+            .compactMap { $0["tag"] as? String }
     }
 
     private func healthMarker(in directory: URL) throws -> [String: Any] {

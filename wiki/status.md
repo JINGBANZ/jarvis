@@ -135,7 +135,7 @@ explicitly partial rather than exact-looking. Historical sessions without proven
 unavailable. The compact transcript also
 elides a growing one-item CLI history and duplicate response-envelope replies while preserving call
 numbers and untouched-source access. Activity's one-click **Evaluate** action launches that evaluator
-and opens its saved report; the standalone script calls the same Core implementation. The runtime ghost-mode rule
+and opens its saved report; the standalone script calls the same `JarvisEvaluation` implementation. The runtime ghost-mode rule
 covers microphone transcription, audio-route loss, in-place CLI preflight, and Activity-audit
 completion: no runtime error autonomously activates Jarvis, opens a browser, or presents a modal;
 fixed notices remain available in Activity. The gate statically rejects unreviewed presentation APIs.
@@ -160,8 +160,9 @@ credential leak; current-tree machine-specific instructions were generalized ins
 repository identity and provenance.
 
 The [lean coaching core architecture](./lean-coaching-core.md) is approved for issue #147. Its
-Phase 0 audit foundation is built; the unified `SessionEvidence` stack, diagnostic migration,
-Activity projection, offline-maintenance changes, adapter direction, and coordinator decomposition
+Phase 0 audit foundation and Phase 3 evaluation extraction (the `JarvisEvaluation` target) are
+built; the unified `SessionEvidence` stack, diagnostic migration, Activity projection, offline
+maintenance (preemptible compaction and pruning), adapter direction, and coordinator decomposition
 are not yet implemented. The approved next slice is diagnostics-only and preserves the current
 coaching, routing, Activity, evaluator, and artifact behavior.
 
@@ -245,8 +246,9 @@ thin OS shell, verified by the smoke run.
 - `Sources/JarvisCore/Overlay/` — overlay text model + length-proportional timing + fan-out (`OverlayRendering`, `OverlayTiming`, `OverlayAppearance`, `BroadcastOverlay`).
 - `Sources/JarvisCore/Config/` — config + owner-only secrets + transcription/brain/screen preferences (`Config`, `Secrets`, `TranscriptionPreferences`, `BrainPreferences`, `ScreenCapturePreferences`, `ScreenCaptureScope`).
 - `Sources/JarvisCore/Support/` — small shared runtime primitives (`Clock`, `TurnTaskBox`, `RetrySchedule`, `RetryIncident`).
-- `Sources/JarvisCore/Diagnostics/` — logging, always-on event-time-ordered activity with stable persisted event kinds, occurrence/record timing, and fixed typed brain-change/failure notices, privacy-preserving audio continuity and capture-readiness policy, authoritative session-readiness composition, chronology-aware session history, the bounded [session-audit component](./session-audit.md), loss-aware JSONL parsing, the neutral session evidence index and normalized provider telemetry, the read-only agentic audit over the complete session directory, and user-facing errors (`ActivityLog`, `AudioContinuityWitness`, `CaptureReadinessMonitor`, `JarvisReadiness`, `SessionStore`, `BrainTrafficAuditing`, `CoachingAttemptAuditing`, `FileSessionAudit`, `SessionAuditEvidence`, `JSONLRecords`, `SessionEvidenceIndex`, `SessionMetrics`, `EvaluationTranscript`, `AgenticEvaluation`, `AgenticEvaluator`, `UserFacingError`).
-- `Sources/JarvisCore/Prompts/` — the single Foundation-only audit surface for predefined model-facing text across coaching, history compaction, local-agent protocols, transcription context, and session evaluation (`JarvisPrompts`).
+- `Sources/JarvisCore/Diagnostics/` — logging, always-on event-time-ordered activity with stable persisted event kinds, occurrence/record timing, and fixed typed brain-change/failure notices, privacy-preserving audio continuity and capture-readiness policy, authoritative session-readiness composition, chronology-aware session history, the bounded [session-audit component](./session-audit.md), and user-facing errors (`ActivityLog`, `AudioContinuityWitness`, `CaptureReadinessMonitor`, `JarvisReadiness`, `SessionStore`, `BrainTrafficAuditing`, `CoachingAttemptAuditing`, `FileSessionAudit`, `UserFacingError`).
+- `Sources/JarvisEvaluation/` — the sealed-session evaluation target ([lean-coaching-core.md → Phase 3 contract](./lean-coaching-core.md#phase-3-implementation-contract--evaluation-extraction)): loss-aware JSONL parsing, the neutral session evidence index and normalized provider telemetry, delta-aware transcript rendering, the read-only agentic audit over the complete session directory, and the HTML report page (`JSONLRecords`, `SessionAuditEvidence`, `SessionEvidenceIndex`, `SessionMetrics`, `EvaluationTranscript`, `AgenticEvaluation`, `AgenticEvaluator`, `EvalReportPage`). Depends inward on `JarvisCore`; consumed by `JarvisApp` and `EvalPrep`.
+- `Sources/JarvisCore/Prompts/` — the single Foundation-only audit surface for predefined model-facing text across coaching, history compaction, local-agent protocols, and transcription context (`JarvisPrompts`); the session-evaluation prompt extends the same namespace from `Sources/JarvisEvaluation/JarvisPrompts+Evaluation.swift`.
 - `Sources/JarvisOverlay/` — the capture-invisible `NSPanel` surfaces: `OverlayCaptionPanel` (transient), `OverlayBoxPanel` (persistent), `NSPanel+CaptureExclusion`.
 - `Sources/JarvisApp/App/` + `MenuBar/` — entry point, shared authoritative readiness rendering, Start/Stop, `ErrorReporter` (startup alerts plus an unconditional no-presentation runtime policy).
 - `Sources/JarvisApp/Updates/UpdateController.swift` — the menu bar's Sparkle-backed **Check for Updates** item: user-initiated checks only, disabled while a session is live, and absent from development builds, which carry no feed ([build-and-run.md → In-app updates](./build-and-run.md#in-app-updates--sparkle-over-the-release-feed)).
@@ -265,8 +267,9 @@ thin OS shell, verified by the smoke run.
 ## Not yet built
 
 - **Lean coaching core Phases 1–5** — the approved destination and slice contracts are in
-  [lean-coaching-core.md](./lean-coaching-core.md). Phase 0 audit isolation is built; unified
-  diagnostics, the Activity projection, offline maintenance, plan/adapter direction, and final
-  coordinator decomposition remain future work.
+  [lean-coaching-core.md](./lean-coaching-core.md). Phase 0 audit isolation and Phase 3's
+  evaluation extraction are built; unified diagnostics, the Activity projection, compaction and
+  pruning maintenance, plan/adapter direction, and final coordinator decomposition remain future
+  work.
 - **Universal binary** — `Sources/CJarvisAEC/lib/libjarvis-aec.a` is arm64-only; `lipo` in an x86_64 slice if Intel is ever needed.
 - **Neural double-talk canceller** (DTLN / Muesli-style on the same aligned streams) — the escalation if AEC3 over-attenuates the user under loud far audio in practice.

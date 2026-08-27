@@ -1,4 +1,5 @@
 import Foundation
+import JarvisCore
 
 /// Evaluator-facing completeness status for the versioned session-audit format.
 struct SessionAuditEvidence: Sendable, Equatable {

@@ -1,6 +1,7 @@
 import Foundation
 import Testing
-@testable import JarvisCore
+import JarvisCore
+@testable import JarvisEvaluation
 
 @Suite struct SessionEvidenceIndexTests {
     @Test func inventoriesArtifactsDistributionsAndCorrelationCoverage() throws {

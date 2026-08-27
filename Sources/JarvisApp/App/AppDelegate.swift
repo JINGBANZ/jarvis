@@ -1,5 +1,6 @@
 import AppKit
 import JarvisCore
+import JarvisEvaluation
 import JarvisOverlay
 
 @MainActor

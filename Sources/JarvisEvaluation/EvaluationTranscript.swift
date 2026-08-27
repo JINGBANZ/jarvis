@@ -1,4 +1,5 @@
 import Foundation
+import JarvisCore
 
 /// Delta-aware rendering of a session's wire traffic for `AgenticEvaluation`. The harness rebuilds
 /// every request as `[system] + history + turn`, so consecutive requests repeat almost all of their

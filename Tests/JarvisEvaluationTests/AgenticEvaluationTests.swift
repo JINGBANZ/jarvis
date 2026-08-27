@@ -1,12 +1,13 @@
 import Testing
 import Foundation
-@testable import JarvisCore
+import JarvisCore
+@testable import JarvisEvaluation
 
 @Suite struct AgenticEvaluationTests {
     /// `prepare` renders the traffic to an owner-only transcript file beside it and returns a prompt
     /// that points the agent at the session dir + repo.
     @Test func prepareWritesOwnerOnlyTranscriptAndReturnsPrompt() async throws {
-        let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
+        let dir = tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         let traffic = await FileSessionAudit.readyForTesting(directory: dir)
         traffic.record(tag: "coach",
                        request: Data(#"{"model":"gpt-5.5","input":[]}"#.utf8),
@@ -64,7 +65,7 @@ import Foundation
     }
 
     @Test func prepareReplacesTranscriptSoAFailedEvaluatorCanBeRetried() async throws {
-        let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
+        let dir = tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         let traffic = await FileSessionAudit.readyForTesting(directory: dir)
         traffic.record(tag: "coach",
                        request: Data(#"{"model":"gpt-5.5","input":[]}"#.utf8),
@@ -115,7 +116,7 @@ import Foundation
 
     /// `savedReport` is the Activity viewer's discovery gate: an empty or absent file is not a report.
     @Test func savedReportReturnsOnlyPersistedAgenticReport() throws {
-        let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
+        let dir = tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         #expect(AgenticEvaluation.savedReport(in: dir) == nil)
         let url = dir.appendingPathComponent(AgenticEvaluation.reportFilename)
         try Data("## Audit\nfine".utf8).write(to: url)
@@ -125,7 +126,7 @@ import Foundation
     }
 
     @Test func hasTrafficRequiresANonemptyTrafficFile() throws {
-        let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
+        let dir = tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         #expect(!AgenticEvaluation.hasTraffic(in: dir))
         let url = dir.appendingPathComponent(FileSessionAudit.brainTrafficFilename)
         try Data().write(to: url)
@@ -135,7 +136,7 @@ import Foundation
     }
 
     @Test func saveReportAtomicallyReplacesAnOlderOwnerOnlyReport() throws {
-        let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
+        let dir = tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         let url = dir.appendingPathComponent(AgenticEvaluation.reportFilename)
         try Data("old report".utf8).write(to: url)
 
@@ -155,7 +156,7 @@ import Foundation
     }
 
     @Test func prepareThrowsWhenSessionHasNoTraffic() throws {
-        let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
+        let dir = tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         #expect(throws: AgenticEvaluation.EvaluationError.noTraffic) {
             try AgenticEvaluation.prepare(sessionDir: dir)
         }
@@ -165,7 +166,7 @@ import Foundation
     }
 
     @Test func preparePreservesMalformedOnlyTrafficAsUnavailableEvidence() throws {
-        let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
+        let dir = tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         try Data("{truncated\n".utf8).write(
             to: dir.appendingPathComponent(FileSessionAudit.brainTrafficFilename))
         try Data().write(to: dir.appendingPathComponent(ActivityLog.filename))
@@ -180,7 +181,7 @@ import Foundation
     }
 
     @Test func prepareRequiresTheCompleteActivityFile() async throws {
-        let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
+        let dir = tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         let traffic = await FileSessionAudit.readyForTesting(directory: dir)
         traffic.record(tag: "coach",
                        request: Data(#"{"model":"gpt-5.5","input":[]}"#.utf8),
@@ -198,7 +199,7 @@ import Foundation
     /// A transcript that can't be written must abort the audit — the prompt promises the agent the
     /// transcript exists, so proceeding would spend an agentic run on a missing/stale file.
     @Test func prepareThrowsWhenTranscriptCannotBeWritten() async throws {
-        let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
+        let dir = tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         let traffic = await FileSessionAudit.readyForTesting(directory: dir)
         traffic.record(tag: "coach",
                        request: Data(#"{"model":"gpt-5.5","input":[]}"#.utf8),

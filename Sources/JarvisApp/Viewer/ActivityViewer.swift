@@ -1,6 +1,7 @@
 import AppKit
 import WebKit
 import JarvisCore
+import JarvisEvaluation
 
 /// The activity viewer view: an in-app `WKWebView` that live-appends log rows pushed from
 /// `ActivityLog` (no reload), shows screenshots in an in-page lightbox, and lets you browse and clear
