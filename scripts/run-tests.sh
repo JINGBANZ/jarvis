@@ -3,6 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 ./scripts/check-ghost-mode.sh
+./scripts/check-coaching-kernel.sh
 ./scripts/check-audio-capture-config.sh
 ./scripts/check-app-identities.sh
 ./scripts/check-release-config.sh
