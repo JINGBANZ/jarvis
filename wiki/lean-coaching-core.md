@@ -945,6 +945,61 @@ storage.
 - The Gate passes: `swift build && ./scripts/run-tests.sh`, plus live smoke of a Settings change
   applied to a running session and a failed preflight.
 
+## Phase 5 Implementation Contract — CoachDriver split
+
+The first Phase 5 slice ([issue #208](https://github.com/JINGBANZ/jarvis/issues/208)) splits the
+1,333-line `CoachDriver` facade into two owners with a stated state-ownership boundary. It is
+deliberately late: splitting a coordinator before its ports and state ownership settle just
+relocates the coupling, which is why the roadmap put decomposition after the plan and adapter work.
+
+### Target shape
+
+- **`CoachDriver` is the scheduler**, and stays the session's public face. It owns trigger
+  coalescing and pending-trigger generations, transcription settlement, the single-flight handling
+  slot, and forward-only route state — selection, advance, skip, exhaustion, and the delivery tokens
+  that make a terminal transition land exactly once. All of it stays under its one `stateLock`.
+- **`CoachAttemptRunner` executes one attempt** against one snapshotted target: filler
+  classification, the bounded tool loop, the `capture_screen` continuation, overlay delivery,
+  history commit, off-path history compaction with its own cancellation lifecycle, and attempt
+  identity. Its `runnerLock` guards state that never touches scheduling state, which is why it is a
+  separate lock rather than a second user of the scheduler's.
+- **`CoachTranscriptLedger` is the one datum both halves share**: the committed transcript boundary.
+  The scheduler reads it to decide whether a late turn-end is already covered by speech an earlier
+  attempt committed; the runner reports into it when a complete, non-truncated terminal action
+  commits. It only ever grows, so it is a leaf lock and neither half ever holds the other's.
+
+The interface is one call per attempt — an immutable `AttemptBrain` plus the pending work in, an
+`AttemptExecution` out. Nothing new coordinates between the halves; the ledger and that one call are
+the same three private touchpoints the combined type already had, made explicit.
+
+### Expected behavior
+
+- Structure changed; observable coaching did not. The conversational attempt boundary, terminal
+  outcomes, transcript commit semantics, route transitions, and audit attempt numbering are
+  identical before and after.
+- `cancelBackgroundWork()` keeps its public shape and semantics; the runner owns the lifecycle
+  behind it.
+
+### Failure and accepted degradation
+
+- Nothing new. No lifecycle state, retry, timer, or cross-component coordination was introduced —
+  if the two halves had needed something new to talk to each other, that would have meant the
+  boundary was wrong, not that the coordination was needed.
+
+### Non-goals
+
+- Renaming `CoachDriver` or changing any public signature. It is the App's and the tests' handle on
+  a session.
+- Moving transcription settlement, the route policy, or the trigger machinery outside the scheduler.
+- Changing attempt semantics, the tool-loop bound, compaction policy, or history commit rules.
+
+### Completion criteria
+
+- **Every existing `CoachDriver` test passes unmodified** — not a single test file changed in this
+  slice, which is the strongest available proof that the split is behavior-preserving.
+- The coaching parity harness passes.
+- The Gate passes: `swift build && ./scripts/run-tests.sh`.
+
 ## Source Handoff
 
 The implementation agent should begin with these current boundaries:
