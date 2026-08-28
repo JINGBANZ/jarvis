@@ -1228,15 +1228,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // worker rather than by whichever thread called jlog.
         JarvisLog.attach(to: audit)
         currentSessionDir = dir
-        // Now that logging is always on, sessions accumulate every launch. Bound it: keep only the most
-        // recent few (the just-created one is current, so it's always spared).
-        SessionStore(base: base, current: dir).pruneToMostRecent(
-            Self.retainedSessions,
-            preserving: protectedAuditDirectories())
         // Point the viewer's history browser at the new current session and show it live; clear-history
         // spares whichever session is current.
         activityViewer.sessionDidChange(base: base, current: dir)
         jlog("Jarvis: session \(dir.lastPathComponent) (\(dir.path)).")
+        pruneRetainedSessions(base: base, current: dir)
+    }
+
+    /// Bound the session directory, off the Start path.
+    ///
+    /// Sessions accumulate every launch, so old ones have to go — but a directory listing and a
+    /// recursive delete are disk work that can only ever slow the user down. They can never make
+    /// Jarvis hear, reason, capture, or deliver better, so they are maintenance, not admission
+    /// (wiki/lean-coaching-core.md, Phase 3). Creating the owner-only session directory stays on
+    /// Start; this does not.
+    ///
+    /// The protected set is read here rather than captured at Start so a session that is still
+    /// sealing its evidence is spared by its state at delete time, and the scan itself runs off the
+    /// main actor. Failure is silent by construction: nothing awaits this, and nothing reports it.
+    private func pruneRetainedSessions(base: URL, current: URL) {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let store = SessionStore(base: base, current: current)
+            let protected = self.protectedAuditDirectories()
+            let keep = Self.retainedSessions
+            await Task.detached(priority: .utility) {
+                store.pruneToMostRecent(keep, preserving: protected)
+            }.value
+            // The picker was built from the pre-prune listing; drop the rows that no longer exist.
+            self.activityViewer?.historyDidChange()
+        }
     }
 
     private func isAuditClosed(for directory: URL) -> Bool {

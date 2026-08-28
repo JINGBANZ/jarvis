@@ -186,7 +186,7 @@ editing.
 | 0 — Audit baseline | **Built** in [#146](https://github.com/JINGBANZ/jarvis/issues/146) / [PR #149](https://github.com/JINGBANZ/jarvis/pull/149) | One process-level count/byte-bounded audit worker, per-session handle, monotonic health, and independent Stop/Start lifecycle | Evaluator audit only; Activity and `jlog` remain separate today |
 | 1 — Evidence foundation | **Built** in [#197](https://github.com/JINGBANZ/jarvis/issues/197) | Generalize the settled audit transport into `SessionEvidence` and route diagnostics through it without another worker | Activity remains on its existing path until Phase 2 |
 | 2 — Activity projection | **Built** in [#198](https://github.com/JINGBANZ/jarvis/issues/198), [#199](https://github.com/JINGBANZ/jarvis/issues/199), [#200](https://github.com/JINGBANZ/jarvis/issues/200) | Render and persist Activity through `SessionEvent`, show incomplete evidence in the Activity window, and remove Activity's independent persistence path | Human copy remains a closed safe projection; no debug detail enters Activity |
-| 3 — Offline work | Evaluation extraction **built** in [#202](https://github.com/JINGBANZ/jarvis/issues/202); compaction and pruning remain the approved destination | Give evaluation a shared compiler boundary when justified by the app and `EvalPrep`; make history compaction preemptible and move pruning off Start | Failure keeps full history and surviving session evidence |
+| 3 — Offline work | **Built**: evaluation extraction in [#202](https://github.com/JINGBANZ/jarvis/issues/202), pruning off Start in [#201](https://github.com/JINGBANZ/jarvis/issues/201); preemptible compaction shipped earlier in [#187](https://github.com/JINGBANZ/jarvis/pull/187) | Give evaluation a shared compiler boundary when justified by the app and `EvalPrep`; make history compaction preemptible and move pruning off Start | Failure keeps full history and surviving session evidence |
 | 4 — Plans and adapters | OpenAI provider extraction **built** in [#205](https://github.com/JINGBANZ/jarvis/issues/205) and screen-capture adapter move **built** in [#204](https://github.com/JINGBANZ/jarvis/issues/204); plan revisions, the local-agent move ([#206](https://github.com/JINGBANZ/jarvis/issues/206)), and the file adapter moves remain the approved destination | Use immutable plan revisions at explicit between-attempt boundaries and move provider, process, screen, and file adapters outward | Live setting changes and fresh-attempt routing semantics remain intact |
 | 5 — Decomposition | Approved destination | Split the `CoachDriver` facade and `AppDelegate` only after ports and state ownership settle | Structure changes; observable coaching and lifecycle behavior do not |
 
@@ -548,6 +548,60 @@ their own contract before implementation.
   for the same session directory before and after the move, verified offline without an agent run.
 - The Gate passes: `swift build && ./scripts/run-tests.sh`. The live Evaluate-click check stays in
   the standard app smoke, not in this slice's gate.
+
+## Phase 3 Implementation Contract — Retention pruning off Start
+
+The second Phase 3 slice ([issue #201](https://github.com/JINGBANZ/jarvis/issues/201)) takes the
+retention scan and delete off the Start path. Start creates the owner-only session directory and
+installs the session's evidence handle; it no longer lists and deletes old sessions inline.
+
+### Target shape
+
+- `beginNewSession` still creates the `0700` directory (and tightens a pre-existing base), enables
+  the Activity projection, opens the evidence handle, attaches diagnostics to it, and points the
+  viewer at the new session. That is admission, and it stays.
+- `pruneRetainedSessions(base:current:)` runs afterwards on its own task: it reads the protected
+  set on the main actor, then performs the listing and deletion on a detached utility task. Nothing
+  awaits it.
+- The protected set is read **at prune time**, not captured at Start, so a session still sealing its
+  evidence is spared by its state when the delete actually happens.
+- `ActivityViewer.historyDidChange()` refreshes the session picker after a prune, since the picker
+  was built from the pre-prune listing. It refreshes the list only — the rows on screen are
+  unaffected, so nothing reloads.
+
+### Expected behavior
+
+- Start performs no retention scan and no delete. Secure owner-only session-directory creation is
+  unchanged: `0700` for the directory, `0600` for everything the worker writes inside it.
+- The retained-session count is what it was, the current session is always spared, non-session
+  subdirectories and symlinks are still skipped, and a session whose evidence is still closing is
+  still never deleted. All of that is `SessionStore.pruneToMostRecent` behavior, unchanged.
+- An immediate Stop → Start is independent of any pruning still in flight.
+
+### Failure and accepted degradation
+
+- Pruning failure is silent by construction: nothing awaits the task, nothing reports it, and it can
+  neither block Start nor consume provider-route failure budget. A failed prune means old sessions
+  survive one more run — the same outcome the existing per-item `try?` already produced.
+- Between Start and the prune completing, the picker can briefly list a session that is about to be
+  deleted. Selecting one in that window renders an empty session rather than failing.
+
+### Non-goals
+
+- Moving secure session-directory creation off Start. It is the privacy boundary and a session must
+  not begin without it.
+- Changing the retained count, the protection rule, or any `SessionStore` deletion semantics.
+- A pruning schedule, timer, or retry. It runs once per Start, after Start.
+
+### Completion criteria
+
+- No retention scan or delete remains on the Start path.
+- `SessionStoreTests` continue to pin the retained count, the spared current session, the
+  non-positive-`keep` floor, and the protected still-closing session — the behaviors the move had to
+  preserve. The move itself is `JarvisApp` composition, which this repository verifies through live
+  smoke rather than unit tests.
+- The Gate passes: `swift build && ./scripts/run-tests.sh`, plus live smoke of Start, Stop, and an
+  immediate restart, confirming the session directory rotates and old sessions still age out.
 
 ## Phase 4 Implementation Contract — Screen-capture adapter move
 

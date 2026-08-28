@@ -164,6 +164,14 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         loadCurrent()
     }
 
+    /// The set of past sessions on disk changed underneath the viewer — retention pruning ran.
+    /// Refresh the picker only: the row content on screen is unaffected, so there is nothing to
+    /// reload. No-op when not embedded.
+    func historyDidChange() {
+        guard webView != nil else { return }
+        populatePicker()
+    }
+
     // MARK: - Session list
 
     private func populatePicker() {
