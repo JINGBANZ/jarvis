@@ -1,5 +1,6 @@
 import Foundation
 import JarvisCore
+import Testing
 
 /// An owner-only scratch directory for one test.
 func tmp() -> URL {
@@ -16,12 +17,23 @@ func tmp() -> URL {
 /// separate isolated-worker fixture.
 extension FileSessionAudit {
     /// Wait for the asynchronous open before sending the record under test, so the assertion
-    /// observes the same ordered lifecycle as production.
+    /// observes the same ordered lifecycle as production. The wait is bounded: if the worker never
+    /// writes the health marker (open failure, saturation), the test fails loudly with this
+    /// fixture's diagnosis instead of stalling until CI's job timeout.
     static func readyForTesting(directory: URL) async -> FileSessionAudit {
         let audit = FileSessionAudit(directory: directory)
         let marker = directory.appendingPathComponent(FileSessionAudit.healthFilename)
+        let deadline = ContinuousClock.now.advanced(by: .seconds(10))
         while !FileManager.default.fileExists(atPath: marker.path) {
-            await Task.yield()
+            guard ContinuousClock.now < deadline else {
+                Issue.record("""
+                    the session audit at \(directory.path) never wrote \
+                    \(FileSessionAudit.healthFilename); the shared audit worker failed or \
+                    stalled instead of opening the session
+                    """)
+                return audit
+            }
+            try? await Task.sleep(for: .milliseconds(2))
         }
         return audit
     }
