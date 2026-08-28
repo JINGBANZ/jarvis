@@ -1,10 +1,8 @@
 # Lean Coaching Core
 
 > The approved target architecture and phased implementation contract for
-> [issue #147](https://github.com/JINGBANZ/jarvis/issues/147). Phases 0, 1 and 2, Phase 3's
-> evaluation-extraction slice, and Phase 4's OpenAI provider and screen-capture adapter slices are
-> built. Phase 3's remaining work is the next implementation slice; the later phases describe the reviewed
-> destination, not shipped behavior.
+> [issue #147](https://github.com/JINGBANZ/jarvis/issues/147). Every phase of the roadmap is built;
+> this page remains the durable contract each slice was reviewed against.
 
 > **Owner review result:** This contract supersedes the issue body's proposed independent Activity,
 > audit, diagnostic, and continuity-telemetry stacks and its earlier phase ordering. The issue remains
@@ -188,7 +186,7 @@ editing.
 | 2 — Activity projection | **Built** in [#198](https://github.com/JINGBANZ/jarvis/issues/198), [#199](https://github.com/JINGBANZ/jarvis/issues/199), [#200](https://github.com/JINGBANZ/jarvis/issues/200) | Render and persist Activity through `SessionEvent`, show incomplete evidence in the Activity window, and remove Activity's independent persistence path | Human copy remains a closed safe projection; no debug detail enters Activity |
 | 3 — Offline work | **Built**: evaluation extraction in [#202](https://github.com/JINGBANZ/jarvis/issues/202), pruning off Start in [#201](https://github.com/JINGBANZ/jarvis/issues/201); preemptible compaction shipped earlier in [#187](https://github.com/JINGBANZ/jarvis/pull/187) | Give evaluation a shared compiler boundary when justified by the app and `EvalPrep`; make history compaction preemptible and move pruning off Start | Failure keeps full history and surviving session evidence |
 | 4 — Plans and adapters | **Built**: screen-capture adapter move ([#204](https://github.com/JINGBANZ/jarvis/issues/204)), OpenAI extraction ([#205](https://github.com/JINGBANZ/jarvis/issues/205)), local-agent move ([#206](https://github.com/JINGBANZ/jarvis/issues/206)), capture-heartbeat split ([#203](https://github.com/JINGBANZ/jarvis/issues/203)), immutable plan revisions ([#207](https://github.com/JINGBANZ/jarvis/issues/207)) | Use immutable plan revisions at explicit between-attempt boundaries and move provider, process, screen, and file adapters outward | Live setting changes and fresh-attempt routing semantics remain intact |
-| 5 — Decomposition | Approved destination | Split the `CoachDriver` facade and `AppDelegate` only after ports and state ownership settle | Structure changes; observable coaching and lifecycle behavior do not |
+| 5 — Decomposition | **Built** in [#208](https://github.com/JINGBANZ/jarvis/issues/208) and [#209](https://github.com/JINGBANZ/jarvis/issues/209) | Split the `CoachDriver` facade and `AppDelegate` only after ports and state ownership settle | Structure changes; observable coaching and lifecycle behavior do not |
 
 ## Phase 1 Implementation Contract
 
@@ -1000,6 +998,63 @@ the same three private touchpoints the combined type already had, made explicit.
 - The coaching parity harness passes.
 - The Gate passes: `swift build && ./scripts/run-tests.sh`.
 
+## Phase 5 Implementation Contract — AppDelegate split
+
+The last Phase 5 slice ([issue #209](https://github.com/JINGBANZ/jarvis/issues/209)) splits the
+1,296-line `AppDelegate` into three focused owners. Like the `CoachDriver` split it comes last on
+purpose: the delegate is where every port is composed, so splitting it before the ports settled
+would only have moved the tangle.
+
+### Target shape
+
+- **`AppDelegate` is the session runtime**: Start, Stop, teardown, readiness observation and its
+  effects, capture-heartbeat handling, transcription connection state, error reporting, hotkeys, the
+  menu bar, and Settings composition. It is also the host the other two owners report through.
+- **`SessionArtifacts`** owns everything a session leaves on disk: the owner-only session directory
+  and its id, the log-directory resolution, the evidence handle installed in it, the Activity
+  projection's session, `jlog`'s attachment, retention pruning, the close bookkeeping that keeps a
+  still-sealing session from being pruned or evaluated, and the source-checkout lookup evaluation
+  needs. It notifies the viewer through two closures rather than reaching into it.
+- **`BrainComposition`** owns provider preflight, brain-client construction, route construction with
+  its route-health callbacks, and the live reapply of brain preferences and credentials. It also
+  owns the route identity a Settings edit is announced against.
+
+`BrainCompositionHost` is the whole interface between composition and the runtime: four read-only
+accessors for the live session (`liveCoachDriver`, `liveSessionDirectory`, `liveSessionEvidence`,
+`isTranscriptionLive`) and two presentation forwards (`reportBrainError`, `brainTargetDidChange`).
+Composition never starts, stops, or tears anything down, and the runtime never builds a brain client.
+
+### Expected behavior
+
+- Start, Stop, teardown, readiness effects, capture continuity handling, and error reporting behave
+  exactly as today, including teardown ordering: the handle is taken before turns are cancelled, the
+  session-end row is recorded against the taken handle, Quit abandons without waiting, and a normal
+  Stop protects the closing directory until `close()` returns.
+- The credential refresh keeps its split of concerns — the transcription half stays in the runtime
+  because it drives live sockets; the brain half is composition's.
+
+### Failure and accepted degradation
+
+- Nothing new. No lifecycle state, retry, timer, or cross-component coordination was introduced.
+- The runtime safety boundaries survive intact: `scripts/check-ghost-mode.sh` passes with **no new**
+  `ghost-mode-allowed` exceptions, and both retained presentation calls keep their inline reasons in
+  the runtime, where they were. Neither extracted owner presents anything.
+
+### Non-goals
+
+- Moving Start/Stop, readiness, or capture handling out of the delegate; that is the runtime.
+- Changing preflight semantics, route-health callbacks, Settings behavior, or the viewer's wiring.
+- Introducing a fourth owner for the control plane. `SessionPlan` is built by the runtime because
+  the runtime is what composes the kernel's ports.
+
+### Completion criteria
+
+- Three owners with documented boundaries, and no behavior change in Start, Stop, teardown,
+  readiness, capture continuity, or error reporting.
+- `scripts/check-ghost-mode.sh` passes with no new exceptions.
+- The Gate passes: `swift build && ./scripts/run-tests.sh`, plus the live smoke checklist for Start,
+  Stop, Settings reapply, and session rotation — `JarvisApp` is verified by live smoke, not units.
+
 ## Source Handoff
 
 The implementation agent should begin with these current boundaries:
@@ -1022,9 +1077,12 @@ The implementation agent should begin with these current boundaries:
   [`AudioContinuityWitness.swift`](../Sources/JarvisCore/Diagnostics/AudioContinuityWitness.swift),
   [`RealtimeContinuityReporter.swift`](../Sources/JarvisApp/Capture/RealtimeContinuityReporter.swift),
   and [`CaptureReadinessMonitor.swift`](../Sources/JarvisCore/Diagnostics/CaptureReadinessMonitor.swift).
-- Composition and attempt boundaries:
-  [`AppDelegate.swift`](../Sources/JarvisApp/App/AppDelegate.swift) and
-  [`CoachDriver.swift`](../Sources/JarvisCore/Coach/CoachDriver.swift).
+- Composition and attempt boundaries: the session runtime in
+  [`AppDelegate.swift`](../Sources/JarvisApp/App/AppDelegate.swift) with
+  [`SessionArtifacts.swift`](../Sources/JarvisApp/App/SessionArtifacts.swift) and
+  [`BrainComposition.swift`](../Sources/JarvisApp/App/BrainComposition.swift); the scheduler in
+  [`CoachDriver.swift`](../Sources/JarvisCore/Coach/CoachDriver.swift) with
+  [`CoachAttemptRunner.swift`](../Sources/JarvisCore/Coach/CoachAttemptRunner.swift).
 
 The first question during review remains: **Can this dependency change or delay a coaching outcome?**
 If not, the critical kernel may emit a typed observation, but it may neither await nor depend on the
