@@ -12,6 +12,36 @@ import Foundation
         if let (name, data) = shot { try data.write(to: d.appendingPathComponent(name)) }
     }
 
+    /// History browsing reads the session's own monotonic health record. A session that lost
+    /// evidence reads incomplete; a clean one reads complete; one written before the record existed
+    /// is unknown — which is not the same claim, and shows no notice.
+    @Test func historyReportsEvidenceCompletenessFromTheHealthRecord() throws {
+        let base = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: base) }
+        let heard = "{\"t\":\"10:00:00\",\"m\":\"🗣 heard: x\"}"
+        try makeSession(base, "2026-06-16_10-00-00_aaaa", lines: [heard])
+        try makeSession(base, "2026-06-16_11-00-00_bbbb", lines: [heard])
+        try makeSession(base, "2026-06-16_12-00-00_cccc", lines: [heard])
+        try makeSession(base, "2026-06-16_13-00-00_dddd", lines: [heard])
+        try writeHealth(base, "2026-06-16_11-00-00_bbbb", state: "complete")
+        try writeHealth(base, "2026-06-16_12-00-00_cccc", state: "partial")
+        try writeHealth(base, "2026-06-16_13-00-00_dddd", state: "in_progress")
+
+        let sessions = SessionStore(base: base, current: nil).listSessions()
+        let byID = Dictionary(uniqueKeysWithValues: sessions.map { ($0.id, $0) })
+        #expect(byID["2026-06-16_11-00-00_bbbb"]?.evidenceIsComplete == true)
+        #expect(byID["2026-06-16_12-00-00_cccc"]?.evidenceIsComplete == false)
+        // An unfinished close is incomplete evidence, not unknown evidence.
+        #expect(byID["2026-06-16_13-00-00_dddd"]?.evidenceIsComplete == false)
+        #expect(byID["2026-06-16_10-00-00_aaaa"]?.evidenceIsComplete == nil)
+    }
+
+    private func writeHealth(_ base: URL, _ id: String, state: String) throws {
+        let object: [String: Any] = ["version": FileSessionAudit.formatVersion, "state": state]
+        try JSONSerialization.data(withJSONObject: object).write(
+            to: base.appendingPathComponent(id)
+                .appendingPathComponent(FileSessionAudit.healthFilename))
+    }
+
     @Test func listsNewestFirstWithCurrentFlagged() throws {
         let base = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: base) }
         // Coaching-class lines (🗣) so both sessions count as content-bearing history.

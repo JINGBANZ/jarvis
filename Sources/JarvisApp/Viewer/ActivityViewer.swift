@@ -41,6 +41,9 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
     private var pending: [String] = []     // rows that arrived before didFinish (main-thread-confined)
     private var snapshotRows: [String] = [] // rows to inject once the shell has loaded
     private var pendingMeta = ""           // header text to set after the shell loads
+    /// Completeness of the session currently on screen. False only when its health record says
+    /// evidence was dropped, failed, or never finished closing.
+    private var evidenceIsComplete = true
     private var viewingCurrent = true
     /// Current UI state only. It is injected into the in-memory page and never written to Activity.
     private var readinessStatus: JarvisReadiness.Status = .stopped
@@ -268,12 +271,16 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         let snap = log.attach { [weak self] js in
             DispatchQueue.main.async { self?.onAppend(js) }
         }
+        evidenceIsComplete = snap.evidenceIsComplete
         beginLoad(shell: snap.shellHTML, rows: snap.rows, shown: snap.shown, total: snap.total)
     }
 
     private func loadPast(_ session: SessionStore.Session) {
         viewingCurrent = false
         log.detach()   // a past session is static; stop receiving live rows
+        // Unknown completeness (a session older than the health record) shows no notice: it is
+        // not the same claim as "this record has holes".
+        evidenceIsComplete = session.evidenceIsComplete ?? true
         let snapshot = store.entrySnapshot(
             for: session,
             retainingMostRecentInsertions: ActivityLog.retainedEntryLimit)
@@ -321,6 +328,8 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         snapshotRows = []
         pending = []
         webView.evaluateJavaScript("setMeta(\(jsString(pendingMeta)));", completionHandler: nil)
+        webView.evaluateJavaScript(
+            ActivityLog.evidenceScript(isComplete: evidenceIsComplete), completionHandler: nil)
         refreshReadinessBadge()
     }
 

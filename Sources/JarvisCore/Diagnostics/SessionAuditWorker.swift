@@ -519,6 +519,7 @@ final class SessionAuditWorker: @unchecked Sendable {
             }
         }
         projection.publish(row)
+        projection.noteEvidence(isComplete: session.health.snapshot.isComplete)
     }
 
     private func finalize(
@@ -533,6 +534,9 @@ final class SessionAuditWorker: @unchecked Sendable {
         let snapshot = session.health.snapshot
         let result: SessionAuditCloseResult = forcePartial || !snapshot.isComplete
             ? .partial : .complete
+        // The seal is the last honest moment to tell the window: a loss recorded after the final
+        // row would otherwise never reach the human view of a session that is still on screen.
+        session.activity?.noteEvidence(isComplete: result == .complete)
         do {
             try writer.replaceHealth(
                 try healthData(

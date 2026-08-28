@@ -1,9 +1,9 @@
 # Lean Coaching Core
 
 > The approved target architecture and phased implementation contract for
-> [issue #147](https://github.com/JINGBANZ/jarvis/issues/147). Phases 0 and 1, Phase 3's
+> [issue #147](https://github.com/JINGBANZ/jarvis/issues/147). Phases 0, 1 and 2, Phase 3's
 > evaluation-extraction slice, and Phase 4's OpenAI provider and screen-capture adapter slices are
-> built. Phase 2 is the next implementation slice; the remaining phases describe the reviewed
+> built. Phase 3's remaining work is the next implementation slice; the later phases describe the reviewed
 > destination, not shipped behavior.
 
 > **Owner review result:** This contract supersedes the issue body's proposed independent Activity,
@@ -185,7 +185,7 @@ editing.
 |---|---|---|---|
 | 0 — Audit baseline | **Built** in [#146](https://github.com/JINGBANZ/jarvis/issues/146) / [PR #149](https://github.com/JINGBANZ/jarvis/pull/149) | One process-level count/byte-bounded audit worker, per-session handle, monotonic health, and independent Stop/Start lifecycle | Evaluator audit only; Activity and `jlog` remain separate today |
 | 1 — Evidence foundation | **Built** in [#197](https://github.com/JINGBANZ/jarvis/issues/197) | Generalize the settled audit transport into `SessionEvidence` and route diagnostics through it without another worker | Activity remains on its existing path until Phase 2 |
-| 2 — Activity projection | Approved destination | Render and persist Activity through `SessionEvent`, show incomplete evidence in the Activity window, and remove Activity's independent persistence path | Human copy remains a closed safe projection; no debug detail enters Activity |
+| 2 — Activity projection | **Built** in [#198](https://github.com/JINGBANZ/jarvis/issues/198), [#199](https://github.com/JINGBANZ/jarvis/issues/199), [#200](https://github.com/JINGBANZ/jarvis/issues/200) | Render and persist Activity through `SessionEvent`, show incomplete evidence in the Activity window, and remove Activity's independent persistence path | Human copy remains a closed safe projection; no debug detail enters Activity |
 | 3 — Offline work | Evaluation extraction **built** in [#202](https://github.com/JINGBANZ/jarvis/issues/202); compaction and pruning remain the approved destination | Give evaluation a shared compiler boundary when justified by the app and `EvalPrep`; make history compaction preemptible and move pruning off Start | Failure keeps full history and surviving session evidence |
 | 4 — Plans and adapters | OpenAI provider extraction **built** in [#205](https://github.com/JINGBANZ/jarvis/issues/205) and screen-capture adapter move **built** in [#204](https://github.com/JINGBANZ/jarvis/issues/204); plan revisions, the local-agent move ([#206](https://github.com/JINGBANZ/jarvis/issues/206)), and the file adapter moves remain the approved destination | Use immutable plan revisions at explicit between-attempt boundaries and move provider, process, screen, and file adapters outward | Live setting changes and fresh-attempt routing semantics remain intact |
 | 5 — Decomposition | Approved destination | Split the `CoachDriver` facade and `AppDelegate` only after ports and state ownership settle | Structure changes; observable coaching and lifecycle behavior do not |
@@ -413,6 +413,65 @@ wrapped. This is the point where Activity stops being a privileged failure domai
   green.
 - The Gate passes: `swift build && ./scripts/run-tests.sh`, plus live smoke of Start, a coaching
   turn with a screen view, Stop, and browsing the finished session in the Activity window.
+
+## Phase 2 Implementation Contract — Incomplete-evidence notice
+
+The final Phase 2 slice ([issue #200](https://github.com/JINGBANZ/jarvis/issues/200)) makes the
+uniform best-effort loss contract honest to the person reading the window. A session that hit
+capacity, dropped an oversize record, failed a write, or never finished its close reads as visibly
+incomplete instead of presenting an apparently complete story.
+
+### Target shape
+
+- One fixed pair of strings, `ActivityLog.incompleteEvidenceNotice` ("incomplete record") and
+  `incompleteEvidenceDetail` ("Some of this session's activity could not be saved."), rendered as a
+  header badge with a tooltip. Empty text collapses the badge out of the header entirely.
+- It is **not** an `ActivityEvent`. Nothing happened in the coaching exchange; incompleteness is a
+  property of the session's record, so it does not become a row, does not join the closed
+  presentation set, and cannot be authored by a producer.
+- The signal is the existing monotonic health record, read two ways and nowhere else:
+  - **Live** — the worker reports `session.health.snapshot.isComplete` after it persists a row and
+    again when it seals the session. The projection announces the transition once, through the same
+    observer channel that carries rows.
+  - **History** — `SessionStore` reads `audit-health.json`. `complete` → true, `partial` and
+    `in_progress` → false, anything else → nil.
+- `nil` is unknown, not incomplete: a session written before the health record existed, or with an
+  unreadable marker, shows no notice. Claiming holes in a record we cannot read would be its own
+  dishonesty.
+
+### Expected behavior
+
+- A session with dropped, failed, or unfinished evidence shows the notice — live while it runs and
+  when browsed later in history.
+- A session whose evidence is complete shows nothing.
+- Switching from an incomplete session to a complete one clears the badge, so a stale notice cannot
+  follow the reader into another session's history.
+- The wording carries no transport, retry, timing, lifecycle, or raw-error detail. The rule that
+  debug detail never reaches the Activity window is not relaxed to build this; the detail stays in
+  the owner-only session folder where an agent reads it.
+
+### Failure and accepted degradation
+
+- No new counter and no new state: the notice reads the health record that already existed. Health
+  counters are monotonic, so the notice is announced once and never retracts within a session.
+- If the loss happens after the final row and the window is closed before the seal, that session
+  still reads incomplete the next time it is browsed — the persisted marker is the durable copy.
+- A missing or malformed marker leaves the session silent rather than accused.
+
+### Non-goals
+
+- A per-category breakdown, a count of lost records, or any way to see *what* was lost from the
+  window. That is what the session folder is for.
+- Turning the notice into an Activity row, a menu-bar indicator, or a notification.
+- Retrying, reserving capacity, or otherwise reducing the loss this notice reports.
+
+### Completion criteria
+
+- `JarvisViewerTests` cover the incomplete rendering, the complete rendering, and the switch back.
+- `ActivityProjectionTests` cover the live announcement, its once-only nature, the clean session,
+  and a loss recorded at seal.
+- `SessionStoreTests` cover complete, partial, unfinished, and unknown history markers.
+- The Gate passes: `swift build && ./scripts/run-tests.sh`.
 
 ## Phase 3 Implementation Contract — Evaluation extraction
 

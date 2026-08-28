@@ -171,6 +171,72 @@ import Testing
         #expect(marker["oversize_record"] as? Int == 1)
     }
 
+    /// Live: the moment the shared worker records a loss, the window is told the record has holes.
+    /// The signal is the existing monotonic health record, so it is announced once and never
+    /// retracted.
+    @Test func lostEvidenceMarksTheLiveWindowIncompleteExactlyOnce() async throws {
+        let directory = ActivityLogTests.tmp()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let projection = ActivityLog()
+        defer { projection.disable() }
+        projection.enable(directory: directory)
+        let pushedLock = NSLock()
+        var pushed: [String] = []
+        let snapshot = projection.attach { js in pushedLock.withLock { pushed.append(js) } }
+        #expect(snapshot.evidenceIsComplete)
+
+        let evidence = FileSessionAudit(
+            directory: directory,
+            worker: SessionAuditWorker(
+                limits: .init(maxEventCount: 32, maxRetainedBytes: 1_024),
+                writer: SessionAuditFileWriter()),
+            activity: projection)
+        evidence.record(.screenViewed(imageBase64JPEG: String(repeating: "A", count: 4_096)))
+        evidence.record(.tip(lines: ["first row after the loss"]))
+        evidence.record(.tip(lines: ["second row after the loss"]))
+        #expect(await evidence.close() == .partial)
+
+        let scripts = pushedLock.withLock { pushed }
+        let notices = scripts.filter { $0.contains("setEvidence(") }
+        #expect(notices.count == 1)
+        #expect(notices[0] == ActivityLog.evidenceScript(isComplete: false))
+        #expect(!projection.attach { _ in }.evidenceIsComplete)
+    }
+
+    /// A session that records everything it was given never claims to be incomplete.
+    @Test func completeEvidenceNeverAnnouncesANotice() async throws {
+        let directory = ActivityLogTests.tmp()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let (projection, evidence) = ActivityLog.recordingSession(in: directory)
+        defer { projection.disable() }
+        let pushedLock = NSLock()
+        var pushed: [String] = []
+        _ = projection.attach { js in pushedLock.withLock { pushed.append(js) } }
+
+        evidence.record(.tip(lines: ["a clean session"]))
+        #expect(await evidence.close() == .complete)
+
+        #expect(pushedLock.withLock { pushed }.allSatisfy { !$0.contains("setEvidence(") })
+        #expect(projection.attach { _ in }.evidenceIsComplete)
+    }
+
+    /// Sealing is the last honest moment: a loss recorded after the final row still reaches a window
+    /// that is still showing the session.
+    @Test func aLossAtSealStillReachesTheWindow() async throws {
+        let directory = ActivityLogTests.tmp()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let (projection, evidence) = ActivityLog.recordingSession(in: directory)
+        defer { projection.disable() }
+        _ = projection.attach { _ in }
+
+        evidence.record(.tip(lines: ["the last row of a doomed session"]))
+        // Abandon is the Quit path: it seals immediately and forces a partial marker.
+        evidence.abandon()
+        #expect(await evidence.close() == .partial)
+
+        #expect(!projection.attach { _ in }.evidenceIsComplete)
+    }
+
     /// The session-end marker is still final for the session, now that it is admitted on the shared
     /// worker rather than on the projection's own queue.
     @Test func theSessionEndMarkerStaysFinalOnTheSharedWorker() async throws {

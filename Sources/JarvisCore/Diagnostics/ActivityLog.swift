@@ -17,6 +17,13 @@ import Foundation
 public final class ActivityLog: @unchecked Sendable {
     public static let shared = ActivityLog()
     public static let filename = "jarvis-activity.jsonl"
+    /// The fixed, human-safe notice shown when a session's evidence is known to be incomplete. It
+    /// says the record has holes and nothing else: no transport, retry, timing, lifecycle, or raw
+    /// error detail — that stays in the owner-only session folder. Not an `ActivityEvent`, because
+    /// nothing happened in the coaching exchange; it is a property of the session's record.
+    public static let incompleteEvidenceNotice = "incomplete record"
+    public static let incompleteEvidenceDetail =
+        "Some of this session's activity could not be saved." 
     /// Shared live/history backstop. Both paths retain insertion identities first, then ask
     /// `ConversationChronology` to display those retained entries by event time.
     public static let retainedEntryLimit = 10_000
@@ -55,6 +62,9 @@ public final class ActivityLog: @unchecked Sendable {
         public let rows: [String]
         public let shown: Int
         public let total: Int
+        /// False when this session is known to have lost evidence, so the window can say so
+        /// instead of presenting an apparently complete story.
+        public let evidenceIsComplete: Bool
     }
 
     /// On-disk line format for `jarvis-activity.jsonl` (one JSON object per line).
@@ -94,6 +104,9 @@ public final class ActivityLog: @unchecked Sendable {
     private let df: DateFormatter
     private var dir: URL?         // nil ⇒ disabled (no observer pushes)
     private var onAppend: ((String) -> Void)?
+    /// Last completeness the evidence worker reported for this session. Health counters are
+    /// monotonic, so this only ever moves from true to false — one notice, never a flicker.
+    private var evidenceIsComplete = true
 
     /// Internal so tests can spin up an isolated instance; the app uses `.shared`.
     init() {
@@ -113,6 +126,7 @@ public final class ActivityLog: @unchecked Sendable {
         lock.withLock {
             dir = directory
             entries.removeAll(); totalCount = 0; shotSeq = 0; sessionHasEnded = false; onAppend = nil
+            evidenceIsComplete = true
         }
     }
 
@@ -125,7 +139,20 @@ public final class ActivityLog: @unchecked Sendable {
             shotSeq = 0
             sessionHasEnded = false
             onAppend = nil
+            evidenceIsComplete = true
         }
+    }
+
+    /// The evidence worker's verdict on this session's record, reported when it persists a row and
+    /// again when it seals the session. The signal is the existing monotonic health record — there
+    /// is no second counter — so the notice appears once, on the transition, and never retracts.
+    func noteEvidence(isComplete: Bool) {
+        let observer = lock.withLock { () -> ((String) -> Void)? in
+            guard !isComplete, evidenceIsComplete else { return nil }
+            evidenceIsComplete = false
+            return onAppend
+        }
+        observer?(Self.evidenceScript(isComplete: false))
     }
 
     /// Whether this projection is showing a session that has not yet ended. The worker checks it
@@ -217,7 +244,12 @@ public final class ActivityLog: @unchecked Sendable {
                     imageBase64: b64,
                     insertionOrder: item.insertionOrder)
             }
-            return Snapshot(shellHTML: Self.htmlShell(), rows: rows, shown: entries.count, total: totalCount)
+            return Snapshot(
+                shellHTML: Self.htmlShell(),
+                rows: rows,
+                shown: entries.count,
+                total: totalCount,
+                evidenceIsComplete: evidenceIsComplete)
         }
     }
 
@@ -278,6 +310,22 @@ public final class ActivityLog: @unchecked Sendable {
             return "appendRow({});"
         }
         return "appendRow(\(json));"
+    }
+
+    /// The JS call that shows or clears the incomplete-record notice. Both strings are fixed and
+    /// human-safe; the page sets them with `textContent`/`title`, so nothing here can inject markup.
+    public static func evidenceScript(isComplete: Bool) -> String {
+        let label = isComplete ? "" : incompleteEvidenceNotice
+        let detail = isComplete ? "" : incompleteEvidenceDetail
+        return "setEvidence(\(jsString(label)),\(jsString(detail)));"
+    }
+
+    /// JSON-encode one string for embedding in a `evaluateJavaScript` call.
+    private static func jsString(_ value: String) -> String {
+        guard let data = try? JSONEncoder().encode(value),
+              let json = String(data: data, encoding: .utf8)
+        else { return "\"\"" }
+        return json
     }
 
     /// Colour class keyed on the line's **leading marker** (the intentional emoji prefix), not a
@@ -373,6 +421,10 @@ public final class ActivityLog: @unchecked Sendable {
           header .count { flex: 1; font-weight: 500; letter-spacing: 0; text-transform: none; }
           header .readiness { padding: 2px 7px; border: 1px solid var(--line); border-radius: 999px;
                               font-weight: 600; letter-spacing: 0; text-transform: none; }
+          header .evidence { padding: 2px 7px; border: 1px solid var(--line); border-radius: 999px;
+                             color: var(--see); font-weight: 600; letter-spacing: 0;
+                             text-transform: none; }
+          header .evidence:empty { display: none; }
           header .readiness[data-state="ready"] { color: var(--say); }
           header .readiness[data-state="microphone-only"],
           header .readiness[data-state="recovering"] { color: var(--see); }
@@ -399,6 +451,7 @@ public final class ActivityLog: @unchecked Sendable {
                           border-radius: 8px; box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6); }
         </style></head><body>
         <header>Jarvis — activity log <span class="count" id="count"></span>
+          <span class="evidence" id="evidence"></span>
           <span class="readiness" id="readiness" data-state="stopped">Stopped</span>
         </header>
         <main id="log"></main>
@@ -443,6 +496,8 @@ public final class ActivityLog: @unchecked Sendable {
           function setMeta(s){ document.getElementById('count').textContent=s; }
           function setReadiness(label,state){ var badge=document.getElementById('readiness');
             badge.textContent=label||''; badge.dataset.state=state||'stopped'; }
+          function setEvidence(label,detail){ var badge=document.getElementById('evidence');
+            badge.textContent=label||''; badge.title=detail||''; }
           document.addEventListener('keydown',function(e){ if(e.key==='Escape') closeShot(); });
           document.getElementById('lightbox').addEventListener('click',closeShot);
         </script>
