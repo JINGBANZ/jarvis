@@ -28,6 +28,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let brainPreferences = BrainPreferences()
     private let transcriptionPreferences = TranscriptionPreferences()
     private let screenPreferences = ScreenCapturePreferences()
+    /// Monotonic revision stamped on each control-plane snapshot. Bumped at Start and whenever an
+    /// explicit Settings edit installs a fresh plan; never by runtime health.
+    private var planRevision: UInt = 0
     private var activityViewer: ActivityViewer!    // embedded as the Settings Activity tab
     /// Two provider sessions feeding one shared transcript: mic → `.me`, system audio → `.them`.
     private var transcriber: (any TranscriptionSession)?       // "me" (mic)
@@ -175,7 +178,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             brainSection,
             connectionsSection,
             OverlaySection(appearance: appearance, caption: overlayCaption, box: overlayBox),
-            DisplaySection(preferences: screenPreferences),
+            DisplaySection(preferences: screenPreferences) { [weak self] in
+                self?.reapplySessionPlan()
+            },
             ActivitySection(viewer: activityViewer),
         ]
         settingsWindow = SettingsWindow(sections: sections)
@@ -728,13 +733,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             config: config,
             transcript: transcript,
             route: configuredRoute,
-            screen: WindowScopedScreenCapture(
-                preferences: screenPreferences,
-                captureDirectory: sessionDirectory),
+            screen: WindowScopedScreenCapture(captureDirectory: sessionDirectory),
             overlay: overlaySink,
             clock: clock,
             sessionStart: conversationStart,
             coachingAttempts: sessionAudit,
+            plan: freshSessionPlan(),
             activity: sessionAudit)
 
         // CoachDriver is @unchecked Sendable; capture it (not @MainActor self) in the callbacks.
@@ -1234,6 +1238,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         activityViewer.sessionDidChange(base: base, current: dir)
         jlog("Jarvis: session \(dir.lastPathComponent) (\(dir.path)).")
         pruneRetainedSessions(base: base, current: dir)
+    }
+
+    /// Read the persisted control plane once and freeze it as the next revision.
+    ///
+    /// This is the only place preferences reach a coaching attempt. Everything a turn needs is
+    /// resolved here, at Start or at an explicit Settings boundary, so no attempt reads storage
+    /// (wiki/lean-coaching-core.md, Phase 4).
+    private func freshSessionPlan() -> SessionPlan {
+        planRevision &+= 1
+        return SessionPlan(revision: planRevision, screen: screenPreferences.selection)
+    }
+
+    /// An explicit Settings edit takes effect at the next attempt. A turn already running keeps the
+    /// revision it snapshotted, and nothing here rewrites a persisted preference.
+    private func reapplySessionPlan() {
+        coachDriver?.updatePlan(freshSessionPlan())
     }
 
     /// Bound the session directory, off the Start path.

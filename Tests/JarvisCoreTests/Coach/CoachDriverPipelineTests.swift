@@ -66,7 +66,7 @@ final class FakeScreen: ScreenCapturing, @unchecked Sendable {
     init(payload: String = "ZmFrZS1qcGVn", recognizedText: String? = nil) { // "fake-jpeg"
         self.payload = payload; self.recognizedText = recognizedText
     }
-    func capture() -> ScreenSnapshot? {
+    func capture(_ selection: ScreenCaptureSelection) -> ScreenSnapshot? {
         captureCount += 1
         return ScreenSnapshot(imageBase64: payload, recognizedText: recognizedText)
     }
@@ -74,7 +74,7 @@ final class FakeScreen: ScreenCapturing, @unchecked Sendable {
 }
 
 final class UnavailableScreen: ScreenCapturing, @unchecked Sendable {
-    func capture() -> ScreenSnapshot? { nil }
+    func capture(_ selection: ScreenCaptureSelection) -> ScreenSnapshot? { nil }
     func cancelCapture() {}
 }
 
@@ -87,7 +87,7 @@ final class GatedScreen: ScreenCapturing, @unchecked Sendable {
     private(set) var cancelCount = 0
     let payload: String
     init(payload: String = "ZmFrZS1qcGVn") { self.payload = payload }
-    func capture() -> ScreenSnapshot? {
+    func capture(_ selection: ScreenCaptureSelection) -> ScreenSnapshot? {
         captureCount += 1
         entered.signal()
         release.wait()
@@ -117,7 +117,7 @@ final class HeldCleanupScreen: ScreenCapturing, @unchecked Sendable {
         lock.withLock { storedCancelCount }
     }
 
-    func capture() -> ScreenSnapshot? {
+    func capture(_ selection: ScreenCaptureSelection) -> ScreenSnapshot? {
         lock.withLock { storedCaptureCount += 1 }
         entered.signal()
         allowCleanup.wait()

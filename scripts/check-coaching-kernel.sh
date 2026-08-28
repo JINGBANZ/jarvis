@@ -15,9 +15,12 @@ cd "$(dirname "$0")/.."
 #   Transcription/  finalized transcript admission and the transcription ports
 #   Triggers/       trigger and turn-substance policy feeding the scheduler
 #   Overlay/        the enabled overlay output port (delivery itself; the AppKit panels in
-#                   Sources/JarvisOverlay are the deliberately thin OS-bound shell outside Core)
+#                   Sources/JarvisOverlay are the deliberately thin OS-bound shell outside Core).
+#                   Overlay *appearance* is a preference store, so it lives in Config/ with the
+#                   others and is control plane, not delivery.
 #   Audio/          capture-side buffering and speech-activity policy ahead of admission
 #   Support/        Clock, retry schedule, and task plumbing the kernel depends on
+#   Config/ is NOT kernel: it is the control plane the kernel is handed a frozen snapshot of.
 #   Brain/          the BrainClient port and route/model types. Core describes brains and never
 #                   runs one: every concrete adapter — the OpenAI URLSession transport and the
 #                   local-agent CLI subtree with its Process plumbing — lives in
@@ -118,8 +121,16 @@ check() {
     fi
 }
 
+# Control-plane storage. Preferences, secrets, and provider discovery are read at Start or at an
+# explicit between-attempt boundary and frozen into an immutable `SessionPlan` revision; a coaching
+# turn is handed the frozen value. Reading a preference inside an attempt would let a coaching
+# outcome depend on disk latency and on whichever value happened to be current partway through the
+# turn — exactly the dependency the Lean Coaching Path Rule exists to remove.
+storage_pattern='\bUserDefaults\b|\bBrainPreferences\b|\bScreenCapturePreferences\b|\bTranscriptionPreferences\b|\bOverlayAppearance\b|\bSecretStore\b'
+
 check "OS reach-through" "$os_pattern" "${kernel_paths[@]}"
 check "evaluator/sealed-session reach-through" "$sealed_pattern" "${kernel_paths[@]}"
+check "control-plane storage reach-through" "$storage_pattern" "${kernel_paths[@]}"
 check "diagnostic-admission OS reach-through" "$os_pattern" "${admission_paths[@]}"
 
 echo "Coaching-kernel dependency guard passed."

@@ -187,7 +187,7 @@ editing.
 | 1 — Evidence foundation | **Built** in [#197](https://github.com/JINGBANZ/jarvis/issues/197) | Generalize the settled audit transport into `SessionEvidence` and route diagnostics through it without another worker | Activity remains on its existing path until Phase 2 |
 | 2 — Activity projection | **Built** in [#198](https://github.com/JINGBANZ/jarvis/issues/198), [#199](https://github.com/JINGBANZ/jarvis/issues/199), [#200](https://github.com/JINGBANZ/jarvis/issues/200) | Render and persist Activity through `SessionEvent`, show incomplete evidence in the Activity window, and remove Activity's independent persistence path | Human copy remains a closed safe projection; no debug detail enters Activity |
 | 3 — Offline work | **Built**: evaluation extraction in [#202](https://github.com/JINGBANZ/jarvis/issues/202), pruning off Start in [#201](https://github.com/JINGBANZ/jarvis/issues/201); preemptible compaction shipped earlier in [#187](https://github.com/JINGBANZ/jarvis/pull/187) | Give evaluation a shared compiler boundary when justified by the app and `EvalPrep`; make history compaction preemptible and move pruning off Start | Failure keeps full history and surviving session evidence |
-| 4 — Plans and adapters | OpenAI provider extraction **built** in [#205](https://github.com/JINGBANZ/jarvis/issues/205) and screen-capture adapter move **built** in [#204](https://github.com/JINGBANZ/jarvis/issues/204); plan revisions, the local-agent move in [#206](https://github.com/JINGBANZ/jarvis/issues/206), and the capture-heartbeat split in [#203](https://github.com/JINGBANZ/jarvis/issues/203); plan revisions remain the approved destination | Use immutable plan revisions at explicit between-attempt boundaries and move provider, process, screen, and file adapters outward | Live setting changes and fresh-attempt routing semantics remain intact |
+| 4 — Plans and adapters | **Built**: screen-capture adapter move ([#204](https://github.com/JINGBANZ/jarvis/issues/204)), OpenAI extraction ([#205](https://github.com/JINGBANZ/jarvis/issues/205)), local-agent move ([#206](https://github.com/JINGBANZ/jarvis/issues/206)), capture-heartbeat split ([#203](https://github.com/JINGBANZ/jarvis/issues/203)), immutable plan revisions ([#207](https://github.com/JINGBANZ/jarvis/issues/207)) | Use immutable plan revisions at explicit between-attempt boundaries and move provider, process, screen, and file adapters outward | Live setting changes and fresh-attempt routing semantics remain intact |
 | 5 — Decomposition | Approved destination | Split the `CoachDriver` facade and `AppDelegate` only after ports and state ownership settle | Structure changes; observable coaching and lifecycle behavior do not |
 
 ## Phase 1 Implementation Contract
@@ -877,6 +877,73 @@ consumers. The rename is the smaller half; the deliverable is the test that prov
 - The asymmetry test passes with a healthy, blocked/full, and failing evidence destination.
 - The Gate passes: `swift build && ./scripts/run-tests.sh`, plus live smoke of capture readiness and
   system-audio degradation to microphone-only.
+
+## Phase 4 Implementation Contract — Immutable plan revisions
+
+The last Phase 4 slice ([issue #207](https://github.com/JINGBANZ/jarvis/issues/207)) is the control
+plane half of the Lean Coaching Path Rule: preferences are read at Start or at an explicit
+between-attempt boundary, frozen into an immutable revision, and a coaching turn never reads
+storage.
+
+### Target shape
+
+- `SessionPlan` is the immutable revision: a monotonic `revision` identity plus the frozen
+  `ScreenCaptureSelection` a turn needs. `ScreenCapturePreferences.selection` is the one place the
+  persisted store is read.
+- `ScreenCapturing.capture(_ selection:)` takes the frozen selection. The adapters — `ScreenCaptureCLI`
+  and `WindowScopedScreenCapture` — no longer hold a preference store at all, so "no attempt reads
+  storage" is structural rather than a convention. Before this, both read scope and display index
+  from `UserDefaults` at capture time, inside the attempt.
+- `CoachDriver` holds the plan under `stateLock` and snapshots it into `AttemptBrain` alongside the
+  target. One attempt, one revision — including every `capture_screen` continuation.
+- `CoachDriver.updatePlan(_:)` is the declared boundary. `AppDelegate.freshSessionPlan()` builds a
+  revision at Start; `reapplySessionPlan()` installs one when the Screen settings change.
+- `OverlayAppearance` moved from `Overlay/` to `Config/` where the other preference stores live. It
+  is control plane, not delivery, and misfiling it was what previously put a `UserDefaults` reader
+  inside a kernel-guarded directory.
+
+### Expected behavior
+
+- The route half of the control plane was already frozen this way through `ConfiguredBrainRoute`,
+  built from preferences, secrets, and provider discovery at Start or at a Settings reapply. That is
+  unchanged: a live Settings edit still installs a fresh route for the next attempt, a failed
+  preflight still surfaces the fixed *settings change not applied* notice while the existing session
+  continues, and a credential refresh still gates stale attempts without superseding committed route
+  health.
+- [Fresh-attempt recovery and routing](#fresh-attempt-recovery-and-routing) is untouched: one
+  snapshotted target per attempt, no in-attempt replay or provider switch, three failed attempts to
+  exhaust a temporary or unknown failure, immediate exhaustion only for a proven permanent
+  provider-boundary failure, forward-only advance, and no rewriting of saved preferences.
+- Runtime health never installs a plan revision. Only an explicit user edit does.
+- **Timing changed, deliberately.** A screen-capture setting used to apply to the very next
+  screenshot, which could be the second capture inside a turn already in progress. It now applies to
+  the next attempt. The Settings card says so ("Applied to the next coaching turn").
+
+### Failure and accepted degradation
+
+- Nothing new and no data loss. A plan is a value: installing one cannot fail, cannot block, and has
+  no failure mode to report.
+- A session with no configured control plane runs against `SessionPlan.default`, which is what the
+  persisted defaults produce — active-window capture on the main display.
+
+### Non-goals
+
+- Folding the route, secrets, or provider discovery into `SessionPlan`. They are already frozen at
+  the same boundaries by `ConfiguredBrainRoute`; restructuring them into one value would be churn
+  with no behavior change, and the rule they have to satisfy is already satisfied.
+- Any new revision lifecycle, rollback, or scheduling. The boundary is "the next attempt", and an
+  attempt already running keeps what it snapshotted.
+- Changing what any preference means, its default, or its clamping.
+
+### Completion criteria
+
+- `scripts/check-coaching-kernel.sh` rejects `UserDefaults`, every preference store, and
+  `SecretStore` inside the kernel, so a reintroduced storage read fails the Gate.
+- `SessionPlanTests` prove a revision installed mid-attempt does not reach that attempt's second
+  capture, that the next attempt does run against it, and that the selection is resolved from the
+  persisted store exactly at the boundary.
+- The Gate passes: `swift build && ./scripts/run-tests.sh`, plus live smoke of a Settings change
+  applied to a running session and a failed preflight.
 
 ## Source Handoff
 

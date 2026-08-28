@@ -8,11 +8,15 @@ final class DisplaySection: NSObject, SettingsSection {
     let fillsTab = true
 
     private let preferences: ScreenCapturePreferences
+    /// Called after an edit is persisted so the host can freeze a fresh control-plane revision for
+    /// the next attempt. A turn already running keeps the revision it snapshotted.
+    private let onChange: () -> Void
     private var popup: NSPopUpButton?
     private var screenObserver: NSObjectProtocol?
 
-    init(preferences: ScreenCapturePreferences) {
+    init(preferences: ScreenCapturePreferences, onChange: @escaping () -> Void = {}) {
         self.preferences = preferences
+        self.onChange = onChange
     }
 
     func makeView() -> NSView {
@@ -29,7 +33,7 @@ final class DisplaySection: NSObject, SettingsSection {
         let card = SettingsCardView(
             frame: NSRect(x: 0, y: 0, width: 712, height: cardHeight))
         card.translatesAutoresizingMaskIntoConstraints = false
-        card.setHeader(title: "Screen capture", detail: "Applied to the next capture")
+        card.setHeader(title: "Screen capture", detail: "Applied to the next coaching turn")
         let row = SettingsRowView(
             title: "Capture scope",
             detail: "Active window is the most private option",
@@ -143,5 +147,6 @@ final class DisplaySection: NSObject, SettingsSection {
             preferences.scope = .entireDisplay
             preferences.displayIndex = row
         }
+        onChange()
     }
 }

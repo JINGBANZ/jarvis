@@ -28,6 +28,10 @@ public final class CoachDriver: @unchecked Sendable {
     private let maxToolIterations = 4
 
     private let stateLock = NSLock()
+    /// The control-plane snapshot new attempts run against. Installed at Start and at explicit
+    /// between-attempt boundaries only; an attempt keeps the revision it snapshotted for its whole
+    /// tool loop, so a Settings edit can never change what a turn already started doing.
+    private var plan: SessionPlan
     private var routeRevision: UInt = 0
     /// Advances only when an explicit Settings edit replaces route topology. Credential refreshes
     /// use `routeRevision` for stale attempt gating but must not supersede committed route health.
@@ -71,6 +75,9 @@ public final class CoachDriver: @unchecked Sendable {
     // Module-visible only because `BrainSelectionStep` carries one; see the note on the route
     // delivery types below.
     struct AttemptBrain {
+        /// Frozen with the target: every capture in this attempt, including a `capture_screen`
+        /// continuation, runs against this one revision.
+        let plan: SessionPlan
         let routeRevision: UInt
         let routeTopologyRevision: UInt
         let routeIndex: Int
@@ -173,9 +180,11 @@ public final class CoachDriver: @unchecked Sendable {
         clock: Clock,
         sessionStart: TimeInterval? = nil,
         coachingAttempts: (any CoachingAttemptAuditing)? = nil,
+        plan: SessionPlan = .default,
         automaticAttemptDelay: AutomaticAttemptDelay? = nil,
         activity: (any ActivityEventRecording)? = nil
     ) {
+        self.plan = plan
         self.activity = activity
         self.config = config
         self.transcript = transcript
@@ -192,6 +201,16 @@ public final class CoachDriver: @unchecked Sendable {
     private static let defaultAutomaticAttemptDelay: AutomaticAttemptDelay = { sequence in
         let seconds = min(0.5 * pow(2, Double(max(0, sequence - 1))), 4)
         try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+    }
+
+    /// Install a fresh control-plane revision for the next attempt. This is the declared
+    /// between-attempt boundary: an attempt already running keeps the revision it snapshotted, so a
+    /// Settings edit never takes effect mid-turn. Runtime health never calls this — only an explicit
+    /// user edit does, and it never rewrites the persisted preference either.
+    public func updatePlan(_ plan: SessionPlan) {
+        stateLock.lock()
+        self.plan = plan
+        stateLock.unlock()
     }
 
     /// A valid explicit Settings edit installs a fresh route for the next attempt. It never rolls
@@ -570,6 +589,8 @@ public final class CoachDriver: @unchecked Sendable {
                 pendingTransitionOrigin = nil
             }
             step.selected = AttemptBrain(
+                // Snapshotted under the same lock as the target: one attempt, one revision.
+                plan: plan,
                 routeRevision: routeRevision,
                 routeTopologyRevision: routeTopologyRevision,
                 routeIndex: index,
@@ -978,7 +999,7 @@ public final class CoachDriver: @unchecked Sendable {
                 activity?.record(.manualHint(prompt: prompt))
             }
             let screen = self.screen
-            let shot = await Self.captureScreen(using: screen)
+            let shot = await Self.captureScreen(using: screen, selecting: attempt.plan.screen)
             if Task.isCancelled {
                 jlog("… attempt cancelled (stopped) after capture")
                 return AttemptExecution(id: attemptID, result: .cancelled)
@@ -1094,7 +1115,7 @@ public final class CoachDriver: @unchecked Sendable {
                 switch call {
                 case .captureScreen(let callID):
                     let screen = self.screen
-                    let shot = await Self.captureScreen(using: screen)
+                    let shot = await Self.captureScreen(using: screen, selecting: attempt.plan.screen)
                     if Task.isCancelled {
                         jlog("… attempt cancelled (stopped) after capture")
                         return .cancelled
@@ -1200,10 +1221,13 @@ public final class CoachDriver: @unchecked Sendable {
     /// Screen capture is an OS-bound synchronous edge, so run it off the cooperative executor.
     /// Cancellation asks the capture adapter to terminate its helper, then waits for `capture()` to
     /// return so the attempt cannot outlive cleanup of screen-derived files.
-    private static func captureScreen(using screen: ScreenCapturing) async -> ScreenSnapshot? {
+    private static func captureScreen(
+        using screen: ScreenCapturing,
+        selecting selection: ScreenCaptureSelection
+    ) async -> ScreenSnapshot? {
         let capture = Task.detached(priority: .userInitiated) { () -> ScreenSnapshot? in
             guard !Task.isCancelled else { return nil }
-            return screen.capture()
+            return screen.capture(selection)
         }
         return await withTaskCancellationHandler {
             // Await the producer itself. A cancelled AsyncStream consumer returns immediately and
