@@ -29,7 +29,7 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
     /// Fired when transcription becomes unusable, either from an unrecoverable provider rejection or
     /// after reconnection is abandoned, so the app can stop instead of lying green.
     var onTerminalFailure: (@Sendable (TranscriptionFailureReason) -> Void)?
-    var onCaptureContinuity: (@Sendable (CaptureReadinessMonitor.Signal) -> Void)?
+    var onCaptureHeartbeat: (@Sendable (CaptureHeartbeat) -> Void)?
 
     private let reconnectSchedule = RetrySchedule(
         maximumRetries: 6, initialDelay: 1, maximumDelay: 30)
@@ -139,8 +139,8 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         self.continuityReporter = RealtimeContinuityReporter(
             speaker: speaker, clock: clock, sessionStart: sessionStart)
         super.init()
-        continuityReporter.onCaptureContinuity = { [weak self] signal in
-            self?.onCaptureContinuity?(signal)
+        continuityReporter.onCaptureHeartbeat = { [weak self] signal in
+            self?.onCaptureHeartbeat?(signal)
         }
         self.coachingCoordinator = TranscriptionCoachingCoordinator(
             speaker: speaker,

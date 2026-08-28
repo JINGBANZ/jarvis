@@ -896,19 +896,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .transcriptionEndpoint(stream: .microphone, state: .connecting),
             .transcriptionEndpoint(stream: .system, state: .connecting),
         ], for: readinessSession)
-        transcriber.onCaptureContinuity = { [weak self, weak transcriber] signal in
+        transcriber.onCaptureHeartbeat = { [weak self, weak transcriber] signal in
             guard let transcriber else { return }
             Task { @MainActor [weak self] in
                 guard let self, self.transcriber === transcriber else { return }
-                self.handleCaptureContinuity(
+                self.handleCaptureHeartbeat(
                     signal, for: .microphone, readinessSession: readinessSession)
             }
         }
-        themTranscriber.onCaptureContinuity = { [weak self, weak themTranscriber] signal in
+        themTranscriber.onCaptureHeartbeat = { [weak self, weak themTranscriber] signal in
             guard let themTranscriber else { return }
             Task { @MainActor [weak self] in
                 guard let self, self.themTranscriber === themTranscriber else { return }
-                self.handleCaptureContinuity(
+                self.handleCaptureHeartbeat(
                     signal, for: .system, readinessSession: readinessSession)
             }
         }
@@ -1148,10 +1148,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         captureReadiness = nil
     }
 
-    /// Fold one content-free capture observation into the focused monitor, then publish only its typed
-    /// output to the overall composition reducer.
-    private func handleCaptureContinuity(
-        _ signal: CaptureReadinessMonitor.Signal,
+    /// Fold one capture heartbeat into the focused monitor, then publish only its typed output to
+    /// the overall composition reducer. This is the critical branch: everything here is in-memory
+    /// policy over the heartbeat value, with no read of the evidence queue or a persisted file.
+    private func handleCaptureHeartbeat(
+        _ heartbeat: CaptureHeartbeat,
         for stream: CaptureReadinessMonitor.Stream,
         readinessSession: JarvisReadiness.Session
     ) {
@@ -1159,8 +1160,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let observedAt = clock.now() - captureReadinessStart
         let hadFirstFrame = captureReadiness.hasFirstFrame(stream)
         let effects = captureReadiness.note(
-            signal, for: stream, at: observedAt)
-        if case .captured(let sampleCount) = signal, sampleCount > 0 {
+            heartbeat, for: stream, at: observedAt)
+        if case .frames(let sampleCount) = heartbeat, sampleCount > 0 {
             if !hadFirstFrame {
                 jlog("Jarvis capture readiness [\(stream.rawValue)]: "
                      + "capture=1/\(sampleCount), first=\(String(format: "%.3fs", observedAt))")

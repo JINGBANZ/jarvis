@@ -755,6 +755,68 @@ contracts before implementation.
 - The Gate passes: `swift build && ./scripts/run-tests.sh`. Live smoke verification of one OpenAI
   coaching turn stays in the standard app smoke, performed by a human.
 
+## Phase 4 Implementation Contract — Capture heartbeat split
+
+The third Phase 4 slice ([issue #203](https://github.com/JINGBANZ/jarvis/issues/203)) names the
+content-free audio-frame-progress observation **capture heartbeat** and gives it exactly two one-way
+consumers. The rename is the smaller half; the deliverable is the test that proves the asymmetry.
+
+### Target shape
+
+- `CaptureHeartbeat` is the Core value: `.frames(sampleCount:)` or `.stalled`, and nothing else. No
+  amplitude, no PCM, no transcript crosses the boundary, and `evidenceDescription` is the only text
+  the evidence copy ever carries.
+- `CaptureHeartbeatGate` holds the promotion latch — the first frame, and the first frame after a
+  stall — moved out of `RealtimeContinuityReporter` into Core. It is not a second counter: it
+  decides *when* the witness's existing frame evidence carries new information, and it holds no
+  totals of its own. Moving it inward gave both capture adapters one implementation and made the
+  latch drivable by Foundation-only tests.
+- `CaptureReadinessMonitor.note(_:for:at:)` takes the heartbeat directly. This is the critical
+  branch: in-memory policy over the value, with no read of the evidence queue or a persisted file —
+  a rule the kernel guard already enforces over `CaptureReadinessMonitor.swift` and the witness.
+- `RealtimeContinuityReporter.emit(_:)` is the one fan-out point. The critical consumer runs first
+  and unconditionally; the evidence copy — one `jlog` line, which since Phase 1 *is* nonblocking
+  admission to `SessionEvidence` — follows. That ordering is what makes the asymmetry structural
+  rather than a convention.
+
+### Expected behavior
+
+- Capture readiness, microphone-only degradation, and the terminal microphone stop behave exactly as
+  before. A zero-length callback is still not health; positive sample progress is still health
+  regardless of amplitude, so valid digital silence still counts.
+- Each promoted heartbeat now also appears in `jarvis-debug.log` as
+  `Jarvis capture heartbeat [<stream>, <boundary>]: frames=N | stalled`, so an agent can reconstruct
+  frame health after the fact.
+- Raw microphone audio is still never archived, and the heartbeat carries no audio content.
+
+### Failure and accepted degradation
+
+- Losing, blocking, or failing the evidence copy makes the session's record partial and nothing
+  else. `CaptureHeartbeatTests.evidencePressureCannotChangeReadinessDegradationOrStop` drives one
+  fixed script — both streams reach ready, the system stream degrades, the microphone stops — under
+  a healthy, a blocked-and-overflowing, and a write-failing evidence destination, and compares the
+  complete readiness/effect/unavailability sequence against a run with no evidence at all.
+- Admission is nonblocking, so emitting the copy is safe on the realtime audio callback it is
+  emitted from.
+
+### Non-goals
+
+- Renaming `AudioContinuityWitness`. The heartbeat is one projection of it; the witness also covers
+  delivery lag, socket generations, replay-buffer eviction, and local-activity matching, none of
+  which is a heartbeat.
+- A typed persisted heartbeat record, a counter stream in the Activity window, or any new capture
+  telemetry. The copy is a projection of the value the critical branch already reads.
+- Changing readiness thresholds, stall thresholds, degradation rules, or the recovery suspension.
+
+### Completion criteria
+
+- Naming is aligned to *capture heartbeat* in code, tests, and this page; no `CapturePulse`,
+  `Signal`, or `onCaptureContinuity` spelling survives.
+- The gate's promotion rule and the content-free evidence text are unit-tested.
+- The asymmetry test passes with a healthy, blocked/full, and failing evidence destination.
+- The Gate passes: `swift build && ./scripts/run-tests.sh`, plus live smoke of capture readiness and
+  system-audio degradation to microphone-only.
+
 ## Source Handoff
 
 The implementation agent should begin with these current boundaries:
@@ -772,7 +834,8 @@ The implementation agent should begin with these current boundaries:
   [`SessionEvidenceIndex.swift`](../Sources/JarvisEvaluation/SessionEvidenceIndex.swift) is the
   evaluator's descriptive index over persisted files. It is an offline consumer in the extracted
   `JarvisEvaluation` target, not the future live `SessionEvidence` admission stack.
-- Capture-heartbeat source and critical policy:
+- Capture-heartbeat value, promotion latch, source, and critical policy:
+  [`CaptureHeartbeat.swift`](../Sources/JarvisCore/Diagnostics/CaptureHeartbeat.swift),
   [`AudioContinuityWitness.swift`](../Sources/JarvisCore/Diagnostics/AudioContinuityWitness.swift),
   [`RealtimeContinuityReporter.swift`](../Sources/JarvisApp/Capture/RealtimeContinuityReporter.swift),
   and [`CaptureReadinessMonitor.swift`](../Sources/JarvisCore/Diagnostics/CaptureReadinessMonitor.swift).

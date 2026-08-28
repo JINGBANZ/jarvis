@@ -15,7 +15,7 @@ public protocol TranscriptionSession: AnyObject, Sendable {
     /// Content-free capture progress/stall edges derived from this endpoint's continuity witness.
     /// They let Core combine positive sample-count progress with provider readiness without exposing
     /// amplitude or PCM. See `CaptureReadinessMonitor`.
-    var onCaptureContinuity: (@Sendable (CaptureReadinessMonitor.Signal) -> Void)? { get set }
+    var onCaptureHeartbeat: (@Sendable (CaptureHeartbeat) -> Void)? { get set }
     func connect()
     func stop()
     func recordCapturedAudio(

@@ -16,7 +16,7 @@ private final class BenchmarkSessionSpy: TranscriptionSession, @unchecked Sendab
     var onTranscriptionWorkChanged: (@Sendable (Bool) -> Void)?
     var onConnectionStateChange: (@Sendable (TranscriptionConnectionState) -> Void)?
     var onTerminalFailure: (@Sendable (TranscriptionFailureReason) -> Void)?
-    var onCaptureContinuity: (@Sendable (CaptureReadinessMonitor.Signal) -> Void)?
+    var onCaptureHeartbeat: (@Sendable (CaptureHeartbeat) -> Void)?
     private let lock = NSLock()
     private var captured: [(UInt64, Int, TimeInterval)] = []
     private var sent: [(Data, UInt64, TimeInterval)] = []

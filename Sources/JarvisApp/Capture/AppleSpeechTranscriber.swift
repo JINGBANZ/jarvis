@@ -27,7 +27,7 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
     var onTranscriptionWorkChanged: (@Sendable (Bool) -> Void)?
     var onConnectionStateChange: (@Sendable (TranscriptionConnectionState) -> Void)?
     var onTerminalFailure: (@Sendable (TranscriptionFailureReason) -> Void)?
-    var onCaptureContinuity: (@Sendable (CaptureReadinessMonitor.Signal) -> Void)?
+    var onCaptureHeartbeat: (@Sendable (CaptureHeartbeat) -> Void)?
 
     private struct BufferedAudio {
         let data: Data
@@ -133,8 +133,8 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
                 self?.onTranscriptionWorkChanged?(hasPendingWork)
             },
             activity: activity)
-        continuityReporter.onCaptureContinuity = { [weak self] signal in
-            self?.onCaptureContinuity?(signal)
+        continuityReporter.onCaptureHeartbeat = { [weak self] signal in
+            self?.onCaptureHeartbeat?(signal)
         }
     }
 
