@@ -402,7 +402,7 @@ reference to a concrete provider is a compile error rather than a review catch. 
 pure move — no request-shape, classification, traffic-recording, timeout, or route/attempt
 behavior changes. The local-agent CLI subtree
 ([issue #206](https://github.com/JINGBANZ/jarvis/issues/206)), immutable plan revisions, and the
-remaining process, screen, and file adapters are the rest of Phase 4 and freeze their own
+remaining process and file adapters are the rest of Phase 4 and freeze their own
 contracts before implementation.
 
 ### Target shape

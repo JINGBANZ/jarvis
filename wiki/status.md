@@ -272,8 +272,8 @@ Tested `JarvisCore` + `JarvisBrainProviders` + `JarvisEvaluation` + `JarvisOverl
 
 - **Lean coaching core Phases 1–5** — the approved destination and slice contracts are in
   [lean-coaching-core.md](./lean-coaching-core.md). Phase 0 audit isolation, Phase 3's evaluation
-  extraction, and Phase 4's screen-capture adapter move are built; unified diagnostics, the
-  Activity projection, compaction and pruning maintenance, plan revisions with the remaining
-  provider/file adapter moves, and final coordinator decomposition remain future work.
+  extraction, and Phase 4's OpenAI provider and screen-capture adapter moves are built; unified
+  diagnostics, the Activity projection, compaction and pruning maintenance, plan revisions with the
+  remaining local-agent/file adapter moves, and final coordinator decomposition remain future work.
 - **Universal binary** — `Sources/CJarvisAEC/lib/libjarvis-aec.a` is arm64-only; `lipo` in an x86_64 slice if Intel is ever needed.
 - **Neural double-talk canceller** (DTLN / Muesli-style on the same aligned streams) — the escalation if AEC3 over-attenuates the user under loud far audio in practice.
