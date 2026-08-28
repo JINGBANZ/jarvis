@@ -29,6 +29,13 @@ let package = Package(
     ],
     targets: [
         .target(name: "JarvisCore"),
+        // Concrete brain-provider adapters, seeded with the OpenAI Responses client and its
+        // HTTP failure classification. Extracted per wiki/lean-coaching-core.md Phase 4 (OpenAI
+        // slice): Core keeps the provider-neutral BrainClient port, targets, failures, model
+        // catalog, workload timeouts, and attempt contracts; the URLSession transport lives here
+        // and JarvisApp composes providers at Start. Foundation-only; depends inward on JarvisCore.
+        // The local-agent CLI subtree joins in its own slice (#206).
+        .target(name: "JarvisBrainProviders", dependencies: ["JarvisCore"]),
         // The sealed-session evaluation stack (evidence index, metrics, transcript rendering, the
         // agentic evaluator, report page). Extracted per wiki/lean-coaching-core.md Phase 3: two
         // executable consumers (JarvisApp's Evaluate flow and EvalPrep) plus a compiler-enforced
@@ -61,8 +68,8 @@ let package = Package(
         .executableTarget(
             name: "JarvisApp",
             dependencies: [
-                "JarvisCore", "JarvisEvaluation", "JarvisOverlay", "JarvisScreenCapture",
-                "CJarvisAEC",
+                "JarvisCore", "JarvisBrainProviders", "JarvisEvaluation", "JarvisOverlay",
+                "JarvisScreenCapture", "CJarvisAEC",
                 .product(name: "Sparkle", package: "Sparkle"),
             ],
             swiftSettings: jarvisAppSwiftSettings,
@@ -82,7 +89,14 @@ let package = Package(
         ),
         .testTarget(
             name: "JarvisCoreTests",
-            dependencies: ["JarvisCore"]
+            // JarvisBrainProviders is linked solely so the coaching parity harness composes the
+            // kernel with the real OpenAI adapter over scripted transports — the same composition
+            // JarvisApp performs at Start. Core's own units keep testing against fakes.
+            dependencies: ["JarvisCore", "JarvisBrainProviders"]
+        ),
+        .testTarget(
+            name: "JarvisBrainProvidersTests",
+            dependencies: ["JarvisBrainProviders", "JarvisCore"]
         ),
         .testTarget(
             name: "JarvisEvaluationTests",

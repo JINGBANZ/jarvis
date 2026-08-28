@@ -22,7 +22,10 @@ public struct BrainFailure: Error, LocalizedError, Sendable, Equatable {
         self.detail = detail
     }
 
-    init(_ error: Error) {
+    /// Public because it is every provider adapter's classification entry point for errors it has
+    /// not proven anything about — including adapters composed outside this module
+    /// (`JarvisBrainProviders`).
+    public init(_ error: Error) {
         if let failure = error as? BrainFailure {
             self = failure
             return
@@ -30,37 +33,8 @@ public struct BrainFailure: Error, LocalizedError, Sendable, Equatable {
 
         // Everything—including new CLI exits, decoding faults, status-like NSError domains, and
         // unknown future errors—is a recoverable missed turn until a provider adapter proves
-        // otherwise with the explicit initializer or the typed factory below.
+        // otherwise with the explicit initializer or a typed adapter-side factory (such as the
+        // OpenAI HTTP classifier in `JarvisBrainProviders`).
         self.init(disposition: .temporary, detail: error.localizedDescription)
-    }
-
-    /// Classify a failed OpenAI Responses request at its adapter boundary. Statuses alone are only
-    /// permanent when they directly prove authentication, billing, access, or configuration cannot
-    /// recover. Request-local and unknown future 4xx responses deliberately stay temporary.
-    static func openAIHTTP(status: Int, errorCode: String?, errorType: String?,
-                           detail: String) -> BrainFailure {
-        let code = errorCode?.lowercased()
-        let type = errorType?.lowercased()
-        let permanentCodes: Set<String> = [
-            "account_deactivated",
-            "billing_hard_limit_reached",
-            "billing_not_active",
-            "insufficient_quota",
-            "invalid_api_key",
-            "model_not_found",
-            "organization_deactivated",
-            "permission_denied",
-            "unsupported_country_region_territory",
-        ]
-        let permanentTypes: Set<String> = [
-            "authentication_error",
-            "permission_error",
-        ]
-        let permanent = [401, 402, 403].contains(status)
-            || code.map(permanentCodes.contains) == true
-            || type.map(permanentTypes.contains) == true
-        return BrainFailure(
-            disposition: permanent ? .permanent : .temporary,
-            detail: detail)
     }
 }

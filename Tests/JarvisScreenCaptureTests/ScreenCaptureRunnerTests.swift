@@ -122,10 +122,7 @@ import Testing
         let runner = ScreenCaptureRunner(
             captureDirectory: directory,
             executable: executable)
-        let capture = Task.detached {
-            guard !Task.isCancelled else { return ScreenCaptureRunner.Outcome.cancelled }
-            return runner.capture(arguments: [])
-        }
+        let capture = captureOffPool(runner)
         let pid: pid_t
         do {
             try await waitForFile(pidFile)
@@ -181,7 +178,7 @@ import Testing
             captureDirectory: directory,
             executable: executable)
 
-        let capture = Task.detached { runner.capture(arguments: []) }
+        let capture = captureOffPool(runner)
         try await waitForFile(exitedFile, pollNanoseconds: 500_000)
         // Repeat across the window: with no pending-request latch, a request that arrives once the
         // call has returned is a no-op, so over-asking cannot itself poison the runner.
@@ -276,10 +273,7 @@ import Testing
         let runner = ScreenCaptureRunner(
             captureDirectory: directory,
             executable: executable)
-        let capture = Task.detached {
-            guard !Task.isCancelled else { return ScreenCaptureRunner.Outcome.cancelled }
-            return runner.capture(arguments: [])
-        }
+        let capture = captureOffPool(runner)
         do {
             try await waitForTransientJPEG(in: directory)
             let jpeg = try #require(try transientJPEGs(in: directory).first)
@@ -296,7 +290,26 @@ import Testing
         _ = await capture.value
     }
 
-    /// A detached task cancelled before `ScreenCaptureRunner` registers its command still needs a
+    /// `capture(arguments:)` blocks its calling thread in `waitUntilExit` until the helper dies,
+    /// and these tests park the helper on purpose. That wait must never hold a cooperative-executor
+    /// thread: the test body that observes the park and then requests cancellation runs on the same
+    /// width-limited pool, so on a small runner enough simultaneously parked captures leave no
+    /// thread for any release path and the whole test process deadlocks at 0% CPU (the CI hang the
+    /// 10-minute backstop kept cancelling). Park a GCD thread instead and keep the pool free.
+    private func captureOffPool(
+        _ runner: ScreenCaptureRunner
+    ) -> Task<ScreenCaptureRunner.Outcome, Never> {
+        Task {
+            guard !Task.isCancelled else { return .cancelled }
+            return await withCheckedContinuation { continuation in
+                DispatchQueue.global().async {
+                    continuation.resume(returning: runner.capture(arguments: []))
+                }
+            }
+        }
+    }
+
+    /// A capture task cancelled before `ScreenCaptureRunner` registers its command still needs a
     /// cancellation request after registration. Keep requesting until the task is joined so no
     /// failure path can return with the infinite fixture or a transient JPEG still alive.
     private func cancelAndAwait(

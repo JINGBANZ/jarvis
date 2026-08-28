@@ -29,8 +29,9 @@ cd "$(dirname "$0")/.."
 #                   places inside the kernel even though they live beside persistence code
 #
 # Deliberately outside the covered paths today; each joins with the slice that clears it:
-#   Brain/Adapters/ concrete provider adapters (URLSession, CLI Process). They are outside the
-#                   kernel by design and move outward with the Phase 4 adapter move; until then
+#   Brain/Adapters/ the local-agent CLI adapters (Process). They are outside the kernel by design
+#                   and move outward with the rest of the Phase 4 adapter move (the OpenAI
+#                   URLSession transport already lives in Sources/JarvisBrainProviders); until then
 #                   they legitimately hold the OS symbols this guard bans.
 #   Diagnostics/ (rest)
 #                   evidence persistence by definition; only the heartbeat/health files above are

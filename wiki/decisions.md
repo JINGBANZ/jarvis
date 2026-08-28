@@ -332,7 +332,7 @@
 - **Chose:** Replay the brain's **entire `output` array verbatim** (reasoning and `function_call` items whole — ids and any payload untouched, in order, the canonical `input.push(...response.output)` loop) on the tool loop's follow-up request. At commit, `CoachHistory` converts the passthrough: the `function_call` survives as the proven id-less synthetic call (so the committed `function_call_output` never orphans) and the reasoning is dropped — it lives only inside the turn that produced it, like screenshots.
 - **Why:** OpenAI's function-calling and reasoning guides require reasoning items to accompany a client-fulfilled tool call's output; dropping them (our old behavior, and a known ecosystem anti-pattern — the Agents SDK, Vercel AI SDK, and LangChain all round-trip them) discards the chain of thought mid-turn, so the model re-reasons over the screenshot from scratch: worse answers, more reasoning tokens, and OpenAI's own cookbook measured a 40%→80% cache-utilization gain from replaying them.
 - **Rejected:** (a) `previous_response_id` server threading — reintroduces the server-side conversation the 2026-07-07 decision removed. (b) `store:false` + `include: reasoning.encrypted_content` — the fully stateless variant; deferred with the existing `store:true` debuggability choice, and it's the same replay path when flipped. (c) Keeping reasoning items across turns — OpenAI ignores stale ones, they'd bloat every later request, and a mid-session brain-model switch invalidates them. (d) A generic SDK/agent-framework dependency to manage the loop — none exists for Swift, and owning the message list is where the harness's cost machinery lives.
-- **Detail:** `Sources/JarvisCore/Brain/Adapters/OpenAI/OpenAIBrainClient.swift` (verbatim extract/re-emit), `CoachDriver.swift` (whole-output threading), `CoachHistory.swift` (commit-time conversion), `Brain.swift` (`ChatMessage.rawItems`).
+- **Detail:** `Sources/JarvisBrainProviders/OpenAI/OpenAIBrainClient.swift` (verbatim extract/re-emit), `CoachDriver.swift` (whole-output threading), `CoachHistory.swift` (commit-time conversion), `Brain.swift` (`ChatMessage.rawItems`).
 
 ### 2026-07-16 — Local Claude Code / Codex CLIs as alternative brain providers
 
@@ -1996,3 +1996,31 @@
   cross-component coordination this design removes.
 - **Detail:** [lean-coaching-core.md → Phase 4 Implementation Contract](./lean-coaching-core.md#phase-4-implementation-contract--screen-capture-adapter-move),
   `Package.swift`, `Sources/JarvisScreenCapture/`, `scripts/check-coaching-kernel.sh`.
+
+### 2026-08-27 — The OpenAI brain adapter lives in its own JarvisBrainProviders target
+
+- **Chose:** Extract the concrete OpenAI Responses adapter — `OpenAIBrainClient` and its HTTP
+  permanence classification (`BrainFailure+OpenAI`) — from `JarvisCore` into the
+  `JarvisBrainProviders` library target, which depends inward on Core. `JarvisApp` composes it at
+  Start; its tests live in `JarvisBrainProvidersTests`. A pure move: no request-shape,
+  classification, traffic-recording, timeout, or route/attempt behavior changed, pinned by the
+  unchanged coaching parity harness, which still composes the kernel with the real adapter — now
+  imported from the provider target (`JarvisCoreTests` links it for exactly that harness).
+- **Chose:** Widen exactly one Core symbol to public: `BrainFailure.init(_:)`, the provider
+  adapters' unknown-failure → temporary classification entry point. The OpenAI-specific
+  `openAIHTTP` factory moved out of Core instead of widening: the statuses and error codes that
+  prove an unrecoverable OpenAI target are that adapter's reviewed boundary knowledge, not
+  provider-neutral domain, and nothing outside the adapter calls it.
+- **Why:** Concrete adapters were the bulk of the Brain subsystem, and the dependency direction
+  was the defect: Core contained the transports it should only describe. Extracting the smaller
+  adapter first proves the direction with a compiler-enforced boundary while the persisted route
+  and attempt semantics stay pinned by the parity harness.
+- **Rejected:** (a) A third, lower-level contracts target beneath Core (proposed by a review bot
+  during the evaluation extraction, declined by the owner) — the approved module boundaries have
+  provider and evaluation targets depending inward on Core's contracts. (b) Rewriting the parity
+  harness onto a fake brain to keep `JarvisCoreTests` provider-free — that weakens the harness's
+  proof that real adapter classification feeds the route. (c) Moving the local-agent CLI subtree
+  in the same PR — each half fits a single context window; it follows in
+  [#206](https://github.com/JINGBANZ/jarvis/issues/206).
+- **Detail:** [lean-coaching-core.md → Phase 4 Implementation Contract](./lean-coaching-core.md#phase-4-implementation-contract--openai-provider-extraction),
+  `Package.swift`, `Sources/JarvisBrainProviders/`.

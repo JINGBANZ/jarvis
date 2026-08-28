@@ -1,6 +1,7 @@
 import Foundation
 import Testing
-@testable import JarvisCore
+import JarvisBrainProviders
+import JarvisCore
 #if canImport(FoundationNetworking)
 import FoundationNetworking   // HTTPURLResponse lives here on non-Darwin (Core tests on Linux)
 #endif
@@ -392,7 +393,7 @@ private func speakResponseBody(arguments: String) -> Data {
     /// With a traffic log wired, a successful round trip lands in `brain-traffic.jsonl` — the raw
     /// eval pipeline input — tagged, with the request body and response body both present.
     @Test func successfulRoundTripIsRecordedToTrafficLog() async throws {
-        let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
+        let dir = tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         let traffic = await FileSessionAudit.readyForTesting(directory: dir)
         let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
                                        traffic: traffic, trafficTag: "coach",
@@ -412,7 +413,7 @@ private func speakResponseBody(arguments: String) -> Data {
 
     /// A transport failure still records the attempt (request + error, no response) and rethrows.
     @Test func transportErrorIsRecordedToTrafficLogAndRethrown() async throws {
-        let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
+        let dir = tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         let traffic = await FileSessionAudit.readyForTesting(directory: dir)
         let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
                                        traffic: traffic, trafficTag: "coach",

@@ -3,6 +3,9 @@ import Foundation
 import FoundationNetworking
 #endif
 @testable import JarvisCore
+// The real OpenAI adapter (over scripted transports) drives the scenario, so parity covers the
+// adapter's classification and traffic recording feeding the route — not a fake's imitation.
+import JarvisBrainProviders
 
 /// Drives one fixed, fully deterministic coaching scenario and captures everything optional
 /// evidence must never change: terminal coaching outcomes, the provider request sequence, overlay

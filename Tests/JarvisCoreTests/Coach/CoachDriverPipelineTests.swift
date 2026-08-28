@@ -197,7 +197,12 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 // that test's rows and nothing else. Being the only suite that *enables* the shared log was never
 // enough on its own: every driver alive anywhere in the process appended to whichever log happened
 // to be enabled, so a peer suite's rows landed in these snapshots.
-@Suite struct CoachDriverPipelineTests {
+// Serialized for the same reason as CoachDriverManualHintTests: the two tests here that use
+// `GatedScreen` / `HeldCleanupScreen` park their `capture()` until the test releases it, and the
+// driver runs that capture on a `Task.detached`, holding a cooperative-pool thread for the whole
+// park. Three such tests exist in the repository and a CI runner has three pool threads, so
+// overlapping parks can starve every release path. Cap this suite at one at a time.
+@Suite(.serialized) struct CoachDriverPipelineTests {
     private func makeDriver(activityLog: ActivityLog = ActivityLog(),
                             brain: BrainClient, brainProvider: BrainProvider? = nil,
                             summarizer: BrainClient? = nil,

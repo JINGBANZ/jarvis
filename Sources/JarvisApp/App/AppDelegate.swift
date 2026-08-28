@@ -1,4 +1,5 @@
 import AppKit
+import JarvisBrainProviders
 import JarvisCore
 import JarvisEvaluation
 import JarvisOverlay

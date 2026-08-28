@@ -1,4 +1,5 @@
 import Foundation
+import JarvisCore
 #if canImport(FoundationNetworking)
 import FoundationNetworking   // URLSession/URLRequest live here on non-Darwin (Core tests on Linux)
 #endif
