@@ -2056,6 +2056,15 @@
   on Quit to save the last row — evidence never owns app termination. (d) Renaming the transport
   types to `SessionEvidence*` — a rename touching every evaluator and test call site, changing no
   behavior; the wiki's "renaming is not a completion requirement" rule covers them too.
+- **Chose:** Scope the Activity projection by session identity. Moving Activity onto the worker
+  destroyed an ordering guarantee the old design had for free: `record` and `enable` used to be
+  FIFO on `ActivityLog`'s own serial queue, so a stopped session's rows always drained before the
+  next Start reset the projection. With records on the worker's queue and `enable` on the caller,
+  that no longer holds, and a stopped session's terminal row would latch the *new* session's end
+  marker — silently killing its window — while a partial old session would put an incomplete-record
+  notice on a healthy new one. Every projection entry point now takes the session it belongs to and
+  ignores calls from any other. The accepted cost is that a row still queued when its window rotates
+  is lost from history and marks its session partial, which only happens under back-pressure.
 - **Detail:** [session-audit.md](./session-audit.md),
   [lean-coaching-core.md → Phase 1 and Phase 2 contracts](./lean-coaching-core.md#phase-1-implementation-contract),
   `Sources/JarvisCore/Diagnostics/`.

@@ -493,9 +493,9 @@ final class SessionAuditWorker: @unchecked Sendable {
         guard let projection = session.activity else { return }
         var shotFilename: String?
         if let base64 = event.presentation.rendered.imageBase64,
-           projection.isRecording,
-           let data = Data(base64Encoded: base64, options: .ignoreUnknownCharacters) {
-            let name = projection.nextShotFilename()
+           projection.isRecording(for: session.id),
+           let data = Data(base64Encoded: base64, options: .ignoreUnknownCharacters),
+           let name = projection.nextShotFilename(for: session.id) {
             if ensureOpen(session) {
                 do {
                     try writer.write(data, filename: name, in: session.directory)
@@ -507,9 +507,22 @@ final class SessionAuditWorker: @unchecked Sendable {
                 session.health.markWriteFailure()
             }
         }
-        guard let row = projection.admit(
-            event.presentation, at: event.date, shotFilename: shotFilename)
-        else { return }
+        let row: ActivityLog.AdmittedRow
+        switch projection.admit(
+            event.presentation, at: event.date, shotFilename: shotFilename, for: session.id) {
+        case .row(let admitted):
+            row = admitted
+        case .sessionEnded:
+            // The terminal marker is final for a session; later rows are dropped by design.
+            return
+        case .notCurrent:
+            // The window rotated to the next session before this row drained, so it can never be
+            // given a chronology entry and is lost from history. Mark it rather than lose it
+            // silently: under worker back-pressure this is exactly the visible-partial case the
+            // uniform loss contract exists for.
+            session.health.markWriteFailure()
+            return
+        }
         if ensureOpen(session) {
             do {
                 try writer.append(
@@ -518,8 +531,8 @@ final class SessionAuditWorker: @unchecked Sendable {
                 session.health.markWriteFailure()
             }
         }
-        projection.publish(row)
-        projection.noteEvidence(isComplete: session.health.snapshot.isComplete)
+        projection.publish(row, for: session.id)
+        projection.noteEvidence(isComplete: session.health.snapshot.isComplete, for: session.id)
     }
 
     private func finalize(
@@ -536,7 +549,7 @@ final class SessionAuditWorker: @unchecked Sendable {
             ? .partial : .complete
         // The seal is the last honest moment to tell the window: a loss recorded after the final
         // row would otherwise never reach the human view of a session that is still on screen.
-        session.activity?.noteEvidence(isComplete: result == .complete)
+        session.activity?.noteEvidence(isComplete: result == .complete, for: session.id)
         do {
             try writer.replaceHealth(
                 try healthData(

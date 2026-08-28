@@ -10,11 +10,11 @@ extension ActivityLog {
     /// `close()` is the drain barrier that replaced the projection's deleted `flush()`.
     static func recordingSession(in directory: URL) -> (ActivityLog, FileSessionAudit) {
         let log = ActivityLog()
-        log.enable(directory: directory)
         let evidence = FileSessionAudit(
             directory: directory,
             worker: SessionAuditWorker(limits: .production, writer: SessionAuditFileWriter()),
             activity: log)
+        log.enable(directory: directory, session: evidence.sessionID)
         return (log, evidence)
     }
 }

@@ -357,11 +357,11 @@ import Testing
         // Enabled: a healthy handle projects every occurrence and closes complete.
         let projection = ActivityLog()
         defer { projection.disable() }
-        projection.enable(directory: enabledDirectory)
         let enabled = FileSessionAudit(
             directory: enabledDirectory,
             worker: SessionAuditWorker(limits: .production, writer: SessionAuditFileWriter()),
             activity: projection)
+        projection.enable(directory: enabledDirectory, session: enabled.sessionID)
         let enabledSnapshot = await CoachingParityHarness.run(
             observers: .init(activity: enabled))
         #expect(await enabled.close() == .complete)
@@ -375,12 +375,12 @@ import Testing
         // Blocked: the worker never leaves its first open for the whole coaching run.
         let blockedProjection = ActivityLog()
         defer { blockedProjection.disable() }
-        blockedProjection.enable(directory: blockedDirectory)
         let blockedWriter = BlockingOpenWriter()
         let blocked = FileSessionAudit(
             directory: blockedDirectory,
             worker: SessionAuditWorker(limits: .production, writer: blockedWriter),
             activity: blockedProjection)
+        blockedProjection.enable(directory: blockedDirectory, session: blocked.sessionID)
         await wait(for: blockedWriter.openEntered)
         let blockedSnapshot = await CoachingParityHarness.run(
             observers: .init(activity: blocked))
@@ -390,7 +390,6 @@ import Testing
         // Full: a one-slot mailbox behind a parked open drops Activity rows outright.
         let fullProjection = ActivityLog()
         defer { fullProjection.disable() }
-        fullProjection.enable(directory: fullDirectory)
         let fullWriter = BlockingOpenWriter()
         let full = FileSessionAudit(
             directory: fullDirectory,
@@ -398,6 +397,7 @@ import Testing
                 limits: .init(maxEventCount: 1, maxRetainedBytes: 8_192),
                 writer: fullWriter),
             activity: fullProjection)
+        fullProjection.enable(directory: fullDirectory, session: full.sessionID)
         await wait(for: fullWriter.openEntered)
         let fullSnapshot = await CoachingParityHarness.run(
             observers: .init(activity: full))
@@ -408,12 +408,12 @@ import Testing
         // Failing: the first Activity write fails; later rows still reach history.
         let failingProjection = ActivityLog()
         defer { failingProjection.disable() }
-        failingProjection.enable(directory: failingDirectory)
         let failingWriter = FailFirstAppendWriter()
         let failing = FileSessionAudit(
             directory: failingDirectory,
             worker: SessionAuditWorker(limits: .production, writer: failingWriter),
             activity: failingProjection)
+        failingProjection.enable(directory: failingDirectory, session: failing.sessionID)
         await wait(for: failingWriter.openCompleted)
         let failingSnapshot = await CoachingParityHarness.run(
             observers: .init(activity: failing))

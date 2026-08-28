@@ -388,6 +388,17 @@ wrapped. This is the point where Activity stops being a privileged failure domai
   write loses that row's place in history, and the session's health record reads `partial`.
 - A failed row is still pushed to the live window. Losing history is not the same as losing the
   screen the user is looking at.
+- **The projection is scoped by session identity.** The worker drains asynchronously, so a stopped
+  session's queued rows and its background close routinely land *after* a replacement Start has
+  rotated the window. Every projection entry point takes the session it belongs to and ignores a
+  call from any other, so late work from the old session can never reach the new session's window —
+  the same rule the envelope already applies to files. Without it, the old session's terminal row
+  would latch the *new* session's end marker and silently kill its window for the rest of the
+  session, and a partial old session would put an incomplete-record notice on a healthy new one.
+- The cost is a narrow, honest loss: a row still queued when its session's window rotates can no
+  longer be given a chronology entry, so it is lost from that session's history and the session is
+  marked partial. This only happens under worker back-pressure — normally the row drains in
+  microseconds, long before a human can press Start.
 - **Quit changed.** The session-end row now rides the evidence stack, and Quit seals without
   waiting, so a session ended by quitting the app may lose its terminal Activity row. That is the
   approved contract — Quit never waits for evidence — and the health marker records the session as

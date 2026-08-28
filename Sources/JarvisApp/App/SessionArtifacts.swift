@@ -58,13 +58,15 @@ final class SessionArtifacts {
         // Application Support/Jarvis left by another tool) keeps its mode, which would leak session-dir
         // names. Tighten it best-effort, mirroring FileSecretStore.setApiKey.
         try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: base.path)
-        ActivityLog.shared.enable(directory: dir)        // in-memory projection for this session
         // File creation and every later write run on the shared bounded evidence worker. Start only
         // creates a lightweight session handle and never waits for an older session's disk access.
         // The human-facing projection is composed here, not reached for inside the kernel: the
         // handle owns the one admission point, and ActivityLog renders what the worker hands it.
         let audit = FileSessionAudit(directory: dir, activity: ActivityLog.shared)
         sessionAudit = audit
+        // The projection rotates to this session by identity, so the previous session's still-
+        // draining rows and its background close land in its own files, never in this window.
+        ActivityLog.shared.enable(directory: dir, session: audit.sessionID)
         // Diagnostics join that same handle: <dir>/jarvis-debug.log, 0600, fresh, written by the
         // worker rather than by whichever thread called jlog.
         JarvisLog.attach(to: audit)

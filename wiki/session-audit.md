@@ -90,7 +90,13 @@ human that the evidence is incomplete.
 ## Attribution
 
 Every event is stamped with its session handle's identity at admission, so late work from a closing
-session can never be attributed to its replacement. Diagnostics follow the same rule: while a handle
+session can never be attributed to its replacement. That applies to both projections: the files are
+addressed by the originating session's directory, and the Activity window is scoped by the same
+identity, so a stopped session's still-queued rows and its background close cannot reach the window
+of the session that replaced it. A row that outlives its own window is lost from history and marks
+its session partial rather than surfacing somewhere it does not belong.
+
+Diagnostics follow the same rule: while a handle
 is attached, `jlog` lines are that session's; with no attachment, or once the attached handle is
 sealed, they reach the asynchronous process log only. A diagnostic is never guessed into whichever
 session happens to be newest — a mis-attributed diagnostic is worse evidence than a missing one.

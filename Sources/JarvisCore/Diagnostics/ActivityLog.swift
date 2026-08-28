@@ -78,6 +78,17 @@ public final class ActivityLog: @unchecked Sendable {
         let r: TimeInterval? // record/completion time (Unix seconds), for chronology diagnosis
     }
 
+    /// Why a row did not become a persistable row, so the worker can tell an intended drop from a
+    /// lost one. A session that already ended refuses later rows by design; a projection that has
+    /// rotated to the next session cannot give this row a chronology entry, and that loss is real.
+    enum Admission {
+        case row(AdmittedRow)
+        /// This session's terminal marker was already recorded. Dropping later rows is the contract.
+        case sessionEnded
+        /// The window moved on to another session before the worker drained this row.
+        case notCurrent
+    }
+
     /// One row that has been given its place in the session's chronology and is ready to be
     /// persisted and pushed. Building it is the projection's decision; writing it is the evidence
     /// worker's job.
@@ -103,6 +114,12 @@ public final class ActivityLog: @unchecked Sendable {
     private var sessionHasEnded = false
     private let df: DateFormatter
     private var dir: URL?         // nil ⇒ disabled (no observer pushes)
+    /// Which session is on screen. The worker drains asynchronously, so a stopped session's rows
+    /// and its close can arrive after a replacement Start has rotated this projection. Every entry
+    /// point below is scoped by this identity: late work from the old session reaches its own
+    /// files, never the new session's window (wiki/lean-coaching-core.md, "A New Session After
+    /// Stop → Start").
+    private var sessionID: UUID?
     private var onAppend: ((String) -> Void)?
     /// Last completeness the evidence worker reported for this session. Health counters are
     /// monotonic, so this only ever moves from true to false — one notice, never a flicker.
@@ -119,12 +136,15 @@ public final class ActivityLog: @unchecked Sendable {
     }
 
     /// Turn on the viewer for a session. `directory` is this session's dir, used to re-read
-    /// screenshot bytes when a viewer attaches late. The empty owner-only `jarvis-activity.jsonl`
-    /// that makes the session discoverable by `SessionStore.listSessions()` is created by the
-    /// evidence worker when it opens the session, alongside every other evidence file.
-    public func enable(directory: URL) {
+    /// screenshot bytes when a viewer attaches late, and `session` is the evidence handle's
+    /// identity, which scopes every later call from the worker. The empty owner-only
+    /// `jarvis-activity.jsonl` that makes the session discoverable by `SessionStore.listSessions()`
+    /// is created by the evidence worker when it opens the session, alongside every other evidence
+    /// file.
+    public func enable(directory: URL, session: UUID) {
         lock.withLock {
             dir = directory
+            sessionID = session
             entries.removeAll(); totalCount = 0; shotSeq = 0; sessionHasEnded = false; onAppend = nil
             evidenceIsComplete = true
         }
@@ -134,6 +154,7 @@ public final class ActivityLog: @unchecked Sendable {
     public func disable() {
         lock.withLock {
             dir = nil
+            sessionID = nil
             entries.removeAll()
             totalCount = 0
             shotSeq = 0
@@ -146,45 +167,53 @@ public final class ActivityLog: @unchecked Sendable {
     /// The evidence worker's verdict on this session's record, reported when it persists a row and
     /// again when it seals the session. The signal is the existing monotonic health record — there
     /// is no second counter — so the notice appears once, on the transition, and never retracts.
-    func noteEvidence(isComplete: Bool) {
+    ///
+    /// A stopped session's close routinely lands after a replacement Start (Stop drains cancelled
+    /// turns and compaction first), so this is scoped by session: a partial old session never puts
+    /// an incomplete-record notice on the new session's healthy window.
+    func noteEvidence(isComplete: Bool, for session: UUID) {
         let observer = lock.withLock { () -> ((String) -> Void)? in
-            guard !isComplete, evidenceIsComplete else { return nil }
+            guard sessionID == session, !isComplete, evidenceIsComplete else { return nil }
             evidenceIsComplete = false
             return onAppend
         }
         observer?(Self.evidenceScript(isComplete: false))
     }
 
-    /// Whether this projection is showing a session that has not yet ended. The worker checks it
+    /// Whether this projection is showing `session` and it has not yet ended. The worker checks it
     /// before decoding and writing a screenshot, so a row that will be refused leaves no orphan
     /// `shot-N.jpg` behind.
-    var isRecording: Bool {
-        lock.withLock { dir != nil && !sessionHasEnded }
+    func isRecording(for session: UUID) -> Bool {
+        lock.withLock { dir != nil && sessionID == session && !sessionHasEnded }
     }
 
     /// Reserve the next owner-only screenshot filename for this session. The worker writes the
-    /// bytes; the sequence belongs here because it is per-session viewer state.
-    func nextShotFilename() -> String {
+    /// bytes; the sequence belongs here because it is per-session viewer state. Returns nil once
+    /// this projection has moved on, so a stopped session cannot consume the live session's
+    /// numbering.
+    func nextShotFilename(for session: UUID) -> String? {
         lock.withLock {
+            guard sessionID == session else { return nil }
             shotSeq += 1
             return "shot-\(shotSeq).jpg"
         }
     }
 
     /// Give one occurrence its place in the session chronology and build what to persist and push.
-    /// Returns nil when the projection is disabled or the session already ended.
     ///
     /// Teardown can race a coaching task that is finishing cancellation. Once the typed end marker
     /// is admitted, it is the final event for this session by definition.
     func admit(
         _ event: ActivityEvent,
         at date: Date,
-        shotFilename: String?
-    ) -> AdmittedRow? {
+        shotFilename: String?,
+        for session: UUID
+    ) -> Admission {
         let rendered = event.rendered
         let recordedAt = Date().timeIntervalSince1970
-        return lock.withLock { () -> AdmittedRow? in
-            guard dir != nil, !sessionHasEnded else { return nil }
+        return lock.withLock { () -> Admission in
+            guard dir != nil, sessionID == session else { return .notCurrent }
+            guard !sessionHasEnded else { return .sessionEnded }
             let baseEntry = Entry(
                 time: df.string(from: date),
                 message: rendered.message,
@@ -205,9 +234,9 @@ public final class ActivityLog: @unchecked Sendable {
                 forInsertionOrder: item.insertionOrder)
             guard let line = Self.persistedLine(
                 entry, kind: rendered.kind, recordedAt: recordedAt)
-            else { return nil }
+            else { return .notCurrent }
             // Push with the live bytes in hand (no disk read on the hot path).
-            return AdmittedRow(
+            return .row(AdmittedRow(
                 line: line,
                 script: Self.rowScript(
                     time: entry.time,
@@ -215,14 +244,16 @@ public final class ActivityLog: @unchecked Sendable {
                     imageBase64: rendered.imageBase64,
                     insertionIndex: chronologicalIndex,
                     insertionOrder: item.insertionOrder,
-                    removedInsertionOrders: removedItems.map(\.insertionOrder)))
+                    removedInsertionOrders: removedItems.map(\.insertionOrder))))
         }
     }
 
     /// Push an admitted row to the live viewer. Called after persistence is attempted: a failed
-    /// write costs the row its place in history, not its place on screen.
-    func publish(_ row: AdmittedRow) {
-        let observer = lock.withLock { onAppend }
+    /// write costs the row its place in history, not its place on screen. Only `admit` can produce
+    /// a row, and only for the session on screen, so the identity check here is belt-and-braces
+    /// against a rotation landing between the two calls.
+    func publish(_ row: AdmittedRow, for session: UUID) {
+        let observer = lock.withLock { sessionID == session ? onAppend : nil }
         observer?(row.script)
     }
 

@@ -146,7 +146,6 @@ import Testing
         defer { try? FileManager.default.removeItem(at: directory) }
         let projection = ActivityLog()
         defer { projection.disable() }
-        projection.enable(directory: directory)
         // The byte cap sits above the session-open envelope and below a screen-view row's JPEG.
         let evidence = FileSessionAudit(
             directory: directory,
@@ -154,6 +153,7 @@ import Testing
                 limits: .init(maxEventCount: 32, maxRetainedBytes: 1_024),
                 writer: SessionAuditFileWriter()),
             activity: projection)
+        projection.enable(directory: directory, session: evidence.sessionID)
 
         evidence.record(
             .screenViewed(imageBase64JPEG: String(repeating: "A", count: 4_096)))
@@ -179,18 +179,17 @@ import Testing
         defer { try? FileManager.default.removeItem(at: directory) }
         let projection = ActivityLog()
         defer { projection.disable() }
-        projection.enable(directory: directory)
-        let pushedLock = NSLock()
-        var pushed: [String] = []
-        let snapshot = projection.attach { js in pushedLock.withLock { pushed.append(js) } }
-        #expect(snapshot.evidenceIsComplete)
-
         let evidence = FileSessionAudit(
             directory: directory,
             worker: SessionAuditWorker(
                 limits: .init(maxEventCount: 32, maxRetainedBytes: 1_024),
                 writer: SessionAuditFileWriter()),
             activity: projection)
+        projection.enable(directory: directory, session: evidence.sessionID)
+        let pushedLock = NSLock()
+        var pushed: [String] = []
+        let snapshot = projection.attach { js in pushedLock.withLock { pushed.append(js) } }
+        #expect(snapshot.evidenceIsComplete)
         evidence.record(.screenViewed(imageBase64JPEG: String(repeating: "A", count: 4_096)))
         evidence.record(.tip(lines: ["first row after the loss"]))
         evidence.record(.tip(lines: ["second row after the loss"]))
@@ -235,6 +234,130 @@ import Testing
         #expect(await evidence.close() == .partial)
 
         #expect(!projection.attach { _ in }.evidenceIsComplete)
+    }
+
+    /// Parks the worker in the **first** open only, so one session's rows stay in the mailbox while
+    /// the projection rotates to the next session. Both sessions share this worker, so parking
+    /// every open would deadlock the second one behind a single release.
+    private final class ParkedOpenWriter: SessionAuditWriting, @unchecked Sendable {
+        let openEntered = DispatchSemaphore(value: 0)
+        private let release = DispatchSemaphore(value: 0)
+        private let lock = NSLock()
+        private var parked = false
+        private let backing = SessionAuditFileWriter()
+
+        func openSession(at directory: URL, initialHealth: Data) throws {
+            let shouldPark = lock.withLock { () -> Bool in
+                guard !parked else { return false }
+                parked = true
+                return true
+            }
+            if shouldPark {
+                openEntered.signal()
+                release.wait()
+            }
+            try backing.openSession(at: directory, initialHealth: initialHealth)
+        }
+
+        func append(_ data: Data, filename: String, in directory: URL) throws {
+            try backing.append(data, filename: filename, in: directory)
+        }
+
+        func write(_ data: Data, filename: String, in directory: URL) throws {
+            try backing.write(data, filename: filename, in: directory)
+        }
+
+        func replaceHealth(_ data: Data, in directory: URL) throws {
+            try backing.replaceHealth(data, in: directory)
+        }
+
+        func emitToConsole(_ message: String) {}
+
+        func releaseOpen() { release.signal() }
+    }
+
+    /// Stop → Start rotates the projection while the stopped session's rows may still be queued.
+    /// A late row from the old session must not reach the new session's window — the envelope's
+    /// rule that late work from A is never attributed to B applies to the human projection too,
+    /// not only to the files.
+    ///
+    /// Without session identity on the projection, the old session's `.sessionEnded` row latches
+    /// the *new* session's end marker and every later row of the live session is silently refused.
+    @Test func aLateRowFromTheStoppedSessionCannotKillTheNextSessionsWindow() async throws {
+        let first = ActivityLogTests.tmp()
+        let second = ActivityLogTests.tmp()
+        defer {
+            try? FileManager.default.removeItem(at: first)
+            try? FileManager.default.removeItem(at: second)
+        }
+        let writer = ParkedOpenWriter()
+        let worker = SessionAuditWorker(limits: .production, writer: writer)
+        let projection = ActivityLog()
+        defer { projection.disable() }
+
+        let sessionA = FileSessionAudit(directory: first, worker: worker, activity: projection)
+        projection.enable(directory: first, session: sessionA.sessionID)
+        wait(for: writer.openEntered)
+        // Stop: the terminal row is admitted but the worker is parked, so it is still in the mailbox.
+        sessionA.record(.sessionEnded(reason: .stoppedByUser))
+
+        // Start: the projection rotates to the replacement session while A's row is still queued.
+        let sessionB = FileSessionAudit(directory: second, worker: worker, activity: projection)
+        projection.enable(directory: second, session: sessionB.sessionID)
+
+        writer.releaseOpen()
+        // A's row can no longer be given a chronology entry, so it is lost from A's history — and
+        // A says so rather than losing it silently.
+        #expect(await sessionA.close() == .partial)
+
+        // B is a healthy live session and must still record.
+        sessionB.record(.tip(lines: ["the replacement session is alive"]))
+        #expect(await sessionB.close() == .complete)
+
+        let rowsB = try String(
+            contentsOf: second.appendingPathComponent(ActivityLog.filename), encoding: .utf8)
+        #expect(rowsB.contains("the replacement session is alive"))
+        // The whole point: A's terminal row never reaches B's window or B's file, and B's own
+        // end-marker latch is untouched, so B keeps recording for the rest of its life.
+        #expect(!rowsB.contains("session ended by user"))
+        let rowsA = try String(
+            contentsOf: first.appendingPathComponent(ActivityLog.filename), encoding: .utf8)
+        #expect(!rowsA.contains("session ended by user"))
+    }
+
+    /// The stopped session's close lands after the replacement session is on screen — normal, since
+    /// Stop drains cancelled turns and compaction in the background before sealing. A partial old
+    /// session must not put an "incomplete record" notice on the new session's healthy window.
+    @Test func aPartialCloseFromTheStoppedSessionCannotMarkTheNextSessionIncomplete() async throws {
+        let first = ActivityLogTests.tmp()
+        let second = ActivityLogTests.tmp()
+        defer {
+            try? FileManager.default.removeItem(at: first)
+            try? FileManager.default.removeItem(at: second)
+        }
+        let worker = SessionAuditWorker(
+            limits: .init(maxEventCount: 32, maxRetainedBytes: 1_024),
+            writer: SessionAuditFileWriter())
+        let projection = ActivityLog()
+        defer { projection.disable() }
+
+        let sessionA = FileSessionAudit(directory: first, worker: worker, activity: projection)
+        projection.enable(directory: first, session: sessionA.sessionID)
+        // Lose evidence in A so its close is partial.
+        sessionA.record(.screenViewed(imageBase64JPEG: String(repeating: "A", count: 4_096)))
+
+        // Start B before A finishes closing, exactly as an immediate restart does.
+        let sessionB = FileSessionAudit(directory: second, worker: worker, activity: projection)
+        projection.enable(directory: second, session: sessionB.sessionID)
+        #expect(await sessionA.close() == .partial)
+
+        sessionB.record(.tip(lines: ["healthy replacement session"]))
+        #expect(await sessionB.close() == .complete)
+        #expect(projection.attach { _ in }.evidenceIsComplete)
+    }
+
+    private func wait(for semaphore: DispatchSemaphore) {
+        #expect(semaphore.wait(timeout: .now() + 10) == .success)
     }
 
     /// The session-end marker is still final for the session, now that it is admitted on the shared

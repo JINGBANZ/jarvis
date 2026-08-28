@@ -69,6 +69,10 @@ public final class FileSessionAudit:
         self.session = worker.openSession(at: directory, activity: activity)
     }
 
+    /// This handle's session identity. The Activity projection is scoped by it, so a stopped
+    /// session's late rows and its close cannot reach a replacement session's window.
+    public var sessionID: UUID { session.id }
+
     public func record(_ event: BrainTrafficAuditEvent) {
         record(.brainTraffic(event))
     }
