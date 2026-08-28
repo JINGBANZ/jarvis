@@ -1210,12 +1210,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Application Support/Jarvis left by another tool) keeps its mode, which would leak session-dir
         // names. Tighten it best-effort, mirroring FileSecretStore.setApiKey.
         try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: base.path)
-        JarvisLog.enableFileLogging(directory: dir)     // <dir>/jarvis-debug.log, 0600, fresh
         ActivityLog.shared.enable(directory: dir)        // <dir>/jarvis-activity.jsonl, 0600, fresh
-        // File creation and every later write run on the shared bounded audit worker. Start only
+        // File creation and every later write run on the shared bounded evidence worker. Start only
         // creates a lightweight session handle and never waits for an older session's disk access.
         let audit = FileSessionAudit(directory: dir)
         sessionAudit = audit
+        // Diagnostics join that same handle: <dir>/jarvis-debug.log, 0600, fresh, written by the
+        // worker rather than by whichever thread called jlog.
+        JarvisLog.attach(to: audit)
         currentSessionDir = dir
         // Now that logging is always on, sessions accumulate every launch. Bound it: keep only the most
         // recent few (the just-created one is current, so it's always spared).

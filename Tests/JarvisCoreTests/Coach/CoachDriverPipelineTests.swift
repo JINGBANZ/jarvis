@@ -432,7 +432,11 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let activityLog = ActivityLog()
         defer { activityLog.disable(); try? FileManager.default.removeItem(at: dir) }
-        JarvisLog.enableFileLogging(directory: dir)
+        // Diagnostics persist through this session's evidence handle now, so the debug log is read
+        // after sealing it rather than immediately after the turn.
+        let evidence = FileSessionAudit(directory: dir)
+        JarvisLog.attach(to: evidence)
+        defer { JarvisLog.detach() }
         activityLog.enable(directory: dir)
 
         let brain = ScriptedBrain(script: [
@@ -449,6 +453,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(!jsonl.contains("quiet for 417s"))
         #expect(!jsonl.contains("thinking"))
 
+        _ = await evidence.close()   // seals the handle and drains its accepted diagnostics
         let debug = try String(contentsOf: dir.appendingPathComponent("jarvis-debug.log"), encoding: .utf8)
         #expect(debug.contains("quiet for 417s"))
         #expect(debug.contains("thinking"))

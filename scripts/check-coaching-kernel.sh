@@ -37,11 +37,19 @@ cd "$(dirname "$0")/.."
 #                   evidence persistence by definition; only the heartbeat/health files above are
 #                   kernel.
 #
+# Separately covered (admission_paths below):
+#   Diagnostics/Log.swift
+#                   `jlog` itself. It is not kernel code, but the kernel calls it from inside the
+#                   live attempt path, so what it does on the caller is a kernel concern. Since the
+#                   diagnostics move onto the shared evidence transport it must only build a typed
+#                   event and admit it — no Console call, no file access. It is exempt from the
+#                   persistence-reach-through check below precisely because naming the shared
+#                   transport is its job.
+#
 # Rules a later slice adds — do not read today's set as the finished contract:
-#   - Persistence singletons (ActivityLog / .shared / jlog) arrive with the Activity projection and
-#     the diagnostics move onto SessionEvidence. CoachDriver and TranscriptionCoachingCoordinator
-#     still take an injected ActivityLog defaulting to .shared and call jlog synchronously, so that
-#     rule cannot land green yet.
+#   - Persistence singletons (ActivityLog / .shared) arrive with the Activity projection.
+#     CoachDriver and TranscriptionCoachingCoordinator still take an injected ActivityLog
+#     defaulting to .shared, so that rule cannot land green yet.
 
 kernel_paths=(
     Sources/JarvisCore/Coach
@@ -58,6 +66,11 @@ kernel_paths=(
     Sources/JarvisCore/Diagnostics/AudioContinuityMatcher.swift
 )
 
+# Paths checked for direct OS reach-through only. See the note above.
+admission_paths=(
+    Sources/JarvisCore/Diagnostics/Log.swift
+)
+
 # Direct OS reach-through. File, process, network, and Console access belong behind injected ports
 # and the evidence stack, never inline in coaching policy.
 os_pattern='\bFileManager\b|\bFileHandle\b|\bProcess\b|\bURLSession\b|\bNSLog\b'
@@ -70,10 +83,12 @@ sealed_pattern='\bAgenticEvaluation\b|\bAgenticEvaluator\b|\bEvaluationTranscrip
 check() {
     local label="$1"
     local pattern="$2"
+    shift 2
+    local paths=("$@")
 
     local scan_status=0
     local matches
-    matches="$(/usr/bin/grep -RInE --exclude-dir=Adapters "$pattern" "${kernel_paths[@]}")" \
+    matches="$(/usr/bin/grep -RInE --exclude-dir=Adapters "$pattern" "${paths[@]}")" \
         || scan_status=$?
     if [ "$scan_status" -gt 1 ]; then
         echo "Coaching-kernel $label scan failed; refusing to pass without a complete scan." >&2
@@ -97,7 +112,8 @@ check() {
     fi
 }
 
-check "OS reach-through" "$os_pattern"
-check "evaluator/sealed-session reach-through" "$sealed_pattern"
+check "OS reach-through" "$os_pattern" "${kernel_paths[@]}"
+check "evaluator/sealed-session reach-through" "$sealed_pattern" "${kernel_paths[@]}"
+check "diagnostic-admission OS reach-through" "$os_pattern" "${admission_paths[@]}"
 
 echo "Coaching-kernel dependency guard passed."

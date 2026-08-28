@@ -28,6 +28,8 @@ import Testing
             try backing.replaceHealth(data, in: directory)
         }
 
+        func emitToConsole(_ message: String) {}
+
         func releaseOpen() {
             release.signal()
         }
@@ -63,6 +65,8 @@ import Testing
         func replaceHealth(_ data: Data, in directory: URL) throws {
             try backing.replaceHealth(data, in: directory)
         }
+
+        func emitToConsole(_ message: String) {}
     }
 
     /// Fails the initial open only. The next record can retry the idempotent file setup.
@@ -94,6 +98,8 @@ import Testing
         func replaceHealth(_ data: Data, in directory: URL) throws {
             try backing.replaceHealth(data, in: directory)
         }
+
+        func emitToConsole(_ message: String) {}
     }
 
     /// Parks one selected session's first terminal marker replacement.
@@ -134,6 +140,8 @@ import Testing
             }
             try backing.replaceHealth(data, in: directory)
         }
+
+        func emitToConsole(_ message: String) {}
 
         func releaseTerminalHealth() {
             release.signal()
@@ -232,6 +240,83 @@ import Testing
         #expect(enabledSnapshot == absent)
         #expect(fullSnapshot == absent)
         #expect(blockedSnapshot == absent)
+        #expect(oversizeSnapshot == absent)
+        #expect(failingSnapshot == absent)
+    }
+
+    /// The same parity invariant for the diagnostics category Phase 1 moved onto the shared stack.
+    /// `jlog` is called from inside the live attempt path, so a blocked, full, oversize, or failing
+    /// debug log must leave provider calls, route transitions, terminal outcomes, and overlay
+    /// output byte-identical to a run with no diagnostics destination at all.
+    @Test func coachingIsIdenticalAcrossBlockedFullOversizeAndFailingDiagnostics() async throws {
+        let absent = await CoachingParityHarness.run()
+
+        let blockedDirectory = ActivityLogTests.tmp()
+        let fullDirectory = ActivityLogTests.tmp()
+        let oversizeDirectory = ActivityLogTests.tmp()
+        let failingDirectory = ActivityLogTests.tmp()
+        defer {
+            try? FileManager.default.removeItem(at: blockedDirectory)
+            try? FileManager.default.removeItem(at: fullDirectory)
+            try? FileManager.default.removeItem(at: oversizeDirectory)
+            try? FileManager.default.removeItem(at: failingDirectory)
+        }
+
+        // Blocked: the worker never leaves its first open for the whole coaching run.
+        let blockedWriter = BlockingOpenWriter()
+        let blocked = FileSessionAudit(
+            directory: blockedDirectory,
+            worker: SessionAuditWorker(limits: .production, writer: blockedWriter))
+        await wait(for: blockedWriter.openEntered)
+        let blockedSnapshot = await CoachingParityHarness.run(
+            observers: .init(diagnostics: blocked))
+        blockedWriter.releaseOpen()
+        #expect(await blocked.close() == .complete)
+
+        // Full: a one-slot mailbox behind a parked open overflows on the first diagnostic burst.
+        let fullWriter = BlockingOpenWriter()
+        let full = FileSessionAudit(
+            directory: fullDirectory,
+            worker: SessionAuditWorker(
+                limits: .init(maxEventCount: 1, maxRetainedBytes: 8_192),
+                writer: fullWriter))
+        await wait(for: fullWriter.openEntered)
+        let fullSnapshot = await CoachingParityHarness.run(
+            observers: .init(diagnostics: full))
+        fullWriter.releaseOpen()
+        #expect(await full.close() == .partial)
+        #expect((try healthMarker(in: fullDirectory)["queue_overflow"] as? Int ?? 0) > 0)
+
+        // Oversize: one diagnostic larger than the whole retained-byte budget is refused outright,
+        // and coaching then runs against that already-degraded handle. Priming it explicitly rather
+        // than hoping a scenario line is long enough keeps the variant deterministic.
+        let oversize = FileSessionAudit(
+            directory: oversizeDirectory,
+            worker: SessionAuditWorker(
+                limits: .init(maxEventCount: 256, maxRetainedBytes: 4_096),
+                writer: SessionAuditFileWriter()))
+        await waitForHealthMarker(in: oversizeDirectory)
+        JarvisLog.attach(to: oversize)
+        jlog(String(repeating: "d", count: 8_192))
+        JarvisLog.detach()
+        let oversizeSnapshot = await CoachingParityHarness.run(
+            observers: .init(diagnostics: oversize))
+        #expect(await oversize.close() == .partial)
+        #expect((try healthMarker(in: oversizeDirectory)["oversize_record"] as? Int ?? 0) > 0)
+
+        // Failing: the first debug-log append fails; later diagnostics still persist.
+        let failingWriter = FailFirstAppendWriter()
+        let failing = FileSessionAudit(
+            directory: failingDirectory,
+            worker: SessionAuditWorker(limits: .production, writer: failingWriter))
+        await wait(for: failingWriter.openCompleted)
+        let failingSnapshot = await CoachingParityHarness.run(
+            observers: .init(diagnostics: failing))
+        #expect(await failing.close() == .partial)
+        #expect(failingWriter.appendCount > 1)
+
+        #expect(blockedSnapshot == absent)
+        #expect(fullSnapshot == absent)
         #expect(oversizeSnapshot == absent)
         #expect(failingSnapshot == absent)
     }

@@ -20,6 +20,7 @@ public struct SessionEvent: Sendable {
     public enum Kind: String, Sendable {
         case brainTraffic = "brain_traffic"
         case coachingAttempt = "coaching_attempt"
+        case diagnostic = "diagnostic"
     }
 
     /// The full typed payload of one occurrence. Later slices add cases here — a new producer
@@ -27,6 +28,7 @@ public struct SessionEvent: Sendable {
     public enum Detail: Sendable {
         case brainTraffic(BrainTrafficAuditEvent)
         case coachingAttempt(CoachingAttemptAuditEvent)
+        case diagnostic(DiagnosticAuditEvent)
     }
 
     public let version: Int
@@ -61,6 +63,7 @@ public struct SessionEvent: Sendable {
         switch detail {
         case .brainTraffic: .brainTraffic
         case .coachingAttempt: .coachingAttempt
+        case .diagnostic: .diagnostic
         }
     }
 
@@ -71,6 +74,7 @@ public struct SessionEvent: Sendable {
         case .brainTraffic(let event): event.date
         case .coachingAttempt(.started(let event)): event.date
         case .coachingAttempt(.finished(let event)): event.date
+        case .diagnostic(let event): event.date
         }
     }
 
@@ -81,6 +85,10 @@ public struct SessionEvent: Sendable {
         case .brainTraffic(let event): event.requestContext?.attemptID
         case .coachingAttempt(.started(let event)): event.attemptID
         case .coachingAttempt(.finished(let event)): event.attemptID
+        // Diagnostics are session-attributed, never attempt-attributed: `jlog` has no attempt
+        // parameter, and inferring one from ambient state would invent attribution the caller
+        // never stated.
+        case .diagnostic: nil
         }
     }
 
@@ -93,6 +101,8 @@ public struct SessionEvent: Sendable {
         case .brainTraffic(let event):
             bytes = Self.adding(bytes, event.approximateRetainedBytes)
         case .coachingAttempt(let event):
+            bytes = Self.adding(bytes, event.approximateRetainedBytes)
+        case .diagnostic(let event):
             bytes = Self.adding(bytes, event.approximateRetainedBytes)
         }
         if let activityPresentation {

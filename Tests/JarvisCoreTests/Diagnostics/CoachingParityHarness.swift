@@ -34,13 +34,19 @@ enum CoachingParityHarness {
     struct EvidenceObservers {
         var brainTraffic: (any BrainTrafficAuditing)?
         var coachingAttempts: (any CoachingAttemptAuditing)?
+        /// The session handle `jlog` is attributed to for the run. Concrete because `JarvisLog`'s
+        /// attachment is a per-session evidence handle, not a narrow producer port — the kernel
+        /// still calls the free `jlog` function from inside the attempt path.
+        var diagnostics: FileSessionAudit?
 
         init(
             brainTraffic: (any BrainTrafficAuditing)? = nil,
-            coachingAttempts: (any CoachingAttemptAuditing)? = nil
+            coachingAttempts: (any CoachingAttemptAuditing)? = nil,
+            diagnostics: FileSessionAudit? = nil
         ) {
             self.brainTraffic = brainTraffic
             self.coachingAttempts = coachingAttempts
+            self.diagnostics = diagnostics
         }
     }
 
@@ -68,6 +74,11 @@ enum CoachingParityHarness {
     }
 
     static func run(observers: EvidenceObservers = EvidenceObservers()) async -> Snapshot {
+        // `JarvisLog`'s attachment is process-global, so a diagnostics variant must run in a
+        // serialized suite. Detached again on the way out, whether or not one was installed.
+        if let diagnostics = observers.diagnostics { JarvisLog.attach(to: diagnostics) }
+        defer { if observers.diagnostics != nil { JarvisLog.detach() } }
+
         let requests = RequestCapture()
         let transitions = TransitionCapture()
         let transportFailure = NSError(

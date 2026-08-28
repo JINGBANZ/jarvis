@@ -1,10 +1,14 @@
 import Foundation
 
-/// File-backed session audit with bounded admission and one-way close semantics.
+/// The per-session evidence handle: bounded admission, one-way close semantics, and one health
+/// record covering every category the session records.
 public final class FileSessionAudit: BrainTrafficAuditing, CoachingAttemptAuditing, Sendable {
     public static let brainTrafficFilename = "brain-traffic.jsonl"
     public static let coachingAttemptsFilename = "coaching-attempts.jsonl"
     public static let healthFilename = "audit-health.json"
+    /// The agent-facing debug log. Its name and content are the pre-migration contract; only the
+    /// thread that writes it changed.
+    public static let diagnosticFilename = "jarvis-debug.log"
     public static let formatVersion = 1
 
     /// `@unchecked Sendable`: the lock protects the result and every continuation. The state moves
@@ -69,14 +73,22 @@ public final class FileSessionAudit: BrainTrafficAuditing, CoachingAttemptAuditi
         record(.coachingAttempt(event))
     }
 
+    /// Admit one agent-facing diagnostic against this session. Returns false when the mailbox
+    /// refused it — a sealed handle or a full mailbox — so `JarvisLog` can fall back to the
+    /// unattributed process log instead of dropping the line outright.
+    func recordDiagnostic(_ event: DiagnosticAuditEvent) -> Bool {
+        record(.diagnostic(event))
+    }
+
     /// The one envelope admission every typed producer view converges on. The handle stamps
     /// session attribution itself, so an event can only ever claim the session it was recorded
     /// through. Internal until a later slice migrates producers onto the envelope directly; the
     /// Activity presentation stays unused until Phase 2 moves Activity onto `SessionEvent`.
+    @discardableResult
     func record(
         _ detail: SessionEvent.Detail,
         presentingInActivity presentation: ActivityLog.Event? = nil
-    ) {
+    ) -> Bool {
         worker.record(
             SessionEvent(
                 sessionID: session.id,

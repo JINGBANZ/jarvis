@@ -1,11 +1,10 @@
 # Lean Coaching Core
 
 > The approved target architecture and phased implementation contract for
-> [issue #147](https://github.com/JINGBANZ/jarvis/issues/147). Phase 0, Phase 3's
+> [issue #147](https://github.com/JINGBANZ/jarvis/issues/147). Phases 0 and 1, Phase 3's
 > evaluation-extraction slice, and Phase 4's OpenAI provider and screen-capture adapter slices are
-> built. Phase 1 is the next implementation slice; the remaining phases describe the reviewed
-> destination, not shipped
-> behavior.
+> built. Phase 2 is the next implementation slice; the remaining phases describe the reviewed
+> destination, not shipped behavior.
 
 > **Owner review result:** This contract supersedes the issue body's proposed independent Activity,
 > audit, diagnostic, and continuity-telemetry stacks and its earlier phase ordering. The issue remains
@@ -185,7 +184,7 @@ editing.
 | Phase | State | Outcome | Explicit boundary |
 |---|---|---|---|
 | 0 — Audit baseline | **Built** in [#146](https://github.com/JINGBANZ/jarvis/issues/146) / [PR #149](https://github.com/JINGBANZ/jarvis/pull/149) | One process-level count/byte-bounded audit worker, per-session handle, monotonic health, and independent Stop/Start lifecycle | Evaluator audit only; Activity and `jlog` remain separate today |
-| 1 — Evidence foundation | **Next slice** | Generalize the settled audit transport into `SessionEvidence` and route diagnostics through it without another worker | Activity remains on its existing path until Phase 2 |
+| 1 — Evidence foundation | **Built** in [#197](https://github.com/JINGBANZ/jarvis/issues/197) | Generalize the settled audit transport into `SessionEvidence` and route diagnostics through it without another worker | Activity remains on its existing path until Phase 2 |
 | 2 — Activity projection | Approved destination | Render and persist Activity through `SessionEvent`, show incomplete evidence in the Activity window, and remove Activity's independent persistence path | Human copy remains a closed safe projection; no debug detail enters Activity |
 | 3 — Offline work | Evaluation extraction **built** in [#202](https://github.com/JINGBANZ/jarvis/issues/202); compaction and pruning remain the approved destination | Give evaluation a shared compiler boundary when justified by the app and `EvalPrep`; make history compaction preemptible and move pruning off Start | Failure keeps full history and surviving session evidence |
 | 4 — Plans and adapters | OpenAI provider extraction **built** in [#205](https://github.com/JINGBANZ/jarvis/issues/205) and screen-capture adapter move **built** in [#204](https://github.com/JINGBANZ/jarvis/issues/204); plan revisions, the local-agent move ([#206](https://github.com/JINGBANZ/jarvis/issues/206)), and the file adapter moves remain the approved destination | Use immutable plan revisions at explicit between-attempt boundaries and move provider, process, screen, and file adapters outward | Live setting changes and fresh-attempt routing semantics remain intact |
@@ -244,6 +243,41 @@ new `DiagnosticSink` service beside it.
 - The repository Gate passes: `swift build && ./scripts/run-tests.sh`.
 - Live microphone or network-interruption validation is not required for this diagnostics-only slice;
   do not run it without explicit owner consent.
+
+### What shipped
+
+- `SessionEvent` gained a third typed detail, `.diagnostic(DiagnosticAuditEvent)`. `jlog` builds one
+  and admits it; nothing else runs on the caller. Timestamp rendering, `NSLog`, file opening,
+  seeking, and writing all moved behind the one shared worker.
+- `JarvisLog.attach(to:)` binds `jlog` to the live session's evidence handle, replacing
+  `enableFileLogging(directory:)`. Attribution is by immutable handle: while a handle is attached its
+  diagnostics are that session's, and once it is sealed — or when none is attached — they reach the
+  asynchronous process log (Console) through `recordProcessDiagnostic` and stop there. A diagnostic
+  is never guessed into the newest session.
+- `jarvis-debug.log` keeps its filename, `0600` mode, per-session freshness, `HH:mm:ss.SSS` stamp,
+  and content. Only the thread that writes it changed. The worker creates it alongside the audit
+  files at session open, so an open retry never truncates lines already written.
+- Console emission became part of the writer edge (`SessionAuditWriting.emitToConsole`) rather than
+  a call at the `jlog` site, so it is both off the caller and deterministically observable in tests.
+  Console runs before the file write, so a file failure still leaves the line visible.
+- The mailbox count bound rose from 256 to 4,096 envelopes. Diagnostics arrive from ~180 call sites
+  and burst during reconnects and teardown; a bound sized for audit records alone would have turned
+  ordinary bursts into routine `queue_overflow` and made every busy session read as partial. The
+  32 MB retained-byte bound — what actually caps memory — is unchanged.
+- The undocumented `JARVIS_LOG` environment fallback was deleted rather than carried onto the new
+  transport. Nothing in the repository set it, and it was a synchronous file write on the caller.
+- `scripts/check-coaching-kernel.sh` gained an `admission_paths` set covering
+  `Diagnostics/Log.swift`, checked for OS reach-through only. `jlog` is not kernel code, but the
+  kernel calls it from inside the attempt path, so reintroducing `NSLog` or a file handle there now
+  fails the Gate. It stays exempt from the persistence-reach-through check because naming the shared
+  transport is exactly its job.
+- The transport types keep their Phase 0 names (`FileSessionAudit`, `SessionAuditWorker`,
+  `SessionAuditFileWriter`). The rule that renaming persisted artifacts is not a completion
+  requirement applies to them too: a rename would touch every evaluator and test call site without
+  changing behavior.
+- The transcription benchmark's run directory is now an ordinary session directory with its own
+  evidence handle, sealed on both exits, so `scripts/transcription-benchmark.sh` still finds
+  `jarvis-debug.log` where it expects it.
 
 ## Phase 3 Implementation Contract — Evaluation extraction
 
