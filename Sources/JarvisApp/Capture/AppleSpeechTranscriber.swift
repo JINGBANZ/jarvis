@@ -98,6 +98,7 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
         transcriptBatchingWindow: TimeInterval,
         maxBufferedAudioSeconds: TimeInterval,
         finalizationResultTimeout: TimeInterval = 8,
+        activity: (any ActivityEventRecording)? = nil,
         benchmark: TranscriptionBenchmarkInstrumentation? = nil
     ) {
         self.locale = locale
@@ -130,7 +131,8 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
             onSilence: { [weak self] quiet in self?.onSilence?(quiet) },
             onTranscriptionWorkChanged: { [weak self] hasPendingWork in
                 self?.onTranscriptionWorkChanged?(hasPendingWork)
-            })
+            },
+            activity: activity)
         continuityReporter.onCaptureContinuity = { [weak self] signal in
             self?.onCaptureContinuity?(signal)
         }

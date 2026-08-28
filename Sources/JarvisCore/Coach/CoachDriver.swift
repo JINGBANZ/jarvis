@@ -158,10 +158,11 @@ public final class CoachDriver: @unchecked Sendable {
         var alreadyExhausted = false
     }
 
-    /// Injected rather than reached for through `ActivityLog.shared` so each driver records into
-    /// its own log. The activity log is process-wide state: with a singleton, any two drivers alive
-    /// at once — which is every parallel test — append to whichever log happens to be enabled.
-    private let activityLog: ActivityLog
+    /// The human-facing evidence port. The kernel names only the port and the closed
+    /// `ActivityEvent` vocabulary; the concrete persistence behind it is composed at the App edge
+    /// (wiki/lean-coaching-core.md, Phase 2). Absent means this session shows no Activity — which,
+    /// like every other optional-evidence state, cannot change a coaching outcome.
+    private let activity: (any ActivityEventRecording)?
 
     public init(
         config: Config,
@@ -173,9 +174,9 @@ public final class CoachDriver: @unchecked Sendable {
         sessionStart: TimeInterval? = nil,
         coachingAttempts: (any CoachingAttemptAuditing)? = nil,
         automaticAttemptDelay: AutomaticAttemptDelay? = nil,
-        activityLog: ActivityLog = .shared
+        activity: (any ActivityEventRecording)? = nil
     ) {
-        self.activityLog = activityLog
+        self.activity = activity
         self.config = config
         self.transcript = transcript
         self.configuredRoute = route
@@ -860,7 +861,7 @@ public final class CoachDriver: @unchecked Sendable {
                 case .retry(let failureCount, let advanced):
                     routeChanged = false
                     if !advanced {
-                        activityLog.record(
+                        activity?.record(
                             .coachingTurnFailed(provider: attempt.target.provider))
                     }
                     let policy = failure.disposition == .permanent
@@ -974,7 +975,7 @@ public final class CoachDriver: @unchecked Sendable {
         if reason == .manualHint && !work.manualHintPrepared {
             if let prompt = context.promptLine {
                 jlog("⌨️ hint shortcut — \(prompt)")
-                activityLog.record(.manualHint(prompt: prompt))
+                activity?.record(.manualHint(prompt: prompt))
             }
             let screen = self.screen
             let shot = await Self.captureScreen(using: screen)
@@ -984,7 +985,7 @@ public final class CoachDriver: @unchecked Sendable {
             }
             if let shot {
                 jlog("👁 looking at your screen")
-                activityLog.record(.screenViewed(imageBase64JPEG: shot.imageBase64))
+                activity?.record(.screenViewed(imageBase64JPEG: shot.imageBase64))
                 var observations: [ChatMessage] = [.userImage(shot.imageBase64)]
                 turnMessages.append(.userImage(shot.imageBase64))
                 if let text = shot.recognizedText {
@@ -996,7 +997,7 @@ public final class CoachDriver: @unchecked Sendable {
                 work.observations = observations
             } else {
                 jlog("👁 screenshot failed")
-                activityLog.record(.screenViewFailed)
+                activity?.record(.screenViewFailed)
                 work.observations = [
                     .user(JarvisPrompts.Coach.manualHintCaptureFailed),
                 ]
@@ -1100,7 +1101,7 @@ public final class CoachDriver: @unchecked Sendable {
                     }
                     if let shot {
                         jlog("👁 looking at your screen")
-                        activityLog.record(.screenViewed(imageBase64JPEG: shot.imageBase64))
+                        activity?.record(.screenViewed(imageBase64JPEG: shot.imageBase64))
                         if let text = shot.recognizedText {
                             jlog("🔤 read \(text.count(where: { $0 == "\n" }) + 1) lines of on-screen text")
                         }
@@ -1112,7 +1113,7 @@ public final class CoachDriver: @unchecked Sendable {
                         ]
                     } else {
                         jlog("👁 screenshot failed")
-                        activityLog.record(.screenViewFailed)
+                        activity?.record(.screenViewFailed)
                         work.observations = [
                             .user(JarvisPrompts.Coach.earlierCaptureFailed),
                         ]
@@ -1147,7 +1148,7 @@ public final class CoachDriver: @unchecked Sendable {
                         return .cancelled
                     }
                     jlog("💬 \(lines.joined(separator: " "))")
-                    activityLog.record(.tip(lines: lines))
+                    activity?.record(.tip(lines: lines))
                     overlay.render(
                         lines,
                         perLineSeconds: lines.map {
@@ -1168,7 +1169,7 @@ public final class CoachDriver: @unchecked Sendable {
                         return .cancelled
                     }
                     jlog("… nothing useful to add, staying silent")
-                    activityLog.record(.stayedSilent)
+                    activity?.record(.stayedSilent)
                     commitIfWorthKeeping(turnMessages, deltaText: substantiveDeltaText)
                     commitTranscript(through: delta.upTo)
                     return .completed(.silentByModel)

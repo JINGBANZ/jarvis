@@ -87,7 +87,7 @@ public struct SessionStore: Sendable {
                     sessionURL.appendingPathComponent(name).path) else { return nil }
                 return name
             }
-            let kind = line.k.flatMap { ActivityLog.EventKind(rawValue: $0) }
+            let kind = line.k.flatMap { ActivityEvent.Kind(rawValue: $0) }
             if kind == .sessionEnded {
                 continue
             }
@@ -141,7 +141,7 @@ public struct SessionStore: Sendable {
             guard ActivityLog.isHumanFacing(
                 message: line.m,
                 imageFile: shotName,
-                kind: line.k.flatMap { ActivityLog.EventKind(rawValue: $0) }
+                kind: line.k.flatMap { ActivityEvent.Kind(rawValue: $0) }
             ) else {
                 continue
             }

@@ -47,9 +47,9 @@ cd "$(dirname "$0")/.."
 #                   transport is its job.
 #
 # Rules a later slice adds — do not read today's set as the finished contract:
-#   - Persistence singletons (ActivityLog / .shared) arrive with the Activity projection.
-#     CoachDriver and TranscriptionCoachingCoordinator still take an injected ActivityLog
-#     defaulting to .shared, so that rule cannot land green yet.
+#   - Nothing outstanding for the kernel itself. `Sources/JarvisApp` still records some Activity
+#     notices directly; that is composition, not kernel, and it moves with the Activity persistence
+#     slice.
 
 kernel_paths=(
     Sources/JarvisCore/Coach
@@ -78,7 +78,11 @@ os_pattern='\bFileManager\b|\bFileHandle\b|\bProcess\b|\bURLSession\b|\bNSLog\b'
 # Evaluator and sealed-session types, plus the concrete evidence-persistence machinery. The kernel
 # may emit through its narrow observer ports (BrainTrafficAuditing, CoachingAttemptAuditing); it may
 # never name the offline analysis surface or the persistence implementation behind those ports.
-sealed_pattern='\bAgenticEvaluation\b|\bAgenticEvaluator\b|\bEvaluationTranscript\b|\bEvalReportPage\b|\bSessionEvidenceIndex\b|\bSessionMetrics\b|\bSessionStore\b|\bFileSessionAudit\b|\bSessionAuditWorker\b|\bSessionAuditFileWriter\b'
+# Persistence singletons are included: the kernel may name a port and the closed `ActivityEvent`
+# vocabulary, but never the concrete `ActivityLog` behind it, and never a process-wide `.shared`
+# instance of anything — a singleton makes two live drivers share whichever one happens to be
+# enabled, which is exactly the coupling injected ports exist to remove.
+sealed_pattern='\bAgenticEvaluation\b|\bAgenticEvaluator\b|\bEvaluationTranscript\b|\bEvalReportPage\b|\bSessionEvidenceIndex\b|\bSessionMetrics\b|\bSessionStore\b|\bFileSessionAudit\b|\bSessionAuditWorker\b|\bSessionAuditFileWriter\b|\bActivityLog\b|\.shared\b'
 
 check() {
     local label="$1"

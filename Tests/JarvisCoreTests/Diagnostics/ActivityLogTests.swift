@@ -220,7 +220,7 @@ import Foundation
         let persisted = try #require(try JSONSerialization.jsonObject(
             with: Data(jsonl.split(separator: "\n")[0].utf8)) as? [String: Any])
         #expect(persisted["k"] as? String
-            == ActivityLog.EventKind.coachingTurnFailed.rawValue)
+            == ActivityEvent.Kind.coachingTurnFailed.rawValue)
     }
 
     @Test func brainChangeAppliedNamesProvidersWithoutDiagnosticDetail() throws {
@@ -268,14 +268,14 @@ import Foundation
             return value["k"] as? String
         }
         #expect(kinds == [
-            ActivityLog.EventKind.brainRouteAdvanced.rawValue,
-            ActivityLog.EventKind.brainRouteAdvanced.rawValue,
-            ActivityLog.EventKind.brainRouteTargetSkipped.rawValue,
+            ActivityEvent.Kind.brainRouteAdvanced.rawValue,
+            ActivityEvent.Kind.brainRouteAdvanced.rawValue,
+            ActivityEvent.Kind.brainRouteTargetSkipped.rawValue,
         ])
     }
 
     @Test func runtimeFailureNoticesStayFixedAndDiagnosticFree() {
-        let events: [ActivityLog.Event] = [
+        let events: [ActivityEvent] = [
             .sessionEnded(reason: .transcriptionStopped(reason: .connectionLost)),
             .sessionEnded(reason: .transcriptionStopped(reason: .quotaExceeded)),
             .sessionEnded(reason: .transcriptionStopped(reason: .authenticationFailed)),
@@ -332,7 +332,7 @@ import Foundation
             .audioCaptureUnavailable,
             .unexpectedError,
         ]
-        let rendered = reasons.map { ActivityLog.Event.sessionEnded(reason: $0).rendered }
+        let rendered = reasons.map { ActivityEvent.sessionEnded(reason: $0).rendered }
         let messages = rendered.map { $0.message }
 
         #expect(messages.count == reasons.count)
@@ -350,7 +350,7 @@ import Foundation
         #expect(!messages.joined().contains("AirPods"))
         #expect(!messages.joined().contains("item_"))
         #expect(rendered.map { $0.kind } == Array(
-            repeating: ActivityLog.EventKind.sessionEnded,
+            repeating: ActivityEvent.Kind.sessionEnded,
             count: reasons.count
         ))
         #expect(ActivityLog.isHumanFacing(

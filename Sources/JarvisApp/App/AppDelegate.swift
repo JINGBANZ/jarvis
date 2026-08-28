@@ -734,7 +734,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             overlay: overlaySink,
             clock: clock,
             sessionStart: conversationStart,
-            coachingAttempts: sessionAudit)
+            coachingAttempts: sessionAudit,
+            activity: sessionAudit)
 
         // CoachDriver is @unchecked Sendable; capture it (not @MainActor self) in the callbacks.
         // Route turns through TurnTaskBox so Stop can cancel an in-flight one. Concurrent triggers are
@@ -752,7 +753,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             config: config,
             networkStatus: { [networkDiagnostics] in
                 networkDiagnostics.currentSummary
-            })
+            },
+            activity: sessionAudit)
         transcriber.onTurnEnd = { boundary in
             turns.run {
                 await driver.handleTrigger(.turnEnd, transcriptBoundary: boundary)
@@ -777,7 +779,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             config: config,
             networkStatus: { [networkDiagnostics] in
                 networkDiagnostics.currentSummary
-            })
+            },
+            activity: sessionAudit)
         themTranscriber.onTurnEnd = { boundary in
             turns.run {
                 await driver.handleTrigger(.turnEnd, transcriptBoundary: boundary)
@@ -1213,7 +1216,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ActivityLog.shared.enable(directory: dir)        // <dir>/jarvis-activity.jsonl, 0600, fresh
         // File creation and every later write run on the shared bounded evidence worker. Start only
         // creates a lightweight session handle and never waits for an older session's disk access.
-        let audit = FileSessionAudit(directory: dir)
+        // The human-facing projection is composed here, not reached for inside the kernel: the
+        // handle owns the one admission point, and ActivityLog renders what the worker hands it.
+        let audit = FileSessionAudit(directory: dir, activity: ActivityLog.shared)
         sessionAudit = audit
         // Diagnostics join that same handle: <dir>/jarvis-debug.log, 0600, fresh, written by the
         // worker rather than by whichever thread called jlog.

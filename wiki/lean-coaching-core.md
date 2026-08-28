@@ -279,6 +279,74 @@ new `DiagnosticSink` service beside it.
   evidence handle, sealed on both exits, so `scripts/transcription-benchmark.sh` still finds
   `jarvis-debug.log` where it expects it.
 
+## Phase 2 Implementation Contract — Activity producer edge
+
+The first Phase 2 slice ([issue #198](https://github.com/JINGBANZ/jarvis/issues/198)) moves the
+producer edge only. Coaching producers stop naming a concrete Activity log and emit one typed
+`SessionEvent` whose detail *is* its human-safe presentation; `ActivityLog` becomes the projection
+the worker renders into. Activity keeps its own persistence until the next slice.
+
+### Target shape
+
+- `ActivityEvent` is the closed human-safe presentation set, lifted out of `ActivityLog` into its
+  own type. The kernel can now name the vocabulary without holding the persistence behind it, which
+  is what lets the kernel guard reject `ActivityLog` and any `.shared` singleton outright.
+- `SessionEvent.Detail` gains `.activity(ActivityAuditEvent)` — a presentation plus its occurrence
+  time. `activityPresentation` became **derived** from the detail rather than a field stored beside
+  it. Deriving it is what makes "one occurrence produces one event" structural: an occurrence cannot
+  carry human copy that duplicates, or disagrees with, what its detail says happened.
+- `ActivityEventRecording` is the narrow producer port, with two implementations on purpose.
+  `FileSessionAudit` wraps the occurrence into one envelope on the shared transport — the production
+  path. `ActivityLog` is the terminal projection the worker renders into.
+- `CoachDriver` and `TranscriptionCoachingCoordinator` hold `any ActivityEventRecording`, injected,
+  with no default. The `ActivityLog.shared` default is gone from the kernel.
+- `JarvisApp` composes `FileSessionAudit(directory:activity: ActivityLog.shared)` at Start and hands
+  that one handle to the driver and both transcribers.
+
+### Expected behavior
+
+- The Activity window shows the same rows, with the same copy, kinds, and occurrence times, for
+  every existing event kind — live and in history. Finalized speech still carries its speech-time so
+  Activity and the model share one chronology.
+- Rendering now happens on the evidence worker rather than on the producer's thread. A producer
+  states an occurrence and returns.
+- The closed presentation set is unchanged. Sharing one stack grants no producer a path to author
+  free-form human-facing copy, and transport, retry, timing, lifecycle, and raw-error detail still
+  cannot reach the human view or the model transcript.
+
+### Failure and accepted degradation
+
+- Absent, blocked, full, oversize, and failing Activity evidence produce identical provider calls,
+  route transitions, terminal outcomes, and overlay output. The parity harness proves it with an
+  `activity` variant beside the existing ones.
+- A screen-view row retains a base64 JPEG, which is the largest thing the human projection carries;
+  it is counted against the same retained-byte bound as everything else, with no reserved capacity.
+- Between this slice and the next, `JarvisApp` still records its own notices — settings-not-applied,
+  route advanced/skipped, brain change applied, system audio stopped, session ended — straight to
+  `ActivityLog`. Those bypass the worker, so their order relative to kernel rows is no longer a
+  single queue's FIFO. `ActivityLog` already orders the window by occurrence time and already
+  treats the session-end marker as final for the session, so the visible record is unaffected; the
+  next slice removes the split entirely.
+
+### Non-goals
+
+- Moving Activity's persistence onto the worker, or removing its serial queue and file writer.
+- Moving `JarvisApp`'s own Activity notices, or the incomplete-evidence notice.
+- Merging an Activity occurrence with the coaching-attempt record that follows it. A delivered tip
+  and an attempt terminal are two occurrences recorded at two points, with different content; the
+  rule is that neither is written twice, not that they must become one record.
+- Any change to Activity copy, event kinds, persisted `jarvis-activity.jsonl` format, or the viewer.
+
+### Completion criteria
+
+- No coaching-kernel file names `ActivityLog` or a `.shared` singleton; `scripts/check-coaching-kernel.sh`
+  fails the Gate if one returns.
+- Activity occurrences reach the window through the shared handle, proven end to end in
+  `ActivityProjectionTests`, and every existing Activity assertion in `CoachDriverPipelineTests`
+  passes unchanged.
+- The parity harness passes with absent, enabled, blocked, full, and failing Activity destinations.
+- The Gate passes: `swift build && ./scripts/run-tests.sh`.
+
 ## Phase 3 Implementation Contract — Evaluation extraction
 
 The first Phase 3 slice ([issue #202](https://github.com/JINGBANZ/jarvis/issues/202)) moves the

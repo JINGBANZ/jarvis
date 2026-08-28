@@ -37,12 +37,16 @@ final class SessionAuditWorker: @unchecked Sendable {
     final class Session: Sendable {
         let id = UUID()
         let directory: URL
+        /// The human-facing projection for this session's Activity occurrences, rendered on the
+        /// worker so no producer pays for it. Absent when nothing is showing Activity.
+        let activity: (any ActivityEventRecording)?
         let health = HealthCounters()
         private let sealed = AtomicCounter()
         private let opened = AtomicCounter()
 
-        init(directory: URL) {
+        init(directory: URL, activity: (any ActivityEventRecording)?) {
             self.directory = directory
+            self.activity = activity
         }
 
         var isSealed: Bool { sealed.load() > 0 }
@@ -203,8 +207,11 @@ final class SessionAuditWorker: @unchecked Sendable {
         self.diagnosticTimestampFormatter = diagnosticFormatter
     }
 
-    func openSession(at directory: URL) -> Session {
-        let session = Session(directory: directory)
+    func openSession(
+        at directory: URL,
+        activity: (any ActivityEventRecording)? = nil
+    ) -> Session {
+        let session = Session(directory: directory, activity: activity)
         _ = enqueue(Envelope(session: session, payload: .open, retainedBytes: 256))
         return session
     }
@@ -420,6 +427,11 @@ final class SessionAuditWorker: @unchecked Sendable {
             persistAttempt(attempt, session: session)
         case .diagnostic(let diagnostic):
             persistDiagnostic(diagnostic, session: session)
+        case .activity(let activity):
+            // Phase 2 stepping stone: the projection still owns Activity's own persistence. What
+            // changed is that the producer no longer calls it — the worker does, off the coaching
+            // path, from the same envelope that carries every other evidence category.
+            session.activity?.record(activity.presentation, at: activity.date)
         }
     }
 

@@ -228,7 +228,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             route: route, screen: screen, overlay: overlay, clock: clock,
             coachingAttempts: coachingAttempts,
             automaticAttemptDelay: automaticAttemptDelay,
-            activityLog: activityLog
+            activity: activityLog
         )
         return (driver, transcript)
     }
@@ -259,7 +259,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
                 overlay: overlay,
                 clock: ManualClock(),
                 automaticAttemptDelay: { _ in },
-                activityLog: activityLog),
+                activity: activityLog),
             transcript)
     }
 

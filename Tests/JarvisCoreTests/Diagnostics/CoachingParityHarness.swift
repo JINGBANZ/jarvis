@@ -38,15 +38,20 @@ enum CoachingParityHarness {
         /// attachment is a per-session evidence handle, not a narrow producer port — the kernel
         /// still calls the free `jlog` function from inside the attempt path.
         var diagnostics: FileSessionAudit?
+        /// The human-facing evidence port. Absent means the scenario shows no Activity at all,
+        /// which is one of the states parity has to prove indistinguishable.
+        var activity: (any ActivityEventRecording)?
 
         init(
             brainTraffic: (any BrainTrafficAuditing)? = nil,
             coachingAttempts: (any CoachingAttemptAuditing)? = nil,
-            diagnostics: FileSessionAudit? = nil
+            diagnostics: FileSessionAudit? = nil,
+            activity: (any ActivityEventRecording)? = nil
         ) {
             self.brainTraffic = brainTraffic
             self.coachingAttempts = coachingAttempts
             self.diagnostics = diagnostics
+            self.activity = activity
         }
     }
 
@@ -134,7 +139,7 @@ enum CoachingParityHarness {
             clock: ManualClock(),
             coachingAttempts: observers.coachingAttempts,
             automaticAttemptDelay: { _ in },
-            activityLog: ActivityLog())
+            activity: observers.activity)
 
         var outcomes: [TurnOutcome] = []
         transcript.append(.init(speaker: .me, text: "walk the route forward", at: 1))

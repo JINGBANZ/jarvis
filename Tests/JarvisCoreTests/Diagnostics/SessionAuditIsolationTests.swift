@@ -321,6 +321,89 @@ import Testing
         #expect(failingSnapshot == absent)
     }
 
+    /// The same parity invariant for the human-facing category. Activity is the one producers were
+    /// most tempted to treat as privileged, so proving a blocked, full, or failing Activity
+    /// destination changes nothing about coaching matters more here than anywhere else.
+    @Test func coachingIsIdenticalAcrossAbsentBlockedFullAndFailingActivity() async throws {
+        let absent = await CoachingParityHarness.run()
+
+        let enabledDirectory = ActivityLogTests.tmp()
+        let blockedDirectory = ActivityLogTests.tmp()
+        let fullDirectory = ActivityLogTests.tmp()
+        let failingDirectory = ActivityLogTests.tmp()
+        defer {
+            try? FileManager.default.removeItem(at: enabledDirectory)
+            try? FileManager.default.removeItem(at: blockedDirectory)
+            try? FileManager.default.removeItem(at: fullDirectory)
+            try? FileManager.default.removeItem(at: failingDirectory)
+        }
+
+        // Enabled: a healthy handle projects every occurrence and closes complete.
+        let projection = ActivityLog()
+        defer { projection.disable() }
+        projection.enable(directory: enabledDirectory)
+        let enabled = FileSessionAudit(
+            directory: enabledDirectory,
+            worker: SessionAuditWorker(limits: .production, writer: SessionAuditFileWriter()),
+            activity: projection)
+        let enabledSnapshot = await CoachingParityHarness.run(
+            observers: .init(activity: enabled))
+        #expect(await enabled.close() == .complete)
+        // Pin that the variant was not vacuous: the delivered tip really did reach the window.
+        _ = projection.attach { _ in }
+        let rows = try String(
+            contentsOf: enabledDirectory.appendingPathComponent(ActivityLog.filename),
+            encoding: .utf8)
+        #expect(rows.contains("💬 same tip"))
+
+        // Blocked: the worker never leaves its first open for the whole coaching run.
+        let blockedWriter = BlockingOpenWriter()
+        let blocked = FileSessionAudit(
+            directory: blockedDirectory,
+            worker: SessionAuditWorker(limits: .production, writer: blockedWriter),
+            activity: ActivityLog())
+        await wait(for: blockedWriter.openEntered)
+        let blockedSnapshot = await CoachingParityHarness.run(
+            observers: .init(activity: blocked))
+        blockedWriter.releaseOpen()
+        #expect(await blocked.close() == .complete)
+
+        // Full: a one-slot mailbox behind a parked open drops Activity rows outright.
+        let fullWriter = BlockingOpenWriter()
+        let full = FileSessionAudit(
+            directory: fullDirectory,
+            worker: SessionAuditWorker(
+                limits: .init(maxEventCount: 1, maxRetainedBytes: 8_192),
+                writer: fullWriter),
+            activity: ActivityLog())
+        await wait(for: fullWriter.openEntered)
+        let fullSnapshot = await CoachingParityHarness.run(
+            observers: .init(activity: full))
+        fullWriter.releaseOpen()
+        #expect(await full.close() == .partial)
+        #expect((try healthMarker(in: fullDirectory)["queue_overflow"] as? Int ?? 0) > 0)
+
+        // Failing: the projection silently discards every row the worker hands it.
+        let failing = FileSessionAudit(
+            directory: failingDirectory,
+            worker: SessionAuditWorker(limits: .production, writer: SessionAuditFileWriter()),
+            activity: TrappingProjection())
+        let failingSnapshot = await CoachingParityHarness.run(
+            observers: .init(activity: failing))
+        #expect(await failing.close() == .complete)
+
+        #expect(enabledSnapshot == absent)
+        #expect(blockedSnapshot == absent)
+        #expect(fullSnapshot == absent)
+        #expect(failingSnapshot == absent)
+    }
+
+    /// An Activity projection that does nothing with what it is handed — the degenerate case of a
+    /// window that is closed, disabled, or wedged.
+    private struct TrappingProjection: ActivityEventRecording {
+        func record(_ event: ActivityEvent, at date: Date) {}
+    }
+
     @Test func aFullQueueDropsOnlyThatRecordAndLaterRecordingContinues() async throws {
         let directory = ActivityLogTests.tmp()
         defer { try? FileManager.default.removeItem(at: directory) }

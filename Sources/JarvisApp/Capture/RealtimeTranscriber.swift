@@ -111,6 +111,7 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         pingInterval: TimeInterval = 20,
         pongTimeout: TimeInterval = 10,
         networkStatus: @escaping @Sendable () -> String = { "unavailable" },
+        activity: (any ActivityEventRecording)? = nil,
         benchmark: TranscriptionBenchmarkInstrumentation? = nil
     ) {
         self.apiKey = apiKey
@@ -155,7 +156,8 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
             onSilence: { [weak self] quiet in self?.onSilence?(quiet) },
             onTranscriptionWorkChanged: { [weak self] hasPendingWork in
                 self?.onTranscriptionWorkChanged?(hasPendingWork)
-            })
+            },
+            activity: activity)
         let onFinalizedItem: (@Sendable (RealtimeTranscriptionLedger.FinalizedItem) -> Void)?
         if benchmark == nil {
             onFinalizedItem = nil

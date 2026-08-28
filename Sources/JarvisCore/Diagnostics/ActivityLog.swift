@@ -9,130 +9,16 @@ import Foundation
 ///
 /// This type is UI-free (Foundation only): it generates the page HTML and the per-row JS as plain
 /// strings; the WebView lives in JarvisApp. See wiki/build-and-run.md.
-public final class ActivityLog: @unchecked Sendable {
+///
+/// It is the terminal implementation of `ActivityEventRecording`: the coaching kernel names only
+/// that port, so the concrete persistence type stays outside the kernel
+/// (wiki/lean-coaching-core.md, Phase 2).
+public final class ActivityLog: ActivityEventRecording, @unchecked Sendable {
     public static let shared = ActivityLog()
     public static let filename = "jarvis-activity.jsonl"
     /// Shared live/history backstop. Both paths retain insertion identities first, then ask
     /// `ConversationChronology` to display those retained entries by event time.
     public static let retainedEntryLimit = 10_000
-
-    /// Stable on-disk identity for each typed Activity event. Human copy and emoji may evolve; tools
-    /// reading the complete log can use this value instead of reverse-parsing prose.
-    public enum EventKind: String, Codable, CaseIterable, Sendable {
-        case heard
-        case manualHint
-        case screenViewed
-        case screenViewFailed
-        case tip
-        case stayedSilent
-        case sessionEnded
-        case coachingTurnFailed
-        case systemAudioStopped
-        case settingsChangeNotApplied
-        case brainChangeApplied
-        case brainRouteAdvanced
-        case brainRouteTargetSkipped
-    }
-
-    /// A human-visible event in the coaching exchange. Keeping this closed set typed prevents
-    /// transport, retry, error details, and other diagnostic strings from leaking into the activity
-    /// viewer through a generic logging call.
-    public enum Event: Sendable {
-        /// A finalized utterance from the user (`me`) or interviewer (`them`).
-        case heard(speaker: Speaker, text: String)
-        /// The user explicitly requested help through the manual-hint shortcut.
-        case manualHint(prompt: String)
-        /// Jarvis captured and viewed the screen while preparing a coaching response.
-        case screenViewed(imageBase64JPEG: String)
-        /// The brain chose to view the screen, but capture failed. Activity gets fixed recovery
-        /// guidance while raw failure detail stays in debug.
-        case screenViewFailed
-        /// Jarvis displayed these coaching lines to the user.
-        case tip(lines: [String])
-        /// The brain explicitly chose `stay_silent` for this turn.
-        case stayedSilent
-        /// The single terminal lifecycle event for a live coaching session. The reason is a closed,
-        /// sanitized set so raw errors cannot leak into Activity.
-        case sessionEnded(reason: SessionEndReason)
-        /// One coaching response failed temporarily and a fresh attempt will retry while capture and
-        /// transcription remain live. Provider identity is enough; raw error detail stays in debug.
-        case coachingTurnFailed(provider: BrainProvider)
-        /// The secondary system-audio transcription stopped while microphone coaching continued.
-        case systemAudioStopped
-        /// An explicit Settings reapply failed its preflight while the existing session continued.
-        case settingsChangeNotApplied
-        /// A live brain replacement completed its first non-truncated terminal turn. Provider
-        /// identities are enough for a fixed human-facing success notice; model transport details
-        /// remain in jlog.
-        case brainChangeApplied(previous: BrainProvider, current: BrainProvider)
-        /// A failed target was exhausted and the next user-authorized route target became active.
-        case brainRouteAdvanced(previous: BrainProvider, current: BrainProvider)
-        /// A route target was proven unavailable before a provider request could be constructed.
-        case brainRouteTargetSkipped(provider: BrainProvider)
-
-        /// Keep persisted identity, human copy, and the optional screenshot payload in one exhaustive
-        /// mapping so adding or editing an event cannot make its `k` disagree with what Activity shows.
-        var rendered: (kind: EventKind, message: String, imageBase64: String?) {
-            switch self {
-            case .heard(let speaker, let text):
-                return (.heard, "🗣 heard (\(speaker.rawValue)): \"\(text)\"", nil)
-            case .manualHint(let prompt):
-                return (.manualHint, "⌨️ hint shortcut — \(prompt)", nil)
-            case .screenViewed(let imageBase64JPEG):
-                return (.screenViewed, "👁 looking at your screen", imageBase64JPEG)
-            case .screenViewFailed:
-                return (
-                    .screenViewFailed,
-                    "👁 couldn't view your screen — screen capture failed; check Screen Recording permission",
-                    nil
-                )
-            case .tip(let lines):
-                return (.tip, "💬 \(lines.joined(separator: " "))", nil)
-            case .stayedSilent:
-                return (.stayedSilent, "🤫 stayed silent — nothing useful to add", nil)
-            case .sessionEnded(let reason):
-                return (.sessionEnded, "⏹ \(reason.activityMessage)", nil)
-            case .coachingTurnFailed(let provider):
-                return (
-                    .coachingTurnFailed,
-                    "⚠️ \(provider.displayName) couldn't finish the response — retrying while listening continues",
-                    nil
-                )
-            case .systemAudioStopped:
-                return (
-                    .systemAudioStopped,
-                    "⚠️ system audio stopped — microphone coaching continues; check jarvis-debug.log",
-                    nil
-                )
-            case .settingsChangeNotApplied:
-                return (
-                    .settingsChangeNotApplied,
-                    "⚠️ settings change wasn't applied — current coaching session continues; check Settings → Brain",
-                    nil
-                )
-            case .brainChangeApplied(let previous, let current):
-                let message = if previous == current {
-                    "🧠 brain change applied — \(current.displayName) setup is active"
-                } else {
-                    "🧠 brain switch applied — \(previous.displayName) → \(current.displayName)"
-                }
-                return (.brainChangeApplied, message, nil)
-            case .brainRouteAdvanced(let previous, let current):
-                let message = if previous == current {
-                    "⚠️ \(previous.displayName) target couldn't respond — continuing with the next \(current.displayName) model"
-                } else {
-                    "⚠️ \(previous.displayName) couldn't respond — continuing on \(current.displayName)"
-                }
-                return (.brainRouteAdvanced, message, nil)
-            case .brainRouteTargetSkipped(let provider):
-                return (
-                    .brainRouteTargetSkipped,
-                    "⚠️ \(provider.displayName) target is unavailable — skipping it",
-                    nil
-                )
-            }
-        }
-    }
 
     /// One recorded line. `imageFile` is the relative `shot-N.jpg` name on disk (the bytes the DOM
     /// renders are passed separately as base64), or nil for a plain text line.
@@ -175,7 +61,7 @@ public final class ActivityLog: @unchecked Sendable {
         let t: String       // time, HH:mm:ss
         let m: String       // message
         let s: String?      // shot filename, if any
-        let k: EventKind?   // stable event identity; nil only for backward-compatible old rows
+        let k: ActivityEvent.Kind?  // stable event identity; nil only for backward-compatible old rows
         let o: TimeInterval? // event occurrence time (Unix seconds)
         let q: UInt64?      // stable insertion tie-breaker
         let r: TimeInterval? // record/completion time (Unix seconds), for chronology diagnosis
@@ -235,7 +121,7 @@ public final class ActivityLog: @unchecked Sendable {
     /// When a screen-view event carries a base64 JPEG, the `.jpg` is written **first** (owner-only)
     /// and then the `.jsonl` line referencing it — so a persisted reference always points at a file
     /// that exists.
-    public func record(_ event: Event, at date: Date = Date()) {
+    public func record(_ event: ActivityEvent, at date: Date) {
         let rendered = event.rendered
         let recordedAt = Date().timeIntervalSince1970
         queue.async { [self] in
@@ -319,7 +205,7 @@ public final class ActivityLog: @unchecked Sendable {
     /// line won't survive into history (the live push already happened). Must run on `queue`.
     private func appendJSONL(
         _ entry: Entry,
-        kind: EventKind,
+        kind: ActivityEvent.Kind,
         recordedAt: TimeInterval,
         in dir: URL
     ) {
@@ -403,7 +289,7 @@ public final class ActivityLog: @unchecked Sendable {
     static func isHumanFacing(
         message: String,
         imageFile: String?,
-        kind: EventKind? = nil
+        kind: ActivityEvent.Kind? = nil
     ) -> Bool {
         // Current builds persist a stable kind only for typed, human-facing events. Prefix matching
         // remains the compatibility path for logs created before event kinds were added.

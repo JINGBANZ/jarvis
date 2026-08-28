@@ -2,7 +2,8 @@ import Foundation
 
 /// The per-session evidence handle: bounded admission, one-way close semantics, and one health
 /// record covering every category the session records.
-public final class FileSessionAudit: BrainTrafficAuditing, CoachingAttemptAuditing, Sendable {
+public final class FileSessionAudit:
+    BrainTrafficAuditing, CoachingAttemptAuditing, ActivityEventRecording, Sendable {
     public static let brainTrafficFilename = "brain-traffic.jsonl"
     public static let coachingAttemptsFilename = "coaching-attempts.jsonl"
     public static let healthFilename = "audit-health.json"
@@ -56,13 +57,20 @@ public final class FileSessionAudit: BrainTrafficAuditing, CoachingAttemptAuditi
     private let session: SessionAuditWorker.Session
     private let closeSettlement = CloseSettlement()
 
-    public convenience init(directory: URL) {
-        self.init(directory: directory, worker: .shared)
+    /// `activity` is the terminal human-facing projection this session's Activity occurrences are
+    /// rendered into, off the producer's thread. Phase 2 still hands it `ActivityLog`, which owns
+    /// that persistence until the next slice moves it onto this worker.
+    public convenience init(directory: URL, activity: (any ActivityEventRecording)? = nil) {
+        self.init(directory: directory, worker: .shared, activity: activity)
     }
 
-    init(directory: URL, worker: SessionAuditWorker) {
+    init(
+        directory: URL,
+        worker: SessionAuditWorker,
+        activity: (any ActivityEventRecording)? = nil
+    ) {
         self.worker = worker
-        self.session = worker.openSession(at: directory)
+        self.session = worker.openSession(at: directory, activity: activity)
     }
 
     public func record(_ event: BrainTrafficAuditEvent) {
@@ -71,6 +79,10 @@ public final class FileSessionAudit: BrainTrafficAuditing, CoachingAttemptAuditi
 
     public func record(_ event: CoachingAttemptAuditEvent) {
         record(.coachingAttempt(event))
+    }
+
+    public func record(_ event: ActivityEvent, at date: Date) {
+        record(.activity(ActivityAuditEvent(presentation: event, date: date)))
     }
 
     /// Admit one agent-facing diagnostic against this session. Returns false when the mailbox
@@ -82,18 +94,11 @@ public final class FileSessionAudit: BrainTrafficAuditing, CoachingAttemptAuditi
 
     /// The one envelope admission every typed producer view converges on. The handle stamps
     /// session attribution itself, so an event can only ever claim the session it was recorded
-    /// through. Internal until a later slice migrates producers onto the envelope directly; the
-    /// Activity presentation stays unused until Phase 2 moves Activity onto `SessionEvent`.
+    /// through.
     @discardableResult
-    func record(
-        _ detail: SessionEvent.Detail,
-        presentingInActivity presentation: ActivityLog.Event? = nil
-    ) -> Bool {
+    func record(_ detail: SessionEvent.Detail) -> Bool {
         worker.record(
-            SessionEvent(
-                sessionID: session.id,
-                detail: detail,
-                activityPresentation: presentation),
+            SessionEvent(sessionID: session.id, detail: detail),
             for: session)
     }
 
