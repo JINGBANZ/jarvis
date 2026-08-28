@@ -44,6 +44,13 @@ let package = Package(
         // The AppKit overlay lives in its own library target (not the executable) so it can be
         // imported by tests — see Tests/JarvisOverlayTests for the screen-capture invisibility checks.
         .target(name: "JarvisOverlay", dependencies: ["JarvisCore"]),
+        // The OS-bound screen-capture adapter behind Core's ScreenCapturing port: the cancellable
+        // `screencapture` helper process, the transient session-local JPEG, and the
+        // cleanup-verification latch (wiki/lean-coaching-core.md Phase 4). A library target rather
+        // than JarvisApp code so Tests/JarvisScreenCaptureTests can keep driving the
+        // cancellation/cleanup/latch privacy contract headlessly, which Core's Foundation-only
+        // tests no longer can once the process leaves Core.
+        .target(name: "JarvisScreenCapture", dependencies: ["JarvisCore"]),
         // WebRTC audio processing (AEC3 + classic VAD), the OS/native-bound edge. The C++ AEC3
         // implementation and upstream VAD are prebuilt + statically merged with abseil into
         // Sources/CJarvisAEC/lib/libjarvis-aec.a by scripts/build-aec.sh (zero runtime dylib deps),
@@ -61,7 +68,8 @@ let package = Package(
         .executableTarget(
             name: "JarvisApp",
             dependencies: [
-                "JarvisCore", "JarvisBrainProviders", "JarvisEvaluation", "JarvisOverlay", "CJarvisAEC",
+                "JarvisCore", "JarvisBrainProviders", "JarvisEvaluation", "JarvisOverlay",
+                "JarvisScreenCapture", "CJarvisAEC",
                 .product(name: "Sparkle", package: "Sparkle"),
             ],
             swiftSettings: jarvisAppSwiftSettings,
@@ -97,6 +105,10 @@ let package = Package(
         .testTarget(
             name: "JarvisOverlayTests",
             dependencies: ["JarvisOverlay"]
+        ),
+        .testTarget(
+            name: "JarvisScreenCaptureTests",
+            dependencies: ["JarvisScreenCapture", "JarvisCore"]
         ),
         // WebKit-driven end-to-end tests for the activity viewer's shipped HTML/JS. Kept separate
         // from JarvisCoreTests so the core's own test target stays Foundation-only and the

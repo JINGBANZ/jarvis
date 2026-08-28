@@ -19,6 +19,10 @@ cd "$(dirname "$0")/.."
 #   Audio/          capture-side buffering and speech-activity policy ahead of admission
 #   Support/        Clock, retry schedule, and task plumbing the kernel depends on
 #   Brain/          the BrainClient port and route/model types — minus Adapters/ (below)
+#   Screen/         the ScreenCapturing port, snapshot model, and pure window-selection and
+#                   recognized-text-layout logic. Foundation-only: the screencapture helper
+#                   process, transient JPEG, and cleanup-verification latch live at the macOS edge
+#                   in Sources/JarvisScreenCapture, behind the port.
 #   Diagnostics/CaptureReadinessMonitor.swift, AudioContinuityWitness*.swift,
 #   AudioContinuityMatcher.swift
 #                   the capture-heartbeat source and capture health policy, which the diagram
@@ -29,10 +33,6 @@ cd "$(dirname "$0")/.."
 #                   and move outward with the rest of the Phase 4 adapter move (the OpenAI
 #                   URLSession transport already lives in Sources/JarvisBrainProviders); until then
 #                   they legitimately hold the OS symbols this guard bans.
-#   Screen/         ScreenSnapshotting is a kernel port, but it sits in the same directory as the
-#                   screencapture runner, which drives a Process and cleans up via FileManager.
-#                   The path (and with it Process/FileManager coverage over screen capture) joins
-#                   when the screen-capture move relocates that adapter.
 #   Diagnostics/ (rest)
 #                   evidence persistence by definition; only the heartbeat/health files above are
 #                   kernel.
@@ -51,6 +51,7 @@ kernel_paths=(
     Sources/JarvisCore/Audio
     Sources/JarvisCore/Support
     Sources/JarvisCore/Brain
+    Sources/JarvisCore/Screen
     Sources/JarvisCore/Diagnostics/CaptureReadinessMonitor.swift
     Sources/JarvisCore/Diagnostics/AudioContinuityWitness.swift
     "Sources/JarvisCore/Diagnostics/AudioContinuityWitness+Types.swift"

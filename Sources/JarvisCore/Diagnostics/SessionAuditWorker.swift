@@ -5,7 +5,9 @@ import Darwin
 import Synchronization
 #endif
 
-/// One bounded process-level worker for every file-backed session audit.
+/// One bounded process-level worker for every file-backed session audit. Its mailbox carries one
+/// versioned `SessionEvent` per occurrence; the typed producer ports converge on it through their
+/// per-session handle.
 ///
 /// The mailbox lock protects only retained in-memory values and counters. Parsing, redaction,
 /// serialization, and file I/O run on the private serial queue after that lock is released.
@@ -113,8 +115,7 @@ final class SessionAuditWorker: @unchecked Sendable {
 
     private enum Payload: Sendable {
         case open
-        case traffic(BrainTrafficAuditEvent)
-        case attempt(CoachingAttemptAuditEvent)
+        case event(SessionEvent)
         case close(
             forcePartial: Bool,
             completion: @Sendable (SessionAuditCloseResult) -> Void)
@@ -182,7 +183,7 @@ final class SessionAuditWorker: @unchecked Sendable {
         return session
     }
 
-    func record(_ event: BrainTrafficAuditEvent, for session: Session) {
+    func record(_ event: SessionEvent, for session: Session) {
         guard !session.isSealed else {
             rejectLateEvent(for: session)
             return
@@ -190,19 +191,7 @@ final class SessionAuditWorker: @unchecked Sendable {
         _ = enqueue(
             Envelope(
                 session: session,
-                payload: .traffic(event),
-                retainedBytes: event.approximateRetainedBytes))
-    }
-
-    func record(_ event: CoachingAttemptAuditEvent, for session: Session) {
-        guard !session.isSealed else {
-            rejectLateEvent(for: session)
-            return
-        }
-        _ = enqueue(
-            Envelope(
-                session: session,
-                payload: .attempt(event),
+                payload: .event(event),
                 retainedBytes: event.approximateRetainedBytes))
     }
 
@@ -357,10 +346,8 @@ final class SessionAuditWorker: @unchecked Sendable {
         switch envelope.payload {
         case .open:
             _ = ensureOpen(envelope.session)
-        case .traffic(let event):
-            persistTraffic(event, session: envelope.session)
-        case .attempt(let event):
-            persistAttempt(event, session: envelope.session)
+        case .event(let event):
+            persist(event, session: envelope.session)
         case .close(let forcePartial, let completion):
             finalize(
                 envelope.session,
@@ -381,6 +368,17 @@ final class SessionAuditWorker: @unchecked Sendable {
         } catch {
             session.health.markOpenFailure()
             return false
+        }
+    }
+
+    /// Project one envelope onto the session folder. File choice per kind is a projection detail;
+    /// the record schemas and filenames are the unchanged Phase 0 contract.
+    private func persist(_ event: SessionEvent, session: Session) {
+        switch event.detail {
+        case .brainTraffic(let traffic):
+            persistTraffic(traffic, session: session)
+        case .coachingAttempt(let attempt):
+            persistAttempt(attempt, session: session)
         }
     }
 

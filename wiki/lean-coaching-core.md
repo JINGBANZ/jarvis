@@ -2,8 +2,9 @@
 
 > The approved target architecture and phased implementation contract for
 > [issue #147](https://github.com/JINGBANZ/jarvis/issues/147). Phase 0, Phase 3's
-> evaluation-extraction slice, and Phase 4's OpenAI provider slice are built. Phase 1 is the next
-> implementation slice; the remaining phases describe the reviewed destination, not shipped
+> evaluation-extraction slice, and Phase 4's OpenAI provider and screen-capture adapter slices are
+> built. Phase 1 is the next implementation slice; the remaining phases describe the reviewed
+> destination, not shipped
 > behavior.
 
 > **Owner review result:** This contract supersedes the issue body's proposed independent Activity,
@@ -187,7 +188,7 @@ editing.
 | 1 — Evidence foundation | **Next slice** | Generalize the settled audit transport into `SessionEvidence` and route diagnostics through it without another worker | Activity remains on its existing path until Phase 2 |
 | 2 — Activity projection | Approved destination | Render and persist Activity through `SessionEvent`, show incomplete evidence in the Activity window, and remove Activity's independent persistence path | Human copy remains a closed safe projection; no debug detail enters Activity |
 | 3 — Offline work | Evaluation extraction **built** in [#202](https://github.com/JINGBANZ/jarvis/issues/202); compaction and pruning remain the approved destination | Give evaluation a shared compiler boundary when justified by the app and `EvalPrep`; make history compaction preemptible and move pruning off Start | Failure keeps full history and surviving session evidence |
-| 4 — Plans and adapters | OpenAI provider extraction **built** in [#205](https://github.com/JINGBANZ/jarvis/issues/205); plans, the local-agent move ([#206](https://github.com/JINGBANZ/jarvis/issues/206)), and the remaining process, screen, and file adapters stay the approved destination | Use immutable plan revisions at explicit between-attempt boundaries and move provider, process, screen, and file adapters outward | Live setting changes and fresh-attempt routing semantics remain intact |
+| 4 — Plans and adapters | OpenAI provider extraction **built** in [#205](https://github.com/JINGBANZ/jarvis/issues/205) and screen-capture adapter move **built** in [#204](https://github.com/JINGBANZ/jarvis/issues/204); plan revisions, the local-agent move ([#206](https://github.com/JINGBANZ/jarvis/issues/206)), and the file adapter moves remain the approved destination | Use immutable plan revisions at explicit between-attempt boundaries and move provider, process, screen, and file adapters outward | Live setting changes and fresh-attempt routing semantics remain intact |
 | 5 — Decomposition | Approved destination | Split the `CoachDriver` facade and `AppDelegate` only after ports and state ownership settle | Structure changes; observable coaching and lifecycle behavior do not |
 
 ## Phase 1 Implementation Contract
@@ -319,6 +320,77 @@ their own contract before implementation.
   for the same session directory before and after the move, verified offline without an agent run.
 - The Gate passes: `swift build && ./scripts/run-tests.sh`. The live Evaluate-click check stays in
   the standard app smoke, not in this slice's gate.
+
+## Phase 4 Implementation Contract — Screen-capture adapter move
+
+The first Phase 4 slice ([issue #204](https://github.com/JINGBANZ/jarvis/issues/204)) moves the
+`screencapture` helper process, the transient session-local JPEG, and the cleanup-verification
+latch out of `JarvisCore` to the macOS edge, behind the existing `ScreenCapturing` port. Core keeps
+the model-facing screen tool contract, the `ScreenSnapshot` model, and the pure window-selection
+and recognized-text-layout logic — Foundation-only and unit-testable without spawning a process —
+which lets the kernel dependency guard cover `Sources/JarvisCore/Screen/` and reject `Process` and
+`FileManager` there outright. Immutable plan revisions and the provider/file adapter moves are the
+rest of Phase 4 and freeze their own contracts before implementation.
+
+### Target shape
+
+- `JarvisScreenCapture` is the OS-bound adapter library: `ScreenCaptureRunner` (the cancellable
+  helper process, the transient owner-only JPEG, TERM→KILL escalation gated on the helper's
+  PID/start-time identity, verified deletion, and the cleanup-failure latch) and
+  `ScreenCaptureCLI` (entire-display targeting with the main-display reshoot). It depends inward
+  on `JarvisCore` only. It clears the architecture contract's bar for a new target through an
+  isolated test boundary: `JarvisApp` is verified only by live smoke, so leaving the runner in the
+  executable would orphan the headless cancellation/cleanup/latch regression tests that prove the
+  privacy contract; they run in `JarvisScreenCaptureTests` instead.
+- `Sources/JarvisCore/Screen/` keeps `ScreenCapturing`, `ScreenSnapshot`, `FrontWindowSelector`,
+  `WindowCandidate`, `TextFragment`, and `RecognizedTextLayout`.
+- `WindowScopedScreenCapture` in `JarvisApp` still composes the window-scoped shot, Vision OCR,
+  and display fallback from the adapter pieces; `AppDelegate` wiring is unchanged.
+- The ghost-mode scan covers `Sources/JarvisScreenCapture`, keeping its scan set equal to the
+  OS-bound targets.
+
+### Expected behavior
+
+- A pure move: capture arguments, scope and display selection read at capture time, the
+  window→display fallback order, OCR attachment, outcome classification, and Activity/debug
+  emissions are unchanged.
+- Cancellation still owns both helper teardown and file cleanup: a cancelled `capture()` returns
+  only after the helper has exited and the transient JPEG's absence has been verified, so a
+  coaching attempt can never outlive an unaccounted-for screen-derived file. A cancellation that
+  loses the race with the helper's exit is still reported by the capture it was issued against and
+  never survives to a later capture.
+- Screen-derived files still land only in the owner-only live session directory, never `/tmp`, and
+  the transient JPEG is owner-only (`0600`) from its first write.
+
+### Failure and accepted degradation
+
+- A capture whose cleanup cannot be proven still returns `cleanupFailed` and latches the
+  session-local runner: no later capture — and no display fallback — starts while a screen-derived
+  file is unaccounted for. The latch never self-clears; a fresh session builds a fresh runner.
+- Local capture failure, cancellation, and the cleanup latch still end the screen tool call
+  without a screenshot and still do not count as provider failures; no retry, recovery, or new
+  failure mode is added.
+
+### Non-goals
+
+- The rest of Phase 4: immutable plan revisions and moving the Brain provider adapters
+  (`Brain/Adapters/`) or remaining file adapters outward.
+- Changing the screen tool contract, capture scopes, Settings behavior, OCR behavior, or any
+  cancellation, cleanup, or latch semantics.
+- New Core-visible capture abstractions beyond the existing `ScreenCapturing` port, and any
+  Phase 1/2 `SessionEvidence` work.
+
+### Completion criteria
+
+- `JarvisCore` contains no `Process` and no file I/O for screen capture;
+  `scripts/check-coaching-kernel.sh` covers `Sources/JarvisCore/Screen/`, so a reintroduced
+  `Process`/`FileManager` fails the Gate.
+- The runner's cancellation, cleanup-verification, latch, and owner-only-permission tests run
+  unchanged (imports aside) in `JarvisScreenCaptureTests`; Core's screen tests are pure
+  Foundation-only unit tests.
+- The Gate passes: `swift build && ./scripts/run-tests.sh`.
+- Live smoke verification of a screen-tool coaching turn and a cancelled capture in the signed
+  app — App-bound behavior stays on the live smoke checklist, not in the offline gate.
 
 ## Phase 4 Implementation Contract — OpenAI provider extraction
 

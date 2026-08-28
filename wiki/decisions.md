@@ -1967,6 +1967,36 @@
 - **Detail:** [lean-coaching-core.md → Phase 3 Implementation Contract](./lean-coaching-core.md#phase-3-implementation-contract--evaluation-extraction),
   `Package.swift`, `Sources/JarvisEvaluation/`.
 
+### 2026-08-27 — The screen-capture process edge lives in its own JarvisScreenCapture target
+
+- **Chose:** Move the `screencapture` helper process, the transient session-local JPEG, and the
+  cleanup-verification latch (`ScreenCaptureRunner`) plus the display-targeting CLI adapter
+  (`ScreenCaptureCLI`) out of `JarvisCore` into the `JarvisScreenCapture` library target, behind
+  Core's existing `ScreenCapturing` port. Core keeps the model-facing screen tool contract, the
+  `ScreenSnapshot` model, and the pure window-selection and recognized-text-layout logic. A pure
+  move: cancellation owning helper teardown and file cleanup, verified deletion before `capture()`
+  returns, the poison latch that blocks any later capture or display fallback while a
+  screen-derived file is unaccounted for, and owner-only session-directory placement are unchanged,
+  and the runner's regression tests moved with it (imports aside). With the process gone,
+  `scripts/check-coaching-kernel.sh` covers `Sources/JarvisCore/Screen/` and rejects
+  `Process`/`FileManager` there, and the ghost-mode scan adds the new OS-bound target.
+- **Why:** [lean-coaching-core.md Phase 4](./lean-coaching-core.md#phase-4-implementation-contract--screen-capture-adapter-move)
+  moves process and file adapters outward so the kernel guard can ban `Process` outright instead of
+  carving out the screen directory. A library target rather than `JarvisApp` code because
+  `JarvisApp` is verified only by live smoke: leaving the runner in the executable would orphan the
+  headless cancellation/cleanup/latch tests that prove the privacy contract — the architecture
+  contract's isolated-test-boundary trigger.
+- **Rejected:** (a) Keeping the display-fallback policy (`ScreenCaptureCLI`) in Core behind a new
+  runner port — a second Core-visible capture abstraction for ~40 lines of argument selection,
+  when the approved contract names `ScreenCapturing` as the one port and the fallback policy is
+  still tested with the runner at the edge. (b) Moving the runner into `JarvisOverlay` — it is
+  OS-bound and testable there, but the overlay target's one concern is the capture-invisible
+  panels. (c) Relocating the latch into Core as pure state — the latch is only trustworthy where
+  the deletion evidence is produced; splitting proof from policy would re-create the
+  cross-component coordination this design removes.
+- **Detail:** [lean-coaching-core.md → Phase 4 Implementation Contract](./lean-coaching-core.md#phase-4-implementation-contract--screen-capture-adapter-move),
+  `Package.swift`, `Sources/JarvisScreenCapture/`, `scripts/check-coaching-kernel.sh`.
+
 ### 2026-08-27 — The OpenAI brain adapter lives in its own JarvisBrainProviders target
 
 - **Chose:** Extract the concrete OpenAI Responses adapter — `OpenAIBrainClient` and its HTTP

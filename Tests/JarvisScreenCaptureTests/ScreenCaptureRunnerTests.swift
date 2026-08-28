@@ -1,7 +1,8 @@
 import Darwin
 import Foundation
+import JarvisCore
 import Testing
-@testable import JarvisCore
+@testable import JarvisScreenCapture
 
 @Suite(.serialized) struct ScreenCaptureRunnerTests {
     @Test func successfulCaptureDeletesItsTransientJPEGBeforeReturning() throws {

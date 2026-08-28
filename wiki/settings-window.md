@@ -349,7 +349,7 @@ Both values, their keys, and the main-display floor are declared in
 | `Sources/JarvisCore/Config/BrainPreferences.swift` | UserDefaults persistence + route validation |
 | `Sources/JarvisCore/Coach/CoachDriver.swift` | Between-attempt route application and attempt orchestration |
 | `Sources/JarvisCore/Config/ScreenCapturePreferences.swift` | Capture scope + display persistence + clamping |
-| `Sources/JarvisCore/Screen/ScreenCapture.swift` | `ScreenCaptureCLI` — reads the selection at capture time, falls back to the main display |
+| `Sources/JarvisScreenCapture/ScreenCaptureCLI.swift` | `ScreenCaptureCLI` — reads the selection at capture time, falls back to the main display |
 | `Sources/JarvisCore/Overlay/OverlayAppearance.swift` | UserDefaults persistence; `OverlayCaptionApplying` + `OverlayBoxApplying` protocols |
 | `Sources/JarvisCore/Config/TranscriptionPreferences.swift` | Persisted transcription selection + validation |
 | `Sources/JarvisCore/Overlay/BroadcastOverlay.swift` | Fans one `render` out to the caption + box |

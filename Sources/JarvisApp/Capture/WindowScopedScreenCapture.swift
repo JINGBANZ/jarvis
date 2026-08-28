@@ -1,6 +1,7 @@
 import Foundation
 import CoreGraphics
 import JarvisCore
+import JarvisScreenCapture
 
 /// Captures just the frontmost app window (`screencapture -l`) when the capture scope is
 /// `.activeWindow`, with an on-device OCR of the shot riding along as `recognizedText`. Falls back
