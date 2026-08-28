@@ -13,7 +13,12 @@ private final class FailingScreen: ScreenCapturing, @unchecked Sendable {
 /// The on-demand hint shortcut (`.manualHint`): the driver itself captures the screenshot and
 /// injects it into the FIRST request, then forces the `speak` tool — so a hint comes back in ONE
 /// brain round trip instead of the model asking for `capture_screen` and reasoning on a second trip.
-@Suite struct CoachDriverManualHintTests {
+/// Serialized: `hintCancellationTerminatesTheCapture` parks a `GatedScreen` whose `capture()`
+/// blocks until the test releases it, and the driver runs that capture on a `Task.detached` —
+/// i.e. on the width-limited cooperative pool. Only three tests in the repository park a pool
+/// thread this way, and a CI runner has three of those threads, so letting them overlap can hold
+/// every thread at once with nothing left to run a release path. Cap this suite at one.
+@Suite(.serialized) struct CoachDriverManualHintTests {
     private func makeDriver(brain: BrainClient, screen: ScreenCapturing, overlay: OverlayRendering,
                             clock: Clock) -> (CoachDriver, RollingTranscript) {
         let transcript = RollingTranscript()
