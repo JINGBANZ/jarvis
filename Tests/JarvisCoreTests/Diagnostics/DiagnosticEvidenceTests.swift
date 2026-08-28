@@ -55,6 +55,10 @@ import Testing
             try backing.replaceHealth(data, in: directory)
         }
 
+        func write(_ data: Data, filename: String, in directory: URL) throws {
+            try backing.write(data, filename: filename, in: directory)
+        }
+
         func emitToConsole(_ message: String) {
             lock.withLock { storedConsole.append(message) }
         }

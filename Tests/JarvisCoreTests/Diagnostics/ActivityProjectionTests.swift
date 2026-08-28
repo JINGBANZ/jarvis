@@ -5,23 +5,6 @@ import Testing
 /// Phase 2, producer edge: an Activity occurrence is one `SessionEvent` on the shared transport,
 /// and the human window is a projection of that event rather than a second call the producer makes.
 @Suite struct ActivityProjectionTests {
-    /// Terminal projection that records what the worker handed it, in delivery order.
-    private final class RecordingProjection: ActivityEventRecording, @unchecked Sendable {
-        private let lock = NSLock()
-        private var storage: [(kind: ActivityEvent.Kind, message: String, date: Date)] = []
-
-        func record(_ event: ActivityEvent, at date: Date) {
-            let rendered = event.rendered
-            lock.withLock {
-                storage.append((rendered.kind, rendered.message, date))
-            }
-        }
-
-        var kinds: [ActivityEvent.Kind] { lock.withLock { storage.map(\.kind) } }
-        var messages: [String] { lock.withLock { storage.map(\.message) } }
-        var dates: [Date] { lock.withLock { storage.map(\.date) } }
-    }
-
     /// The envelope derives everything about an Activity occurrence from its typed detail, so the
     /// human copy an event carries can never disagree with what the event says happened.
     @Test func theEnvelopeDerivesActivityKindTimingAndPresentation() {
@@ -61,22 +44,25 @@ import Testing
     @Test func theWorkerProjectsActivityOccurrencesOffTheProducer() async throws {
         let directory = ActivityLogTests.tmp()
         defer { try? FileManager.default.removeItem(at: directory) }
-        let projection = RecordingProjection()
-        let evidence = FileSessionAudit(
-            directory: directory,
-            worker: SessionAuditWorker(limits: .production, writer: SessionAuditFileWriter()),
-            activity: projection)
+        let (projection, evidence) = ActivityLog.recordingSession(in: directory)
+        defer { projection.disable() }
 
         let heardAt = Date(timeIntervalSince1970: 1_755_000_042)
         evidence.record(.heard(speaker: .them, text: "what's the tradeoff?"), at: heardAt)
         evidence.record(.tip(lines: ["name the tradeoff"]))
         #expect(await evidence.close() == .complete)
 
-        #expect(projection.kinds == [.heard, .tip])
-        #expect(projection.messages[0] == "🗣 heard (them): \"what's the tradeoff?\"")
-        #expect(projection.messages[1] == "💬 name the tradeoff")
+        let rows = projection.attach { _ in }.rows
+        #expect(rows.count == 2)
+        #expect(rows[0].contains("🗣 heard (them)"))
+        #expect(rows[1].contains("💬 name the tradeoff"))
+        let persisted = try String(
+            contentsOf: directory.appendingPathComponent(ActivityLog.filename), encoding: .utf8)
+        let first = try #require(
+            JSONSerialization.jsonObject(
+                with: Data(persisted.split(separator: "\n")[0].utf8)) as? [String: Any])
         // Speech keeps its own speech-time so Activity and the model share one chronology.
-        #expect(projection.dates[0] == heardAt)
+        #expect(first["o"] as? Double == heardAt.timeIntervalSince1970)
     }
 
     /// A session with no Activity destination still admits and persists everything else. Absent
@@ -106,13 +92,8 @@ import Testing
     @Test func kernelOccurrencesReachTheActivityWindowThroughTheSharedHandle() async throws {
         let directory = ActivityLogTests.tmp()
         defer { try? FileManager.default.removeItem(at: directory) }
-        let activityLog = ActivityLog()
+        let (activityLog, evidence) = ActivityLog.recordingSession(in: directory)
         defer { activityLog.disable() }
-        activityLog.enable(directory: directory)
-        let evidence = FileSessionAudit(
-            directory: directory,
-            worker: SessionAuditWorker(limits: .production, writer: SessionAuditFileWriter()),
-            activity: activityLog)
 
         evidence.record(.manualHint(prompt: "unblock me"))
         evidence.record(.screenViewFailed)
@@ -130,5 +111,83 @@ import Testing
         #expect(jsonl.contains("\"k\":\"tip\""))
         // The human record stays free of transport, retry, and raw-error detail.
         #expect(!jsonl.contains("audit_version"))
+    }
+
+    /// The screenshot attachment is written by the worker, owner-only, inside the session directory
+    /// — never `/tmp` — and always before the row that references it.
+    @Test func screenshotAttachmentsPersistOwnerOnlyInsideTheSessionDirectory() async throws {
+        let directory = ActivityLogTests.tmp()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let (projection, evidence) = ActivityLog.recordingSession(in: directory)
+        defer { projection.disable() }
+
+        let jpeg = Data([0xFF, 0xD8, 0xFF, 0xD9])
+        evidence.record(.screenViewed(imageBase64JPEG: jpeg.base64EncodedString()))
+        evidence.record(.screenViewed(imageBase64JPEG: jpeg.base64EncodedString()))
+        #expect(await evidence.close() == .complete)
+
+        for name in ["shot-1.jpg", "shot-2.jpg"] {
+            let url = directory.appendingPathComponent(name)
+            #expect(try Data(contentsOf: url) == jpeg)
+            let mode = try FileManager.default.attributesOfItem(
+                atPath: url.path)[.posixPermissions] as? NSNumber
+            #expect(mode?.int16Value == 0o600)
+        }
+        let jsonl = try String(
+            contentsOf: directory.appendingPathComponent(ActivityLog.filename), encoding: .utf8)
+        #expect(jsonl.contains("\"s\":\"shot-1.jpg\""))
+        #expect(jsonl.contains("\"s\":\"shot-2.jpg\""))
+    }
+
+    /// Activity has no reserved capacity: a row that does not fit is lost like any other evidence,
+    /// the session reads partial, and the next row is admitted on its own merits.
+    @Test func activityRowsAreLostUnderTheSameUniformCapacityContract() async throws {
+        let directory = ActivityLogTests.tmp()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let projection = ActivityLog()
+        defer { projection.disable() }
+        projection.enable(directory: directory)
+        // The byte cap sits above the session-open envelope and below a screen-view row's JPEG.
+        let evidence = FileSessionAudit(
+            directory: directory,
+            worker: SessionAuditWorker(
+                limits: .init(maxEventCount: 32, maxRetainedBytes: 1_024),
+                writer: SessionAuditFileWriter()),
+            activity: projection)
+
+        evidence.record(
+            .screenViewed(imageBase64JPEG: String(repeating: "A", count: 4_096)))
+        evidence.record(.tip(lines: ["admitted after the oversize row"]))
+        #expect(await evidence.close() == .partial)
+
+        let jsonl = try String(
+            contentsOf: directory.appendingPathComponent(ActivityLog.filename), encoding: .utf8)
+        #expect(!jsonl.contains("looking at your screen"))
+        #expect(jsonl.contains("admitted after the oversize row"))
+        let health = try Data(
+            contentsOf: directory.appendingPathComponent(FileSessionAudit.healthFilename))
+        let marker = try #require(JSONSerialization.jsonObject(with: health) as? [String: Any])
+        #expect(marker["state"] as? String == "partial")
+        #expect(marker["oversize_record"] as? Int == 1)
+    }
+
+    /// The session-end marker is still final for the session, now that it is admitted on the shared
+    /// worker rather than on the projection's own queue.
+    @Test func theSessionEndMarkerStaysFinalOnTheSharedWorker() async throws {
+        let directory = ActivityLogTests.tmp()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let (projection, evidence) = ActivityLog.recordingSession(in: directory)
+        defer { projection.disable() }
+
+        evidence.record(.tip(lines: ["before stop"]))
+        evidence.record(.sessionEnded(reason: .stoppedByUser))
+        evidence.record(.stayedSilent)
+        #expect(await evidence.close() == .complete)
+
+        let jsonl = try String(
+            contentsOf: directory.appendingPathComponent(ActivityLog.filename), encoding: .utf8)
+        #expect(jsonl.contains("before stop"))
+        #expect(jsonl.contains("session ended by user"))
+        #expect(!jsonl.contains("stayed silent"))
     }
 }

@@ -10,10 +10,11 @@ import Foundation
 /// This type is UI-free (Foundation only): it generates the page HTML and the per-row JS as plain
 /// strings; the WebView lives in JarvisApp. See wiki/build-and-run.md.
 ///
-/// It is the terminal implementation of `ActivityEventRecording`: the coaching kernel names only
-/// that port, so the concrete persistence type stays outside the kernel
+/// It is the terminal *projection* of the session-evidence stack, not a recorder: producers
+/// admit one `SessionEvent` through `FileSessionAudit`, the one bounded worker persists the row and
+/// its attachment, and this type renders and retains what the worker hands back
 /// (wiki/lean-coaching-core.md, Phase 2).
-public final class ActivityLog: ActivityEventRecording, @unchecked Sendable {
+public final class ActivityLog: @unchecked Sendable {
     public static let shared = ActivityLog()
     public static let filename = "jarvis-activity.jsonl"
     /// Shared live/history backstop. Both paths retain insertion identities first, then ask
@@ -67,17 +68,31 @@ public final class ActivityLog: ActivityEventRecording, @unchecked Sendable {
         let r: TimeInterval? // record/completion time (Unix seconds), for chronology diagnosis
     }
 
+    /// One row that has been given its place in the session's chronology and is ready to be
+    /// persisted and pushed. Building it is the projection's decision; writing it is the evidence
+    /// worker's job.
+    struct AdmittedRow {
+        /// The `jarvis-activity.jsonl` line, without its trailing newline.
+        let line: Data
+        /// The live `appendRow(...)` payload for an attached viewer.
+        let script: String
+    }
+
     /// In-memory replay cap for a late-attaching viewer. Sized for hours of coaching (an hour-long
     /// session logs a few thousand lines) — a cap this high exists only as a runaway backstop, so the
     /// viewer shows the WHOLE session, not just its tail. Entries are small (text + a filename; shot
     /// bytes stay on disk), so memory is not a concern.
-    private let queue = DispatchQueue(label: "jarvis.activitylog")   // serializes state + disk writes
+    ///
+    /// The lock replaces this type's former private serial queue. Admission and publication run on
+    /// the one evidence worker; `attach`/`detach` run on the viewer's thread. It is held only across
+    /// in-memory bookkeeping — no disk access happens behind it any more.
+    private let lock = NSLock()
     private var entries = ConversationChronology<Entry>()
     private var totalCount = 0    // everything recorded this session (survives the retained-entry cap)
     private var shotSeq = 0       // monotonic id for saved screenshot files this session
     private var sessionHasEnded = false
     private let df: DateFormatter
-    private var dir: URL?         // nil ⇒ disabled (no observer pushes, no disk writes)
+    private var dir: URL?         // nil ⇒ disabled (no observer pushes)
     private var onAppend: ((String) -> Void)?
 
     /// Internal so tests can spin up an isolated instance; the app uses `.shared`.
@@ -90,22 +105,20 @@ public final class ActivityLog: ActivityEventRecording, @unchecked Sendable {
         df.dateFormat = "HH:mm:ss"
     }
 
-    /// Turn on the viewer for a session. `directory` is this session's dir; an empty
-    /// `jarvis-activity.jsonl` is created at 0600 immediately so the session is discoverable by
-    /// `SessionStore.listSessions()` even before its first event.
+    /// Turn on the viewer for a session. `directory` is this session's dir, used to re-read
+    /// screenshot bytes when a viewer attaches late. The empty owner-only `jarvis-activity.jsonl`
+    /// that makes the session discoverable by `SessionStore.listSessions()` is created by the
+    /// evidence worker when it opens the session, alongside every other evidence file.
     public func enable(directory: URL) {
-        queue.sync {
+        lock.withLock {
             dir = directory
             entries.removeAll(); totalCount = 0; shotSeq = 0; sessionHasEnded = false; onAppend = nil
-            let url = directory.appendingPathComponent(Self.filename)
-            FileManager.default.createFile(atPath: url.path, contents: Data(),
-                                           attributes: [.posixPermissions: 0o600])
         }
     }
 
-    /// Turn the viewer back off (no further pushes or disk writes).
+    /// Turn the viewer back off (no further pushes).
     public func disable() {
-        queue.sync {
+        lock.withLock {
             dir = nil
             entries.removeAll()
             totalCount = 0
@@ -115,33 +128,47 @@ public final class ActivityLog: ActivityEventRecording, @unchecked Sendable {
         }
     }
 
-    /// Append one human-facing coaching event: persist it, then push it to the observer. No-op when
-    /// disabled. Call `jlog` instead for diagnostics.
+    /// Whether this projection is showing a session that has not yet ended. The worker checks it
+    /// before decoding and writing a screenshot, so a row that will be refused leaves no orphan
+    /// `shot-N.jpg` behind.
+    var isRecording: Bool {
+        lock.withLock { dir != nil && !sessionHasEnded }
+    }
+
+    /// Reserve the next owner-only screenshot filename for this session. The worker writes the
+    /// bytes; the sequence belongs here because it is per-session viewer state.
+    func nextShotFilename() -> String {
+        lock.withLock {
+            shotSeq += 1
+            return "shot-\(shotSeq).jpg"
+        }
+    }
+
+    /// Give one occurrence its place in the session chronology and build what to persist and push.
+    /// Returns nil when the projection is disabled or the session already ended.
     ///
-    /// When a screen-view event carries a base64 JPEG, the `.jpg` is written **first** (owner-only)
-    /// and then the `.jsonl` line referencing it — so a persisted reference always points at a file
-    /// that exists.
-    public func record(_ event: ActivityEvent, at date: Date) {
+    /// Teardown can race a coaching task that is finishing cancellation. Once the typed end marker
+    /// is admitted, it is the final event for this session by definition.
+    func admit(
+        _ event: ActivityEvent,
+        at date: Date,
+        shotFilename: String?
+    ) -> AdmittedRow? {
         let rendered = event.rendered
         let recordedAt = Date().timeIntervalSince1970
-        queue.async { [self] in
-            // Teardown can race a coaching task that is finishing cancellation. Once the typed end
-            // marker reaches this serial queue, it is the final event for this session by definition.
-            guard let dir, !sessionHasEnded else { return }
-            let shotName = rendered.imageBase64.flatMap { saveShot($0, in: dir) }
-            let occurredAt = date.timeIntervalSince1970
+        return lock.withLock { () -> AdmittedRow? in
+            guard dir != nil, !sessionHasEnded else { return nil }
             let baseEntry = Entry(
                 time: df.string(from: date),
                 message: rendered.message,
-                imageFile: shotName)
-            let item = entries.append(baseEntry, occurredAt: occurredAt)
+                imageFile: shotFilename)
+            let item = entries.append(baseEntry, occurredAt: date.timeIntervalSince1970)
             let entry = Entry(
                 time: baseEntry.time,
                 message: baseEntry.message,
                 imageFile: baseEntry.imageFile,
                 occurredAt: item.occurredAt,
                 insertionOrder: item.insertionOrder)
-            appendJSONL(entry, kind: rendered.kind, recordedAt: recordedAt, in: dir)
             totalCount += 1
             if rendered.kind == .sessionEnded {
                 sessionHasEnded = true
@@ -149,20 +176,34 @@ public final class ActivityLog: ActivityEventRecording, @unchecked Sendable {
             let removedItems = entries.keepMostRecentInsertions(Self.retainedEntryLimit)
             let chronologicalIndex = entries.chronologicalIndex(
                 forInsertionOrder: item.insertionOrder)
+            guard let line = Self.persistedLine(
+                entry, kind: rendered.kind, recordedAt: recordedAt)
+            else { return nil }
             // Push with the live bytes in hand (no disk read on the hot path).
-            onAppend?(Self.rowScript(time: entry.time, message: entry.message,
-                                     imageBase64: rendered.imageBase64,
-                                     insertionIndex: chronologicalIndex,
-                                     insertionOrder: item.insertionOrder,
-                                     removedInsertionOrders: removedItems.map(\.insertionOrder)))
+            return AdmittedRow(
+                line: line,
+                script: Self.rowScript(
+                    time: entry.time,
+                    message: entry.message,
+                    imageBase64: rendered.imageBase64,
+                    insertionIndex: chronologicalIndex,
+                    insertionOrder: item.insertionOrder,
+                    removedInsertionOrders: removedItems.map(\.insertionOrder)))
         }
+    }
+
+    /// Push an admitted row to the live viewer. Called after persistence is attempted: a failed
+    /// write costs the row its place in history, not its place on screen.
+    func publish(_ row: AdmittedRow) {
+        let observer = lock.withLock { onAppend }
+        observer?(row.script)
     }
 
     /// Atomically register the live observer and capture the current snapshot, so every subsequent
     /// entry arrives via `onAppend` exactly once — never double-rendered or missed. Snapshot rows
     /// re-read their screenshot bytes from disk (a rare, one-shot cost when the viewer opens).
     public func attach(_ onAppend: @escaping (String) -> Void) -> Snapshot {
-        queue.sync {
+        lock.withLock {
             self.onAppend = onAppend
             let rows: [String] = entries.chronologicalItems.map { item in
                 let e = item.element
@@ -181,49 +222,22 @@ public final class ActivityLog: ActivityEventRecording, @unchecked Sendable {
     }
 
     /// Stop pushing to the observer (e.g. while the viewer shows a *past* session).
-    public func detach() { queue.sync { onAppend = nil } }
+    public func detach() { lock.withLock { onAppend = nil } }
 
-    /// Wait until every event recorded before this call is persisted. Session teardown and
-    /// evaluation use this barrier so a just-recorded catastrophic outcome cannot race the evaluator.
-    public func flush() {
-        queue.sync {}
-    }
-
-    /// Decode a base64 JPEG and write it as the next owner-only `shot-N.jpg` in `dir`. Returns the
-    /// relative filename, or nil if the payload was invalid / the write failed. Must run on `queue`.
-    private func saveShot(_ base64: String, in dir: URL) -> String? {
-        guard let data = Data(base64Encoded: base64, options: .ignoreUnknownCharacters) else { return nil }
-        shotSeq += 1
-        let name = "shot-\(shotSeq).jpg"
-        guard FileManager.default.createFile(atPath: dir.appendingPathComponent(name).path,
-                                             contents: data, attributes: [.posixPermissions: 0o600])
-        else { return nil }
-        return name
-    }
-
-    /// Append one JSON line to `jarvis-activity.jsonl`. Best-effort; a failed write just means that
-    /// line won't survive into history (the live push already happened). Must run on `queue`.
-    private func appendJSONL(
+    /// Encode one `jarvis-activity.jsonl` line. Pure — the worker owns the write.
+    private static func persistedLine(
         _ entry: Entry,
         kind: ActivityEvent.Kind,
-        recordedAt: TimeInterval,
-        in dir: URL
-    ) {
-        let pe = PersistedEntry(
+        recordedAt: TimeInterval
+    ) -> Data? {
+        try? JSONEncoder().encode(PersistedEntry(
             t: entry.time,
             m: entry.message,
             s: entry.imageFile,
             k: kind,
             o: entry.occurredAt,
             q: entry.insertionOrder,
-            r: recordedAt)
-        guard let data = try? JSONEncoder().encode(pe) else { return }
-        let url = dir.appendingPathComponent(Self.filename)
-        guard let fh = try? FileHandle(forWritingTo: url) else { return }
-        defer { try? fh.close() }
-        _ = try? fh.seekToEnd()
-        try? fh.write(contentsOf: data)
-        try? fh.write(contentsOf: Data([0x0A]))   // newline
+            r: recordedAt))
     }
 
     // MARK: - Pure rendering (testable without a WebView)

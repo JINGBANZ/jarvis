@@ -8,6 +8,9 @@ import Foundation
 protocol SessionAuditWriting: Sendable {
     func openSession(at directory: URL, initialHealth: Data) throws
     func append(_ data: Data, filename: String, in directory: URL) throws
+    /// Create one owner-only file with exactly these bytes. Used for a screenshot attachment, which
+    /// is written whole rather than appended to.
+    func write(_ data: Data, filename: String, in directory: URL) throws
     func replaceHealth(_ data: Data, in directory: URL) throws
     func emitToConsole(_ message: String)
 }

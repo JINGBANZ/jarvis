@@ -347,6 +347,73 @@ the worker renders into. Activity keeps its own persistence until the next slice
 - The parity harness passes with absent, enabled, blocked, full, and failing Activity destinations.
 - The Gate passes: `swift build && ./scripts/run-tests.sh`.
 
+## Phase 2 Implementation Contract — Activity persistence
+
+The second Phase 2 slice ([issue #199](https://github.com/JINGBANZ/jarvis/issues/199)) moves the
+writes. Activity rows and their screenshot attachments persist through the one bounded worker and
+per-session handle; `ActivityLog`'s own serial queue and `FileHandle` writing are deleted, not
+wrapped. This is the point where Activity stops being a privileged failure domain.
+
+### Target shape
+
+- `ActivityLog` is the terminal **projection**, not a recorder. It owns the in-memory chronology,
+  the retained-entry cap, the screenshot sequence, the session-end latch, the `attach`/`detach`
+  viewer wiring, and the pure rendering. Its serial queue is replaced by a lock held only across
+  in-memory bookkeeping; no disk access happens behind it.
+- The worker calls three narrow projection entry points on its own queue — `isRecording`,
+  `nextShotFilename()`, `admit(_:at:shotFilename:)`, `publish(_:)` — and performs both writes
+  itself through `SessionAuditWriting`, which gains a whole-file `write` for attachments.
+- `ActivityEventRecording` now has exactly one implementation, `FileSessionAudit`. A producer
+  cannot record into a projection that does not persist.
+- `jarvis-activity.jsonl` is created empty and owner-only when the worker opens the session,
+  alongside every other evidence file, so `SessionStore.listSessions()` still discovers a session
+  before its first row.
+- `JarvisApp`'s own notices — settings-not-applied, route advanced/skipped, brain change applied,
+  system audio stopped, session ended — go through the same handle. Nothing records Activity
+  directly any more, so the split introduced by the previous slice is gone.
+
+### Expected behavior
+
+- The Activity window and history are unchanged: same rows, copy, kinds, occurrence-time ordering,
+  screenshot lightbox, and `jarvis-activity.jsonl` format. Past sessions open and render as before,
+  through `SessionStore` and the same projection rendering.
+- A screenshot is still written **before** the row that references it, still `0600`, and still only
+  inside the owner-only live session directory — never `/tmp`.
+- The session-end marker is still final for the session; a late row admitted after it is refused.
+- `ActivityLog.flush()` is deleted. Closing the session handle is the barrier that replaced it, and
+  it covers every accepted row rather than only Activity's queue.
+
+### Failure and accepted degradation
+
+- Activity evidence is best-effort under the one uniform loss contract: no reserved capacity, no
+  priority, no writer retries. A row that does not fit the count or byte bound is lost, a failed
+  write loses that row's place in history, and the session's health record reads `partial`.
+- A failed row is still pushed to the live window. Losing history is not the same as losing the
+  screen the user is looking at.
+- **Quit changed.** The session-end row now rides the evidence stack, and Quit seals without
+  waiting, so a session ended by quitting the app may lose its terminal Activity row. That is the
+  approved contract — Quit never waits for evidence — and the health marker records the session as
+  partial when it happens. The next slice makes that visible in the window.
+- The parity harness proves absent, enabled, blocked, full, and failing Activity destinations
+  produce identical provider calls, route transitions, terminal outcomes, and overlay output.
+
+### Non-goals
+
+- Renaming `jarvis-activity.jsonl`, `shot-N.jpg`, or the persisted row schema.
+- Any change to Activity copy, event kinds, the viewer, or history browsing.
+- Evidence priority, reserved capacity for Activity, writer retries, or a synchronous drain on Quit.
+- The incomplete-evidence notice; that is the next slice.
+
+### Completion criteria
+
+- No Activity row or attachment is written outside the shared worker, and `ActivityLog` contains no
+  `DispatchQueue` and no `FileHandle`.
+- Past sessions still open and render; `SessionStoreTests` and `JarvisViewerTests` pass unchanged.
+- The kernel guard rejects persistence singletons — landed with the producer-edge slice and still
+  green.
+- The Gate passes: `swift build && ./scripts/run-tests.sh`, plus live smoke of Start, a coaching
+  turn with a screen view, Stop, and browsing the finished session in the Activity window.
+
 ## Phase 3 Implementation Contract — Evaluation extraction
 
 The first Phase 3 slice ([issue #202](https://github.com/JINGBANZ/jarvis/issues/202)) moves the

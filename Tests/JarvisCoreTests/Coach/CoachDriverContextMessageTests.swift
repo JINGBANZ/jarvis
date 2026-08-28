@@ -19,7 +19,7 @@ import Testing
             ]),
             screen: FakeScreen(), overlay: FakeOverlay(), clock: clock,
             automaticAttemptDelay: { _ in },
-            activity: ActivityLog()
+            activity: nil
         )
         return (driver, transcript)
     }

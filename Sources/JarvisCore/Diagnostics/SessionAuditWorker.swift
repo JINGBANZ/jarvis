@@ -39,12 +39,12 @@ final class SessionAuditWorker: @unchecked Sendable {
         let directory: URL
         /// The human-facing projection for this session's Activity occurrences, rendered on the
         /// worker so no producer pays for it. Absent when nothing is showing Activity.
-        let activity: (any ActivityEventRecording)?
+        let activity: ActivityLog?
         let health = HealthCounters()
         private let sealed = AtomicCounter()
         private let opened = AtomicCounter()
 
-        init(directory: URL, activity: (any ActivityEventRecording)?) {
+        init(directory: URL, activity: ActivityLog?) {
             self.directory = directory
             self.activity = activity
         }
@@ -207,10 +207,7 @@ final class SessionAuditWorker: @unchecked Sendable {
         self.diagnosticTimestampFormatter = diagnosticFormatter
     }
 
-    func openSession(
-        at directory: URL,
-        activity: (any ActivityEventRecording)? = nil
-    ) -> Session {
+    func openSession(at directory: URL, activity: ActivityLog? = nil) -> Session {
         let session = Session(directory: directory, activity: activity)
         _ = enqueue(Envelope(session: session, payload: .open, retainedBytes: 256))
         return session
@@ -428,10 +425,7 @@ final class SessionAuditWorker: @unchecked Sendable {
         case .diagnostic(let diagnostic):
             persistDiagnostic(diagnostic, session: session)
         case .activity(let activity):
-            // Phase 2 stepping stone: the projection still owns Activity's own persistence. What
-            // changed is that the producer no longer calls it — the worker does, off the coaching
-            // path, from the same envelope that carries every other evidence category.
-            session.activity?.record(activity.presentation, at: activity.date)
+            persistActivity(activity, session: session)
         }
     }
 
@@ -487,6 +481,44 @@ final class SessionAuditWorker: @unchecked Sendable {
         } catch {
             session.health.markWriteFailure()
         }
+    }
+
+    /// Project one Activity occurrence onto the human window and the session folder.
+    ///
+    /// The screenshot is written **before** the row that references it, so a persisted reference
+    /// always points at a file that exists; if that write fails the row is still recorded, without
+    /// the attachment, and the session's evidence is marked partial. The live push happens last,
+    /// so a failed disk write costs the row its place in history, not its place on screen.
+    private func persistActivity(_ event: ActivityAuditEvent, session: Session) {
+        guard let projection = session.activity else { return }
+        var shotFilename: String?
+        if let base64 = event.presentation.rendered.imageBase64,
+           projection.isRecording,
+           let data = Data(base64Encoded: base64, options: .ignoreUnknownCharacters) {
+            let name = projection.nextShotFilename()
+            if ensureOpen(session) {
+                do {
+                    try writer.write(data, filename: name, in: session.directory)
+                    shotFilename = name
+                } catch {
+                    session.health.markWriteFailure()
+                }
+            } else {
+                session.health.markWriteFailure()
+            }
+        }
+        guard let row = projection.admit(
+            event.presentation, at: event.date, shotFilename: shotFilename)
+        else { return }
+        if ensureOpen(session) {
+            do {
+                try writer.append(
+                    row.line, filename: ActivityLog.filename, in: session.directory)
+            } catch {
+                session.health.markWriteFailure()
+            }
+        }
+        projection.publish(row)
     }
 
     private func finalize(

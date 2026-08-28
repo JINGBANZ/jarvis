@@ -28,6 +28,10 @@ import Testing
             try backing.replaceHealth(data, in: directory)
         }
 
+        func write(_ data: Data, filename: String, in directory: URL) throws {
+            try backing.write(data, filename: filename, in: directory)
+        }
+
         func emitToConsole(_ message: String) {}
 
         func releaseOpen() {
@@ -66,6 +70,10 @@ import Testing
             try backing.replaceHealth(data, in: directory)
         }
 
+        func write(_ data: Data, filename: String, in directory: URL) throws {
+            try backing.write(data, filename: filename, in: directory)
+        }
+
         func emitToConsole(_ message: String) {}
     }
 
@@ -97,6 +105,10 @@ import Testing
 
         func replaceHealth(_ data: Data, in directory: URL) throws {
             try backing.replaceHealth(data, in: directory)
+        }
+
+        func write(_ data: Data, filename: String, in directory: URL) throws {
+            try backing.write(data, filename: filename, in: directory)
         }
 
         func emitToConsole(_ message: String) {}
@@ -139,6 +151,10 @@ import Testing
                 release.wait()
             }
             try backing.replaceHealth(data, in: directory)
+        }
+
+        func write(_ data: Data, filename: String, in directory: URL) throws {
+            try backing.write(data, filename: filename, in: directory)
         }
 
         func emitToConsole(_ message: String) {}
@@ -357,11 +373,14 @@ import Testing
         #expect(rows.contains("💬 same tip"))
 
         // Blocked: the worker never leaves its first open for the whole coaching run.
+        let blockedProjection = ActivityLog()
+        defer { blockedProjection.disable() }
+        blockedProjection.enable(directory: blockedDirectory)
         let blockedWriter = BlockingOpenWriter()
         let blocked = FileSessionAudit(
             directory: blockedDirectory,
             worker: SessionAuditWorker(limits: .production, writer: blockedWriter),
-            activity: ActivityLog())
+            activity: blockedProjection)
         await wait(for: blockedWriter.openEntered)
         let blockedSnapshot = await CoachingParityHarness.run(
             observers: .init(activity: blocked))
@@ -369,13 +388,16 @@ import Testing
         #expect(await blocked.close() == .complete)
 
         // Full: a one-slot mailbox behind a parked open drops Activity rows outright.
+        let fullProjection = ActivityLog()
+        defer { fullProjection.disable() }
+        fullProjection.enable(directory: fullDirectory)
         let fullWriter = BlockingOpenWriter()
         let full = FileSessionAudit(
             directory: fullDirectory,
             worker: SessionAuditWorker(
                 limits: .init(maxEventCount: 1, maxRetainedBytes: 8_192),
                 writer: fullWriter),
-            activity: ActivityLog())
+            activity: fullProjection)
         await wait(for: fullWriter.openEntered)
         let fullSnapshot = await CoachingParityHarness.run(
             observers: .init(activity: full))
@@ -383,25 +405,25 @@ import Testing
         #expect(await full.close() == .partial)
         #expect((try healthMarker(in: fullDirectory)["queue_overflow"] as? Int ?? 0) > 0)
 
-        // Failing: the projection silently discards every row the worker hands it.
+        // Failing: the first Activity write fails; later rows still reach history.
+        let failingProjection = ActivityLog()
+        defer { failingProjection.disable() }
+        failingProjection.enable(directory: failingDirectory)
+        let failingWriter = FailFirstAppendWriter()
         let failing = FileSessionAudit(
             directory: failingDirectory,
-            worker: SessionAuditWorker(limits: .production, writer: SessionAuditFileWriter()),
-            activity: TrappingProjection())
+            worker: SessionAuditWorker(limits: .production, writer: failingWriter),
+            activity: failingProjection)
+        await wait(for: failingWriter.openCompleted)
         let failingSnapshot = await CoachingParityHarness.run(
             observers: .init(activity: failing))
-        #expect(await failing.close() == .complete)
+        #expect(await failing.close() == .partial)
+        #expect(failingWriter.appendCount > 1)
 
         #expect(enabledSnapshot == absent)
         #expect(blockedSnapshot == absent)
         #expect(fullSnapshot == absent)
         #expect(failingSnapshot == absent)
-    }
-
-    /// An Activity projection that does nothing with what it is handed — the degenerate case of a
-    /// window that is closed, disabled, or wedged.
-    private struct TrappingProjection: ActivityEventRecording {
-        func record(_ event: ActivityEvent, at date: Date) {}
     }
 
     @Test func aFullQueueDropsOnlyThatRecordAndLaterRecordingContinues() async throws {

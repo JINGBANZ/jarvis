@@ -6,9 +6,9 @@ import Foundation
 /// it never authors free-form copy and never learns whether the record survived. Implementations
 /// must return immediately, must not throw, and must never invoke coaching callbacks.
 ///
-/// Two implementations exist, on purpose. `FileSessionAudit` wraps the occurrence into one
-/// `SessionEvent` on the shared bounded transport — the production path. `ActivityLog` is the
-/// terminal projection that renders and (until Phase 2 finishes) persists it.
+/// `FileSessionAudit` is the one implementation: it wraps the occurrence into a single `SessionEvent`
+/// on the shared bounded transport. The port exists so the kernel names neither that handle nor the
+/// `ActivityLog` projection the worker ultimately renders into.
 public protocol ActivityEventRecording: Sendable {
     func record(_ event: ActivityEvent, at date: Date)
 }

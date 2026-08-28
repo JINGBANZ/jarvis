@@ -32,7 +32,7 @@ private final class FailingScreen: ScreenCapturing, @unchecked Sendable {
             ]),
             screen: screen, overlay: overlay, clock: clock,
             automaticAttemptDelay: { _ in },
-            activity: ActivityLog()
+            activity: nil
         )
         return (driver, transcript)
     }

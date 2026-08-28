@@ -41,17 +41,18 @@ import Foundation
         #expect(js.contains("\"cls\":\"see\"") || js.contains("\"cls\": \"see\""))
     }
 
-    @Test func recordPersistsJsonlAndShotThenNotifiesObserver() throws {
+    @Test func recordPersistsJsonlAndShotThenNotifiesObserver() async throws {
         let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
-        let log = ActivityLog(); log.enable(directory: dir)
-        var pushed: [String] = []
-        let snap = log.attach { pushed.append($0) }
+        let (log, evidence) = ActivityLog.recordingSession(in: dir)
+        let pushedLock = NSLock()
+        var pushedRows: [String] = []
+        let snap = log.attach { row in pushedLock.withLock { pushedRows.append(row) } }
         #expect(snap.rows.isEmpty)                       // empty session
         #expect(snap.total == 0)
         let pixel = Data([0xFF, 0xD8, 0xFF, 0xD9]).base64EncodedString()
-        log.record(.screenViewed(imageBase64JPEG: pixel))
-        log.record(.tip(lines: ["tip"]))
-        _ = log.attach { _ in }                          // sync barrier: drains the serial queue
+        evidence.record(.screenViewed(imageBase64JPEG: pixel))
+        evidence.record(.tip(lines: ["tip"]))
+        _ = await evidence.close()                       // barrier: drains the evidence worker
 
         let jsonl = try String(contentsOf: dir.appendingPathComponent("jarvis-activity.jsonl"), encoding: .utf8)
         #expect(jsonl.split(separator: "\n").count == 2)
@@ -59,17 +60,18 @@ import Foundation
         #expect(FileManager.default.fileExists(atPath: shot.path))
         let perms = try FileManager.default.attributesOfItem(atPath: shot.path)[.posixPermissions] as? NSNumber
         #expect(perms?.int16Value == 0o600)
+        let pushed = pushedLock.withLock { pushedRows }
         #expect(pushed.count == 2)
         #expect(pushed[0].contains("data:image/jpeg;base64,"))
         #expect(pushed[1].contains("appendRow("))
     }
 
-    @Test func flushPersistsEveryPreviouslyRecordedEvent() throws {
+    @Test func closingTheHandlePersistsEveryPreviouslyRecordedEvent() async throws {
         let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
-        let log = ActivityLog(); log.enable(directory: dir)
+        let (log, evidence) = ActivityLog.recordingSession(in: dir)
 
-        log.record(.sessionEnded(reason: .stoppedByUser))
-        log.flush()
+        evidence.record(.sessionEnded(reason: .stoppedByUser))
+        _ = await evidence.close()
 
         let jsonl = try String(
             contentsOf: dir.appendingPathComponent(ActivityLog.filename), encoding: .utf8)
@@ -77,15 +79,16 @@ import Foundation
             || jsonl.contains(#""k": "sessionEnded""#))
     }
 
-    @Test func sessionEndMarkerRejectsLaterActivity() throws {
+    @Test func sessionEndMarkerRejectsLaterActivity() async throws {
         let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
-        let log = ActivityLog(); log.enable(directory: dir)
+        let (log, evidence) = ActivityLog.recordingSession(in: dir)
 
-        log.record(.tip(lines: ["before stop"]))
-        log.record(.sessionEnded(reason: .stoppedByUser))
-        log.record(.stayedSilent)
-        log.flush()
+        evidence.record(.tip(lines: ["before stop"]))
+        evidence.record(.sessionEnded(reason: .stoppedByUser))
+        evidence.record(.stayedSilent)
+        _ = await evidence.close()
 
+        _ = await evidence.close()
         let snapshot = log.attach { _ in }
         #expect(snapshot.rows.count == 2)
         #expect(snapshot.rows[0].contains("before stop"))
@@ -93,12 +96,13 @@ import Foundation
         #expect(!snapshot.rows.joined().contains("stayed silent"))
     }
 
-    @Test func attachSnapshotReplaysExistingEntriesWithImageBytes() throws {
+    @Test func attachSnapshotReplaysExistingEntriesWithImageBytes() async throws {
         let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
-        let log = ActivityLog(); log.enable(directory: dir)
+        let (log, evidence) = ActivityLog.recordingSession(in: dir)
         let pixel = Data([0xFF, 0xD8, 0xFF, 0xD9]).base64EncodedString()
-        log.record(.screenViewed(imageBase64JPEG: pixel))
-        log.record(.tip(lines: ["tip"]))
+        evidence.record(.screenViewed(imageBase64JPEG: pixel))
+        evidence.record(.tip(lines: ["tip"]))
+        _ = await evidence.close()
         let snap = log.attach { _ in }                   // late attach: snapshot must contain prior rows
         #expect(snap.rows.count == 2)
         #expect(snap.shown == 2)
@@ -107,29 +111,37 @@ import Foundation
         #expect(snap.shellHTML.contains("appendRow"))               // shell carries the JS
     }
 
-    @Test func enableCreatesJsonlImmediately() throws {
+    /// The empty owner-only file exists before the first row so `SessionStore.listSessions()`
+    /// can discover the session. The evidence worker creates it when it opens the session.
+    @Test func openingTheSessionCreatesJsonlImmediately() async throws {
         let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
-        let log = ActivityLog(); log.enable(directory: dir)
-        _ = log.attach { _ in }
+        let (_, evidence) = ActivityLog.recordingSession(in: dir)
+        _ = await evidence.close()
         let url = dir.appendingPathComponent("jarvis-activity.jsonl")
         #expect(FileManager.default.fileExists(atPath: url.path))
         let perms = try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? NSNumber
         #expect(perms?.int16Value == 0o600)
     }
 
-    @Test func recordIsNoOpWhenDisabled() {
+    @Test func recordIsNoOpWhenTheProjectionIsDisabled() async throws {
+        let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         let log = ActivityLog()                          // never enabled
-        log.record(.tip(lines: ["should not crash or write anything"]))
+        let evidence = FileSessionAudit(
+            directory: dir,
+            worker: SessionAuditWorker(limits: .production, writer: SessionAuditFileWriter()),
+            activity: log)
+        evidence.record(.tip(lines: ["should not crash or write anything"]))
+        _ = await evidence.close()
         let snap = log.attach { _ in }
         #expect(snap.total == 0)
         #expect(snap.rows.isEmpty)
     }
 
-    @Test func eventFormattingKeepsDiagnosticDetailsOut() throws {
+    @Test func eventFormattingKeepsDiagnosticDetailsOut() async throws {
         let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
-        let log = ActivityLog(); log.enable(directory: dir)
-        log.record(.heard(speaker: .them, text: "How would you optimize it?"))
-        _ = log.attach { _ in }
+        let (log, evidence) = ActivityLog.recordingSession(in: dir)
+        evidence.record(.heard(speaker: .them, text: "How would you optimize it?"))
+        _ = await evidence.close()
 
         let jsonl = try String(contentsOf: dir.appendingPathComponent("jarvis-activity.jsonl"), encoding: .utf8)
         #expect(jsonl.contains(#"heard (them): \"How would you optimize it?\""#))
@@ -137,9 +149,9 @@ import Foundation
         #expect(!jsonl.contains("recovered"))
     }
 
-    @Test func heardRowsUseSpeechTimeInsteadOfTranscriptCompletionOrder() throws {
+    @Test func heardRowsUseSpeechTimeInsteadOfTranscriptCompletionOrder() async throws {
         let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
-        let log = ActivityLog(); log.enable(directory: dir)
+        let (log, evidence) = ActivityLog.recordingSession(in: dir)
         let liveRowsLock = NSLock()
         var liveRows: [String] = []
         _ = log.attach { row in
@@ -147,14 +159,14 @@ import Foundation
         }
 
         // The short reply finishes transcription first, but it was spoken after the question.
-        log.record(
+        evidence.record(
             .heard(speaker: .me, text: "Yep."),
             at: Date(timeIntervalSince1970: 20))
-        log.record(
+        evidence.record(
             .heard(speaker: .them, text: "Did you see the pop-up?"),
             at: Date(timeIntervalSince1970: 10))
 
-        log.flush()
+        _ = await evidence.close()
         let pushedRows = liveRowsLock.withLock { liveRows }
         #expect(pushedRows.count == 2)
         #expect(pushedRows[1].contains("\"insertionIndex\":0"))
@@ -174,11 +186,12 @@ import Foundation
         #expect(persisted.allSatisfy { $0["q"] != nil && $0["r"] != nil })
     }
 
-    @Test func everyBrainActionHasAHumanFacingEvent() throws {
+    @Test func everyBrainActionHasAHumanFacingEvent() async throws {
         let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
-        let log = ActivityLog(); log.enable(directory: dir)
-        log.record(.screenViewFailed)
-        log.record(.stayedSilent)
+        let (log, evidence) = ActivityLog.recordingSession(in: dir)
+        evidence.record(.screenViewFailed)
+        evidence.record(.stayedSilent)
+        _ = await evidence.close()
         let snapshot = log.attach { _ in }
 
         #expect(snapshot.rows.count == 2)
@@ -196,10 +209,11 @@ import Foundation
         ))
     }
 
-    @Test func temporaryBrainFailureSaysRetryingWithoutDiagnosticDetail() throws {
+    @Test func temporaryBrainFailureSaysRetryingWithoutDiagnosticDetail() async throws {
         let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
-        let log = ActivityLog(); log.enable(directory: dir)
-        log.record(.coachingTurnFailed(provider: .codexCLI))
+        let (log, evidence) = ActivityLog.recordingSession(in: dir)
+        evidence.record(.coachingTurnFailed(provider: .codexCLI))
+        _ = await evidence.close()
         let snapshot = log.attach { _ in }
 
         let row = try #require(snapshot.rows.first)
@@ -223,10 +237,11 @@ import Foundation
             == ActivityEvent.Kind.coachingTurnFailed.rawValue)
     }
 
-    @Test func brainChangeAppliedNamesProvidersWithoutDiagnosticDetail() throws {
+    @Test func brainChangeAppliedNamesProvidersWithoutDiagnosticDetail() async throws {
         let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
-        let log = ActivityLog(); log.enable(directory: dir)
-        log.record(.brainChangeApplied(previous: .openAI, current: .claudeCode))
+        let (log, evidence) = ActivityLog.recordingSession(in: dir)
+        evidence.record(.brainChangeApplied(previous: .openAI, current: .claudeCode))
+        _ = await evidence.close()
         let snapshot = log.attach { _ in }
 
         let row = try #require(snapshot.rows.first)
@@ -241,12 +256,13 @@ import Foundation
         ))
     }
 
-    @Test func providerRouteLifecycleUsesFixedProviderOnlyCopy() throws {
+    @Test func providerRouteLifecycleUsesFixedProviderOnlyCopy() async throws {
         let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
-        let log = ActivityLog(); log.enable(directory: dir)
-        log.record(.brainRouteAdvanced(previous: .openAI, current: .claudeCode))
-        log.record(.brainRouteAdvanced(previous: .claudeCode, current: .claudeCode))
-        log.record(.brainRouteTargetSkipped(provider: .codexCLI))
+        let (log, evidence) = ActivityLog.recordingSession(in: dir)
+        evidence.record(.brainRouteAdvanced(previous: .openAI, current: .claudeCode))
+        evidence.record(.brainRouteAdvanced(previous: .claudeCode, current: .claudeCode))
+        evidence.record(.brainRouteTargetSkipped(provider: .codexCLI))
+        _ = await evidence.close()
         let snapshot = log.attach { _ in }
 
         #expect(snapshot.rows.count == 3)

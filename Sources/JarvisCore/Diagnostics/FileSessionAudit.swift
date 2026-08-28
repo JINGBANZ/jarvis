@@ -58,17 +58,13 @@ public final class FileSessionAudit:
     private let closeSettlement = CloseSettlement()
 
     /// `activity` is the terminal human-facing projection this session's Activity occurrences are
-    /// rendered into, off the producer's thread. Phase 2 still hands it `ActivityLog`, which owns
-    /// that persistence until the next slice moves it onto this worker.
-    public convenience init(directory: URL, activity: (any ActivityEventRecording)? = nil) {
+    /// rendered into, on the worker rather than on the producer's thread. Absent means the session
+    /// records everything except a human-facing window.
+    public convenience init(directory: URL, activity: ActivityLog? = nil) {
         self.init(directory: directory, worker: .shared, activity: activity)
     }
 
-    init(
-        directory: URL,
-        worker: SessionAuditWorker,
-        activity: (any ActivityEventRecording)? = nil
-    ) {
+    init(directory: URL, worker: SessionAuditWorker, activity: ActivityLog? = nil) {
         self.worker = worker
         self.session = worker.openSession(at: directory, activity: activity)
     }

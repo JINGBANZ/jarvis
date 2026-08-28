@@ -203,7 +203,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 // park. Three such tests exist in the repository and a CI runner has three pool threads, so
 // overlapping parks can starve every release path. Cap this suite at one at a time.
 @Suite(.serialized) struct CoachDriverPipelineTests {
-    private func makeDriver(activityLog: ActivityLog = ActivityLog(),
+    private func makeDriver(activity: (any ActivityEventRecording)? = nil,
                             brain: BrainClient, brainProvider: BrainProvider? = nil,
                             summarizer: BrainClient? = nil,
                             screen: ScreenCapturing = FakeScreen(),
@@ -228,7 +228,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             route: route, screen: screen, overlay: overlay, clock: clock,
             coachingAttempts: coachingAttempts,
             automaticAttemptDelay: automaticAttemptDelay,
-            activity: activityLog
+            activity: activity
         )
         return (driver, transcript)
     }
@@ -240,7 +240,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         onAdvanced: (@Sendable (BrainTarget, BrainTarget) -> Void)? = nil,
         onSkipped: (@Sendable (BrainTarget) -> Void)? = nil,
         onExhausted: (@MainActor @Sendable (BrainTarget, BrainFailure) -> Void)? = nil,
-        activityLog: ActivityLog = ActivityLog()
+        activity: (any ActivityEventRecording)? = nil
     ) -> (CoachDriver, RollingTranscript) {
         let transcript = RollingTranscript()
         let route = ConfiguredBrainRoute(
@@ -259,7 +259,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
                 overlay: overlay,
                 clock: ManualClock(),
                 automaticAttemptDelay: { _ in },
-                activity: activityLog),
+                activity: activity),
             transcript)
     }
 
@@ -358,9 +358,8 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let dir = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("jarvis-e2e-\(ProcessInfo.processInfo.globallyUniqueString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let activityLog = ActivityLog()
+        let (activityLog, evidence) = ActivityLog.recordingSession(in: dir)
         defer { activityLog.disable(); try? FileManager.default.removeItem(at: dir) }
-        activityLog.enable(directory: dir)
 
         let clock = ManualClock(now: 100)
         let brain = ScriptedBrain(script: [
@@ -372,14 +371,14 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         ])
         let screen = FakeScreen(payload: TestFixtures.tinyJpegBase64)   // a real JPEG, like screencapture
         let (driver, transcript) = makeDriver(
-            activityLog: activityLog, brain: brain, screen: screen, clock: clock)
+            activity: evidence, brain: brain, screen: screen, clock: clock)
         transcript.append(.init(speaker: .me, text: "here's my solution", at: 100))
 
         await driver.handleTrigger(.turnEnd)
 
         // attach() runs on the activity log's serial queue (a sync barrier after the async record()
         // calls), so everything is persisted before we assert.
-        _ = activityLog.attach { _ in }
+        _ = await evidence.close()
         let jsonl = try String(contentsOf: dir.appendingPathComponent("jarvis-activity.jsonl"), encoding: .utf8)
         #expect(jsonl.contains("looking at your screen"))   // the capture line
         #expect(jsonl.contains("shot-"))                     // line references the saved screenshot
@@ -406,19 +405,18 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let dir = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("jarvis-hintlog-\(ProcessInfo.processInfo.globallyUniqueString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let activityLog = ActivityLog()
+        let (activityLog, evidence) = ActivityLog.recordingSession(in: dir)
         defer { activityLog.disable(); try? FileManager.default.removeItem(at: dir) }
-        activityLog.enable(directory: dir)
 
         let clock = ManualClock(now: 100)
         let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s", lines: ["use a hash map"])])])
         let (driver, transcript) = makeDriver(
-            activityLog: activityLog, brain: brain, clock: clock)
+            activity: evidence, brain: brain, clock: clock)
         transcript.append(.init(speaker: .me, text: "stuck on two-sum", at: 100))
 
         await driver.handleTrigger(.manualHint)
 
-        _ = activityLog.attach { _ in }   // sync barrier: all async record()s have landed
+        _ = await evidence.close()   // barrier: drains this session's accepted rows
         let jsonl = try String(contentsOf: dir.appendingPathComponent("jarvis-activity.jsonl"), encoding: .utf8)
         // The trigger marker carries the pre-filled synthetic request ("…pressed the hint shortcut…").
         #expect(jsonl.contains("hint shortcut"))
@@ -430,30 +428,28 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let dir = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("jarvis-activity-boundary-\(ProcessInfo.processInfo.globallyUniqueString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let activityLog = ActivityLog()
+        // Diagnostics and Activity now share this session's one evidence handle, so both files are
+        // read after sealing it rather than immediately after the turn. Sharing a stack is exactly
+        // what makes this boundary worth pinning: the two projections must still stay separate.
+        let (activityLog, evidence) = ActivityLog.recordingSession(in: dir)
         defer { activityLog.disable(); try? FileManager.default.removeItem(at: dir) }
-        // Diagnostics persist through this session's evidence handle now, so the debug log is read
-        // after sealing it rather than immediately after the turn.
-        let evidence = FileSessionAudit(directory: dir)
         JarvisLog.attach(to: evidence)
         defer { JarvisLog.detach() }
-        activityLog.enable(directory: dir)
 
         let brain = ScriptedBrain(script: [
             .init(toolCalls: [.speak(callId: "s", lines: ["activity-boundary-tip-417"])])
         ])
         let (driver, _) = makeDriver(
-            activityLog: activityLog, brain: brain, clock: ManualClock(now: 417))
+            activity: evidence, brain: brain, clock: ManualClock(now: 417))
 
         #expect(await driver.handleTrigger(.silence(secondsQuiet: 417)) == .spoke)
 
-        _ = activityLog.attach { _ in }   // sync barrier: all async records have landed
+        _ = await evidence.close()   // barrier: drains this session's accepted rows
         let jsonl = try String(contentsOf: dir.appendingPathComponent("jarvis-activity.jsonl"), encoding: .utf8)
         #expect(jsonl.contains("activity-boundary-tip-417"))
         #expect(!jsonl.contains("quiet for 417s"))
         #expect(!jsonl.contains("thinking"))
 
-        _ = await evidence.close()   // seals the handle and drains its accepted diagnostics
         let debug = try String(contentsOf: dir.appendingPathComponent("jarvis-debug.log"), encoding: .utf8)
         #expect(debug.contains("quiet for 417s"))
         #expect(debug.contains("thinking"))
@@ -465,9 +461,8 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             .appendingPathComponent(
                 "jarvis-attempt-failure-\(ProcessInfo.processInfo.globallyUniqueString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let activityLog = ActivityLog()
+        let (activityLog, evidence) = ActivityLog.recordingSession(in: dir)
         defer { activityLog.disable(); try? FileManager.default.removeItem(at: dir) }
-        activityLog.enable(directory: dir)
 
         let brain = ScriptedThrowBrain(script: [
             nil,
@@ -475,11 +470,12 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             .init(toolCalls: [.speak(callId: "recovered", lines: ["recovered coaching"])]),
         ])
         let (driver, transcript) = makeDriver(
-            activityLog: activityLog, brain: brain, clock: ManualClock(now: 0))
+            activity: evidence, brain: brain, clock: ManualClock(now: 0))
         transcript.append(.init(speaker: .me, text: "keep listening after failures", at: 0))
 
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
 
+        _ = await evidence.close()
         let snapshot = activityLog.attach { _ in }
         // Anchor on the recovery row and inspect the two failures before it: this asserts the
         // ordering around the recovery rather than the log's total length.
@@ -591,20 +587,20 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let dir = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("jarvis-silent-action-\(ProcessInfo.processInfo.globallyUniqueString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let activityLog = ActivityLog()
+        let (activityLog, evidence) = ActivityLog.recordingSession(in: dir)
         defer { activityLog.disable(); try? FileManager.default.removeItem(at: dir) }
-        activityLog.enable(directory: dir)
 
         let brain = ScriptedBrain(script: [
             .init(toolCalls: [.staySilent(callId: "quiet")],
                   rawToolCalls: [RawToolCall(id: "quiet", name: "stay_silent", argumentsJSON: "{}")])
         ])
         let (driver, transcript) = makeDriver(
-            activityLog: activityLog, brain: brain, clock: ManualClock(now: 0))
+            activity: evidence, brain: brain, clock: ManualClock(now: 0))
         transcript.append(.init(speaker: .me, text: "thinking about the columns", at: 0))
 
         #expect(await driver.handleTrigger(.turnEnd) == .silentByModel)
 
+        _ = await evidence.close()
         let snapshot = activityLog.attach { _ in }
         #expect(snapshot.rows.count == 1)
         #expect(snapshot.rows[0].contains("stayed silent"))
@@ -616,9 +612,8 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let dir = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("jarvis-failed-screen-action-\(ProcessInfo.processInfo.globallyUniqueString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let activityLog = ActivityLog()
+        let (activityLog, evidence) = ActivityLog.recordingSession(in: dir)
         defer { activityLog.disable(); try? FileManager.default.removeItem(at: dir) }
-        activityLog.enable(directory: dir)
 
         let brain = ScriptedBrain(script: [
             .init(toolCalls: [.captureScreen(callId: "capture")],
@@ -627,12 +622,13 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
                   rawToolCalls: [RawToolCall(id: "quiet", name: "stay_silent", argumentsJSON: "{}")]),
         ])
         let (driver, transcript) = makeDriver(
-            activityLog: activityLog, brain: brain, screen: UnavailableScreen(),
+            activity: evidence, brain: brain, screen: UnavailableScreen(),
             clock: ManualClock(now: 0))
         transcript.append(.init(speaker: .me, text: "look at this", at: 0))
 
         #expect(await driver.handleTrigger(.turnEnd) == .silentByModel)
 
+        _ = await evidence.close()
         let snapshot = activityLog.attach { _ in }
         #expect(snapshot.rows.count == 2)
         #expect(snapshot.rows[0].contains("couldn't view your screen"))

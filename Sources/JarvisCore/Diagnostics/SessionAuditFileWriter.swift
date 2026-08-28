@@ -16,6 +16,10 @@ struct SessionAuditFileWriter: SessionAuditWriting {
         // per Start; creating rather than truncating keeps open idempotent for the retry below.
         try ensureOwnerOnlyFile(
             directory.appendingPathComponent(FileSessionAudit.diagnosticFilename))
+        // Created empty and owner-only up front so `SessionStore.listSessions()` can discover the
+        // session before its first human-facing row exists.
+        try ensureOwnerOnlyFile(
+            directory.appendingPathComponent(ActivityLog.filename))
         try replaceHealth(initialHealth, in: directory)
     }
 
@@ -46,6 +50,14 @@ struct SessionAuditFileWriter: SessionAuditWriting {
         guard rename(temporary.path, destination.path) == 0 else {
             throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
         }
+    }
+
+    func write(_ data: Data, filename: String, in directory: URL) throws {
+        guard FileManager.default.createFile(
+            atPath: directory.appendingPathComponent(filename).path,
+            contents: data,
+            attributes: [.posixPermissions: 0o600]
+        ) else { throw CocoaError(.fileWriteUnknown) }
     }
 
     func emitToConsole(_ message: String) {

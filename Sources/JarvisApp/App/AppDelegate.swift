@@ -234,7 +234,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let action = recordSettingsFailure ? "apply brain settings" : "start"
         guard let cli = detectedCLI else {
             jlog("Jarvis: can't \(action) — \(provider.displayName) CLI not found.")
-            if recordSettingsFailure { ActivityLog.shared.record(.settingsChangeNotApplied) }
+            if recordSettingsFailure { sessionAudit?.record(.settingsChangeNotApplied) }
             errorReporter.reportImmediately(
                 .brainCLIMissing(provider: provider.displayName), context: context)
             return (false, nil)
@@ -244,7 +244,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             break
         case .signedOut:
             jlog("Jarvis: can't \(action) — \(provider.displayName) isn't signed in.")
-            if recordSettingsFailure { ActivityLog.shared.record(.settingsChangeNotApplied) }
+            if recordSettingsFailure { sessionAudit?.record(.settingsChangeNotApplied) }
             errorReporter.reportImmediately(
                 .brainCLINotSignedIn(provider: provider.displayName), context: context)
             return (false, nil)
@@ -365,7 +365,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     return
                 }
                 if let previous = self.pendingBrainChangeFrom {
-                    ActivityLog.shared.record(.brainChangeApplied(
+                    sessionAudit?.record(.brainChangeApplied(
                         previous: previous.provider,
                         current: target.provider))
                     self.pendingBrainChangeFrom = nil
@@ -379,7 +379,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     jlog("Jarvis: ignoring route transition from a stopped or superseded session.")
                     return
                 }
-                ActivityLog.shared.record(.brainRouteAdvanced(
+                sessionAudit?.record(.brainRouteAdvanced(
                     previous: previous.provider, current: current.provider))
             },
             onSkipped: { [weak self] target in
@@ -388,7 +388,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     jlog("Jarvis: ignoring unavailable-target notice from a stopped session.")
                     return
                 }
-                ActivityLog.shared.record(
+                sessionAudit?.record(
                     .brainRouteTargetSkipped(provider: target.provider))
             },
             onExhausted: { [weak self, errorReporter] target, failure in
@@ -425,7 +425,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let key = apiKeyOverride ?? secrets.apiKey() ?? ""
         guard !route.targets.contains(where: { $0.provider == .openAI }) || !key.isEmpty else {
             jlog("Jarvis: can't apply brain settings — an OpenAI target has no API key.")
-            ActivityLog.shared.record(.settingsChangeNotApplied)
+            sessionAudit?.record(.settingsChangeNotApplied)
             return
         }
         let provider = route.primary.provider
@@ -521,7 +521,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             jlog("Jarvis: can't start — required permissions are missing: "
                  + missingPermissions.map(\.rawValue).sorted().joined(separator: ", "))
             if wasRunning {
-                ActivityLog.shared.record(.settingsChangeNotApplied)
+                sessionAudit?.record(.settingsChangeNotApplied)
             }
             errorReporter.reportImmediately(
                 .permissionsMissing(missingPermissions),
@@ -535,7 +535,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard !requiresOpenAIKey || !key.isEmpty else {
             jlog("Jarvis: can't start — no API key.")
             if wasRunning {
-                ActivityLog.shared.record(.settingsChangeNotApplied)
+                sessionAudit?.record(.settingsChangeNotApplied)
             }
             errorReporter.reportImmediately(.noAPIKey, context: reportContext)
             return false
@@ -652,7 +652,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .transcriptionPreparation(.blocked(blocker)), for: readinessSession)
         jlog("Jarvis: can't start — \(diagnostic)")
         if wasRunning {
-            ActivityLog.shared.record(.settingsChangeNotApplied)
+            sessionAudit?.record(.settingsChangeNotApplied)
         }
         errorReporter.reportImmediately(error, context: context)
     }
@@ -818,7 +818,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.captureReadiness?.systemBecameUnavailable()
                 self.observeEndpointAndCaptureReadiness(
                     stream: .system, state: .failed, for: readinessSession)
-                ActivityLog.shared.record(.systemAudioStopped)
+                sessionAudit?.record(.systemAudioStopped)
                 self.errorReporter.reportImmediately(.systemAudioStopped, context: .runtime)
             }
         }
@@ -1004,12 +1004,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             jlog("Jarvis: stopped.")
         }
         if endedLiveSession {
-            ActivityLog.shared.record(.sessionEnded(reason: reason))
+            // `sessionAudit` was already cleared above; record against the handle teardown holds so
+            // the marker still reaches this session's evidence rather than the next one's.
+            audit?.record(.sessionEnded(reason: reason))
         }
-        // Activity remains its separate human-facing failure domain. Normal Stop drains this
-        // session's producers and audit in the background, so a replacement Start stays instant.
-        // Quit seals best-effort and returns immediately; diagnostics never own app termination.
-        ActivityLog.shared.flush()
+        // Activity is no longer a privileged failure domain: its rows ride the one bounded evidence
+        // stack, so Stop drains this session's producers and evidence in the background and a
+        // replacement Start stays instant. Quit seals best-effort and returns immediately —
+        // evidence never owns app termination, so a last row may be lost and the session is then
+        // honestly marked partial.
         if reason == .applicationQuit {
             audit?.abandon()
         } else if audit != nil || !cancelled.isEmpty || compaction != nil {
@@ -1020,9 +1023,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { @MainActor [weak self] in
                 for task in cancelled { await task.value }
                 await compaction?.value
-                ActivityLog.shared.flush()
                 self?.pendingTurnDrainIDs.remove(drainID)
                 self?.activityViewer?.coachingStateDidChange()
+                // Closing the handle is the barrier now: it waits for every accepted row, Activity
+                // included, so a just-recorded outcome cannot race the evaluator.
                 _ = await audit?.close()
                 if let auditPath { self?.closingAuditPaths.remove(auditPath) }
                 self?.activityViewer?.coachingStateDidChange()
@@ -1191,7 +1195,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 systemConnectionState = .failed
                 observeEndpointAndCaptureReadiness(
                     stream: .system, state: .failed, for: readinessSession)
-                ActivityLog.shared.record(.systemAudioStopped)
+                sessionAudit?.record(.systemAudioStopped)
                 errorReporter.reportImmediately(.systemAudioStopped, context: .runtime)
             }
         }
@@ -1213,7 +1217,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Application Support/Jarvis left by another tool) keeps its mode, which would leak session-dir
         // names. Tighten it best-effort, mirroring FileSecretStore.setApiKey.
         try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: base.path)
-        ActivityLog.shared.enable(directory: dir)        // <dir>/jarvis-activity.jsonl, 0600, fresh
+        ActivityLog.shared.enable(directory: dir)        // in-memory projection for this session
         // File creation and every later write run on the shared bounded evidence worker. Start only
         // creates a lightweight session handle and never waits for an older session's disk access.
         // The human-facing projection is composed here, not reached for inside the kernel: the
