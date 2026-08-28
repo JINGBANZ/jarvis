@@ -18,7 +18,12 @@ cd "$(dirname "$0")/.."
 #                   Sources/JarvisOverlay are the deliberately thin OS-bound shell outside Core)
 #   Audio/          capture-side buffering and speech-activity policy ahead of admission
 #   Support/        Clock, retry schedule, and task plumbing the kernel depends on
-#   Brain/          the BrainClient port and route/model types — minus Adapters/ (below)
+#   Brain/          the BrainClient port and route/model types. Core describes brains and never
+#                   runs one: every concrete adapter — the OpenAI URLSession transport and the
+#                   local-agent CLI subtree with its Process plumbing — lives in
+#                   Sources/JarvisBrainProviders.
+#   Prompts/        predefined model-facing text for the kernel's own prompts. Provider-specific
+#                   prompt text moved out with its adapter, still under the JarvisPrompts name.
 #   Screen/         the ScreenCapturing port, snapshot model, and pure window-selection and
 #                   recognized-text-layout logic. Foundation-only: the screencapture helper
 #                   process, transient JPEG, and cleanup-verification latch live at the macOS edge
@@ -29,10 +34,6 @@ cd "$(dirname "$0")/.."
 #                   places inside the kernel even though they live beside persistence code
 #
 # Deliberately outside the covered paths today; each joins with the slice that clears it:
-#   Brain/Adapters/ the local-agent CLI adapters (Process). They are outside the kernel by design
-#                   and move outward with the rest of the Phase 4 adapter move (the OpenAI
-#                   URLSession transport already lives in Sources/JarvisBrainProviders); until then
-#                   they legitimately hold the OS symbols this guard bans.
 #   Diagnostics/ (rest)
 #                   evidence persistence by definition; only the heartbeat/health files above are
 #                   kernel.
@@ -59,6 +60,7 @@ kernel_paths=(
     Sources/JarvisCore/Audio
     Sources/JarvisCore/Support
     Sources/JarvisCore/Brain
+    Sources/JarvisCore/Prompts
     Sources/JarvisCore/Screen
     Sources/JarvisCore/Diagnostics/CaptureReadinessMonitor.swift
     Sources/JarvisCore/Diagnostics/AudioContinuityWitness.swift
@@ -92,7 +94,7 @@ check() {
 
     local scan_status=0
     local matches
-    matches="$(/usr/bin/grep -RInE --exclude-dir=Adapters "$pattern" "${paths[@]}")" \
+    matches="$(/usr/bin/grep -RInE "$pattern" "${paths[@]}")" \
         || scan_status=$?
     if [ "$scan_status" -gt 1 ]; then
         echo "Coaching-kernel $label scan failed; refusing to pass without a complete scan." >&2

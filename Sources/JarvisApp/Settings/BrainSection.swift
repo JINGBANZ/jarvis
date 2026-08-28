@@ -1,5 +1,6 @@
 import AppKit
 import JarvisCore
+import JarvisBrainProviders
 
 /// Minimal Brain Settings surface: one provider route, one reasoning-effort row, and transcription.
 ///

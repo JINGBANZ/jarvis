@@ -1,5 +1,6 @@
 import AppKit
 import JarvisCore
+import JarvisBrainProviders
 
 /// The complete persisted brain-provider route shown as one uninterrupted Settings card.
 ///

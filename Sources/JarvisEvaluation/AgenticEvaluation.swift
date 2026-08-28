@@ -1,4 +1,5 @@
 import Foundation
+import JarvisBrainProviders
 import JarvisCore
 #if canImport(Darwin)
 import Darwin

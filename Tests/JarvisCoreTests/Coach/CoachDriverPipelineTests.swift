@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import JarvisCore
+import JarvisBrainProviders
 
 /// Mock brain: replays a script of responses and records the messages + tool-choice it saw.
 ///

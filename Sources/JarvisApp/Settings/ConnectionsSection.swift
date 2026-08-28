@@ -1,5 +1,6 @@
 import AppKit
 import JarvisCore
+import JarvisBrainProviders
 
 /// Shared authentication and provider readiness, kept separate from Brain behavior settings.
 @MainActor

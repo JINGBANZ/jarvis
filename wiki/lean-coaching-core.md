@@ -187,7 +187,7 @@ editing.
 | 1 — Evidence foundation | **Built** in [#197](https://github.com/JINGBANZ/jarvis/issues/197) | Generalize the settled audit transport into `SessionEvidence` and route diagnostics through it without another worker | Activity remains on its existing path until Phase 2 |
 | 2 — Activity projection | **Built** in [#198](https://github.com/JINGBANZ/jarvis/issues/198), [#199](https://github.com/JINGBANZ/jarvis/issues/199), [#200](https://github.com/JINGBANZ/jarvis/issues/200) | Render and persist Activity through `SessionEvent`, show incomplete evidence in the Activity window, and remove Activity's independent persistence path | Human copy remains a closed safe projection; no debug detail enters Activity |
 | 3 — Offline work | **Built**: evaluation extraction in [#202](https://github.com/JINGBANZ/jarvis/issues/202), pruning off Start in [#201](https://github.com/JINGBANZ/jarvis/issues/201); preemptible compaction shipped earlier in [#187](https://github.com/JINGBANZ/jarvis/pull/187) | Give evaluation a shared compiler boundary when justified by the app and `EvalPrep`; make history compaction preemptible and move pruning off Start | Failure keeps full history and surviving session evidence |
-| 4 — Plans and adapters | OpenAI provider extraction **built** in [#205](https://github.com/JINGBANZ/jarvis/issues/205) and screen-capture adapter move **built** in [#204](https://github.com/JINGBANZ/jarvis/issues/204); plan revisions, the local-agent move ([#206](https://github.com/JINGBANZ/jarvis/issues/206)), and the file adapter moves remain the approved destination | Use immutable plan revisions at explicit between-attempt boundaries and move provider, process, screen, and file adapters outward | Live setting changes and fresh-attempt routing semantics remain intact |
+| 4 — Plans and adapters | OpenAI provider extraction **built** in [#205](https://github.com/JINGBANZ/jarvis/issues/205) and screen-capture adapter move **built** in [#204](https://github.com/JINGBANZ/jarvis/issues/204); plan revisions, the local-agent move in [#206](https://github.com/JINGBANZ/jarvis/issues/206), and the capture-heartbeat split in [#203](https://github.com/JINGBANZ/jarvis/issues/203); plan revisions remain the approved destination | Use immutable plan revisions at explicit between-attempt boundaries and move provider, process, screen, and file adapters outward | Live setting changes and fresh-attempt routing semantics remain intact |
 | 5 — Decomposition | Approved destination | Split the `CoachDriver` facade and `AppDelegate` only after ports and state ownership settle | Structure changes; observable coaching and lifecycle behavior do not |
 
 ## Phase 1 Implementation Contract
@@ -701,8 +701,8 @@ contracts before implementation.
 - Core keeps the provider-neutral brain domain: `BrainClient`/`BrainConversation`, `BrainTarget`,
   `BrainRoute`, `BrainProvider`, `BrainFailure` with its unknown-error → temporary entry point,
   `BrainModelCatalog`, `ReasoningEffort`, `BrainWorkloadTimeout`, tool-invocation parsing, and
-  the attempt/observer contracts. The local-agent CLI subtree stays under Core's
-  `Brain/Adapters/LocalAgent` until its own slice.
+  the attempt/observer contracts. (The local-agent CLI subtree followed in
+  [#206](https://github.com/JINGBANZ/jarvis/issues/206).)
 - `JarvisApp` composes providers at Start and hands the kernel injected `BrainClient` ports; the
   kernel's route and scheduling policy never name a concrete adapter.
 - One Core symbol becomes public for the boundary; everything else the adapter reads already was:
@@ -754,6 +754,67 @@ contracts before implementation.
 - The coaching parity harness passes with its scenario, fakes, and snapshot comparison untouched.
 - The Gate passes: `swift build && ./scripts/run-tests.sh`. Live smoke verification of one OpenAI
   coaching turn stays in the standard app smoke, performed by a human.
+
+## Phase 4 Implementation Contract — Local-agent adapter move
+
+The second Phase 4 slice ([issue #206](https://github.com/JINGBANZ/jarvis/issues/206)) moves the
+local-agent CLI subtree out of `JarvisCore` into `JarvisBrainProviders` — roughly 3,000 lines, and
+the last brain-related process plumbing in Core. After it, **Core describes brains and never runs
+one**, which is what lets the kernel guard cover `Sources/JarvisCore/Brain/` with no exclusions at
+all. It is a pure move: no behavior, invocation, parsing, timing, or classification change.
+
+### Target shape
+
+- `Sources/JarvisBrainProviders/LocalAgent/` holds the CLI brain client and its reply parsing,
+  conversation rendering and invocation shaping, the CLI detector and its unavailability reporting,
+  the process runner and phase timings, the runtime lifetime, and the Claude Code, Codex exec, and
+  Codex app-server runtimes — moved unchanged apart from `import JarvisCore`.
+- `JarvisPrompts+LocalAgent` moves with the adapters. It stays an extension of Core's public
+  `JarvisPrompts` namespace, so every predefined model-facing string Jarvis ships is still auditable
+  under that one name — the same rule the evaluation prompts follow.
+- `JarvisEvaluation` gains a dependency on `JarvisBrainProviders`, because the agentic evaluator
+  genuinely runs a local agent CLI: it reuses the same detector, invocation shape, and process
+  runner rather than keeping a second copy of that plumbing. The dependency graph stays acyclic and
+  inward-only (`JarvisEvaluation` → `JarvisBrainProviders` → `JarvisCore`), and the boundary that
+  matters — evaluation never reads live coaching state — is untouched.
+- One symbol becomes public for the boundary: `AgentCLIProcessRunner.errorDomain`. It is the
+  adapter's identity on every error that leaves it, and Core's provider-neutral `BrainFailure`
+  classification is tested against the real domain rather than a duplicated literal.
+- `JarvisCoreTests` links `JarvisBrainProviders` for two narrow reasons now: the coaching parity
+  harness, and the `BrainFailure` classification tests naming that real domain.
+
+### Expected behavior
+
+- CLI detection and its unavailability reporting, runtime lifetime and teardown, app-server versus
+  exec runtime selection, reply parsing, and phase timings behave exactly as today.
+- Failure classification and its consequences are unchanged: a proven permanent provider-boundary
+  failure (a missing CLI, for instance) still exhausts its target immediately, and a temporary or
+  unknown failure still takes three failed attempts. See
+  [Fresh-attempt recovery and routing](#fresh-attempt-recovery-and-routing).
+
+### Failure and accepted degradation
+
+- Nothing new, and no accepted data loss. With the CLI plumbing gone from `JarvisCore`, a future
+  live-path reference to a concrete brain runtime is a compile error rather than a review catch.
+
+### Non-goals
+
+- Restructuring the local-agent code to fit the move, changing any CLI invocation or parse, or
+  touching the app-server protocol.
+- Widening Core's public API beyond the one named symbol; compatibility shims or re-exports.
+- Adding `JarvisBrainProviders` to the ghost-mode scan: the target is Foundation-only and
+  presentation-free like Core, and the scan set still covers exactly the OS-bound targets.
+
+### Completion criteria
+
+- `swift build` proves the boundary: no `Process`, `FileManager`, `FileHandle`, or `URLSession`
+  remains under `Sources/JarvisCore/Brain`, and `scripts/check-coaching-kernel.sh` now scans that
+  directory — and `Sources/JarvisCore/Prompts` — with the `Adapters` exclusion deleted outright.
+- The six local-agent test suites move to `JarvisBrainProvidersTests` with assertions unchanged —
+  imports only.
+- The coaching parity harness passes.
+- The Gate passes: `swift build && ./scripts/run-tests.sh`, plus live smoke verification of one
+  Claude Code and one Codex coaching turn.
 
 ## Phase 4 Implementation Contract — Capture heartbeat split
 
