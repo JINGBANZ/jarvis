@@ -62,11 +62,27 @@ public final class FileSessionAudit: BrainTrafficAuditing, CoachingAttemptAuditi
     }
 
     public func record(_ event: BrainTrafficAuditEvent) {
-        worker.record(event, for: session)
+        record(.brainTraffic(event))
     }
 
     public func record(_ event: CoachingAttemptAuditEvent) {
-        worker.record(event, for: session)
+        record(.coachingAttempt(event))
+    }
+
+    /// The one envelope admission every typed producer view converges on. The handle stamps
+    /// session attribution itself, so an event can only ever claim the session it was recorded
+    /// through. Internal until a later slice migrates producers onto the envelope directly; the
+    /// Activity presentation stays unused until Phase 2 moves Activity onto `SessionEvent`.
+    func record(
+        _ detail: SessionEvent.Detail,
+        presentingInActivity presentation: ActivityLog.Event? = nil
+    ) {
+        worker.record(
+            SessionEvent(
+                sessionID: session.id,
+                detail: detail,
+                activityPresentation: presentation),
+            for: session)
     }
 
     /// Seal the audit and wait for its accepted records plus one immutable terminal marker. Callers
