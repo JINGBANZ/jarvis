@@ -1,4 +1,5 @@
 import Foundation
+import JarvisCore
 #if canImport(Darwin)
 import Darwin
 #else
@@ -6,6 +7,14 @@ import Glibc
 #endif
 
 /// Owns one cancellable `screencapture` helper and its transient session-local JPEG.
+///
+/// This is the macOS edge behind Core's `ScreenCapturing` port: the helper process, the transient
+/// file, and the cleanup-verification latch live here so `JarvisCore`'s screen logic stays
+/// Foundation-only. The privacy contract is unchanged — cancellation owns helper teardown and file
+/// cleanup, cleanup must be proven before the capture returns, and an unprovable cleanup latches
+/// this runner so no later capture or display fallback starts while a screen-derived file is
+/// unaccounted for (see wiki/decisions.md, "Screen-capture cancellation owns helper and file
+/// cleanup").
 ///
 /// `@unchecked Sendable` is justified because `lock` guards `activeCommand` and `cleanupFailed`;
 /// each command separately guards its process lifecycle.

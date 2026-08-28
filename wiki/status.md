@@ -160,11 +160,13 @@ credential leak; current-tree machine-specific instructions were generalized ins
 repository identity and provenance.
 
 The [lean coaching core architecture](./lean-coaching-core.md) is approved for issue #147. Its
-Phase 0 audit foundation and Phase 3 evaluation extraction (the `JarvisEvaluation` target) are
-built; the unified `SessionEvidence` stack, diagnostic migration, Activity projection, offline
-maintenance (preemptible compaction and pruning), adapter direction, and coordinator decomposition
-are not yet implemented. The approved next slice is diagnostics-only and preserves the current
-coaching, routing, Activity, evaluator, and artifact behavior.
+Phase 0 audit foundation, Phase 3 evaluation extraction (the `JarvisEvaluation` target), and Phase
+4's screen-capture adapter move (the `JarvisScreenCapture` target) are built; the unified
+`SessionEvidence` stack, diagnostic migration, Activity projection, offline maintenance
+(preemptible compaction and pruning), plan revisions with the remaining provider/file adapter
+moves, and coordinator decomposition are not yet implemented. The approved next slice is
+diagnostics-only and preserves the current coaching, routing, Activity, evaluator, and artifact
+behavior.
 
 ## Next action
 
@@ -233,8 +235,8 @@ playback, remains in
 
 ## Built
 
-Tested `JarvisCore` + `JarvisOverlay` harness is green (`./scripts/run-tests.sh`); `JarvisApp` is the
-thin OS shell, verified by the smoke run.
+Tested `JarvisCore` + `JarvisEvaluation` + `JarvisOverlay` + `JarvisScreenCapture` harness is green
+(`./scripts/run-tests.sh`); `JarvisApp` is the thin OS shell, verified by the smoke run.
 
 - `Sources/JarvisCore/Audio/` — transactional PCM + utterance buffering, bounded speech pre-roll, adaptive content-free activity detection, stable frame-decision endpoints, non-destructive AEC reference alignment, and system-audio timeline preservation (`PCMBuffer`, `SpeechGatedAudioBuffer`, `UtteranceBuffer`, `PCM16Framer`, `SpeechEndpointDetector`, `AudioDownmix`, `AdaptiveAudioActivityDetector`, `PCM16SpeechActivityTracker`, `EchoReferenceAlignment`, `SystemAudioTimeline`).
 - `Sources/JarvisCore/Transcription/` — provider-neutral session/provider contracts and immutable Start configuration, selectable OpenAI model/expected-language values, the OpenAI Realtime wire contract, reconnect-safe Jarvis-managed turn coordinator and recovery state, per-item ledger, analyzer-finalization state, and the single spoken-time ordering policy used by the rolling transcript and Activity (`TranscriptionSession`, `TranscriptionProvider`, `TranscriptionConfiguration`, `OpenAITranscriptionModel`, `OpenAITranscriptionLanguage`, `RealtimeSession`, `RealtimeJarvisManagedTurnCoordinator`, `RealtimeReconnectTranscriptionRecovery`, `RealtimeTranscriptionLedger`, `TranscriptionFinalizationState`, `ConversationChronology`, `Transcript`, `NoiseReduction`).
@@ -242,7 +244,8 @@ thin OS shell, verified by the smoke run.
 - `Sources/JarvisCore/Brain/` — provider-neutral `BrainClient`/attempt-scoped `BrainConversation` contracts and models stay at the root. `Adapters/OpenAI/` owns the Responses transport; `Adapters/LocalAgent/` owns CLI detection, `CLIBrainClient`, the Claude Code and Codex runtimes, and the bounded shared process edge. `LocalAgentRuntimeSet` encapsulates provider-specific coach/summarizer ownership. `AgentCLIProcessRunner` remains only for the explicit completed-session evaluator. The subsystem also owns provider-boundary failure classification (`BrainFailure`), immutable `BrainTarget`/`BrainRoute`, `BrainProvider`, `BrainModelCatalog` (first per-provider entry is the default), and `ReasoningEffort`.
 - `Sources/JarvisCore/Coach/` — the event loop: `CoachDriver` (fresh-attempt scheduling, transcription-settlement admission, and one-target tool-loop orchestration), the pure forward-only `BrainRouteSession`, `TranscriptionSettlementGate`, `CoachHistory` (client-managed session memory), and `ToolDefs` (coach tool schemas).
 - `Sources/JarvisCore/Triggers/` — turn/silence trigger detection, substance classification, and silence backoff (`Trigger`, `TurnSubstance`, `SilenceBackoff`).
-- `Sources/JarvisCore/Screen/` — the model-triggered screen-capture tool contract + window-scoped capture logic, plus `ScreenCaptureRunner`, which owns each cancellable `screencapture` helper and the transient JPEG it writes into the owner-only session directory: it verifies that file is gone before returning, and a capture whose cleanup can't be proven latches the runner so no later capture (or display fallback) starts while a screen-derived file is unaccounted for (`ScreenCapture`, `ScreenCaptureRunner`, `ScreenSnapshot`, `FrontWindowSelector`, `RecognizedTextLayout`).
+- `Sources/JarvisCore/Screen/` — the model-facing screen port and the pure, Foundation-only capture logic: the `ScreenCapturing` contract, the `ScreenSnapshot` model, front-window selection over window-server candidates, and reading-order OCR layout (`ScreenCapturing`, `ScreenSnapshot`, `FrontWindowSelector`, `WindowCandidate`, `TextFragment`, `RecognizedTextLayout`). No process or file I/O; the kernel dependency guard rejects `Process`/`FileManager` here.
+- `Sources/JarvisScreenCapture/` — the OS-bound screen-capture adapter behind that port ([lean-coaching-core.md → Phase 4 contract](./lean-coaching-core.md#phase-4-implementation-contract--screen-capture-adapter-move)): `ScreenCaptureRunner` owns each cancellable `screencapture` helper and the transient JPEG it writes into the owner-only session directory — it verifies that file is gone before returning, and a capture whose cleanup can't be proven latches the runner so no later capture (or display fallback) starts while a screen-derived file is unaccounted for — and `ScreenCaptureCLI` shoots the Settings-chosen or main display. Depends inward on `JarvisCore`; composed by `WindowScopedScreenCapture` in `JarvisApp`; tested headlessly in `JarvisScreenCaptureTests`.
 - `Sources/JarvisCore/Overlay/` — overlay text model + length-proportional timing + fan-out (`OverlayRendering`, `OverlayTiming`, `OverlayAppearance`, `BroadcastOverlay`).
 - `Sources/JarvisCore/Config/` — config + owner-only secrets + transcription/brain/screen preferences (`Config`, `Secrets`, `TranscriptionPreferences`, `BrainPreferences`, `ScreenCapturePreferences`, `ScreenCaptureScope`).
 - `Sources/JarvisCore/Support/` — small shared runtime primitives (`Clock`, `TurnTaskBox`, `RetrySchedule`, `RetryIncident`).
@@ -267,9 +270,9 @@ thin OS shell, verified by the smoke run.
 ## Not yet built
 
 - **Lean coaching core Phases 1–5** — the approved destination and slice contracts are in
-  [lean-coaching-core.md](./lean-coaching-core.md). Phase 0 audit isolation and Phase 3's
-  evaluation extraction are built; unified diagnostics, the Activity projection, compaction and
-  pruning maintenance, plan/adapter direction, and final coordinator decomposition remain future
-  work.
+  [lean-coaching-core.md](./lean-coaching-core.md). Phase 0 audit isolation, Phase 3's evaluation
+  extraction, and Phase 4's screen-capture adapter move are built; unified diagnostics, the
+  Activity projection, compaction and pruning maintenance, plan revisions with the remaining
+  provider/file adapter moves, and final coordinator decomposition remain future work.
 - **Universal binary** — `Sources/CJarvisAEC/lib/libjarvis-aec.a` is arm64-only; `lipo` in an x86_64 slice if Intel is ever needed.
 - **Neural double-talk canceller** (DTLN / Muesli-style on the same aligned streams) — the escalation if AEC3 over-attenuates the user under loud far audio in practice.

@@ -11,13 +11,18 @@ The Command Line Tools SDK (`/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk
 ScreenCaptureKit, AVFoundation, AppKit, SwiftUI, Vision, CoreAudio, and Security — everything Jarvis
 needs — so a SwiftUI + ScreenCaptureKit binary builds with plain `swift build`. No `.xcodeproj`.
 
-- **Three-target split (load-bearing for testability):** `JarvisCore` holds the pure, deterministic
-  logic behind protocols (config, transcript, the coach loop, the OpenAI client, …) and is
-  unit-tested with mocks on **any** machine — no Mac UI, key, or permissions needed. `JarvisOverlay`
-  is a small library holding just the `NSPanel` overlay, split out so `JarvisOverlayTests` can import
-  it to verify screen-capture invisibility headlessly. `JarvisApp` is the thin executable that wires
-  the other two to the side-effectful macOS frameworks (mic, ScreenCaptureKit, the realtime websocket,
-  the menu bar). That split is what lets most of the system be verified headless.
+- **Library/executable split (load-bearing for testability):** `JarvisCore` holds the pure,
+  deterministic logic behind protocols (config, transcript, the coach loop, the OpenAI client, …)
+  and is unit-tested with mocks on **any** machine — no Mac UI, key, or permissions needed.
+  `JarvisOverlay` is a small library holding just the `NSPanel` overlay, split out so
+  `JarvisOverlayTests` can import it to verify screen-capture invisibility headlessly.
+  `JarvisScreenCapture` is the OS-bound `screencapture` process/file adapter behind Core's
+  `ScreenCapturing` port, split out so `JarvisScreenCaptureTests` can drive its cancellation,
+  cleanup-verification, and latch contract headlessly. `JarvisEvaluation` is the Foundation-only
+  sealed-session evaluation library shared by the app and `EvalPrep`. `JarvisApp` is the thin
+  executable that wires the libraries to the side-effectful macOS frameworks (mic,
+  ScreenCaptureKit, the realtime websocket, the menu bar). That split is what lets most of the
+  system be verified headless.
 - **Tests use swift-testing, not XCTest.** `import XCTest` fails with "no such module" under
   CLT-only. Run the suite via **`./scripts/run-tests.sh`**, which adds the swift-testing framework
   search/rpath flags that plain `swift test` lacks CLT-only. (One sharp edge: a direct
