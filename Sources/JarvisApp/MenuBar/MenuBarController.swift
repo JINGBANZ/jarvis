@@ -1,10 +1,10 @@
 import AppKit
 import JarvisCore
 
-/// Menu-bar status item: Start/Stop, Settings, Check for Updates, Quit, then the build version —
-/// every command in the standard icon+title format (see `NSMenuItem+Standard.swift`). It renders the
-/// same overall `JarvisReadiness.Status` as Activity; no connection/capture policy is duplicated in
-/// this AppKit adapter.
+/// Menu-bar status item: Start/Stop, Settings, Check for Updates, Quit, then a caption naming the
+/// running build — every command in the standard icon+title format (see `NSMenuItem+Standard.swift`).
+/// It renders the same overall `JarvisReadiness.Status` as Activity; no connection/capture policy is
+/// duplicated in this AppKit adapter.
 @MainActor
 final class MenuBarController: NSObject {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -20,7 +20,7 @@ final class MenuBarController: NSObject {
     var onStart: (() -> Bool)?
     /// Fired when the user asks to stop the pipeline.
     var onStop: (() -> Void)?
-    /// Fired when the user picks "Settings…". Opens the unified Settings window.
+    /// Fired when the user picks "Settings". Opens the unified Settings window.
     var onOpenSettings: (() -> Void)?
     /// Fired when the user picks "Check for Updates". Answers whether Sparkle can start a check, so
     /// the item can render its own availability without this adapter importing Sparkle.
@@ -46,14 +46,14 @@ final class MenuBarController: NSObject {
         let menu = NSMenu()
         menu.items = [
             startStopItem,
-            .standard("Settings…", symbol: "gearshape",
+            .standard("Settings", symbol: "gearshape",
                       action: #selector(openSettings), target: self, keyEquivalent: ","),
         ]
         if let updateItem { menu.items.append(updateItem) }
         menu.items.append(contentsOf: [
             .standard("Quit Jarvis", symbol: "power",
                       action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"),
-            Self.versionItem(),
+            Self.buildCaptionItem(),
         ])
         // The item's availability depends on live session state, so resolve it when the menu opens
         // rather than caching it at build time.
@@ -69,17 +69,28 @@ final class MenuBarController: NSObject {
         refreshUI()
     }
 
-    /// The running build's marketing version, so a user reporting an issue can read it off the menu
-    /// without opening Settings. `Resources/Info.plist` is the single source (release-please rewrites
-    /// it), and both the release and the development bundle carry it.
+    /// Names the running build, so a user reporting an issue can read it off the menu without opening
+    /// Settings. A release shows its marketing version, whose single source is `Resources/Info.plist`
+    /// (release-please rewrites it). A local build shows "DevBuild": it copies that same plist, where
+    /// the version names whichever release the checkout descends from rather than the code actually
+    /// running, so `scripts/build-app.sh` stamps `JarvisDevelopmentBuild` and the caption says which
+    /// variant this is instead of quoting a version that would misidentify the build.
     ///
     /// The one item that skips the icon+title command format: it is a non-interactive footer caption,
     /// and centering needs the whole item width. A plain title would be drawn after the leading
     /// state/image column and centered only within what remains, so the caption is a custom view —
     /// AppKit sizes an item view to the menu's width, and the label spans it.
-    private static func versionItem() -> NSMenuItem {
-        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
-        let label = NSTextField(labelWithString: version.map { "v\($0)" } ?? "version unknown")
+    private static func buildCaptionItem() -> NSMenuItem {
+        let info = Bundle.main.infoDictionary
+        let caption: String
+        if info?["JarvisDevelopmentBuild"] as? Bool == true {
+            caption = "DevBuild"
+        } else if let version = info?["CFBundleShortVersionString"] as? String {
+            caption = "v\(version)"
+        } else {
+            caption = "version unknown"
+        }
+        let label = NSTextField(labelWithString: caption)
         label.font = .menuFont(ofSize: NSFont.smallSystemFontSize)
         label.textColor = .disabledControlTextColor
         label.alignment = .center

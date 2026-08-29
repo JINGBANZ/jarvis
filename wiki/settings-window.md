@@ -6,7 +6,7 @@
 
 ## Entry Point
 
-One menu item — **"Settings…"** — calls `SettingsWindow.show()`. The lightweight window and tab shell
+One menu item — **"Settings"** — calls `SettingsWindow.show()`. The lightweight window and tab shell
 are retained between opens. Section views are built only when selected and released on close, so
 controls still start fresh without constructing hidden tabs before the window can appear.
 
