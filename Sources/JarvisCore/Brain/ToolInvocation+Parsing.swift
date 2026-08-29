@@ -19,6 +19,12 @@ public extension ToolInvocation {
             return .speak(callId: callId, lines: lines)
         case staySilentTool.name:
             return .staySilent(callId: callId)
+        case searchPrepNotesTool.name:
+            let query = ((try? JSONDecoder().decode([String: String].self,
+                                                     from: Data(argumentsJSON.utf8)))?["query"] ?? "")
+                .trimmingCharacters(in: .whitespaces)
+            guard !query.isEmpty else { return nil }
+            return .searchPrepNotes(callId: callId, query: query)
         default:
             return nil
         }

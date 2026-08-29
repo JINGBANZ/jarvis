@@ -259,6 +259,10 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 result: .failed(outcome: .brainError, failure: failure, work: work))
         }
 
+        // search_prep_notes joins the fixed set only when a source actually indexed usable text —
+        // a session without prep material offers a tool set identical to before this feature existed.
+        let tools: [ToolDef] = attempt.prepMaterial != nil ? coachTools + [searchPrepNotesTool] : coachTools
+
         let result: AttemptResult = await { () async -> AttemptResult in
             var iterations = 0
             while iterations < maxToolIterations {
@@ -274,7 +278,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     response = try await CoachingRequestAttribution.$current.withValue(requestContext) {
                         try await conversation.respond(
                             messages: historyBase + turnMessages,
-                            tools: coachTools,
+                            tools: tools,
                             toolChoice: toolChoice)
                     }
                 } catch {
@@ -397,6 +401,28 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     commitIfWorthKeeping(turnMessages, deltaText: substantiveDeltaText)
                     ledger.commit(through: delta.upTo)
                     return .completed(.silentByModel)
+
+                case .searchPrepNotes(let callID, let query):
+                    if Task.isCancelled {
+                        jlog("… attempt cancelled (stopped) before searching prep notes")
+                        return .cancelled
+                    }
+                    let results = attempt.prepMaterial?.search(query: query) ?? []
+                    jlog("📎 searched prep notes for \"\(query)\" — \(results.count) match(es)")
+                    activity?.record(.prepNotesSearched(query: query, matchCount: results.count))
+
+                    // Provider-specific linkage remains inside this attempt only.
+                    if !response.outputItemsJSON.isEmpty {
+                        turnMessages.append(.rawItems(response.outputItemsJSON))
+                    } else {
+                        turnMessages.append(.assistantToolCalls(response.rawToolCalls))
+                    }
+                    turnMessages.append(.init(
+                        role: .tool,
+                        text: JarvisPrompts.Coach.prepNotesResult(results),
+                        toolCallId: callID))
+                    requestPhase = .searchPrepNotesContinuation
+                    requestSequence += 1
                 }
             }
 

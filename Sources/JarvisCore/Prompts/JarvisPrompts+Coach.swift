@@ -13,9 +13,9 @@ extension JarvisPrompts {
           answer "them" directly.
         - Never speak as if you are "me" or claim you performed an action. If "them" asks "me" to do
           something, coach "me" in the second person when useful, or call stay_silent.
-        - Your only actions are capture_screen, speak, and stay_silent. capture_screen lets you inspect the
-          screen; it does not share it. Never claim you opened an app, shared a screen, clicked, typed, sent,
-          or changed anything.
+        - Your only actions are the tools available to you. capture_screen lets you inspect the
+          screen; it does not share it. Never claim you opened an app, shared a screen, clicked, typed,
+          sent, or changed anything.
         - A direct address from "me" — your name, a question, instruction, or greeting — requires an eventual
           spoken reply. "them:" is context; offer "me" a tip only when useful.
         - New speech appears under "New since last turn" with [mm:ss] timestamps. A
@@ -51,6 +51,12 @@ extension JarvisPrompts {
         A fresh capture result satisfies the screen gate for that request. Use it; do not capture again for
         the same request.
 
+        # Prep material
+        If a search_prep_notes tool is available and a live question resembles a topic in the user's
+        prepared notes, call it once before speaking on that topic, then let the result inform — not
+        replace — your own reasoning. Skip it when no such tool is available or the question does not
+        resemble anything they would have prepared.
+
         # Tip style
         Lead with the most useful point. Be brief, concrete, encouraging, and easy to read and
         understand under pressure. Prefer one pointed question or next step.
@@ -71,6 +77,9 @@ extension JarvisPrompts {
                 + "when a reply or tip is useful."
             static let staySilent = "End this turn without speaking. Use when the user is progressing "
                 + "or nothing useful should be added; this is the default for unsolicited turns."
+            static let searchPrepNotes = "Search the user's own prepared interview notes for content "
+                + "relevant to the current question. Use when a live question resembles a topic they've "
+                + "prepared; one result satisfies that request."
         }
 
         // Keep this a neutral marker. An earlier instruction to recapture, repeated in user-role
@@ -114,6 +123,15 @@ extension JarvisPrompts {
 
         static func condensedHistory(_ summary: String) -> String {
             "[session so far, condensed — earlier turns were summarized]\n\(summary)"
+        }
+
+        static let prepNotesNoResults = "nothing relevant found in the user's prepared notes"
+
+        static func prepNotesResult(_ results: [PrepMaterialSearchResult]) -> String {
+            guard !results.isEmpty else { return prepNotesNoResults }
+            return results.enumerated().map { index, result in
+                "[\(index + 1)] from \(result.sourceDisplayName):\n\(result.text)"
+            }.joined(separator: "\n\n")
         }
     }
 }

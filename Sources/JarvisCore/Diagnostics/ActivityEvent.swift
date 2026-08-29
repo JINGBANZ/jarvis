@@ -26,6 +26,7 @@ public enum ActivityEvent: Sendable {
         case brainChangeApplied
         case brainRouteAdvanced
         case brainRouteTargetSkipped
+        case prepNotesSearched
     }
 
     /// A finalized utterance from the user (`me`) or interviewer (`them`).
@@ -59,6 +60,9 @@ public enum ActivityEvent: Sendable {
     case brainRouteAdvanced(previous: BrainProvider, current: BrainProvider)
     /// A route target was proven unavailable before a provider request could be constructed.
     case brainRouteTargetSkipped(provider: BrainProvider)
+    /// The brain looked up the user's prepared interview notes for `query`. `matchCount` is how
+    /// many relevant chunks came back, 0 meaning nothing scored usefully.
+    case prepNotesSearched(query: String, matchCount: Int)
 
     /// Keep persisted identity, human copy, and the optional screenshot payload in one exhaustive
     /// mapping so adding or editing an event cannot make its `k` disagree with what Activity shows.
@@ -120,6 +124,12 @@ public enum ActivityEvent: Sendable {
                 "⚠️ \(provider.displayName) target is unavailable — skipping it",
                 nil
             )
+        case .prepNotesSearched(let query, let matchCount):
+            let message = matchCount > 0
+                ? "📎 checked prep notes for \"\(query)\" — found \(matchCount) match"
+                    + "\(matchCount == 1 ? "" : "es")"
+                : "📎 checked prep notes for \"\(query)\" — nothing relevant found"
+            return (.prepNotesSearched, message, nil)
         }
     }
 }

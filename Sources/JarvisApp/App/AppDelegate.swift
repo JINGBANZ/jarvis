@@ -483,6 +483,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             plan: freshSessionPlan(),
             activity: artifacts.sessionAudit)
 
+        // Building the index reads files and can shell out to `textutil`, so it runs off the Start
+        // path entirely rather than delaying it — a trigger that fires before this lands just
+        // doesn't have search_prep_notes available for that one attempt.
+        let prepMaterialSources = prepMaterialPreferences.sources
+        Task.detached(priority: .utility) {
+            let index = await PrepMaterialIndexBuilder.build(from: prepMaterialSources)
+            driver.installPrepMaterial(index)
+        }
+
         // CoachDriver is @unchecked Sendable; capture it (not @MainActor self) in the callbacks.
         // Route turns through TurnTaskBox so Stop can cancel an in-flight one. Concurrent triggers are
         // coalesced inside CoachDriver (the running turn batches them in), so we don't cancel here.

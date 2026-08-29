@@ -10,6 +10,7 @@ public enum CoachingAttemptAuditEvent: Sendable {
     public enum RequestPhase: String, Sendable {
         case initial
         case captureScreenContinuation = "capture_screen_continuation"
+        case searchPrepNotesContinuation = "search_prep_notes_continuation"
     }
 
     public enum TerminalAction: String, Sendable {
