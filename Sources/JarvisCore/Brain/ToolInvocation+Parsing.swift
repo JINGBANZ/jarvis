@@ -20,9 +20,12 @@ public extension ToolInvocation {
         case staySilentTool.name:
             return .staySilent(callId: callId)
         case searchPrepNotesTool.name:
-            let query = ((try? JSONDecoder().decode([String: String].self,
-                                                     from: Data(argumentsJSON.utf8)))?["query"] ?? "")
-                .trimmingCharacters(in: .whitespaces)
+            // A loose object read, not a strict Decodable dictionary: the API path guarantees the
+            // shape via Structured Outputs, but the CLI protocol is free-form prompt text, and a
+            // sibling field of an unexpected type must not make the whole call fail to parse.
+            let object = (try? JSONSerialization.jsonObject(
+                with: Data(argumentsJSON.utf8))) as? [String: Any]
+            let query = (object?["query"] as? String ?? "").trimmingCharacters(in: .whitespaces)
             guard !query.isEmpty else { return nil }
             return .searchPrepNotes(callId: callId, query: query)
         default:

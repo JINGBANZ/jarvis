@@ -319,6 +319,27 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         work: work)
                 }
 
+                // Shared tail for every non-terminal tool call: replay the model's own call (verbatim
+                // reasoning items when the provider needs them, or the plain call list otherwise),
+                // append the tool's result, fold in any extra messages (e.g. an image), and advance
+                // to the continuation phase for the next request in this same attempt.
+                func appendToolContinuation(
+                    toolCallId: String,
+                    resultText: String,
+                    extraMessages: [ChatMessage] = [],
+                    newPhase: CoachingAttemptAuditEvent.RequestPhase
+                ) {
+                    if !response.outputItemsJSON.isEmpty {
+                        turnMessages.append(.rawItems(response.outputItemsJSON))
+                    } else {
+                        turnMessages.append(.assistantToolCalls(response.rawToolCalls))
+                    }
+                    turnMessages.append(.init(role: .tool, text: resultText, toolCallId: toolCallId))
+                    turnMessages.append(contentsOf: extraMessages)
+                    requestPhase = newPhase
+                    requestSequence += 1
+                }
+
                 switch call {
                 case .captureScreen(let callID):
                     let screen = self.screen
@@ -339,36 +360,23 @@ final class CoachAttemptRunner: @unchecked Sendable {
                             )),
                             .userImage(shot.imageBase64),
                         ]
+                        appendToolContinuation(
+                            toolCallId: callID,
+                            resultText: JarvisPrompts.Coach.captureResult(
+                                recognizedText: shot.recognizedText),
+                            extraMessages: [.userImage(shot.imageBase64)],
+                            newPhase: .captureScreenContinuation)
                     } else {
                         jlog("👁 screenshot failed")
                         activity?.record(.screenViewFailed)
                         work.observations = [
                             .user(JarvisPrompts.Coach.earlierCaptureFailed),
                         ]
+                        appendToolContinuation(
+                            toolCallId: callID,
+                            resultText: JarvisPrompts.Coach.captureFailed,
+                            newPhase: .captureScreenContinuation)
                     }
-
-                    // Provider-specific linkage remains inside this attempt only.
-                    if !response.outputItemsJSON.isEmpty {
-                        turnMessages.append(.rawItems(response.outputItemsJSON))
-                    } else {
-                        turnMessages.append(.assistantToolCalls(response.rawToolCalls))
-                    }
-                    if let shot {
-                        turnMessages.append(.init(
-                            role: .tool,
-                            text: JarvisPrompts.Coach.captureResult(
-                                recognizedText: shot.recognizedText
-                            ),
-                            toolCallId: callID))
-                        turnMessages.append(.userImage(shot.imageBase64))
-                    } else {
-                        turnMessages.append(.init(
-                            role: .tool,
-                            text: JarvisPrompts.Coach.captureFailed,
-                            toolCallId: callID))
-                    }
-                    requestPhase = .captureScreenContinuation
-                    requestSequence += 1
 
                 case .speak(let callID, let lines):
                     if Task.isCancelled {
@@ -407,26 +415,32 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         jlog("… attempt cancelled (stopped) before searching prep notes")
                         return .cancelled
                     }
-                    let results = attempt.prepMaterial?.search(query: query) ?? []
+                    // The tool is offered only when prepMaterial != nil (below), so a call here with
+                    // it absent means a non-schema-enforced provider (a CLI protocol reconstructing
+                    // calls from free-form prompt text) emitted one anyway — reject it rather than
+                    // silently returning an empty result with a real-looking Activity entry implying
+                    // prep material was actually checked.
+                    guard let prepMaterial = attempt.prepMaterial else {
+                        jlog("⚠️ search_prep_notes called without prep material configured — "
+                             + "scheduling fresh attempt")
+                        return .failed(
+                            outcome: .brainError,
+                            failure: BrainFailure(
+                                disposition: .temporary,
+                                detail: "search_prep_notes called without prep material configured"),
+                            work: work)
+                    }
+                    let results = prepMaterial.search(query: query)
                     jlog("📎 searched prep notes for \"\(query)\" — \(results.count) match(es)")
                     activity?.record(.prepNotesSearched(query: query, matchCount: results.count))
                     // Mirrors capture_screen: if the very next request in this attempt fails, a
                     // fresh retry starts with this result already in hand — search is cheap to
                     // redo, but this still saves the model an extra tool-loop round-trip.
                     work.observations = [.user(JarvisPrompts.Coach.prepNotesResult(results))]
-
-                    // Provider-specific linkage remains inside this attempt only.
-                    if !response.outputItemsJSON.isEmpty {
-                        turnMessages.append(.rawItems(response.outputItemsJSON))
-                    } else {
-                        turnMessages.append(.assistantToolCalls(response.rawToolCalls))
-                    }
-                    turnMessages.append(.init(
-                        role: .tool,
-                        text: JarvisPrompts.Coach.prepNotesResult(results),
-                        toolCallId: callID))
-                    requestPhase = .searchPrepNotesContinuation
-                    requestSequence += 1
+                    appendToolContinuation(
+                        toolCallId: callID,
+                        resultText: JarvisPrompts.Coach.prepNotesResult(results),
+                        newPhase: .searchPrepNotesContinuation)
                 }
             }
 

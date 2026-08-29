@@ -4,6 +4,10 @@ import Testing
 
 /// A scripted `PrepMaterialSearching` port that records every query it was asked, so a test can
 /// assert the model's tool-call argument reached the port unchanged.
+///
+/// `@unchecked Sendable` is safe because the only mutable property (`_queries`) is accessed only
+/// under `lock` — the same justification `ScriptedBrain` in `CoachDriverPipelineTests.swift` gives
+/// for its identical pattern.
 final class FakePrepMaterialSearch: PrepMaterialSearching, @unchecked Sendable {
     private let lock = NSLock()
     private var _queries: [String] = []
@@ -90,6 +94,26 @@ final class FakePrepMaterialSearch: PrepMaterialSearching, @unchecked Sendable {
         #expect(brain.requestContexts.compactMap { $0 }.map(\.phase) == [
             .initial, .searchPrepNotesContinuation,
         ])
+    }
+
+    @Test func searchPrepNotesWithoutConfiguredMaterialFailsRatherThanSilentlyEmpty() async {
+        // Simulates a non-schema-enforced CLI provider emitting the call even though it was never
+        // offered (prepMaterial nil means the tool isn't in the request's tool set at all).
+        let brain = ScriptedBrain(script: [
+            .init(toolCalls: [.searchPrepNotes(callId: "p1", query: "rate limiter")],
+                  rawToolCalls: [RawToolCall(
+                    id: "p1", name: "search_prep_notes",
+                    argumentsJSON: #"{"query":"rate limiter"}"#)]),
+        ])
+        let (driver, transcript) = makeDriver(brain: brain, prepMaterial: nil)
+        transcript.append(.init(speaker: .them, text: "How would you design a rate limiter?", at: 100))
+
+        let outcome = await driver.handleTrigger(.turnEnd)
+
+        // A temporary failure correctly triggers automatic retry (same as any other malformed
+        // response) — the scripted brain just keeps replaying the same call, so what matters here
+        // is that it's treated as a failure at all, never as a silent empty-result success.
+        #expect(outcome == .brainError)
     }
 
     @Test func noMatchesRendersAnExplicitNoResultsMessage() async {

@@ -154,4 +154,31 @@ import Testing
                     "args=\(args)")
         }
     }
+
+    @Test func parseMapsSearchPrepNotesAndTrimsQuery() {
+        guard case .searchPrepNotes(_, let query)? = ToolInvocation.parse(
+            callId: "c", name: "search_prep_notes", argumentsJSON: #"{"query":"  rate limiter  "}"#)
+        else {
+            Issue.record("search_prep_notes"); return
+        }
+        #expect(query == "rate limiter")
+    }
+
+    @Test func parseSearchPrepNotesToleratesAnUnexpectedSiblingField() {
+        // The CLI protocol is free-form prompt text, not a Structured Outputs guarantee — a stray
+        // non-string sibling field must not make the whole call fail to parse.
+        guard case .searchPrepNotes(_, let query)? = ToolInvocation.parse(
+            callId: "c", name: "search_prep_notes",
+            argumentsJSON: #"{"query":"rate limiter","extra":{"nested":1}}"#) else {
+            Issue.record("search_prep_notes with sibling field"); return
+        }
+        #expect(query == "rate limiter")
+    }
+
+    @Test func parseRejectsMalformedSearchPrepNotes() {
+        for args in [#"{}"#, #"{"query":""}"#, #"{"query":"   "}"#, #"{"q":"rate limiter"}"#, "junk"] {
+            #expect(ToolInvocation.parse(callId: "c", name: "search_prep_notes", argumentsJSON: args) == nil,
+                    "args=\(args)")
+        }
+    }
 }
