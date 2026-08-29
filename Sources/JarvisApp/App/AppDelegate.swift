@@ -562,7 +562,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                 self.captureReadiness?.systemBecameUnavailable()
                 self.observeEndpointAndCaptureReadiness(
                     stream: .system, state: .failed, for: readinessSession)
-                artifacts.sessionAudit?.record(.systemAudioStopped)
+                self.artifacts.sessionAudit?.record(.systemAudioStopped)
                 self.errorReporter.reportImmediately(.systemAudioStopped, context: .runtime)
             }
         }
