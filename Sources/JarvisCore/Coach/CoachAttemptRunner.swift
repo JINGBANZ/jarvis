@@ -106,11 +106,19 @@ final class CoachAttemptRunner: @unchecked Sendable {
         var bypassesTranscriptionSettlement: Bool
         var wake: CoachingAttemptAuditEvent.Wake = .trigger
         /// Completed effects safe to carry between attempts and providers: ordinary user context
-        /// only. At most the latest screen observation is retained; a later search_prep_notes
-        /// result appends alongside it rather than replacing it, so one tool's carried result can't
-        /// silently discard another's from earlier in the same attempt. Never raw reasoning, tool
-        /// ids, or call/result linkage.
-        var observations: [ChatMessage] = []
+        /// only, one independently-replaceable slot per contributing tool — at most the latest
+        /// screen observation, at most the latest search result. A flat, appended-to array can't
+        /// express this: `work` also carries forward verbatim into a retry after a failure
+        /// (`CoachDriver.swift`'s `work = failedWork`), so a second search on that retry must
+        /// replace the first search's stale result, not accumulate alongside it — while still never
+        /// disturbing whatever the screen slot holds, and vice versa. Never raw reasoning, tool ids,
+        /// or call/result linkage.
+        var screenObservation: [ChatMessage] = []
+        var prepNotesObservation: ChatMessage?
+        /// Every carried observation, screen first, in the order the model should see them.
+        var observations: [ChatMessage] {
+            screenObservation + (prepNotesObservation.map { [$0] } ?? [])
+        }
         var manualHintPrepared = false
 
         init(reason: TriggerReason) {
@@ -226,11 +234,11 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     observations.append(observation)
                     turnMessages.append(observation)
                 }
-                work.observations = observations
+                work.screenObservation = observations
             } else {
                 jlog("👁 screenshot failed")
                 activity?.record(.screenViewFailed)
-                work.observations = [
+                work.screenObservation = [
                     .user(JarvisPrompts.Coach.manualHintCaptureFailed),
                 ]
             }
@@ -362,7 +370,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         if let text = shot.recognizedText {
                             jlog("🔤 read \(text.count(where: { $0 == "\n" }) + 1) lines of on-screen text")
                         }
-                        work.observations = [
+                        work.screenObservation = [
                             .user(JarvisPrompts.Coach.captureResult(
                                 recognizedText: shot.recognizedText
                             )),
@@ -377,7 +385,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     } else {
                         jlog("👁 screenshot failed")
                         activity?.record(.screenViewFailed)
-                        work.observations = [
+                        work.screenObservation = [
                             .user(JarvisPrompts.Coach.earlierCaptureFailed),
                         ]
                         appendToolContinuation(
@@ -443,11 +451,11 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     activity?.record(.prepNotesSearched(query: query, matchCount: results.count))
                     // Mirrors capture_screen: if the very next request in this attempt fails, a
                     // fresh retry starts with this result already in hand — search is cheap to
-                    // redo, but this still saves the model an extra tool-loop round-trip. Appended,
-                    // not replaced: a capture_screen observation earlier in this same attempt (from
-                    // the tool loop or a prepared manual hint) must survive a later search, not be
-                    // silently discarded.
-                    work.observations.append(.user(JarvisPrompts.Coach.prepNotesResult(results)))
+                    // redo, but this still saves the model an extra tool-loop round-trip. Its own
+                    // slot: replacing prepNotesObservation (not appending to the flat list) means a
+                    // second search on a later retry supersedes the first's now-stale result instead
+                    // of piling on top of it, while never touching screenObservation either way.
+                    work.prepNotesObservation = .user(JarvisPrompts.Coach.prepNotesResult(results))
                     appendToolContinuation(
                         toolCallId: callID,
                         resultText: JarvisPrompts.Coach.prepNotesResult(results),

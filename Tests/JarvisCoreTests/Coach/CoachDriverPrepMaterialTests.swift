@@ -13,10 +13,13 @@ final class FakePrepMaterialSearch: PrepMaterialSearching, @unchecked Sendable {
     private var _queries: [String] = []
     var queries: [String] { lock.withLock { _queries } }
     let results: [PrepMaterialSearchResult]
+    /// Overrides `results` for a specific query, so a test can distinguish which of several calls
+    /// produced a given carried observation. Set before the search is exercised; read-only after.
+    var resultsByQuery: [String: [PrepMaterialSearchResult]] = [:]
     init(results: [PrepMaterialSearchResult] = []) { self.results = results }
     func search(query: String) -> [PrepMaterialSearchResult] {
         lock.withLock { _queries.append(query) }
-        return results
+        return resultsByQuery[query] ?? results
     }
 }
 
@@ -177,6 +180,40 @@ final class FakePrepMaterialSearch: PrepMaterialSearching, @unchecked Sendable {
         #expect(retryRequest.contains { $0.imageBase64JPEG != nil })
         #expect(retryRequest.contains { ($0.text ?? "").contains("visible code") })
         #expect(retryRequest.contains { ($0.text ?? "").contains("token bucket details") })
+    }
+
+    @Test func secondSearchAcrossRetriesReplacesTheFirstsStaleResult() async {
+        // work carries forward verbatim into a retry after a failure (CoachDriver's
+        // `work = failedWork`), so a search that fires again on that retry must replace the first
+        // search's now-stale result, not pile on top of it — otherwise a long enough failure chain
+        // accumulates every prior query's result in every later request.
+        let brain = ScriptedThrowBrain(script: [
+            .init(toolCalls: [.searchPrepNotes(callId: "p1", query: "A")],
+                  rawToolCalls: [RawToolCall(id: "p1", name: "search_prep_notes",
+                                             argumentsJSON: #"{"query":"A"}"#)]),
+            nil, // fails — carries the "A" result forward into a fresh attempt
+            .init(toolCalls: [.searchPrepNotes(callId: "p2", query: "B")],
+                  rawToolCalls: [RawToolCall(id: "p2", name: "search_prep_notes",
+                                             argumentsJSON: #"{"query":"B"}"#)]),
+            nil, // fails again — the carried result must now be "B" only, not "A" and "B"
+            .init(toolCalls: [.speak(callId: "s1", lines: ["done"])],
+                  rawToolCalls: [RawToolCall(id: "s1", name: "speak",
+                                             argumentsJSON: #"{"lines":["done"]}"#)]),
+        ])
+        let prepMaterial = FakePrepMaterialSearch()
+        prepMaterial.resultsByQuery = [
+            "A": [PrepMaterialSearchResult(sourceDisplayName: "notes.md", text: "result-from-query-A")],
+            "B": [PrepMaterialSearchResult(sourceDisplayName: "notes.md", text: "result-from-query-B")],
+        ]
+        let (driver, transcript) = makeDriver(brain: brain, prepMaterial: prepMaterial)
+        transcript.append(.init(speaker: .them, text: "How would you design a rate limiter?", at: 100))
+
+        _ = await driver.handleTrigger(.turnEnd)
+
+        #expect(brain.calls.count == 5)
+        let finalRetryRequest = brain.calls[4]
+        #expect(finalRetryRequest.contains { ($0.text ?? "").contains("result-from-query-B") })
+        #expect(!finalRetryRequest.contains { ($0.text ?? "").contains("result-from-query-A") })
     }
 
     @Test func noMatchesRendersAnExplicitNoResultsMessage() async {
