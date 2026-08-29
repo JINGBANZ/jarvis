@@ -495,7 +495,9 @@ their own contract before implementation.
 
 ### Target shape
 
-- `JarvisEvaluation` depends inward on `JarvisCore` only and stays Foundation-only.
+- `JarvisEvaluation` depends inward and stays Foundation-only: on `JarvisCore`, and on
+  `JarvisBrainProviders` for the local-agent CLI plumbing its agentic evaluator runs (see the
+  [local-agent adapter move](#phase-4-implementation-contract--local-agent-adapter-move)).
   `JarvisCore` cannot depend back on it; the SwiftPM dependency graph is the enforcement, and no
   separate guard script exists for this rule.
 - `Sources/JarvisEvaluation/` holds the sealed-session stack, moved unchanged apart from
@@ -506,10 +508,12 @@ their own contract before implementation.
   name). `JSONLRecords` moves although the issue body does not list it: it is loss-aware parsing
   consumed only by the sealed-session readers; nothing on the live path parses JSONL.
 - Core keeps the live recording side — `FileSessionAudit` with its worker/writer, the typed audit
-  events and observer ports, `ActivityLog`, `SessionStore`, `jlog` — and the LocalAgent CLI
-  plumbing (`AgentCLIDetector`, `AgentCLIProcessRunner`, `CodexRuntimeHome`), which the live brain
-  path shares. The boundary reads: Core records evidence; `JarvisEvaluation` reads it after Stop.
-- Two Core symbols become public for the boundary; everything else the stack reads already was:
+  events and observer ports, `ActivityLog`, `SessionStore`, `jlog`. The boundary reads: Core records
+  evidence; `JarvisEvaluation` reads it after Stop. The LocalAgent CLI plumbing the evaluator shares
+  with the live brain path (`AgentCLIDetector`, `AgentCLIProcessRunner`, `CodexRuntimeHome`) lives
+  in `JarvisBrainProviders`.
+- Two symbols are public for the boundary; everything else the stack reads already was. Both now
+  live in `JarvisBrainProviders` with the adapters they belong to:
   - `LocalAgentTransport` — its raw values are part of the persisted traffic-record schema
     (`request.runtime`), and `SessionMetrics` keys the `codex exec` usage shape on it. One source
     of truth beats duplicating the string in the parser.
@@ -546,7 +550,7 @@ their own contract before implementation.
 
 ### Completion criteria
 
-- `swift build` proves the boundary: `JarvisEvaluation` depends on `JarvisCore` only, `JarvisApp`
+- `swift build` proves the boundary: `JarvisEvaluation` depends only inward, `JarvisApp`
   and `EvalPrep` link the new target, and no sealed-session evaluation code remains under
   `Sources/JarvisCore`.
 - The six evaluation test suites move to `JarvisEvaluationTests` with assertions unchanged —
