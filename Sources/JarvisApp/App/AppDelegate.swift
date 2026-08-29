@@ -30,6 +30,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     private var brain: BrainComposition!
     private let transcriptionPreferences = TranscriptionPreferences()
     private let screenPreferences = ScreenCapturePreferences()
+    private let prepMaterialPreferences = PrepMaterialPreferences()
     /// Monotonic revision stamped on each control-plane snapshot. Bumped at Start and whenever an
     /// explicit Settings edit installs a fresh plan; never by runtime health.
     private var planRevision: UInt = 0
@@ -175,6 +176,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             DisplaySection(preferences: screenPreferences) { [weak self] in
                 self?.reapplySessionPlan()
             },
+            PrepMaterialSection(preferences: prepMaterialPreferences),
             ActivitySection(viewer: activityViewer),
         ]
         settingsWindow = SettingsWindow(sections: sections)
