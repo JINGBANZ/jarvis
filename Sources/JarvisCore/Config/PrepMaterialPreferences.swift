@@ -3,8 +3,9 @@ import Foundation
 /// Persisted list of local files/folders the user has pointed Jarvis at as interview prep material.
 /// Backed by UserDefaults — the same per-macOS-account storage every other setting already uses, so
 /// this data is inherently local to the signed-in user with no separate tenant/isolation concept
-/// needed. Jarvis stores only the path, never a copy of the file's contents; it reads the live file
-/// at Session Start. Mirrors `BrainPreferences.fallbackTargets`.
+/// needed. Jarvis stores only the path, never a copy of the file's contents. Reading and indexing
+/// that content is a later slice; this type only manages the source list. Mirrors
+/// `BrainPreferences.fallbackTargets`.
 ///
 /// Foundation-only so it stays unit-testable in JarvisCore; inject a `UserDefaults(suiteName:)` in
 /// tests.
@@ -29,9 +30,19 @@ public final class PrepMaterialPreferences {
 
     /// Adds one source, unless its path is already present.
     public func add(_ source: PrepMaterialSource) {
+        add([source])
+    }
+
+    /// Adds every source not already present by path, skipping duplicates within the batch too, in
+    /// one read + one write — so a multi-select add costs one round-trip regardless of count instead
+    /// of one per source.
+    public func add(_ newSources: [PrepMaterialSource]) {
+        guard !newSources.isEmpty else { return }
         var current = sources
-        guard !current.contains(where: { $0.path == source.path }) else { return }
-        current.append(source)
+        var seenPaths = Set(current.map(\.path))
+        for source in newSources where seenPaths.insert(source.path).inserted {
+            current.append(source)
+        }
         persist(current)
     }
 

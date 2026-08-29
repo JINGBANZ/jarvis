@@ -21,7 +21,11 @@ final class PrepMaterialSection: NSObject, SettingsSection {
     private let card = SettingsCardView(frame: NSRect(x: 0, y: 0, width: 712, height: 200))
     private let addButton = NSButton(title: "＋ Add Files or Folders…", target: nil, action: nil)
     private var rows: [SettingsRowView] = []
+    private var rowsBySourceID: [UUID: SettingsRowView] = [:]
     private var emptyLabel: NSTextField?
+    /// Guards a background existence check against a stale result landing after a newer `render()`
+    /// (a fast add/remove, or leaving and returning to the tab) already rebuilt the row list.
+    private var renderGeneration = 0
 
     init(preferences: PrepMaterialPreferences) {
         self.preferences = preferences
@@ -115,8 +119,12 @@ final class PrepMaterialSection: NSObject, SettingsSection {
     }
 
     private func render() {
+        renderGeneration += 1
+        let generation = renderGeneration
+
         rows.forEach { $0.removeFromSuperview() }
         rows.removeAll()
+        rowsBySourceID.removeAll()
         emptyLabel?.removeFromSuperview()
         emptyLabel = nil
 
@@ -137,20 +145,38 @@ final class PrepMaterialSection: NSObject, SettingsSection {
                 removeButton.controlSize = .small
                 removeButton.setAccessibilityLabel("Remove \(source.displayName)")
 
-                let missing = !source.exists()
                 let row = SettingsRowView(
                     title: source.displayName,
-                    detail: missing ? "⚠️ Not found — \(source.path)" : source.path,
+                    detail: source.path,
                     controlView: removeButton,
                     controlSize: NSSize(width: 30, height: 30),
                     preferredHeight: Self.rowHeight)
                 card.contentView?.addSubview(row)
                 rows.append(row)
+                rowsBySourceID[source.id] = row
             }
         }
 
         card.frame.size.height = preferredHeight
         layoutRows()
+
+        // Existence is a stat() per source, which can block on an unresponsive network volume or a
+        // sleeping external disk — never do it on the main thread. Rows show their plain path until
+        // this resolves, then a still-current render applies the ⚠️ warning to whichever are missing.
+        guard !sources.isEmpty else { return }
+        Task.detached(priority: .utility) { [sources] in
+            let missing = sources.filter { !$0.exists() }
+            await MainActor.run { [weak self] in
+                self?.applyMissingState(missing, generation: generation)
+            }
+        }
+    }
+
+    private func applyMissingState(_ missing: [PrepMaterialSource], generation: Int) {
+        guard generation == renderGeneration else { return }
+        for source in missing {
+            rowsBySourceID[source.id]?.setDetail("⚠️ Not found — \(source.path)")
+        }
     }
 
     private func layoutRows() {
@@ -188,40 +214,18 @@ final class PrepMaterialSection: NSObject, SettingsSection {
         guard panel.runModal() == .OK else { return } // ghost-mode-allowed: explicit user action in Settings
 
         let fm = FileManager.default
+        var newSources: [PrepMaterialSource] = []
         for url in panel.urls {
             var isDirectory: ObjCBool = false
             guard fm.fileExists(atPath: url.path, isDirectory: &isDirectory) else { continue }
-            preferences.add(PrepMaterialSource(path: url.path, isDirectory: isDirectory.boolValue))
+            newSources.append(PrepMaterialSource(path: url.path, isDirectory: isDirectory.boolValue))
         }
+        preferences.add(newSources)
         render()
     }
 
     private func removeSource(id: UUID) {
         preferences.remove(id: id)
         render()
-    }
-}
-
-/// A tiny target/action adapter for the per-row remove button. Mirrors the identical private helper
-/// in `BrainTargetRowView.swift`.
-@MainActor
-private final class ClosureButton: NSButton {
-    private let closure: () -> Void
-
-    init(title: String, action: @escaping () -> Void) {
-        self.closure = action
-        super.init(frame: .zero)
-        self.title = title
-        target = self
-        self.action = #selector(performAction)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    @objc private func performAction() {
-        closure()
     }
 }
