@@ -51,12 +51,6 @@ extension JarvisPrompts {
         A fresh capture result satisfies the screen gate for that request. Use it; do not capture again for
         the same request.
 
-        # Prep material
-        If a search_prep_notes tool is available and a live question resembles a topic in the user's
-        prepared notes, call it once before speaking on that topic, then let the result inform — not
-        replace — your own reasoning. Skip it when no such tool is available or the question does not
-        resemble anything they would have prepared.
-
         # Tip style
         Lead with the most useful point. Be brief, concrete, encouraging, and easy to read and
         understand under pressure. Prefer one pointed question or next step.
@@ -66,6 +60,17 @@ extension JarvisPrompts {
         either speaker said. Do not use an unfamiliar term as if it were shared. When a new term or
         symbol genuinely is the right one, gloss it on first use ("1<<h, that is 2 to the power h");
         accuracy outranks brevity.
+        """
+
+        /// Appended to `system` only for a session where `search_prep_notes` is actually offered
+        /// (see `CoachAttemptRunner.runAttempt`) — describing a tool the model doesn't have invites
+        /// exactly the hallucinated call the tool-loop guard turns into a hard attempt failure.
+        static let prepMaterialAddendum = """
+
+        # Prep material
+        If a live question resembles a topic in the user's prepared notes, call search_prep_notes once
+        before speaking on that topic, then let the result inform — not replace — your own reasoning.
+        Skip it when the question does not resemble anything they would have prepared.
         """
 
         enum ToolDescription {

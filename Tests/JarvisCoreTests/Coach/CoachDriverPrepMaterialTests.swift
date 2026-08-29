@@ -24,6 +24,7 @@ final class FakePrepMaterialSearch: PrepMaterialSearching, @unchecked Sendable {
     private func makeDriver(
         brain: BrainClient,
         prepMaterial: (any PrepMaterialSearching)? = nil,
+        screen: ScreenCapturing = FakeScreen(),
         clock: Clock = ManualClock(now: 100)
     ) -> (CoachDriver, RollingTranscript) {
         let transcript = RollingTranscript()
@@ -33,7 +34,7 @@ final class FakePrepMaterialSearch: PrepMaterialSearching, @unchecked Sendable {
             targets: [ConfiguredBrainTarget(target: target, brain: brain)])
         let driver = CoachDriver(
             config: .default, transcript: transcript, route: route,
-            screen: FakeScreen(), overlay: FakeOverlay(), clock: clock,
+            screen: screen, overlay: FakeOverlay(), clock: clock,
             automaticAttemptDelay: { _ in },
             prepMaterial: prepMaterial)
         return (driver, transcript)
@@ -114,6 +115,68 @@ final class FakePrepMaterialSearch: PrepMaterialSearching, @unchecked Sendable {
         // response) — the scripted brain just keeps replaying the same call, so what matters here
         // is that it's treated as a failure at all, never as a silent empty-result success.
         #expect(outcome == .brainError)
+    }
+
+    @Test func systemPromptOmitsPrepMaterialGuidanceWhenNotConfigured() async {
+        let brain = ScriptedBrain(script: [
+            .init(toolCalls: [.staySilent(callId: "s1")],
+                  rawToolCalls: [RawToolCall(id: "s1", name: "stay_silent", argumentsJSON: "{}")]),
+        ])
+        let (driver, transcript) = makeDriver(brain: brain, prepMaterial: nil)
+        transcript.append(.init(speaker: .me, text: "let me think out loud", at: 100))
+
+        _ = await driver.handleTrigger(.turnEnd)
+
+        // Describing a tool the model doesn't have invites exactly the hallucinated call that's a
+        // hard attempt failure — the guidance must not appear when the tool isn't offered.
+        #expect(!brain.calls[0].contains {
+            $0.role == .system && ($0.text ?? "").contains("search_prep_notes")
+        })
+    }
+
+    @Test func systemPromptIncludesPrepMaterialGuidanceWhenConfigured() async {
+        let brain = ScriptedBrain(script: [
+            .init(toolCalls: [.staySilent(callId: "s1")],
+                  rawToolCalls: [RawToolCall(id: "s1", name: "stay_silent", argumentsJSON: "{}")]),
+        ])
+        let (driver, transcript) = makeDriver(
+            brain: brain, prepMaterial: FakePrepMaterialSearch())
+        transcript.append(.init(speaker: .me, text: "let me think out loud", at: 100))
+
+        _ = await driver.handleTrigger(.turnEnd)
+
+        #expect(brain.calls[0].contains {
+            $0.role == .system && ($0.text ?? "").contains("search_prep_notes")
+        })
+    }
+
+    @Test func retryAfterCaptureAndSearchPreservesBothObservations() async {
+        let brain = ScriptedThrowBrain(script: [
+            .init(toolCalls: [.captureScreen(callId: "c1")],
+                  rawToolCalls: [RawToolCall(id: "c1", name: "capture_screen", argumentsJSON: "{}")]),
+            .init(toolCalls: [.searchPrepNotes(callId: "p1", query: "rate limiter")],
+                  rawToolCalls: [RawToolCall(
+                    id: "p1", name: "search_prep_notes",
+                    argumentsJSON: #"{"query":"rate limiter"}"#)]),
+            nil, // fails this attempt — carries work.observations into a fresh retry
+            .init(toolCalls: [.speak(callId: "s1", lines: ["done"])],
+                  rawToolCalls: [RawToolCall(id: "s1", name: "speak",
+                                             argumentsJSON: #"{"lines":["done"]}"#)]),
+        ])
+        let screen = FakeScreen(recognizedText: "visible code")
+        let prepMaterial = FakePrepMaterialSearch(results: [
+            PrepMaterialSearchResult(sourceDisplayName: "notes.md", text: "token bucket details"),
+        ])
+        let (driver, transcript) = makeDriver(brain: brain, prepMaterial: prepMaterial, screen: screen)
+        transcript.append(.init(speaker: .them, text: "How would you design a rate limiter?", at: 100))
+
+        _ = await driver.handleTrigger(.turnEnd)
+
+        #expect(brain.calls.count == 4)
+        let retryRequest = brain.calls[3]
+        #expect(retryRequest.contains { $0.imageBase64JPEG != nil })
+        #expect(retryRequest.contains { ($0.text ?? "").contains("visible code") })
+        #expect(retryRequest.contains { ($0.text ?? "").contains("token bucket details") })
     }
 
     @Test func noMatchesRendersAnExplicitNoResultsMessage() async {

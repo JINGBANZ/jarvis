@@ -106,8 +106,10 @@ final class CoachAttemptRunner: @unchecked Sendable {
         var bypassesTranscriptionSettlement: Bool
         var wake: CoachingAttemptAuditEvent.Wake = .trigger
         /// Completed effects safe to carry between attempts and providers: ordinary user context
-        /// only. At most the latest screen observation is retained. Never raw reasoning, tool ids,
-        /// or call/result linkage.
+        /// only. At most the latest screen observation is retained; a later search_prep_notes
+        /// result appends alongside it rather than replacing it, so one tool's carried result can't
+        /// silently discard another's from earlier in the same attempt. Never raw reasoning, tool
+        /// ids, or call/result linkage.
         var observations: [ChatMessage] = []
         var manualHintPrepared = false
 
@@ -194,7 +196,13 @@ final class CoachAttemptRunner: @unchecked Sendable {
             ledger.commit(through: delta.upTo)
             return AttemptExecution(id: attemptID, result: .skipped(.skippedFillerOnly))
         }
-        let historyBase: [ChatMessage] = [.system(JarvisPrompts.Coach.system)] + history.snapshot()
+        // Describing search_prep_notes when it isn't actually offered invites the model to call a
+        // tool it doesn't have — and that call is a hard attempt failure (below), so this must track
+        // the real tool set exactly, not just hint at it.
+        let systemPrompt = attempt.prepMaterial != nil
+            ? JarvisPrompts.Coach.system + JarvisPrompts.Coach.prepMaterialAddendum
+            : JarvisPrompts.Coach.system
+        let historyBase: [ChatMessage] = [.system(systemPrompt)] + history.snapshot()
 
         if reason == .manualHint && !work.manualHintPrepared {
             if let prompt = context.promptLine {
@@ -435,8 +443,11 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     activity?.record(.prepNotesSearched(query: query, matchCount: results.count))
                     // Mirrors capture_screen: if the very next request in this attempt fails, a
                     // fresh retry starts with this result already in hand — search is cheap to
-                    // redo, but this still saves the model an extra tool-loop round-trip.
-                    work.observations = [.user(JarvisPrompts.Coach.prepNotesResult(results))]
+                    // redo, but this still saves the model an extra tool-loop round-trip. Appended,
+                    // not replaced: a capture_screen observation earlier in this same attempt (from
+                    // the tool loop or a prepared manual hint) must survive a later search, not be
+                    // silently discarded.
+                    work.observations.append(.user(JarvisPrompts.Coach.prepNotesResult(results)))
                     appendToolContinuation(
                         toolCallId: callID,
                         resultText: JarvisPrompts.Coach.prepNotesResult(results),
