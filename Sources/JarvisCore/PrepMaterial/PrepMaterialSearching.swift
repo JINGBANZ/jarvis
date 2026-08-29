@@ -1,16 +1,5 @@
 import Foundation
 
-/// One relevant excerpt from the user's configured prep material, plus which source it came from.
-public struct PrepMaterialSearchResult: Sendable, Equatable {
-    public let sourceDisplayName: String
-    public let text: String
-
-    public init(sourceDisplayName: String, text: String) {
-        self.sourceDisplayName = sourceDisplayName
-        self.text = text
-    }
-}
-
 /// Looks up the most relevant chunks of the user's prep material for a live coaching question.
 ///
 /// This is the kernel's prep-material port: Core owns the contract and the pure chunking/ranking

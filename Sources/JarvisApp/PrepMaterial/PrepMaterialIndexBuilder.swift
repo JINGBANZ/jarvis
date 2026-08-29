@@ -24,11 +24,17 @@ enum PrepMaterialIndexBuilder {
         let files = sources.flatMap(expand)
         guard !files.isEmpty else { return nil }
 
-        let extractions = files.map { file in
-            Task.detached(priority: .utility) { () -> [PrepMaterialChunk] in
+        // A detached task isn't linked to its caller's cancellation, so once dispatched it runs to
+        // completion regardless — but checking here before *dispatching* each one means a Stop that
+        // lands mid-build stops adding new file reads/subprocesses rather than working through the
+        // whole remaining list.
+        var extractions: [Task<[PrepMaterialChunk], Never>] = []
+        for file in files {
+            guard !Task.isCancelled else { break }
+            extractions.append(Task.detached(priority: .utility) { () -> [PrepMaterialChunk] in
                 guard let text = extractText(from: file) else { return [] }
                 return PrepMaterialChunker.chunk(text: text, sourceDisplayName: file.lastPathComponent)
-            }
+            })
         }
 
         var chunks: [PrepMaterialChunk] = []
@@ -83,7 +89,10 @@ enum PrepMaterialIndexBuilder {
         process.arguments = ["-convert", "txt", "-stdout", url.path]
         let stdout = Pipe()
         process.standardOutput = stdout
-        process.standardError = Pipe()
+        // Never a Pipe() nobody drains: textutil blocking on a full stderr pipe while this thread
+        // blocks on stdout's readDataToEndOfFile() is a classic Process deadlock. Same reason
+        // SyntheticSpeechFixtures.swift routes its own subprocess's stderr to the null device.
+        process.standardError = FileHandle.nullDevice
         do {
             try process.run()
         } catch {
@@ -96,6 +105,13 @@ enum PrepMaterialIndexBuilder {
               !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return nil
         }
+        // textutil separates paragraphs with a single newline, not the blank-line convention
+        // PrepMaterialChunker splits on — left as-is, the whole document would extract as one
+        // oversized chunk. Treat each non-empty line as its own paragraph instead.
         return text
+            .components(separatedBy: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n\n")
     }
 }

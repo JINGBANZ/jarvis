@@ -410,6 +410,10 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     let results = attempt.prepMaterial?.search(query: query) ?? []
                     jlog("📎 searched prep notes for \"\(query)\" — \(results.count) match(es)")
                     activity?.record(.prepNotesSearched(query: query, matchCount: results.count))
+                    // Mirrors capture_screen: if the very next request in this attempt fails, a
+                    // fresh retry starts with this result already in hand — search is cheap to
+                    // redo, but this still saves the model an extra tool-loop round-trip.
+                    work.observations = [.user(JarvisPrompts.Coach.prepNotesResult(results))]
 
                     // Provider-specific linkage remains inside this attempt only.
                     if !response.outputItemsJSON.isEmpty {
