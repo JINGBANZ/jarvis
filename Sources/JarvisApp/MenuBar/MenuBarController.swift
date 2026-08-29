@@ -71,7 +71,7 @@ final class MenuBarController: NSObject {
 
     /// Names the running build, so a user reporting an issue can read it off the menu without opening
     /// Settings. A release shows its marketing version, whose single source is `Resources/Info.plist`
-    /// (release-please rewrites it). A local build shows "DevBuild": it copies that same plist, where
+    /// (release-please rewrites it). A local build shows a red "Dev": it copies that same plist, where
     /// the version names whichever release the checkout descends from rather than the code actually
     /// running, so `scripts/build-app.sh` stamps `JarvisDevelopmentBuild` and the caption says which
     /// variant this is instead of quoting a version that would misidentify the build.
@@ -82,9 +82,10 @@ final class MenuBarController: NSObject {
     /// AppKit sizes an item view to the menu's width, and the label spans it.
     private static func buildCaptionItem() -> NSMenuItem {
         let info = Bundle.main.infoDictionary
+        let isDevelopmentBuild = info?["JarvisDevelopmentBuild"] as? Bool == true
         let caption: String
-        if info?["JarvisDevelopmentBuild"] as? Bool == true {
-            caption = "DevBuild"
+        if isDevelopmentBuild {
+            caption = "Dev"
         } else if let version = info?["CFBundleShortVersionString"] as? String {
             caption = "v\(version)"
         } else {
@@ -92,7 +93,9 @@ final class MenuBarController: NSObject {
         }
         let label = NSTextField(labelWithString: caption)
         label.font = .menuFont(ofSize: NSFont.smallSystemFontSize)
-        label.textColor = .disabledControlTextColor
+        // A release version is a quiet footnote; the development marker is a warning, so it takes the
+        // system red, which stays legible in both appearances and against the menu's vibrancy.
+        label.textColor = isDevelopmentBuild ? .systemRed : .disabledControlTextColor
         label.alignment = .center
         label.translatesAutoresizingMaskIntoConstraints = false
 

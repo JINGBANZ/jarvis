@@ -36,7 +36,7 @@ needs — so a SwiftUI + ScreenCaptureKit binary builds with plain `swift build`
 `scripts/build-app.sh` assembles the executable into a hand-built `Jarvis Dev.app`. The production
 identity remains the source in `Resources/Info.plist`; the development script edits only the assembled
 copy, rewriting its name and bundle id, dropping its update feed, and stamping it as a development
-build so the menu's footer caption reads `DevBuild` rather than the release version the plist carries.
+build so the menu's footer caption reads a red `Dev` rather than the release version the plist carries.
 
 **Permission persistence is a signing problem.** macOS TCC keys Screen-Recording, Microphone, and
 System Audio Recording grants to **code signature + bundle id + bundle path**. An ad-hoc signature
