@@ -28,6 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let brainPreferences = BrainPreferences()
     private let transcriptionPreferences = TranscriptionPreferences()
     private let screenPreferences = ScreenCapturePreferences()
+    private let prepMaterialPreferences = PrepMaterialPreferences()
     private var activityViewer: ActivityViewer!    // embedded as the Settings Activity tab
     /// Two provider sessions feeding one shared transcript: mic → `.me`, system audio → `.them`.
     private var transcriber: (any TranscriptionSession)?       // "me" (mic)
@@ -176,6 +177,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             connectionsSection,
             OverlaySection(appearance: appearance, caption: overlayCaption, box: overlayBox),
             DisplaySection(preferences: screenPreferences),
+            PrepMaterialSection(preferences: prepMaterialPreferences),
             ActivitySection(viewer: activityViewer),
         ]
         settingsWindow = SettingsWindow(sections: sections)

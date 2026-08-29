@@ -77,6 +77,16 @@ public enum Defaults {
         public static let displayIndexMinimum = 1
     }
 
+    // MARK: - Prep material
+
+    /// Local files/folders of interview notes the user has pointed Jarvis at, so the coach can draw
+    /// on prepared answers. Referenced in place — Jarvis never copies or edits the user's notes.
+    public enum PrepMaterial {
+        public static let sourcesKey = "prepMaterial.sources"
+        /// No material until the user adds it.
+        public static let sources: [PrepMaterialSource] = []
+    }
+
     // MARK: - Overlay
 
     /// The two capture-invisible coaching surfaces. Each has an on/off flag, a font size in points,
