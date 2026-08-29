@@ -182,11 +182,12 @@ ready on `main`; they were disabled during rollout so the old base-branch copies
 removed self-hosted runner.
 Delete the historical self-hosted runs and artifacts after owner approval: the audit found no
 credential leak, but those logs expose runner, account, and installed-tool paths.
-Replace release-please's `GITHUB_TOKEN` with a GitHub App token
-before making CI a required check, because token-authored Release PRs do not trigger `pull_request`
-workflows. Confirm private vulnerability reporting, secret scanning and push protection, Dependabot
-security updates, fork-workflow approval, and a `main` ruleset requiring pull requests and the CI
-check for the public repository. Keep self-hosted runners unavailable to public forks.
+Replace release-please's `GITHUB_TOKEN` with a GitHub App token: the `main` ruleset now requires the
+CI `test` check, and token-authored Release PRs do not trigger `pull_request` workflows, so every
+Release PR reports no such check and merges only on a repository admin's pull-request bypass.
+Confirm private vulnerability reporting, secret scanning and push protection, Dependabot security
+updates, and fork-workflow approval for the public repository. Keep self-hosted runners unavailable
+to public forks.
 
 
 Run a live chronology smoke on a fresh session: let one speaker finish a longer question while the
