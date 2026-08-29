@@ -85,7 +85,12 @@ enum PrepMaterialIndexBuilder {
         let text = (0..<document.pageCount)
             .compactMap { document.page(at: $0)?.string }
             .joined(separator: "\n\n")
-        return text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : text
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        // Verified directly against a real multi-page PDF: PDFPage.string never contains a blank-line
+        // boundary — every line within a page is joined by a single newline, identical to textutil's
+        // docx output below. Without normalizing, a page with no natural page-boundary relief (this
+        // one stayed small enough to avoid it) becomes one oversized, unsplittable chunk.
+        return normalizeLinesToParagraphs(text)
     }
 
     /// `textutil` is a stock macOS CLI — no dependency, no network — that converts Word documents to
@@ -112,16 +117,22 @@ enum PrepMaterialIndexBuilder {
               !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return nil
         }
-        // textutil separates paragraphs with a single newline, not the blank-line convention
-        // PrepMaterialChunker splits on — left as-is, the whole document would extract as one
-        // oversized chunk. Treat each non-empty line as its own paragraph instead.
-        //
-        // Known imprecision: plain-text conversion loses the distinction between a real paragraph
-        // break and a manual line break inside one paragraph (e.g. pasted text), so this can
-        // occasionally fragment one paragraph into several chunks. Bounded impact — worse retrieval
-        // granularity for that source, not data loss — and not worth chasing without richer input
-        // (e.g. an HTML conversion that keeps paragraph tags) than plain text can carry.
-        return text
+        // textutil separates paragraphs with a single newline too — same fix, same reasoning.
+        return normalizeLinesToParagraphs(text)
+    }
+
+    /// Treats each non-empty line as its own paragraph, so `PrepMaterialChunker`'s blank-line
+    /// splitting has something to split on. Shared by both format-converted extraction paths
+    /// (`PDFPage.string` and `textutil`'s txt output), neither of which ever emits a blank-line
+    /// paragraph boundary on its own.
+    ///
+    /// Known imprecision: plain-text conversion loses the distinction between a real paragraph break
+    /// and a manual line break inside one paragraph (e.g. pasted text or a line-wrapped PDF), so this
+    /// can occasionally fragment one paragraph into several chunks. Bounded impact — worse retrieval
+    /// granularity for that source, not data loss — and not worth chasing without richer input (e.g.
+    /// an HTML conversion that keeps paragraph tags) than plain text can carry.
+    private static func normalizeLinesToParagraphs(_ text: String) -> String {
+        text
             .components(separatedBy: "\n")
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
