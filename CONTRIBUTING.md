@@ -20,6 +20,16 @@ Use Conventional Commits in lowercase imperative form, such as `fix(audio): pres
 order`. Pull requests should explain the user-visible behavior, security or privacy impact, and
 validation performed.
 
+## How a pull request merges
+
+`main` takes squash merges only, and requires a pull request, one approving review, and a passing
+`test` check — the same gate as above, run on macOS by CI. Pushing new commits dismisses an existing
+approval, so expect to ask for another look after addressing review feedback.
+
+Contributions arrive as pull requests from a fork; nobody needs write access to this repository. An
+automated Claude review comments on every pull request, forks included — it reviews, it never
+approves, and a maintainer still reads the change.
+
 ## Security and privacy
 
 - Never commit credentials, `.jarvis/` sessions, transcripts, screenshots, raw audio, or local CLI
