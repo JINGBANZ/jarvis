@@ -35,9 +35,9 @@ import Testing
         // The policy receives sample count but no amplitude or PCM, so this positive-count observation
         // represents both audible and all-zero digital-silence frames.
         #expect(monitor.note(
-            .captured(sampleCount: 480), for: .microphone, at: 0.2).isEmpty)
+            .frames(sampleCount: 480), for: .microphone, at: 0.2).isEmpty)
         #expect(monitor.note(
-            .captured(sampleCount: 480), for: .system, at: 0.2).isEmpty)
+            .frames(sampleCount: 480), for: .system, at: 0.2).isEmpty)
         #expect(monitor.hasFirstFrame(.microphone))
         #expect(monitor.hasFirstFrame(.system))
         #expect(monitor.readiness == .ready)
@@ -48,7 +48,7 @@ import Testing
         let monitor = makeMonitor(firstFrameTimeout: 5)
         monitor.setProviderReady(true, for: .microphone)
         monitor.setProviderReady(true, for: .system)
-        #expect(monitor.note(.captured(sampleCount: 0), for: .microphone, at: 1).isEmpty)
+        #expect(monitor.note(.frames(sampleCount: 0), for: .microphone, at: 1).isEmpty)
         #expect(!monitor.hasFirstFrame(.microphone))
         #expect(monitor.readiness == .waitingForMicrophone)
         #expect(monitor.poll(at: 5) == [.microphoneCaptureFailed(.firstFrameTimeout)])
@@ -64,7 +64,7 @@ import Testing
         let monitor = makeMonitor(firstFrameTimeout: 5)
         monitor.setProviderReady(true, for: .microphone)
         monitor.setProviderReady(true, for: .system)
-        _ = monitor.note(.captured(sampleCount: 480), for: .microphone, at: 0.3)
+        _ = monitor.note(.frames(sampleCount: 480), for: .microphone, at: 0.3)
         // Only the system stream is missing frames: degrade, don't stop.
         #expect(monitor.poll(at: 5) == [.degradeToMicrophoneOnly(.firstFrameTimeout)])
         #expect(monitor.isSystemUnavailable)
@@ -78,11 +78,11 @@ import Testing
         let monitor = makeMonitor(firstFrameTimeout: 5)
         monitor.setProviderReady(true, for: .microphone)
         monitor.setProviderReady(true, for: .system)
-        _ = monitor.note(.captured(sampleCount: 480), for: .microphone, at: 0.3)
+        _ = monitor.note(.frames(sampleCount: 480), for: .microphone, at: 0.3)
         #expect(monitor.hasFirstFrame(.microphone))
         #expect(!monitor.hasFirstFrame(.system))
         #expect(monitor.readiness == .waitingForSystem)
-        _ = monitor.note(.captured(sampleCount: 480), for: .system, at: 3)
+        _ = monitor.note(.frames(sampleCount: 480), for: .system, at: 3)
         #expect(monitor.hasFirstFrame(.system))
         #expect(monitor.readiness == .ready)
         #expect(monitor.poll(at: 100).isEmpty)
@@ -92,8 +92,8 @@ import Testing
         let monitor = makeMonitor()
         monitor.setProviderReady(true, for: .microphone)
         monitor.setProviderReady(true, for: .system)
-        _ = monitor.note(.captured(sampleCount: 480), for: .microphone, at: 0.3)
-        _ = monitor.note(.captured(sampleCount: 480), for: .system, at: 0.3)
+        _ = monitor.note(.frames(sampleCount: 480), for: .microphone, at: 0.3)
+        _ = monitor.note(.frames(sampleCount: 480), for: .system, at: 0.3)
         #expect(monitor.readiness == .ready)
 
         monitor.setProviderReady(false, for: .system)
@@ -107,8 +107,8 @@ import Testing
         let monitor = makeMonitor(sustainedStallTimeout: 10)
         monitor.setProviderReady(true, for: .microphone)
         monitor.setProviderReady(true, for: .system)
-        _ = monitor.note(.captured(sampleCount: 480), for: .microphone, at: 0.3)
-        _ = monitor.note(.captured(sampleCount: 480), for: .system, at: 0.3)
+        _ = monitor.note(.frames(sampleCount: 480), for: .microphone, at: 0.3)
+        _ = monitor.note(.frames(sampleCount: 480), for: .system, at: 0.3)
         #expect(monitor.readiness == .ready)
         // A stall begins at t=12; a normal short gap must ride through until the sustained deadline.
         #expect(monitor.note(.stalled, for: .microphone, at: 12).isEmpty)
@@ -120,8 +120,8 @@ import Testing
         let monitor = makeMonitor(sustainedStallTimeout: 10)
         monitor.setProviderReady(true, for: .microphone)
         monitor.setProviderReady(true, for: .system)
-        _ = monitor.note(.captured(sampleCount: 480), for: .microphone, at: 0.3)
-        _ = monitor.note(.captured(sampleCount: 480), for: .system, at: 0.3)
+        _ = monitor.note(.frames(sampleCount: 480), for: .microphone, at: 0.3)
+        _ = monitor.note(.frames(sampleCount: 480), for: .system, at: 0.3)
         #expect(monitor.readiness == .ready)
         _ = monitor.note(.stalled, for: .system, at: 12)
         #expect(monitor.poll(at: 22) == [.degradeToMicrophoneOnly(.sustainedStall)])
@@ -132,20 +132,20 @@ import Testing
         let monitor = makeMonitor(sustainedStallTimeout: 10)
         monitor.setProviderReady(true, for: .microphone)
         monitor.setProviderReady(true, for: .system)
-        _ = monitor.note(.captured(sampleCount: 480), for: .microphone, at: 0.3)
-        _ = monitor.note(.captured(sampleCount: 480), for: .system, at: 0.3)
+        _ = monitor.note(.frames(sampleCount: 480), for: .microphone, at: 0.3)
+        _ = monitor.note(.frames(sampleCount: 480), for: .system, at: 0.3)
         #expect(monitor.readiness == .ready)
         _ = monitor.note(.stalled, for: .microphone, at: 12)
         #expect(monitor.note(
-            .captured(sampleCount: 480), for: .microphone, at: 15).isEmpty)
+            .frames(sampleCount: 480), for: .microphone, at: 15).isEmpty)
         // The stall is cleared, so the old deadline no longer applies.
         #expect(monitor.poll(at: 100).isEmpty)
     }
 
     @Test func routeRecoveryOwnsFailureUntilItsRetryIncidentFinishes() {
         let monitor = makeMonitor(firstFrameTimeout: 5, sustainedStallTimeout: 10)
-        _ = monitor.note(.captured(sampleCount: 480), for: .microphone, at: 0.3)
-        _ = monitor.note(.captured(sampleCount: 480), for: .system, at: 0.3)
+        _ = monitor.note(.frames(sampleCount: 480), for: .microphone, at: 0.3)
+        _ = monitor.note(.frames(sampleCount: 480), for: .system, at: 0.3)
         _ = monitor.note(.stalled, for: .microphone, at: 3)
         monitor.setCaptureRecoveryInProgress(true, at: 4)
 
@@ -169,8 +169,8 @@ import Testing
 
     @Test func shortRouteRecoveryDoesNotInventAStallWithoutWitnessEvidence() {
         let monitor = makeMonitor(sustainedStallTimeout: 10)
-        _ = monitor.note(.captured(sampleCount: 480), for: .microphone, at: 0.3)
-        _ = monitor.note(.captured(sampleCount: 480), for: .system, at: 0.3)
+        _ = monitor.note(.frames(sampleCount: 480), for: .microphone, at: 0.3)
+        _ = monitor.note(.frames(sampleCount: 480), for: .system, at: 0.3)
         monitor.setCaptureRecoveryInProgress(true, at: 1)
         monitor.setCaptureRecoveryInProgress(false, at: 1.5)
 
@@ -202,7 +202,7 @@ import Testing
         // After the microphone fails the session is ending; nothing can re-arm readiness.
         monitor.setProviderReady(true, for: .microphone)
         #expect(monitor.note(
-            .captured(sampleCount: 480), for: .microphone, at: 6).isEmpty)
+            .frames(sampleCount: 480), for: .microphone, at: 6).isEmpty)
         #expect(!monitor.hasFirstFrame(.microphone))
         #expect(monitor.readiness == .stopped)
         #expect(monitor.poll(at: 30).isEmpty)
@@ -211,7 +211,7 @@ import Testing
     @Test func systemBecameUnavailableStopsItsCaptureTimeout() {
         let monitor = makeMonitor(firstFrameTimeout: 5)
         monitor.setProviderReady(true, for: .microphone)
-        _ = monitor.note(.captured(sampleCount: 480), for: .microphone, at: 0.3)
+        _ = monitor.note(.frames(sampleCount: 480), for: .microphone, at: 0.3)
         monitor.systemBecameUnavailable()
         #expect(monitor.isSystemUnavailable)
         #expect(monitor.readiness == .microphoneOnly)
@@ -222,7 +222,7 @@ import Testing
     @Test func microphoneOnlyConfigurationIgnoresTheSystemStream() {
         let monitor = makeMonitor(firstFrameTimeout: 5, requiresSystemAudio: false)
         monitor.setProviderReady(true, for: .microphone)
-        _ = monitor.note(.captured(sampleCount: 480), for: .microphone, at: 0.3)
+        _ = monitor.note(.frames(sampleCount: 480), for: .microphone, at: 0.3)
         // System audio is not required, so it never triggers a degrade even without frames.
         #expect(monitor.poll(at: 30).isEmpty)
         #expect(!monitor.isSystemUnavailable)
@@ -232,11 +232,11 @@ import Testing
     @Test func resolvedSystemStreamIgnoresLaterStalls() {
         let monitor = makeMonitor()
         monitor.setProviderReady(true, for: .microphone)
-        _ = monitor.note(.captured(sampleCount: 480), for: .microphone, at: 0.3)
+        _ = monitor.note(.frames(sampleCount: 480), for: .microphone, at: 0.3)
         monitor.systemBecameUnavailable()
         monitor.setProviderReady(true, for: .system)
         #expect(monitor.note(
-            .captured(sampleCount: 480), for: .system, at: 30).isEmpty)
+            .frames(sampleCount: 480), for: .system, at: 30).isEmpty)
         #expect(monitor.note(.stalled, for: .system, at: 40).isEmpty)
         #expect(monitor.poll(at: 60).isEmpty)
         #expect(monitor.readiness == .microphoneOnly)

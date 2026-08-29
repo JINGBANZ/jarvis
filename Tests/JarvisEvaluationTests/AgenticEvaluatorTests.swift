@@ -2,6 +2,7 @@ import Foundation
 import Testing
 import JarvisCore
 @testable import JarvisEvaluation
+import JarvisBrainProviders
 
 @Suite struct AgenticEvaluatorTests {
     @Test func evaluateRunsClaudeAndPersistsOwnerOnlyStampedReport() async throws {

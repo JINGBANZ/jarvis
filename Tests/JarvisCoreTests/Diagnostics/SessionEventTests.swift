@@ -62,8 +62,7 @@ import Testing
     }
 
     /// The expand-step pin: admitting through the typed producer views and admitting the same
-    /// occurrences as envelopes — even with an Activity presentation attached — must leave the
-    /// persisted session folder byte-for-byte identical.
+    /// occurrences as envelopes must leave the persisted session folder byte-for-byte identical.
     @Test func typedViewsAndEnvelopeAdmissionPersistByteIdenticalRecords() async throws {
         let viewDirectory = ActivityLogTests.tmp()
         let envelopeDirectory = ActivityLogTests.tmp()
@@ -107,9 +106,7 @@ import Testing
         #expect(await viewAudit.closeForTesting() == .complete)
 
         let envelopeAudit = await FileSessionAudit.readyForTesting(directory: envelopeDirectory)
-        envelopeAudit.record(
-            .brainTraffic(trafficEvent),
-            presentingInActivity: .tip(lines: ["same tip"]))
+        envelopeAudit.record(.brainTraffic(trafficEvent))
         envelopeAudit.record(.coachingAttempt(startedEvent))
         envelopeAudit.record(.coachingAttempt(finishedEvent))
         #expect(await envelopeAudit.closeForTesting() == .complete)
@@ -128,9 +125,9 @@ import Testing
         }
     }
 
-    /// The retained-byte bound covers the whole envelope, not only its typed detail: a small
-    /// occurrence dragging an oversize Activity presentation is dropped, and later admission
-    /// continues independently.
+    /// The retained-byte bound covers the human projection too: a screen-view row retains a base64
+    /// JPEG, by far the largest thing Activity ever carries. An oversize one is dropped and later
+    /// admission continues independently.
     @Test func anOversizeActivityPresentationCountsAgainstTheByteBound() async throws {
         let directory = ActivityLogTests.tmp()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -142,19 +139,8 @@ import Testing
         await waitForHealthMarker(in: directory)
 
         audit.record(
-            .brainTraffic(BrainTrafficAuditEvent(
-                tag: "small-detail",
-                request: Data(#"{"model":"gpt-5.5"}"#.utf8),
-                response: nil,
-                status: nil,
-                latencyMs: 5,
-                error: nil,
-                phases: nil,
-                kind: .providerCall,
-                requestContext: nil,
-                date: Date())),
-            presentingInActivity: .screenViewed(
-                imageBase64JPEG: String(repeating: "A", count: 4_096)))
+            .screenViewed(imageBase64JPEG: String(repeating: "A", count: 4_096)),
+            at: Date())
         audit.record(
             tag: "after-presentation-drop",
             request: Data(#"{"model":"gpt-5.5"}"#.utf8),

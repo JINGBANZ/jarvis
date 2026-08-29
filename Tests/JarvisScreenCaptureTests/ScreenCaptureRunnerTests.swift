@@ -75,18 +75,15 @@ import Testing
                 chmod 500 '\(shellQuoted(captureDirectory.path))'
                 exit 1
                 """)
-        let defaultsSuite = "ScreenCaptureRunnerTests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: defaultsSuite))
-        defer { defaults.removePersistentDomain(forName: defaultsSuite) }
-        let preferences = ScreenCapturePreferences(defaults: defaults)
-        preferences.scope = .entireDisplay
-        preferences.displayIndex = 2
+        // The selection is frozen by the attempt's plan revision, so the adapter is handed it
+        // rather than reading a preference store at capture time.
+        let selection = ScreenCaptureSelection(scope: .entireDisplay, explicitDisplay: 2)
         let runner = ScreenCaptureRunner(
             captureDirectory: captureDirectory,
             executable: executable)
-        let screen = ScreenCaptureCLI(preferences: preferences, runner: runner)
+        let screen = ScreenCaptureCLI(runner: runner)
 
-        #expect(screen.capture() == nil)
+        #expect(screen.capture(selection) == nil)
         #expect(try transientJPEGs(in: captureDirectory).count == 1)
 
         // Restoring permissions must not let this session-local runner forget an unaccounted-for

@@ -2024,3 +2024,95 @@
   [#206](https://github.com/JINGBANZ/jarvis/issues/206).
 - **Detail:** [lean-coaching-core.md → Phase 4 Implementation Contract](./lean-coaching-core.md#phase-4-implementation-contract--openai-provider-extraction),
   `Package.swift`, `Sources/JarvisBrainProviders/`.
+
+### 2026-08-28 — One evidence stack carries diagnostics, Activity, and audit
+
+- **Chose:** Expand the settled Phase 0 audit transport into the one `SessionEvidence` stack for
+  every optional record a live session produces. `jlog` builds a typed `DiagnosticAuditEvent` and
+  admits it — no `NSLog`, no file work on the caller — and Activity occurrences become
+  `SessionEvent`s whose typed detail *is* their human presentation. `ActivityLog` keeps the
+  chronology, the retained-entry cap, the screenshot sequence, the session-end latch, and the
+  rendering, but its serial queue, its `flush` barrier, and its direct file writing are deleted:
+  the shared worker writes both `jarvis-activity.jsonl` and each `shot-N.jpg`.
+- **Chose:** Raise the mailbox count bound from 256 to 4,096 envelopes. Diagnostics arrive from
+  ~180 call sites and burst during reconnects and teardown; a bound sized for audit records alone
+  would have turned ordinary bursts into routine `queue_overflow` and made every busy session read
+  as partial. The 32 MB retained-byte bound — what actually caps memory — is unchanged.
+- **Chose:** Derive `SessionEvent.activityPresentation` from the typed detail rather than storing it
+  beside one. That is what makes "one occurrence produces one event" structural: an occurrence
+  cannot carry human copy that duplicates, or disagrees with, what its detail says happened.
+- **Chose:** Accept that Quit may lose a session's last rows, including its session-end Activity row.
+  Quit never waits for evidence, and the health marker records the session partial when it happens.
+  The Activity window says so with one fixed notice — "incomplete record" — read from the existing
+  monotonic health record, live from the worker and in history from `audit-health.json`. A marker
+  that cannot be read shows nothing: unknown is not the same claim as incomplete.
+- **Why:** Activity, audit, and `jlog` had different content but the same product contract, and
+  three independent stacks meant three ways to stall, starve, or lie. One transport, one lifecycle,
+  and one honest completeness record is what the owner approved; making Activity best-effort is the
+  point of it, not a regression, and the notice is what keeps the loss honest to the reader.
+- **Rejected:** (a) A dedicated `DiagnosticSink` beside the audit worker — explicitly rejected by
+  the decision record this expands. (b) Reserved capacity or priority for Activity — that would
+  restore the privileged failure domain the consolidation exists to remove. (c) A synchronous drain
+  on Quit to save the last row — evidence never owns app termination. (d) Renaming the transport
+  types to `SessionEvidence*` — a rename touching every evaluator and test call site, changing no
+  behavior; the wiki's "renaming is not a completion requirement" rule covers them too.
+- **Chose:** Scope the Activity projection by session identity. Moving Activity onto the worker
+  destroyed an ordering guarantee the old design had for free: `record` and `enable` used to be
+  FIFO on `ActivityLog`'s own serial queue, so a stopped session's rows always drained before the
+  next Start reset the projection. With records on the worker's queue and `enable` on the caller,
+  that no longer holds, and a stopped session's terminal row would latch the *new* session's end
+  marker — silently killing its window — while a partial old session would put an incomplete-record
+  notice on a healthy new one. Every projection entry point now takes the session it belongs to and
+  ignores calls from any other. The accepted cost is that a row still queued when its window rotates
+  is lost from history and marks its session partial, which only happens under back-pressure.
+- **Detail:** [session-audit.md](./session-audit.md),
+  [lean-coaching-core.md → Phase 1 and Phase 2 contracts](./lean-coaching-core.md#phase-1-implementation-contract),
+  `Sources/JarvisCore/Diagnostics/`.
+
+### 2026-08-28 — A coaching turn is handed a frozen plan, never a preference store
+
+- **Chose:** Freeze the control plane a turn depends on into an immutable `SessionPlan` revision
+  built at Start and at explicit between-attempt boundaries, and change `ScreenCapturing.capture`
+  to take the frozen `ScreenCaptureSelection`. The capture adapters no longer hold a preference
+  store at all. An attempt snapshots its revision alongside its target and keeps it for the whole
+  tool loop, including a `capture_screen` continuation.
+- **Chose:** Move `OverlayAppearance` from `Overlay/` to `Config/` with the other preference stores.
+  It is control plane, not delivery, and misfiling it was what put a `UserDefaults` reader inside a
+  kernel-guarded directory. With it moved, `scripts/check-coaching-kernel.sh` rejects `UserDefaults`,
+  every preference store, and `SecretStore` in the kernel.
+- **Chose:** Accept the timing change this causes. A screen-capture setting used to apply to the
+  very next screenshot, which could be the second capture inside a turn already in progress; it now
+  applies to the next attempt, and the Settings card says so.
+- **Why:** Reading a preference mid-attempt lets a coaching outcome depend on disk latency and on
+  whichever value happened to be current partway through a turn — the exact class of dependency the
+  Lean Coaching Path Rule exists to remove. The route half was already frozen this way by
+  `ConfiguredBrainRoute`; the screen selection was the one remaining live read.
+- **Rejected:** (a) Folding the route, secrets, and provider discovery into `SessionPlan` — already
+  frozen at the same boundaries, so restructuring them would be churn with no behavior change.
+  (b) Rebuilding the capture adapter at each revision boundary instead of changing the port — more
+  moving parts, and it would leave the adapter able to read storage.
+- **Detail:** [lean-coaching-core.md → Phase 4 Implementation Contract](./lean-coaching-core.md#phase-4-implementation-contract--immutable-plan-revisions),
+  `Sources/JarvisCore/Config/SessionPlan.swift`, `scripts/check-coaching-kernel.sh`.
+
+### 2026-08-28 — The coordinator and the delegate split into owners, not files
+
+- **Chose:** Split `CoachDriver` into a scheduler (it keeps the name and the public face) and a
+  `CoachAttemptRunner`, sharing only a `CoachTranscriptLedger` — the committed transcript boundary,
+  which only grows, so it is a leaf lock neither half holds the other's. Split `AppDelegate` into
+  the session runtime (it keeps the name), `SessionArtifacts` for everything a session leaves on
+  disk, and `BrainComposition` for preflight, client and route construction, and live reapply,
+  reached through a six-member `BrainCompositionHost`.
+- **Chose:** Keep one lock for the scheduler's coupled trigger and route state rather than
+  splitting it with the types. The runner's lock guards state that never touches scheduling state,
+  which is why it is a separate lock and not a second user of the scheduler's.
+- **Why:** Decomposition came last on purpose: the delegate is where every port is composed and the
+  driver is where every policy meets, so splitting either before the ports and state ownership
+  settled would only have relocated the coupling. Doing it after the evidence, plan, and adapter
+  work meant each half had a boundary worth drawing.
+- **Rejected:** (a) Extracting the scheduler's state into a struct mutated under a passed-in lock —
+  ~20 rewritten transitions for no ownership change. (b) Renaming `CoachDriver` and `AppDelegate` —
+  they are the App's and the tests' handle on a session. (c) Splitting `AppDelegate` into three
+  peers with no host — composition would have needed the runtime's state anyway, and an implicit
+  web of accessors is worse than one declared protocol.
+- **Detail:** [lean-coaching-core.md → Phase 5 contracts](./lean-coaching-core.md#phase-5-implementation-contract--coachdriver-split),
+  `Sources/JarvisCore/Coach/CoachAttemptRunner.swift`, `Sources/JarvisApp/App/`.

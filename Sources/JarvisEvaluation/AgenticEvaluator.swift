@@ -1,5 +1,6 @@
 import Foundation
 import JarvisCore
+import JarvisBrainProviders
 
 /// Runs the sole session evaluator through a locally installed Claude Code or Codex CLI. The CLI
 /// receives the repository checkout as its working directory plus the complete selected session,

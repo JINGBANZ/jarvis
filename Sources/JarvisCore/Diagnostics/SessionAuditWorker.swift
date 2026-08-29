@@ -5,9 +5,15 @@ import Darwin
 import Synchronization
 #endif
 
-/// One bounded process-level worker for every file-backed session audit. Its mailbox carries one
-/// versioned `SessionEvent` per occurrence; the typed producer ports converge on it through their
-/// per-session handle.
+/// One bounded process-level worker for every file-backed session's evidence. Its mailbox carries
+/// one versioned `SessionEvent` per occurrence; the typed producer ports — brain traffic, coaching
+/// attempts, and agent-facing diagnostics — converge on it through their per-session handle. There
+/// is deliberately no second worker per category (wiki/lean-coaching-core.md, "One Event, Two
+/// Projections"): one mailbox, one lifecycle, one completeness record, one uniform loss contract.
+///
+/// The type keeps its Phase 0 name. The wiki's rule that renaming persisted artifacts is not a
+/// completion requirement applies to the transport types too: a rename would touch every evaluator
+/// and test call site without changing behavior.
 ///
 /// The mailbox lock protects only retained in-memory values and counters. Parsing, redaction,
 /// serialization, and file I/O run on the private serial queue after that lock is released.
@@ -16,8 +22,14 @@ final class SessionAuditWorker: @unchecked Sendable {
         let maxEventCount: Int
         let maxRetainedBytes: Int
 
+        /// Sized for the whole shared stack, not just audit records. Audit events arrive a handful
+        /// per coaching attempt; agent-facing diagnostics arrive from 180-odd call sites and can
+        /// burst during reconnects and teardown. A count bound tight enough for audit alone would
+        /// turn ordinary diagnostic bursts into routine `queue_overflow`, making every busy session
+        /// read as partial. Envelopes are small unless they carry a provider body, and the byte
+        /// bound — unchanged — is what actually caps memory.
         static let production = Limits(
-            maxEventCount: 256,
+            maxEventCount: 4_096,
             maxRetainedBytes: 32 * 1024 * 1024)
     }
 
@@ -25,12 +37,16 @@ final class SessionAuditWorker: @unchecked Sendable {
     final class Session: Sendable {
         let id = UUID()
         let directory: URL
+        /// The human-facing projection for this session's Activity occurrences, rendered on the
+        /// worker so no producer pays for it. Absent when nothing is showing Activity.
+        let activity: ActivityLog?
         let health = HealthCounters()
         private let sealed = AtomicCounter()
         private let opened = AtomicCounter()
 
-        init(directory: URL) {
+        init(directory: URL, activity: ActivityLog?) {
             self.directory = directory
+            self.activity = activity
         }
 
         var isSealed: Bool { sealed.load() > 0 }
@@ -116,13 +132,19 @@ final class SessionAuditWorker: @unchecked Sendable {
     private enum Payload: Sendable {
         case open
         case event(SessionEvent)
+        /// A diagnostic emitted with no live session handle, or after its handle was sealed. It
+        /// reaches the asynchronous process log (Console) and stops there: guessing it into
+        /// whichever session happens to be newest would be worse evidence than none.
+        case processDiagnostic(DiagnosticAuditEvent)
         case close(
             forcePartial: Bool,
             completion: @Sendable (SessionAuditCloseResult) -> Void)
     }
 
+    /// `session` is nil only for `.processDiagnostic`, which owns no session directory and
+    /// therefore no health record.
     private struct Envelope: Sendable {
-        let session: Session
+        let session: Session?
         let payload: Payload
         let retainedBytes: Int
     }
@@ -163,6 +185,9 @@ final class SessionAuditWorker: @unchecked Sendable {
     private var unfinishedEnvelopeCounts: [UUID: Int] = [:]
     private var deferredCloses: [DeferredClose] = []
     private let timestampFormatter: DateFormatter
+    /// Millisecond precision, matching what `jlog` wrote before the move: diagnostics are read to
+    /// order events inside one turn, where whole seconds are too coarse.
+    private let diagnosticTimestampFormatter: DateFormatter
 
     init(limits: Limits, writer: any SessionAuditWriting) {
         self.limits = Limits(
@@ -175,23 +200,38 @@ final class SessionAuditWorker: @unchecked Sendable {
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.dateFormat = "HH:mm:ss"
         self.timestampFormatter = formatter
+        let diagnosticFormatter = DateFormatter()
+        diagnosticFormatter.locale = Locale(identifier: "en_US_POSIX")
+        diagnosticFormatter.calendar = Calendar(identifier: .gregorian)
+        diagnosticFormatter.dateFormat = "HH:mm:ss.SSS"
+        self.diagnosticTimestampFormatter = diagnosticFormatter
     }
 
-    func openSession(at directory: URL) -> Session {
-        let session = Session(directory: directory)
+    func openSession(at directory: URL, activity: ActivityLog? = nil) -> Session {
+        let session = Session(directory: directory, activity: activity)
         _ = enqueue(Envelope(session: session, payload: .open, retainedBytes: 256))
         return session
     }
 
-    func record(_ event: SessionEvent, for session: Session) {
-        guard !session.isSealed else {
-            rejectLateEvent(for: session)
-            return
-        }
-        _ = enqueue(
+    /// Returns whether the mailbox accepted the envelope. A caller that holds a fallback — the
+    /// process log, for diagnostics — uses it when this returns false, so a sealed handle or a full
+    /// mailbox costs the session folder a record rather than silently costing the line entirely.
+    @discardableResult
+    func record(_ event: SessionEvent, for session: Session) -> Bool {
+        enqueue(
             Envelope(
                 session: session,
                 payload: .event(event),
+                retainedBytes: event.approximateRetainedBytes))
+    }
+
+    /// Admit a diagnostic that belongs to no live session. Bounded by the same mailbox as every
+    /// other category — it has no reserved capacity, and an overflow simply loses the line.
+    func recordProcessDiagnostic(_ event: DiagnosticAuditEvent) {
+        _ = enqueue(
+            Envelope(
+                session: nil,
+                payload: .processDiagnostic(event),
                 retainedBytes: event.approximateRetainedBytes))
     }
 
@@ -249,20 +289,19 @@ final class SessionAuditWorker: @unchecked Sendable {
 
     private func enqueue(_ envelope: Envelope) -> Bool {
         mailboxLock.lock()
-        if envelope.session.isSealed {
+        if envelope.session?.isSealed == true {
             mailboxLock.unlock()
-            rejectLateEvent(for: envelope.session)
             return false
         }
         if envelope.retainedBytes > limits.maxRetainedBytes {
             // Publish the sticky loss before Close can acquire the mailbox and enter the ring.
-            envelope.session.health.markOversizeRecord()
+            envelope.session?.health.markOversizeRecord()
             mailboxLock.unlock()
             return false
         }
         guard canRetain(envelope) else {
             // Publish the sticky loss before Close can acquire the mailbox and enter the ring.
-            envelope.session.health.markQueueOverflow()
+            envelope.session?.health.markQueueOverflow()
             mailboxLock.unlock()
             return false
         }
@@ -288,11 +327,9 @@ final class SessionAuditWorker: @unchecked Sendable {
         queuedCount += 1
         retainedCount += 1
         retainedBytes += envelope.retainedBytes
-        unfinishedEnvelopeCounts[envelope.session.id, default: 0] += 1
-    }
-
-    private func rejectLateEvent(for session: Session) {
-        jlog("Jarvis: rejected a session-audit callback after the audit was sealed.")
+        if let session = envelope.session {
+            unfinishedEnvelopeCounts[session.id, default: 0] += 1
+        }
     }
 
     private func drain() {
@@ -333,24 +370,30 @@ final class SessionAuditWorker: @unchecked Sendable {
         mailboxLock.lock()
         retainedCount -= 1
         retainedBytes -= envelope.retainedBytes
-        let sessionID = envelope.session.id
-        if let unfinished = unfinishedEnvelopeCounts[sessionID], unfinished > 1 {
-            unfinishedEnvelopeCounts[sessionID] = unfinished - 1
-        } else {
-            unfinishedEnvelopeCounts[sessionID] = nil
+        if let sessionID = envelope.session?.id {
+            if let unfinished = unfinishedEnvelopeCounts[sessionID], unfinished > 1 {
+                unfinishedEnvelopeCounts[sessionID] = unfinished - 1
+            } else {
+                unfinishedEnvelopeCounts[sessionID] = nil
+            }
         }
         mailboxLock.unlock()
     }
 
     private func process(_ envelope: Envelope) {
         switch envelope.payload {
+        case .processDiagnostic(let event):
+            writer.emitToConsole(event.message)
         case .open:
-            _ = ensureOpen(envelope.session)
+            guard let session = envelope.session else { return }
+            _ = ensureOpen(session)
         case .event(let event):
-            persist(event, session: envelope.session)
+            guard let session = envelope.session else { return }
+            persist(event, session: session)
         case .close(let forcePartial, let completion):
+            guard let session = envelope.session else { return }
             finalize(
-                envelope.session,
+                session,
                 forcePartial: forcePartial,
                 completion: completion)
         }
@@ -379,6 +422,26 @@ final class SessionAuditWorker: @unchecked Sendable {
             persistTraffic(traffic, session: session)
         case .coachingAttempt(let attempt):
             persistAttempt(attempt, session: session)
+        case .diagnostic(let diagnostic):
+            persistDiagnostic(diagnostic, session: session)
+        case .activity(let activity):
+            persistActivity(activity, session: session)
+        }
+    }
+
+    /// Console first, then the session's `jarvis-debug.log`, so a file failure still leaves the line
+    /// visible in Console — the same order `jlog` used when it did both on the caller.
+    private func persistDiagnostic(_ event: DiagnosticAuditEvent, session: Session) {
+        writer.emitToConsole(event.message)
+        guard ensureOpen(session) else { return }
+        let line = "\(diagnosticTimestampFormatter.string(from: event.date)) \(event.message)"
+        do {
+            try writer.append(
+                Data(line.utf8),
+                filename: FileSessionAudit.diagnosticFilename,
+                in: session.directory)
+        } catch {
+            session.health.markWriteFailure()
         }
     }
 
@@ -420,6 +483,58 @@ final class SessionAuditWorker: @unchecked Sendable {
         }
     }
 
+    /// Project one Activity occurrence onto the human window and the session folder.
+    ///
+    /// The screenshot is written **before** the row that references it, so a persisted reference
+    /// always points at a file that exists; if that write fails the row is still recorded, without
+    /// the attachment, and the session's evidence is marked partial. The live push happens last,
+    /// so a failed disk write costs the row its place in history, not its place on screen.
+    private func persistActivity(_ event: ActivityAuditEvent, session: Session) {
+        guard let projection = session.activity else { return }
+        var shotFilename: String?
+        if let base64 = event.presentation.rendered.imageBase64,
+           projection.isRecording(for: session.id),
+           let data = Data(base64Encoded: base64, options: .ignoreUnknownCharacters),
+           let name = projection.nextShotFilename(for: session.id) {
+            if ensureOpen(session) {
+                do {
+                    try writer.write(data, filename: name, in: session.directory)
+                    shotFilename = name
+                } catch {
+                    session.health.markWriteFailure()
+                }
+            } else {
+                session.health.markWriteFailure()
+            }
+        }
+        let row: ActivityLog.AdmittedRow
+        switch projection.admit(
+            event.presentation, at: event.date, shotFilename: shotFilename, for: session.id) {
+        case .row(let admitted):
+            row = admitted
+        case .sessionEnded:
+            // The terminal marker is final for a session; later rows are dropped by design.
+            return
+        case .notCurrent:
+            // The window rotated to the next session before this row drained, so it can never be
+            // given a chronology entry and is lost from history. Mark it rather than lose it
+            // silently: under worker back-pressure this is exactly the visible-partial case the
+            // uniform loss contract exists for.
+            session.health.markWriteFailure()
+            return
+        }
+        if ensureOpen(session) {
+            do {
+                try writer.append(
+                    row.line, filename: ActivityLog.filename, in: session.directory)
+            } catch {
+                session.health.markWriteFailure()
+            }
+        }
+        projection.publish(row, for: session.id)
+        projection.noteEvidence(isComplete: session.health.snapshot.isComplete, for: session.id)
+    }
+
     private func finalize(
         _ session: Session,
         forcePartial: Bool,
@@ -432,6 +547,9 @@ final class SessionAuditWorker: @unchecked Sendable {
         let snapshot = session.health.snapshot
         let result: SessionAuditCloseResult = forcePartial || !snapshot.isComplete
             ? .partial : .complete
+        // The seal is the last honest moment to tell the window: a loss recorded after the final
+        // row would otherwise never reach the human view of a session that is still on screen.
+        session.activity?.noteEvidence(isComplete: result == .complete, for: session.id)
         do {
             try writer.replaceHealth(
                 try healthData(

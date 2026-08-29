@@ -6,7 +6,7 @@ import Testing
 /// screenshot is available — the hint must still be forced from transcript/conversation context.
 private final class FailingScreen: ScreenCapturing, @unchecked Sendable {
     private(set) var captureCount = 0
-    func capture() -> ScreenSnapshot? { captureCount += 1; return nil }
+    func capture(_ selection: ScreenCaptureSelection) -> ScreenSnapshot? { captureCount += 1; return nil }
     func cancelCapture() {}
 }
 
@@ -32,7 +32,7 @@ private final class FailingScreen: ScreenCapturing, @unchecked Sendable {
             ]),
             screen: screen, overlay: overlay, clock: clock,
             automaticAttemptDelay: { _ in },
-            activityLog: ActivityLog()
+            activity: nil
         )
         return (driver, transcript)
     }

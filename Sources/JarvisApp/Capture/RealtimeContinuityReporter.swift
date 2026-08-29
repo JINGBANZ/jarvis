@@ -21,15 +21,14 @@ final class RealtimeContinuityReporter: @unchecked Sendable {
     private var timer: Timer?
     private var stopped = true
     private var evictionAccumulator = ReplayBufferEvictionAccumulator()
-    /// Latches so positive sample progress is surfaced only for the first frame and the first frame
-    /// after a witness stall. Guarded by `lock`.
-    private var emittedFirstFrame = false
-    private var reportedStall = false
+    /// Decides which frame arrivals carry new information: the first frame, and the first frame
+    /// after a witness stall. The latch is Core policy, shared by both capture adapters.
+    private let heartbeatGate = CaptureHeartbeatGate()
 
-    /// Promotes actual audio-frame arrival into readiness. Fired off the witness's own evidence (no
-    /// second counter): positive sample progress on first capture/resume and `.stalled` on the
-    /// witness's capture-stalled anomaly. Consumed by `CaptureReadinessMonitor` in the app.
-    var onCaptureContinuity: (@Sendable (CaptureReadinessMonitor.Signal) -> Void)?
+    /// The critical, in-memory consumer of the capture heartbeat: `CaptureReadinessMonitor` in the
+    /// app, which can keep readiness pending, degrade system audio to microphone-only, or stop an
+    /// unusable microphone session. Fired off the witness's own frame evidence — no second counter.
+    var onCaptureHeartbeat: (@Sendable (CaptureHeartbeat) -> Void)?
 
     init(
         speaker: Speaker,
@@ -48,9 +47,8 @@ final class RealtimeContinuityReporter: @unchecked Sendable {
         lock.lock()
         stopped = false
         evictionAccumulator.reset()
-        emittedFirstFrame = false
-        reportedStall = false
         lock.unlock()
+        heartbeatGate.reset()
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.lock.lock(); let shouldStart = !self.stopped; self.lock.unlock()
@@ -82,17 +80,9 @@ final class RealtimeContinuityReporter: @unchecked Sendable {
         precondition(sampleCount >= 0)
         let witnessOutput = witness.recordCapture(
             sequence: sequence, sampleCount: sampleCount, at: timestamp)
-        lock.lock()
-        let hasSampleProgress = sampleCount > 0
-        let emitCaptureProgress = hasSampleProgress && (!emittedFirstFrame || reportedStall)
-        if hasSampleProgress {
-            emittedFirstFrame = true
-            reportedStall = false
-        }
-        lock.unlock()
         // Positive sample progress is health regardless of amplitude; a zero-length callback is not.
-        if emitCaptureProgress {
-            onCaptureContinuity?(.captured(sampleCount: sampleCount))
+        if let heartbeat = heartbeatGate.frames(sampleCount: sampleCount) {
+            emit(heartbeat)
         }
         consume(witnessOutput)
     }
@@ -145,6 +135,19 @@ final class RealtimeContinuityReporter: @unchecked Sendable {
         }
     }
 
+    /// One capture-heartbeat observation, two one-way consumers.
+    ///
+    /// The critical branch runs first and unconditionally: capture health policy reads the value
+    /// directly, in memory, and never reads the evidence queue or a persisted file. The evidence
+    /// copy that follows is a projection of the very same value — losing it can make the session's
+    /// record partial, and can never change a readiness, degradation, or stop decision. Admission is
+    /// nonblocking, so this stays safe on a realtime audio callback.
+    private func emit(_ heartbeat: CaptureHeartbeat) {
+        onCaptureHeartbeat?(heartbeat)
+        jlog("Jarvis capture heartbeat [\(speaker.rawValue), \(boundary.rawValue)]: "
+             + heartbeat.evidenceDescription)
+    }
+
     private var now: TimeInterval { clock.now() - sessionStart }
 
     /// Calls originate on audio, URLSession, and main queues. Preserve the observation at its source
@@ -181,11 +184,7 @@ final class RealtimeContinuityReporter: @unchecked Sendable {
                 let lastCapture = lastCaptureAt.map(Self.seconds) ?? "never"
                 jlog("⚠️ audio continuity [\(speaker.rawValue)] capture stalled for "
                      + "\(Self.seconds(duration)) (last=\(lastCapture))")
-                lock.lock()
-                let emitStall = !reportedStall
-                reportedStall = true
-                lock.unlock()
-                if emitStall { onCaptureContinuity?(.stalled) }
+                if let heartbeat = heartbeatGate.stalled() { emit(heartbeat) }
             case .sequenceGap(let stage, let expected, let observed):
                 let boundary = stage == .capture ? "capture" : "delivery"
                 jlog("⚠️ audio continuity [\(speaker.rawValue)] \(boundary) sequence gap: "

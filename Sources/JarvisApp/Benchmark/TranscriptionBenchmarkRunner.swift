@@ -52,7 +52,23 @@ final class TranscriptionBenchmarkRunner {
             base: options.outputDirectory.deletingLastPathComponent(),
             current: options.outputDirectory
         ).pruneToMostRecent(TranscriptionBenchmark.retainedRunCount)
-        JarvisLog.enableFileLogging(directory: options.outputDirectory)
+        // The run directory is this benchmark's session directory: one evidence handle owns its
+        // jarvis-debug.log, and `scripts/transcription-benchmark.sh` reads that file when a run
+        // fails. Sealed on both exits so the health marker never lies about an unfinished close.
+        let evidence = FileSessionAudit(directory: options.outputDirectory)
+        JarvisLog.attach(to: evidence)
+        do {
+            try await runInstrumented()
+        } catch {
+            _ = await evidence.close()
+            JarvisLog.detach()
+            throw error
+        }
+        _ = await evidence.close()
+        JarvisLog.detach()
+    }
+
+    private func runInstrumented() async throws {
         networkDiagnostics.start()
         TranscriptionBenchmarkFiles.writeProgress(
             phase: "preparing-synthetic-fixtures", to: options.outputDirectory)

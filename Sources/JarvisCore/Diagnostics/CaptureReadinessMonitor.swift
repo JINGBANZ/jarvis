@@ -8,24 +8,15 @@ import Foundation
 /// microphone-only.
 ///
 /// Readiness is based purely on callback/frame arrival, never signal amplitude — valid digital silence
-/// still counts as healthy capture. It consumes positive sample-count progress plus
-/// `AudioContinuityWitness` stall evidence rather than running a second competing counter, and the
-/// caller supplies every timestamp so the policy is deterministic and unit-testable with no timer of
-/// its own.
+/// still counts as healthy capture. Its one input is the `CaptureHeartbeat` — content-free frame
+/// progress derived from `AudioContinuityWitness`, not a second competing counter — and the caller
+/// supplies every timestamp so the policy is deterministic and unit-testable with no timer of its
+/// own.
 public final class CaptureReadinessMonitor {
     /// The two independent capture paths fed by the one-clock aggregate device.
     public enum Stream: String, Sendable, Equatable, CaseIterable {
         case microphone
         case system
-    }
-
-    /// A content-free capture observation for one stream, derived from the continuity witness.
-    public enum Signal: Sendable, Equatable {
-        /// A callback delivered this many samples. Positive progress establishes or restores frame
-        /// health; zero samples do not. No amplitude or PCM crosses this boundary.
-        case captured(sampleCount: Int)
-        /// The witness reported a capture stall (no frames for its stall threshold).
-        case stalled
     }
 
     /// Capture-aware readiness for the app to render. Connection attempt details remain app-owned,
@@ -130,13 +121,17 @@ public final class CaptureReadinessMonitor {
         streams[.system]?.resolved == true
     }
 
-    /// Record one capture observation for a stream and advance time-based policy. Late or duplicate
-    /// signals after a stream is resolved (or after the microphone failed) are inert.
+    /// Fold one capture heartbeat into this stream's health and advance time-based policy. This is
+    /// the critical, in-memory branch: it reads the heartbeat value directly and never reads the
+    /// evidence queue or a persisted file. Late or duplicate heartbeats after a stream is resolved
+    /// (or after the microphone failed) are inert.
     @discardableResult
-    public func note(_ signal: Signal, for stream: Stream, at time: TimeInterval) -> [Effect] {
+    public func note(
+        _ heartbeat: CaptureHeartbeat, for stream: Stream, at time: TimeInterval
+    ) -> [Effect] {
         guard !stopped, var state = streams[stream], !state.resolved else { return [] }
-        switch signal {
-        case .captured(let sampleCount):
+        switch heartbeat {
+        case .frames(let sampleCount):
             precondition(sampleCount >= 0)
             if sampleCount > 0 {
                 state.firstFrame = true

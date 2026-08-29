@@ -11,6 +11,10 @@ public struct SessionStore: Sendable {
         public let label: String     // human label, e.g. "2026-06-16 10:00:00"
         public let url: URL
         public let isCurrent: Bool
+        /// Whether this session's evidence record is known to be complete. `nil` means unknown —
+        /// a session written before the health record existed, or an unreadable marker. Unknown is
+        /// not the same as incomplete, so it shows no notice.
+        public let evidenceIsComplete: Bool?
     }
 
     public struct EntrySnapshot: Sendable {
@@ -69,10 +73,32 @@ public struct SessionStore: Sendable {
             .map { name -> Session in
                 let url = base.appendingPathComponent(name)
                 let isCurrent = curPath != nil && url.standardizedFileURL.path == curPath
-                return Session(id: name, label: Self.label(from: name), url: url, isCurrent: isCurrent)
+                return Session(
+                    id: name,
+                    label: Self.label(from: name),
+                    url: url,
+                    isCurrent: isCurrent,
+                    evidenceIsComplete: Self.evidenceIsComplete(in: url))
             }
             .filter { $0.isCurrent || Self.hasCoachingContent($0.url) }
             .sorted { $0.id > $1.id }   // id is a lexically-sortable timestamp ⇒ newest first
+    }
+
+    /// Read the session's monotonic health record. `complete` means every accepted record reached
+    /// disk and the session sealed cleanly; `partial` means something was dropped or failed;
+    /// `in_progress` means the close never finished. Anything else — a session written before the
+    /// record existed, or an unreadable marker — is unknown, and unknown shows no notice.
+    private static func evidenceIsComplete(in sessionURL: URL) -> Bool? {
+        let url = sessionURL.appendingPathComponent(FileSessionAudit.healthFilename)
+        guard let data = try? Data(contentsOf: url),
+              let marker = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let state = marker["state"] as? String
+        else { return nil }
+        switch state {
+        case "complete": return true
+        case "partial", "in_progress": return false
+        default: return nil
+        }
     }
 
     /// Whether a session's log holds at least one human-facing coaching event. A terminal marker is
@@ -87,7 +113,7 @@ public struct SessionStore: Sendable {
                     sessionURL.appendingPathComponent(name).path) else { return nil }
                 return name
             }
-            let kind = line.k.flatMap { ActivityLog.EventKind(rawValue: $0) }
+            let kind = line.k.flatMap { ActivityEvent.Kind(rawValue: $0) }
             if kind == .sessionEnded {
                 continue
             }
@@ -141,7 +167,7 @@ public struct SessionStore: Sendable {
             guard ActivityLog.isHumanFacing(
                 message: line.m,
                 imageFile: shotName,
-                kind: line.k.flatMap { ActivityLog.EventKind(rawValue: $0) }
+                kind: line.k.flatMap { ActivityEvent.Kind(rawValue: $0) }
             ) else {
                 continue
             }
