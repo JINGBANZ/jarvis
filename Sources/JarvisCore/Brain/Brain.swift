@@ -73,6 +73,9 @@ public enum ToolInvocation: Sendable, Equatable {
     /// a stay-quiet turn used to be stored in the server-side conversation, where the model imitated
     /// its own leaked deliberation and degenerated (and every stored byte was re-billed every turn).
     case staySilent(callId: String)
+    /// A lookup against the user's configured prep material. Present only when at least one source
+    /// produced usable text at Session Start — see `PrepMaterialSearching`.
+    case searchPrepNotes(callId: String, query: String)
 }
 
 /// One brain response: parsed tool calls (possibly empty = stay silent), plus the raw calls

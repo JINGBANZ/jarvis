@@ -68,6 +68,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     /// A Start that is still discovering local CLIs. Stop or a newer Start cancels it before the
     /// prepared runtime can be installed on the main actor.
     private var pendingStartTask: Task<Void, Never>?
+    /// Reads prep-material files and can shell out to `textutil`; cancelled on Stop like compaction
+    /// is, so it never outlives the session it was built for.
+    private var prepMaterialIndexTask: Task<Void, Never>?
     private var pendingStartRevision: UInt = 0
     /// The global hint hotkey. Lives for the whole app run; its callback beeps when no session runs.
     private var hotkeys: HotkeyController?
@@ -483,6 +486,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             plan: freshSessionPlan(),
             activity: artifacts.sessionAudit)
 
+        // Building the index reads files and can shell out to `textutil`, so it runs off the Start
+        // path entirely rather than delaying it — a trigger that fires before this lands just
+        // doesn't have search_prep_notes available for that one attempt. Tracked and cancelled in
+        // `stop()` for the same reason compaction is: an untracked task would keep reading files and
+        // spawning textutil subprocesses after the session it belongs to has already torn down.
+        let prepMaterialSources = prepMaterialPreferences.sources
+        prepMaterialIndexTask = Task.detached(priority: .utility) { [weak driver] in
+            let index = await PrepMaterialIndexBuilder.build(from: prepMaterialSources)
+            guard !Task.isCancelled else { return }
+            driver?.installPrepMaterial(index)
+        }
+
         // CoachDriver is @unchecked Sendable; capture it (not @MainActor self) in the callbacks.
         // Route turns through TurnTaskBox so Stop can cancel an in-flight one. Concurrent triggers are
         // coalesced inside CoachDriver (the running turn batches them in), so we don't cancel here.
@@ -707,6 +722,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         pendingStartRevision &+= 1
         pendingStartTask?.cancel()
         pendingStartTask = nil
+        prepMaterialIndexTask?.cancel()
+        prepMaterialIndexTask = nil
         let hadAllocatedPipeline = transcriber != nil || themTranscriber != nil
         let preservesReplacementReadiness = readinessToPreserve == readinessSession
         let preservesStartupBlock = !hadAllocatedPipeline
