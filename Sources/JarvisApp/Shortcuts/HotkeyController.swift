@@ -42,8 +42,12 @@ final class HotkeyController {
             guard let userData else { return noErr }
             let controller = Unmanaged<HotkeyController>.fromOpaque(userData).takeUnretainedValue()
             // Carbon delivers application-target hot-key events on the main thread, so it is safe to
-            // assert main-actor isolation here and call back synchronously.
-            MainActor.assumeIsolated { controller.onRequestHint?() }
+            // assert main-actor isolation here and call back synchronously. Logged unconditionally so
+            // a press that never reaches the coaching pipeline is still provably recorded here first.
+            MainActor.assumeIsolated {
+                jlog("Jarvis: hint hotkey ⌥⌘J pressed.")
+                controller.onRequestHint?()
+            }
             return noErr
         }, 1, &spec, selfPtr, &handlerRef)
         // A failed install leaves the hot key dead; without this line that failure is invisible.

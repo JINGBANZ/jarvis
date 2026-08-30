@@ -525,6 +525,10 @@ public final class CoachDriver: @unchecked Sendable {
         while true {
             let step = takeBrainSelectionStep()
             if step.alreadyExhausted {
+                // The route exhausted between this trigger's claim and its first selection — the
+                // exhaustion notice itself was already delivered when it first happened, but a
+                // trigger landing here must still leave a trace rather than vanish silently.
+                jlog("… provider route already exhausted")
                 return nil
             }
             if let diagnostic = step.diagnostic {

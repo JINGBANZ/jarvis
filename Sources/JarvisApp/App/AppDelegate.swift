@@ -199,9 +199,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         hotkeys = HotkeyController()
         hotkeys?.onRequestHint = { [weak self] in
             guard let self, let fire = self.requestManualHint else {
+                jlog("Jarvis: hint hotkey ignored — no live session, beeping instead.")
                 NSSound.beep() // ghost-mode-allowed: explicit user hotkey while stopped
                 return
             }
+            jlog("Jarvis: hint hotkey routed into the coaching pipeline.")
             fire()
         }
 

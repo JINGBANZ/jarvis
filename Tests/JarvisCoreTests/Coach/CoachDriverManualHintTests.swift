@@ -133,4 +133,40 @@ private final class FailingScreen: ScreenCapturing, @unchecked Sendable {
         #expect(overlay.rendered.isEmpty)        // ...but never rendered a tip after Stop
         #expect(brain.calls.isEmpty)             // and the guard fires before any brain.respond call
     }
+
+    /// Regression for a hint press that lands while another trigger's attempt is already in flight
+    /// (issue #231): `claimOrPend` must coalesce it into the pending trigger rather than drop it, and
+    /// the SAME `handleTrigger(.turnEnd)` call — not a new one — must go on to run the forced hint
+    /// once the in-flight attempt completes, since the hint's own call only ever reports `.busy`.
+    @Test func manualHintPressedWhileAnAttemptIsInFlightStillExecutesAfterItCompletes() async {
+        let gate = AsyncGate()
+        let brain = GatedBrain(gate: gate, script: [
+            .init(toolCalls: [.speak(callId: "turnEnd", lines: ["in-flight turn-end tip"])],
+                  rawToolCalls: [RawToolCall(id: "turnEnd", name: "speak",
+                                             argumentsJSON: #"{"lines":["in-flight turn-end tip"]}"#)]),
+            .init(toolCalls: [.speak(callId: "hint", lines: ["forced hint tip"])],
+                  rawToolCalls: [RawToolCall(id: "hint", name: "speak",
+                                             argumentsJSON: #"{"lines":["forced hint tip"]}"#)]),
+        ])
+        let screen = FakeScreen()
+        let overlay = FakeOverlay()
+        let (driver, transcript) = makeDriver(brain: brain, screen: screen, overlay: overlay, clock: ManualClock(now: 0))
+        transcript.append(.init(speaker: .me, text: "walking through the approach", at: 0))
+
+        async let turnEndOutcome = driver.handleTrigger(.turnEnd)   // parks inside the brain call
+        await gate.waitUntilEntered()
+
+        let hintOutcome = await driver.handleTrigger(.manualHint)   // pends behind the in-flight attempt
+        #expect(hintOutcome == .busy)
+
+        await gate.release()                                       // lets the turn-end attempt finish
+
+        #expect(await turnEndOutcome == .spoke)   // the ORIGINAL call carries the coalesced hint home
+        #expect(brain.calls.count == 2)
+        #expect(screen.captureCount == 1)                                // the hint captured the screen
+        #expect(brain.calls[1].contains { $0.imageBase64JPEG != nil })   // ...and it rode the forced request
+        let hintUserText = brain.calls[1].compactMap { $0.text }.joined(separator: " ")
+        #expect(hintUserText.contains("hint shortcut"))
+        #expect(overlay.rendered == [["in-flight turn-end tip"], ["forced hint tip"]])
+    }
 }
