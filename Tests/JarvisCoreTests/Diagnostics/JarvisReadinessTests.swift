@@ -170,6 +170,18 @@ import Testing
         #expect(readiness.status == .blocked(.permissions([.screenRecording])))
     }
 
+    @Test func missingSystemAudioPermissionBlocksStartBeforeCaptureIsBuilt() {
+        let readiness = JarvisReadiness()
+        let start = readiness.begin(
+            configuration: .init(requiredPermissions: [.microphone, .systemAudio]))
+
+        // A refused system-audio grant kills the whole aggregate device, so it blocks the attempt
+        // up front rather than surfacing later as a capture-construction failure.
+        let effects = readiness.observe(.permissions(granted: [.microphone]), for: start.session)
+
+        #expect(effects == [.statusChanged(.blocked(.permissions([.systemAudio])))])
+    }
+
     @Test func unselectedScreenRecordingPermissionDoesNotBlockAudioReadiness() {
         let readiness = JarvisReadiness()
         let start = readiness.begin(configuration: .init(requiredPermissions: [.microphone]))

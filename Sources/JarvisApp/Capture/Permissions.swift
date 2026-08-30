@@ -3,54 +3,85 @@ import CoreGraphics
 import AppKit
 import JarvisCore
 
-/// Requests the TCC permissions Jarvis needs **up front**, at launch, so the user grants them
-/// once at the start rather than being surprised by a prompt mid-session. Each is only requested
-/// when not already granted.
+/// The macOS side of the TCC grants Jarvis needs: what it holds right now, and how to ask for one.
+///
+/// `PermissionsOnboarding` drives the asking at first launch so a coaching session never has to,
+/// and `JarvisReadiness` consumes `grantedReadinessPermissions` when the user presses Start. This
+/// adapter only reports and requests; the Core reducer owns which permissions a configuration needs.
 @MainActor
 enum Permissions {
-    static func primeAll() {
-        requestMicrophone()
-        requestScreenRecording()
-    }
-
-    /// Microphone — prompts on first launch; AVAudioEngine later just works.
-    static func requestMicrophone() {
-        switch AVCaptureDevice.authorizationStatus(for: .audio) {
-        case .authorized:
-            jlog("Jarvis: microphone permission already granted")
-        case .notDetermined:
-            AVCaptureDevice.requestAccess(for: .audio) { granted in
-                jlog("Jarvis: microphone permission \(granted ? "granted" : "denied")")
-            }
-        case .denied, .restricted:
-            jlog("Jarvis: microphone denied — enable in System Settings › Privacy & Security › Microphone")
-        @unknown default:
-            break
+    /// What macOS says about one grant right now. System Audio Recording has no readable state, so
+    /// its answer is the remembered result of the last probe — see `PermissionPreferences`.
+    static func isGranted(
+        _ permission: JarvisReadiness.Permission,
+        remembering preferences: PermissionPreferences
+    ) -> Bool {
+        switch permission {
+        case .microphone:
+            AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
+        case .systemAudio:
+            preferences.systemAudioGranted
+        case .screenRecording:
+            CGPreflightScreenCaptureAccess()
         }
     }
 
-    /// Screen Recording — `CGRequestScreenCaptureAccess()` shows the prompt if undetermined.
-    /// Note: macOS often requires a relaunch after the user enables it for the grant to take effect,
-    /// which is exactly why we prompt at startup instead of lazily when `capture_screen` first fires.
-    static func requestScreenRecording() {
+    /// Content-free permission snapshot for `JarvisReadiness`.
+    static func grantedReadinessPermissions(
+        remembering preferences: PermissionPreferences
+    ) -> Set<JarvisReadiness.Permission> {
+        Set(JarvisReadiness.Permission.allCases.filter { isGranted($0, remembering: preferences) })
+    }
+
+    /// Asks macOS for one grant and reports what Jarvis holds afterwards. An already-granted
+    /// permission returns immediately with no dialog, and macOS answers for a user who already
+    /// refused without prompting again — so this is safe to call for any row.
+    static func request(
+        _ permission: JarvisReadiness.Permission,
+        remembering preferences: PermissionPreferences
+    ) async -> Bool {
+        switch permission {
+        case .microphone:
+            return await requestMicrophone()
+        case .systemAudio:
+            let granted = await probeSystemAudio()
+            preferences.systemAudioGranted = granted
+            return granted
+        case .screenRecording:
+            return requestScreenRecording()
+        }
+    }
+
+    private static func requestMicrophone() async -> Bool {
+        if AVCaptureDevice.authorizationStatus(for: .audio) == .authorized {
+            jlog("Jarvis: microphone permission already granted")
+            return true
+        }
+        let granted = await AVCaptureDevice.requestAccess(for: .audio)
+        jlog("Jarvis: microphone permission \(granted ? "granted" : "denied")")
+        return granted
+    }
+
+    /// `CGRequestScreenCaptureAccess()` shows the prompt when the grant is undetermined but never
+    /// waits for an answer, and a grant made in System Settings is only visible to a new process.
+    /// So `false` here means "not in this process yet", not "refused".
+    private static func requestScreenRecording() -> Bool {
         if CGPreflightScreenCaptureAccess() {
             jlog("Jarvis: screen recording permission already granted")
-        } else {
-            let granted = CGRequestScreenCaptureAccess()
-            jlog("Jarvis: screen recording \(granted ? "granted" : "not yet granted — enable in System Settings › Privacy & Security › Screen Recording, then relaunch Jarvis")")
+            return true
         }
+        let granted = CGRequestScreenCaptureAccess()
+        jlog("Jarvis: screen recording \(granted ? "granted" : "not yet granted — enable in System Settings › Privacy & Security › Screen Recording, then relaunch Jarvis")")
+        return granted
     }
 
-    /// Content-free permission snapshot for `JarvisReadiness`. The Core reducer owns which members
-    /// the selected configuration requires; this OS adapter only reports current TCC state.
-    static func grantedReadinessPermissions() -> Set<JarvisReadiness.Permission> {
-        var granted: Set<JarvisReadiness.Permission> = []
-        if AVCaptureDevice.authorizationStatus(for: .audio) == .authorized {
-            granted.insert(.microphone)
+    /// The probe blocks its thread while macOS shows the prompt, so it never runs on the main
+    /// actor — the checklist has to keep drawing behind the dialog.
+    private static func probeSystemAudio() async -> Bool {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                continuation.resume(returning: SystemAudioPermissionProbe.requestAccess())
+            }
         }
-        if CGPreflightScreenCaptureAccess() {
-            granted.insert(.screenRecording)
-        }
-        return granted
     }
 }

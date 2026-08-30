@@ -14,9 +14,24 @@ public final class JarvisReadiness {
         fileprivate let generation: UInt64
     }
 
+    /// Declaration order is the order a notice or checklist names them, so a multi-permission
+    /// message never reshuffles between attempts.
     public enum Permission: String, Sendable, Hashable, CaseIterable {
         case microphone
+        /// Core Audio process taps. macOS offers no API to request or read this grant, so the only
+        /// evidence is an adapter having built and started a tap-backed device at least once.
+        case systemAudio
         case screenRecording
+
+        /// The name macOS itself uses in System Settings, so a notice and the permission checklist
+        /// point at the same row the user has to find.
+        public var displayName: String {
+            switch self {
+            case .microphone: "Microphone"
+            case .systemAudio: "System Audio Recording"
+            case .screenRecording: "Screen Recording"
+            }
+        }
     }
 
     public enum Credential: String, Sendable, Hashable, CaseIterable {

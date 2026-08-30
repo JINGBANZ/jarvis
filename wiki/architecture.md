@@ -180,6 +180,7 @@ plugins ship only with full Xcode, and Jarvis builds **CLT-only** (see
 | **Overlay Box** | A persistent window logging every `speak` tip in full, timestamped — the scrollable history of what the caption flashed one line at a time. Movable, resizable, translucent, also excluded from capture; switched on/off from Settings (**on by default**), cleared on each Start. Its size persists across launches; its position does not, so it opens centered. Fed by the same `speak` call as the caption via **`BroadcastOverlay`**, which fans one `OverlayRendering.render` out to both sinks (so `CoachDriver` is unchanged). | AppKit NSPanel; `OverlayBoxPanel`. |
 | **MenuBar** | Manual **Start/Stop** of the pipeline (no auto-start), the same authoritative readiness status shown by Activity, and one-time API-key entry when OpenAI is in use. The status item is a quiet monochrome tile while stopped and a lit Listening Lens in every other readiness state — amber while checking or recovering, violet for a fully ready or explicit microphone-only session, red when a Start is blocked before any session begins — while the menu and tooltip name the requirement behind any non-ready state. A failed system stream may degrade to microphone-only, while a failed microphone stream stops the session. The two overlay surfaces are switched from Settings, not the menu. A centered, disabled `v<version>` caption at the bottom of the menu names the running build (`CFBundleShortVersionString`), so a user can report it without opening Settings. | AppKit menu-bar item; owner-only file for the key. |
 | **HotkeyController** | Register the global **⌥⌘J** hint hotkey and route a press to a one-trip `manualHint` turn while a session runs (beep otherwise). See [§2 On-demand hint](#on-demand-hint-j). | Carbon HIToolbox (`RegisterEventHotKey`, no TCC). |
+| **PermissionsOnboarding** | Gather every TCC grant at first launch instead of mid-session: a checklist window that walks Microphone, System Audio Recording, and Screen Recording one dialog at a time, shared with the Settings Permissions tab. `SystemAudioPermissionProbe` is the only way to ask for — or read — the system-audio grant. See [§3 Permissions](#permissions). | AVFoundation, `CGRequestScreenCaptureAccess`, Core Audio process taps. |
 
 Each component has one job and a narrow interface. The CoachDriver is the only place the
 "intelligence" lives, and even there the intelligence is the model — the driver just wires events
@@ -205,6 +206,27 @@ indistinguishable from a headset, so a wrong bypass re-admits the echo. AEC3 the
 all routes — it's a near-passthrough on earbuds (no acoustic echo to cancel). Caveat: AirPods *as a
 mic* are HFP narrowband and low-fidelity regardless of resampling; for input quality, use the
 built-in mic.
+
+### Permissions
+
+Jarvis needs three macOS grants — Microphone, System Audio Recording, Screen Recording — and asks
+for all of them at **first launch**, from a checklist window, one dialog at a time. The reason is the
+coaching context: a TCC dialog is system UI that no capture-exclusion trick can hide, so one arriving
+mid-interview is visible to whoever the user is sharing a screen with. Only Microphone and System
+Audio Recording block a Start; Screen Recording missing costs `capture_screen`, not the session.
+
+System Audio Recording is the awkward one. macOS publishes no API to request it and none to read it:
+`AudioHardwareCreateProcessTap` succeeds without the grant, and the prompt appears only when a
+tap-backed device starts. `SystemAudioPermissionProbe` therefore *is* both the request and the check
+— it starts a throwaway tap-only aggregate (clocked by the default output device, no microphone
+sub-device, empty IOProc) and reports whether the start succeeded. `PermissionPreferences` remembers
+that answer, since re-probing on every Start would mean building a second aggregate device beside the
+real one. A grant revoked afterwards leaves that memory stale; capture construction then fails with
+its own notice, which is the degradation the cache is allowed to have.
+
+The checklist guides rather than gates: it closes whenever the user wants, `JarvisReadiness` names
+whatever they skipped when they press Start, and the Permissions tab in Settings hosts the same view
+afterwards — necessary because macOS never re-prompts once a user has refused.
 
 ### Failure surfacing — startup loud, runtime ghost
 

@@ -87,6 +87,21 @@ public enum Defaults {
         public static let sources: [PrepMaterialSource] = []
     }
 
+    // MARK: - Permissions
+
+    /// What Jarvis remembers about the macOS grants it needs. Not user-editable settings: the
+    /// Permissions checklist writes them, and the values are only ever what macOS last told us.
+    public enum Permissions {
+        public static let onboardingShownKey = "permissions.onboardingShown"
+        /// The first-launch checklist has never run, so a fresh install gets it once.
+        public static let onboardingShown = false
+
+        public static let systemAudioGrantedKey = "permissions.systemAudioGranted"
+        /// Assume nothing until a tap has actually started; macOS exposes no way to read this grant,
+        /// so an unproven install re-probes instead of claiming readiness it can't verify.
+        public static let systemAudioGranted = false
+    }
+
     // MARK: - Overlay
 
     /// The two capture-invisible coaching surfaces. Each has an on/off flag, a font size in points,

@@ -2116,3 +2116,30 @@
   web of accessors is worse than one declared protocol.
 - **Detail:** [lean-coaching-core.md → Phase 5 contracts](./lean-coaching-core.md#phase-5-implementation-contract--coachdriver-split),
   `Sources/JarvisCore/Coach/CoachAttemptRunner.swift`, `Sources/JarvisApp/App/`.
+
+### 2026-08-30 — Every TCC prompt moves to first launch; a throwaway tap is the system-audio check
+
+- **Chose:** Present a permission checklist window on the first launch and walk Microphone, System
+  Audio Recording, and Screen Recording one dialog at a time, instead of priming two at launch and
+  letting Core Audio raise the third at the first Start.
+- **Chose:** Make `SystemAudioPermissionProbe` — a tap-only aggregate device that starts and stops
+  immediately — both the request and the check for System Audio Recording, and cache its answer in
+  `PermissionPreferences`.
+- **Chose:** Add `.systemAudio` to `JarvisReadiness.Permission` and require it at Start beside
+  `.microphone`. Screen Recording stays optional: without it a session still coaches on audio.
+- **Why:** A TCC dialog is system UI, so no capture-exclusion trick hides it. The system-audio
+  prompt fired on the first Start — which, for the user this product exists for, is the moment an
+  interview begins and a screen may be shared. The grant is also unreadable: macOS publishes no API
+  to request or query it, and `AudioHardwareCreateProcessTap` succeeds without it, so starting a
+  tap is the only evidence that exists. Requiring it at Start matches what capture already does —
+  one aggregate device carries mic and tap, so a refused tap takes the whole session with it, and
+  naming the permission beats failing later in device construction.
+- **Rejected:** (a) A hard gate that stays up until all three are granted — Screen Recording isn't
+  needed to coach, so it would trap a user who declined it. (b) Re-probing on every Start — a second
+  aggregate device built and torn down beside the real one, for a revocation that the existing
+  capture-failure notice already handles. (c) Re-probing on every launch — cheap, but it starts
+  audio IO on a schedule no user asked for. (d) Automating the relaunch that a fresh Screen
+  Recording grant needs: the Settings tab can be opened mid-session, and no button there may
+  terminate a live one. The checklist says to reopen Jarvis instead.
+- **Detail:** [architecture.md → Permissions](./architecture.md#permissions),
+  `Sources/JarvisApp/Onboarding/`, `Sources/JarvisApp/Capture/SystemAudioPermissionProbe.swift`.

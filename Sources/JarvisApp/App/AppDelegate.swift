@@ -31,6 +31,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     private let transcriptionPreferences = TranscriptionPreferences()
     private let screenPreferences = ScreenCapturePreferences()
     private let prepMaterialPreferences = PrepMaterialPreferences()
+    private let permissionPreferences = PermissionPreferences()
+    private var permissionsOnboarding: PermissionsOnboarding!
     /// Monotonic revision stamped on each control-plane snapshot. Bumped at Start and whenever an
     /// explicit Settings edit installs a fresh plan; never by runtime health.
     private var planRevision: UInt = 0
@@ -123,8 +125,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                                     preferredProvider: self.brain.preferences.provider)
         }
 
-        // Ask for Microphone + Screen Recording up front, not lazily mid-session.
-        Permissions.primeAll()
+        // Gather every macOS grant up front, not lazily mid-session. Core Audio's system-audio
+        // prompt in particular used to wait until the first Start, which is the worst possible
+        // moment for a dialog to appear over a shared screen.
+        permissionsOnboarding = PermissionsOnboarding(preferences: permissionPreferences)
+        permissionsOnboarding.runAtLaunch()
 
         overlayCaption = OverlayCaptionPanel()
         overlayCaption.setFontSize(appearance.captionFontSize)
@@ -177,6 +182,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                 self?.reapplySessionPlan()
             },
             PrepMaterialSection(preferences: prepMaterialPreferences),
+            PermissionsSection(preferences: permissionPreferences),
             ActivitySection(viewer: activityViewer),
         ]
         settingsWindow = SettingsWindow(sections: sections)
@@ -251,8 +257,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         let key = secrets.apiKey() ?? ""
         let requiresOpenAIKey = transcriptionProvider.requiresOpenAIAPIKey(for: brainRoute)
         let preparesAppleSpeech = transcriptionProvider == .appleSpeech
+        // System audio is as mandatory as the microphone: the aggregate device carries both, so a
+        // refused tap takes the whole capture with it. Blocking here names the missing grant
+        // instead of surfacing it later as a capture-construction failure.
         let readinessConfiguration = JarvisReadiness.Configuration(
-            requiredPermissions: [.microphone],
+            requiredPermissions: [.microphone, .systemAudio],
             requiredCredentials: requiresOpenAIKey ? [.openAIAPIKey] : [],
             requiresTranscriptionPreparation: preparesAppleSpeech)
         let readinessStart = readiness.begin(configuration: readinessConfiguration)
@@ -260,7 +269,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         self.readinessSession = readinessSession
         applyReadinessEffects(readinessStart.effects)
 
-        let grantedPermissions = Permissions.grantedReadinessPermissions()
+        let grantedPermissions = Permissions.grantedReadinessPermissions(
+            remembering: permissionPreferences)
         observeReadiness(.permissions(granted: grantedPermissions), for: readinessSession)
         let missingPermissions = readinessConfiguration.requiredPermissions
             .subtracting(grantedPermissions)

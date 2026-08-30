@@ -10,7 +10,8 @@ Two layers below are **not OS-enforced** in the current build:
 - **No App Sandbox.** The app is **unsandboxed**, signed with a **stable self-signed identity
   (`Jarvis Dev`)** — not ad-hoc, so TCC grants persist across rebuilds (see
   [build-and-run.md](./build-and-run.md)). Screen Recording, Microphone, and System Audio Recording
-  are granted via **TCC prompts**. Consequence: the app has the filesystem authority of the signed-in
+  are granted via **TCC prompts at first launch**
+  ([architecture.md](./architecture.md#permissions)). Consequence: the app has the filesystem authority of the signed-in
   user even though Jarvis's own code limits its normal file access. (Future model: §1.)
 - **No separate account requirement.** Development normally runs in the developer's current account
   inside a **git worktree** for recoverability. A worktree is not an OS access boundary. (Optional
