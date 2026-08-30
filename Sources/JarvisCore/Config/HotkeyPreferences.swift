@@ -14,9 +14,9 @@ public final class HotkeyPreferences: @unchecked Sendable {
         self.defaults = defaults
     }
 
-    /// Absent, or a stored combination with no modifiers (a hand-edited or corrupted plist — the
-    /// shortcut recorder never writes one), falls back to the shipped default rather than
-    /// registering a bare key app-wide.
+    /// Absent, or a stored combination whose modifiers don't satisfy `satisfiesHotkeyRequirement`
+    /// (a hand-edited or corrupted plist — the shortcut recorder never writes one), falls back to the
+    /// shipped default rather than registering an unsafe combination app-wide.
     public var combination: HotkeyCombination {
         get {
             guard defaults.object(forKey: Defaults.Hotkey.keyCodeKey) != nil,
@@ -27,7 +27,7 @@ public final class HotkeyPreferences: @unchecked Sendable {
                 truncatingIfNeeded: defaults.integer(forKey: Defaults.Hotkey.keyCodeKey))
             let modifiers = HotkeyModifiers(rawValue: UInt32(
                 truncatingIfNeeded: defaults.integer(forKey: Defaults.Hotkey.modifiersKey)))
-            guard !modifiers.isEmpty else { return Defaults.Hotkey.combination }
+            guard modifiers.satisfiesHotkeyRequirement else { return Defaults.Hotkey.combination }
             return HotkeyCombination(keyCode: keyCode, modifiers: modifiers)
         }
         set {

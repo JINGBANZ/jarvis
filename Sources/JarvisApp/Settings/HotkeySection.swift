@@ -61,7 +61,7 @@ final class HotkeySection: NSObject, SettingsSection {
         card.setHeader(title: "Manual hint", detail: "Works only while a session is running")
         let row = SettingsRowView(
             title: "Shortcut",
-            detail: "Requires ⌘, ⌥, or ⌃ — Shift alone isn't enough",
+            detail: "Requires ⌘ or ⌥",
             controlView: recorder,
             controlSize: NSSize(width: 170, height: 32),
             preferredHeight: SettingsStyle.rowHeight,

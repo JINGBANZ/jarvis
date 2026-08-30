@@ -2,14 +2,6 @@ import AppKit
 import Carbon.HIToolbox
 import JarvisCore   // jlog, HotkeyPreferences, HotkeyCombination
 
-/// Whether the most recent registration attempt for the currently-active combination succeeded.
-/// Read by Settings to decide when a registration failure needs to be shown — only for a value the
-/// user explicitly picked, never for the shipped default nobody chose.
-enum HotkeyRegistrationOutcome: Equatable {
-    case registered
-    case failed(status: OSStatus)
-}
-
 /// Registers the single global hint hotkey via Carbon's `RegisterEventHotKey` and forwards each press
 /// to `onRequestHint`. The shortcut is system-wide (it fires even when Jarvis, a menu-bar accessory,
 /// isn't frontmost) and needs no Accessibility permission or permission dialog.
@@ -54,6 +46,14 @@ final class HotkeyController {
     /// The caller decides whether to persist `combination` based on the returned outcome.
     @discardableResult
     func apply(_ combination: HotkeyCombination) -> HotkeyRegistrationOutcome {
+        // Re-registering the exact combination Jarvis itself already holds would otherwise fail:
+        // Carbon's hot-key registry rejects a second RegisterEventHotKey for a combo it hasn't
+        // released yet, even from the same process — surfacing as a spurious "already in use by
+        // another app" the moment the user re-picks their current shortcut.
+        guard combination != registered else {
+            lastOutcome = .registered
+            return .registered
+        }
         let previousRef = hotKeyRef
         let outcome = register(combination)
         if case .registered = outcome, let previousRef {

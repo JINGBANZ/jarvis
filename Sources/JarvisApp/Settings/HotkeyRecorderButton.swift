@@ -4,10 +4,10 @@ import JarvisCore
 
 /// A "click to record" control for the manual-hint global hotkey: shows the current combination as a
 /// button title; a click starts recording, and the next key + modifier(s) pressed becomes the
-/// candidate. A key held with no modifier, or with only Shift, is ignored — one global hotkey
-/// app-wide must not be a key (or Shifted key, e.g. Shift-3 for "#") someone types into a random text
-/// field; at least one of ⌘/⌥/⌃ is required. Escape cancels recording and restores the previous
-/// display without calling `onRecorded`.
+/// candidate. `HotkeyModifiers.satisfiesHotkeyRequirement` gates what's accepted — a key held with no
+/// modifier, only Shift (e.g. Shift-3 for "#"), or only Control (⌃A/⌃E/⌃K/⌃D collide with macOS's
+/// Emacs-style text-editing bindings) is ignored; at least one of ⌘/⌥ is required. Escape cancels
+/// recording and restores the previous display without calling `onRecorded`.
 @MainActor
 final class HotkeyRecorderButton: NSButton {
     /// Called with a candidate combination once a valid key + modifier(s) is pressed while recording.
@@ -72,9 +72,7 @@ final class HotkeyRecorderButton: NSButton {
             return
         }
         let modifiers = event.modifierFlags.hotkeyModifiers
-        // Shift alone doesn't count: a Shift-only combo (e.g. Shift-3 for "#") is still something
-        // someone types into a random text field, not a safe app-wide global shortcut.
-        guard !modifiers.isDisjoint(with: [.command, .option, .control]) else { return }
+        guard modifiers.satisfiesHotkeyRequirement else { return }
         let candidate = HotkeyCombination(keyCode: UInt32(event.keyCode), modifiers: modifiers)
         isRecording = false
         displayedCombination = candidate
