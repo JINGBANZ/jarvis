@@ -1,5 +1,6 @@
 # The scheduled/manual caller follows the shared workflow's main branch, whose runner default is
-# `ubuntu-latest`. Its repository-scoped token lets a filed issue trigger Issue Worker.
+# `ubuntu-latest`. Issues are filed with a short-lived GitHub App installation token (minted from
+# the app credentials below, scoped to this repo) so a filed issue triggers Issue Worker.
 name: Issue Opener
 
 on:
@@ -12,7 +13,8 @@ jobs:
     uses: JINGBANZ/workflows/.github/workflows/issue-opener.yml@main
     permissions:
       contents: read
-      issues: write
+      issues: read
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-      BOT_PAT: ${{ secrets.BOT_PAT }}
+      APP_CLIENT_ID: ${{ secrets.APP_CLIENT_ID }}
+      APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}

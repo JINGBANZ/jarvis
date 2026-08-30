@@ -1,5 +1,6 @@
 # The shared workflow's main branch gates every opened issue before its agent job: only an author
-# with admin, maintain, or write permission can proceed. Its runner default is `ubuntu-latest`.
+# with admin, maintain, or write permission — or the pipeline's own GitHub App, which files issues
+# via Issue Opener — can proceed. Its runner default is `ubuntu-latest`.
 name: Issue Worker
 
 on:
@@ -14,9 +15,8 @@ jobs:
   work:
     uses: JINGBANZ/workflows/.github/workflows/issue-worker.yml@main
     permissions:
-      contents: write
-      pull-requests: write
       issues: write
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-      BOT_PAT: ${{ secrets.BOT_PAT }}
+      APP_CLIENT_ID: ${{ secrets.APP_CLIENT_ID }}
+      APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
