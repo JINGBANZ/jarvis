@@ -188,7 +188,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             PrepMaterialSection(preferences: prepMaterialPreferences),
             HotkeySection(
                 preferences: hotkeyPreferences,
-                currentOutcome: { [weak self] in self?.hotkeys?.lastOutcome ?? .registered },
                 hasActiveHotkey: { [weak self] in self?.hotkeys?.registered != nil },
                 applyCombination: { [weak self] combination in
                     // `hotkeys` is constructed above, before Settings can ever be shown, so `self`

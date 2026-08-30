@@ -4,24 +4,23 @@ import JarvisCore
 /// Settings panel for the global manual-hint hotkey: one "click to record" control, plus an inline
 /// callout when a user-chosen combination can't be registered (e.g. another app already owns it) —
 /// see #229. A rejected rebind always leaves the previous, still-working combination live, so that
-/// stays displayed and only the failure is new information; the one case where nothing is actually
-/// registered is the shipped default itself colliding with another app at launch, and the callout says
-/// so instead of falsely claiming an old shortcut is still active.
+/// stays displayed and the failure is only flashed as immediate feedback on the attempt itself
+/// (`recorded(_:)`); it does not persist across a tab revisit, since the previous shortcut is still
+/// fine. The one case that *is* persistent — the shipped default itself colliding with another app at
+/// launch, so nothing is registered at all — keeps showing the callout on every revisit instead of
+/// going quiet on a stale success.
 @MainActor
 final class HotkeySection: NSObject, SettingsSection {
     let title = "Shortcuts"
     let fillsTab = true
 
     private let preferences: HotkeyPreferences
-    /// Reads the controller's live registration outcome — used on `didBecomeActive` so a failure that
-    /// happened before Settings was ever opened (e.g. at launch, for a previously-rebound
-    /// combination) is still surfaced.
-    private let currentOutcome: () -> HotkeyRegistrationOutcome
-    /// Whether the controller currently has *any* combination registered. A rejected rebind always
-    /// leaves the previous, still-working combination live (see `HotkeyController.apply`), so the only
-    /// way this is false is the shipped default itself colliding with another app at launch — nothing
-    /// was ever registered this run. `currentOutcome` alone can't distinguish that case from "the
-    /// previous combination stays active," so the failure callout reads this too.
+    /// Whether the controller currently has *any* combination registered. This is the only thing
+    /// that must persist across Settings visits: a rejected rebind always leaves the previous,
+    /// still-working combination live (see `HotkeyController.apply`), so the sole way this is false
+    /// is the shipped default itself colliding with another app at launch — nothing was ever
+    /// registered this run. Both branches of `renderOutcome` read this: it decides whether a
+    /// revisit shows the persistent-failure callout, and it picks that callout's wording.
     private let hasActiveHotkey: () -> Bool
     /// Attempts to register a candidate combination and reports whether it took. Persisting the
     /// choice is this section's job, only after a `.registered` outcome — see `recorded(_:)`.
@@ -36,12 +35,10 @@ final class HotkeySection: NSObject, SettingsSection {
 
     init(
         preferences: HotkeyPreferences,
-        currentOutcome: @escaping () -> HotkeyRegistrationOutcome,
         hasActiveHotkey: @escaping () -> Bool,
         applyCombination: @escaping (HotkeyCombination) -> HotkeyRegistrationOutcome
     ) {
         self.preferences = preferences
-        self.currentOutcome = currentOutcome
         self.hasActiveHotkey = hasActiveHotkey
         self.applyCombination = applyCombination
     }
@@ -118,19 +115,29 @@ final class HotkeySection: NSObject, SettingsSection {
         renderOutcome(outcome)
     }
 
+    /// `outcome` is the immediate result of one `recorded(_:)` attempt — pass it right after a
+    /// rebind to flash honest feedback about *that* attempt. Passing nothing (`makeView()` opening
+    /// the tab, `didBecomeActive()` revisiting it) must not replay that transient result: a rejected
+    /// rebind whose previous combination is still active is not an ongoing problem, so on a revisit
+    /// the callout shows only for the one state that *is* persistent — nothing registered at all.
     private func renderOutcome(_ outcome: HotkeyRegistrationOutcome? = nil) {
-        switch outcome ?? currentOutcome() {
-        case .registered:
+        let showsFailure: Bool
+        switch outcome {
+        case .registered: showsFailure = false
+        case .failed: showsFailure = true
+        case nil: showsFailure = !hasActiveHotkey()
+        }
+        guard showsFailure else {
             calloutHeightConstraint?.constant = 0
             callout?.isHidden = true
-        case .failed:
-            calloutLabel?.stringValue = hasActiveHotkey()
-                ? "That shortcut is already in use by another app. The previous shortcut stays active."
-                : "That shortcut is already in use by another app, and no manual-hint shortcut is "
-                    + "currently active."
-            calloutHeightConstraint?.constant = Self.calloutHeight
-            callout?.isHidden = false
+            return
         }
+        calloutLabel?.stringValue = hasActiveHotkey()
+            ? "That shortcut is already in use by another app. The previous shortcut stays active."
+            : "That shortcut is already in use by another app, and no manual-hint shortcut is "
+                + "currently active."
+        calloutHeightConstraint?.constant = Self.calloutHeight
+        callout?.isHidden = false
     }
 
     private func makeCallout() -> NSBox {

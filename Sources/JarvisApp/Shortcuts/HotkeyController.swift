@@ -22,16 +22,18 @@ final class HotkeyController {
     private var handlerRef: EventHandlerRef?
     /// The combination actually registered right now — nil only if nothing has registered
     /// successfully yet this run. Kept separate from `HotkeyPreferences.combination` so a failed
-    /// rebind attempt can restore this exact still-active value.
+    /// rebind attempt can restore this exact still-active value, and read by Settings
+    /// (`HotkeySection.hasActiveHotkey`) to tell "the previous shortcut stays active" apart from
+    /// "nothing is registered at all" — the only state that must persist across Settings visits;
+    /// the transient result of the last `apply(_:)` call does not need to persist and isn't stored.
     private(set) var registered: HotkeyCombination?
-    private(set) var lastOutcome: HotkeyRegistrationOutcome = .failed(status: noErr)
 
     /// 'JRVS' — a unique signature so our hot-key id can't be confused with another component's.
     private static let signature: OSType = 0x4A_52_56_53
 
     init(preferences: HotkeyPreferences) {
         installHandler()
-        lastOutcome = register(preferences.combination)
+        register(preferences.combination)
     }
 
     // No teardown: the controller lives for the whole app run (like the menu bar and overlay), and
@@ -50,10 +52,7 @@ final class HotkeyController {
         // Carbon's hot-key registry rejects a second RegisterEventHotKey for a combo it hasn't
         // released yet, even from the same process — surfacing as a spurious "already in use by
         // another app" the moment the user re-picks their current shortcut.
-        guard combination != registered else {
-            lastOutcome = .registered
-            return .registered
-        }
+        guard combination != registered else { return .registered }
         let previousRef = hotKeyRef
         let outcome = register(combination)
         if case .registered = outcome, let previousRef {
@@ -66,7 +65,6 @@ final class HotkeyController {
                      + "(status \(status)).")
             }
         }
-        lastOutcome = outcome
         return outcome
     }
 
@@ -88,6 +86,7 @@ final class HotkeyController {
         if status != noErr { jlog("Jarvis: hint-hotkey handler install failed (status \(status)).") }
     }
 
+    @discardableResult
     private func register(_ combination: HotkeyCombination) -> HotkeyRegistrationOutcome {
         let id = EventHotKeyID(signature: Self.signature, id: 1)
         var ref: EventHotKeyRef?
