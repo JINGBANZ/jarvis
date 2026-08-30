@@ -48,5 +48,11 @@ enum HotkeyKeyNames {
             UInt32(kVK_UpArrow): "↑", UInt32(kVK_DownArrow): "↓",
             UInt32(kVK_Home): "↖", UInt32(kVK_End): "↘",
             UInt32(kVK_PageUp): "⇞", UInt32(kVK_PageDown): "⇟",
+            UInt32(kVK_ANSI_Semicolon): ";", UInt32(kVK_ANSI_Quote): "'",
+            UInt32(kVK_ANSI_Comma): ",", UInt32(kVK_ANSI_Period): ".",
+            UInt32(kVK_ANSI_Slash): "/", UInt32(kVK_ANSI_Backslash): "\\",
+            UInt32(kVK_ANSI_LeftBracket): "[", UInt32(kVK_ANSI_RightBracket): "]",
+            UInt32(kVK_ANSI_Minus): "-", UInt32(kVK_ANSI_Equal): "=",
+            UInt32(kVK_ANSI_Grave): "`",
     ]
 }

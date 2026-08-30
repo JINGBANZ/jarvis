@@ -189,6 +189,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             HotkeySection(
                 preferences: hotkeyPreferences,
                 currentOutcome: { [weak self] in self?.hotkeys?.lastOutcome ?? .registered },
+                hasActiveHotkey: { [weak self] in self?.hotkeys?.registered != nil },
                 applyCombination: { [weak self] combination in
                     // `hotkeys` is constructed above, before Settings can ever be shown, so `self`
                     // being torn down is the only way this falls through — report failure rather

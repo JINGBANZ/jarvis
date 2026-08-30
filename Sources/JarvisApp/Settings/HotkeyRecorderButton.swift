@@ -4,8 +4,9 @@ import JarvisCore
 
 /// A "click to record" control for the manual-hint global hotkey: shows the current combination as a
 /// button title; a click starts recording, and the next key + modifier(s) pressed becomes the
-/// candidate. A bare key press (no modifier held) is ignored — one global hotkey app-wide must not be
-/// a key someone types into a random text field. Escape cancels recording and restores the previous
+/// candidate. A key held with no modifier, or with only Shift, is ignored — one global hotkey
+/// app-wide must not be a key (or Shifted key, e.g. Shift-3 for "#") someone types into a random text
+/// field; at least one of ⌘/⌥/⌃ is required. Escape cancels recording and restores the previous
 /// display without calling `onRecorded`.
 @MainActor
 final class HotkeyRecorderButton: NSButton {
@@ -71,7 +72,9 @@ final class HotkeyRecorderButton: NSButton {
             return
         }
         let modifiers = event.modifierFlags.hotkeyModifiers
-        guard !modifiers.isEmpty else { return }   // ignore a bare key; keep waiting
+        // Shift alone doesn't count: a Shift-only combo (e.g. Shift-3 for "#") is still something
+        // someone types into a random text field, not a safe app-wide global shortcut.
+        guard !modifiers.isDisjoint(with: [.command, .option, .control]) else { return }
         let candidate = HotkeyCombination(keyCode: UInt32(event.keyCode), modifiers: modifiers)
         isRecording = false
         displayedCombination = candidate
@@ -80,9 +83,11 @@ final class HotkeyRecorderButton: NSButton {
     }
 
     @objc private func startRecording() {
+        // A declined first-responder change (e.g. another view refuses to resign) must not leave the
+        // button stuck showing "Press shortcut…" with no way to actually capture a key press.
+        guard window?.makeFirstResponder(self) == true else { return }
         isRecording = true
         title = "Press shortcut…"
-        window?.makeFirstResponder(self)
     }
 
     private func cancelRecording() {

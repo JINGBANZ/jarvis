@@ -46,17 +46,25 @@ final class HotkeyController {
     // the OS reclaims the registration on process exit. The refs are retained so the hot key and its
     // handler stay alive for the app's lifetime.
 
-    /// Register `combination` in place of whatever is currently active. On failure (most commonly
-    /// `eventHotKeyExistsErr` — another app already owns it) the previous, still-working combination
-    /// is re-registered so the hotkey never goes silently dead; the caller decides whether to persist
-    /// `combination` based on the returned outcome.
+    /// Register `combination` in place of whatever is currently active. Registers the *new* Carbon key
+    /// first and only releases the previous one once that succeeds, so a rejected candidate — even one
+    /// that collides with another app — leaves the previous, still-working registration exactly as it
+    /// was, rather than passing through a state with nothing registered at all (the failure mode this
+    /// unregister-then-register-then-restore dance used to be able to manufacture on a double failure).
+    /// The caller decides whether to persist `combination` based on the returned outcome.
     @discardableResult
     func apply(_ combination: HotkeyCombination) -> HotkeyRegistrationOutcome {
-        let previous = registered
-        unregister()
+        let previousRef = hotKeyRef
         let outcome = register(combination)
-        if case .failed = outcome, let previous {
-            _ = register(previous)
+        if case .registered = outcome, let previousRef {
+            let status = UnregisterEventHotKey(previousRef)
+            // Releasing a ref that was just live practically never fails, but if it does, don't
+            // pretend otherwise — the old binding may still be registered at the OS level alongside
+            // the new one.
+            if status != noErr {
+                jlog("Jarvis: hint hotkey failed to release the previous binding after rebinding "
+                     + "(status \(status)).")
+            }
         }
         lastOutcome = outcome
         return outcome
@@ -80,7 +88,6 @@ final class HotkeyController {
         if status != noErr { jlog("Jarvis: hint-hotkey handler install failed (status \(status)).") }
     }
 
-    @discardableResult
     private func register(_ combination: HotkeyCombination) -> HotkeyRegistrationOutcome {
         let id = EventHotKeyID(signature: Self.signature, id: 1)
         var ref: EventHotKeyRef?
@@ -98,11 +105,5 @@ final class HotkeyController {
         hotKeyRef = ref
         registered = combination
         return .registered
-    }
-
-    private func unregister() {
-        if let hotKeyRef { UnregisterEventHotKey(hotKeyRef) }
-        hotKeyRef = nil
-        registered = nil
     }
 }
