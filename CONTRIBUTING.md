@@ -26,9 +26,13 @@ validation performed.
 `test` check — the same gate as above, run on macOS by CI. Pushing new commits dismisses an existing
 approval, so expect to ask for another look after addressing review feedback.
 
-Contributions arrive as pull requests from a fork; nobody needs write access to this repository. An
-automated Claude review comments on every pull request, forks included — it reviews, it never
+You do not need write access to contribute: a pull request from your own fork gets the same CI and
+the same review. CodeRabbit comments on every pull request, forks included — it reviews, it never
 approves, and a maintainer still reads the change.
+
+The first workflow run on a fork pull request waits for a maintainer to approve it, so CI can sit
+idle for a while before it starts. That is a repository setting, not something wrong with your
+branch, and it stops applying once your first run has been approved.
 
 ## Security and privacy
 

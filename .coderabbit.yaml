@@ -1,0 +1,69 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+# Reference: https://docs.coderabbit.ai/reference/configuration
+#
+# CodeRabbit reviews every pull request, including those from forks. It is a GitHub App rather than
+# a workflow, so it never needs repository secrets on a fork pull request and is not subject to the
+# fork-workflow approval gate — which is why review feedback arrives while CI is still waiting for a
+# maintainer to approve the run.
+#
+# `@coderabbitai configuration` in a pull request comment prints the effective config with defaults.
+language: "en-US"
+
+# Max 250 characters. The repository's own review posture, condensed: AGENTS.md asks reviewers to
+# act on contract, security, and privacy violations and to leave scope expansion alone.
+tone_instructions: >-
+  Jarvis has strict audio, screen, credential, and ghost-mode boundaries — flag violations of them
+  plainly. Do not propose speculative abstractions, extra lifecycle state, retries, or timers the
+  change did not ask for.
+
+reviews:
+  # `chill` over `assertive` on purpose: AGENTS.md says not to optimize for zero comments, and an
+  # assertive reviewer buries the contract violations that matter under nitpicks.
+  profile: chill
+
+  auto_review:
+    enabled: true
+    # A draft is work in progress; reviewing every push to one wastes the contributor's attention.
+    drafts: false
+    # release-please's standing Release PR carries only generated version bumps — nothing an author
+    # wrote and nothing a review can improve. Mirrors the same exclusion in claude-code-review.yml.
+    ignore_title_keywords:
+      - "chore(main): release"
+
+  # Generated or vendored files. Reviewing them produces noise and no signal.
+  path_filters:
+    - "!.build/**"
+    - "!Package.resolved"
+    - "!CHANGELOG.md"
+    - "!.release-please-manifest.json"
+
+  # The architectural boundaries from AGENTS.md that a reviewer unfamiliar with the repo would miss.
+  path_instructions:
+    - path: "Sources/JarvisCore/**"
+      instructions: >-
+        Foundation-only by contract. Flag AppKit, Process, FileManager, or URLSession reaching the
+        coaching kernel — that logic belongs in JarvisApp, JarvisOverlay, JarvisScreenCapture, or
+        JarvisBrainProviders. Route and scheduling policy must stay pure state machines; the app
+        supplies clients, timers, and speech-activity events.
+    - path: "Sources/{JarvisApp,JarvisOverlay}/**"
+      instructions: >-
+        Ghost mode: during the live pipeline and teardown no autonomous path may activate Jarvis,
+        present UI beyond the two nonactivating capture-excluded overlay panels, open apps or URLs,
+        request attention, notify, or play sound. Every presentation API call needs an inline
+        `ghost-mode-allowed` reason. Screen- and audio-derived data persists only in owner-only
+        files under the workspace-local `.jarvis/` session directory, never `/tmp`, and raw
+        microphone audio and the live transcript are never archived.
+    - path: "**/*.swift"
+      instructions: >-
+        Swift 6 strict concurrency. Flag `@unchecked` or `nonisolated(unsafe)` used without a
+        written reason. One primary type per file; focused extensions are named `Type+Purpose.swift`.
+    - path: "Tests/**"
+      instructions: >-
+        swift-testing, not XCTest. A test must never be weakened, skipped, or deleted to make a
+        change pass. Tests adapt to the code — do not ask for production seams added solely to make
+        something testable.
+    - path: ".github/workflows/**"
+      instructions: >-
+        Flag anything that exposes secrets to untrusted input: `pull_request_target` combined with a
+        checkout of the pull request head, unpinned third-party actions, or `contents: write` where
+        read would do. Third-party actions are SHA-pinned and Dependabot-managed.
