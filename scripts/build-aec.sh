@@ -28,7 +28,7 @@ OUT_LIB="$REPO_ROOT/Sources/CJarvisAEC/lib/libjarvis-aec.a"
 WORK="${AEC_WORK:-/tmp/jarvis-aec-build}"
 mkdir -p "$WORK" "$(dirname "$OUT_LIB")"
 
-# 1. webrtc-audio-processing STATIC (AEC3 + classic VAD) with its bundled, version-matched abseil.
+# 1. webrtc-audio-processing STATIC (AEC3) with its bundled, version-matched abseil.
 #    Build only the lib target; the bundled run-offline demo fails to link — ignore it.
 if [ ! -d "$WORK/wap" ]; then
   git clone --depth 1 --branch "$WEBRTC_TAG" \
@@ -64,9 +64,10 @@ cp "$WORK/wap/COPYING" "$WORK/wap/AUTHORS" "$TP/webrtc-audio-processing/" 2>/dev
 cp "$ABSL_INC/LICENSE" "$ABSL_INC/AUTHORS" "$TP/abseil-cpp/" 2>/dev/null || true
 
 # 4. Verify the AEC facade symbol is DEFINED and nothing targets a newer macOS than 14.
-#    Upstream's classic VAD is still inside this archive; Jarvis no longer calls it (local turn
-#    detection runs on Silero, see scripts/build-vad.sh), so it is left unreferenced rather than
-#    surgically stripped, and nothing asserts on its symbols.
+#    Jarvis no longer calls WebRTC's classic VAD directly (local turn detection runs on Silero, see
+#    scripts/build-vad.sh), so nothing asserts on its symbols. They stay in the archive and the linked
+#    binary either way: upstream's own audio-processing objects (vad_vad.cc.o, vad_standalone_vad.cc.o)
+#    depend on it, so it is not strippable without patching upstream.
 if ! nm "$OUT_LIB" 2>/dev/null | grep -q 'T _jarvis_aec_create'; then
   echo "FAIL: jarvis_aec_create not defined in $OUT_LIB" >&2; exit 1
 fi

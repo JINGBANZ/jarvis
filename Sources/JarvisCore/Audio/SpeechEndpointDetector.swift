@@ -96,7 +96,10 @@ public struct SpeechEndpointDetector: Sendable {
         return .started(at: startedAt)
     }
 
-    public mutating func reset() {
+    /// Internal only. Callers that need to drop stream continuity after an audio-timeline break do
+    /// so at the detector layer; clearing the endpoint policy would strand a turn the transcriber
+    /// downstream has already opened.
+    private mutating func reset() {
         candidateStartedAt = nil
         candidateSpeechFrames = 0
         activeStartedAt = nil
