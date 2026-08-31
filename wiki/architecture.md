@@ -218,8 +218,7 @@ after a refusal.
 
 The reason it happens at launch rather than at Start is the coaching context. A TCC dialog is system
 UI that no capture-exclusion trick can hide, so one arriving mid-interview is visible to whoever the
-user is sharing a screen with. Core Audio's system-audio prompt used to wait for the first Start,
-which is precisely that moment.
+user is sharing a screen with.
 
 **Screen Recording is invisible to the process that asks.** `CGRequestScreenCaptureAccess` returns
 false whether the user allowed or refused, and preflight keeps returning what the process started

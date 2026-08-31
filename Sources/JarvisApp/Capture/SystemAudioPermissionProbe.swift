@@ -110,7 +110,15 @@ enum SystemAudioPermissionProbe {
         // thread while the IOProc writes it. Waiting the whole window and reading once after
         // `AudioDeviceStop` costs a fixed second and needs no synchronization on the audio thread.
         Thread.sleep(forTimeInterval: Self.deadline)
+        // `AVAudioEngine` stops itself on a configuration change, so a device arriving mid-probe
+        // (AirPods connecting, say) silences the tone. Read this before the stop, which would set it
+        // false anyway. No tone means a probe that could not run, not a grant that was refused.
+        let tonePlayedThroughout = engine.isRunning
         AudioDeviceStop(aggregate, proc)
+        guard tonePlayedThroughout else {
+            jlog("Jarvis: system-audio probe — the audio engine stopped before the tone finished")
+            return nil
+        }
 
         let granted = heard.pointee
         jlog("Jarvis: system-audio permission \(granted ? "granted" : "denied — the tone played but came back as digital silence")")
