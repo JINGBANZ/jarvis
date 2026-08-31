@@ -64,8 +64,10 @@ that checkout-local bundle to the Trash so it cannot be launched accidentally; l
 - All three grants come from **TCC prompts at launch**, not an App-Sandbox entitlement file.
   `PermissionGate` walks Microphone, System Audio Recording, and Screen Recording one dialog at a
   time and keeps Jarvis closed until it holds all three. Reset one with
-  `tccutil reset AudioCapture com.jarvis.coach.dev` (or `Microphone` / `ScreenCapture`) to see the
-  gate again. See [architecture.md](./architecture.md#permissions).
+  `tccutil reset AudioCapture com.jarvis.coach.dev` (or `Microphone` / `ScreenCapture`), and clear
+  what Jarvis remembers with `defaults delete com.jarvis.coach.dev permissions.systemAudioGranted`
+  and `permissions.screenRecordingAsked`, to see the gate again. Resetting TCC alone leaves those
+  two out of step with the system, which is the state their comments describe. See [architecture.md](./architecture.md#permissions).
 
 ## Distribution — signed, notarized releases from CI
 

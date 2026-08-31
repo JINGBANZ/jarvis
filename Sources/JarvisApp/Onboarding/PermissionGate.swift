@@ -43,11 +43,20 @@ final class PermissionGate: NSObject, NSWindowDelegate {
     /// conversation. Only a remembered grant is re-proved; a remembered refusal is left alone,
     /// because probing it here would raise a prompt with no window on screen to explain it.
     func holdsEveryGrant() async -> Bool {
-        if preferences.systemAudioGranted {
-            _ = await Permissions.request(.systemAudio, remembering: preferences)
+        var granted = Permissions.grantedReadinessPermissions(remembering: preferences)
+        // Re-prove only when the remembered grant is the last thing between the user and a running
+        // Jarvis. If anything else is missing the gate is opening regardless, and the walk can
+        // probe with the window on screen to explain the prompt. That matters because the ways a
+        // remembered grant goes stale — a new signature, a reinstall, an OS upgrade — usually clear
+        // the other services too, and probing into an empty TCC record with no window invites a
+        // "Don't Allow" that turns an undecided grant into a lasting refusal.
+        guard granted.isSuperset(of: Self.required.subtracting([.systemAudio])),
+              preferences.systemAudioGranted else {
+            return granted.isSuperset(of: Self.required)
         }
-        return Permissions.grantedReadinessPermissions(remembering: preferences)
-            .isSuperset(of: Self.required)
+        _ = await Permissions.request(.systemAudio, remembering: preferences)
+        granted = Permissions.grantedReadinessPermissions(remembering: preferences)
+        return granted.isSuperset(of: Self.required)
     }
 
     /// Puts the gate on screen. The caller checks `isOpen` first; there is no menu bar, overlay, or
