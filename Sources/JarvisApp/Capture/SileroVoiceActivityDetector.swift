@@ -101,8 +101,14 @@ final class SileroVoiceActivityDetector {
             let chunk = pending[consumed..<(consumed + Self.chunkSamples)]
             let offset = consumed - carried
             consumed += Self.chunkSamples
-            guard let probability = predict(chunk: chunk) else { break }
-            frames.append(Frame(probability: probability, startOffsetSamples: offset))
+            // Score a failed prediction as silence rather than dropping the frame. Dropping it stalls
+            // the endpoint policy instead of feeding it: an already-open turn would stop accruing
+            // silence and never emit `.ended`, so `localSpeechActive` would stay set and every
+            // automatic coaching attempt would park on a turn that can no longer settle. Silence ends
+            // the open turn normally and opens no new one, so a persistent failure degrades to "no
+            // further turns" instead of a silent hang. `predict` logs the cause once.
+            frames.append(Frame(
+                probability: predict(chunk: chunk) ?? 0, startOffsetSamples: offset))
         }
         if consumed > 0 { pending.removeFirst(consumed) }
         return frames

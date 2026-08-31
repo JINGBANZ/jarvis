@@ -164,6 +164,26 @@ import Testing
         #expect(detectedAt > 180)
     }
 
+    /// A detector that starts failing must still close an open turn. If failed frames stopped
+    /// reaching the policy, `localSpeechActive` would stay set and every automatic coaching attempt
+    /// would park on a turn that can never settle. Scoring failures as silence keeps that bounded.
+    @Test func closesAnOpenTurnWhenScoringDegradesToSilence() {
+        var detector = SpeechEndpointDetector(
+            frameDuration: Self.frame, trailingSilenceDuration: 0.8)
+        var events: [SpeechEndpointDetector.Event] = []
+        var at = feed(&detector, probability: 0.9, seconds: 2, from: 0, into: &events)
+        #expect(events.count == 1)
+
+        // Every later frame scores 0, the value a failed prediction contributes.
+        at = feed(&detector, probability: 0, seconds: 5, from: at, into: &events)
+        _ = at
+        #expect(events.count == 2)
+        guard case .ended = events[1] else {
+            Issue.record("expected the open turn to close once scoring degraded")
+            return
+        }
+    }
+
     /// A model that returns NaN must read as silence rather than latch a turn open forever.
     @Test func treatsNonFiniteProbabilityAsSilence() {
         var detector = SpeechEndpointDetector(
