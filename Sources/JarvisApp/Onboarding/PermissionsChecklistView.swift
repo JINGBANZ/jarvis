@@ -247,7 +247,11 @@ final class PermissionsChecklistView: NSView {
     /// Whether macOS has already given its final answer for this permission, so asking again would
     /// be a silent no-op and the only way forward is System Settings.
     private func isBeyondAsking(_ permission: JarvisReadiness.Permission) -> Bool {
-        permission == .screenRecording ? screenAskedInEarlierLaunch : hasWalked
+        // Screen Recording gets one attempt per launch before it counts as beyond asking. The
+        // remembered flag survives `tccutil reset`, which clears the grant back to undetermined, and
+        // skipping the request there would leave Jarvis absent from the Settings pane with no
+        // prompt to put it back.
+        permission == .screenRecording ? (screenAskedInEarlierLaunch && hasWalked) : hasWalked
     }
 
     private func render() {

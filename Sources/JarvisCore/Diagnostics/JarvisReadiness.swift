@@ -124,7 +124,7 @@ public final class JarvisReadiness {
         public let requiresSystemAudio: Bool
 
         public init(
-            requiredPermissions: Set<Permission> = [.microphone, .screenRecording],
+            requiredPermissions: Set<Permission> = [.microphone, .systemAudio, .screenRecording],
             requiredCredentials: Set<Credential> = [],
             requiresBrainPreparation: Bool = true,
             requiresTranscriptionPreparation: Bool = false,

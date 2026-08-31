@@ -99,6 +99,11 @@ enum SystemAudioPermissionProbe {
             jlog("Jarvis: system-audio probe — device start failed")
             return nil
         }
+        // Not dead code: any return below leaves the device running, and the cleanup that follows
+        // destroys the IOProc and frees `heard` while callbacks could still be writing through it.
+        // The explicit stop before the read is the one that orders the read; this one covers exits.
+        defer { AudioDeviceStop(aggregate, proc) }
+
         guard let engine = playProbeTone() else { return nil }
         defer { engine.stop() }
         // Deliberately not polling `heard` while the tone plays: that would read the flag on this
