@@ -6,7 +6,7 @@
 
 ## Entry Point
 
-One menu item — **"Settings…"** — calls `SettingsWindow.show()`. The lightweight window and tab shell
+One menu item — **"Settings"** — calls `SettingsWindow.show()`. The lightweight window and tab shell
 are retained between opens. Section views are built only when selected and released on close, so
 controls still start fresh without constructing hidden tabs before the window can appear.
 
@@ -116,7 +116,7 @@ so the drag floor and the clamp floor cannot drift apart.
 `OverlaySection` applies changes live through two protocols, with no direct dependency on the AppKit
 panels: `OverlayCaptionApplying`, conformed by `OverlayCaptionPanel`, and `OverlayBoxApplying`,
 conformed by `OverlayBoxPanel`. Both are declared in
-[`OverlayAppearance.swift`](../Sources/JarvisCore/Overlay/OverlayAppearance.swift). All values
+[`OverlayAppearance.swift`](../Sources/JarvisCore/Config/OverlayAppearance.swift). All values
 round-trip through `OverlayAppearance` so they survive an app relaunch.
 
 `setEnabled(false)` on the caption suppresses coaching tips (dropping any in-flight/queued tip); on

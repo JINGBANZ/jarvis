@@ -14,6 +14,7 @@ enum TranscriptionSessionFactory {
         sessionStart: TimeInterval,
         config: Config,
         networkStatus: @escaping @Sendable () -> String,
+        activity: (any ActivityEventRecording)? = nil,
         benchmark: TranscriptionBenchmarkInstrumentation? = nil
     ) -> any TranscriptionSession {
         switch configuration.provider {
@@ -39,6 +40,7 @@ enum TranscriptionSessionFactory {
                 pingInterval: config.realtimePingIntervalSeconds,
                 pongTimeout: config.realtimePongTimeoutSeconds,
                 networkStatus: networkStatus,
+                activity: activity,
                 benchmark: benchmark)
         case .appleSpeech:
             // Reaching here means preparation already succeeded, which only happens on the macOS 26
@@ -59,6 +61,7 @@ enum TranscriptionSessionFactory {
                         : .infinity,
                     transcriptBatchingWindow: config.transcriptBatchingWindowSeconds,
                     maxBufferedAudioSeconds: config.maxBufferedAudioSeconds,
+                    activity: activity,
                     benchmark: benchmark)
             } else {
                 preconditionFailure("Apple Speech must be prepared before constructing its session")

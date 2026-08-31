@@ -1,5 +1,6 @@
 import Foundation
 import JarvisCore
+import JarvisBrainProviders
 
 /// Pure-Swift accounting of a session's provider traffic. It gives the evaluator normalized per-call
 /// and aggregate latency, token, cache, and cost telemetry without deciding whether any value is good

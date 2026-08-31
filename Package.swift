@@ -29,18 +29,22 @@ let package = Package(
     ],
     targets: [
         .target(name: "JarvisCore"),
-        // Concrete brain-provider adapters, seeded with the OpenAI Responses client and its
-        // HTTP failure classification. Extracted per wiki/lean-coaching-core.md Phase 4 (OpenAI
-        // slice): Core keeps the provider-neutral BrainClient port, targets, failures, model
-        // catalog, workload timeouts, and attempt contracts; the URLSession transport lives here
-        // and JarvisApp composes providers at Start. Foundation-only; depends inward on JarvisCore.
-        // The local-agent CLI subtree joins in its own slice (#206).
+        // Concrete brain-provider adapters: the OpenAI Responses client with its HTTP failure
+        // classification, and the local-agent CLI subtree (Claude Code, Codex exec, and the Codex
+        // app server) with its detector, process runner, and runtime lifetime. Extracted per
+        // wiki/lean-coaching-core.md Phase 4: Core keeps the provider-neutral BrainClient port,
+        // targets, failures, model catalog, workload timeouts, and attempt contracts and describes
+        // brains without running one; JarvisApp composes providers at Start. Foundation-only;
+        // depends inward on JarvisCore.
         .target(name: "JarvisBrainProviders", dependencies: ["JarvisCore"]),
         // The sealed-session evaluation stack (evidence index, metrics, transcript rendering, the
         // agentic evaluator, report page). Extracted per wiki/lean-coaching-core.md Phase 3: two
         // executable consumers (JarvisApp's Evaluate flow and EvalPrep) plus a compiler-enforced
         // "never reads live coaching state" boundary. Foundation-only; depends inward on JarvisCore.
-        .target(name: "JarvisEvaluation", dependencies: ["JarvisCore"]),
+        // JarvisBrainProviders is a dependency because the agentic evaluator runs a local agent
+        // CLI: it reuses the same detector, invocation shape, and process runner the local-agent
+        // brain adapters use, rather than keeping a second copy of that plumbing.
+        .target(name: "JarvisEvaluation", dependencies: ["JarvisCore", "JarvisBrainProviders"]),
         // The AppKit overlay lives in its own library target (not the executable) so it can be
         // imported by tests — see Tests/JarvisOverlayTests for the screen-capture invisibility checks.
         .target(name: "JarvisOverlay", dependencies: ["JarvisCore"]),
@@ -89,9 +93,11 @@ let package = Package(
         ),
         .testTarget(
             name: "JarvisCoreTests",
-            // JarvisBrainProviders is linked solely so the coaching parity harness composes the
-            // kernel with the real OpenAI adapter over scripted transports — the same composition
-            // JarvisApp performs at Start. Core's own units keep testing against fakes.
+            // JarvisBrainProviders is linked for two narrow reasons: the coaching parity harness
+            // composes the kernel with the real OpenAI adapter over scripted transports — the same
+            // composition JarvisApp performs at Start — and the provider-neutral BrainFailure tests
+            // classify a real local-agent CLI error domain rather than a made-up string. Core's own
+            // units keep testing against fakes.
             dependencies: ["JarvisCore", "JarvisBrainProviders"]
         ),
         .testTarget(
@@ -100,7 +106,7 @@ let package = Package(
         ),
         .testTarget(
             name: "JarvisEvaluationTests",
-            dependencies: ["JarvisEvaluation", "JarvisCore"]
+            dependencies: ["JarvisEvaluation", "JarvisCore", "JarvisBrainProviders"]
         ),
         .testTarget(
             name: "JarvisOverlayTests",

@@ -7,7 +7,10 @@ import Foundation
 /// cleanup-verification latch live at the macOS edge (`JarvisScreenCapture`'s `ScreenCaptureRunner`
 /// / `ScreenCaptureCLI`, composed by `WindowScopedScreenCapture` in JarvisApp).
 public protocol ScreenCapturing: Sendable {
-    func capture() -> ScreenSnapshot?
+    /// `selection` is the attempt's frozen screen selection, handed down from its `SessionPlan`
+    /// revision. The adapter is given what to shoot rather than reading a preference store, so a
+    /// capture can never depend on disk latency or on a value that changed mid-attempt.
+    func capture(_ selection: ScreenCaptureSelection) -> ScreenSnapshot?
     /// Stop an in-flight capture and make `capture()` return only after its helper and transient
     /// file have been cleaned up.
     func cancelCapture()

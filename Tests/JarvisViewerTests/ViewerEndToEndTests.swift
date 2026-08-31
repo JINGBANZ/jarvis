@@ -147,4 +147,56 @@ import WebKit
         let after = try await h.eval("document.querySelectorAll('#log .row').length") as? Int
         #expect(after == 0)                                     // session-switch path reuses the page
     }
+
+    /// A session that lost evidence must not present an apparently complete story.
+    @MainActor @Test func incompleteEvidenceShowsTheFixedNotice() async throws {
+        let h = WebViewHarness()
+        try await h.load(ActivityLog.htmlShell())
+        try await h.eval(ActivityLog.rowScript(time: "10:00", message: "💬 tip", imageBase64: nil))
+        try await h.eval(ActivityLog.evidenceScript(isComplete: false))
+
+        let text = try await h.eval(
+            "document.getElementById('evidence').textContent") as? String
+        let detail = try await h.eval("document.getElementById('evidence').title") as? String
+        #expect(text == ActivityLog.incompleteEvidenceNotice)
+        #expect(detail == ActivityLog.incompleteEvidenceDetail)
+        // The notice is a property of the record, not an Activity row.
+        let rows = try await h.eval("document.querySelectorAll('#log .row').length") as? Int
+        #expect(rows == 1)
+
+        // Fixed and human-safe: it names no provider, error, timing, retry, or lifecycle detail.
+        let notice = ActivityLog.incompleteEvidenceNotice + " " + ActivityLog.incompleteEvidenceDetail
+        for forbidden in [
+            "error", "failed", "retry", "timeout", "queue", "overflow", "write", "worker",
+            "partial", "http", "ms",
+        ] {
+            #expect(!notice.lowercased().contains(forbidden), "notice leaked \(forbidden)")
+        }
+    }
+
+    /// A complete session shows nothing at all — an empty badge collapses out of the header.
+    @MainActor @Test func completeEvidenceShowsNoNotice() async throws {
+        let h = WebViewHarness()
+        try await h.load(ActivityLog.htmlShell())
+        try await h.eval(ActivityLog.evidenceScript(isComplete: true))
+
+        let text = try await h.eval(
+            "document.getElementById('evidence').textContent") as? String
+        #expect(text == "")
+        let display = try await h.eval(
+            "getComputedStyle(document.getElementById('evidence')).display") as? String
+        #expect(display == "none")
+    }
+
+    /// The notice clears when the viewer switches from an incomplete session to a complete one, so
+    /// a stale badge cannot follow the reader into another session's history.
+    @MainActor @Test func switchingToACompleteSessionClearsTheNotice() async throws {
+        let h = WebViewHarness()
+        try await h.load(ActivityLog.htmlShell())
+        try await h.eval(ActivityLog.evidenceScript(isComplete: false))
+        try await h.eval(ActivityLog.evidenceScript(isComplete: true))
+        let text = try await h.eval(
+            "document.getElementById('evidence').textContent") as? String
+        #expect(text == "")
+    }
 }

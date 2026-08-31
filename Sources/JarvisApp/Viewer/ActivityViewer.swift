@@ -2,6 +2,7 @@ import AppKit
 import WebKit
 import JarvisCore
 import JarvisEvaluation
+import JarvisBrainProviders
 
 /// The activity viewer view: an in-app `WKWebView` that live-appends log rows pushed from
 /// `ActivityLog` (no reload), shows screenshots in an in-page lightbox, and lets you browse and clear
@@ -31,6 +32,7 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
     private var copySessionIDButton: NSButton?
     private var evaluateButton: NSButton?
     private var clearHistoryButton: NSButton?
+    private var exportButton: NSButton?
     /// Survives a Settings close/reopen because the viewer itself lives for the whole app run.
     private var isEvaluating = false
     /// Retained so Quit can cancel the direct CLI child instead of leaving an orphaned paid run.
@@ -41,6 +43,9 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
     private var pending: [String] = []     // rows that arrived before didFinish (main-thread-confined)
     private var snapshotRows: [String] = [] // rows to inject once the shell has loaded
     private var pendingMeta = ""           // header text to set after the shell loads
+    /// Completeness of the session currently on screen. False only when its health record says
+    /// evidence was dropped, failed, or never finished closing.
+    private var evidenceIsComplete = true
     private var viewingCurrent = true
     /// Current UI state only. It is injected into the in-memory page and never written to Activity.
     private var readinessStatus: JarvisReadiness.Status = .stopped
@@ -102,6 +107,13 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         header.addSubview(clear)
         self.clearHistoryButton = clear
 
+        let export = NSButton(title: "Export…", target: self, action: #selector(exportTapped))
+        export.translatesAutoresizingMaskIntoConstraints = false
+        export.bezelStyle = .rounded
+        export.toolTip = "Export one or more sessions' history to a file"
+        header.addSubview(export)
+        self.exportButton = export
+
         let preferredPickerWidth = pop.widthAnchor.constraint(equalToConstant: 230)
         // Prefer the full picker width, but let window resizing compress it.
         preferredPickerWidth.priority = .init(rawValue: 490)
@@ -119,7 +131,10 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
             evaluate.trailingAnchor.constraint(equalTo: clear.leadingAnchor, constant: -8),
             clear.centerYAnchor.constraint(equalTo: header.centerYAnchor),
             clear.widthAnchor.constraint(equalToConstant: 110),
-            clear.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -12),
+            clear.trailingAnchor.constraint(equalTo: export.leadingAnchor, constant: -8),
+            export.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            export.widthAnchor.constraint(equalToConstant: 90),
+            export.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -12),
         ])
 
         let wv = WKWebView(frame: NSRect(x: 0, y: 0,
@@ -145,6 +160,7 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         copySessionIDButton = nil
         evaluateButton = nil
         clearHistoryButton = nil
+        exportButton = nil
         loaded = false
         pending = []
         snapshotRows = []
@@ -159,6 +175,16 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         guard webView != nil else { return }
         populatePicker()
         loadCurrent()
+    }
+
+    /// The set of past sessions on disk changed underneath the viewer — retention pruning ran.
+    /// Refresh the picker only: the row content on screen is unaffected, so there is nothing to
+    /// reload. No-op when not embedded, and no-op while a past session is on screen —
+    /// `populatePicker` re-selects the current session, which would leave the picker, Copy Session
+    /// ID, and Evaluate pointing at a session the WebView is not showing.
+    func historyDidChange() {
+        guard webView != nil, viewingCurrent else { return }
+        populatePicker()
     }
 
     // MARK: - Session list
@@ -268,12 +294,16 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         let snap = log.attach { [weak self] js in
             DispatchQueue.main.async { self?.onAppend(js) }
         }
+        evidenceIsComplete = snap.evidenceIsComplete
         beginLoad(shell: snap.shellHTML, rows: snap.rows, shown: snap.shown, total: snap.total)
     }
 
     private func loadPast(_ session: SessionStore.Session) {
         viewingCurrent = false
         log.detach()   // a past session is static; stop receiving live rows
+        // Unknown completeness (a session older than the health record) shows no notice: it is
+        // not the same claim as "this record has holes".
+        evidenceIsComplete = session.evidenceIsComplete ?? true
         let snapshot = store.entrySnapshot(
             for: session,
             retainingMostRecentInsertions: ActivityLog.retainedEntryLimit)
@@ -321,6 +351,8 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         snapshotRows = []
         pending = []
         webView.evaluateJavaScript("setMeta(\(jsString(pendingMeta)));", completionHandler: nil)
+        webView.evaluateJavaScript(
+            ActivityLog.evidenceScript(isComplete: evidenceIsComplete), completionHandler: nil)
         refreshReadinessBadge()
     }
 
@@ -424,6 +456,16 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         alert.messageText = title
         alert.informativeText = message
         alert.runModal() // ghost-mode-allowed: guarded explicit Activity action
+    }
+
+    // MARK: - Export
+
+    @objc private func exportTapped() {
+        guard isCoachingRunning?() != true else {
+            jlog("Jarvis: suppressed Activity export presentation while coaching is running.")
+            return
+        }
+        ActivityExportSheet.present(sessions: sessions, store: store)
     }
 
     // MARK: - Clear history

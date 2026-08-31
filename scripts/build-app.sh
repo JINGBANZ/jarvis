@@ -91,6 +91,10 @@ cp Resources/Jarvis.icns "$APP/Contents/Resources/Jarvis.icns"
 # the Developer ID release over it anyway. Removing the feed leaves the app with no updater at all,
 # and the menu omits "Check for Updates" rather than offering an action that must fail.
 /usr/bin/plutil -remove SUFeedURL "$APP/Contents/Info.plist"
+# The copied plist carries the version of whichever release this checkout descends from, which would
+# misname a local build in the menu's footer caption. Marking the bundle makes that caption read a red
+# "Dev" instead, so it is obvious at a glance which variant is running.
+/usr/bin/plutil -replace JarvisDevelopmentBuild -bool YES "$APP/Contents/Info.plist"
 
 echo "▶ signing with '$IDENTITY'"
 codesign --force --deep --sign "$IDENTITY" "$APP"

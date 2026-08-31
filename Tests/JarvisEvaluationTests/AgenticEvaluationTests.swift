@@ -188,6 +188,11 @@ import JarvisCore
                        response: Data(#"{"status":"completed","output":[]}"#.utf8),
                        status: 200, latencyMs: 300)
         _ = await traffic.closeForTesting()
+        // Opening a session now creates the empty owner-only Activity file alongside the other
+        // evidence files, so the missing-Activity condition has to be made explicitly: a session
+        // directory whose human record was deleted, or never written, cannot be evaluated.
+        try FileManager.default.removeItem(
+            at: dir.appendingPathComponent(ActivityLog.filename))
 
         #expect(throws: AgenticEvaluation.EvaluationError.missingActivityLog) {
             try AgenticEvaluation.prepare(sessionDir: dir)

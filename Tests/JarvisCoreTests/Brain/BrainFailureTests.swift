@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import JarvisCore
+import JarvisBrainProviders
 
 /// The provider-neutral classification contract: everything a provider adapter has not proven
 /// anything about wraps as a recoverable `.temporary` missed turn. Each adapter's own permanence

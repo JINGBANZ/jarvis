@@ -1,10 +1,15 @@
 import Foundation
 
-/// File-backed session audit with bounded admission and one-way close semantics.
-public final class FileSessionAudit: BrainTrafficAuditing, CoachingAttemptAuditing, Sendable {
+/// The per-session evidence handle: bounded admission, one-way close semantics, and one health
+/// record covering every category the session records.
+public final class FileSessionAudit:
+    BrainTrafficAuditing, CoachingAttemptAuditing, ActivityEventRecording, Sendable {
     public static let brainTrafficFilename = "brain-traffic.jsonl"
     public static let coachingAttemptsFilename = "coaching-attempts.jsonl"
     public static let healthFilename = "audit-health.json"
+    /// The agent-facing debug log. Its name and content are the pre-migration contract; only the
+    /// thread that writes it changed.
+    public static let diagnosticFilename = "jarvis-debug.log"
     public static let formatVersion = 1
 
     /// `@unchecked Sendable`: the lock protects the result and every continuation. The state moves
@@ -52,14 +57,21 @@ public final class FileSessionAudit: BrainTrafficAuditing, CoachingAttemptAuditi
     private let session: SessionAuditWorker.Session
     private let closeSettlement = CloseSettlement()
 
-    public convenience init(directory: URL) {
-        self.init(directory: directory, worker: .shared)
+    /// `activity` is the terminal human-facing projection this session's Activity occurrences are
+    /// rendered into, on the worker rather than on the producer's thread. Absent means the session
+    /// records everything except a human-facing window.
+    public convenience init(directory: URL, activity: ActivityLog? = nil) {
+        self.init(directory: directory, worker: .shared, activity: activity)
     }
 
-    init(directory: URL, worker: SessionAuditWorker) {
+    init(directory: URL, worker: SessionAuditWorker, activity: ActivityLog? = nil) {
         self.worker = worker
-        self.session = worker.openSession(at: directory)
+        self.session = worker.openSession(at: directory, activity: activity)
     }
+
+    /// This handle's session identity. The Activity projection is scoped by it, so a stopped
+    /// session's late rows and its close cannot reach a replacement session's window.
+    public var sessionID: UUID { session.id }
 
     public func record(_ event: BrainTrafficAuditEvent) {
         record(.brainTraffic(event))
@@ -69,19 +81,24 @@ public final class FileSessionAudit: BrainTrafficAuditing, CoachingAttemptAuditi
         record(.coachingAttempt(event))
     }
 
+    public func record(_ event: ActivityEvent, at date: Date) {
+        record(.activity(ActivityAuditEvent(presentation: event, date: date)))
+    }
+
+    /// Admit one agent-facing diagnostic against this session. Returns false when the mailbox
+    /// refused it — a sealed handle or a full mailbox — so `JarvisLog` can fall back to the
+    /// unattributed process log instead of dropping the line outright.
+    func recordDiagnostic(_ event: DiagnosticAuditEvent) -> Bool {
+        record(.diagnostic(event))
+    }
+
     /// The one envelope admission every typed producer view converges on. The handle stamps
     /// session attribution itself, so an event can only ever claim the session it was recorded
-    /// through. Internal until a later slice migrates producers onto the envelope directly; the
-    /// Activity presentation stays unused until Phase 2 moves Activity onto `SessionEvent`.
-    func record(
-        _ detail: SessionEvent.Detail,
-        presentingInActivity presentation: ActivityLog.Event? = nil
-    ) {
+    /// through.
+    @discardableResult
+    func record(_ detail: SessionEvent.Detail) -> Bool {
         worker.record(
-            SessionEvent(
-                sessionID: session.id,
-                detail: detail,
-                activityPresentation: presentation),
+            SessionEvent(sessionID: session.id, detail: detail),
             for: session)
     }
 

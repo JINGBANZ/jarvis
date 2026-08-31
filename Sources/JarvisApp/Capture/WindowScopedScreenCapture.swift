@@ -5,7 +5,7 @@ import JarvisScreenCapture
 
 /// Captures just the frontmost app window (`screencapture -l`) when the capture scope is
 /// `.activeWindow`, with an on-device OCR of the shot riding along as `recognizedText`. Falls back
-/// to a full-display capture (`ScreenCaptureCLI` — the Settings-chosen display in `.entireDisplay`
+/// to a full-display capture (`ScreenCaptureCLI` — the plan's chosen display in `.entireDisplay`
 /// scope, the main display otherwise) when no eligible window is on screen or the window capture
 /// command fails. A cleanup-integrity failure returns without fallback. Full-display captures skip
 /// OCR deliberately (a whole display's text would feed the clutter back as tokens).
@@ -17,20 +17,18 @@ import JarvisScreenCapture
 /// and the extra CLI flag. `-l` reads the window's own backing image, so the shot is clean even
 /// when the window is partially covered; `-o` omits the window shadow.
 struct WindowScopedScreenCapture: ScreenCapturing {
-    private let preferences: ScreenCapturePreferences
     private let runner: ScreenCaptureRunner
     private let fallback: ScreenCaptureCLI
     private let recognizer = ScreenTextRecognizer()
 
-    init(preferences: ScreenCapturePreferences, captureDirectory: URL) {
-        self.preferences = preferences
+    init(captureDirectory: URL) {
         let runner = ScreenCaptureRunner(captureDirectory: captureDirectory)
         self.runner = runner
-        self.fallback = ScreenCaptureCLI(preferences: preferences, runner: runner)
+        self.fallback = ScreenCaptureCLI(runner: runner)
     }
 
-    func capture() -> ScreenSnapshot? {
-        if preferences.scope == .activeWindow,   // read at capture time, like the display index
+    func capture(_ selection: ScreenCaptureSelection) -> ScreenSnapshot? {
+        if selection.scope == .activeWindow,   // frozen with the attempt, like the display index
            let windowID = Self.frontWindowID() {
             let outcome = runner.capture(
                 arguments: ["-x", "-o", "-t", "jpg", "-l", "\(windowID)"])
@@ -45,7 +43,7 @@ struct WindowScopedScreenCapture: ScreenCapturing {
                 break
             }
         }
-        return fallback.capture()
+        return fallback.capture(selection)
     }
 
     func cancelCapture() {
