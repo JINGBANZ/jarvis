@@ -189,6 +189,13 @@ def main() -> None:
         shutil.rmtree(args.output)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(compiled, args.output)
+
+    # coremltools writes an analytics blob that differs run to run. The model loads and scores
+    # identically without it, and keeping it would make every regeneration show a spurious diff on a
+    # committed artifact whose whole point is being reproducible.
+    analytics = args.output / "analytics"
+    if analytics.exists():
+        shutil.rmtree(analytics)
     print(f"wrote {args.output}")
 
 

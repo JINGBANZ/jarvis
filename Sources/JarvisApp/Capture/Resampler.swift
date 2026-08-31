@@ -38,6 +38,13 @@ final class Resampler {
               let outCh = outBuf.int16ChannelData else { return [] }
         return Array(UnsafeBufferPointer(start: outCh[0], count: Int(outBuf.frameLength)))
     }
+
+    /// Drop the resampling history. Callers use this when the audio timeline breaks (a device
+    /// rebuild), where carrying filter state across the discontinuity would smear unrelated audio
+    /// into the first converted samples.
+    func reset() {
+        converter.reset()
+    }
 }
 
 // Single-use flag, touched only within one synchronous `convert` call on one thread.

@@ -1150,6 +1150,7 @@
 
 ### 2026-08-06 — GPT Transcribe uses server VAD while GPT Live keeps local endpoints
 
+- **Superseded by:** 2026-08-06 — GPT Transcribe requires explicit committed turns.
 - **Chose:** Add GPT Transcribe as an opt-in OpenAI model without changing GPT-4o Transcribe as the
   default. GPT Transcribe uses the same tuned server-VAD boundary as GPT-4o; GPT Live retains its
   local WebRTC VAD and acknowledged explicit commits. GPT Transcribe and GPT Live receive fixed,
@@ -1178,6 +1179,8 @@
 
 ### 2026-08-06 — GPT Transcribe requires explicit committed turns
 
+- **Superseded by:** [2026-08-31 — Local turn detection runs on Silero, not classic WebRTC VAD](#2026-08-31--local-turn-detection-runs-on-silero-not-classic-webrtc-vad),
+  for the detector only. The committed-turn contract this entry establishes still holds.
 - **Chose:** Keep GPT-4o Transcribe on tuned server VAD. Run GPT Transcribe and GPT Live through the
   existing local WebRTC VAD, ordered append, explicit commit, acknowledgement, and `item_id`
   lifecycle path. GPT Transcribe retains its fixed recording context, plural expected-language
@@ -2146,8 +2149,9 @@
 ### 2026-08-31 — Local turn detection runs on Silero, not classic WebRTC VAD
 
 - **Supersedes:** the detector half of
-  [2026-08-01 — GPT Live uses local WebRTC VAD and explicit commits](#2026-08-01--gpt-live-uses-local-webrtc-vad-and-explicit-commits).
-  The explicit-commit and `item_id` binding design is unchanged.
+  [2026-08-01 — GPT Live uses local WebRTC VAD and explicit commits](#2026-08-01--gpt-live-uses-local-webrtc-vad-and-explicit-commits)
+  and of 2026-08-06 — GPT Transcribe requires explicit committed turns. The explicit-commit,
+  acknowledgement, and `item_id` binding design in both is unchanged.
 - **Chose:** Silero VAD v6.2.1, converted to a committed Core ML model by `scripts/build-vad.sh` and
   run per speaker stream. `SpeechEndpointDetector` consumes per-frame *probabilities* with a Schmitt
   trigger (activation 0.5, release 0.35) instead of booleans, and the local trailing-silence window

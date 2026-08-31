@@ -42,13 +42,15 @@ final class SystemAudioBenchmarkCapture: @unchecked Sendable {
     private var aggregateID = AudioObjectID(kAudioObjectUnknown)
     private var procID: AudioDeviceIOProcID?
     private var downToWire: Resampler?
-    private var toVAD: Resampler?
-    private var voiceActivityDetector: SileroVoiceActivityDetector?
+    /// Confined to `deliveryQueue`, never the IOProc: it runs a Core ML prediction. Same contract as
+    /// the production path in `AggregateEchoCapture`.
+    private var turnDetector: LocalTurnDetector?
     /// IOProc-only state while the device runs; teardown first drains that callback.
-    private var endpointDetector = SpeechEndpointDetector(
-        frameDuration: SileroVoiceActivityDetector.frameDuration,
-        trailingSilenceDuration: 1.0)
     private var sequence: UInt64 = 0
+    /// Keeps model inference off the realtime callback while preserving capture order, which the
+    /// benchmark depends on for its turn boundaries.
+    private let deliveryQueue = DispatchQueue(
+        label: "jarvis.benchmark.delivery", qos: .userInitiated)
 
     init(
         onChunk: @escaping @Sendable (
@@ -121,15 +123,12 @@ final class SystemAudioBenchmarkCapture: @unchecked Sendable {
         guard let downToWire = Resampler(
             fromHz: sampleRate,
             toHz: Double(TranscriptionAudioFormat.pcm16Mono.sampleRate)),
-              let voiceActivityDetector = SileroVoiceActivityDetector(),
-              let toVAD = Resampler(
-                fromHz: sampleRate,
-                toHz: Double(SileroVoiceActivityDetector.sampleRate)) else {
+              let turnDetector = LocalTurnDetector(
+                inputSampleRate: sampleRate, trailingSilenceDuration: 1.0) else {
             throw Failure.conversionUnavailable
         }
         self.downToWire = downToWire
-        self.voiceActivityDetector = voiceActivityDetector
-        self.toVAD = toVAD
+        self.turnDetector = turnDetector
 
         var proc: AudioDeviceIOProcID?
         let callbackStatus = AudioDeviceCreateIOProcIDWithBlock(
@@ -161,9 +160,7 @@ final class SystemAudioBenchmarkCapture: @unchecked Sendable {
         aggregateID = AudioObjectID(kAudioObjectUnknown)
         tapID = AudioObjectID(kAudioObjectUnknown)
         downToWire = nil
-        toVAD = nil
-        voiceActivityDetector = nil
-        endpointDetector.reset()
+        turnDetector = nil
         sequence = 0
     }
 
@@ -172,22 +169,10 @@ final class SystemAudioBenchmarkCapture: @unchecked Sendable {
             UnsafeMutablePointer(mutating: list))
         guard let buffer = buffers.first,
               let downToWire,
-              let voiceActivityDetector,
-              let toVAD else { return }
+              let turnDetector else { return }
         let nativeSamples = Self.monoInt16(buffer)
         guard !nativeSamples.isEmpty else { return }
         let capturedAt = Date().timeIntervalSince1970
-        var endpointEvents: [SpeechEndpointDetector.Event] = []
-        endpointEvents.reserveCapacity(2)
-        for frame in voiceActivityDetector.classify(toVAD.convert(nativeSamples)) {
-            if let event = endpointDetector.observe(
-                speechProbability: frame.probability,
-                frameStartedAt: capturedAt
-                    + TimeInterval(frame.startOffsetSamples)
-                        / TimeInterval(SileroVoiceActivityDetector.sampleRate)) {
-                endpointEvents.append(event)
-            }
-        }
 
         let wireSamples = downToWire.convert(nativeSamples)
         guard !wireSamples.isEmpty else { return }
@@ -196,16 +181,23 @@ final class SystemAudioBenchmarkCapture: @unchecked Sendable {
         let sampleCount = wireSamples.count
         let commitAt = capturedAt + TimeInterval(sampleCount)
             / TimeInterval(TranscriptionAudioFormat.pcm16Mono.sampleRate)
-        let speechEvents = endpointEvents.map { event -> LocalSpeechEvent in
-            switch event {
-            case .started(let startedAt): .started(at: startedAt)
-            case .ended(let startedAt, _): .ended(startedAt: startedAt, commitAt: commitAt)
-            }
-        }
         let data = wireSamples.withUnsafeBufferPointer { Data(buffer: $0) }
-        // The runner supplies `TranscriptionBenchmarkSessionRelay.enqueue`, which only binds this
-        // chunk to the relay's serial delivery stream. Provider work never runs on the IOProc.
-        onChunk(data, sequence, sampleCount, capturedAt, speechEvents)
+        let onChunk = self.onChunk
+        // Turn detection and delivery both hop off the realtime callback. The queue is serial, so
+        // chunks stay in capture order; the runner supplies
+        // `TranscriptionBenchmarkSessionRelay.enqueue`, which only binds this chunk to the relay's
+        // own serial stream. Provider work never runs on the IOProc.
+        deliveryQueue.async { [turnDetector] in
+            let speechEvents = turnDetector
+                .speechEvents(from: nativeSamples, capturedAt: capturedAt)
+                .map { event -> LocalSpeechEvent in
+                    switch event {
+                    case .started(let startedAt): .started(at: startedAt)
+                    case .ended(let startedAt, _): .ended(startedAt: startedAt, commitAt: commitAt)
+                    }
+                }
+            onChunk(data, sequence, sampleCount, capturedAt, speechEvents)
+        }
     }
 
     @available(macOS 14.2, *)

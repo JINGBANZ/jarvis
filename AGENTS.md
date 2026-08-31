@@ -106,6 +106,14 @@ Foundation-only logic in `JarvisCore`; keep AppKit, audio, capture, and other OS
   checklist because it depends on TCC permissions and real capture devices.
 - Work in an isolated git worktree. PRs squash-merge with the PR number in the subject.
 - Read `wiki/AGENTS.md` before wiki edits; the wiki is the design source of truth.
+- **Vendored native and model artifacts are the one exception to "never commit generated
+  artifacts".** Exactly two are committed: `Sources/CJarvisAEC/lib/libjarvis-aec.a` and
+  `Sources/JarvisApp/Resources/SileroVAD.mlmodelc`. Each is required for `swift build` to work
+  offline under Command Line Tools alone, is regenerated deterministically by a committed script
+  (`scripts/build-aec.sh`, `scripts/build-vad.sh`) that pins every input, and is small. Fetching them
+  at build time would put the network in the build and make the bytes we ship unreviewable. Nothing
+  else qualifies: build output, `.app` bundles, DMGs, and captured audio or screenshots stay out.
+  Adding a third needs the same three properties and its entry in `THIRD_PARTY_NOTICES.md`.
 
 ## Runtime safety boundaries
 
