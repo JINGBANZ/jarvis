@@ -87,6 +87,7 @@ struct AudioContinuityMatcher {
 
     mutating func poll(at timestamp: TimeInterval) -> [AudioContinuityWitness.Anomaly] {
         var anomalies: [AudioContinuityWitness.Anomaly] = []
+        guard configuration.expectsServerSpeechEvents else { return anomalies }
         for index in localActivityEpisodes.indices
             where localActivityEpisodes[index].state == .pending {
             let episode = localActivityEpisodes[index]

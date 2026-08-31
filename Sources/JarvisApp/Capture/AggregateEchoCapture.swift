@@ -55,11 +55,12 @@ final class AggregateEchoCapture: @unchecked Sendable {
         fromHz: 48_000,
         toHz: Double(TranscriptionAudioFormat.pcm16Mono.sampleRate))
     private let usesLocalTurnDetection: Bool
-    private let micVoiceActivityDetector: WebRTCVoiceActivityDetector?
-    private let systemVoiceActivityDetector: WebRTCVoiceActivityDetector?
-    /// IOProc-only value state. WebRTC supplies frame decisions; Core owns the endpoint policy.
-    private var micEndpointDetector: SpeechEndpointDetector?
-    private var systemEndpointDetector: SpeechEndpointDetector?
+    /// Turn detection runs on `deliveryQueue`, not in the IOProc: neural inference does not belong on
+    /// the realtime thread, and the delivery queue is already serial and already ordered by capture,
+    /// so frames stay in sample order for free. Both detectors are confined to that queue, which is
+    /// what `@unchecked Sendable` is covering for them.
+    private let micTurnDetector: LocalTurnDetector?
+    private let systemTurnDetector: LocalTurnDetector?
     /// Device-native → 48 kHz, rebuilt per `buildAudioLocked` from the aggregate's actual rate. `nil`
     /// when the device is already 48 kHz (then mic/tap feed AEC directly — the built-in path, unchanged).
     /// Touched only by the IOProc thread (read in `handle`) and by build/rebuild under `lock` while the
@@ -103,17 +104,17 @@ final class AggregateEchoCapture: @unchecked Sendable {
         self.onSystemSpeechEvent = onSystemSpeechEvent
         usesLocalTurnDetection = localTurnDetectionSilenceDuration != nil
         if let localTurnDetectionSilenceDuration {
-            micVoiceActivityDetector = WebRTCVoiceActivityDetector()
-            systemVoiceActivityDetector = WebRTCVoiceActivityDetector()
-            micEndpointDetector = SpeechEndpointDetector(
+            // Detectors see post-AEC audio, which is always at the AEC rate regardless of the
+            // device's native rate.
+            micTurnDetector = LocalTurnDetector(
+                inputSampleRate: Self.aecRate,
                 trailingSilenceDuration: localTurnDetectionSilenceDuration)
-            systemEndpointDetector = SpeechEndpointDetector(
+            systemTurnDetector = LocalTurnDetector(
+                inputSampleRate: Self.aecRate,
                 trailingSilenceDuration: localTurnDetectionSilenceDuration)
         } else {
-            micVoiceActivityDetector = nil
-            systemVoiceActivityDetector = nil
-            micEndpointDetector = nil
-            systemEndpointDetector = nil
+            micTurnDetector = nil
+            systemTurnDetector = nil
         }
     }
 
@@ -129,8 +130,10 @@ final class AggregateEchoCapture: @unchecked Sendable {
         }
         lock.lock()
         stopped = false
+        // A client-commit session whose detectors failed to build would start, stream audio, and
+        // never commit a turn: no transcript, no error. Fail the start instead.
         let localTurnDetectionReady = !usesLocalTurnDetection
-            || (micVoiceActivityDetector != nil && systemVoiceActivityDetector != nil)
+            || (micTurnDetector != nil && systemTurnDetector != nil)
         if #available(macOS 14.2, *), aec != nil, micDown != nil, sysDown != nil,
            localTurnDetectionReady {
             reason = buildAudioLocked()
@@ -296,6 +299,15 @@ final class AggregateEchoCapture: @unchecked Sendable {
         lock.lock()
         if !stopped {
             teardownAudioLocked()
+            // A route change splices two unrelated audio timelines together. Drop the detectors'
+            // stream state so the first frames of the new device are not coloured by the old one.
+            // Ordering falls out of the serial delivery queue: teardown has drained the IOProc, so
+            // every pre-rebuild delivery is already enqueued ahead of this, and the rebuilt device
+            // cannot enqueue anything until `buildAudioLocked` starts it below.
+            deliveryQueue.async { [micTurnDetector, systemTurnDetector] in
+                micTurnDetector?.resetStreamContinuity()
+                systemTurnDetector?.resetStreamContinuity()
+            }
             reason = buildAudioLocked()
             if reason == nil {
                 jlog("Jarvis: rebuilt capture after audio route change")
@@ -362,8 +374,6 @@ final class AggregateEchoCapture: @unchecked Sendable {
         let systemData = systemTimeline.isEmpty ? nil : Self.data(sysDown.convert(systemTimeline))
         guard micData != nil || systemData != nil else { return }
         let capturedAt = Date().timeIntervalSince1970
-        let micSpeechEvents = localMicSpeechEvents(clean, capturedAt: capturedAt)
-        let systemSpeechEvents = localSystemSpeechEvents(systemTimeline, capturedAt: capturedAt)
         let micChunk: SequencedAudioChunk? = micData.map { data in
             micSequence &+= 1
             return SequencedAudioChunk(
@@ -384,7 +394,13 @@ final class AggregateEchoCapture: @unchecked Sendable {
         let onSystem = self.onSystem
         let onMicSpeechEvent = self.onMicSpeechEvent
         let onSystemSpeechEvent = self.onSystemSpeechEvent
-        deliveryQueue.async {
+        deliveryQueue.async { [self] in
+            // Turn detection happens here rather than in the IOProc. `clean` and `systemTimeline` are
+            // value types, so the realtime thread hands them over without doing the work itself.
+            let micSpeechEvents = micTurnDetector?.speechEvents(
+                from: clean, capturedAt: capturedAt) ?? []
+            let systemSpeechEvents = systemTurnDetector?.speechEvents(
+                from: systemTimeline, capturedAt: capturedAt) ?? []
             if let micChunk {
                 onMicCaptured(micChunk.sequence, micChunk.sampleCount, micChunk.capturedAt)
                 onMicClean(micChunk.data, micChunk.sequence, micChunk.capturedAt)
@@ -408,43 +424,6 @@ final class AggregateEchoCapture: @unchecked Sendable {
         }
     }
 
-    private func localMicSpeechEvents(
-        _ samples: [Int16],
-        capturedAt: TimeInterval
-    ) -> [SpeechEndpointDetector.Event] {
-        guard let micVoiceActivityDetector, var detector = micEndpointDetector else { return [] }
-        let events = Self.endpointEvents(
-            decisions: micVoiceActivityDetector.classify(samples),
-            detector: &detector,
-            capturedAt: capturedAt)
-        micEndpointDetector = detector
-        return events
-    }
-
-    private func localSystemSpeechEvents(
-        _ samples: [Int16],
-        capturedAt: TimeInterval
-    ) -> [SpeechEndpointDetector.Event] {
-        guard let systemVoiceActivityDetector, var detector = systemEndpointDetector else { return [] }
-        let events = Self.endpointEvents(
-            decisions: systemVoiceActivityDetector.classify(samples),
-            detector: &detector,
-            capturedAt: capturedAt)
-        systemEndpointDetector = detector
-        return events
-    }
-
-    private static func endpointEvents(
-        decisions: [Bool],
-        detector: inout SpeechEndpointDetector,
-        capturedAt: TimeInterval
-    ) -> [SpeechEndpointDetector.Event] {
-        decisions.enumerated().compactMap { index, isSpeech in
-            detector.observe(
-                isSpeech: isSpeech,
-                frameStartedAt: capturedAt + TimeInterval(index) / 100)
-        }
-    }
 
     /// Commit through the whole delivered 24 kHz chunk containing the endpoint. This keeps the wire
     /// FIFO and capture boundary identical even when a resampler emits a small converter tail.
