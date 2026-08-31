@@ -18,9 +18,12 @@ jobs:
   # release_created flips true only on the push that merges the Release PR — that push creates
   # the tag and the GitHub Release, and gates the publish job below.
   #
-  # Note: the Release PR is authored by GITHUB_TOKEN, whose PRs don't trigger ci.yml. If CI is
-  # ever made a *required* check, the Release PR becomes unmergeable — switch to a GitHub App
-  # token at that point (see the evolving repo's release.yml for the worked example).
+  # Note: the Release PR is authored by GITHUB_TOKEN, whose PRs don't trigger ci.yml. `test` is now
+  # a required check on `main`, so the Release PR carries no such check and cannot merge through the
+  # normal path: a repository admin merges it on the ruleset's pull-request bypass
+  # (`gh pr merge <n> --squash --admin`). Switching this step to a GitHub App token restores the
+  # `pull_request` trigger and retires that standing manual override (see the evolving repo's
+  # release.yml for the worked example, and #178 for the App the issue pipeline is adopting).
   release-please:
     runs-on: ubuntu-latest
     timeout-minutes: 10
