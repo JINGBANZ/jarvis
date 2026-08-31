@@ -95,11 +95,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         // worse than no Start at all.
         permissionGate = PermissionGate(preferences: permissionPreferences)
         permissionGate.onSatisfied = { [weak self] in self?.startApp() }
-        guard permissionGate.isOpen else {
-            permissionGate.present()
-            return
+        // Asynchronous because proving the system-audio grant means running a tap, which must not
+        // block the main thread.
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            if await self.permissionGate.holdsEveryGrant() {
+                self.startApp()
+            } else {
+                self.permissionGate.present()
+            }
         }
-        startApp()
     }
 
     /// Builds everything a permitted Jarvis needs. Reached either straight from launch or from the

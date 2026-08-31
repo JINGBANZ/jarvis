@@ -33,9 +33,20 @@ final class PermissionGate: NSObject, NSWindowDelegate {
         self.preferences = preferences
     }
 
-    /// True once macOS holds every required grant.
-    var isOpen: Bool {
-        Permissions.grantedReadinessPermissions(remembering: preferences)
+    /// Whether macOS holds every required grant, re-proving the remembered system-audio answer
+    /// first.
+    ///
+    /// A remembered `true` cannot simply be trusted: the user may have switched the grant off in
+    /// System Settings since, and nothing downstream would notice. A refused tap still delivers
+    /// frames, and `CaptureReadinessMonitor` reads frame arrival as healthy without inspecting
+    /// amplitude, so Jarvis would report full readiness while deaf to the other side of the
+    /// conversation. Only a remembered grant is re-proved; a remembered refusal is left alone,
+    /// because probing it here would raise a prompt with no window on screen to explain it.
+    func holdsEveryGrant() async -> Bool {
+        if preferences.systemAudioGranted {
+            _ = await Permissions.request(.systemAudio, remembering: preferences)
+        }
+        return Permissions.grantedReadinessPermissions(remembering: preferences)
             .isSuperset(of: Self.required)
     }
 

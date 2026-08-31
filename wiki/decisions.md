@@ -2126,7 +2126,8 @@
 - **Chose:** Prove the system-audio grant by tapping *Jarvis's own process*, muted, playing half a
   second of tone, and listening for it. Hearing it back is the grant; digital silence is a refusal.
 - **Chose:** Record that Screen Recording was asked for, so a later launch that still lacks it can
-  tell a refusal from a grant awaiting relaunch.
+  tell a refusal from a grant awaiting relaunch. Record the system-audio answer too, but treat it as
+  the last known one and re-prove it at each launch.
 - **Why:** A TCC dialog is system UI that no capture-exclusion trick hides, and Core Audio's
   system-audio prompt fired on the first Start, which for this product is the moment an interview
   begins and a screen may be shared. Gating the whole app rather than just Start is what makes that
@@ -2143,6 +2144,7 @@
   `TCCAccessPreflight`, which is exact and silent but can break on any macOS update. (d) Dropping the
   claim and detecting a refusal at runtime, as the field does: a denied tap delivers *frames*, so
   `CaptureReadinessMonitor` sees a healthy stream and the user gets a half-deaf coach with no notice.
+  That same fact is why a remembered grant is re-proved at launch rather than trusted.
   (e) A Permissions tab in Settings, which a hard gate makes unreachable and pointless. (f)
   Remembering that the gate has run: it appears exactly when the grants are incomplete, which is the
   same condition.

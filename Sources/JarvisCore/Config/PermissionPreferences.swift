@@ -4,10 +4,14 @@ import Foundation
 /// Audio tap has ever started.
 ///
 /// It exists because macOS ships no API to request or read the System Audio Recording grant — an
-/// adapter can only find out by building a tap-backed device and starting it. Caching the answer
-/// keeps that probe off every launch and out of the Start path. A grant revoked afterwards makes
-/// this flag stale; capture construction still fails with its own notice, which is the recovery
-/// path a stale `true` degrades to.
+/// adapter can only find out by building a tap-backed device, starting it, and listening. This is
+/// the *last known* answer, not a standing truth: the gate re-proves a remembered grant at launch,
+/// because a refusal cannot be left to surface downstream. A denied tap still delivers frames, and
+/// `CaptureReadinessMonitor` reads frame arrival as healthy without inspecting amplitude, so a stale
+/// `true` would let Jarvis report full readiness while hearing nothing from the other side.
+///
+/// A remembered refusal is what stops the launch probe from raising a prompt with no window on
+/// screen to explain it; the gate's own walk asks for that one.
 ///
 /// Nothing records whether the permission gate has run: it is shown whenever the grants are
 /// incomplete, so its own condition is the only state it needs.

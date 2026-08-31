@@ -239,8 +239,11 @@ So `SystemAudioPermissionProbe` proves the grant by making a sound and listening
 quiet tone: hearing it back is proof, digital silence is proof of refusal. Scoping the tap to Jarvis
 is what keeps the check invisible, since nothing the user is playing is tapped and nothing they are
 listening to is muted. `PermissionPreferences` remembers the answer so the probe stays off the Start
-path; a grant revoked later leaves that memory stale, and capture construction then fails with its
-own notice.
+path, but only as the *last known* one: the gate re-proves a remembered grant at each launch. It has
+to, because a refusal cannot be left to surface downstream — a denied tap still delivers frames, and
+`CaptureReadinessMonitor` reads frame arrival as healthy without inspecting amplitude, so a stale
+`true` would let Jarvis report full readiness while hearing nothing from the other side. A remembered
+refusal is left alone, since probing it at launch would raise a prompt with no window to explain it.
 
 ### Failure surfacing — startup loud, runtime ghost
 
