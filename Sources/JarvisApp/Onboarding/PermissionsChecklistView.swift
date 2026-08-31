@@ -34,6 +34,10 @@ final class PermissionsChecklistView: NSView {
     private var isRequesting = false
     /// The permission being asked about right now, so the other rows can recede.
     private var asking: JarvisReadiness.Permission?
+    /// Permissions the user has already been sent to System Settings for. Screen Recording needs
+    /// this: once they have been there, a still-missing grant may equally be one they just switched
+    /// on, which this process cannot see either way, so the honest next step becomes a relaunch.
+    private var sentToSettings: Set<JarvisReadiness.Permission> = []
     /// Whether the walk has run. Until it has, a not-yet-granted permission reads as pending rather
     /// than refused.
     private var hasWalked = false
@@ -157,10 +161,12 @@ final class PermissionsChecklistView: NSView {
         case .microphone: "Privacy_Microphone"
         default: "Privacy_ScreenCapture"
         }
+        sentToSettings.formUnion(permissions)
         guard let url = URL(
             string: "x-apple.systempreferences:com.apple.preference.security?\(anchor)")
         else { return }
         NSWorkspace.shared.open(url) // ghost-mode-allowed: explicit click on the permission gate
+        render()
     }
 
     /// A fresh Screen Recording grant is only visible to a new process. Safe to do from here and
@@ -199,6 +205,12 @@ final class PermissionsChecklistView: NSView {
             !refused.contains($0) && !($0 == .screenRecording && hasWalked)
         }
         if !askable.isEmpty { return .none }
+        // Screen Recording alone, after a trip to System Settings: reopening is the only way to
+        // find out whether they granted it, and repeating "Open System Settings" would promise a
+        // readiness this process can never reach.
+        if refused == [.screenRecording], sentToSettings.contains(.screenRecording) {
+            return .needsRelaunch
+        }
         if !refused.isEmpty { return .refused(refused) }
         return .needsRelaunch
     }
