@@ -2024,3 +2024,27 @@
   [#206](https://github.com/JINGBANZ/jarvis/issues/206).
 - **Detail:** [lean-coaching-core.md → Phase 4 Implementation Contract](./lean-coaching-core.md#phase-4-implementation-contract--openai-provider-extraction),
   `Package.swift`, `Sources/JarvisBrainProviders/`.
+
+### 2026-08-31 — CodeRabbit reviews every pull request; the credential-bearing caller stays same-repository
+
+- **Chose:** Adopt CodeRabbit — a GitHub App — as the automatic reviewer for every pull request,
+  forks included, configured by a checked-in `.coderabbit.yaml`. Keep `claude-code-review.yml`
+  gated to same-repository branches until CodeRabbit is proven, so the repository is never without
+  a reviewer during the switch.
+- **Why:** A fork `pull_request` run cannot read `CLAUDE_CODE_OAUTH_TOKEN`, so an outside
+  contribution landed with CI and no review. An App holds no repository secret, so fork-authored
+  input forces no trust decision, and it is exempt from the fork-workflow approval gate — review
+  arrives while CI is still waiting for a maintainer to approve the run. One App covers fork and
+  in-repository pull requests alike, where matching that coverage in Actions took two callers.
+- **Rejected:** (a) A second caller on `pull_request_target` — it hands fork-authored input to a
+  credential-bearing reviewer, and the read-only `permissions:` block bounds only `GITHUB_TOKEN`,
+  not the App installation token the action actually posts with, so the containment argument did
+  not hold; both review bots flagged it on the pull request that proposed it. (b) Relaxing the
+  same-repository gate on `claude-code-review.yml` — that gate is what keeps fork input away from
+  the credential. (c) PR-Agent, provider-swappable but billed to a console API key: Anthropic
+  prohibits subscription OAuth tokens in third-party tools, so provider independence and
+  subscription billing cannot both hold here. (d) Skipping the Release PR by title match — a title
+  is author-controlled, so any fork could opt out of review by naming itself after a release;
+  matched by author instead.
+- **Detail:** `.coderabbit.yaml`, `.github/workflows/claude-code-review.yml`,
+  [status.md](./status.md).

@@ -6,7 +6,8 @@
 # fork-workflow approval gate — which is why review feedback arrives while CI is still waiting for a
 # maintainer to approve the run.
 #
-# `@coderabbitai configuration` in a pull request comment prints the effective config with defaults.
+# This file only takes effect from the default branch. `@coderabbitai configuration` in a pull
+# request comment prints the effective config with defaults resolved.
 language: "en-US"
 
 # Max 250 characters. The repository's own review posture, condensed: AGENTS.md asks reviewers to
@@ -26,14 +27,17 @@ reviews:
     # A draft is work in progress; reviewing every push to one wastes the contributor's attention.
     drafts: false
     # release-please's standing Release PR carries only generated version bumps — nothing an author
-    # wrote and nothing a review can improve. Mirrors the same exclusion in claude-code-review.yml.
-    ignore_title_keywords:
-      - "chore(main): release"
+    # wrote and nothing a review can improve. Matched by author rather than title: a pull request
+    # title is author-controlled, so a title filter would let any fork opt out of review by naming
+    # its pull request after a release.
+    ignore_usernames:
+      - "github-actions[bot]"
 
-  # Generated or vendored files. Reviewing them produces noise and no signal.
+  # Generated output only. `Package.resolved` is deliberately NOT filtered — SwiftPM consumes its
+  # pinned revisions during `swift build`, so a dependency bump with an untouched `Package.swift` is
+  # exactly the change a reviewer has to see.
   path_filters:
     - "!.build/**"
-    - "!Package.resolved"
     - "!CHANGELOG.md"
     - "!.release-please-manifest.json"
 
@@ -41,10 +45,21 @@ reviews:
   path_instructions:
     - path: "Sources/JarvisCore/**"
       instructions: >-
-        Foundation-only by contract. Flag AppKit, Process, FileManager, or URLSession reaching the
-        coaching kernel — that logic belongs in JarvisApp, JarvisOverlay, JarvisScreenCapture, or
-        JarvisBrainProviders. Route and scheduling policy must stay pure state machines; the app
-        supplies clients, timers, and speech-activity events.
+        Foundation-only by contract: flag AppKit and other OS-framework imports, which belong in
+        JarvisApp, JarvisOverlay, JarvisScreenCapture, or JarvisBrainProviders. File, process, and
+        network APIs are NOT banned across Core — `Config`, `Benchmark`, `Diagnostics`, and
+        `Brain/Adapters` own real I/O by design, including the owner-only secrets file and the
+        `.jarvis/` session directory. Route and scheduling policy must stay pure Foundation state
+        machines; the app supplies clients, timers, and speech-activity events.
+    - path: "Sources/JarvisCore/{Coach,Transcription,Triggers,Overlay,Audio,Support,Brain,Screen}/**"
+      instructions: >-
+        Coaching kernel. Direct OS reach-through — FileManager, FileHandle, Process, URLSession,
+        NSLog — belongs behind an injected port, never inline in coaching policy, and the kernel may
+        not name the persistence or offline-analysis types (SessionStore, SessionAuditFileWriter,
+        AgenticEvaluator and siblings); it emits through its narrow observer ports instead.
+        `Brain/Adapters/**` is exempt — concrete adapters own their transports.
+        `scripts/check-coaching-kernel.sh` is the enforcing guard and the authority on scope; report
+        a disagreement with it as a finding about the guard, not about the code.
     - path: "Sources/{JarvisApp,JarvisOverlay}/**"
       instructions: >-
         Ghost mode: during the live pipeline and teardown no autonomous path may activate Jarvis,

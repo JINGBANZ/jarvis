@@ -141,9 +141,10 @@ completion: no runtime error autonomously activates Jarvis, opens a browser, or 
 fixed notices remain available in Activity. The gate statically rejects unreviewed presentation APIs.
 The public source tree gives no public input a direct privileged-agent path. CI, release, and agent
 automation use hosted runners; no self-hosted runner remains registered.
-Automatic agent review is limited to same-repository PR branches, `@claude` is owner-invoked, issue
-discovery keeps its scheduled/manual triggers, and automatic issue implementation relies on the
-central workflow's existing author write-access check. Reusable agent workflows track the shared
+CodeRabbit reviews every pull request including forks, as a GitHub App that receives no repository
+secret; the credential-bearing Claude review workflow stays limited to same-repository PR branches,
+`@claude` is owner-invoked, issue discovery keeps its scheduled/manual triggers, and automatic issue
+implementation relies on the central workflow's existing author write-access check. Reusable agent workflows track the shared
 repository's `main` branch; retained third-party Actions are SHA-pinned and Dependabot-managed.
 Public docs disclose the current unsandboxed boundary, contribution and private-reporting paths are
 present, and the latest GitHub Release carries a Developer ID-signed, notarized Apple silicon app.
@@ -182,7 +183,7 @@ ready on `main`; they were disabled during rollout so the old base-branch copies
 removed self-hosted runner.
 Delete the historical self-hosted runs and artifacts after owner approval: the audit found no
 credential leak, but those logs expose runner, account, and installed-tool paths.
-Replace release-please's `GITHUB_TOKEN` with a GitHub App token: the `main` ruleset now requires the
+Replace release-please's `GITHUB_TOKEN` with a GitHub App token: the `main` ruleset requires the
 CI `test` check, and token-authored Release PRs do not trigger `pull_request` workflows, so every
 Release PR reports no such check and merges only on a repository admin's pull-request bypass.
 Confirm private vulnerability reporting, secret scanning and push protection, Dependabot security
