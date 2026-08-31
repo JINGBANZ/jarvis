@@ -50,12 +50,15 @@ final class LocalTurnDetector {
         }
     }
 
-    /// Drop all stream continuity. The audio timeline broke (a device rebuild, or a fresh session),
-    /// so filter history, LSTM state, and a half-counted silence window all describe audio that no
-    /// longer precedes what comes next.
-    func reset() {
+    /// Drop stream continuity after the audio timeline breaks, such as a device rebuild: filter
+    /// history and LSTM state both describe audio that no longer precedes what comes next.
+    ///
+    /// The endpoint policy is deliberately left alone. It holds an open turn that the transcriber
+    /// downstream is also tracking, and clearing it here would strand that turn: no `.ended` would
+    /// ever follow, so the speech buffer would stay open and the next utterance would merge into it.
+    /// Its counters stay meaningful across the gap, so post-rebuild silence still closes the turn.
+    func resetStreamContinuity() {
         resampler.reset()
         voiceActivityDetector.reset()
-        endpointDetector.reset()
     }
 }

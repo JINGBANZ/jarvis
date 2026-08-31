@@ -305,8 +305,8 @@ final class AggregateEchoCapture: @unchecked Sendable {
             // every pre-rebuild delivery is already enqueued ahead of this, and the rebuilt device
             // cannot enqueue anything until `buildAudioLocked` starts it below.
             deliveryQueue.async { [micTurnDetector, systemTurnDetector] in
-                micTurnDetector?.reset()
-                systemTurnDetector?.reset()
+                micTurnDetector?.resetStreamContinuity()
+                systemTurnDetector?.resetStreamContinuity()
             }
             reason = buildAudioLocked()
             if reason == nil {
