@@ -161,11 +161,16 @@ final class PermissionsChecklistView: NSView {
         case .microphone: "Privacy_Microphone"
         default: "Privacy_ScreenCapture"
         }
-        sentToSettings.formUnion(permissions)
         guard let url = URL(
             string: "x-apple.systempreferences:com.apple.preference.security?\(anchor)")
         else { return }
-        NSWorkspace.shared.open(url) // ghost-mode-allowed: explicit click on the permission gate
+        // Only a pane the user actually reached counts as a visit. Recording one for an open that
+        // failed would advance the button to a relaunch they have no reason to make.
+        guard NSWorkspace.shared.open(url) else { // ghost-mode-allowed: explicit click on the gate
+            jlog("Jarvis: couldn't open the \(anchor) settings pane")
+            return
+        }
+        sentToSettings.formUnion(permissions)
         render()
     }
 
