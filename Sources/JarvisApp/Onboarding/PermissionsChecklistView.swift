@@ -1,67 +1,80 @@
 import AppKit
 import JarvisCore
 
-/// The permission checklist: one row per macOS grant Jarvis needs, and one button that walks them.
+/// The permission gate's contents: a plain list of the grants Jarvis needs, and the one button that
+/// walks them.
 ///
-/// Shared by the first-launch window and the Settings tab so both show the same state and offer the
-/// same recovery. The walk is strictly sequential — macOS queues TCC dialogs, and asking for three
-/// at once stacks them into a pile the user can't tell apart.
+/// One button, never a row of them. It asks for every outstanding grant in checklist order, strictly
+/// one dialog at a time — macOS queues TCC dialogs, and asking for three at once stacks them into a
+/// pile the user can't tell apart. Its label is the only thing that changes as the walk progresses,
+/// ending on whatever is actually true: reopen, fix in System Settings, or start using Jarvis.
 @MainActor
 final class PermissionsChecklistView: NSView {
-    /// Fires whenever a row's state changes, so a host can refresh its own controls.
-    var onStateChange: (() -> Void)?
-
-    /// Every permission is granted, as far as macOS will tell us.
-    var isComplete: Bool {
-        JarvisReadiness.Permission.allCases.allSatisfy {
-            Permissions.isGranted($0, remembering: preferences)
-        }
-    }
-
-    static let preferredHeight = SettingsStyle.cardHeaderHeight
-        + SettingsStyle.rowHeight * CGFloat(JarvisReadiness.Permission.allCases.count) + 84
+    /// The user is through the gate: every grant is held and they've asked to get on with it.
+    var onFinished: (() -> Void)?
+    /// The user is leaving without granting. There is no Jarvis to fall back to, so this is a quit.
+    var onQuit: (() -> Void)?
 
     private struct Row {
         let permission: JarvisReadiness.Permission
-        let view: SettingsRowView
+        let glyph: NSTextField
+        let name: NSTextField
+        let why: NSTextField
         let status: NSTextField
-        let button: ClosureButton
+        let separator: NSBox
     }
 
     private let preferences: PermissionPreferences
-    private let card = SettingsCardView(frame: NSRect(x: 0, y: 0, width: 640, height: 200))
-    private var rows: [Row] = []
-    private var primaryButton = ClosureButton(title: "", action: {})
+    private let titleLabel = NSTextField(
+        labelWithString: "Hi, it’s Jarvis. Before we start, I need three things from you.")
     private let footnote = NSTextField(labelWithString: "")
-    /// Permissions this view has already asked macOS for. macOS never re-prompts after a refusal,
-    /// so their row switches from asking to pointing at System Settings.
-    private var attempted: Set<JarvisReadiness.Permission> = []
+    private var primaryButton = ClosureButton(title: "", action: {})
+    private var quitButton = ClosureButton(title: "", action: {})
+    private var rows: [Row] = []
     private var isRequesting = false
+    /// The permission being asked about right now, so the other rows can recede.
+    private var asking: JarvisReadiness.Permission?
+    /// Whether the walk has run. Until it has, a not-yet-granted permission reads as pending rather
+    /// than refused.
+    private var hasWalked = false
+    /// Whether an *earlier* launch already asked for Screen Recording. Captured once at init: a
+    /// grant made in a previous process would be visible to this one, so "asked before and still
+    /// missing" is the only proof of refusal macOS leaves. Without it, a refusal is indistinguishable
+    /// from a grant awaiting relaunch, and the gate loops the user through Quit & Reopen forever.
+    private let screenAskedInEarlierLaunch: Bool
+
+    private enum Layout {
+        static let inset: CGFloat = 28
+        static let rowHeight: CGFloat = 52
+        static let titleTop: CGFloat = 30
+    }
 
     init(preferences: PermissionPreferences) {
         self.preferences = preferences
-        super.init(frame: NSRect(x: 0, y: 0, width: 640, height: Self.preferredHeight))
-        autoresizingMask = [.width]
+        self.screenAskedInEarlierLaunch = preferences.screenRecordingAsked
+        super.init(frame: .zero)
 
-        card.setHeader(title: "Permissions", detail: "Granted once, in System Settings")
-        rows = JarvisReadiness.Permission.allCases.map(makeRow(for:))
-
-        primaryButton = ClosureButton(title: "Grant Permissions") { [weak self] in
-            self?.requestAll()
-        }
-        primaryButton.bezelStyle = .rounded
-        primaryButton.keyEquivalent = "\r"
+        titleLabel.font = .systemFont(ofSize: 20, weight: .semibold)
+        titleLabel.lineBreakMode = .byWordWrapping
+        titleLabel.maximumNumberOfLines = 2
 
         footnote.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         footnote.textColor = .secondaryLabelColor
         footnote.lineBreakMode = .byWordWrapping
         footnote.maximumNumberOfLines = 2
 
-        for row in rows { card.contentView?.addSubview(row.view) }
-        addSubview(card)
-        addSubview(primaryButton)
-        addSubview(footnote)
-        card.onLayout = { [weak self] in self?.layoutRows() }
+        primaryButton = ClosureButton(title: "Grant Access") { [weak self] in self?.primaryAction() }
+        primaryButton.bezelStyle = .rounded
+        primaryButton.controlSize = .large
+        primaryButton.keyEquivalent = "\r"
+
+        // Leaving is a quit, not a dismissal: nothing of Jarvis is running behind this window.
+        quitButton = ClosureButton(title: "Quit") { [weak self] in self?.onQuit?() }
+        quitButton.bezelStyle = .rounded
+        quitButton.controlSize = .large
+
+        rows = JarvisReadiness.Permission.allCases.map(makeRow(for:))
+        for view in [titleLabel, footnote, quitButton, primaryButton] { addSubview(view) }
         render()
     }
 
@@ -70,120 +83,193 @@ final class PermissionsChecklistView: NSView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    /// Re-reads every grant. A host calls this when it becomes visible again, since the user may
-    /// have changed a switch in System Settings while Jarvis was running.
-    func refresh() {
-        render()
-    }
+    // MARK: - The walk
 
-    // MARK: - Requesting
+    private func primaryAction() {
+        guard !isRequesting else { return }
+        switch terminalState {
+        case .none:
+            requestAll()
+        case .refused(let refused):
+            openSystemSettings(for: refused)
+        case .needsRelaunch:
+            relaunch()
+        case .satisfied:
+            onFinished?()
+        }
+    }
 
     /// Asks for every outstanding grant, one dialog at a time, in checklist order.
     private func requestAll() {
-        guard !isRequesting else { return }
         isRequesting = true
         render()
         Task { @MainActor in
             for permission in JarvisReadiness.Permission.allCases
             where !Permissions.isGranted(permission, remembering: preferences) {
-                attempted.insert(permission)
-                _ = await Permissions.request(permission, remembering: preferences)
+                asking = permission
                 render()
+                _ = await Permissions.request(permission, remembering: preferences)
             }
+            asking = nil
             isRequesting = false
+            hasWalked = true
             render()
         }
     }
 
-    private func request(_ permission: JarvisReadiness.Permission) {
-        guard !isRequesting else { return }
-        guard !attempted.contains(permission) else {
-            openSystemSettings(for: permission)
-            return
-        }
-        isRequesting = true
-        attempted.insert(permission)
-        render()
-        Task { @MainActor in
-            _ = await Permissions.request(permission, remembering: preferences)
-            isRequesting = false
-            render()
-        }
-    }
-
-    /// Once a user has refused, macOS answers for them without prompting, so the settings pane is
-    /// the only way back.
-    private func openSystemSettings(for permission: JarvisReadiness.Permission) {
+    /// macOS answers a refusal without prompting again, so the settings pane is the only way back.
+    private func openSystemSettings(for permissions: [JarvisReadiness.Permission]) {
         // Screen Recording and System Audio Recording share one pane from macOS 15 on.
-        let anchor = switch permission {
+        let anchor = switch permissions.first {
         case .microphone: "Privacy_Microphone"
-        case .systemAudio, .screenRecording: "Privacy_ScreenCapture"
+        default: "Privacy_ScreenCapture"
         }
         guard let url = URL(
             string: "x-apple.systempreferences:com.apple.preference.security?\(anchor)")
         else { return }
-        NSWorkspace.shared.open(url) // ghost-mode-allowed: explicit click on a permission row
+        NSWorkspace.shared.open(url) // ghost-mode-allowed: explicit click on the permission gate
     }
 
-    // MARK: - Rendering
+    /// A fresh Screen Recording grant is only visible to a new process. Safe to do from here and
+    /// nowhere else: the gate runs at launch, so there is no session to kill.
+    private func relaunch() {
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.createsNewApplicationInstance = true
+        NSWorkspace.shared.openApplication( // ghost-mode-allowed: explicit click on the launch gate
+            at: Bundle.main.bundleURL, configuration: configuration
+        ) { _, _ in
+            Task { @MainActor in NSApp.terminate(nil) }
+        }
+    }
+
+    // MARK: - State
+
+    private enum TerminalState {
+        case none
+        case refused([JarvisReadiness.Permission])
+        case needsRelaunch
+        case satisfied
+    }
+
+    private var terminalState: TerminalState {
+        guard !isRequesting else { return .none }
+        let missing = JarvisReadiness.Permission.allCases.filter {
+            !Permissions.isGranted($0, remembering: preferences)
+        }
+        guard !missing.isEmpty else { return .satisfied }
+
+        let refused = missing.filter(isBeyondAsking)
+        // Screen Recording can't be re-asked usefully once this launch has tried: macOS has the
+        // answer and won't share it until a new process. Everything else outstanding is still worth
+        // a dialog, and asking comes before reporting.
+        let askable = missing.filter {
+            !refused.contains($0) && !($0 == .screenRecording && hasWalked)
+        }
+        if !askable.isEmpty { return .none }
+        if !refused.isEmpty { return .refused(refused) }
+        return .needsRelaunch
+    }
+
+    /// Whether macOS has already given its final answer for this permission, so asking again would
+    /// be a silent no-op and the only way forward is System Settings.
+    private func isBeyondAsking(_ permission: JarvisReadiness.Permission) -> Bool {
+        permission == .screenRecording ? screenAskedInEarlierLaunch : hasWalked
+    }
 
     private func render() {
         for row in rows {
             let granted = Permissions.isGranted(row.permission, remembering: preferences)
-            row.status.stringValue = granted ? "Granted" : "Needed"
-            row.status.textColor = granted ? .systemGreen : .secondaryLabelColor
-            row.button.isHidden = granted
-            row.button.isEnabled = !isRequesting
-            row.button.title = attempted.contains(row.permission) ? "Open Settings" : "Grant"
+            let isAsking = asking == row.permission
+            row.status.stringValue = statusText(for: row.permission, granted: granted, asking: isAsking)
+            row.status.textColor = granted ? .systemGreen
+                : (isBeyondAsking(row.permission) ? .systemOrange : .secondaryLabelColor)
+            row.glyph.stringValue = granted ? "●" : "○"
+            row.glyph.textColor = granted ? .systemGreen : .tertiaryLabelColor
+            // Only the row being asked about stays at full strength during the walk.
+            let recedes = isRequesting && !isAsking
+            for label in [row.glyph, row.name, row.why, row.status] {
+                label.alphaValue = recedes ? 0.38 : 1
+            }
         }
-        primaryButton.isHidden = isComplete
+
+        let state = terminalState
         primaryButton.isEnabled = !isRequesting
-        primaryButton.title = isRequesting ? "Waiting for macOS…" : "Grant Permissions"
-        footnote.stringValue = footnoteText
+        primaryButton.title = buttonTitle(for: state)
+        footnote.stringValue = footnoteText(for: state)
         needsLayout = true
-        onStateChange?()
     }
 
-    private var footnoteText: String {
-        if isComplete { return "All set — Jarvis has everything it needs." }
-        // A Screen Recording grant is only visible to a new process, so the row stays "Needed"
-        // however the user answered. Saying so is the difference between finishing and retrying.
-        if attempted.contains(.screenRecording),
-           !Permissions.isGranted(.screenRecording, remembering: preferences) {
-            return "Screen Recording only takes effect in a new process — quit Jarvis and open it "
-                + "again to finish."
-        }
-        return "Granting these now means no macOS prompt interrupts a session later."
+    private func statusText(
+        for permission: JarvisReadiness.Permission, granted: Bool, asking: Bool
+    ) -> String {
+        if granted { return "Granted" }
+        if asking { return "Asking…" }
+        if isBeyondAsking(permission) { return "Refused" }
+        // Asked this launch and still unreadable: that is Screen Recording waiting for a new process.
+        if permission == .screenRecording, hasWalked { return "Reopen to finish" }
+        return "Needed"
     }
+
+    private func buttonTitle(for state: TerminalState) -> String {
+        if isRequesting { return "Waiting for macOS…" }
+        return switch state {
+        case .none: "Grant Access"
+        case .refused: "Open System Settings"
+        case .needsRelaunch: "Quit & Reopen"
+        case .satisfied: "I’m Ready"
+        }
+    }
+
+    private func footnoteText(for state: TerminalState) -> String {
+        if isRequesting { return "Answer macOS and I’ll take the next one." }
+        return switch state {
+        case .none:
+            // The rows already say what is being asked for; a line restating it is noise.
+            ""
+        case .refused(let refused):
+            "macOS won’t let me ask twice. Switch "
+                + refused.map(\.displayName).joined(separator: " and ")
+                + " on by hand and I’ll be ready."
+        case .needsRelaunch:
+            "Almost there. macOS only shows me screen access in a fresh session, so let me reopen "
+                + "and check."
+        case .satisfied:
+            "That’s everything. I’ll be up in your menu bar whenever you need me."
+        }
+    }
+
+    // MARK: - Rows
 
     private func makeRow(for permission: JarvisReadiness.Permission) -> Row {
-        let status = NSTextField(labelWithString: "")
-        status.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        let glyph = NSTextField(labelWithString: "○")
+        glyph.font = .systemFont(ofSize: 13)
+
+        let name = NSTextField(labelWithString: permission.displayName)
+        name.font = .systemFont(ofSize: 13.5, weight: .medium)
+
+        let why = NSTextField(labelWithString: Self.purpose(of: permission))
+        why.font = .systemFont(ofSize: 11.5)
+        why.textColor = .tertiaryLabelColor
+        why.lineBreakMode = .byTruncatingTail
+
+        let status = NSTextField(labelWithString: "Needed")
+        status.font = .systemFont(ofSize: 11.5)
         status.alignment = .right
 
-        let button = ClosureButton(title: "Grant") { [weak self] in self?.request(permission) }
-        button.bezelStyle = .rounded
-        button.setAccessibilityLabel("Grant \(permission.displayName)")
+        let separator = NSBox()
+        separator.boxType = .separator
+        separator.isHidden = permission == JarvisReadiness.Permission.allCases.first
 
-        let control = NSStackView(views: [status, button])
-        control.orientation = .horizontal
-        control.spacing = 10
-        control.alignment = .centerY
-
-        let view = SettingsRowView(
-            title: permission.displayName,
-            detail: Self.purpose(of: permission),
-            controlView: control,
-            controlSize: NSSize(width: 190, height: 32),
-            showsSeparator: permission != JarvisReadiness.Permission.allCases.last)
-        return Row(permission: permission, view: view, status: status, button: button)
+        for view in [glyph, name, why, status, separator] { addSubview(view) }
+        return Row(permission: permission, glyph: glyph, name: name, why: why,
+                   status: status, separator: separator)
     }
 
     private static func purpose(of permission: JarvisReadiness.Permission) -> String {
         switch permission {
-        case .microphone: "Hear you think aloud"
-        case .systemAudio: "Hear the other side of your call"
-        case .screenRecording: "Read your screen when the coach needs context"
+        case .microphone: "So I can hear your voice"
+        case .systemAudio: "So I can hear the other side of your call"
+        case .screenRecording: "So I can see what’s on your screen"
         }
     }
 
@@ -191,26 +277,37 @@ final class PermissionsChecklistView: NSView {
 
     override func layout() {
         super.layout()
-        let cardHeight = SettingsStyle.cardHeaderHeight
-            + SettingsStyle.rowHeight * CGFloat(rows.count)
-        card.frame = NSRect(x: 0, y: bounds.height - cardHeight,
-                            width: bounds.width, height: cardHeight)
-        layoutRows()
+        let inset = Layout.inset
+        let width = bounds.width - inset * 2
+        var top = bounds.height - Layout.titleTop
 
-        let buttonWidth: CGFloat = 170
-        primaryButton.frame = NSRect(x: bounds.width - buttonWidth, y: card.frame.minY - 44,
-                                     width: buttonWidth, height: 32)
-        footnote.frame = NSRect(x: 0, y: card.frame.minY - 48,
-                                width: max(120, bounds.width - buttonWidth - 16), height: 36)
-    }
+        // Jarvis introduces itself in a sentence, so the title takes the height it needs rather
+        // than a fixed line.
+        let titleHeight = ceil(titleLabel.sizeThatFits(
+            NSSize(width: width, height: .greatestFiniteMagnitude)).height)
+        top -= titleHeight
+        titleLabel.frame = NSRect(x: inset, y: top, width: width, height: titleHeight)
+        top -= 24
 
-    private func layoutRows() {
-        guard let content = card.contentView else { return }
-        var top = content.bounds.height - SettingsStyle.cardHeaderHeight
         for row in rows {
-            top -= SettingsStyle.rowHeight
-            row.view.frame = NSRect(x: 0, y: top,
-                                    width: content.bounds.width, height: SettingsStyle.rowHeight)
+            row.separator.frame = NSRect(x: inset, y: top, width: width, height: 1)
+            top -= Layout.rowHeight
+            let textLeft = inset + 26
+            row.glyph.frame = NSRect(x: inset, y: top + 18, width: 18, height: 16)
+            row.name.frame = NSRect(x: textLeft, y: top + 25, width: width - 160, height: 17)
+            row.why.frame = NSRect(x: textLeft, y: top + 9, width: width - 160, height: 15)
+            row.status.frame = NSRect(x: bounds.width - inset - 130, y: top + 18,
+                                      width: 130, height: 16)
         }
+
+        // Buttons on the bottom row, the note on its own line above them: the longest note runs to
+        // two full-width lines and would truncate if it had to share the row.
+        let buttonWidth: CGFloat = 190
+        let quitWidth: CGFloat = 74
+        primaryButton.frame = NSRect(x: bounds.width - inset - buttonWidth, y: inset,
+                                     width: buttonWidth, height: 32)
+        quitButton.frame = NSRect(x: primaryButton.frame.minX - quitWidth - 8, y: inset,
+                                  width: quitWidth, height: 32)
+        footnote.frame = NSRect(x: inset, y: inset + 32 + 10, width: width, height: 34)
     }
 }

@@ -11,23 +11,18 @@ import Foundation
         return d
     }
 
-    @Test func freshInstallHasSeenNeitherTheChecklistNorATap() {
-        let preferences = PermissionPreferences(defaults: freshDefaults())
-        #expect(preferences.onboardingShown == Defaults.Permissions.onboardingShown)
-        // Nothing proven yet, so Start blocks with a named permission rather than assuming a grant
-        // macOS gives no way to read.
-        #expect(preferences.systemAudioGranted == Defaults.Permissions.systemAudioGranted)
+    @Test func freshInstallHasNeverStartedATap() {
+        // Nothing proven yet, so the gate stays shut rather than assuming a grant macOS gives no
+        // way to read.
+        #expect(PermissionPreferences(defaults: freshDefaults()).systemAudioGranted
+            == Defaults.Permissions.systemAudioGranted)
     }
 
-    @Test func bothFlagsRoundTripThroughDefaults() {
+    @Test func aStartedTapRoundTripsThroughDefaults() {
         let d = freshDefaults()
-        let written = PermissionPreferences(defaults: d)
-        written.onboardingShown = true
-        written.systemAudioGranted = true
+        PermissionPreferences(defaults: d).systemAudioGranted = true
 
-        let reread = PermissionPreferences(defaults: d)
-        #expect(reread.onboardingShown)
-        #expect(reread.systemAudioGranted)
+        #expect(PermissionPreferences(defaults: d).systemAudioGranted)
     }
 
     @Test func aRevokedGrantIsRememberedAsRevoked() {

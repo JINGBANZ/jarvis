@@ -48,6 +48,9 @@ enum Permissions {
             preferences.systemAudioGranted = granted
             return granted
         case .screenRecording:
+            // Recorded before the answer, because there won't be a usable one: this process cannot
+            // see the grant either way. A later launch that still lacks it is the proof of refusal.
+            preferences.screenRecordingAsked = true
             return requestScreenRecording()
         }
     }

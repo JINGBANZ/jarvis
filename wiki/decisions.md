@@ -2117,29 +2117,34 @@
 - **Detail:** [lean-coaching-core.md → Phase 5 contracts](./lean-coaching-core.md#phase-5-implementation-contract--coachdriver-split),
   `Sources/JarvisCore/Coach/CoachAttemptRunner.swift`, `Sources/JarvisApp/App/`.
 
-### 2026-08-30 — Every TCC prompt moves to first launch; a throwaway tap is the system-audio check
+### 2026-08-30 - Jarvis will not run without every grant, and proves the silent one by ear
 
-- **Chose:** Present a permission checklist window on the first launch and walk Microphone, System
-  Audio Recording, and Screen Recording one dialog at a time, instead of priming two at launch and
-  letting Core Audio raise the third at the first Start.
-- **Chose:** Make `SystemAudioPermissionProbe` — a tap-only aggregate device that starts and stops
-  immediately — both the request and the check for System Audio Recording, and cache its answer in
-  `PermissionPreferences`.
-- **Chose:** Add `.systemAudio` to `JarvisReadiness.Permission` and require it at Start beside
-  `.microphone`. Screen Recording stays optional: without it a session still coaches on audio.
-- **Why:** A TCC dialog is system UI, so no capture-exclusion trick hides it. The system-audio
-  prompt fired on the first Start — which, for the user this product exists for, is the moment an
-  interview begins and a screen may be shared. The grant is also unreadable: macOS publishes no API
-  to request or query it, and `AudioHardwareCreateProcessTap` succeeds without it, so starting a
-  tap is the only evidence that exists. Requiring it at Start matches what capture already does —
-  one aggregate device carries mic and tap, so a refused tap takes the whole session with it, and
-  naming the permission beats failing later in device construction.
-- **Rejected:** (a) A hard gate that stays up until all three are granted — Screen Recording isn't
-  needed to coach, so it would trap a user who declined it. (b) Re-probing on every Start — a second
-  aggregate device built and torn down beside the real one, for a revocation that the existing
-  capture-failure notice already handles. (c) Re-probing on every launch — cheap, but it starts
-  audio IO on a schedule no user asked for. (d) Automating the relaunch that a fresh Screen
-  Recording grant needs: the Settings tab can be opened mid-session, and no button there may
-  terminate a live one. The checklist says to reopen Jarvis instead.
+- **Chose:** Present a permission gate at launch and build nothing else until Jarvis holds
+  Microphone, System Audio Recording, and Screen Recording: no menu bar, no overlays, no session
+  runtime. One button walks the dialogs one at a time; a Quit button beside it, and the window's
+  close button, both exit the app.
+- **Chose:** Prove the system-audio grant by tapping *Jarvis's own process*, muted, playing half a
+  second of tone, and listening for it. Hearing it back is the grant; digital silence is a refusal.
+- **Chose:** Record that Screen Recording was asked for, so a later launch that still lacks it can
+  tell a refusal from a grant awaiting relaunch.
+- **Why:** A TCC dialog is system UI that no capture-exclusion trick hides, and Core Audio's
+  system-audio prompt fired on the first Start, which for this product is the moment an interview
+  begins and a screen may be shared. Gating the whole app rather than just Start is what makes that
+  true: a half-permitted Jarvis could still be started from the menu bar and could only fail.
+- **Why the tone:** macOS enforces this one grant *silently*. Denied, every call still returns
+  `noErr`, the tap still reports a 48 kHz format, the aggregate still reports a channel, the device
+  still starts, and callbacks still arrive; only the samples differ. Measured on macOS 26: 117
+  callbacks peaking at 0.25 allowed, 116 peaking at 0.0 denied. No status, format, or channel count
+  discriminates, so the only honest check is to make a sound and hear it. Scoping the tap to Jarvis
+  keeps that invisible: nothing the user plays is tapped, nothing they hear is muted.
+- **Rejected:** (a) Treating a successful `AudioDeviceStart` as the grant. It shipped in review and
+  reported a refusal as *Granted*, which is what sent us looking. (b) A muted tone through a *global*
+  tap: it works, but mutes the user's own audio for the probe's length. (c) The private
+  `TCCAccessPreflight`, which is exact and silent but can break on any macOS update. (d) Dropping the
+  claim and detecting a refusal at runtime, as the field does: a denied tap delivers *frames*, so
+  `CaptureReadinessMonitor` sees a healthy stream and the user gets a half-deaf coach with no notice.
+  (e) A Permissions tab in Settings, which a hard gate makes unreachable and pointless. (f)
+  Remembering that the gate has run: it appears exactly when the grants are incomplete, which is the
+  same condition.
 - **Detail:** [architecture.md → Permissions](./architecture.md#permissions),
   `Sources/JarvisApp/Onboarding/`, `Sources/JarvisApp/Capture/SystemAudioPermissionProbe.swift`.

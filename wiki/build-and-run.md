@@ -60,10 +60,11 @@ that checkout-local bundle to the Trash so it cannot be launched accidentally; l
 - Recover a stale *denied* state (which macOS won't re-prompt for) with
   `tccutil reset Microphone com.jarvis.coach.dev` (or `ScreenCapture`), then relaunch `Jarvis Dev`
   and Allow. Use `com.jarvis.coach` only when intentionally resetting the production release.
-- All three grants come from **TCC prompts at first launch**, not an App-Sandbox entitlement file.
-  `PermissionsOnboarding` presents a checklist on a first run and walks Microphone, System Audio
-  Recording, and Screen Recording one dialog at a time; the Permissions tab in Settings hosts the
-  same checklist afterwards. See [architecture.md](./architecture.md#permissions).
+- All three grants come from **TCC prompts at launch**, not an App-Sandbox entitlement file.
+  `PermissionGate` walks Microphone, System Audio Recording, and Screen Recording one dialog at a
+  time and keeps Jarvis closed until it holds all three. Reset one with
+  `tccutil reset AudioCapture com.jarvis.coach.dev` (or `Microphone` / `ScreenCapture`) to see the
+  gate again. See [architecture.md](./architecture.md#permissions).
 
 ## Distribution — signed, notarized releases from CI
 

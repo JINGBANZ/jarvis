@@ -32,7 +32,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     private let screenPreferences = ScreenCapturePreferences()
     private let prepMaterialPreferences = PrepMaterialPreferences()
     private let permissionPreferences = PermissionPreferences()
-    private var permissionsOnboarding: PermissionsOnboarding!
+    private var permissionGate: PermissionGate!
+    /// Whether the app's own surfaces exist yet. Nothing is built while the permission gate is up.
+    private var didStartApp = false
     /// Monotonic revision stamped on each control-plane snapshot. Bumped at Start and whenever an
     /// explicit Settings edit installs a fresh plan; never by runtime health.
     private var planRevision: UInt = 0
@@ -85,9 +87,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     private var pendingTurnDrainIDs: Set<UUID> = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        brain = BrainComposition(secrets: secrets, coachTools: coachTools, host: self)
         NSApp.setActivationPolicy(.accessory) // ghost-mode-allowed: launch configuration
         MainMenu.install() // an Edit menu so ⌘X/⌘C/⌘V/⌘A work in the Settings text fields
+
+        // Nothing else comes up until Jarvis holds every grant: no menu bar, no overlays, no session
+        // runtime. A half-permitted Jarvis is not a usable product, and a Start that can only fail is
+        // worse than no Start at all.
+        permissionGate = PermissionGate(preferences: permissionPreferences)
+        permissionGate.onSatisfied = { [weak self] in self?.startApp() }
+        guard permissionGate.isOpen else {
+            permissionGate.present()
+            return
+        }
+        startApp()
+    }
+
+    /// Builds everything a permitted Jarvis needs. Reached either straight from launch or from the
+    /// gate closing, and never twice.
+    private func startApp() {
+        didStartApp = true
+        brain = BrainComposition(secrets: secrets, coachTools: coachTools, host: self)
         networkDiagnostics.start()
 
         // The activity viewer lives for the whole app run, but a *session* is one coaching run: each
@@ -124,12 +143,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             return AgenticEvaluator(repositoryDirectory: repository,
                                     preferredProvider: self.brain.preferences.provider)
         }
-
-        // Gather every macOS grant up front, not lazily mid-session. Core Audio's system-audio
-        // prompt in particular used to wait until the first Start, which is the worst possible
-        // moment for a dialog to appear over a shared screen.
-        permissionsOnboarding = PermissionsOnboarding(preferences: permissionPreferences)
-        permissionsOnboarding.runAtLaunch()
 
         overlayCaption = OverlayCaptionPanel()
         overlayCaption.setFontSize(appearance.captionFontSize)
@@ -182,7 +195,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                 self?.reapplySessionPlan()
             },
             PrepMaterialSection(preferences: prepMaterialPreferences),
-            PermissionsSection(preferences: permissionPreferences),
             ActivitySection(viewer: activityViewer),
         ]
         settingsWindow = SettingsWindow(sections: sections)
@@ -218,6 +230,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        // Quitting from the permission gate happens before anything exists to stop.
+        guard didStartApp else { return .terminateNow }
         activityViewer?.cancelEvaluation()
         stop(reason: .applicationQuit)
         return .terminateNow
@@ -257,11 +271,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         let key = secrets.apiKey() ?? ""
         let requiresOpenAIKey = transcriptionProvider.requiresOpenAIAPIKey(for: brainRoute)
         let preparesAppleSpeech = transcriptionProvider == .appleSpeech
-        // System audio is as mandatory as the microphone: the aggregate device carries both, so a
-        // refused tap takes the whole capture with it. Blocking here names the missing grant
-        // instead of surfacing it later as a capture-construction failure.
+        // Every grant the launch gate collects is required here too, so a permission revoked in
+        // System Settings after the gate opened is named at Start instead of surfacing later as a
+        // capture-construction failure.
         let readinessConfiguration = JarvisReadiness.Configuration(
-            requiredPermissions: [.microphone, .systemAudio],
+            requiredPermissions: PermissionGate.required,
             requiredCredentials: requiresOpenAIKey ? [.openAIAPIKey] : [],
             requiresTranscriptionPreparation: preparesAppleSpeech)
         let readinessStart = readiness.begin(configuration: readinessConfiguration)

@@ -89,12 +89,14 @@ public enum Defaults {
 
     // MARK: - Permissions
 
-    /// What Jarvis remembers about the macOS grants it needs. Not user-editable settings: the
-    /// Permissions checklist writes them, and the values are only ever what macOS last told us.
+    /// What Jarvis remembers about the macOS grants it needs. Not a user-editable setting: the
+    /// permission gate writes it, and the value is only ever what macOS last told us. Whether the
+    /// gate has run needs no flag — it appears whenever the grants are incomplete.
     public enum Permissions {
-        public static let onboardingShownKey = "permissions.onboardingShown"
-        /// The first-launch checklist has never run, so a fresh install gets it once.
-        public static let onboardingShown = false
+        public static let screenRecordingAskedKey = "permissions.screenRecordingAsked"
+        /// Nobody has asked macOS for Screen Recording yet. Set once the gate has, which is what
+        /// lets a later launch read a still-missing grant as a refusal rather than a pending one.
+        public static let screenRecordingAsked = false
 
         public static let systemAudioGrantedKey = "permissions.systemAudioGranted"
         /// Assume nothing until a tap has actually started; macOS exposes no way to read this grant,
