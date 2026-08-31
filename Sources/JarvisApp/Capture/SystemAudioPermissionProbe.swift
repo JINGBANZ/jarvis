@@ -99,12 +99,10 @@ enum SystemAudioPermissionProbe {
 
         let engine = playProbeTone()
         defer { engine?.stop() }
-        // Stop as soon as the tone is heard; a refusal has nothing to wait for, so it runs out the
-        // deadline instead.
-        let deadline = Date().addingTimeInterval(Self.deadline)
-        while Date() < deadline && !heard.pointee {
-            Thread.sleep(forTimeInterval: 0.02)
-        }
+        // Deliberately not polling `heard` while the tone plays: that would read the flag on this
+        // thread while the IOProc writes it. Waiting the whole window and reading once after
+        // `AudioDeviceStop` costs a fixed second and needs no synchronization on the audio thread.
+        Thread.sleep(forTimeInterval: Self.deadline)
         AudioDeviceStop(aggregate, proc)
 
         let granted = heard.pointee
@@ -112,8 +110,8 @@ enum SystemAudioPermissionProbe {
         return granted
     }
 
-    /// How long to wait for the tone. Comfortably longer than the tone itself, since a granted probe
-    /// returns the moment it hears anything and only a refusal waits this out.
+    /// How long to listen. Comfortably longer than the half-second tone, since the probe always
+    /// waits the whole window rather than watching the flag as the IOProc writes it.
     private static let deadline: TimeInterval = 1.2
 
     /// Half a second of a quiet 440 Hz tone, played by Jarvis so Jarvis's own tap can hear it. The

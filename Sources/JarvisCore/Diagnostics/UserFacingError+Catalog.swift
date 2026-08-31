@@ -67,9 +67,12 @@ public extension UserFacingError {
         let named = JarvisReadiness.Permission.allCases
             .filter(missing.contains)
             .map(\.displayName)
+        // Screen Recording is only visible to a new process, so telling the user to press Start
+        // again would send them round a loop that cannot end.
+        let ending = missing.contains(.screenRecording) ? "reopen Jarvis." : "press Start again."
         let message = named.isEmpty
-            ? "Check Jarvis permissions in System Settings → Privacy & Security, then press Start again."
-            : "Enable \(sentenceList(named)) in System Settings → Privacy & Security, then press Start again."
+            ? "Check Jarvis permissions in System Settings → Privacy & Security, then \(ending)"
+            : "Enable \(sentenceList(named)) in System Settings → Privacy & Security, then \(ending)"
         return .init(
             title: missing.count == 1 ? "Permission needed" : "Permissions needed",
             message: message,

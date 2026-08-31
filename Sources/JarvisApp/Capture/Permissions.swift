@@ -5,7 +5,7 @@ import JarvisCore
 
 /// The macOS side of the TCC grants Jarvis needs: what it holds right now, and how to ask for one.
 ///
-/// `PermissionsOnboarding` drives the asking at first launch so a coaching session never has to,
+/// `PermissionGate` drives the asking at launch so a coaching session never has to,
 /// and `JarvisReadiness` consumes `grantedReadinessPermissions` when the user presses Start. This
 /// adapter only reports and requests; the Core reducer owns which permissions a configuration needs.
 @MainActor

@@ -51,6 +51,16 @@ import Testing
         #expect(all.message.contains("Microphone, System Audio Recording, and Screen Recording"))
     }
 
+    @Test func aMissingScreenGrantAsksForARelaunchRatherThanAnotherStart() {
+        // The grant only becomes visible to a new process, so "press Start again" would loop.
+        let screen = UserFacingError.permissionsMissing([.screenRecording])
+        #expect(screen.message.contains("reopen Jarvis"))
+        #expect(!screen.message.contains("press Start again"))
+
+        #expect(UserFacingError.permissionsMissing([.microphone]).message
+            .contains("press Start again"))
+    }
+
     @Test func captureFailedIsFatalAndCarriesReason() {
         let e = UserFacingError.captureFailed(reason: "no input device")
         #expect(e.severity == .fatal)

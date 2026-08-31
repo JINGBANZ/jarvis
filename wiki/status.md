@@ -171,7 +171,15 @@ coaching kernel's dependency rules are enforced by `scripts/check-coaching-kerne
 
 ## Next action
 
-Run the live smoke checklist for the lean coaching core work: Start, Stop, and an immediate
+Run the live permission-gate smoke, since the gate runs before anything the Gate can test. With
+`tccutil reset Microphone|ScreenCapture|AudioCapture com.jarvis.coach.dev` and both
+`permissions.*` defaults cleared: the gate appears with no menu bar behind it; one walk collects all
+three dialogs in order; **Quit** exits; refusing system audio records a refusal rather than a grant
+and the probe tone stays inaudible; refusing screen recording ends on **Quit & Reopen** and the next
+launch offers **Open System Settings** rather than looping; allowing everything reaches the menu bar
+after one relaunch.
+
+Then run the live smoke checklist for the lean coaching core work: Start, Stop, and an immediate
 restart; a coaching turn with a screen view; a Settings change applied to a running session and a
 failed preflight; capture readiness and system-audio degradation to microphone-only; one Claude Code
 and one Codex coaching turn; and browsing a finished session in the Activity window. The offline Gate
