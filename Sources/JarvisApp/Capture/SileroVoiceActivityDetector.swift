@@ -74,7 +74,7 @@ final class SileroVoiceActivityDetector {
             return nil
         }
         pending.reserveCapacity(Self.windowSamples * 2)
-        resetState()
+        resetModelContinuity()
     }
 
     struct Frame {
@@ -118,11 +118,15 @@ final class SileroVoiceActivityDetector {
     /// cannot colour the probabilities for unrelated audio.
     func reset() {
         pending.removeAll(keepingCapacity: true)
-        context = [Float](repeating: 0, count: Self.contextSamples)
-        resetState()
+        resetModelContinuity()
     }
 
-    private func resetState() {
+    /// Zero the two halves of the model's stream state together. They must always describe the same
+    /// point in the audio: the carried context is the tail of the last window fed in, and the LSTM
+    /// state is what the model derived from it. Clearing one without the other pairs a window with
+    /// recurrent state from a different moment.
+    private func resetModelContinuity() {
+        context = [Float](repeating: 0, count: Self.contextSamples)
         let pointer = stateInput.dataPointer.bindMemory(to: Float.self, capacity: Self.stateCount)
         pointer.update(repeating: 0, count: Self.stateCount)
     }
@@ -149,8 +153,7 @@ final class SileroVoiceActivityDetector {
             let output = try model.prediction(from: input)
             guard let probability = output.featureValue(for: "prob")?.multiArrayValue,
                   let nextState = output.featureValue(for: "state_out")?.multiArrayValue else {
-                reportPredictionFailure("model returned no prob/state_out")
-                return nil
+                return failed("model returned no prob/state_out")
             }
             let state = stateInput.dataPointer.bindMemory(
                 to: Float.self, capacity: Self.stateCount)
@@ -159,9 +162,17 @@ final class SileroVoiceActivityDetector {
             state.update(from: produced, count: Self.stateCount)
             return probability[0].doubleValue
         } catch {
-            reportPredictionFailure("\(error)")
-            return nil
+            return failed("\(error)")
         }
+    }
+
+    /// Give up on one frame. `context` has already advanced past the chunk the model never consumed,
+    /// so the carried window and the LSTM state now describe different moments. Start a fresh stream
+    /// rather than pairing them; Silero reconverges within a few frames once predictions recover.
+    private func failed(_ detail: String) -> Double? {
+        reportPredictionFailure(detail)
+        resetModelContinuity()
+        return nil
     }
 
     private var reportedPredictionFailure = false
