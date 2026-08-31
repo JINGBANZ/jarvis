@@ -16,7 +16,7 @@ final class TranscriptionControls: NSObject {
     private var modelRow: SettingsRowView?
     private var languagesRow: SettingsRowView?
     private var vocabularyRow: SettingsRowView?
-    private var vocabularyField: NSTextField?
+    var vocabularyField: NSTextField?
     private var localeRow: SettingsRowView?
     private var localePopup: NSPopUpButton?
     private var localeLoadTask: Task<Void, Never>?
@@ -209,7 +209,7 @@ final class TranscriptionControls: NSObject {
         jlog("Jarvis: \(model.displayName) selected for the next Start.")
     }
 
-    private func vocabularyChanged(_ rawValue: String) {
+    func vocabularyChanged(_ rawValue: String) {
         let keywords = rawValue.split(separator: ",").map(String.init)
         preferences.openAIVocabularyKeywords = keywords
         vocabularyField?.stringValue = preferences.openAIVocabularyKeywords.joined(separator: ", ")
@@ -302,12 +302,5 @@ final class TranscriptionControls: NSObject {
         #else
         return false
         #endif
-    }
-}
-
-extension TranscriptionControls: NSTextFieldDelegate {
-    func controlTextDidEndEditing(_ obj: Notification) {
-        guard let field = obj.object as? NSTextField, field === vocabularyField else { return }
-        vocabularyChanged(field.stringValue)
     }
 }
