@@ -6,7 +6,11 @@ Delete any section that genuinely does not apply, rather than leaving it blank.
 
 ## Summary
 
-<!-- What changes, and the user-visible behavior afterwards. Link the issue this implements. -->
+<!--
+Plain language, kept short. What changes, and what someone using Jarvis notices afterwards — a
+reader should understand it without opening the diff. A few clear sentences beat a wall of detail;
+save the depth for the sections below. Link the issue this implements.
+-->
 
 ## Security and privacy impact
 
@@ -23,8 +27,10 @@ coaching-attempt and provider-route boundaries.
 - [ ] Behavior changes are covered by swift-testing cases
 - [ ] Commits follow Conventional Commits (`type(scope): summary`, lowercase imperative)
 
-```
-<!-- Paste the gate result, including the test count. -->
+<!-- Paste the gate result below, including the test count. -->
+
+```text
+
 ```
 
 ### Live smoke — optional, and only for `JarvisApp` changes

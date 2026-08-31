@@ -26,41 +26,39 @@ reviews:
     enabled: true
     # A draft is work in progress; reviewing every push to one wastes the contributor's attention.
     drafts: false
-    # release-please's standing Release PR carries only generated version bumps — nothing an author
-    # wrote and nothing a review can improve. Matched by author rather than title: a pull request
-    # title is author-controlled, so a title filter would let any fork opt out of review by naming
-    # its pull request after a release.
-    ignore_usernames:
-      - "github-actions[bot]"
+    # No bot exclusion. A title filter would let any fork opt out of review by naming its pull
+    # request after a release, and `github-actions[bot]` also authors the shared-rules sync, whose
+    # diffs change repository-wide security and review guidance. Reviewing the generated Release PR
+    # is cheap noise; leaving the rules sync unreviewed is not.
 
-  # Generated output only. `Package.resolved` is deliberately NOT filtered — SwiftPM consumes its
-  # pinned revisions during `swift build`, so a dependency bump with an untouched `Package.swift` is
-  # exactly the change a reviewer has to see.
+  # Generated output only, and the bar is "inert". `Package.resolved` and
+  # `.release-please-manifest.json` are deliberately NOT filtered: SwiftPM consumes the first during
+  # `swift build` and release.yml feeds the second to release-please, so each is executable input
+  # whose diff is exactly what review exists to catch.
   path_filters:
     - "!.build/**"
     - "!CHANGELOG.md"
-    - "!.release-please-manifest.json"
 
   # The architectural boundaries from AGENTS.md that a reviewer unfamiliar with the repo would miss.
   path_instructions:
     - path: "Sources/JarvisCore/**"
       instructions: >-
         Foundation-only by contract: flag AppKit and other OS-framework imports, which belong in
-        JarvisApp, JarvisOverlay, JarvisScreenCapture, or JarvisBrainProviders. File, process, and
-        network APIs are NOT banned across Core — `Config`, `Benchmark`, `Diagnostics`, and
-        `Brain/Adapters` own real I/O by design, including the owner-only secrets file and the
-        `.jarvis/` session directory. Route and scheduling policy must stay pure Foundation state
-        machines; the app supplies clients, timers, and speech-activity events.
-    - path: "Sources/JarvisCore/{Coach,Transcription,Triggers,Overlay,Audio,Support,Brain,Screen}/**"
+        JarvisApp, JarvisOverlay, JarvisScreenCapture, or JarvisBrainProviders. File and network
+        APIs are NOT banned across Core — `Config`, `Benchmark`, and the non-kernel `Diagnostics`
+        own real I/O by design, including the owner-only secrets file and the `.jarvis/` session
+        directory. Route and scheduling policy must stay pure Foundation state machines; the app
+        supplies clients, timers, and speech-activity events.
+    - path: "Sources/JarvisCore/{Coach,Transcription,Triggers,Overlay,Audio,Support,Brain,Prompts,Screen,PrepMaterial}/**"
       instructions: >-
         Coaching kernel. Direct OS reach-through — FileManager, FileHandle, Process, URLSession,
         NSLog — belongs behind an injected port, never inline in coaching policy, and the kernel may
         not name the persistence or offline-analysis types (SessionStore, SessionAuditFileWriter,
         AgenticEvaluator and siblings); it emits through its narrow observer ports instead.
-        `Brain/Adapters/**` is exempt — concrete adapters own their transports.
-        `scripts/check-coaching-kernel.sh` is the enforcing guard and the authority on scope; report
-        a disagreement with it as a finding about the guard, not about the code.
-    - path: "Sources/{JarvisApp,JarvisOverlay}/**"
+        Concrete provider adapters live in JarvisBrainProviders, outside this scope, and own their
+        transports. `scripts/check-coaching-kernel.sh` is the enforcing guard and the authority on
+        scope; report a disagreement with it as a finding about the guard, not about the code.
+    - path: "Sources/{JarvisApp,JarvisOverlay,JarvisScreenCapture}/**"
       instructions: >-
         Ghost mode: during the live pipeline and teardown no autonomous path may activate Jarvis,
         present UI beyond the two nonactivating capture-excluded overlay panels, open apps or URLs,
