@@ -74,6 +74,18 @@ final class PermissionsChecklistView: NSView {
         quitButton.controlSize = .large
 
         rows = JarvisReadiness.Permission.allCases.map(makeRow(for:))
+
+        // Returning from System Settings changes what a click will do, and `primaryAction` reads
+        // that live. Without this the label keeps the last walk's text, so a button saying "Open
+        // System Settings" could quietly start Jarvis instead.
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, !self.isRequesting else { return }
+                self.render()
+            }
+        }
         for view in [titleLabel, footnote, quitButton, primaryButton] { addSubview(view) }
         render()
     }
@@ -91,7 +103,7 @@ final class PermissionsChecklistView: NSView {
         case .none:
             requestAll()
         case .refused(let refused):
-            openSystemSettings(for: refused)
+            recheck(refused)
         case .needsRelaunch:
             relaunch()
         case .satisfied:
@@ -114,6 +126,27 @@ final class PermissionsChecklistView: NSView {
             isRequesting = false
             hasWalked = true
             render()
+        }
+    }
+
+    /// A refusal is not always final: the user may have just switched the toggle on in System
+    /// Settings and come back. Microphone is read live and Screen Recording has its relaunch, but
+    /// System Audio Recording has neither, so it is re-proved here before the user is sent back to
+    /// a pane where the toggle may already be on. A granted tap answers without a dialog.
+    private func recheck(_ refused: [JarvisReadiness.Permission]) {
+        guard refused.contains(.systemAudio) else {
+            openSystemSettings(for: refused)
+            return
+        }
+        isRequesting = true
+        render()
+        Task { @MainActor in
+            _ = await Permissions.request(.systemAudio, remembering: preferences)
+            isRequesting = false
+            render()
+            if case .refused(let stillRefused) = terminalState {
+                openSystemSettings(for: stillRefused)
+            }
         }
     }
 

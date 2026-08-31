@@ -276,9 +276,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         let key = secrets.apiKey() ?? ""
         let requiresOpenAIKey = transcriptionProvider.requiresOpenAIAPIKey(for: brainRoute)
         let preparesAppleSpeech = transcriptionProvider == .appleSpeech
-        // Every grant the launch gate collects is required here too, so a permission revoked in
-        // System Settings after the gate opened is named at Start instead of surfacing later as a
-        // capture-construction failure.
+        // Every grant the launch gate collects is required here too, but only `.microphone` is read
+        // live. `.systemAudio` reflects the launch probe and `.screenRecording` this process's
+        // preflight, so a revocation after the gate opened is not named here — see
+        // `PermissionGate.holdsEveryGrant()` for why that window is left open.
         let readinessConfiguration = JarvisReadiness.Configuration(
             requiredPermissions: PermissionGate.required,
             requiredCredentials: requiresOpenAIKey ? [.openAIAPIKey] : [],
