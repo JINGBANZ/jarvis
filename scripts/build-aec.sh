@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Regenerate Sources/CJarvisAEC/lib/libjarvis-aec.a — a self-contained static
-# WebRTC audio-processing library (AEC3 + classic VAD) for arm64 macOS (deployment target 14.0)
+# WebRTC audio-processing library (AEC3) for arm64 macOS (deployment target 14.0)
 # with ZERO runtime
 # dylib dependencies. You only need to run this when bumping the webrtc version;
 # the resulting .a is committed so a normal `swift build` needs none of this
@@ -63,13 +63,12 @@ mkdir -p "$TP/webrtc-audio-processing" "$TP/abseil-cpp"
 cp "$WORK/wap/COPYING" "$WORK/wap/AUTHORS" "$TP/webrtc-audio-processing/" 2>/dev/null || true
 cp "$ABSL_INC/LICENSE" "$ABSL_INC/AUTHORS" "$TP/abseil-cpp/" 2>/dev/null || true
 
-# 4. Verify the AEC facade and upstream VAD symbols are DEFINED and nothing targets a newer macOS
-#    than 14. The small jarvis_vad_* C facade is compiled by SwiftPM from CJarvisAEC/shim.c.
+# 4. Verify the AEC facade symbol is DEFINED and nothing targets a newer macOS than 14.
+#    Upstream's classic VAD is still inside this archive; Jarvis no longer calls it (local turn
+#    detection runs on Silero, see scripts/build-vad.sh), so it is left unreferenced rather than
+#    surgically stripped, and nothing asserts on its symbols.
 if ! nm "$OUT_LIB" 2>/dev/null | grep -q 'T _jarvis_aec_create'; then
   echo "FAIL: jarvis_aec_create not defined in $OUT_LIB" >&2; exit 1
-fi
-if ! nm "$OUT_LIB" 2>/dev/null | grep -q 'T _WebRtcVad_Process'; then
-  echo "FAIL: WebRtcVad_Process not defined in $OUT_LIB" >&2; exit 1
 fi
 if otool -l "$OUT_LIB" 2>/dev/null | grep -E 'minos' | grep -vq '14.0'; then
   echo "FAIL: some objects target a macOS other than 14.0" >&2; exit 1

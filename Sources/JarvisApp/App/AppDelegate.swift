@@ -590,7 +590,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         // gone, so treat it as a full (mic-side) terminal failure.
         let localTurnDetectionSilenceDuration: TimeInterval? =
             transcriptionConfiguration.turnDetectionStrategy == .clientCommit
-            ? TimeInterval(config.vadSilenceDurationMs) / 1_000
+            ? TimeInterval(config.localEndpointSilenceDurationMs) / 1_000
             : nil
         let capture = AggregateEchoCapture(
             onMicCaptured: { [weak transcriber] sequence, samples, capturedAt in

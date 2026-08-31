@@ -55,9 +55,17 @@ final class AggregateEchoCapture: @unchecked Sendable {
         fromHz: 48_000,
         toHz: Double(TranscriptionAudioFormat.pcm16Mono.sampleRate))
     private let usesLocalTurnDetection: Bool
-    private let micVoiceActivityDetector: WebRTCVoiceActivityDetector?
-    private let systemVoiceActivityDetector: WebRTCVoiceActivityDetector?
-    /// IOProc-only value state. WebRTC supplies frame decisions; Core owns the endpoint policy.
+    /// Turn detection runs on `deliveryQueue`, not in the IOProc: neural inference does not belong on
+    /// the realtime thread, and the delivery queue is already serial and already ordered by capture,
+    /// so probabilities stay in sample order for free. Every field below is confined to that queue,
+    /// which is what `@unchecked Sendable` is covering for them.
+    private let micVoiceActivityDetector: SileroVoiceActivityDetector?
+    private let systemVoiceActivityDetector: SileroVoiceActivityDetector?
+    /// Silero wants 16 kHz; AEC hands us 48 kHz. One stateful converter per stream, per `Resampler`'s
+    /// contract.
+    private let micVadDown: Resampler?
+    private let systemVadDown: Resampler?
+    /// Silero supplies frame probabilities; Core owns the endpoint policy.
     private var micEndpointDetector: SpeechEndpointDetector?
     private var systemEndpointDetector: SpeechEndpointDetector?
     /// Device-native → 48 kHz, rebuilt per `buildAudioLocked` from the aggregate's actual rate. `nil`
@@ -103,15 +111,23 @@ final class AggregateEchoCapture: @unchecked Sendable {
         self.onSystemSpeechEvent = onSystemSpeechEvent
         usesLocalTurnDetection = localTurnDetectionSilenceDuration != nil
         if let localTurnDetectionSilenceDuration {
-            micVoiceActivityDetector = WebRTCVoiceActivityDetector()
-            systemVoiceActivityDetector = WebRTCVoiceActivityDetector()
+            micVoiceActivityDetector = SileroVoiceActivityDetector()
+            systemVoiceActivityDetector = SileroVoiceActivityDetector()
+            micVadDown = Resampler(
+                fromHz: Self.aecRate, toHz: Double(SileroVoiceActivityDetector.sampleRate))
+            systemVadDown = Resampler(
+                fromHz: Self.aecRate, toHz: Double(SileroVoiceActivityDetector.sampleRate))
             micEndpointDetector = SpeechEndpointDetector(
+                frameDuration: SileroVoiceActivityDetector.frameDuration,
                 trailingSilenceDuration: localTurnDetectionSilenceDuration)
             systemEndpointDetector = SpeechEndpointDetector(
+                frameDuration: SileroVoiceActivityDetector.frameDuration,
                 trailingSilenceDuration: localTurnDetectionSilenceDuration)
         } else {
             micVoiceActivityDetector = nil
             systemVoiceActivityDetector = nil
+            micVadDown = nil
+            systemVadDown = nil
             micEndpointDetector = nil
             systemEndpointDetector = nil
         }
@@ -362,8 +378,6 @@ final class AggregateEchoCapture: @unchecked Sendable {
         let systemData = systemTimeline.isEmpty ? nil : Self.data(sysDown.convert(systemTimeline))
         guard micData != nil || systemData != nil else { return }
         let capturedAt = Date().timeIntervalSince1970
-        let micSpeechEvents = localMicSpeechEvents(clean, capturedAt: capturedAt)
-        let systemSpeechEvents = localSystemSpeechEvents(systemTimeline, capturedAt: capturedAt)
         let micChunk: SequencedAudioChunk? = micData.map { data in
             micSequence &+= 1
             return SequencedAudioChunk(
@@ -384,7 +398,13 @@ final class AggregateEchoCapture: @unchecked Sendable {
         let onSystem = self.onSystem
         let onMicSpeechEvent = self.onMicSpeechEvent
         let onSystemSpeechEvent = self.onSystemSpeechEvent
-        deliveryQueue.async {
+        deliveryQueue.async { [self] in
+            // Turn detection happens here rather than in the IOProc. `clean` and `systemTimeline` are
+            // value types, so the realtime thread hands them over without doing the work itself.
+            let micSpeechEvents = usesLocalTurnDetection
+                ? localMicSpeechEvents(clean, capturedAt: capturedAt) : []
+            let systemSpeechEvents = usesLocalTurnDetection
+                ? localSystemSpeechEvents(systemTimeline, capturedAt: capturedAt) : []
             if let micChunk {
                 onMicCaptured(micChunk.sequence, micChunk.sampleCount, micChunk.capturedAt)
                 onMicClean(micChunk.data, micChunk.sequence, micChunk.capturedAt)
@@ -412,9 +432,10 @@ final class AggregateEchoCapture: @unchecked Sendable {
         _ samples: [Int16],
         capturedAt: TimeInterval
     ) -> [SpeechEndpointDetector.Event] {
-        guard let micVoiceActivityDetector, var detector = micEndpointDetector else { return [] }
+        guard let micVoiceActivityDetector, let micVadDown,
+              var detector = micEndpointDetector else { return [] }
         let events = Self.endpointEvents(
-            decisions: micVoiceActivityDetector.classify(samples),
+            frames: micVoiceActivityDetector.classify(micVadDown.convert(samples)),
             detector: &detector,
             capturedAt: capturedAt)
         micEndpointDetector = detector
@@ -425,9 +446,10 @@ final class AggregateEchoCapture: @unchecked Sendable {
         _ samples: [Int16],
         capturedAt: TimeInterval
     ) -> [SpeechEndpointDetector.Event] {
-        guard let systemVoiceActivityDetector, var detector = systemEndpointDetector else { return [] }
+        guard let systemVoiceActivityDetector, let systemVadDown,
+              var detector = systemEndpointDetector else { return [] }
         let events = Self.endpointEvents(
-            decisions: systemVoiceActivityDetector.classify(samples),
+            frames: systemVoiceActivityDetector.classify(systemVadDown.convert(samples)),
             detector: &detector,
             capturedAt: capturedAt)
         systemEndpointDetector = detector
@@ -435,14 +457,18 @@ final class AggregateEchoCapture: @unchecked Sendable {
     }
 
     private static func endpointEvents(
-        decisions: [Bool],
+        frames: [SileroVoiceActivityDetector.Frame],
         detector: inout SpeechEndpointDetector,
         capturedAt: TimeInterval
     ) -> [SpeechEndpointDetector.Event] {
-        decisions.enumerated().compactMap { index, isSpeech in
+        // A frame usually opens before this callback's audio, because one delivered chunk is shorter
+        // than 32 ms. Its own offset dates it rather than assuming frames start where callbacks do.
+        frames.compactMap { frame in
             detector.observe(
-                isSpeech: isSpeech,
-                frameStartedAt: capturedAt + TimeInterval(index) / 100)
+                speechProbability: frame.probability,
+                frameStartedAt: capturedAt
+                    + TimeInterval(frame.startOffsetSamples)
+                        / TimeInterval(SileroVoiceActivityDetector.sampleRate))
         }
     }
 

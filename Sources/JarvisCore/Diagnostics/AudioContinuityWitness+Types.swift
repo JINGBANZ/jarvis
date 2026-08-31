@@ -40,6 +40,10 @@ extension AudioContinuityWitness {
         public let serverSpeechGrace: TimeInterval
         public let maximumPendingCaptures: Int
         public let maximumActivityEpisodes: Int
+        /// Whether the provider reports its own speech boundaries. Client-commit models disable
+        /// server VAD, so the server cannot describe speech until *after* a commit; comparing local
+        /// activity against it then flags every healthy utterance. False turns that check off.
+        public let expectsServerSpeechEvents: Bool
         public let activity: ActivityConfiguration
 
         public init(snapshotInterval: TimeInterval = 15,
@@ -50,6 +54,7 @@ extension AudioContinuityWitness {
                     serverSpeechGrace: TimeInterval = 3,
                     maximumPendingCaptures: Int = 4_096,
                     maximumActivityEpisodes: Int = 256,
+                    expectsServerSpeechEvents: Bool = true,
                     activity: ActivityConfiguration = .init()) {
             precondition(snapshotInterval > 0 && captureStallThreshold > 0)
             precondition(deliveryLagThreshold > 0 && sustainedActivityDuration >= 0)
@@ -63,6 +68,7 @@ extension AudioContinuityWitness {
             self.serverSpeechGrace = serverSpeechGrace
             self.maximumPendingCaptures = maximumPendingCaptures
             self.maximumActivityEpisodes = maximumActivityEpisodes
+            self.expectsServerSpeechEvents = expectsServerSpeechEvents
             self.activity = activity
         }
     }

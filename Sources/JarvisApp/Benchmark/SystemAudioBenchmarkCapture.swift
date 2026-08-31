@@ -42,10 +42,12 @@ final class SystemAudioBenchmarkCapture: @unchecked Sendable {
     private var aggregateID = AudioObjectID(kAudioObjectUnknown)
     private var procID: AudioDeviceIOProcID?
     private var downToWire: Resampler?
-    private var upToVAD: Resampler?
-    private var voiceActivityDetector: WebRTCVoiceActivityDetector?
+    private var toVAD: Resampler?
+    private var voiceActivityDetector: SileroVoiceActivityDetector?
     /// IOProc-only state while the device runs; teardown first drains that callback.
-    private var endpointDetector = SpeechEndpointDetector(trailingSilenceDuration: 1.0)
+    private var endpointDetector = SpeechEndpointDetector(
+        frameDuration: SileroVoiceActivityDetector.frameDuration,
+        trailingSilenceDuration: 1.0)
     private var sequence: UInt64 = 0
 
     init(
@@ -119,19 +121,15 @@ final class SystemAudioBenchmarkCapture: @unchecked Sendable {
         guard let downToWire = Resampler(
             fromHz: sampleRate,
             toHz: Double(TranscriptionAudioFormat.pcm16Mono.sampleRate)),
-              let voiceActivityDetector = WebRTCVoiceActivityDetector() else {
+              let voiceActivityDetector = SileroVoiceActivityDetector(),
+              let toVAD = Resampler(
+                fromHz: sampleRate,
+                toHz: Double(SileroVoiceActivityDetector.sampleRate)) else {
             throw Failure.conversionUnavailable
         }
         self.downToWire = downToWire
         self.voiceActivityDetector = voiceActivityDetector
-        if abs(sampleRate - 48_000) >= 1 {
-            guard let upToVAD = Resampler(fromHz: sampleRate, toHz: 48_000) else {
-                throw Failure.conversionUnavailable
-            }
-            self.upToVAD = upToVAD
-        } else {
-            upToVAD = nil
-        }
+        self.toVAD = toVAD
 
         var proc: AudioDeviceIOProcID?
         let callbackStatus = AudioDeviceCreateIOProcIDWithBlock(
@@ -163,7 +161,7 @@ final class SystemAudioBenchmarkCapture: @unchecked Sendable {
         aggregateID = AudioObjectID(kAudioObjectUnknown)
         tapID = AudioObjectID(kAudioObjectUnknown)
         downToWire = nil
-        upToVAD = nil
+        toVAD = nil
         voiceActivityDetector = nil
         endpointDetector.reset()
         sequence = 0
@@ -174,18 +172,19 @@ final class SystemAudioBenchmarkCapture: @unchecked Sendable {
             UnsafeMutablePointer(mutating: list))
         guard let buffer = buffers.first,
               let downToWire,
-              let voiceActivityDetector else { return }
+              let voiceActivityDetector,
+              let toVAD else { return }
         let nativeSamples = Self.monoInt16(buffer)
         guard !nativeSamples.isEmpty else { return }
-        let vadSamples = upToVAD?.convert(nativeSamples) ?? nativeSamples
         let capturedAt = Date().timeIntervalSince1970
-        let decisions = voiceActivityDetector.classify(vadSamples)
         var endpointEvents: [SpeechEndpointDetector.Event] = []
         endpointEvents.reserveCapacity(2)
-        for (index, decision) in decisions.enumerated() {
+        for frame in voiceActivityDetector.classify(toVAD.convert(nativeSamples)) {
             if let event = endpointDetector.observe(
-                isSpeech: decision,
-                frameStartedAt: capturedAt + TimeInterval(index) / 100) {
+                speechProbability: frame.probability,
+                frameStartedAt: capturedAt
+                    + TimeInterval(frame.startOffsetSamples)
+                        / TimeInterval(SileroVoiceActivityDetector.sampleRate)) {
                 endpointEvents.append(event)
             }
         }

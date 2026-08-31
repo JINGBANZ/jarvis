@@ -34,13 +34,16 @@ final class RealtimeContinuityReporter: @unchecked Sendable {
         speaker: Speaker,
         clock: Clock,
         sessionStart: TimeInterval,
-        boundary: Boundary = .openAIRealtime
+        boundary: Boundary = .openAIRealtime,
+        expectsServerSpeechEvents: Bool = true
     ) {
         self.speaker = speaker
         self.clock = clock
         self.sessionStart = sessionStart
         self.boundary = boundary
-        witness = AudioContinuityWitness(startedAt: 0)
+        witness = AudioContinuityWitness(
+            configuration: .init(expectsServerSpeechEvents: expectsServerSpeechEvents),
+            startedAt: 0)
     }
 
     func start() {

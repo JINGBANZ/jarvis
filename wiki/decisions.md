@@ -1125,6 +1125,8 @@
 
 ### 2026-08-01 — GPT Live uses local WebRTC VAD and explicit commits
 
+- **Superseded by:** [2026-08-31 — Local turn detection runs on Silero, not classic WebRTC VAD](#2026-08-31--local-turn-detection-runs-on-silero-not-classic-webrtc-vad).
+  The explicit-commit design stands; only the detector behind it changed.
 - **Chose:** Keep GPT-4o Transcribe on its existing tuned `server_vad` path. For opt-in GPT Live
   Transcribe, disable unsupported server turn detection and run one classic WebRTC VAD instance per
   post-AEC 48 kHz speaker stream. A Foundation-only endpoint policy confirms speech and waits through
@@ -2140,3 +2142,36 @@
   matched by author instead.
 - **Detail:** `.coderabbit.yaml`, `.github/workflows/claude-code-review.yml`,
   [status.md](./status.md).
+
+### 2026-08-31 — Local turn detection runs on Silero, not classic WebRTC VAD
+
+- **Supersedes:** the detector half of
+  [2026-08-01 — GPT Live uses local WebRTC VAD and explicit commits](#2026-08-01--gpt-live-uses-local-webrtc-vad-and-explicit-commits).
+  The explicit-commit and `item_id` binding design is unchanged.
+- **Chose:** Silero VAD v6.2.1, converted to a committed Core ML model by `scripts/build-vad.sh` and
+  run per speaker stream. `SpeechEndpointDetector` consumes per-frame *probabilities* with a Schmitt
+  trigger (activation 0.5, release 0.35) instead of booleans, and the local trailing-silence window
+  moves to its own `localEndpointSilenceDurationMs` (800 ms) so tuning it no longer retunes OpenAI's
+  server VAD. Inference runs on the capture delivery queue rather than the Core Audio IOProc.
+- **Why:** Classic WebRTC VAD is biased toward recall and false-positives on impulsive broadband
+  noise. Laptop typing near the mic held one turn open for 86.4 seconds in production; 341 s of a
+  380 s session read as a single utterance, and because a client-commit model shows no text before
+  its commit, the user saw nothing and repeated themselves into the same unbroken turn. On an A/B
+  fixture the shipped WebRTC binary marked 41.2% of a keyboard segment as speech and invented a
+  6.6 s turn; Silero peaked at p=0.023 there against a 0.5 threshold and produced none. Probabilities
+  also make hysteresis expressible at all, which a one-bit detector cannot do.
+- **Rejected:** (a) A maximum turn duration. Real speech legitimately runs past a minute, and
+  upstream Silero defaults `max_speech_duration_s` to infinity; bound silence, not speech. (b) The
+  adaptive-RMS activity detector as the primary gate. It segmented the failing session correctly but
+  is an energy detector with no spectral discrimination, so it cannot separate speech from any loud
+  noise; it stays a diagnostic, and remains available as a Pipecat-style corroborating gate. (c) The
+  `FluidAudio` package. It carries ASR, TTS, diarization and a Rust XCFramework for 1 MB of VAD,
+  downloads models at runtime by default, quantizes boundaries to 256 ms, and ships a 14 s
+  auto-split. (d) ONNX Runtime. A tens-of-MB general inference runtime to run a 2 MB model. (e) TEN
+  VAD. Apache-2.0 plus an Agora non-compete that propagates to derivatives. (f) Picovoice Cobra.
+  Closed, with a server-validated access key. (g) Apple `SoundAnalysis`. A 300-class sound tagger on
+  windows of 0.5 s or more, an order of magnitude coarser than 32 ms frames.
+- **Detail:** [architecture.md → Models and APIs](./architecture.md#models-and-apis),
+  `scripts/build-vad.sh`, `scripts/vad/convert_silero.py`,
+  `Sources/JarvisApp/Capture/SileroVoiceActivityDetector.swift`,
+  `Sources/JarvisCore/Audio/SpeechEndpointDetector.swift`.
