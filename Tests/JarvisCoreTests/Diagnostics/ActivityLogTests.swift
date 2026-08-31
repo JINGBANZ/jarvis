@@ -209,6 +209,22 @@ import Foundation
         ))
     }
 
+    @Test func prepNotesSearchedRendersMatchCountAndCssClass() async throws {
+        let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
+        let (log, evidence) = ActivityLog.recordingSession(in: dir)
+        evidence.record(.prepNotesSearched(query: "rate limiter", matchCount: 2))
+        evidence.record(.prepNotesSearched(query: "quantum computing", matchCount: 0))
+        _ = await evidence.close()
+        let snapshot = log.attach { _ in }
+
+        #expect(snapshot.rows.count == 2)
+        #expect(snapshot.rows[0].contains("checked prep notes for \\\"rate limiter\\\""))
+        #expect(snapshot.rows[0].contains("found 2 matches"))
+        #expect(snapshot.rows[1].contains("nothing relevant found"))
+        #expect(ActivityLog.cssClass(for: "📎 checked prep notes for \"rate limiter\" — found 2 matches")
+            == "think")
+    }
+
     @Test func temporaryBrainFailureSaysRetryingWithoutDiagnosticDetail() async throws {
         let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         let (log, evidence) = ActivityLog.recordingSession(in: dir)

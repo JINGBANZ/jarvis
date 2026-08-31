@@ -137,7 +137,10 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
             ? SpeechGatedAudioBuffer(maximumPreRollDuration: jarvisManagedTurnPreRollDuration)
             : nil
         self.continuityReporter = RealtimeContinuityReporter(
-            speaker: speaker, clock: clock, sessionStart: sessionStart)
+            speaker: speaker, clock: clock, sessionStart: sessionStart,
+            // Client-commit models run with `turn_detection: null`, so the server never reports
+            // speech boundaries and the local-vs-server comparison would flag every real utterance.
+            expectsServerSpeechEvents: model.turnDetectionStrategy != .clientCommit)
         super.init()
         continuityReporter.onCaptureHeartbeat = { [weak self] signal in
             self?.onCaptureHeartbeat?(signal)

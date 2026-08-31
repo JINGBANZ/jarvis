@@ -369,6 +369,7 @@ public final class ActivityLog: @unchecked Sendable {
         if m.hasPrefix("🗣") || m.hasPrefix("🤫 quiet") { return "hear" }
         if m.hasPrefix("🤫 stayed silent") || m.hasPrefix("💭") || m.hasPrefix("…") { return "think" }
         if m.hasPrefix("🧠") { return "think" }
+        if m.hasPrefix("📎") { return "think" }
         if m.hasPrefix("⏹ session ended by error") { return "err" }
         if m.hasPrefix("⏹ session ended") { return "think" }
         if m.hasPrefix("⚠️") { return "think" }

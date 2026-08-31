@@ -77,6 +77,10 @@ cp "$BIN_PATH" "$APP/Contents/MacOS/$BIN_NAME"
 # Sparkle is linked dynamically, so the framework must be embedded even though the development
 # bundle has no update feed — without it dyld cannot start the app at all.
 ditto "$(dirname "$BIN_PATH")/Sparkle.framework" "$APP/Contents/Frameworks/Sparkle.framework"
+# SwiftPM emits the target's resources (the Silero VAD model) as a side-by-side bundle. Copy it into
+# Contents/Resources so `Bundle.module` resolves inside the assembled app, not just from .build.
+ditto "$(dirname "$BIN_PATH")/Jarvis_JarvisApp.bundle" \
+      "$APP/Contents/Resources/Jarvis_JarvisApp.bundle"
 rm -rf "$APP/Contents/Frameworks/Sparkle.framework/Versions/Current/XPCServices" \
        "$APP/Contents/Frameworks/Sparkle.framework/XPCServices"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
@@ -91,6 +95,10 @@ cp Resources/Jarvis.icns "$APP/Contents/Resources/Jarvis.icns"
 # the Developer ID release over it anyway. Removing the feed leaves the app with no updater at all,
 # and the menu omits "Check for Updates" rather than offering an action that must fail.
 /usr/bin/plutil -remove SUFeedURL "$APP/Contents/Info.plist"
+# The copied plist carries the version of whichever release this checkout descends from, which would
+# misname a local build in the menu's footer caption. Marking the bundle makes that caption read a red
+# "Dev" instead, so it is obvious at a glance which variant is running.
+/usr/bin/plutil -replace JarvisDevelopmentBuild -bool YES "$APP/Contents/Info.plist"
 
 echo "▶ signing with '$IDENTITY'"
 codesign --force --deep --sign "$IDENTITY" "$APP"
