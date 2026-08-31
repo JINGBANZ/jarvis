@@ -44,9 +44,13 @@ enum Permissions {
         case .microphone:
             return await requestMicrophone()
         case .systemAudio:
-            let granted = await probeSystemAudio()
-            preferences.systemAudioGranted = granted
-            return granted
+            // A probe that could not run says nothing about the grant, so the remembered answer
+            // stands. Recording it as a refusal would let one Bluetooth transition erase a grant
+            // the user really gave.
+            if let answer = await probeSystemAudio() {
+                preferences.systemAudioGranted = answer
+            }
+            return preferences.systemAudioGranted
         case .screenRecording:
             // Recorded before the answer, because there won't be a usable one: this process cannot
             // see the grant either way. A later launch that still lacks it is the proof of refusal.
@@ -80,7 +84,7 @@ enum Permissions {
 
     /// The probe blocks its thread while macOS shows the prompt, so it never runs on the main
     /// actor — the checklist has to keep drawing behind the dialog.
-    private static func probeSystemAudio() async -> Bool {
+    private static func probeSystemAudio() async -> Bool? {
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 continuation.resume(returning: SystemAudioPermissionProbe.requestAccess())

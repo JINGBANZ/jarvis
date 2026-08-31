@@ -93,6 +93,7 @@ final class PermissionGate: NSObject, NSWindowDelegate {
             NSApp.terminate(nil)
             return
         }
+        checklist?.stopObservingActivation()
         onSatisfied?()
     }
 }

@@ -21,15 +21,19 @@ enum SystemAudioPermissionProbe {
     /// fresh install this is what raises "Jarvis wants to record this computer's audio", and the
     /// call blocks until the user answers. Afterwards macOS answers for them, so it doubles as the
     /// check that no public API provides.
-    static func requestAccess() -> Bool {
-        guard #available(macOS 14.2, *) else { return false }
+    ///
+    /// `nil` means the probe could not run at all — no output device, a tap or device that would
+    /// not build, a tone that would not play. That is not a refusal, and callers must not record it
+    /// as one: a Bluetooth device mid-transition would otherwise overwrite a proved grant.
+    static func requestAccess() -> Bool? {
+        guard #available(macOS 14.2, *) else { return nil }
         guard let processObject = ownProcessObject() else {
             jlog("Jarvis: system-audio probe — Core Audio doesn't know this process")
-            return false
+            return nil
         }
         guard let outputUID = defaultOutputDeviceUID() else {
             jlog("Jarvis: system-audio probe — no default output device to clock the tap")
-            return false
+            return nil
         }
 
         let description = CATapDescription(monoMixdownOfProcesses: [processObject])
@@ -39,7 +43,7 @@ enum SystemAudioPermissionProbe {
         guard AudioHardwareCreateProcessTap(description, &tap) == noErr,
               tap != kAudioObjectUnknown else {
             jlog("Jarvis: system-audio probe — process tap creation failed")
-            return false
+            return nil
         }
         defer { AudioHardwareDestroyProcessTap(tap) }
 
@@ -62,7 +66,7 @@ enum SystemAudioPermissionProbe {
             aggregateDescription as CFDictionary, &aggregate) == noErr,
               aggregate != kAudioObjectUnknown else {
             jlog("Jarvis: system-audio probe — aggregate device creation failed")
-            return false
+            return nil
         }
         defer { AudioHardwareDestroyAggregateDevice(aggregate) }
 
@@ -87,18 +91,16 @@ enum SystemAudioPermissionProbe {
             }
         }) == noErr, let proc else {
             jlog("Jarvis: system-audio probe — IOProc creation failed")
-            return false
+            return nil
         }
         defer { AudioDeviceDestroyIOProcID(aggregate, proc) }
 
         guard AudioDeviceStart(aggregate, proc) == noErr else {
             jlog("Jarvis: system-audio probe — device start failed")
-            return false
+            return nil
         }
-        defer { AudioDeviceStop(aggregate, proc) }
-
-        let engine = playProbeTone()
-        defer { engine?.stop() }
+        guard let engine = playProbeTone() else { return nil }
+        defer { engine.stop() }
         // Deliberately not polling `heard` while the tone plays: that would read the flag on this
         // thread while the IOProc writes it. Waiting the whole window and reading once after
         // `AudioDeviceStop` costs a fixed second and needs no synchronization on the audio thread.
@@ -106,7 +108,7 @@ enum SystemAudioPermissionProbe {
         AudioDeviceStop(aggregate, proc)
 
         let granted = heard.pointee
-        jlog("Jarvis: system-audio permission \(granted ? "granted" : "denied — the probe tone came back as digital silence")")
+        jlog("Jarvis: system-audio permission \(granted ? "granted" : "denied — the tone played but came back as digital silence")")
         return granted
     }
 

@@ -32,6 +32,9 @@ final class PermissionsChecklistView: NSView {
     private var quitButton = ClosureButton(title: "", action: {})
     private var rows: [Row] = []
     private var isRequesting = false
+    /// Retained so the gate can stop listening once it is done; otherwise `render()` would run on
+    /// every activation for the rest of the process's life.
+    private var activationObserver: (any NSObjectProtocol)?
     /// The permission being asked about right now, so the other rows can recede.
     private var asking: JarvisReadiness.Permission?
     /// Permissions the user has already been sent to System Settings for. Screen Recording needs
@@ -82,7 +85,7 @@ final class PermissionsChecklistView: NSView {
         // Returning from System Settings changes what a click will do, and `primaryAction` reads
         // that live. Without this the label keeps the last walk's text, so a button saying "Open
         // System Settings" could quietly start Jarvis instead.
-        NotificationCenter.default.addObserver(
+        activationObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
         ) { [weak self] _ in
             Task { @MainActor in
@@ -97,6 +100,14 @@ final class PermissionsChecklistView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    /// Stops watching for activation. Called once the gate is satisfied: past that point the app
+    /// itself is running and this view has nothing left to refresh.
+    func stopObservingActivation() {
+        guard let activationObserver else { return }
+        NotificationCenter.default.removeObserver(activationObserver)
+        self.activationObserver = nil
     }
 
     // MARK: - The walk
@@ -156,11 +167,11 @@ final class PermissionsChecklistView: NSView {
 
     /// macOS answers a refusal without prompting again, so the settings pane is the only way back.
     private func openSystemSettings(for permissions: [JarvisReadiness.Permission]) {
-        // Screen Recording and System Audio Recording share one pane from macOS 15 on.
-        let anchor = switch permissions.first {
-        case .microphone: "Privacy_Microphone"
-        default: "Privacy_ScreenCapture"
-        }
+        // Screen Recording and System Audio Recording share one pane from macOS 15 on, and only
+        // one pane can be opened, so the others are not visited by this click.
+        let opensMicrophonePane = permissions.first == .microphone
+        let anchor = opensMicrophonePane ? "Privacy_Microphone" : "Privacy_ScreenCapture"
+        let covered = permissions.filter { ($0 == .microphone) == opensMicrophonePane }
         guard let url = URL(
             string: "x-apple.systempreferences:com.apple.preference.security?\(anchor)")
         else { return }
@@ -170,19 +181,32 @@ final class PermissionsChecklistView: NSView {
             jlog("Jarvis: couldn't open the \(anchor) settings pane")
             return
         }
-        sentToSettings.formUnion(permissions)
+        sentToSettings.formUnion(covered)
         render()
     }
 
     /// A fresh Screen Recording grant is only visible to a new process. Safe to do from here and
     /// nowhere else: the gate runs at launch, so there is no session to kill.
     private func relaunch() {
+        // One in-flight relaunch only: a second click would ask for a second instance while just
+        // this one exits.
+        isRequesting = true
+        render()
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.createsNewApplicationInstance = true
         NSWorkspace.shared.openApplication( // ghost-mode-allowed: explicit click on the launch gate
             at: Bundle.main.bundleURL, configuration: configuration
-        ) { _, _ in
-            Task { @MainActor in NSApp.terminate(nil) }
+        ) { [weak self] _, error in
+            Task { @MainActor in
+                guard error == nil else {
+                    // Quitting now would leave the user with nothing running.
+                    jlog("Jarvis: relaunch failed — \(String(describing: error))")
+                    self?.isRequesting = false
+                    self?.render()
+                    return
+                }
+                NSApp.terminate(nil)
+            }
         }
     }
 
