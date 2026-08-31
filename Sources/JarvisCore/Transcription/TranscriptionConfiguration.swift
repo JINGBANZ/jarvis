@@ -8,18 +8,21 @@ public struct TranscriptionConfiguration: Equatable, Sendable {
     public let provider: TranscriptionProvider
     public let openAIModel: OpenAITranscriptionModel
     public let openAIExpectedLanguages: [OpenAITranscriptionLanguage]
+    public let openAIVocabularyKeywords: [String]
     public let appleSpeechLocaleIdentifier: String
 
     public init(
         provider: TranscriptionProvider,
         openAIModel: OpenAITranscriptionModel,
         openAIExpectedLanguages: [OpenAITranscriptionLanguage],
+        openAIVocabularyKeywords: [String] = [],
         appleSpeechLocaleIdentifier: String
     ) {
         self.provider = provider
         self.openAIModel = openAIModel
         self.openAIExpectedLanguages = OpenAITranscriptionLanguage.canonicalizing(
             openAIExpectedLanguages)
+        self.openAIVocabularyKeywords = openAIVocabularyKeywords
         self.appleSpeechLocaleIdentifier = appleSpeechLocaleIdentifier
     }
 

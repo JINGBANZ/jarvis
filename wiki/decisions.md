@@ -1157,6 +1157,9 @@
   speaker-role-aware recording context and plural expected-language hints, while GPT Live also
   requests low transcription delay. GPT Transcribe completion-language metadata goes only to debug
   diagnostics. Vocabulary keywords remain unset.
+- **Superseded in part by:** [2026-08-31 — Vocabulary keywords bias GPT Transcribe and GPT Live
+  recognition](#2026-08-31--vocabulary-keywords-bias-gpt-transcribe-and-gpt-live-recognition). The
+  server-VAD/fixed-context/expected-language design here is unchanged.
 - **Why:** The current GPT Transcribe Realtime contract accepts server VAD and produces the same
   speech-start, speech-stop, committed-item, and completed-item sequence Jarvis already reconciles.
   That keeps endpoint ownership on the server for models that support it and preserves local VAD
@@ -1169,7 +1172,9 @@
   (c) Enabling server VAD for GPT Live—the live API rejects that model/configuration combination.
   (d) Dynamic OCR, prior-turn, or transcript-derived prompts—the role context is sufficient for this
   step and avoids another changing data path. (e) Vocabulary keywords—the user explicitly deferred
-  them. (f) Changing the default before a same-input three-model comparison.
+  them, until [2026-08-31 — Vocabulary keywords bias GPT Transcribe and GPT Live
+  recognition](#2026-08-31--vocabulary-keywords-bias-gpt-transcribe-and-gpt-live-recognition). (f)
+  Changing the default before a same-input three-model comparison.
 - **Detail:** [architecture.md → Models and APIs](./architecture.md#models-and-apis),
   [settings-window.md → Brain](./settings-window.md#brain),
   `Sources/JarvisCore/Transcription/RealtimeSession.swift`,
@@ -1181,6 +1186,9 @@
 
 - **Superseded by:** [2026-08-31 — Local turn detection runs on Silero, not classic WebRTC VAD](#2026-08-31--local-turn-detection-runs-on-silero-not-classic-webrtc-vad),
   for the detector only. The committed-turn contract this entry establishes still holds.
+- **Superseded in part by:** [2026-08-31 — Vocabulary keywords bias GPT Transcribe and GPT Live
+  recognition](#2026-08-31--vocabulary-keywords-bias-gpt-transcribe-and-gpt-live-recognition), for
+  vocabulary keywords only.
 - **Chose:** Keep GPT-4o Transcribe on tuned server VAD. Run GPT Transcribe and GPT Live through the
   existing local WebRTC VAD, ordered append, explicit commit, acknowledgement, and `item_id`
   lifecycle path. GPT Transcribe retains its fixed recording context, plural expected-language
@@ -2179,3 +2187,34 @@
   `scripts/build-vad.sh`, `scripts/vad/convert_silero.py`,
   `Sources/JarvisApp/Capture/SileroVoiceActivityDetector.swift`,
   `Sources/JarvisCore/Audio/SpeechEndpointDetector.swift`.
+
+### 2026-08-31 — Vocabulary keywords bias GPT Transcribe and GPT Live recognition
+
+- **Supersedes in part:** 2026-08-06 — GPT Transcribe uses server VAD while GPT Live keeps local
+  endpoints, and 2026-08-06 — GPT Transcribe requires explicit committed turns, on vocabulary
+  keywords only; their server-VAD/committed-turn/context/language decisions are unchanged.
+- **Chose:** Let the user enter a free-text, comma-separated glossary of literal terms (jargon,
+  names) in Settings → Transcription. Send it as the GA Realtime API's `keywords` field alongside
+  `prompt`, so only GPT Transcribe and GPT Live receive it — GPT-4o Transcribe has neither field and
+  ignores the setting until the user switches models. Persisted via `TranscriptionPreferences`
+  exactly like expected languages; blank/whitespace-only entries are dropped on write.
+- **Why:** The user's own report was mangled technical terms and names, not wrong-language
+  lock-in — literal vocabulary priming is what OpenAI's `keywords` field exists for, and it was
+  already deliberately stubbed out pending exactly this request (see the superseded entries).
+  Keeping it a flat user-maintained list — rather than deriving it from prep-material — is the
+  smallest change that addresses the reported failure mode; prep-material is chunked/BM25-indexed
+  for the coach's own retrieval tool, not shaped as short discrete terms, and deriving a glossary
+  from it is tracked separately.
+- **Rejected:** (a) Changing the default model or default expected-language away from GPT-4o
+  Transcribe / Automatic — those defaults were deliberate (compatibility, and never silently
+  assuming English); the user can already switch both from existing Settings pickers. (b) Folding
+  the glossary into the existing `prompt` prose instead of the dedicated `keywords` field — the GA
+  API exposes `keywords` specifically for literal terms, and mixing the two would make the fixed
+  role-context prompt user-editable for no reason. (c) Deriving vocabulary automatically from
+  prep-material sources in this change — a separate extraction path over already-large prep files,
+  with its own merge-with-static-list and cost questions; left for a follow-up ticket.
+- **Detail:** [architecture.md → Models and APIs](./architecture.md#models-and-apis),
+  `Sources/JarvisCore/Transcription/RealtimeSession.swift`,
+  `Sources/JarvisCore/Config/TranscriptionPreferences.swift`,
+  `Sources/JarvisApp/Settings/TranscriptionControls.swift`,
+  [GitHub issue #240](https://github.com/JINGBANZ/jarvis/issues/240).

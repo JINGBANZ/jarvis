@@ -23,6 +23,7 @@ enum TranscriptionSessionFactory {
                 apiKey: apiKey,
                 model: configuration.openAIModel,
                 expectedLanguages: configuration.openAIExpectedLanguages,
+                vocabularyKeywords: configuration.openAIVocabularyKeywords,
                 speaker: speaker,
                 transcript: transcript,
                 clock: clock,

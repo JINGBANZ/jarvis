@@ -373,7 +373,9 @@ rather than a per-turn screenshot.
   disable automatic turn detection, keep only bounded local pre-roll while idle, and explicitly
   commit endpoints from a local Silero VAD scoring each post-AEC stream at 16 kHz. GPT
   Transcribe and GPT Live receive fixed role-aware recording context; GPT Live also requests low
-  transcription delay. Jarvis does not send vocabulary keywords. Automatic is the default language
+  transcription delay. Both also receive the user's free-text vocabulary glossary (Settings →
+  Transcription) as literal `keywords`, biasing recognition toward jargon and names; GPT-4o
+  Transcribe has no such field and ignores the setting. Automatic is the default language
   selection and sends no language hint. A single expected language guides recognition without
   translating. Multiple selections are supplied to GPT Transcribe and GPT Live and leave GPT-4o
   automatic because the older model accepts at most one language hint. GPT Transcribe's completion-language

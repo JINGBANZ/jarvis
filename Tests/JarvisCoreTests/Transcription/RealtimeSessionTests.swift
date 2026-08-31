@@ -307,6 +307,33 @@ import Testing
         #expect((committed["prompt"] as? String) != (live["prompt"] as? String))
     }
 
+    /// Keywords are opt-in vocabulary hints: absent by default (matching the prior no-keywords
+    /// behavior), sent only alongside `prompt` for the committed-turn models, and never for GPT-4o
+    /// Transcribe, which has no wire field for either.
+    @Test func keywordsOnlySendToCommittedTurnModels() throws {
+        func transcription(model: OpenAITranscriptionModel, keywords: [String]) throws -> [String: Any] {
+            let payload = RealtimeSession.sessionUpdate(model: model, keywords: keywords)
+            let data = try JSONSerialization.data(withJSONObject: payload)
+            let object = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+            let session = object["session"] as! [String: Any]
+            let audio = session["audio"] as! [String: Any]
+            let input = audio["input"] as! [String: Any]
+            return input["transcription"] as! [String: Any]
+        }
+
+        let gpt4o = try transcription(model: .gpt4oTranscribe, keywords: ["Kubernetes", "gRPC"])
+        #expect(gpt4o["keywords"] == nil)
+
+        let committed = try transcription(model: .gptTranscribe, keywords: ["Kubernetes", "gRPC"])
+        #expect(committed["keywords"] as? [String] == ["Kubernetes", "gRPC"])
+
+        let live = try transcription(model: .gptLiveTranscribe, keywords: ["Sun Xu"])
+        #expect(live["keywords"] as? [String] == ["Sun Xu"])
+
+        let empty = try transcription(model: .gptTranscribe, keywords: [])
+        #expect(empty["keywords"] == nil)
+    }
+
     @Test func detectedLanguageCodesPreserveAbsentAndEmptyMeanings() {
         let type = RealtimeSession.completedTranscriptionType
         #expect(RealtimeSession.detectedLanguageCodes(from: [
