@@ -10,7 +10,9 @@ import Testing
 /// elapsed wall-clock time.
 ///
 /// Serialized because several cases park the worker's serial queue, and because `JarvisLog`'s
-/// attachment is process-global.
+/// attachment is process-global — the latter also needs `JarvisLogAttachmentLock` for exclusivity
+/// against the *other* suites that install the same attachment, since `.serialized` only covers
+/// cases within this one suite.
 @Suite(.serialized) struct DiagnosticEvidenceTests {
     /// Records what reached the Console edge and can park the worker on demand.
     private final class RecordingWriter: SessionAuditWriting, @unchecked Sendable {
@@ -77,6 +79,8 @@ import Testing
             directory: directory,
             worker: SessionAuditWorker(limits: .production, writer: writer))
         wait(for: writer.openEntered)
+        JarvisLogAttachmentLock.acquire()
+        defer { JarvisLogAttachmentLock.release() }
         JarvisLog.attach(to: evidence)
         defer { JarvisLog.detach() }
 
@@ -106,6 +110,8 @@ import Testing
         let evidence = FileSessionAudit(
             directory: directory,
             worker: SessionAuditWorker(limits: .production, writer: RecordingWriter()))
+        JarvisLogAttachmentLock.acquire()
+        defer { JarvisLogAttachmentLock.release() }
         JarvisLog.attach(to: evidence)
         defer { JarvisLog.detach() }
 
@@ -158,6 +164,8 @@ import Testing
         }
         let worker = SessionAuditWorker(limits: .production, writer: RecordingWriter())
         let sessionA = FileSessionAudit(directory: first, worker: worker)
+        JarvisLogAttachmentLock.acquire()
+        defer { JarvisLogAttachmentLock.release() }
         JarvisLog.attach(to: sessionA)
         defer { JarvisLog.detach() }
 
@@ -186,6 +194,8 @@ import Testing
             writer: writer)
         let evidence = FileSessionAudit(directory: directory, worker: worker)
         wait(for: writer.openEntered)
+        JarvisLogAttachmentLock.acquire()
+        defer { JarvisLogAttachmentLock.release() }
         JarvisLog.attach(to: evidence)
         defer { JarvisLog.detach() }
 
@@ -214,6 +224,8 @@ import Testing
             worker: SessionAuditWorker(
                 limits: .init(maxEventCount: 8, maxRetainedBytes: 512),
                 writer: RecordingWriter()))
+        JarvisLogAttachmentLock.acquire()
+        defer { JarvisLogAttachmentLock.release() }
         JarvisLog.attach(to: evidence)
         defer { JarvisLog.detach() }
 
@@ -236,6 +248,8 @@ import Testing
         let evidence = FileSessionAudit(
             directory: directory,
             worker: SessionAuditWorker(limits: .production, writer: writer))
+        JarvisLogAttachmentLock.acquire()
+        defer { JarvisLogAttachmentLock.release() }
         JarvisLog.attach(to: evidence)
         defer { JarvisLog.detach() }
 
@@ -263,6 +277,8 @@ import Testing
                 limits: .init(maxEventCount: 2, maxRetainedBytes: 65_536),
                 writer: writer))
         wait(for: writer.openEntered)
+        JarvisLogAttachmentLock.acquire()
+        defer { JarvisLogAttachmentLock.release() }
         JarvisLog.attach(to: evidence)
         defer { JarvisLog.detach() }
 

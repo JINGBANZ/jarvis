@@ -205,7 +205,9 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 // `GatedScreen` / `HeldCleanupScreen` park their `capture()` until the test releases it, and the
 // driver runs that capture on a `Task.detached`, holding a cooperative-pool thread for the whole
 // park. Three such tests exist in the repository and a CI runner has three pool threads, so
-// overlapping parks can starve every release path. Cap this suite at one at a time.
+// overlapping parks can starve every release path. Cap this suite at one at a time. One case also
+// installs a process-global `JarvisLog` attachment and holds `JarvisLogAttachmentLock` for it, since
+// `.serialized` alone does not protect against the other suites that do the same.
 @Suite(.serialized) struct CoachDriverPipelineTests {
     private func makeDriver(activity: (any ActivityEventRecording)? = nil,
                             brain: BrainClient, brainProvider: BrainProvider? = nil,
@@ -439,6 +441,8 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         // what makes this boundary worth pinning: the two projections must still stay separate.
         let (activityLog, evidence) = ActivityLog.recordingSession(in: dir)
         defer { activityLog.disable(); try? FileManager.default.removeItem(at: dir) }
+        JarvisLogAttachmentLock.acquire()
+        defer { JarvisLogAttachmentLock.release() }
         JarvisLog.attach(to: evidence)
         defer { JarvisLog.detach() }
 

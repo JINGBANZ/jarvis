@@ -8,7 +8,9 @@ import Testing
 /// optional evidence copy may make a session's record partial, and can never change a readiness,
 /// microphone-only degradation, or stop decision.
 ///
-/// Serialized because the evidence-pressure cases install a process-global `JarvisLog` attachment.
+/// Serialized because the evidence-pressure cases install a process-global `JarvisLog` attachment —
+/// `JarvisLogAttachmentLock` additionally guards it against the other suites that do the same, since
+/// `.serialized` only covers cases within this one suite.
 @Suite(.serialized) struct CaptureHeartbeatTests {
     /// The complete observable output of the critical branch for one heartbeat script: what the app
     /// would render, and every lifecycle consequence it would apply, in order.
@@ -108,6 +110,8 @@ import Testing
         #expect(baseline.readiness.last == .stopped)
 
         for variant in try evidenceVariants() {
+            JarvisLogAttachmentLock.acquire()
+            defer { JarvisLogAttachmentLock.release() }
             defer {
                 JarvisLog.detach()
                 try? FileManager.default.removeItem(at: variant.directory)
