@@ -9,10 +9,14 @@ import Testing
 /// byte-starved mailbox, an injected write failure, an explicit session rotation. None asserts on
 /// elapsed wall-clock time.
 ///
-/// Serialized because several cases park the worker's serial queue, and because `JarvisLog`'s
-/// attachment is process-global — the latter also needs `JarvisLogAttachmentLock` for exclusivity
-/// against the *other* suites that install the same attachment, since `.serialized` only covers
-/// cases within this one suite.
+/// Serialized because several cases park the worker's serial queue.
+///
+/// Only the two cases whose claim is `jlog`'s own routing install the process-global `JarvisLog`
+/// attachment, under `JarvisLogAttachmentLock` so no other attaching suite can re-point it. Every
+/// transport-contract case admits diagnostics through `FileSessionAudit.recordDiagnostic` directly
+/// instead: with the attachment installed, any `jlog` from a concurrently running suite lands in
+/// the same mailbox, and the exact-count cases below then flaked in CI (#239). The lock cannot
+/// prevent that, since the emitting suites never take it.
 @Suite(.serialized) struct DiagnosticEvidenceTests {
     /// Records what reached the Console edge and can park the worker on demand.
     private final class RecordingWriter: SessionAuditWriting, @unchecked Sendable {
@@ -110,29 +114,25 @@ import Testing
         let evidence = FileSessionAudit(
             directory: directory,
             worker: SessionAuditWorker(limits: .production, writer: RecordingWriter()))
-        try await JarvisLogAttachmentLock.withExclusiveAttachment {
-            JarvisLog.attach(to: evidence)
-            defer { JarvisLog.detach() }
 
-            jlog("ordered-diagnostic-first")
-            jlog("ordered-diagnostic-second")
-            #expect(await evidence.close() == .complete)
+        admit("ordered-diagnostic-first", into: evidence)
+        admit("ordered-diagnostic-second", into: evidence)
+        #expect(await evidence.close() == .complete)
 
-            let url = directory.appendingPathComponent(FileSessionAudit.diagnosticFilename)
-            let lines = try debugLog(in: directory)
-                .split(separator: "\n", omittingEmptySubsequences: true)
-                .map(String.init)
-            #expect(lines.count == 2)
-            #expect(lines[0].hasSuffix("ordered-diagnostic-first"))
-            #expect(lines[1].hasSuffix("ordered-diagnostic-second"))
-            // "HH:mm:ss.SSS " — the millisecond stamp the agent-facing log has always carried.
-            #expect(lines[0].prefix(12).allSatisfy { $0.isNumber || $0 == ":" || $0 == "." })
-            #expect(String(lines[0].dropFirst(12).prefix(1)) == " ")
+        let url = directory.appendingPathComponent(FileSessionAudit.diagnosticFilename)
+        let lines = try debugLog(in: directory)
+            .split(separator: "\n", omittingEmptySubsequences: true)
+            .map(String.init)
+        #expect(lines.count == 2)
+        #expect(lines[0].hasSuffix("ordered-diagnostic-first"))
+        #expect(lines[1].hasSuffix("ordered-diagnostic-second"))
+        // "HH:mm:ss.SSS " — the millisecond stamp the agent-facing log has always carried.
+        #expect(lines[0].prefix(12).allSatisfy { $0.isNumber || $0 == ":" || $0 == "." })
+        #expect(String(lines[0].dropFirst(12).prefix(1)) == " ")
 
-            let mode = try FileManager.default.attributesOfItem(
-                atPath: url.path)[.posixPermissions] as? NSNumber
-            #expect(mode?.int16Value == 0o600)
-        }
+        let mode = try FileManager.default.attributesOfItem(
+            atPath: url.path)[.posixPermissions] as? NSNumber
+        #expect(mode?.int16Value == 0o600)
     }
 
     /// A diagnostic emitted with no attachment reaches the asynchronous process log and stops
@@ -194,24 +194,20 @@ import Testing
             writer: writer)
         let evidence = FileSessionAudit(directory: directory, worker: worker)
         wait(for: writer.openEntered)
-        try await JarvisLogAttachmentLock.withExclusiveAttachment {
-            JarvisLog.attach(to: evidence)
-            defer { JarvisLog.detach() }
 
-            jlog("accepted-before-capacity")   // fills the second of two slots
-            jlog("dropped-at-capacity")
+        admit("accepted-before-capacity", into: evidence)   // fills the second of two slots
+        admit("dropped-at-capacity", into: evidence)
 
-            writer.releaseOpen()
-            await waitForDebugLine("accepted-before-capacity", in: directory)
-            jlog("accepted-after-capacity")
+        writer.releaseOpen()
+        await waitForDebugLine("accepted-before-capacity", in: directory)
+        admit("accepted-after-capacity", into: evidence)
 
-            #expect(await evidence.close() == .partial)
-            let log = try debugLog(in: directory)
-            #expect(log.contains("accepted-before-capacity"))
-            #expect(!log.contains("dropped-at-capacity"))
-            #expect(log.contains("accepted-after-capacity"))
-            #expect(try healthMarker(in: directory)["queue_overflow"] as? Int == 1)
-        }
+        #expect(await evidence.close() == .partial)
+        let log = try debugLog(in: directory)
+        #expect(log.contains("accepted-before-capacity"))
+        #expect(!log.contains("dropped-at-capacity"))
+        #expect(log.contains("accepted-after-capacity"))
+        #expect(try healthMarker(in: directory)["queue_overflow"] as? Int == 1)
     }
 
     /// An oversize diagnostic is refused outright and marks the session partial; the next one is
@@ -224,19 +220,15 @@ import Testing
             worker: SessionAuditWorker(
                 limits: .init(maxEventCount: 8, maxRetainedBytes: 512),
                 writer: RecordingWriter()))
-        try await JarvisLogAttachmentLock.withExclusiveAttachment {
-            JarvisLog.attach(to: evidence)
-            defer { JarvisLog.detach() }
 
-            jlog(String(repeating: "o", count: 1_024))
-            jlog("small-after-oversize")
+        admit(String(repeating: "o", count: 1_024), into: evidence)
+        admit("small-after-oversize", into: evidence)
 
-            #expect(await evidence.close() == .partial)
-            let log = try debugLog(in: directory)
-            #expect(!log.contains(String(repeating: "o", count: 1_024)))
-            #expect(log.contains("small-after-oversize"))
-            #expect(try healthMarker(in: directory)["oversize_record"] as? Int == 1)
-        }
+        #expect(await evidence.close() == .partial)
+        let log = try debugLog(in: directory)
+        #expect(!log.contains(String(repeating: "o", count: 1_024)))
+        #expect(log.contains("small-after-oversize"))
+        #expect(try healthMarker(in: directory)["oversize_record"] as? Int == 1)
     }
 
     /// A failed debug-log write marks the session partial and leaves later diagnostics working —
@@ -248,21 +240,17 @@ import Testing
         let evidence = FileSessionAudit(
             directory: directory,
             worker: SessionAuditWorker(limits: .production, writer: writer))
-        try await JarvisLogAttachmentLock.withExclusiveAttachment {
-            JarvisLog.attach(to: evidence)
-            defer { JarvisLog.detach() }
 
-            jlog("write-fails-for-this-line")
-            jlog("write-succeeds-for-this-line")
+        admit("write-fails-for-this-line", into: evidence)
+        admit("write-succeeds-for-this-line", into: evidence)
 
-            #expect(await evidence.close() == .partial)
-            let log = try debugLog(in: directory)
-            #expect(!log.contains("write-fails-for-this-line"))
-            #expect(log.contains("write-succeeds-for-this-line"))
-            // Console is ahead of the file on purpose, so a file failure still leaves the line visible.
-            #expect(writer.console.contains("write-fails-for-this-line"))
-            #expect(try healthMarker(in: directory)["write_failure"] as? Int == 1)
-        }
+        #expect(await evidence.close() == .partial)
+        let log = try debugLog(in: directory)
+        #expect(!log.contains("write-fails-for-this-line"))
+        #expect(log.contains("write-succeeds-for-this-line"))
+        // Console is ahead of the file on purpose, so a file failure still leaves the line visible.
+        #expect(writer.console.contains("write-fails-for-this-line"))
+        #expect(try healthMarker(in: directory)["write_failure"] as? Int == 1)
     }
 
     /// Diagnostics get no priority over audit records and grant none: a diagnostics-heavy session
@@ -277,31 +265,33 @@ import Testing
                 limits: .init(maxEventCount: 2, maxRetainedBytes: 65_536),
                 writer: writer))
         wait(for: writer.openEntered)
-        try await JarvisLogAttachmentLock.withExclusiveAttachment {
-            JarvisLog.attach(to: evidence)
-            defer { JarvisLog.detach() }
 
-            jlog("diagnostic-consuming-the-last-slot")
-            evidence.record(
-                tag: "audit-record-lost-to-a-diagnostics-flood",
-                request: Data(#"{"model":"gpt-5.5"}"#.utf8),
-                response: nil,
-                status: nil,
-                latencyMs: 1)
+        admit("diagnostic-consuming-the-last-slot", into: evidence)
+        evidence.record(
+            tag: "audit-record-lost-to-a-diagnostics-flood",
+            request: Data(#"{"model":"gpt-5.5"}"#.utf8),
+            response: nil,
+            status: nil,
+            latencyMs: 1)
 
-            writer.releaseOpen()
-            #expect(await evidence.close() == .partial)
-            let traffic = try String(
-                contentsOf: directory.appendingPathComponent(
-                    FileSessionAudit.brainTrafficFilename),
-                encoding: .utf8)
-            #expect(!traffic.contains("audit-record-lost-to-a-diagnostics-flood"))
-            #expect(try debugLog(in: directory).contains("diagnostic-consuming-the-last-slot"))
-            #expect(try healthMarker(in: directory)["queue_overflow"] as? Int == 1)
-        }
+        writer.releaseOpen()
+        #expect(await evidence.close() == .partial)
+        let traffic = try String(
+            contentsOf: directory.appendingPathComponent(
+                FileSessionAudit.brainTrafficFilename),
+            encoding: .utf8)
+        #expect(!traffic.contains("audit-record-lost-to-a-diagnostics-flood"))
+        #expect(try debugLog(in: directory).contains("diagnostic-consuming-the-last-slot"))
+        #expect(try healthMarker(in: directory)["queue_overflow"] as? Int == 1)
     }
 
     // MARK: - helpers
+
+    /// The admission `JarvisLog.emit` performs for an attached session, made on the handle itself
+    /// so the process-global attachment stays untouched.
+    private func admit(_ message: String, into evidence: FileSessionAudit) {
+        _ = evidence.recordDiagnostic(DiagnosticAuditEvent(message: message))
+    }
 
     private func debugLog(in directory: URL) throws -> String {
         let url = directory.appendingPathComponent(FileSessionAudit.diagnosticFilename)

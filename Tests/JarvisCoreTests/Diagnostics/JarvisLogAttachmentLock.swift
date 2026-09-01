@@ -10,6 +10,12 @@ import Foundation
 /// still runs distinct suites concurrently by default, so two suites' tests could otherwise race to
 /// attach and silently mis-attribute each other's diagnostics.
 ///
+/// The lock covers attaching only. It cannot stop the other suites from *emitting*: while an
+/// attachment is installed, every `jlog` anywhere in the process lands in the attached session, and
+/// the emitting suites never take this lock. So attach only for a claim about `jlog`'s routing, and
+/// only with presence/absence assertions. A test that asserts an exact count or a tiny mailbox must
+/// admit through `FileSessionAudit.recordDiagnostic` directly instead (#239).
+///
 /// An `actor` (suspending, not thread-blocking) rather than a `DispatchSemaphore`: a semaphore's
 /// `wait()` blocks the calling thread outright, and every call site here holds the lock across real
 /// `await` points (`evidence.close()`, `waitForDebugLine`, `CoachingParityHarness.run`'s own async
