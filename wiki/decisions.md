@@ -2217,3 +2217,42 @@
   `Tests/JarvisCoreTests/Diagnostics/CaptureHeartbeatTests.swift`,
   `Tests/JarvisCoreTests/Diagnostics/CoachingParityHarness.swift`,
   `Tests/JarvisCoreTests/Diagnostics/SessionAuditIsolationTests.swift`.
+
+### 2026-08-30 - Jarvis will not run without every grant, and proves the silent one by ear
+
+- **Chose:** Present a permission gate at launch and build nothing else until Jarvis holds
+  Microphone, System Audio Recording, and Screen Recording: no menu bar, no overlays, no session
+  runtime. One button walks the dialogs one at a time; a Quit button beside it, and the window's
+  close button, both exit the app.
+- **Chose:** Prove the system-audio grant by tapping *Jarvis's own process*, muted, playing half a
+  second of tone, and listening for it. Hearing it back is the grant; digital silence is a refusal.
+- **Chose:** Prove grants, never remember them. Nothing persists a grant; system audio is proved at
+  launch and again inside every Start, and a probe that cannot run refuses rather than falling back.
+  The single persisted value records that Screen Recording was *asked for*, which is a fact about
+  Jarvis rather than a claim about macOS, and is what lets a later launch tell a refusal from a
+  grant awaiting relaunch.
+- **Why:** A TCC dialog is system UI that no capture-exclusion trick hides, and Core Audio's
+  system-audio prompt fired on the first Start, which for this product is the moment an interview
+  begins and a screen may be shared. Gating the whole app rather than just Start is what makes that
+  true: a half-permitted Jarvis could still be started from the menu bar and could only fail.
+- **Why the tone:** macOS enforces this one grant *silently*. Denied, every call still returns
+  `noErr`, the tap still reports a 48 kHz format, the aggregate still reports a channel, the device
+  still starts, and callbacks still arrive; only the samples differ. Measured on macOS 26: 117
+  callbacks peaking at 0.25 allowed, 116 peaking at 0.0 denied. No status, format, or channel count
+  discriminates, so the only honest check is to make a sound and hear it. Scoping the tap to Jarvis
+  keeps that invisible: nothing the user plays is tapped, nothing they hear is muted.
+- **Rejected:** (a) Treating a successful `AudioDeviceStart` as the grant. It shipped in review and
+  reported a refusal as *Granted*, which is what sent us looking. (b) A muted tone through a *global*
+  tap: it works, but mutes the user's own audio for the probe's length. (c) The private
+  `TCCAccessPreflight`, which is exact and silent but can break on any macOS update. (d) Dropping the
+  claim and detecting a refusal at runtime, as the field does: a denied tap delivers *frames*, so
+  `CaptureReadinessMonitor` sees a healthy stream and the user gets a half-deaf coach with no notice.
+  That same fact is why a grant is proved rather than remembered: a stored answer reads exactly like
+  a current one, and every caller that could tell them apart would have to carry the distinction.
+  (e) A Permissions tab in Settings, which a hard gate makes unreachable and pointless. (f)
+  Remembering that the gate has run: it appears exactly when the grants are incomplete, which is the
+  same condition. (g) Detecting a mid-session revocation: every mechanism is amplitude policing,
+  which contradicts capture health treating digital silence as valid, or a timer. The next Start
+  refuses with the reason.
+- **Detail:** [architecture.md → Permissions](./architecture.md#permissions),
+  `Sources/JarvisApp/Onboarding/`, `Sources/JarvisApp/Capture/SystemAudioPermissionProbe.swift`.
