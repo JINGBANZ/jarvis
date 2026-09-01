@@ -38,6 +38,10 @@ Two projections read that one stack:
 The closed presentation set is what keeps transport, retry, timing, lifecycle, and raw-error detail
 out of the human view. Sharing one stack grants no producer a path to author free-form human copy.
 
+Provider traffic is kept at the wire level, the exact request and response bodies with images
+redacted, rather than as provider-neutral messages: cache-busting prefix changes and tool-schema
+bloat, the audit's main quarry, are visible only in the bytes actually sent.
+
 ## Contract
 
 - Producers submit typed values to one process-level bounded worker. Timestamp rendering, JSON

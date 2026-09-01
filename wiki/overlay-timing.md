@@ -7,7 +7,7 @@
 ## The problem
 
 The brain returns a tip as a pre-split `lines` array; the overlay shows the lines one at a time (see
-[architecture.md §2](./architecture.md#2-core-loop) and [the queueing decision](./decisions.md)).
+[architecture.md §2](./architecture.md#2-core-loop) and [the queueing rationale](./architecture.md#the-turn)).
 The question this page answers: **how long should each line stay up?**
 
 A single hard-coded duration is wrong — a two-word nudge and a full sentence shouldn't get the same
