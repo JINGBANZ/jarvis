@@ -41,6 +41,12 @@ final class PermissionGate: NSObject, NSWindowDelegate {
         // The two readable grants first, because they cost nothing and cannot prompt. If either is
         // missing the gate is opening anyway, so the walk proves system audio with the window on
         // screen to explain any dialog it raises.
+        // Holding the grant proves we were not refused, so the asked-marker has served its purpose.
+        // Left set, a later reset would make the gate call a fresh, undetermined grant a refusal and
+        // label the row while its dialog is still on screen.
+        if Permissions.isGranted(.screenRecording) {
+            preferences.screenRecordingAsked = false
+        }
         let readable = Self.required.subtracting([.systemAudio])
         guard Permissions.grantedReadinessPermissions().isSuperset(of: readable) else { return false }
         return await Permissions.request(.systemAudio, remembering: preferences)

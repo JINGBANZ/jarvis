@@ -247,9 +247,10 @@ the other side.
 So proof is gathered twice, and lives only in the process that gathered it. At launch the two
 readable grants are checked first, because they cost nothing and cannot prompt; system audio is
 probed only when they are held, so anything missing opens the gate and lets the walk raise its
-dialogs with a window on screen to explain them. Then every Start proves system audio again inside
-the preparation it already runs, since a menu-bar app can sit for days between launches and a grant
-withdrawn in that time would otherwise reach a session. A probe that cannot run proves nothing and
+dialogs with a window on screen to explain them. Then every Start proves system audio again, ahead of the
+preparation it already runs, since a menu-bar app can sit for days between launches and a grant
+withdrawn in that time would otherwise reach a session. Every Start takes that path: there is no
+longer a configuration with nothing to await. A probe that cannot run proves nothing and
 refuses; it never falls back to a previous answer.
 
 The one thing that persists is `screenRecordingAsked`, and it is not a grant: it records that Jarvis

@@ -278,7 +278,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         brain.applySavedAPIKey(key)
     }
 
-    /// Validate a Start immediately, then prepare any local-CLI targets and on-device speech assets.
+    /// Validate a Start immediately, then prove system audio and prepare any local-CLI targets and
+    /// on-device speech assets.
     /// Returns `true` once startup is accepted; the menu remains in Starting until preparation and
     /// both transcription endpoints finish. Stop, a newer Start, or a relevant preference/credential
     /// edit makes the prepared result stale before it can install a pipeline.
@@ -339,18 +340,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         pendingStartTask?.cancel()
         pendingStartTask = nil
         let cliProviders = brainRoute.targets.map(\.provider).filter(\.usesLocalCLI)
-        guard preparesAppleSpeech || !cliProviders.isEmpty else {
-            return installPreparedStart(
-                apiKey: key,
-                brainRoute: brainRoute,
-                transcriptionConfiguration: transcriptionConfiguration,
-                appleSpeechLocale: nil,
-                detectedCLIs: [:],
-                wasRunning: wasRunning,
-                reportContext: reportContext,
-                readinessSession: readinessSession)
-        }
-
         let detector = AgentCLIDetector()
         pendingStartTask = Task { [weak self] in
             guard let self else { return }
