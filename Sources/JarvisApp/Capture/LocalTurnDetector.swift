@@ -13,7 +13,12 @@ import JarvisCore
 /// **Never call `speechEvents` from a Core Audio IOProc.** Silero runs a Core ML prediction, which
 /// allocates and takes locks, so it belongs on the serial queue that delivers audio rather than the
 /// realtime callback. Confine one instance per stream to that queue; it is not thread-safe.
-final class LocalTurnDetector {
+///
+/// `@unchecked Sendable` covers only that hand-off: a capture builds the detector on its own thread
+/// and then passes the reference to its serial delivery queue, which is the sole caller from then on.
+/// It is not a claim that the three pieces of stream state tolerate concurrent access, so never
+/// call into an instance from a second queue.
+final class LocalTurnDetector: @unchecked Sendable {
     private let resampler: Resampler
     private let voiceActivityDetector: SileroVoiceActivityDetector
     private var endpointDetector: SpeechEndpointDetector
