@@ -2226,9 +2226,11 @@
   close button, both exit the app.
 - **Chose:** Prove the system-audio grant by tapping *Jarvis's own process*, muted, playing half a
   second of tone, and listening for it. Hearing it back is the grant; digital silence is a refusal.
-- **Chose:** Record that Screen Recording was asked for, so a later launch that still lacks it can
-  tell a refusal from a grant awaiting relaunch. Record the system-audio answer too, but treat it as
-  the last known one and re-prove it at each launch.
+- **Chose:** Prove grants, never remember them. Nothing persists a grant; system audio is proved at
+  launch and again inside every Start, and a probe that cannot run refuses rather than falling back.
+  The single persisted value records that Screen Recording was *asked for*, which is a fact about
+  Jarvis rather than a claim about macOS, and is what lets a later launch tell a refusal from a
+  grant awaiting relaunch.
 - **Why:** A TCC dialog is system UI that no capture-exclusion trick hides, and Core Audio's
   system-audio prompt fired on the first Start, which for this product is the moment an interview
   begins and a screen may be shared. Gating the whole app rather than just Start is what makes that
@@ -2245,9 +2247,12 @@
   `TCCAccessPreflight`, which is exact and silent but can break on any macOS update. (d) Dropping the
   claim and detecting a refusal at runtime, as the field does: a denied tap delivers *frames*, so
   `CaptureReadinessMonitor` sees a healthy stream and the user gets a half-deaf coach with no notice.
-  That same fact is why a remembered grant is re-proved at launch rather than trusted.
+  That same fact is why a grant is proved rather than remembered: a stored answer reads exactly like
+  a current one, and every caller that could tell them apart would have to carry the distinction.
   (e) A Permissions tab in Settings, which a hard gate makes unreachable and pointless. (f)
   Remembering that the gate has run: it appears exactly when the grants are incomplete, which is the
-  same condition.
+  same condition. (g) Detecting a mid-session revocation: every mechanism is amplitude policing,
+  which contradicts capture health treating digital silence as valid, or a timer. The next Start
+  refuses with the reason.
 - **Detail:** [architecture.md → Permissions](./architecture.md#permissions),
   `Sources/JarvisApp/Onboarding/`, `Sources/JarvisApp/Capture/SystemAudioPermissionProbe.swift`.

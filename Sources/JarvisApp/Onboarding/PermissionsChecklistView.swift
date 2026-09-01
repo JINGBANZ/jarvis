@@ -132,7 +132,7 @@ final class PermissionsChecklistView: NSView {
         render()
         Task { @MainActor in
             for permission in JarvisReadiness.Permission.allCases
-            where !Permissions.isGranted(permission, remembering: preferences) {
+            where !Permissions.isGranted(permission) {
                 asking = permission
                 render()
                 _ = await Permissions.request(permission, remembering: preferences)
@@ -222,7 +222,7 @@ final class PermissionsChecklistView: NSView {
     private var terminalState: TerminalState {
         guard !isRequesting else { return .none }
         let missing = JarvisReadiness.Permission.allCases.filter {
-            !Permissions.isGranted($0, remembering: preferences)
+            !Permissions.isGranted($0)
         }
         guard !missing.isEmpty else { return .satisfied }
 
@@ -247,16 +247,24 @@ final class PermissionsChecklistView: NSView {
     /// Whether macOS has already given its final answer for this permission, so asking again would
     /// be a silent no-op and the only way forward is System Settings.
     private func isBeyondAsking(_ permission: JarvisReadiness.Permission) -> Bool {
-        // Screen Recording gets one attempt per launch before it counts as beyond asking. The
-        // remembered flag survives `tccutil reset`, which clears the grant back to undetermined, and
-        // skipping the request there would leave Jarvis absent from the Settings pane with no
-        // prompt to put it back.
-        permission == .screenRecording ? (screenAskedInEarlierLaunch && hasWalked) : hasWalked
+        switch permission {
+        case .screenRecording:
+            // One attempt per launch before it counts as beyond asking. The remembered flag survives
+            // `tccutil reset`, which clears the grant back to undetermined, and skipping the request
+            // there would leave Jarvis absent from the Settings pane with no prompt to put it back.
+            return screenAskedInEarlierLaunch && hasWalked
+        case .systemAudio:
+            // A probe that could not run leaves no answer, and an unanswered grant is still worth
+            // asking for. Only a probe that played its tone and heard silence is a refusal.
+            return hasWalked && Permissions.systemAudioProof == false
+        case .microphone:
+            return hasWalked
+        }
     }
 
     private func render() {
         for row in rows {
-            let granted = Permissions.isGranted(row.permission, remembering: preferences)
+            let granted = Permissions.isGranted(row.permission)
             let isAsking = asking == row.permission
             row.status.stringValue = statusText(for: row.permission, granted: granted, asking: isAsking)
             row.status.textColor = granted ? .systemGreen
@@ -301,6 +309,8 @@ final class PermissionsChecklistView: NSView {
     private func footnoteText(for state: TerminalState) -> String {
         if isRequesting { return "Answer macOS and I’ll take the next one." }
         return switch state {
+        case .none where hasWalked && Permissions.systemAudioProof == nil:
+            "I couldn’t check system audio just now. Try again."
         case .none:
             // The rows already say what is being asked for; a line restating it is noise.
             ""

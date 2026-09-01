@@ -306,8 +306,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         self.readinessSession = readinessSession
         applyReadinessEffects(readinessStart.effects)
 
-        let grantedPermissions = Permissions.grantedReadinessPermissions(
-            remembering: permissionPreferences)
+        let grantedPermissions = Permissions.grantedReadinessPermissions()
         observeReadiness(.permissions(granted: grantedPermissions), for: readinessSession)
         let missingPermissions = readinessConfiguration.requiredPermissions
             .subtracting(grantedPermissions)
@@ -355,6 +354,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         let detector = AgentCLIDetector()
         pendingStartTask = Task { [weak self] in
             guard let self else { return }
+
+            // Prove system audio again for this session. The launch proof can be hours or days old
+            // on a menu-bar app, and a grant withdrawn since would otherwise produce a session that
+            // reports full readiness while hearing nothing: a refused tap still delivers frames, and
+            // capture health counts frames without inspecting amplitude. Microphone and Screen
+            // Recording need no probe — the checks above read them directly.
+            guard await Permissions.request(.systemAudio, remembering: self.permissionPreferences)
+            else {
+                self.rejectStartWithoutSystemAudio(
+                    revision: revision,
+                    wasRunning: wasRunning,
+                    context: reportContext,
+                    readinessSession: readinessSession)
+                return
+            }
+
             var appleSpeechLocale: Locale?
             if preparesAppleSpeech {
                 guard #available(macOS 26.0, *) else {
@@ -449,6 +464,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             artifacts.sessionAudit?.record(.settingsChangeNotApplied)
         }
         errorReporter.reportImmediately(error, context: context)
+    }
+
+    /// A Start whose system-audio proof failed. Distinct from a transcription blocker: the session
+    /// never begins, and the notice names the permission rather than the provider.
+    private func rejectStartWithoutSystemAudio(
+        revision: UInt,
+        wasRunning: Bool,
+        context: UserFacingError.PresentationContext,
+        readinessSession: JarvisReadiness.Session
+    ) {
+        guard pendingStartRevision == revision,
+              self.readinessSession == readinessSession else { return }
+        pendingStartTask = nil
+        observeReadiness(
+            .permissions(granted: Permissions.grantedReadinessPermissions()),
+            for: readinessSession)
+        jlog("Jarvis: can't start — system audio is no longer proved for this session.")
+        if wasRunning {
+            artifacts.sessionAudit?.record(.settingsChangeNotApplied)
+        }
+        errorReporter.reportImmediately(.permissionsMissing([.systemAudio]), context: context)
     }
 
     /// Install a fully prepared route on the main actor. The primary preflight still happens before

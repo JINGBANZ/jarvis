@@ -237,12 +237,25 @@ So `SystemAudioPermissionProbe` proves the grant by making a sound and listening
 **only Jarvis's own process** rather than the system mix and mutes it, then plays half a second of a
 quiet tone: hearing it back is proof, digital silence is proof of refusal. Scoping the tap to Jarvis
 is what keeps the check invisible, since nothing the user is playing is tapped and nothing they are
-listening to is muted. `PermissionPreferences` remembers the answer so the probe stays off the Start
-path, but only as the *last known* one: the gate re-proves a remembered grant at each launch. It has
-to, because a refusal cannot be left to surface downstream — a denied tap still delivers frames, and
-`CaptureReadinessMonitor` reads frame arrival as healthy without inspecting amplitude, so a stale
-`true` would let Jarvis report full readiness while hearing nothing from the other side. A remembered
-refusal is left alone, since probing it at launch would raise a prompt with no window to explain it.
+listening to is muted. **Grants are proved, never remembered.** Nothing records whether a grant was
+held, because a stored answer reads exactly like a current one and the caller deciding whether a
+session may run cannot tell which it holds. Being wrong there is the worst outcome in the design: a
+denied tap still delivers frames, and `CaptureReadinessMonitor` reads frame arrival as healthy
+without inspecting amplitude, so a session would report full readiness while hearing nothing from
+the other side.
+
+So proof is gathered twice, and lives only in the process that gathered it. At launch the two
+readable grants are checked first, because they cost nothing and cannot prompt; system audio is
+probed only when they are held, so anything missing opens the gate and lets the walk raise its
+dialogs with a window on screen to explain them. Then every Start proves system audio again inside
+the preparation it already runs, since a menu-bar app can sit for days between launches and a grant
+withdrawn in that time would otherwise reach a session. A probe that cannot run proves nothing and
+refuses; it never falls back to a previous answer.
+
+The one thing that persists is `screenRecordingAsked`, and it is not a grant: it records that Jarvis
+asked, which stays true whatever the user does next. Mid-session revocation is out of scope — every
+way to catch it is either amplitude policing, which contradicts the rule above, or a timer. The next
+Start refuses with the reason.
 
 ### Failure surfacing — startup loud, runtime ghost
 

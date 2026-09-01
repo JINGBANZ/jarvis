@@ -1,20 +1,21 @@
 import Foundation
 
-/// The one thing Jarvis has to remember about macOS permissions between launches: whether a Core
-/// Audio tap has ever started.
+/// The one thing Jarvis remembers about macOS permissions between launches: that it has asked for
+/// Screen Recording.
 ///
-/// It exists because macOS ships no API to request or read the System Audio Recording grant — an
-/// adapter can only find out by building a tap-backed device, starting it, and listening. This is
-/// the *last known* answer, not a standing truth: the gate re-proves a remembered grant at launch,
-/// because a refusal cannot be left to surface downstream. A denied tap still delivers frames, and
-/// `CaptureReadinessMonitor` reads frame arrival as healthy without inspecting amplitude, so a stale
-/// `true` would let Jarvis report full readiness while hearing nothing from the other side.
+/// Nothing here records a *grant*. A stored grant is indistinguishable from a current one, and the
+/// caller that has to decide whether a session can run cannot tell which it is holding — so grants
+/// are proved live, by reading them or by probing for them, and never remembered. That this app
+/// asked, by contrast, is a fact about Jarvis's own behaviour and cannot become untrue.
 ///
-/// A remembered refusal is what stops the launch probe from raising a prompt with no window on
-/// screen to explain it; the gate's own walk asks for that one.
+/// It is needed because macOS hides a Screen Recording answer from the process that asks:
+/// `CGRequestScreenCaptureAccess` returns false whether the user allowed or refused. A later launch
+/// that asked before and still lacks the grant is therefore looking at a refusal, not at a grant
+/// waiting for a relaunch. Without that distinction the gate loops the user through Quit & Reopen
+/// forever.
 ///
-/// Nothing records whether the permission gate has run: it is shown whenever the grants are
-/// incomplete, so its own condition is the only state it needs.
+/// Nothing records whether the gate has run: it appears whenever the grants are incomplete, so its
+/// own condition is the only state it needs.
 ///
 /// Foundation-only so it stays unit-testable in JarvisCore; inject a `UserDefaults(suiteName:)` in
 /// tests. Mirrors `PrepMaterialPreferences`.
@@ -38,14 +39,5 @@ public final class PermissionPreferences {
                 ?? Defaults.Permissions.screenRecordingAsked
         }
         set { defaults.set(newValue, forKey: Defaults.Permissions.screenRecordingAskedKey) }
-    }
-
-    /// Whether a tap-backed device has started successfully at least once.
-    public var systemAudioGranted: Bool {
-        get {
-            defaults.object(forKey: Defaults.Permissions.systemAudioGrantedKey) as? Bool
-                ?? Defaults.Permissions.systemAudioGranted
-        }
-        set { defaults.set(newValue, forKey: Defaults.Permissions.systemAudioGrantedKey) }
     }
 }

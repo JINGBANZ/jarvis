@@ -106,19 +106,15 @@ public enum Defaults {
 
     // MARK: - Permissions
 
-    /// What Jarvis remembers about the macOS grants it needs. Not a user-editable setting: the
-    /// permission gate writes it, and the value is only ever what macOS last told us. Whether the
-    /// gate has run needs no flag — it appears whenever the grants are incomplete.
+    /// The one thing Jarvis remembers about macOS permissions. Not a user-editable setting, and
+    /// deliberately not a record of any *grant*: a stored grant cannot be told apart from a current
+    /// one, so grants are proved live instead. This records something Jarvis did, which stays true.
     public enum Permissions {
         public static let screenRecordingAskedKey = "permissions.screenRecordingAsked"
         /// Nobody has asked macOS for Screen Recording yet. Set once the gate has, which is what
         /// lets a later launch read a still-missing grant as a refusal rather than a pending one.
         public static let screenRecordingAsked = false
 
-        public static let systemAudioGrantedKey = "permissions.systemAudioGranted"
-        /// Assume nothing until a tap has actually started; macOS exposes no way to read this grant,
-        /// so an unproven install re-probes instead of claiming readiness it can't verify.
-        public static let systemAudioGranted = false
     }
 
     // MARK: - Overlay

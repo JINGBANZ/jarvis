@@ -10,27 +10,32 @@ import JarvisCore
 /// adapter only reports and requests; the Core reducer owns which permissions a configuration needs.
 @MainActor
 enum Permissions {
-    /// What macOS says about one grant right now. System Audio Recording has no readable state, so
-    /// its answer is the remembered result of the last probe — see `PermissionPreferences`.
-    static func isGranted(
-        _ permission: JarvisReadiness.Permission,
-        remembering preferences: PermissionPreferences
-    ) -> Bool {
+    /// What a probe in *this launch* established about System Audio Recording: granted, refused, or
+    /// nil for never asked or asked and unable to run.
+    ///
+    /// Held in memory and never persisted. A stored answer reads exactly like a proved one, so a
+    /// caller deciding whether a session can run cannot tell whether it holds evidence or a memory
+    /// — and being wrong means a session that looks healthy while hearing nothing, because a refused
+    /// tap still delivers frames.
+    private(set) static var systemAudioProof: Bool?
+
+    /// What macOS says about one grant right now. Microphone is a live read and Screen Recording is
+    /// this process's preflight; System Audio Recording has neither, so it is whatever this launch
+    /// proved.
+    static func isGranted(_ permission: JarvisReadiness.Permission) -> Bool {
         switch permission {
         case .microphone:
             AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
         case .systemAudio:
-            preferences.systemAudioGranted
+            systemAudioProof == true
         case .screenRecording:
             CGPreflightScreenCaptureAccess()
         }
     }
 
     /// Content-free permission snapshot for `JarvisReadiness`.
-    static func grantedReadinessPermissions(
-        remembering preferences: PermissionPreferences
-    ) -> Set<JarvisReadiness.Permission> {
-        Set(JarvisReadiness.Permission.allCases.filter { isGranted($0, remembering: preferences) })
+    static func grantedReadinessPermissions() -> Set<JarvisReadiness.Permission> {
+        Set(JarvisReadiness.Permission.allCases.filter(isGranted))
     }
 
     /// Asks macOS for one grant and reports what Jarvis holds afterwards. An already-granted
@@ -44,13 +49,10 @@ enum Permissions {
         case .microphone:
             return await requestMicrophone()
         case .systemAudio:
-            // A probe that could not run says nothing about the grant, so the remembered answer
-            // stands. Recording it as a refusal would let one Bluetooth transition erase a grant
-            // the user really gave.
-            if let answer = await probeSystemAudio() {
-                preferences.systemAudioGranted = answer
-            }
-            return preferences.systemAudioGranted
+            // A probe that could not run proves nothing, so it leaves the answer unset rather than
+            // claiming a refusal. Nothing falls back to a previous launch: unproved is unproved.
+            systemAudioProof = await probeSystemAudio()
+            return systemAudioProof == true
         case .screenRecording:
             // Recorded before the answer, because there won't be a usable one: this process cannot
             // see the grant either way. A later launch that still lacks it is the proof of refusal.

@@ -11,25 +11,17 @@ import Foundation
         return d
     }
 
-    @Test func freshInstallHasNeverStartedATap() {
-        // Nothing proven yet, so the gate stays shut rather than assuming a grant macOS gives no
-        // way to read.
-        #expect(PermissionPreferences(defaults: freshDefaults()).systemAudioGranted
-            == Defaults.Permissions.systemAudioGranted)
+    @Test func aFreshInstallHasNotAskedForScreenRecording() {
+        #expect(PermissionPreferences(defaults: freshDefaults()).screenRecordingAsked
+            == Defaults.Permissions.screenRecordingAsked)
     }
 
-    @Test func aStartedTapRoundTripsThroughDefaults() {
+    @Test func askingIsRememberedAcrossLaunches() {
+        // The only permission fact worth persisting: a later launch that still lacks the grant is
+        // looking at a refusal rather than one waiting for a relaunch.
         let d = freshDefaults()
-        PermissionPreferences(defaults: d).systemAudioGranted = true
+        PermissionPreferences(defaults: d).screenRecordingAsked = true
 
-        #expect(PermissionPreferences(defaults: d).systemAudioGranted)
-    }
-
-    @Test func aRevokedGrantIsRememberedAsRevoked() {
-        let d = freshDefaults()
-        PermissionPreferences(defaults: d).systemAudioGranted = true
-        PermissionPreferences(defaults: d).systemAudioGranted = false
-
-        #expect(!PermissionPreferences(defaults: d).systemAudioGranted)
+        #expect(PermissionPreferences(defaults: d).screenRecordingAsked)
     }
 }
