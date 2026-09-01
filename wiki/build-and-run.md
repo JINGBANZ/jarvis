@@ -79,7 +79,10 @@ with the window chrome hidden. `dmgbuild` writes that layout metadata directly r
 Finder, so the hosted runner does not need a GUI session. It deliberately leaves the signed app free
 of FinderInfo extended attributes, which strict code-signature verification rejects. The script signs
 and notarizes the outer disk image separately, then staples the container's ticket to the exact file
-users download. Both layers therefore remain verifiable offline.
+users download. Both layers therefore remain verifiable offline. The install stays an explicit drag:
+Jarvis never relocates itself to `/Applications` on first launch (a downloaded app can be running
+translocated and read-only, and an app should not move itself), and there is no installer package,
+because a single bundle needs no elevated install semantics.
 
 The script passes that final DMG to `scripts/verify-release.sh`, which verifies the disk image and its
 ticket, mounts it read-only, and requires exactly the two visible install targets plus the hidden
@@ -124,7 +127,10 @@ The menu bar's **Check for Updates** item runs [Sparkle](https://sparkle-project
 newest signed disk image instead of the user re-downloading by hand. `SUFeedURL` points at
 `/releases/latest/download/appcast.xml`, which GitHub resolves to the newest published Release;
 `scripts/generate-appcast.sh` renders the feed after packaging, pinning the enclosure to the release's
-own tag so a signed item keeps naming the exact bytes it covers once "latest" moves on.
+own tag so a signed item keeps naming the exact bytes it covers once "latest" moves on. Sparkle rather
+than a hand-written downloader over the Releases API: the parts a custom updater would reimplement,
+signature verification and replacing the running bundle, are exactly the ones most costly to get
+subtly wrong.
 
 Sparkle resolves under Command Line Tools alone: it is a remote binary target carrying a prebuilt
 XCFramework, so no `.xcodeproj` is needed to consume it. SwiftPM leaves `Sparkle.framework` beside the
@@ -222,13 +228,17 @@ runtime). It also sidesteps the `file://` `fetch()` restriction that forced the 
   provenance with raw brain traffic and screenshots. Its compact input opens with a neutral evidence
   index—artifact health, categorical distributions, and correlation-field coverage—followed by
   normalized provider-call telemetry. These tables describe recorded facts without declaring a
-  defect; missing or partial values stay unavailable instead of becoming zero. Growing CLI request
+  defect; missing or partial values stay unavailable instead of becoming zero. The prompt carries no
+  checklist of past incidents: one grows without bound and biases the auditor toward known failures
+  while still missing the next shape. Growing CLI request
   history is common-prefix elided with an explicit pointer back to untouched traffic. The agent uses
   read-only file and source-search tools to follow the evidence, then writes a generic Summary /
   Findings / Evidence gaps / Recommendations report to owner-only `eval-report.md`. A saved session
   shows **Open report** instead, avoiding another agent run. The local app locates its checkout from the
   workspace `.jarvis/`, a `--repo-dir` launch argument, or the directory containing a locally built
-  app bundle; without live source it refuses to run a weaker audit. `./scripts/eval-session.sh
+  app bundle; without live source it refuses to run a weaker audit, because a single model call over
+  the wire traffic alone produced confident recommendations about mechanisms that already existed in
+  the code. `./scripts/eval-session.sh
   [session-dir]` is the terminal launcher for the same `JarvisEvaluation` evaluator.
 
 ## System-audio transcription benchmark

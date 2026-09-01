@@ -3,8 +3,8 @@
 > Snapshot of what is true *right now*. This is the entry point for picking the project up mid-stream:
 > read [`index.md`](./index.md) first, then this page, then the relevant core page. Edited in place at
 > the close of every change, per [`AGENTS.md`](./AGENTS.md) → "Keep-in-sync checklist". Every file
-> pointer below either resolves to a real file or this page is wrong — fix the page. The load-bearing
-> design decisions live in [`decisions.md`](./decisions.md).
+> pointer below either resolves to a real file or this page is wrong — fix the page. Design rationale
+> lives on each core page beside the design it explains.
 
 ## Current phase
 

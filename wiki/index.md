@@ -22,11 +22,6 @@
 - **[lean-coaching-core.md](./lean-coaching-core.md)** — the approved issue #147 target architecture and phased roadmap: one critical coaching lane, one shared `SessionEvidence` stack with Activity and agent projections, capture heartbeat, preserved fresh-attempt routing, and the per-slice implementation contracts every phase was reviewed against.
 - **[session-audit.md](./session-audit.md)** — the one session-evidence stack: typed producer ports, one bounded worker and per-session handle, the Activity and session-folder projections, Start/Stop/Quit ownership, the uniform loss contract, completeness evidence, and the evaluator boundary.
 
-## Decisions
-
-- **[decisions.md](./decisions.md)** — the decision log: what was chosen and why, with the rejected
-  alternative. One page, no ADR folder by design; see [AGENTS.md](./AGENTS.md) → Convention 8.
-
 ## Meta
 
 - **[AGENTS.md](./AGENTS.md)** — conventions for maintaining this wiki. Read before editing any wiki file.

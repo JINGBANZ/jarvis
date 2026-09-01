@@ -120,9 +120,16 @@ Narrow and explicit. Data leaves the machine only via:
   launch argv and the per-thread config; and a prompt forbids built-in tool use. Codex publishes no
   control that removes built-in tools, so this envelope is layered rather than a proof of absence —
   an accepted residual risk, backed by a runtime allowlist that aborts the turn on any server request
-  or item event outside agent messages and reasoning. See
-  [decisions.md](./decisions.md) → 2026-07-29. The separate completed-session evaluator remains
-  intentionally agentic under the explicit Evaluate boundary below.
+  or item event outside agent messages and reasoning. The acceptance is measured, not assumed: on
+  codex-cli 0.145.0 a captured outgoing request shows `codex exec` and the app-server offering the
+  model the same four built-in tools (`exec`, `wait`, `request_user_input`, `collaboration`) whether
+  the feature-disable set is applied or absent, because they arrive as an `additional_tools` input
+  item rather than through the `tools` array a `features.<name>` gate controls
+  (openai/codex#21952). The deny list therefore narrows nothing today; the event allowlist is the
+  control that bites. Revisit when Codex publishes a real disable-all-tools control, or when that
+  issue is fixed so the disable set provably reaches the tool builder. The separate
+  completed-session evaluator remains intentionally agentic under the explicit Evaluate boundary
+  below.
 - **An explicit Activity → Evaluate click** sends the selected completed session to a read-only,
   non-persisted Claude Code / Codex agent under that CLI account. Unlike a coaching turn, this agent
   may inspect the complete `jarvis-activity.jsonl`, coaching-attempt provenance, brain traffic,

@@ -6,8 +6,7 @@
 
 > **Owner review result:** This contract supersedes the issue body's proposed independent Activity,
 > audit, diagnostic, and continuity-telemetry stacks and its earlier phase ordering. The issue remains
-> the umbrella tracker; this wiki page and the matching [decision record](./decisions.md) are the
-> implementation authority.
+> the umbrella tracker; this wiki page is the implementation authority.
 
 ## Why This Exists
 
