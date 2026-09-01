@@ -7,9 +7,10 @@ import Testing
 
 // A few cases deliberately park the synchronous disk edge. Keep their gates serial so the parallel
 // repository test run never consumes several cooperative-pool threads on test-only blockers. Cases
-// that install a `JarvisLog` attachment (via `CoachingParityHarness` or directly) also hold
+// that install a `JarvisLog` attachment (via `CoachingParityHarness`) also hold
 // `JarvisLogAttachmentLock`, since `.serialized` only covers cases within this one suite and the
-// attachment is one process-global slot shared with other suites.
+// attachment is one process-global slot shared with other suites. The oversize variant is primed
+// through the handle directly rather than through `jlog`, so no other suite's lines can share it.
 @Suite(.serialized) struct SessionAuditIsolationTests {
     /// Holds the worker in its first open while mailbox admission remains available.
     private final class BlockingOpenWriter: SessionAuditWriting, @unchecked Sendable {
@@ -315,11 +316,8 @@ import Testing
                 limits: .init(maxEventCount: 256, maxRetainedBytes: 4_096),
                 writer: SessionAuditFileWriter()))
         await waitForHealthMarker(in: oversizeDirectory)
-        await JarvisLogAttachmentLock.withExclusiveAttachment {
-            JarvisLog.attach(to: oversize)
-            jlog(String(repeating: "d", count: 8_192))
-            JarvisLog.detach()
-        }
+        _ = oversize.recordDiagnostic(
+            DiagnosticAuditEvent(message: String(repeating: "d", count: 8_192)))
         let oversizeSnapshot = await CoachingParityHarness.run(
             observers: .init(diagnostics: oversize))
         #expect(await oversize.close() == .partial)

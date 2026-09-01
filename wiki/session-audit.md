@@ -101,6 +101,13 @@ is attached, `jlog` lines are that session's; with no attachment, or once the at
 sealed, they reach the asynchronous process log only. A diagnostic is never guessed into whichever
 session happens to be newest — a mis-attributed diagnostic is worse evidence than a missing one.
 
+The attachment is one process-global slot, and the test suite runs concurrently in one process. A
+test of the transport's capacity or loss accounting therefore admits diagnostics through the session
+handle (`FileSessionAudit.recordDiagnostic`, the call `jlog` itself makes for an attached session)
+rather than attaching it, since any `jlog` from another suite would otherwise share the mailbox under
+assertion. Only a claim about `jlog`'s routing attaches, one suite at a time, and asserts presence or
+absence rather than counts.
+
 ## Privacy and Verification
 
 Evidence stays in the owner-only session directory under the existing retention policy. Request
