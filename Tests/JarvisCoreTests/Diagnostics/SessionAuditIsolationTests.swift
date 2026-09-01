@@ -315,11 +315,11 @@ import Testing
                 limits: .init(maxEventCount: 256, maxRetainedBytes: 4_096),
                 writer: SessionAuditFileWriter()))
         await waitForHealthMarker(in: oversizeDirectory)
-        JarvisLogAttachmentLock.acquire()
-        JarvisLog.attach(to: oversize)
-        jlog(String(repeating: "d", count: 8_192))
-        JarvisLog.detach()
-        JarvisLogAttachmentLock.release()
+        await JarvisLogAttachmentLock.withExclusiveAttachment {
+            JarvisLog.attach(to: oversize)
+            jlog(String(repeating: "d", count: 8_192))
+            JarvisLog.detach()
+        }
         let oversizeSnapshot = await CoachingParityHarness.run(
             observers: .init(diagnostics: oversize))
         #expect(await oversize.close() == .partial)

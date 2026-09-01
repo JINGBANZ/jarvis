@@ -2183,8 +2183,9 @@
 ### 2026-09-01 — A cross-suite lock protects JarvisLog's process-global test attachment
 
 - **Chose:** Add `JarvisLogAttachmentLock` (`Tests/JarvisCoreTests/Diagnostics/JarvisLogAttachmentLock.swift`),
-  a `DispatchSemaphore(value: 1)`-backed acquire/release pair, and hold it around every
-  `JarvisLog.attach`/`detach` span in `DiagnosticEvidenceTests`, `CoachDriverPipelineTests`,
+  an `actor`-based mutual-exclusion helper (`withExclusiveAttachment(_:)`, suspending rather than
+  thread-blocking, releasing on every path including a thrown error), and wrap every
+  `JarvisLog.attach`/`detach` span in it across `DiagnosticEvidenceTests`, `CoachDriverPipelineTests`,
   `CaptureHeartbeatTests`, `CoachingParityHarness` (shared by `SessionAuditIsolationTests`), and the
   one direct priming call in `SessionAuditIsolationTests` itself.
 - **Why:** CI hit a one-off failure in `DiagnosticEvidenceTests.aFullMailboxDropsOneDiagnosticAndKeepsAdmittingLaterOnes`
@@ -2200,11 +2201,16 @@
 - **Rejected:** (a) Making `JarvisLog.attach` itself block until any previous session detaches — it
   would change production semantics: a fresh Start's `attach()` is not guaranteed a prior `detach()`
   (Stop does not require one, since a sealed handle already refuses late events), so a real second
-  session would deadlock waiting for a `detach()` that never comes. The lock stays test-only. (b)
-  Disabling test parallelism repository-wide — only four files touch this one shared global; slowing
-  every test in the suite to fix a narrow, specific race is disproportionate. (c) Merging the four
-  affected suites into one — they test unrelated things; a shared acquire/release pair is the
-  narrower fix.
+  session would deadlock waiting for a `detach()` that never comes. The lock stays test-only. (b) A
+  `DispatchSemaphore`-backed lock, tried first — it thread-blocks the caller, and every call site
+  here holds the lock across real `await` points (`evidence.close()`, `waitForDebugLine`,
+  `CoachingParityHarness.run`'s own async work); blocking a Swift Concurrency cooperative-pool thread
+  for that long risks starving the whole pool on a CI runner with few cores, since the pool does not
+  grow to compensate the way GCD's would. Landed first, still failed in CI, and was replaced by the
+  actor. (c) Disabling test parallelism repository-wide — only four files touch this one shared
+  global; slowing every test in the suite to fix a narrow, specific race is disproportionate. (d)
+  Merging the four affected suites into one — they test unrelated things; a shared exclusivity helper
+  is the narrower fix.
 - **Detail:** `Tests/JarvisCoreTests/Diagnostics/JarvisLogAttachmentLock.swift`,
   `Tests/JarvisCoreTests/Diagnostics/DiagnosticEvidenceTests.swift`,
   `Tests/JarvisCoreTests/Coach/CoachDriverPipelineTests.swift`,

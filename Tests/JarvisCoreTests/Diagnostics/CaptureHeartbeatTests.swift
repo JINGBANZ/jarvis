@@ -110,17 +110,17 @@ import Testing
         #expect(baseline.readiness.last == .stopped)
 
         for variant in try evidenceVariants() {
-            JarvisLogAttachmentLock.acquire()
-            defer { JarvisLogAttachmentLock.release() }
-            defer {
-                JarvisLog.detach()
-                try? FileManager.default.removeItem(at: variant.directory)
+            try await JarvisLogAttachmentLock.withExclusiveAttachment {
+                defer {
+                    JarvisLog.detach()
+                    try? FileManager.default.removeItem(at: variant.directory)
+                }
+                JarvisLog.attach(to: variant.evidence)
+                let outcome = runCriticalBranch(emittingEvidence: true)
+                variant.release?()
+                #expect(outcome == baseline, "evidence variant \(variant.name) changed coaching health")
+                #expect(await variant.evidence.close() == variant.expectedClose)
             }
-            JarvisLog.attach(to: variant.evidence)
-            let outcome = runCriticalBranch(emittingEvidence: true)
-            variant.release?()
-            #expect(outcome == baseline, "evidence variant \(variant.name) changed coaching health")
-            #expect(await variant.evidence.close() == variant.expectedClose)
         }
     }
 
