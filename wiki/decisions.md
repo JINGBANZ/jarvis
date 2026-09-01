@@ -2179,3 +2179,41 @@
   `scripts/build-vad.sh`, `scripts/vad/convert_silero.py`,
   `Sources/JarvisApp/Capture/SileroVoiceActivityDetector.swift`,
   `Sources/JarvisCore/Audio/SpeechEndpointDetector.swift`.
+
+### 2026-09-01 — A cross-suite lock protects JarvisLog's process-global test attachment
+
+- **Chose:** Add `JarvisLogAttachmentLock` (`Tests/JarvisCoreTests/Diagnostics/JarvisLogAttachmentLock.swift`),
+  an `actor`-based mutual-exclusion helper (`withExclusiveAttachment(_:)`, suspending rather than
+  thread-blocking, releasing on every path including a thrown error), and wrap every
+  `JarvisLog.attach`/`detach` span in it across `DiagnosticEvidenceTests`, `CoachDriverPipelineTests`,
+  `CaptureHeartbeatTests`, `CoachingParityHarness` (shared by `SessionAuditIsolationTests`), and the
+  one direct priming call in `SessionAuditIsolationTests` itself.
+- **Why:** CI hit a one-off failure in `DiagnosticEvidenceTests.aFullMailboxDropsOneDiagnosticAndKeepsAdmittingLaterOnes`
+  (`healthMarker(in:)["queue_overflow"]` not 1) that never reproduced locally or on an immediate CI
+  rerun of the same commit — the signature of a race, not a logic bug. `JarvisLog`'s attachment
+  (`Sources/JarvisCore/Diagnostics/Log.swift`) is one process-global slot guarded only for memory
+  safety (an `NSLock` around the pointer swap), not for the logical invariant that exactly one test's
+  session is attached at a time. Every suite that installs it is already `@Suite(.serialized)`, but
+  that only serializes cases *within* one suite — swift-testing still runs distinct suites
+  concurrently by default (`scripts/run-tests.sh` runs plain `swift test`, no `--no-parallel`), so a
+  test in one suite could attach between another suite's test's own attach and its assertions,
+  silently repointing `jlog` traffic to the wrong session and corrupting its overflow count.
+- **Rejected:** (a) Making `JarvisLog.attach` itself block until any previous session detaches — it
+  would change production semantics: a fresh Start's `attach()` is not guaranteed a prior `detach()`
+  (Stop does not require one, since a sealed handle already refuses late events), so a real second
+  session would deadlock waiting for a `detach()` that never comes. The lock stays test-only. (b) A
+  `DispatchSemaphore`-backed lock, tried first — it thread-blocks the caller, and every call site
+  here holds the lock across real `await` points (`evidence.close()`, `waitForDebugLine`,
+  `CoachingParityHarness.run`'s own async work); blocking a Swift Concurrency cooperative-pool thread
+  for that long risks starving the whole pool on a CI runner with few cores, since the pool does not
+  grow to compensate the way GCD's would. Landed first, still failed in CI, and was replaced by the
+  actor. (c) Disabling test parallelism repository-wide — only four files touch this one shared
+  global; slowing every test in the suite to fix a narrow, specific race is disproportionate. (d)
+  Merging the four affected suites into one — they test unrelated things; a shared exclusivity helper
+  is the narrower fix.
+- **Detail:** `Tests/JarvisCoreTests/Diagnostics/JarvisLogAttachmentLock.swift`,
+  `Tests/JarvisCoreTests/Diagnostics/DiagnosticEvidenceTests.swift`,
+  `Tests/JarvisCoreTests/Coach/CoachDriverPipelineTests.swift`,
+  `Tests/JarvisCoreTests/Diagnostics/CaptureHeartbeatTests.swift`,
+  `Tests/JarvisCoreTests/Diagnostics/CoachingParityHarness.swift`,
+  `Tests/JarvisCoreTests/Diagnostics/SessionAuditIsolationTests.swift`.

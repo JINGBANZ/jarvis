@@ -80,10 +80,20 @@ enum CoachingParityHarness {
 
     static func run(observers: EvidenceObservers = EvidenceObservers()) async -> Snapshot {
         // `JarvisLog`'s attachment is process-global, so a diagnostics variant must run in a
-        // serialized suite. Detached again on the way out, whether or not one was installed.
-        if let diagnostics = observers.diagnostics { JarvisLog.attach(to: diagnostics) }
-        defer { if observers.diagnostics != nil { JarvisLog.detach() } }
+        // serialized suite — and, since swift-testing still runs distinct suites concurrently,
+        // exclusively across suites too (`JarvisLogAttachmentLock`). Detached/released again on the
+        // way out.
+        guard let diagnostics = observers.diagnostics else {
+            return await runScenario(observers: observers)
+        }
+        return await JarvisLogAttachmentLock.withExclusiveAttachment {
+            JarvisLog.attach(to: diagnostics)
+            defer { JarvisLog.detach() }
+            return await runScenario(observers: observers)
+        }
+    }
 
+    private static func runScenario(observers: EvidenceObservers) async -> Snapshot {
         let requests = RequestCapture()
         let transitions = TransitionCapture()
         let transportFailure = NSError(
