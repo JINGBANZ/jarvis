@@ -77,6 +77,23 @@ public enum Defaults {
         public static let displayIndexMinimum = 1
     }
 
+    // MARK: - Hotkey
+
+    /// The one global shortcut: force an immediate hint mid-session.
+    public enum Hotkey {
+        public static let keyCodeKey = "hotkey.keyCode"
+        public static let modifiersKey = "hotkey.modifiers"
+
+        /// kVK_ANSI_J — the original hardcoded binding, so existing installs see no behavior change
+        /// until they opt to rebind. Carbon virtual key codes are layout-independent (a fixed
+        /// physical key position), so this constant needs no keyboard-layout awareness.
+        public static let keyCode: UInt32 = 38
+        public static let modifiers: HotkeyModifiers = [.command, .option]
+        public static var combination: HotkeyCombination {
+            HotkeyCombination(keyCode: keyCode, modifiers: modifiers)
+        }
+    }
+
     // MARK: - Prep material
 
     /// Local files/folders of interview notes the user has pointed Jarvis at, so the coach can draw

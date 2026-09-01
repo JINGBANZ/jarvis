@@ -35,6 +35,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     private var permissionGate: PermissionGate!
     /// Whether the app's own surfaces exist yet. Nothing is built while the permission gate is up.
     private var didStartApp = false
+    private let hotkeyPreferences = HotkeyPreferences()
     /// Monotonic revision stamped on each control-plane snapshot. Bumped at Start and whenever an
     /// explicit Settings edit installs a fresh plan; never by runtime health.
     private var planRevision: UInt = 0
@@ -176,6 +177,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             onCheckForUpdates: updates.map { updater in { updater.checkForUpdates() } })
         renderReadinessStatus(readiness.status)
 
+        // The global hint hotkey is constructed before Settings so HotkeySection's closures (built
+        // below) can already read/apply through it. `onRequestHint` is wired later, alongside the
+        // rest of session lifecycle plumbing.
+        hotkeys = HotkeyController(preferences: hotkeyPreferences)
+
         // Unified Settings window: Brain owns behavior; Connections owns shared authentication.
         // A pasted key is stored but does not auto-start. While running, it updates future Realtime
         // connections and transactionally replaces only an OpenAI brain—never the capture/transcript
@@ -203,6 +209,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                 self?.reapplySessionPlan()
             },
             PrepMaterialSection(preferences: prepMaterialPreferences),
+            HotkeySection(
+                preferences: hotkeyPreferences,
+                hasActiveHotkey: { [weak self] in self?.hotkeys?.registered != nil },
+                applyCombination: { [weak self] combination in
+                    // `hotkeys` is constructed above, before Settings can ever be shown, so `self`
+                    // being torn down is the only way this falls through — report failure rather
+                    // than falsely claiming a rebind that never happened.
+                    self?.hotkeys?.apply(combination) ?? .failed(status: -1)
+                }),
             ActivitySection(viewer: activityViewer),
         ]
         settingsWindow = SettingsWindow(sections: sections)
@@ -217,9 +232,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             self?.stop(reason: reason)
         }
 
-        // Global hint hotkey: while a session is running, screenshot + ask the brain for a hint in one
-        // trip; otherwise beep — there's no live driver/conversation to hint from when stopped.
-        hotkeys = HotkeyController()
+        // While a session is running, screenshot + ask the brain for a hint in one trip; otherwise
+        // beep — there's no live driver/conversation to hint from when stopped.
         hotkeys?.onRequestHint = { [weak self] in
             guard let self, let fire = self.requestManualHint else {
                 NSSound.beep() // ghost-mode-allowed: explicit user hotkey while stopped
