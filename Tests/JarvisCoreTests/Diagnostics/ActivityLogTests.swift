@@ -68,7 +68,7 @@ import Foundation
 
     @Test func closingTheHandlePersistsEveryPreviouslyRecordedEvent() async throws {
         let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
-        let (log, evidence) = ActivityLog.recordingSession(in: dir)
+        let (_, evidence) = ActivityLog.recordingSession(in: dir)
 
         evidence.record(.sessionEnded(reason: .stoppedByUser))
         _ = await evidence.close()
@@ -139,7 +139,7 @@ import Foundation
 
     @Test func eventFormattingKeepsDiagnosticDetailsOut() async throws {
         let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
-        let (log, evidence) = ActivityLog.recordingSession(in: dir)
+        let (_, evidence) = ActivityLog.recordingSession(in: dir)
         evidence.record(.heard(speaker: .them, text: "How would you optimize it?"))
         _ = await evidence.close()
 
