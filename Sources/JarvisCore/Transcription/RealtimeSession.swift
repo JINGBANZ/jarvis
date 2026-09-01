@@ -16,7 +16,7 @@ public enum RealtimeSession {
     /// GPT-4o accepts the legacy singular `language` hint. GPT Transcribe and GPT Live accept the
     /// plural `languages` list and a free-form recording context; GPT Live also receives the low
     /// streaming-delay setting. GPT-4o sessions with zero or multiple expected languages omit
-    /// `language` and use automatic recognition. No literal keyword hints are sent.
+    /// `language` and use automatic recognition.
     ///
     /// GPT-4o uses `server_vad`; `silenceDurationMs` tunes how long a pause must last before the
     /// server ends the turn. GPT Transcribe and GPT Live require committed-turn transcription, so

@@ -1172,9 +1172,7 @@
   (c) Enabling server VAD for GPT Live—the live API rejects that model/configuration combination.
   (d) Dynamic OCR, prior-turn, or transcript-derived prompts—the role context is sufficient for this
   step and avoids another changing data path. (e) Vocabulary keywords—the user explicitly deferred
-  them, until [2026-08-31 — Vocabulary keywords bias GPT Transcribe and GPT Live
-  recognition](#2026-08-31--vocabulary-keywords-bias-gpt-transcribe-and-gpt-live-recognition). (f)
-  Changing the default before a same-input three-model comparison.
+  them. (f) Changing the default before a same-input three-model comparison.
 - **Detail:** [architecture.md → Models and APIs](./architecture.md#models-and-apis),
   [settings-window.md → Brain](./settings-window.md#brain),
   `Sources/JarvisCore/Transcription/RealtimeSession.swift`,
