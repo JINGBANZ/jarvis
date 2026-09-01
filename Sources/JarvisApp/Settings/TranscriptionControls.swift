@@ -105,7 +105,7 @@ final class TranscriptionControls: NSObject {
         self.languagesRow = languagesRow
 
         let vocabularyField = NSTextField()
-        vocabularyField.placeholderString = "e.g. Kubernetes, gRPC, Sun Xu"
+        vocabularyField.placeholderString = "e.g. Kubernetes, gRPC, Ada Lovelace"
         vocabularyField.stringValue = preferences.openAIVocabularyKeywords.joined(separator: ", ")
         vocabularyField.delegate = self
         vocabularyField.setAccessibilityLabel("Transcription vocabulary")

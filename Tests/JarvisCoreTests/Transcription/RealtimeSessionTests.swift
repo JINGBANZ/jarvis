@@ -327,8 +327,8 @@ import Testing
         let committed = try transcription(model: .gptTranscribe, keywords: ["Kubernetes", "gRPC"])
         #expect(committed["keywords"] as? [String] == ["Kubernetes", "gRPC"])
 
-        let live = try transcription(model: .gptLiveTranscribe, keywords: ["Sun Xu"])
-        #expect(live["keywords"] as? [String] == ["Sun Xu"])
+        let live = try transcription(model: .gptLiveTranscribe, keywords: ["Ada Lovelace"])
+        #expect(live["keywords"] as? [String] == ["Ada Lovelace"])
 
         let empty = try transcription(model: .gptTranscribe, keywords: [])
         #expect(empty["keywords"] == nil)
