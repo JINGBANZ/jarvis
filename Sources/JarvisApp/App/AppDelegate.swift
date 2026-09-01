@@ -294,12 +294,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         let key = secrets.apiKey() ?? ""
         let requiresOpenAIKey = transcriptionProvider.requiresOpenAIAPIKey(for: brainRoute)
         let preparesAppleSpeech = transcriptionProvider == .appleSpeech
-        // Every grant the launch gate collects is required here too, but only `.microphone` is read
-        // live. `.systemAudio` reflects the launch probe and `.screenRecording` this process's
-        // preflight, so a revocation after the gate opened is not named here — see
-        // `PermissionGate.holdsEveryGrant()` for why that window is left open.
+        // Only the readable grants gate a Start here: microphone live, screen recording from this
+        // process's preflight. System audio is settled by the probe below, which is the only
+        // authority on it — requiring the previous answer here would let one failed probe refuse
+        // every later Start until Jarvis was relaunched, while the notice says to press Start again.
         let readinessConfiguration = JarvisReadiness.Configuration(
-            requiredPermissions: PermissionGate.required,
+            requiredPermissions: PermissionGate.required.subtracting([.systemAudio]),
             requiredCredentials: requiresOpenAIKey ? [.openAIAPIKey] : [],
             requiresTranscriptionPreparation: preparesAppleSpeech)
         let readinessStart = readiness.begin(configuration: readinessConfiguration)

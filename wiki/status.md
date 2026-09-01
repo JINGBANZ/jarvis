@@ -173,7 +173,7 @@ coaching kernel's dependency rules are enforced by `scripts/check-coaching-kerne
 ## Next action
 
 Run the live permission-gate smoke, since the gate runs before anything the Gate can test. After resetting each service in turn (`tccutil reset Microphone com.jarvis.coach.dev`, then
-`ScreenCapture`, then `AudioCapture`) and clearing both `permissions.*` defaults: the gate appears with no menu bar behind it; one walk collects all
+`ScreenCapture`, then `AudioCapture`) and clearing the one marker Jarvis persists (`defaults delete com.jarvis.coach.dev permissions.screenRecordingAsked`): the gate appears with no menu bar behind it; one walk collects all
 three dialogs in order; **Quit** exits; refusing system audio records a refusal rather than a grant
 and the probe tone stays inaudible; refusing screen recording ends on **Quit & Reopen**, and the next
 launch asks once more (silent after a refusal) before offering **Open System Settings** rather than
