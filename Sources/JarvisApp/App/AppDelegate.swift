@@ -222,6 +222,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         ]
         settingsWindow = SettingsWindow(sections: sections)
         menuBar.onOpenSettings = { [weak self] in self?.settingsWindow.show() }
+        menuBar.onClearOverlayBox = { [weak self] in self?.overlayBox.clear() }
 
         // The menu drives the pipeline lifecycle. Jarvis does NOT auto-start; the user presses Start.
         menuBar.onStart = { [weak self] in self?.start() ?? false }
