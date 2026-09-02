@@ -2,14 +2,14 @@ import Foundation
 
 /// The interview format a coaching session is specialized for. Chosen once at Start — like
 /// `TranscriptionPreferences.openAIExpectedLanguages` — and fixed for the whole session, never
-/// guessed or reclassified mid-conversation. See wiki/decisions.md (2026-09-01) for why: an
-/// automatic, in-session classifier was considered and rejected, both for guessing once and locking
-/// in (misclassifies a session that shifts formats) and for continuously re-guessing (the "brittle
-/// state machine" a 2026-08-07 decision already rejected for history compaction).
+/// guessed or reclassified mid-conversation: an automatic, in-session classifier was considered and
+/// rejected, both for guessing once and locking in (misclassifies a session that shifts formats) and
+/// for continuously re-guessing (the same "brittle state machine" a history-compaction design
+/// already rejected — see wiki/architecture.md § Models and APIs).
 public enum InterviewFormat: String, CaseIterable, Codable, Sendable, CoachingSkill {
-    case coding
-    case systemDesign
-    case behavioral
+    case coding = "coding"
+    case systemDesign = "system-design"
+    case behavioral = "behavioral"
 
     public var displayName: String {
         switch self {
@@ -19,30 +19,25 @@ public enum InterviewFormat: String, CaseIterable, Codable, Sendable, CoachingSk
         }
     }
 
-    /// Only `.systemDesign` has content today. `.coding` and `.behavioral` are already reported as
-    /// working well, so they stay empty rather than getting new prompt guidance nobody asked for.
+    /// Loaded from `Resources/Skills/<rawValue>.md` — a real Markdown file, not a Swift string
+    /// literal, so a skill's content reads and edits like prose. Only `system-design.md` exists
+    /// today: `.coding` and `.behavioral` are already reported as working well, so they stay empty
+    /// rather than getting new prompt guidance nobody asked for. Missing file → empty, not a crash —
+    /// an unwritten skill is a normal state, not an error.
     public var promptAddendum: String {
-        switch self {
-        case .coding, .behavioral:
-            ""
-        case .systemDesign:
-            """
-
-            # Interview format: system design
-            This is a system-design interview. The discussion typically moves through: clarifying
-            functional requirements, non-functional requirements (scale, latency, consistency), API
-            design, data model, high-level architecture, then a deep dive into specific components
-            and their trade-offs — but the candidate may revisit an earlier stage at any point. Infer
-            which stage the candidate is currently addressing from what they just said, and keep your
-            tip scoped to that stage — a data-model tip is unhelpful while they are still defining the
-            API contract, and vice versa.
-            """
+        guard let url = Bundle.module.url(
+            forResource: rawValue, withExtension: "md", subdirectory: "Skills"),
+            let body = try? String(contentsOf: url, encoding: .utf8)
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+            !body.isEmpty else {
+            return ""
         }
+        return "\n\n" + body
     }
 
     /// The addendum for an explicit choice, or — when none was made — every format's non-empty
     /// addendum concatenated, so Jarvis still has the vocabulary without guessing which format this
-    /// is. See wiki/decisions.md (2026-09-01).
+    /// is. See wiki/architecture.md § Models and APIs.
     public static func resolvedPromptAddendum(for format: InterviewFormat?) -> String {
         if let format { return format.promptAddendum }
         return allCases.map(\.promptAddendum).filter { !$0.isEmpty }.joined()

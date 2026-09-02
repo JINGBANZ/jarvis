@@ -94,10 +94,13 @@ cp LICENSE THIRD_PARTY_NOTICES.md "$APP/Contents/Resources/"
 # executable; the bundle needs it at Contents/Frameworks, which is what the target's rpath names.
 SPARKLE="$APP/Contents/Frameworks/Sparkle.framework"
 ditto "$(dirname "$BIN_PATH")/Sparkle.framework" "$SPARKLE"
-# SwiftPM emits the target's resources (the Silero VAD model) as a side-by-side bundle. Copy it into
+# SwiftPM emits each resource-bearing target's resources as its own side-by-side bundle — JarvisApp's
+# (the Silero VAD model) and JarvisCore's (the interview-format skill Markdown files). Copy both into
 # Contents/Resources so `Bundle.module` resolves inside the assembled app, not just from .build.
 ditto "$(dirname "$BIN_PATH")/Jarvis_JarvisApp.bundle" \
       "$APP/Contents/Resources/Jarvis_JarvisApp.bundle"
+ditto "$(dirname "$BIN_PATH")/Jarvis_JarvisCore.bundle" \
+      "$APP/Contents/Resources/Jarvis_JarvisCore.bundle"
 # Sparkle's XPC services exist only to install updates from inside an App Sandbox. Jarvis is not
 # sandboxed, so shipping them would notarize and distribute code that can never run. A versioned
 # framework exposes each versioned directory through a top-level alias, so the alias goes too —

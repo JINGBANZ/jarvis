@@ -437,7 +437,16 @@ rather than a per-turn screenshot.
   content, added because the coach otherwise has zero system-design vocabulary (functional
   requirements, API design, data model, etc.) and its tips can drift from whatever stage of that
   discussion the candidate is actually in; Coding and Behavioral stay empty because no one has
-  reported a problem with them, not because the mechanism can't hold their content too. No selection
+  reported a problem with them, not because the mechanism can't hold their content too. Each format's
+  content is a real Markdown file (`Sources/JarvisCore/Resources/Skills/<rawValue>.md`), not a Swift
+  string literal, so it reads and edits like prose; a missing file resolves to an empty addendum
+  rather than an error, since an unwritten skill is a normal state. `JarvisCore`'s `Bundle.module`
+  serves it, so `scripts/build-app.sh` and `scripts/package-app.sh` copy `Jarvis_JarvisCore.bundle`
+  into the assembled app's `Contents/Resources` alongside `Jarvis_JarvisApp.bundle` (the Silero VAD
+  model) — otherwise the skill resolves under `swift build`/`swift test` but silently goes missing
+  from the shipped app. Adding or editing a skill still needs a developer and a rebuild — a
+  self-service system where a user drops in their own skill file was considered and set aside as
+  speculative infrastructure for a need nothing has yet. No selection
   includes every format's non-empty addendum rather than guessing which one applies — an automatic
   classifier was rejected: guessing once and locking in misclassifies a session that shifts formats
   (a behavioral opener sliding into a system-design round), and re-guessing every turn is a brittle
