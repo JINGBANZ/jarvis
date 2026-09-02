@@ -2179,3 +2179,59 @@
   `scripts/build-vad.sh`, `scripts/vad/convert_silero.py`,
   `Sources/JarvisApp/Capture/SileroVoiceActivityDetector.swift`,
   `Sources/JarvisCore/Audio/SpeechEndpointDetector.swift`.
+
+### 2026-09-01 — An interview-format Start-time picker supplies coaching-prompt vocabulary
+
+- **Superseded in part:** [§6 Non-Goals — "Multiple coaching modes"](./architecture.md#6-non-goals-v1),
+  narrowed rather than removed: still no tiered sensitivity dial and no genuinely separate mode with
+  different gating/tools/proactivity; an optional format selection now supplies additional prompt
+  *vocabulary* only.
+- **Chose:** A `CoachingSkill` protocol (`displayName`, `promptAddendum: String`) conformed to by an
+  `InterviewFormat: String, CaseIterable, Codable, Sendable` enum (`coding`, `systemDesign`,
+  `behavioral`) — one enum with computed properties, matching how every other "one of a few known
+  variants" setting in this codebase is modeled (`OpenAITranscriptionModel`, `BrainProvider`), not a
+  struct per case. The user picks a format once in Settings → Brain's Coaching card (or leaves it
+  unselected); the choice is snapshotted once at Start — like
+  `TranscriptionPreferences.openAIExpectedLanguages` — and never reclassified mid-session. No
+  selection resolves to every format's non-empty addendum concatenated
+  (`InterviewFormat.resolvedPromptAddendum(for:)`), not a guess. Only `.systemDesign` has real
+  content: the standard flow (functional requirements → non-functional requirements → API design →
+  data model → architecture → deep dive/trade-offs) plus an instruction to infer which stage the
+  candidate is addressing and keep the tip scoped to it. `.coding` and `.behavioral` stay empty — the
+  user reports those already work well, so no new prompt guidance was written for them without
+  evidence it's needed.
+- **Why:** The coaching prompt (`JarvisPrompts.Coach.system`) had zero system-design vocabulary
+  anywhere, and the user reported tips drifting from whatever part of a system-design discussion
+  (functional requirements, API design, …) they were actually in. The protocol, not a bare enum,
+  gives this room to grow: a structurally different kind of skill could conform to `CoachingSkill` on
+  its own type later without touching `InterviewFormat` or the code that consumes `any CoachingSkill`
+  — a deliberately smaller step than a runtime-pluggable skill system (skills defined outside
+  compiled code, a registry/loader), which nothing today needs.
+- **A real correctness constraint drove the Start-time-fixed design, not just precedent-following:**
+  the coaching system prompt is assembled in two places — per-turn in `CoachAttemptRunner` for
+  OpenAI-style providers, and once at Start in `BrainComposition` baked into a persistent process for
+  local CLI providers (Claude Code/Codex). `CLIBrainClient` asserts its instructions never change
+  after construction; a value that could change mid-session would need to update both sites in
+  lockstep or hard-fail every CLI turn with "local-agent instructions changed after runtime
+  initialization." Resolving the addendum once at Start and feeding the identical string to both
+  sites (`BrainComposition.interviewFormatAddendum`, set before every route/reapply construction,
+  including a later `applyBrainPreferencesToRunningSession` hot switch) avoids the whole problem.
+- **Rejected:** (a) An automatic classifier that guesses the format from the conversation when
+  nothing is selected — already rejected in principle by the 2026-08-07 decision (misclassifies a
+  session that shifts formats if it locks in once; reintroduces "another brittle state machine" if it
+  re-guesses). (b) Writing new prompt content for `.coding`/`.behavioral` now, to make every case
+  "complete" — the user only reported a problem with system design; touching prompt text for formats
+  that already work is unjustified risk. (c) A runtime-pluggable skill system (skills as data/config,
+  loaded without a code change) — considered explicitly, set aside as speculative infrastructure for
+  a product pivot nothing has decided to make; see `CoachingSkill`'s doc comment for the room it
+  leaves instead. (d) Threading the resolved addendum through `makeConfiguredRoute`/`makeBrainRuntime`
+  as an explicit parameter on every call — `applyBrainPreferencesToRunningSession` (the hot-switch
+  path) doesn't go through the App's Start snapshot at all, so the value has to live as
+  session-scoped state on `BrainComposition` itself (mirroring `activeBrainTarget`) rather than being
+  re-passed by every caller.
+- **Detail:** `Sources/JarvisCore/Coach/CoachingSkill.swift`,
+  `Sources/JarvisCore/Coach/InterviewFormat.swift`,
+  `Sources/JarvisCore/Coach/CoachAttemptRunner.swift`, `Sources/JarvisCore/Coach/CoachDriver.swift`,
+  `Sources/JarvisApp/App/BrainComposition.swift`, `Sources/JarvisApp/App/AppDelegate.swift`,
+  `Sources/JarvisApp/Settings/BrainSection.swift`,
+  [settings-window.md](./settings-window.md), [GitHub issue #247](https://github.com/JINGBANZ/jarvis/issues/247).

@@ -1,0 +1,79 @@
+import Foundation
+import Testing
+@testable import JarvisCore
+
+@Suite struct CoachDriverInterviewFormatTests {
+    private func makeDriver(
+        brain: BrainClient,
+        interviewFormat: InterviewFormat?,
+        clock: Clock = ManualClock(now: 100)
+    ) -> (CoachDriver, RollingTranscript) {
+        let transcript = RollingTranscript()
+        let target = BrainTarget(
+            provider: .openAI, modelID: BrainModelCatalog.defaultModel(for: .openAI).id)
+        let route = ConfiguredBrainRoute(
+            targets: [ConfiguredBrainTarget(target: target, brain: brain)])
+        let driver = CoachDriver(
+            config: .default, transcript: transcript, route: route,
+            screen: FakeScreen(), overlay: FakeOverlay(), clock: clock,
+            automaticAttemptDelay: { _ in },
+            interviewFormatAddendum: InterviewFormat.resolvedPromptAddendum(for: interviewFormat))
+        return (driver, transcript)
+    }
+
+    private func staySilentScript() -> [BrainResponse] {
+        [.init(toolCalls: [.staySilent(callId: "s1")],
+               rawToolCalls: [RawToolCall(id: "s1", name: "stay_silent", argumentsJSON: "{}")])]
+    }
+
+    @Test func systemPromptIncludesSystemDesignGuidanceWhenExplicitlySelected() async {
+        let brain = ScriptedBrain(script: staySilentScript())
+        let (driver, transcript) = makeDriver(brain: brain, interviewFormat: .systemDesign)
+        transcript.append(.init(speaker: .me, text: "let me think out loud", at: 100))
+
+        _ = await driver.handleTrigger(.turnEnd)
+
+        #expect(brain.calls[0].contains {
+            $0.role == .system && ($0.text ?? "").contains("functional requirements")
+        })
+    }
+
+    @Test func systemPromptOmitsFormatGuidanceForCoding() async {
+        let brain = ScriptedBrain(script: staySilentScript())
+        let (driver, transcript) = makeDriver(brain: brain, interviewFormat: .coding)
+        transcript.append(.init(speaker: .me, text: "let me think out loud", at: 100))
+
+        _ = await driver.handleTrigger(.turnEnd)
+
+        #expect(!brain.calls[0].contains {
+            $0.role == .system && ($0.text ?? "").contains("Interview format")
+        })
+    }
+
+    @Test func systemPromptOmitsFormatGuidanceForBehavioral() async {
+        let brain = ScriptedBrain(script: staySilentScript())
+        let (driver, transcript) = makeDriver(brain: brain, interviewFormat: .behavioral)
+        transcript.append(.init(speaker: .me, text: "let me think out loud", at: 100))
+
+        _ = await driver.handleTrigger(.turnEnd)
+
+        #expect(!brain.calls[0].contains {
+            $0.role == .system && ($0.text ?? "").contains("Interview format")
+        })
+    }
+
+    /// No selection never guesses — every non-empty format's guidance is included, which today
+    /// means the same content as explicitly selecting system design. See wiki/decisions.md
+    /// (2026-09-01) for why an auto-classifier was rejected in favor of this.
+    @Test func systemPromptIncludesSystemDesignGuidanceWhenNoneSelected() async {
+        let brain = ScriptedBrain(script: staySilentScript())
+        let (driver, transcript) = makeDriver(brain: brain, interviewFormat: nil)
+        transcript.append(.init(speaker: .me, text: "let me think out loud", at: 100))
+
+        _ = await driver.handleTrigger(.turnEnd)
+
+        #expect(brain.calls[0].contains {
+            $0.role == .system && ($0.text ?? "").contains("functional requirements")
+        })
+    }
+}

@@ -366,6 +366,18 @@ rather than a per-turn screenshot.
   summary leaves the full history intact for a later attempt. Requests are sent `store:true`
   so they stay inspectable in the OpenAI dashboard for debugging — the retention tradeoff is
   documented in [sandbox.md](./sandbox.md).
+- **Interview format supplies optional coaching-prompt vocabulary (`InterviewFormat`,
+  `CoachingSkill`).** A Start-time picker (Coding / System Design / Behavioral, or no selection) adds
+  a format-specific addendum to the coach system prompt — today, only System Design has real
+  content, added because the coach otherwise has zero system-design vocabulary (functional
+  requirements, API design, data model, etc.) and its tips can drift from whatever stage of that
+  discussion the candidate is actually in. No selection includes every format's non-empty addendum
+  rather than guessing which one applies. Fixed for the whole session like the transcription
+  language/model choice, for a concrete reason beyond convention: `CLIBrainClient` bakes the system
+  prompt into the local-agent process at construction and asserts it never changes, so the resolved
+  addendum must be computed once and reused identically by both the per-turn OpenAI-style prompt
+  (`CoachAttemptRunner`) and the CLI-provider construction (`BrainComposition`). See
+  [decisions.md](./decisions.md) (2026-09-01).
 - **Transcription has its own provider, model, and language settings.** OpenAI remains the provider
   default and `gpt-4o-transcribe` remains its model default; `gpt-transcribe` and
   `gpt-live-transcribe` are opt-in comparison choices. All use the GA Realtime API, but keep their
@@ -658,8 +670,11 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
 
 ## 6. Non-Goals (v1)
 
-- Multiple coaching modes / a tiered sensitivity dial. (One technical-interview mode spans
-  behavioral, system-design, and coding questions.)
+- A tiered sensitivity dial, or genuinely separate coaching modes with different action-policy
+  gating, tool sets, or proactivity behavior. (One technical-interview coaching approach spans
+  behavioral, system-design, and coding questions; an optional Start-time interview-format selection
+  only supplies additional prompt *vocabulary* for the selected format — see [§ Models and
+  APIs](#models-and-apis) — never a different mode of operation.)
 - Continuous OCR or recording the screen/audio to disk ("recall").
 - A dedicated wake-word engine. Direct address is just the word "Jarvis" (or a question) appearing
   in the transcript, which the brain reads and answers — there is no wake-word detector. (A global

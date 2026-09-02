@@ -29,6 +29,10 @@ public enum Defaults {
         /// Keeps a coaching turn fast (sub-2s target) while still allowing tool calls.
         public static let effort: ReasoningEffort = .low
 
+        /// No default value: absent means "not selected," resolved to every format's combined
+        /// guidance rather than a guess — see `InterviewFormat.resolvedPromptAddendum(for:)`.
+        public static let interviewFormatKey = "brain.interviewFormat"
+
         /// The OpenAI model keeps the pre-provider key ("brain.model") so existing installs keep
         /// their selection; CLI providers store under a suffixed key each.
         public static func modelKey(for provider: BrainProvider) -> String {

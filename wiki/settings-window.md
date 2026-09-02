@@ -64,7 +64,7 @@ lazy lifecycle; its adaptive light/dark feed is simply framed by the same page a
 
 | Section class | Tab title | Always present | Description |
 |---|---|---|---|
-| `BrainSection` | "Brain" | yes | Behavior that decides who answers and what Jarvis hears, in one scrolling stack: the primary provider/model, an ordered editable fallback list, reasoning effort, and transcription provider/model/expected-languages-or-locale controls. A live status badge mirrors the active brain provider without moving the saved route. Valid Brain-route changes take effect between coaching attempts while running; transcription changes take effect on the next Start. |
+| `BrainSection` | "Brain" | yes | Behavior that decides who answers and what Jarvis hears, in one scrolling stack: the primary provider/model, an ordered editable fallback list, reasoning effort, interview format, and transcription provider/model/expected-languages-or-locale controls. A live status badge mirrors the active brain provider without moving the saved route. Valid Brain-route changes take effect between coaching attempts while running; interview format and transcription changes take effect on the next Start. |
 | `ConnectionsSection` | "Connections" | yes | Shared authentication and provider readiness in three stacked cards. OpenAI exposes the Jarvis-managed API-key editor; Claude Code and Codex CLI report their externally managed local-account state without importing or changing those accounts. Saving a key never restarts a live conversation: established OpenAI Realtime endpoints stay connected and use it on a later reconnect. |
 | `OverlaySection` | "Overlay" | yes | Two matching cards, one per overlay surface — **Overlay Caption** (the transient on-screen tip) and **Overlay Box** (the persistent response history). Each card has an icon, description, On/Off toggle, and the same Text Size + Opacity row layout. When a surface is **on** its rows and live sample appear only while the Overlay tab is selected (`didBecomeActive`/`didResignActive`); when **off**, its rows and sample are hidden and the card collapses. Persists via `OverlayAppearance`. |
 | `DisplaySection` | "Screen" | yes | One **Screen capture** card with the capture-scope dropdown — **Active window** (default) or one **Entire display** entry per connected display — followed by a concise fallback/privacy callout. Persists via `ScreenCapturePreferences` and applies to the next screenshot. |
@@ -201,6 +201,13 @@ provider is active; its default lives with the others in
 per-thread `model_reasoning_effort`; both CLI scales start at `low`, so None clamps to Low while the
 three shared levels pass through.
 
+**Interview format.** A second Coaching-card picker (`InterviewFormat`: Automatic / Coding / System
+Design / Behavioral) supplies additional coaching-prompt vocabulary for the selected format. No
+selection means Automatic — every format's non-empty guidance is included rather than guessed. Fixed
+for the whole session, like the transcription language/model choice: it applies on the next Start,
+never reclassified mid-conversation. See [architecture.md → Models and
+APIs](./architecture.md#models-and-apis) and `wiki/decisions.md` (2026-09-01).
+
 **Transcription.** This group owns the separate speech-to-text role without conflating it with the
 brain route. Its picker contains **OpenAI** (the default) and **Apple Speech (macOS 26+)**. Apple is
 enabled only when the running Mac and OS expose `SpeechTranscriber`; selecting it persists through
@@ -327,7 +334,7 @@ Both values, their keys, and the main-display floor are declared in
 | `Sources/JarvisApp/Settings/SettingsCardView.swift` | Rounded group boundary, optional header, and resize callback |
 | `Sources/JarvisApp/Settings/SettingsRowView.swift` | Shared label/help/trailing-control row |
 | `Sources/JarvisApp/Settings/SettingsScrollView.swift` | Viewport-change adapter for variable-height card documents |
-| `Sources/JarvisApp/Settings/BrainSection.swift` | Minimal Brain tab composition: Provider + Reasoning effort + Transcription |
+| `Sources/JarvisApp/Settings/BrainSection.swift` | Minimal Brain tab composition: Provider + Reasoning effort + Interview format + Transcription |
 | `Sources/JarvisApp/Settings/ConnectionsSection.swift` | Shared OpenAI credential editor + external CLI account readiness |
 | `Sources/JarvisApp/Settings/BrainTargetRowView.swift` | Shared inline provider/model row for primary and fallback targets |
 | `Sources/JarvisApp/Settings/ProviderRouteEditor.swift` | Unified Primary + ordered fallback card and persistence mutations |

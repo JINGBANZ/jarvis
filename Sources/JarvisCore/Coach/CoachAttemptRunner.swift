@@ -55,6 +55,9 @@ final class CoachAttemptRunner: @unchecked Sendable {
     private let coachingAttempts: (any CoachingAttemptAuditing)?
     private let activity: (any ActivityEventRecording)?
     private let ledger: CoachTranscriptLedger
+    /// Fixed for the whole session — chosen once at Start, never reclassified — so it needs none of
+    /// `prepMaterial`'s live-swap machinery; a plain stored `let` is enough.
+    private let interviewFormatAddendum: String
 
     private let runnerLock = NSLock()
     private var nextAttemptID = 0
@@ -76,7 +79,8 @@ final class CoachAttemptRunner: @unchecked Sendable {
         sessionStart: TimeInterval,
         coachingAttempts: (any CoachingAttemptAuditing)?,
         activity: (any ActivityEventRecording)?,
-        ledger: CoachTranscriptLedger
+        ledger: CoachTranscriptLedger,
+        interviewFormatAddendum: String = ""
     ) {
         self.config = config
         self.transcript = transcript
@@ -87,6 +91,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
         self.coachingAttempts = coachingAttempts
         self.activity = activity
         self.ledger = ledger
+        self.interviewFormatAddendum = interviewFormatAddendum
     }
 
     private func takeNextAttemptID() -> Int {
@@ -207,9 +212,9 @@ final class CoachAttemptRunner: @unchecked Sendable {
         // Describing search_prep_notes when it isn't actually offered invites the model to call a
         // tool it doesn't have — and that call is a hard attempt failure (below), so this must track
         // the real tool set exactly, not just hint at it.
-        let systemPrompt = attempt.prepMaterial != nil
+        let systemPrompt = (attempt.prepMaterial != nil
             ? JarvisPrompts.Coach.system + JarvisPrompts.Coach.prepMaterialAddendum
-            : JarvisPrompts.Coach.system
+            : JarvisPrompts.Coach.system) + interviewFormatAddendum
         let historyBase: [ChatMessage] = [.system(systemPrompt)] + history.snapshot()
 
         if reason == .manualHint && !work.manualHintPrepared {
