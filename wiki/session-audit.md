@@ -38,6 +38,10 @@ Two projections read that one stack:
 The closed presentation set is what keeps transport, retry, timing, lifecycle, and raw-error detail
 out of the human view. Sharing one stack grants no producer a path to author free-form human copy.
 
+Provider traffic is kept at the wire level, the exact request and response bodies with images
+redacted, rather than as provider-neutral messages: cache-busting prefix changes and tool-schema
+bloat, the audit's main quarry, are visible only in the bytes actually sent.
+
 ## Contract
 
 - Producers submit typed values to one process-level bounded worker. Timestamp rendering, JSON
@@ -100,6 +104,13 @@ Diagnostics follow the same rule: while a handle
 is attached, `jlog` lines are that session's; with no attachment, or once the attached handle is
 sealed, they reach the asynchronous process log only. A diagnostic is never guessed into whichever
 session happens to be newest — a mis-attributed diagnostic is worse evidence than a missing one.
+
+The attachment is one process-global slot, and the test suite runs concurrently in one process. A
+test of the transport's capacity or loss accounting therefore admits diagnostics through the session
+handle (`FileSessionAudit.recordDiagnostic`, the call `jlog` itself makes for an attached session)
+rather than attaching it, since any `jlog` from another suite would otherwise share the mailbox under
+assertion. Only a claim about `jlog`'s routing attaches, one suite at a time, and asserts presence or
+absence rather than counts.
 
 ## Privacy and Verification
 

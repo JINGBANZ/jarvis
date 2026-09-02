@@ -39,6 +39,28 @@ import Testing
         #expect(both.sessionEndReason == .permissionsMissing)
     }
 
+    @Test func missingPermissionsAreNamedIndividuallyAndListed() {
+        let systemAudio = UserFacingError.permissionsMissing([.systemAudio])
+        #expect(systemAudio.title == "Permission needed")
+        #expect(systemAudio.message.contains("Enable System Audio Recording in System Settings"))
+        #expect(!systemAudio.message.contains("Microphone"))
+
+        // Named in one stable order, so the notice never reshuffles between attempts.
+        let all = UserFacingError.permissionsMissing([.screenRecording, .systemAudio, .microphone])
+        #expect(all.title == "Permissions needed")
+        #expect(all.message.contains("Microphone, System Audio Recording, and Screen Recording"))
+    }
+
+    @Test func aMissingScreenGrantAsksForARelaunchRatherThanAnotherStart() {
+        // The grant only becomes visible to a new process, so "press Start again" would loop.
+        let screen = UserFacingError.permissionsMissing([.screenRecording])
+        #expect(screen.message.contains("reopen Jarvis"))
+        #expect(!screen.message.contains("press Start again"))
+
+        #expect(UserFacingError.permissionsMissing([.microphone]).message
+            .contains("press Start again"))
+    }
+
     @Test func captureFailedIsFatalAndCarriesReason() {
         let e = UserFacingError.captureFailed(reason: "no input device")
         #expect(e.severity == .fatal)

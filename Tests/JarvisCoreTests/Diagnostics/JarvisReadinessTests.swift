@@ -26,7 +26,7 @@ import Testing
         #expect(readiness.status == .checking(.permissions))
 
         let effects = readiness.observe(
-            .permissions(granted: [.microphone, .screenRecording]),
+            .permissions(granted: [.microphone, .systemAudio, .screenRecording]),
             for: start.session)
         #expect(readiness.status == .ready(.full))
         #expect(effects == [
@@ -37,7 +37,7 @@ import Testing
         let reverse = JarvisReadiness()
         let reverseStart = reverse.begin(configuration: allRequirements)
         _ = reverse.observe([
-            .permissions(granted: [.microphone, .screenRecording]),
+            .permissions(granted: [.microphone, .systemAudio, .screenRecording]),
             .credentials(available: [.openAIAPIKey]),
             .brainPreparation(.ready),
             .transcriptionPreparation(.ready),
@@ -59,7 +59,7 @@ import Testing
         let start = readiness.begin(configuration: allRequirements)
 
         _ = readiness.observe(
-            .permissions(granted: [.microphone, .screenRecording]), for: start.session)
+            .permissions(granted: [.microphone, .systemAudio, .screenRecording]), for: start.session)
         #expect(readiness.status == .checking(.credentials))
         _ = readiness.observe(
             .credentials(available: [.openAIAPIKey]), for: start.session)
@@ -83,7 +83,7 @@ import Testing
         let readiness = JarvisReadiness()
         let start = readiness.begin(configuration: .init())
         _ = readiness.observe([
-            .permissions(granted: [.microphone, .screenRecording]),
+            .permissions(granted: [.microphone, .systemAudio, .screenRecording]),
             .brainPreparation(.ready),
             .transcriptionEndpoint(stream: .microphone, state: .ready),
             .transcriptionEndpoint(stream: .system, state: .failed),
@@ -97,7 +97,7 @@ import Testing
         let readiness = JarvisReadiness()
         let start = readiness.begin(configuration: .init(requiresSystemAudio: false))
         _ = readiness.observe([
-            .permissions(granted: [.microphone, .screenRecording]),
+            .permissions(granted: [.microphone, .systemAudio, .screenRecording]),
             .brainPreparation(.ready),
             .transcriptionEndpoint(stream: .microphone, state: .ready),
             .capture(.microphoneOnly),
@@ -154,12 +154,12 @@ import Testing
             .permissions(granted: [.microphone]), for: start.session)
 
         #expect(effects == [
-            .statusChanged(.blocked(.permissions([.screenRecording]))),
+            .statusChanged(.blocked(.permissions([.systemAudio, .screenRecording]))),
         ])
         // A permission callback or other late completion must not autonomously start the attempt the
         // user was already told was blocked. A new explicit Start gets a new token.
         #expect(readiness.observe([
-            .permissions(granted: [.microphone, .screenRecording]),
+            .permissions(granted: [.microphone, .systemAudio, .screenRecording]),
             .credentials(available: [.openAIAPIKey]),
             .brainPreparation(.ready),
             .transcriptionPreparation(.ready),
@@ -167,7 +167,19 @@ import Testing
             .transcriptionEndpoint(stream: .system, state: .ready),
             .capture(.ready),
         ], for: start.session).isEmpty)
-        #expect(readiness.status == .blocked(.permissions([.screenRecording])))
+        #expect(readiness.status == .blocked(.permissions([.systemAudio, .screenRecording])))
+    }
+
+    @Test func missingSystemAudioPermissionBlocksStartBeforeCaptureIsBuilt() {
+        let readiness = JarvisReadiness()
+        let start = readiness.begin(
+            configuration: .init(requiredPermissions: [.microphone, .systemAudio]))
+
+        // A refused system-audio grant kills the whole aggregate device, so it blocks the attempt
+        // up front rather than surfacing later as a capture-construction failure.
+        let effects = readiness.observe(.permissions(granted: [.microphone]), for: start.session)
+
+        #expect(effects == [.statusChanged(.blocked(.permissions([.systemAudio])))])
     }
 
     @Test func unselectedScreenRecordingPermissionDoesNotBlockAudioReadiness() {
@@ -183,7 +195,7 @@ import Testing
         let credentials = JarvisReadiness()
         let credentialStart = credentials.begin(configuration: allRequirements)
         _ = credentials.observe(
-            .permissions(granted: [.microphone, .screenRecording]),
+            .permissions(granted: [.microphone, .systemAudio, .screenRecording]),
             for: credentialStart.session)
         _ = credentials.observe(.credentials(available: []), for: credentialStart.session)
         #expect(credentials.status == .blocked(.credentials([.openAIAPIKey])))
@@ -191,7 +203,7 @@ import Testing
         let brain = JarvisReadiness()
         let brainStart = brain.begin(configuration: .init())
         _ = brain.observe(
-            .permissions(granted: [.microphone, .screenRecording]), for: brainStart.session)
+            .permissions(granted: [.microphone, .systemAudio, .screenRecording]), for: brainStart.session)
         _ = brain.observe(
             .brainPreparation(.blocked(.providerUnavailable)), for: brainStart.session)
         #expect(brain.status == .blocked(.brain(.providerUnavailable)))
@@ -200,7 +212,7 @@ import Testing
         let transcriptionStart = transcription.begin(
             configuration: .init(requiresTranscriptionPreparation: true))
         _ = transcription.observe(
-            .permissions(granted: [.microphone, .screenRecording]),
+            .permissions(granted: [.microphone, .systemAudio, .screenRecording]),
             for: transcriptionStart.session)
         _ = transcription.observe(.brainPreparation(.ready), for: transcriptionStart.session)
         _ = transcription.observe(
@@ -236,7 +248,7 @@ import Testing
         #expect(readiness.status == .checking(.permissions))
 
         _ = readiness.observe([
-            .permissions(granted: [.microphone, .screenRecording]),
+            .permissions(granted: [.microphone, .systemAudio, .screenRecording]),
             .brainPreparation(.ready),
             .transcriptionEndpoint(stream: .microphone, state: .ready),
             .transcriptionEndpoint(stream: .system, state: .ready),
@@ -249,7 +261,7 @@ import Testing
         let readiness = JarvisReadiness()
         let start = readiness.begin(configuration: .init())
         _ = readiness.observe([
-            .permissions(granted: [.microphone, .screenRecording]),
+            .permissions(granted: [.microphone, .systemAudio, .screenRecording]),
             .brainPreparation(.ready),
             .transcriptionEndpoint(stream: .microphone, state: .ready),
             .transcriptionEndpoint(stream: .system, state: .ready),
