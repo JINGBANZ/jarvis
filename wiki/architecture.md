@@ -432,8 +432,8 @@ rather than a per-turn screenshot.
   so they stay inspectable in the OpenAI dashboard for debugging — the retention tradeoff is
   documented in [sandbox.md](./sandbox.md).
 - **Interview format supplies optional coaching-prompt vocabulary (`InterviewFormat`,
-  `CoachingSkill`).** A Start-time picker (Coding / System Design / Behavioral, or no selection) adds
-  a format-specific addendum to the coach system prompt — today, only System Design has real
+  `CoachingSkill`).** A Start-time picker (**None**, plus one entry per format that actually has
+  content — System Design today) adds a format-specific addendum to the coach system prompt — today, only System Design has real
   content, added because the coach otherwise has zero system-design vocabulary (functional
   requirements, API design, data model, etc.) and its tips can drift from whatever stage of that
   discussion the candidate is actually in; Coding and Behavioral stay empty because no one has
@@ -446,10 +446,13 @@ rather than a per-turn screenshot.
   model) — otherwise the skill resolves under `swift build`/`swift test` but silently goes missing
   from the shipped app. Adding or editing a skill still needs a developer and a rebuild — a
   self-service system where a user drops in their own skill file was considered and set aside as
-  speculative infrastructure for a need nothing has yet. The picker offers **None** plus only the
-  formats that actually have content (`InterviewFormat.allCases.filter { !$0.promptAddendum.isEmpty
-  }`) — System Design today — so a new `<format>.md` surfaces there with no Swift change, and no
-  entry is ever indistinguishable from None. No selection resolves to no addendum at all
+  speculative infrastructure for a need nothing has yet. The picker filters the fixed
+  `InterviewFormat.allCases` down to entries whose addendum is non-empty
+  (`InterviewFormat.allCases.filter { !$0.promptAddendum.isEmpty }`), so an entry is never
+  indistinguishable from None: writing Coding's or Behavioral's Markdown file is a resource-only
+  change that surfaces its existing case, but a genuinely new format still needs a new
+  `InterviewFormat` case and display name before any Markdown file can surface it. No selection
+  resolves to no addendum at all
   (`format?.promptAddendum ?? ""`), not a guess assembled from whatever formats happen to have
   content: concatenating every non-empty addendum was tried and rejected — with only one format
   written it silently asserted "this is a system-design interview" into every session by default,
