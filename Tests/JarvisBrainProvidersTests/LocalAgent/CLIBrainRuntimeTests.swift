@@ -318,6 +318,102 @@ import JarvisCore
         runtime.terminateNow()
     }
 
+    /// A prewarm resumed after an attempt has installed its own thread must leave that thread
+    /// alone. It used to treat the attempt's thread as stale and replace it, the attempt then
+    /// replaced the prewarm's, and so on, one thread/unsubscribe plus thread/start per round,
+    /// until the attempt happened to be resumed first. The open runs at background priority and
+    /// the prewarm at utility, so the prewarm wins every resume race: exactly the order that
+    /// traded evictions.
+    @Test func aPrewarmDoesNotReplaceTheThreadAnAttemptIsOpening() async throws {
+        let directory = try makeWorkDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let trace = directory.appendingPathComponent("trace")
+        let gate = directory.appendingPathComponent("thread-start-gate")
+        let executable = try makeExecutable(
+            in: directory,
+            named: "fake-codex",
+            script: codexScript(
+                trace: trace,
+                threadResult: Self.ephemeralThreadResult,
+                threadStartGate: gate))
+        let runtime = makeRuntime(provider: .codexCLI, directory: directory)
+        let attempt = makeClient(
+            provider: .codexCLI,
+            executable: executable,
+            directory: directory,
+            runtime: runtime,
+            prewarm: false,
+            systemPrompt: "attempt coach prompt")
+        let leased = directory.appendingPathComponent("leased")
+        let opening = Task.detached(priority: .background) {
+            let conversation = try await attempt.makeConversation()
+            try Data().write(to: leased)
+            return conversation
+        }
+        // The attempt's thread/start is in the trace, and the fake will not answer it until the
+        // gate exists: the open is parked on its own preparation.
+        try await waitForRequestCount(1, method: "thread/start", in: trace)
+
+        let prewarming = makeClient(
+            provider: .codexCLI,
+            executable: executable,
+            directory: directory,
+            runtime: runtime,
+            prewarm: true)
+        _ = prewarming
+        // Let the prewarm reach the parked preparation. Nothing observable marks that moment; a
+        // prewarm that only arrives after the gate opens finds the leased thread and returns, so a
+        // late one makes this case pass vacuously rather than fail.
+        try await Task.sleep(nanoseconds: 300_000_000)
+        try Data().write(to: gate)
+
+        // Poll for the lease rather than awaiting the task: awaiting would escalate the open to
+        // this task's priority and hand it the resume race the case exists to lose.
+        try await waitForFile(leased)
+        let conversation = try await opening.value
+        #expect(requests(method: "thread/start", in: trace).count == 1)
+        #expect(requests(method: "thread/unsubscribe", in: trace).isEmpty)
+        await conversation.finish()
+        runtime.terminateNow()
+    }
+
+    /// A newer prewarm for another configuration still replaces an idle prepared thread, so a
+    /// route replacement or topology edit keeps its head start: the attempt that follows leases
+    /// the replacement's thread instead of starting one.
+    @Test func aNewerPrewarmReplacesAnIdleThreadPreparedForAnotherConfiguration() async throws {
+        let directory = try makeWorkDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let trace = directory.appendingPathComponent("trace")
+        let executable = try makeExecutable(
+            in: directory,
+            named: "fake-codex",
+            script: codexScript(trace: trace, threadResult: Self.ephemeralThreadResult))
+        let runtime = makeRuntime(provider: .codexCLI, directory: directory)
+        let firstTarget = makeClient(
+            provider: .codexCLI,
+            executable: executable,
+            directory: directory,
+            runtime: runtime,
+            prewarm: true)
+        _ = firstTarget
+        try await waitForRequestCount(1, method: "thread/start", in: trace)
+
+        let replacementTarget = makeClient(
+            provider: .codexCLI,
+            executable: executable,
+            directory: directory,
+            runtime: runtime,
+            prewarm: true,
+            systemPrompt: "replacement coach prompt")
+        try await waitForRequestCount(2, method: "thread/start", in: trace)
+
+        let replacement = try await replacementTarget.makeConversation()
+        #expect(requests(method: "thread/start", in: trace).count == 2)
+        #expect(requests(method: "thread/unsubscribe", in: trace).count == 1)
+        await replacement.finish()
+        runtime.terminateNow()
+    }
+
     @Test func releasingPreparedCodexRuntimeStopsItsSessionProcess() async throws {
         let directory = try makeWorkDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -871,12 +967,14 @@ import JarvisCore
         #"{"thread":{"id":"thread-1","ephemeral":true,"path":null},"instructionSources":[]}"#
 
     /// A fake `codex app-server` that records its argv and every request it is sent, then answers
-    /// with a single `stay_silent` agent message.
+    /// with a single `stay_silent` agent message. With `threadStartGate` set, no `thread/start` is
+    /// answered until that file exists, which parks whoever is preparing a thread.
     private func codexScript(
         argumentsFile: URL? = nil,
         pidFile: URL? = nil,
         trace: URL,
         threadResult: String,
+        threadStartGate: URL? = nil,
         execReply: String? = nil,
         execItemType: String = "agent_message",
         execUsage: String = "{}"
@@ -886,6 +984,9 @@ import JarvisCore
         } ?? ""
         let recordPID = pidFile.map {
             "printf '%s\\n' \"$$\" > '\(shellQuoted($0.path))'\n"
+        } ?? ""
+        let threadStartGateWait = threadStartGate.map {
+            "while [ ! -e '\(shellQuoted($0.path))' ]; do sleep 0.01; done"
         } ?? ""
         // `codex exec --json` is a different program shape from the app-server: one shot, JSONL
         // events on stdout, and the reply written to the --output-last-message path.
@@ -914,6 +1015,7 @@ import JarvisCore
                   printf '{"id":%s,"result":{}}\\n' "$request_id"
                   ;;
                 thread/start)
+                  \(threadStartGateWait)
                   printf '{"id":%s,"result":%s}\\n' "$request_id" '\(shellQuoted(threadResult))'
                   ;;
                 thread/unsubscribe)
