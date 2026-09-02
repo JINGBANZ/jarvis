@@ -62,10 +62,26 @@ extension JarvisPrompts {
         accuracy outranks brevity.
         """
 
-        /// Appended to `system` only for a session where `search_prep_notes` is actually offered
-        /// (see `CoachAttemptRunner.runAttempt`) — describing a tool the model doesn't have invites
-        /// exactly the hallucinated call the tool-loop guard turns into a hard attempt failure.
-        static let prepMaterialAddendum = """
+        /// The complete coaching system prompt. Every site that sends one assembles it here, so the
+        /// per-turn prompt `CoachAttemptRunner` builds and the one `BrainComposition` bakes into a
+        /// CLI provider's persistent process at Start cannot drift. `CLIBrainClient` asserts its
+        /// instructions never change after construction, so drift would fail every CLI turn.
+        ///
+        /// - `prepMaterial`: whether `search_prep_notes` is actually in this prompt's tool set (see
+        ///   `prepMaterialAddendum`).
+        /// - `formatAddendum`: the interview-format guidance, resolved to a `String` once at Start
+        ///   rather than passed as an `InterviewFormat?`. That is deliberate, not something to
+        ///   clean up: `promptAddendum` reads its bundled file on every access and this builder
+        ///   runs per coaching turn, so the pre-resolved string keeps that a single file read
+        ///   instead of one per turn.
+        public static func system(prepMaterial: Bool, formatAddendum: String) -> String {
+            (prepMaterial ? system + prepMaterialAddendum : system) + formatAddendum
+        }
+
+        /// Appended by `system(prepMaterial:formatAddendum:)` only when `search_prep_notes` is
+        /// actually offered: describing a tool the model doesn't have invites exactly the
+        /// hallucinated call the tool-loop guard turns into a hard attempt failure.
+        private static let prepMaterialAddendum = """
 
         # Prep material
         If a live question resembles a topic in the user's prepared notes, call search_prep_notes once

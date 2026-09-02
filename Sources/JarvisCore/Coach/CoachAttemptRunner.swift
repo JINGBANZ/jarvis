@@ -210,11 +210,11 @@ final class CoachAttemptRunner: @unchecked Sendable {
             return AttemptExecution(id: attemptID, result: .skipped(.skippedFillerOnly))
         }
         // Describing search_prep_notes when it isn't actually offered invites the model to call a
-        // tool it doesn't have — and that call is a hard attempt failure (below), so this must track
-        // the real tool set exactly, not just hint at it.
-        let systemPrompt = (attempt.prepMaterial != nil
-            ? JarvisPrompts.Coach.system + JarvisPrompts.Coach.prepMaterialAddendum
-            : JarvisPrompts.Coach.system) + interviewFormatAddendum
+        // tool it doesn't have — and that call is a hard attempt failure (below), so `prepMaterial`
+        // must track the real tool set (`tools`, below) exactly, not just hint at it.
+        let systemPrompt = JarvisPrompts.Coach.system(
+            prepMaterial: attempt.prepMaterial != nil,
+            formatAddendum: interviewFormatAddendum)
         let historyBase: [ChatMessage] = [.system(systemPrompt)] + history.snapshot()
 
         if reason == .manualHint && !work.manualHintPrepared {
