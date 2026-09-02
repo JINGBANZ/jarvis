@@ -17,6 +17,8 @@ import Testing
         #expect(Defaults.Transcription.openAIModelKey == "transcription.openai.model")
         #expect(Defaults.Transcription.openAIExpectedLanguagesKey
             == "transcription.openai.expected-languages")
+        #expect(Defaults.Transcription.openAIVocabularyKeywordsKey
+            == "transcription.openai.vocabulary-keywords")
         #expect(Defaults.Transcription.appleSpeechLocaleKey == "transcription.apple-speech.locale")
         #expect(Defaults.Screen.scopeKey == "screen.captureScope")
         #expect(Defaults.Screen.displayIndexKey == "screen.captureDisplayIndex")
@@ -60,6 +62,7 @@ import Testing
         #expect(Defaults.Transcription.openAIModel == .gpt4oTranscribe)
         // Empty means automatic detection — never a silent assumption of English.
         #expect(Defaults.Transcription.openAIExpectedLanguages.isEmpty)
+        #expect(Defaults.Transcription.openAIVocabularyKeywords.isEmpty)
         #expect(!Defaults.Transcription.appleSpeechLocaleIdentifier.isEmpty)
     }
 

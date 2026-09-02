@@ -15,6 +15,7 @@ import Testing
         #expect(preferences.provider == .openAI)
         #expect(preferences.openAIModel == .gpt4oTranscribe)
         #expect(preferences.openAIExpectedLanguages.isEmpty)
+        #expect(preferences.openAIVocabularyKeywords.isEmpty)
         #expect(preferences.appleSpeechLocaleIdentifier == Locale.current.identifier)
     }
 
@@ -24,18 +25,30 @@ import Testing
         written.provider = .appleSpeech
         written.openAIModel = .gptLiveTranscribe
         written.openAIExpectedLanguages = [.mandarinChinese, .english, .mandarinChinese]
+        written.openAIVocabularyKeywords = ["Kubernetes", "gRPC"]
         written.appleSpeechLocaleIdentifier = "zh-CN"
 
         let read = TranscriptionPreferences(defaults: defaults)
         #expect(read.provider == .appleSpeech)
         #expect(read.openAIModel == .gptLiveTranscribe)
         #expect(read.openAIExpectedLanguages == [.english, .mandarinChinese])
+        #expect(read.openAIVocabularyKeywords == ["Kubernetes", "gRPC"])
         #expect(read.appleSpeechLocaleIdentifier == "zh-CN")
         #expect(read.configuration == TranscriptionConfiguration(
             provider: .appleSpeech,
             openAIModel: .gptLiveTranscribe,
             openAIExpectedLanguages: [.english, .mandarinChinese],
+            openAIVocabularyKeywords: ["Kubernetes", "gRPC"],
             appleSpeechLocaleIdentifier: "zh-CN"))
+    }
+
+    /// Blank and whitespace-only entries are dropped, and surrounding whitespace is trimmed, so a
+    /// trailing comma from a comma-separated text field doesn't persist a stray empty term.
+    @Test func vocabularyKeywordsTrimAndDropBlankEntries() {
+        let defaults = freshDefaults()
+        let preferences = TranscriptionPreferences(defaults: defaults)
+        preferences.openAIVocabularyKeywords = [" Kubernetes ", "", "  ", "gRPC"]
+        #expect(preferences.openAIVocabularyKeywords == ["Kubernetes", "gRPC"])
     }
 
     @Test func gptTranscribeSelectionRoundTripsThroughDefaults() {

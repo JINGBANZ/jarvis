@@ -217,7 +217,10 @@ are sent to GPT Transcribe and GPT Live; GPT-4o remains automatic because it acc
 language hint, and the row says so whenever GPT-4o has multiple selections. The canonical list is one
 immutable Start-time expectation shared by `me` and `them`,
 so the transcription model—not a Jarvis per-turn classifier—handles a speaker switching languages
-inside one sentence. Model-specific language, context, and turn-detection behavior is defined in
+inside one sentence. **Vocabulary** is a free-text, comma-separated glossary of literal terms
+(jargon, names) sent as `keywords` to bias recognition; it applies only to GPT Transcribe and GPT
+Live and the row says so whenever GPT-4o Transcribe is selected. Blank entries are dropped on save.
+Model-specific language, context, and turn-detection behavior is defined in
 [architecture.md](./architecture.md#models-and-apis).
 
 With Apple Speech selected, **Conversation locale** is populated from

@@ -15,13 +15,15 @@ final class TranscriptionControls: NSObject {
     private var providerRow: SettingsRowView?
     private var modelRow: SettingsRowView?
     private var languagesRow: SettingsRowView?
+    private var vocabularyRow: SettingsRowView?
+    var vocabularyField: NSTextField?
     private var localeRow: SettingsRowView?
     private var localePopup: NSPopUpButton?
     private var localeLoadTask: Task<Void, Never>?
 
     var preferredHeight: CGFloat {
         SettingsStyle.cardHeaderHeight
-            + CGFloat(preferences.provider == .openAI ? 3 : 2) * SettingsStyle.rowHeight
+            + CGFloat(preferences.provider == .openAI ? 4 : 2) * SettingsStyle.rowHeight
     }
 
     init(preferences: TranscriptionPreferences) {
@@ -102,6 +104,21 @@ final class TranscriptionControls: NSObject {
         content.addSubview(languagesRow)
         self.languagesRow = languagesRow
 
+        let vocabularyField = NSTextField()
+        vocabularyField.placeholderString = "e.g. Kubernetes, gRPC, Ada Lovelace"
+        vocabularyField.stringValue = preferences.openAIVocabularyKeywords.joined(separator: ", ")
+        vocabularyField.delegate = self
+        vocabularyField.setAccessibilityLabel("Transcription vocabulary")
+        vocabularyField.identifier = NSUserInterfaceItemIdentifier("transcription-vocabulary")
+        let vocabularyRow = SettingsRowView(
+            title: "Vocabulary",
+            detail: "Only used by GPT Transcribe / GPT Live",
+            controlView: vocabularyField,
+            controlSize: NSSize(width: 340, height: 24))
+        content.addSubview(vocabularyRow)
+        self.vocabularyRow = vocabularyRow
+        self.vocabularyField = vocabularyField
+
         let locale = NSPopUpButton()
         locale.addItem(withTitle: "Loading locales…")
         locale.isEnabled = false
@@ -128,8 +145,10 @@ final class TranscriptionControls: NSObject {
         let usesOpenAI = preferences.provider == .openAI
         modelRow?.isHidden = !usesOpenAI
         languagesRow?.isHidden = !usesOpenAI
+        vocabularyRow?.isHidden = !usesOpenAI
         localeRow?.isHidden = usesOpenAI
         refreshLanguageDetail()
+        refreshVocabularyDetail()
         card?.frame.size.height = preferredHeight
         layoutRows()
         onHeightChanged?(preferredHeight)
@@ -143,10 +162,17 @@ final class TranscriptionControls: NSObject {
             : "No selection means Automatic")
     }
 
+    private func refreshVocabularyDetail() {
+        vocabularyRow?.setDetail(preferences.openAIModel == .gpt4oTranscribe
+            ? "GPT-4o Transcribe ignores this — switch Model to use it"
+            : "Comma-separated jargon and names bias recognition")
+    }
+
     private func layoutRows() {
         guard let card else { return }
         let rows = [providerRow, preferences.provider == .openAI ? modelRow : localeRow,
-                    preferences.provider == .openAI ? languagesRow : nil].compactMap { $0 }
+                    preferences.provider == .openAI ? languagesRow : nil,
+                    preferences.provider == .openAI ? vocabularyRow : nil].compactMap { $0 }
         var top = card.bodyFrame.maxY
         for row in rows {
             top -= row.preferredHeight
@@ -179,7 +205,16 @@ final class TranscriptionControls: NSObject {
         }
         preferences.openAIModel = model
         refreshLanguageDetail()
+        refreshVocabularyDetail()
         jlog("Jarvis: \(model.displayName) selected for the next Start.")
+    }
+
+    func vocabularyChanged(_ rawValue: String) {
+        let keywords = rawValue.split(separator: ",").map(String.init)
+        preferences.openAIVocabularyKeywords = keywords
+        vocabularyField?.stringValue = preferences.openAIVocabularyKeywords.joined(separator: ", ")
+        jlog("Jarvis: \(preferences.openAIVocabularyKeywords.count) transcription vocabulary "
+            + "term(s) selected for the next Start.")
     }
 
     private func languagesChanged(_ languages: [OpenAITranscriptionLanguage]) {
