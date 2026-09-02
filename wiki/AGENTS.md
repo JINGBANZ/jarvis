@@ -35,8 +35,9 @@ substantive edits.
 
 Describe the system as it is now; after a change a page should read as if the old concept never existed.
 Delete on sight: "X was removed / replaced / deprecated"; "originally Y, now Z"; "Previously…", "No
-longer…", "Used to be…"; `~~struck~~` items; obsolete non-goals. The *why it changed* lives only in the
-git log and the decision log ([Convention 8](#8-log-load-bearing-decisions-in-one-place-dont-accumulate-decision-files)).
+longer…", "Used to be…"; `~~struck~~` items; obsolete non-goals. The *why it changed* lives in the pull
+request and the git log; the *why it is this way* stays on the page
+([Convention 8](#8-keep-rationale-beside-the-design-it-explains-there-is-no-decision-log)).
 
 ### 4. Reference source; don't paste code.
 
@@ -52,7 +53,7 @@ Document each fact on one page; elsewhere, **link** to it. Two copies drift, and
 ### 6. Don't create empty pages.
 
 If you can't write three meaningful sentences on a topic, don't make a page — an indexed `TODO` stub is
-worse than a missing one. Exception: the scaffold pages (`index.md`, `status.md`, `decisions.md`) exist
+worse than a missing one. Exception: the scaffold pages (`index.md`, `status.md`) exist
 for structure and stay even when near-empty — but a `status.md` left full of `<placeholders>` after work
 starts is the stub this forbids.
 
@@ -72,16 +73,17 @@ until flat stops working; let taxonomy emerge. **Adding / renaming / removing a 
 [`index.md`](./index.md) in the same edit** (a page not in the index is invisible); keep it a lightweight
 map, not a second copy.
 
-### 8. Log load-bearing decisions in one place. Don't accumulate decision files.
+### 8. Keep rationale beside the design it explains. There is no decision log.
 
-Decisions go in one running log, [`decisions.md`](./decisions.md): one dated entry each (what you chose,
-why, what you rejected), newest last. No numbered ADR folder — that's its own sync-and-cross-link burden.
-It's a dedicated page, not part of [`status.md`](./status.md): status is volatile current-state, the log
-is durable. Log only genuinely **load-bearing, non-obvious** choices — ones a reader would re-litigate or
-a dead end they'd re-walk; skip what the code or PR already explains. This is the **one** place past
-rationale persists, so [Convention 3](#3-write-in-the-present-dont-narrate-refactors) does *not* apply to
-it. **Supersede, don't rewrite:** when a later decision reverses an earlier one, leave it and append
-`**Superseded by:** <entry>` — the lifecycle a numbered ADR would carry, in one line.
+A design page states what is true now *and why*. When a choice is non-obvious, or an obvious
+alternative was tried and rejected, say so in a sentence or two next to the fact it explains ("X, not
+Y, because Z") — that is where a reader about to propose Y will be looking, and it is the only place
+rationale persists in the wiki. Keep it to the choices a reader would re-litigate or a dead end they
+would re-walk; skip what the code already makes obvious. The story of a *change* — what it was
+before, what was learned, how it was validated — belongs in the pull request and the commit message,
+not here. No running decision log and no ADR folder: a log appended per change fills with entries of
+every weight, and its entries go stale while the pages they describe move on. When a choice is
+reversed, rewrite the sentence on the design page; git holds the old one.
 
 ### 9. Run health checks, not only per-change updates.
 
@@ -99,10 +101,13 @@ Run in the **same change (PR or commit)** as the code, never as a later cleanup.
 documented behavior without a doc update is incomplete; stale docs erode trust faster than they rebuild.
 
 1. **[`status.md`](./status.md)** — move built things to "Built" with a file pointer; delete abandoned
-   "Not yet built" items (log why in `decisions.md` if load-bearing); update phase + next action.
+   "Not yet built" items (if a reader might re-propose one, say why not on the design page); update
+   phase + next action.
 2. **Core page(s)** — create or update in place, present tense; touch every page whose meaning the change
    alters, not just the nearest one.
-3. **[`decisions.md`](./decisions.md)** — log any load-bearing decision.
+3. **Rationale** — a non-obvious choice or a rejected alternative goes on the design page beside the
+   fact it explains ([Convention 8](#8-keep-rationale-beside-the-design-it-explains-there-is-no-decision-log));
+   the change story goes in the pull request.
 4. **[`index.md`](./index.md)** — update if a page was added, renamed, or removed.
 5. **Links** — confirm every link and file pointer in touched pages still resolves.
 6. **Duplicated facts** — code ↔ wiki, page ↔ page, code ↔ config: collapse to one source or link
@@ -114,7 +119,8 @@ A change isn't done until a fresh agent could reconstruct what's built and where
 
 ## Not in the wiki
 
-- **Brainstorms, plans, scratch drafts** — extract any real decision to `decisions.md`, discard the rest.
+- **Brainstorms, plans, scratch drafts** — fold any design change and its rationale into the design
+  page, discard the rest.
 - **Tutorials / quickstarts / user guides** — those serve external users; they go in `README.md`.
 - **Generated artifacts, logs, runtime output**, and **anything the code already states**
   ([Convention 4](#4-reference-source-dont-paste-code)).
@@ -125,6 +131,6 @@ design page. They are listed in [`index.md`](./index.md), so they aren't orphans
 
 ## If you get stuck
 
-If a page and the code disagree and no decision explains the gap, that's drift: treat code as truth for
+If a page and the code disagree and nothing on the page explains the gap, that's drift: treat code as truth for
 *what*, but flag it to a human rather than silently rewriting — the page may encode intent the code
 drifted from.

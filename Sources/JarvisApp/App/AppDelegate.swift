@@ -31,6 +31,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     private let transcriptionPreferences = TranscriptionPreferences()
     private let screenPreferences = ScreenCapturePreferences()
     private let prepMaterialPreferences = PrepMaterialPreferences()
+    private let permissionPreferences = PermissionPreferences()
+    private var permissionGate: PermissionGate!
+    /// Whether the app's own surfaces exist yet. Nothing is built while the permission gate is up.
+    private var didStartApp = false
     private let hotkeyPreferences = HotkeyPreferences()
     /// Monotonic revision stamped on each control-plane snapshot. Bumped at Start and whenever an
     /// explicit Settings edit installs a fresh plan; never by runtime health.
@@ -87,9 +91,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     private var pendingTurnDrainIDs: Set<UUID> = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        brain = BrainComposition(secrets: secrets, coachTools: coachTools, host: self)
         NSApp.setActivationPolicy(.accessory) // ghost-mode-allowed: launch configuration
         MainMenu.install() // an Edit menu so ⌘X/⌘C/⌘V/⌘A work in the Settings text fields
+
+        // Nothing else comes up until Jarvis holds every grant: no menu bar, no overlays, no session
+        // runtime. A half-permitted Jarvis is not a usable product, and a Start that can only fail is
+        // worse than no Start at all.
+        permissionGate = PermissionGate(preferences: permissionPreferences)
+        permissionGate.onSatisfied = { [weak self] in self?.startApp() }
+        // Asynchronous because proving the system-audio grant means running a tap, which must not
+        // block the main thread.
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            if await self.permissionGate.holdsEveryGrant() {
+                self.startApp()
+            } else {
+                self.permissionGate.present()
+            }
+        }
+    }
+
+    /// Builds everything a permitted Jarvis needs. Reached either straight from launch or from the
+    /// gate closing, and never twice.
+    private func startApp() {
+        didStartApp = true
+        brain = BrainComposition(secrets: secrets, coachTools: coachTools, host: self)
         networkDiagnostics.start()
 
         // The activity viewer lives for the whole app run, but a *session* is one coaching run: each
@@ -126,9 +152,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             return AgenticEvaluator(repositoryDirectory: repository,
                                     preferredProvider: self.brain.preferences.provider)
         }
-
-        // Ask for Microphone + Screen Recording up front, not lazily mid-session.
-        Permissions.primeAll()
 
         overlayCaption = OverlayCaptionPanel()
         overlayCaption.setFontSize(appearance.captionFontSize)
@@ -199,6 +222,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         ]
         settingsWindow = SettingsWindow(sections: sections)
         menuBar.onOpenSettings = { [weak self] in self?.settingsWindow.show() }
+        menuBar.onClearOverlayBox = { [weak self] in self?.overlayBox.clear() }
 
         // The menu drives the pipeline lifecycle. Jarvis does NOT auto-start; the user presses Start.
         menuBar.onStart = { [weak self] in self?.start() ?? false }
@@ -229,6 +253,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        // Quitting from the permission gate happens before anything exists to stop.
+        guard didStartApp else { return .terminateNow }
         activityViewer?.cancelEvaluation()
         stop(reason: .applicationQuit)
         return .terminateNow
@@ -253,7 +279,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         brain.applySavedAPIKey(key)
     }
 
-    /// Validate a Start immediately, then prepare any local-CLI targets and on-device speech assets.
+    /// Validate a Start immediately, then prove system audio and prepare any local-CLI targets and
+    /// on-device speech assets.
     /// Returns `true` once startup is accepted; the menu remains in Starting until preparation and
     /// both transcription endpoints finish. Stop, a newer Start, or a relevant preference/credential
     /// edit makes the prepared result stale before it can install a pipeline.
@@ -272,8 +299,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         let key = secrets.apiKey() ?? ""
         let requiresOpenAIKey = transcriptionProvider.requiresOpenAIAPIKey(for: brainRoute)
         let preparesAppleSpeech = transcriptionProvider == .appleSpeech
+        // Only the readable grants gate a Start here: microphone live, screen recording from this
+        // process's preflight. System audio is settled by the probe below, which is the only
+        // authority on it — requiring the previous answer here would let one failed probe refuse
+        // every later Start until Jarvis was relaunched, while the notice says to press Start again.
         let readinessConfiguration = JarvisReadiness.Configuration(
-            requiredPermissions: [.microphone],
+            requiredPermissions: PermissionGate.required.subtracting([.systemAudio]),
             requiredCredentials: requiresOpenAIKey ? [.openAIAPIKey] : [],
             requiresTranscriptionPreparation: preparesAppleSpeech)
         let readinessStart = readiness.begin(configuration: readinessConfiguration)
@@ -314,22 +345,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         pendingStartTask?.cancel()
         pendingStartTask = nil
         let cliProviders = brainRoute.targets.map(\.provider).filter(\.usesLocalCLI)
-        guard preparesAppleSpeech || !cliProviders.isEmpty else {
-            return installPreparedStart(
-                apiKey: key,
-                brainRoute: brainRoute,
-                interviewFormatAddendum: interviewFormatAddendum,
-                transcriptionConfiguration: transcriptionConfiguration,
-                appleSpeechLocale: nil,
-                detectedCLIs: [:],
-                wasRunning: wasRunning,
-                reportContext: reportContext,
-                readinessSession: readinessSession)
-        }
-
         let detector = AgentCLIDetector()
         pendingStartTask = Task { [weak self] in
             guard let self else { return }
+
+            // Prove system audio again for this session. The launch proof can be hours or days old
+            // on a menu-bar app, and a grant withdrawn since would otherwise produce a session that
+            // reports full readiness while hearing nothing: a refused tap still delivers frames, and
+            // capture health counts frames without inspecting amplitude. Microphone and Screen
+            // Recording need no probe — the checks above read them directly.
+            guard await Permissions.request(.systemAudio, remembering: self.permissionPreferences)
+            else {
+                self.rejectStartWithoutSystemAudio(
+                    revision: revision,
+                    wasRunning: wasRunning,
+                    context: reportContext,
+                    readinessSession: readinessSession)
+                return
+            }
+
             var appleSpeechLocale: Locale?
             if preparesAppleSpeech {
                 guard #available(macOS 26.0, *) else {
@@ -425,6 +459,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             artifacts.sessionAudit?.record(.settingsChangeNotApplied)
         }
         errorReporter.reportImmediately(error, context: context)
+    }
+
+    /// A Start whose system-audio proof failed. Distinct from a transcription blocker: the session
+    /// never begins, and the notice names the permission rather than the provider.
+    private func rejectStartWithoutSystemAudio(
+        revision: UInt,
+        wasRunning: Bool,
+        context: UserFacingError.PresentationContext,
+        readinessSession: JarvisReadiness.Session
+    ) {
+        guard pendingStartRevision == revision,
+              self.readinessSession == readinessSession else { return }
+        pendingStartTask = nil
+        observeReadiness(
+            .permissions(granted: Permissions.grantedReadinessPermissions()),
+            for: readinessSession)
+        jlog("Jarvis: can't start — system audio is no longer proved for this session.")
+        if wasRunning {
+            artifacts.sessionAudit?.record(.settingsChangeNotApplied)
+        }
+        errorReporter.reportImmediately(.permissionsMissing([.systemAudio]), context: context)
     }
 
     /// Install a fully prepared route on the main actor. The primary preflight still happens before

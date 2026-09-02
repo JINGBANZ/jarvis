@@ -108,6 +108,19 @@ public enum Defaults {
         public static let sources: [PrepMaterialSource] = []
     }
 
+    // MARK: - Permissions
+
+    /// The one thing Jarvis remembers about macOS permissions. Not a user-editable setting, and
+    /// deliberately not a record of any *grant*: a stored grant cannot be told apart from a current
+    /// one, so grants are proved live instead. This records something Jarvis did, which stays true.
+    public enum Permissions {
+        public static let screenRecordingAskedKey = "permissions.screenRecordingAsked"
+        /// Nobody has asked macOS for Screen Recording yet. Set once the gate has, which is what
+        /// lets a later launch read a still-missing grant as a refusal rather than a pending one.
+        public static let screenRecordingAsked = false
+
+    }
+
     // MARK: - Overlay
 
     /// The two capture-invisible coaching surfaces. Each has an on/off flag, a font size in points,

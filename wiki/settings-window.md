@@ -193,7 +193,9 @@ list. Stop → Start begins at the saved primary again.
 
 **Model + reasoning effort.** A **Model** dropdown is drawn from `BrainModelCatalog` per provider.
 OpenAI API and Codex CLI share one concrete model list; Claude Code exposes the current concrete
-release in each supported family. Each provider remembers its own model; without a valid preference,
+release in each supported family. Concrete releases, never rolling aliases such as `sonnet` or
+`opus` or a CLI's own default: a saved route must keep naming the release the user picked, and an
+alias silently retargets it the day the provider advances it. Each provider remembers its own model; without a valid preference,
 the first entry in that provider's catalog is selected. The **Reasoning effort** picker
 (`ReasoningEffort`: None / Low / Medium / High) is stored once and applies uniformly to whichever
 provider is active; its default lives with the others in
@@ -206,7 +208,7 @@ Design / Behavioral) supplies additional coaching-prompt vocabulary for the sele
 selection means Automatic — every format's non-empty guidance is included rather than guessed. Fixed
 for the whole session, like the transcription language/model choice: it applies on the next Start,
 never reclassified mid-conversation. See [architecture.md → Models and
-APIs](./architecture.md#models-and-apis) and `wiki/decisions.md` (2026-09-01).
+APIs](./architecture.md#models-and-apis).
 
 **Transcription.** This group owns the separate speech-to-text role without conflating it with the
 brain route. Its picker contains **OpenAI** (the default) and **Apple Speech (macOS 26+)**. Apple is
@@ -301,7 +303,10 @@ The window shot also gets an **on-device OCR sidecar**: `ScreenTextRecognizer` (
 `.accurate`, language correction off so code identifiers survive) recognizes the text and Core's
 `RecognizedTextLayout` rebuilds reading order; `CoachDriver` sends it in the `capture_screen`
 tool-result text beside the image, flagged as fallible, so the model reads exact code instead of
-deciphering pixels. Nothing eligible on screen → fall back to a full shot of the **main display**;
+deciphering pixels. OCR, not accessibility-tree extraction: Chrome exposes web content only under
+assistive-tech flags and Monaco virtualizes to the visible lines, so OCR gets the same text
+generically with none of the per-app fragility. Nor is the text a substitute for the image, which
+stays ground truth: diagrams and layout need vision, and OCR mangles the odd identifier. Nothing eligible on screen → fall back to a full shot of the **main display**;
 fallback and entire-display captures skip OCR deliberately (a whole display's text would feed the
 surrounding clutter back to the model as tokens).
 

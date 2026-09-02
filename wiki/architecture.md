@@ -4,17 +4,17 @@
 > that govern Jarvis. Exact schemas, prompts, and config are not duplicated here — they live in
 > `Sources/JarvisCore/` (`Prompts/`, `Coach/ToolDefs.swift`, `Config/Config.swift`).
 
-> **Scope:** This page describes the **native Swift app** — the thing being built. The earlier
-> two-phase plan (a Natively fork PoC first) was **dropped on 2026-06-14**; we build this directly,
-> including the model-triggered `capture_screen` tool-loop. See [decisions.md](./decisions.md).
+> **Scope:** This page describes the **native Swift app**, built directly rather than on a fork of
+> an existing tool; why no existing product or open-source base fit is the record in
+> [landscape-survey.md](./landscape-survey.md) and [fork-evaluation.md](./fork-evaluation.md).
 > Exact schemas, the coach prompt, and config are **not duplicated here** — they live in code
 > (`Sources/JarvisCore/`, especially `Prompts/`, `Coach/ToolDefs.swift`, and
 > `Config/Config.swift`); this page is
 > the *why*, the code is the *what*.
 
-> The approved cross-cutting destination for isolating optional runtime work is documented in
-> [lean-coaching-core.md](./lean-coaching-core.md). That page distinguishes the built Phase 0 audit
-> foundation from the unbuilt Phase 1–5 roadmap; the current runtime remains as described here.
+> The cross-cutting contract for isolating optional runtime work is
+> [lean-coaching-core.md](./lean-coaching-core.md); every phase of its roadmap is built, and this
+> page describes the resulting runtime.
 
 ## 1. Vision
 
@@ -88,7 +88,10 @@ moments the model judges worthwhile.
    keeps the complete finalized transcription. Context-dependent short replies such as "Yes", "No",
    "Okay", "对", and "可以" fail open for either speaker, as do unknown short fragments. Interviewer
    questions remain first-class and may draw a proactive tip. Consumed noise never rides into a
-   later request; silence checks and the hint hotkey always go through.
+   later request; silence checks and the hint hotkey always go through. The gate is a small explicit
+   class on purpose: a classifier model would add latency and cost for it, and asking the
+   transcription model to drop filler is not a deterministic boundary and would silently alter the
+   audit record.
 3. It calls the **selected brain model** with the coach system prompt, the session memory
    (`CoachHistory`), the
    new transcript delta, the timing context (seconds silent, session elapsed), and the tool set
@@ -104,8 +107,10 @@ moments the model judges worthwhile.
 5. The model calls `speak(lines)` — a tip of up to ~3 short lines, returned **already split**
    into an array (Structured Outputs / `strict:true`), so the client never splits prose on
    punctuation — or `stay_silent`. A tool call is **required** on every model response: silence is an
-   explicit tool, never plain text, so the session memory stays free of stray model prose
-   (see [decisions.md](./decisions.md)).
+   explicit tool, never plain text. Under a "stay silent by calling no tool" contract the model still
+   has to emit *something*, and at low reasoning effort that came out as leaked deliberation text
+   ("final empty. no. final.") that polluted the conversation and was imitated on later turns;
+   requiring a tool call prevents the emission rather than filtering it afterwards.
 6. Activity records every brain action, through the session's one evidence handle: successful or failed `capture_screen`, `speak`, and
    `stay_silent`. Heard rows and model-facing transcript deltas share `ConversationChronology`:
    occurrence time is authoritative, and insertion order breaks timestamp ties. A late-finalizing
@@ -180,6 +185,7 @@ plugins ship only with full Xcode, and Jarvis builds **CLT-only** (see
 | **Overlay Box** | A persistent window logging every `speak` tip in full, timestamped — the scrollable history of what the caption flashed one line at a time. Movable, resizable, translucent, also excluded from capture; switched on/off from Settings (**on by default**), cleared on each Start. Its size persists across launches; its position does not, so it opens centered. Fed by the same `speak` call as the caption via **`BroadcastOverlay`**, which fans one `OverlayRendering.render` out to both sinks (so `CoachDriver` is unchanged). | AppKit NSPanel; `OverlayBoxPanel`. |
 | **MenuBar** | Manual **Start/Stop** of the pipeline (no auto-start), the same authoritative readiness status shown by Activity, and one-time API-key entry when OpenAI is in use. The status item is a quiet monochrome tile while stopped and a lit Listening Lens in every other readiness state — amber while checking or recovering, violet for a fully ready or explicit microphone-only session, red when a Start is blocked before any session begins — while the menu and tooltip name the requirement behind any non-ready state. A failed system stream may degrade to microphone-only, while a failed microphone stream stops the session. The two overlay surfaces are switched from Settings, not the menu. A centered, disabled caption at the bottom of the menu names the running build, so a user can report it without opening Settings: a release shows a muted `v<version>` from `CFBundleShortVersionString`, and a local build shows a red `Dev`, keyed off the development marker `scripts/build-app.sh` stamps into the assembled bundle (see `MenuBarController.buildCaptionItem()`). | AppKit menu-bar item; owner-only file for the key. |
 | **HotkeyController** | Register the global **⌥⌘J** hint hotkey and route a press to a one-trip `manualHint` turn while a session runs (beep otherwise). See [§2 On-demand hint](#on-demand-hint-j). | Carbon HIToolbox (`RegisterEventHotKey`, no TCC). |
+| **PermissionGate** | Gather every TCC grant at launch instead of mid-session, and keep Jarvis closed until it holds all three: one button walks Microphone, System Audio Recording, and Screen Recording one dialog at a time, and closing the window quits. `SystemAudioPermissionProbe` proves the silently-enforced system-audio grant by playing a muted tone into a tap of Jarvis's own process and listening for it. See [§3 Permissions](#permissions). | AVFoundation, `CGRequestScreenCaptureAccess`, Core Audio process taps. |
 
 Each component has one job and a narrow interface. The CoachDriver is the only place the
 "intelligence" lives, and even there the intelligence is the model — the driver just wires events
@@ -205,6 +211,62 @@ indistinguishable from a headset, so a wrong bypass re-admits the echo. AEC3 the
 all routes — it's a near-passthrough on earbuds (no acoustic echo to cancel). Caveat: AirPods *as a
 mic* are HFP narrowband and low-fidelity regardless of resampling; for input quality, use the
 built-in mic.
+
+### Permissions
+
+Jarvis needs three macOS grants (Microphone, System Audio Recording, Screen Recording) and cannot
+coach without any of them, so `PermissionGate` asks for all three at launch and keeps the app closed
+until it holds them. One button walks the dialogs, strictly one at a time because macOS queues them.
+The window's close button quits: grant or quit is the whole choice. Nothing records that the gate has
+run, because it is shown exactly when the grants are incomplete, which is also the only way back in
+after a refusal. There is no Permissions tab in Settings: the hard gate makes one unreachable.
+
+The reason it happens at launch rather than at Start is the coaching context. A TCC dialog is system
+UI that no capture-exclusion trick can hide, so one arriving mid-interview is visible to whoever the
+user is sharing a screen with.
+
+**Screen Recording is invisible to the process that asks.** `CGRequestScreenCaptureAccess` returns
+false whether the user allowed or refused, and preflight keeps returning what the process started
+with. A *later* launch sees the truth, so `PermissionPreferences.screenRecordingAsked` records that
+Jarvis asked, and a launch that has asked before and still lacks the grant treats it as a proven
+refusal. Without that, a refusal is indistinguishable from a grant awaiting relaunch and the gate
+loops the user through Quit & Reopen forever.
+
+**System Audio Recording is enforced silently.** There is no API to request it and none to read it,
+and a refusal changes no observable except the audio itself: with the grant denied, tap creation, the
+tap's 48 kHz format, the aggregate's channel count, `AudioDeviceStart`, and the IOProc callbacks all
+behave exactly as when granted, and only the samples differ. Measured on macOS 26: 117 callbacks
+peaking at 0.25 when allowed, 116 callbacks peaking at 0.0 when denied.
+
+So `SystemAudioPermissionProbe` proves the grant by making a sound and listening for it. It taps
+**only Jarvis's own process** rather than the system mix and mutes it, then plays half a second of a
+quiet tone: hearing it back is proof, digital silence is proof of refusal. Scoping the tap to Jarvis
+is what keeps the check invisible, since nothing the user is playing is tapped and nothing they are
+listening to is muted. The private `TCCAccessPreflight` would read this grant exactly and silently,
+but it can break on any macOS update, so the tone stays the check. **Grants are proved, never remembered.** Nothing records whether a grant was
+held, because a stored answer reads exactly like a current one and the caller deciding whether a
+session may run cannot tell which it holds. Being wrong there is the worst outcome in the design: a
+denied tap still delivers frames, and `CaptureReadinessMonitor` reads frame arrival as healthy
+without inspecting amplitude, so a session would report full readiness while hearing nothing from
+the other side.
+
+So proof is gathered twice, and lives only in the process that gathered it. At launch the two
+readable grants are checked first, because they cost nothing and cannot prompt; system audio is
+probed only when they are held, so anything missing opens the gate and lets the walk raise its
+dialogs with a window on screen to explain them. Then every Start proves system audio again, ahead of the
+preparation it already runs, since a menu-bar app can sit for days between launches and a grant
+withdrawn in that time would otherwise reach a session. Every Start takes that path: there is no
+longer a configuration with nothing to await, and nothing before the probe gates on its previous
+answer, so a Start that failed on system audio is retried by pressing Start again. A probe that
+cannot run proves nothing: it blocks the attempt at hand without counting as a refusal, so the
+checklist keeps offering to ask rather than sending the user to a toggle that may already be on.
+
+The one thing that persists is `screenRecordingAsked`, and it is not a grant: it records that Jarvis
+asked, which no later grant or refusal makes untrue. It is cleared once the grant is observed held,
+because holding it proves the asking was answered — which is what lets a later reset be treated as
+undetermined and asked for again, rather than read as a refusal. Mid-session revocation is out of scope — every
+way to catch it is either amplitude policing, which contradicts the rule above, or a timer. The next
+Start refuses with the reason.
 
 ### Failure surfacing — startup loud, runtime ghost
 
@@ -363,7 +425,10 @@ rather than a per-turn screenshot.
   treats non-ASCII scripts conservatively; the exact retention and topic-retirement policy lives in
   [`JarvisPrompts.HistorySummary.system`](../Sources/JarvisCore/Prompts/JarvisPrompts+HistorySummary.swift).
   Compaction uses one Core-owned workload deadline across providers and fails soft: a slow or failed
-  summary leaves the full history intact for a later attempt. Requests are sent `store:true`
+  summary leaves the full history intact for a later attempt. Server-side memory (a Conversations
+  API conversation, or `previous_response_id` threading) is deliberately not used: it can only grow,
+  so every screenshot and reply is re-billed as input on every later turn of a long session, and its
+  single-writer lock turns one slow turn into minutes of `conversation_locked` silence. Requests are sent `store:true`
   so they stay inspectable in the OpenAI dashboard for debugging — the retention tradeoff is
   documented in [sandbox.md](./sandbox.md).
 - **Interview format supplies optional coaching-prompt vocabulary (`InterviewFormat`,
@@ -371,19 +436,33 @@ rather than a per-turn screenshot.
   a format-specific addendum to the coach system prompt — today, only System Design has real
   content, added because the coach otherwise has zero system-design vocabulary (functional
   requirements, API design, data model, etc.) and its tips can drift from whatever stage of that
-  discussion the candidate is actually in. No selection includes every format's non-empty addendum
-  rather than guessing which one applies. Fixed for the whole session like the transcription
-  language/model choice, for a concrete reason beyond convention: `CLIBrainClient` bakes the system
-  prompt into the local-agent process at construction and asserts it never changes, so the resolved
-  addendum must be computed once and reused identically by both the per-turn OpenAI-style prompt
-  (`CoachAttemptRunner`) and the CLI-provider construction (`BrainComposition`). See
-  [decisions.md](./decisions.md) (2026-09-01).
+  discussion the candidate is actually in; Coding and Behavioral stay empty because no one has
+  reported a problem with them, not because the mechanism can't hold their content too. No selection
+  includes every format's non-empty addendum rather than guessing which one applies — an automatic
+  classifier was rejected: guessing once and locking in misclassifies a session that shifts formats
+  (a behavioral opener sliding into a system-design round), and re-guessing every turn is a brittle
+  state machine for a signal the model can read from context anyway once it has the vocabulary.
+  Fixed for the whole session like the
+  transcription language/model choice, for a concrete reason beyond convention: `CLIBrainClient`
+  bakes the system prompt into the local-agent process at construction and asserts it never changes,
+  so the resolved addendum must be computed once (`BrainComposition.interviewFormatAddendum`, set
+  before every route construction or reapply, including a live provider hot-switch) and reused
+  identically by both the per-turn OpenAI-style prompt (`CoachAttemptRunner`) and the CLI-provider
+  construction (`BrainComposition`).
 - **Transcription has its own provider, model, and language settings.** OpenAI remains the provider
   default and `gpt-4o-transcribe` remains its model default; `gpt-transcribe` and
   `gpt-live-transcribe` are opt-in comparison choices. All use the GA Realtime API, but keep their
   model-compatible turn contracts: GPT-4o uses tuned `server_vad`, while GPT Transcribe and GPT Live
   disable automatic turn detection, keep only bounded local pre-roll while idle, and explicitly
-  commit endpoints from a local Silero VAD scoring each post-AEC stream at 16 kHz. GPT
+  commit endpoints from a local Silero VAD scoring each post-AEC stream at 16 kHz. Silero, not the
+  classic WebRTC VAD already inside the vendored AEC archive: that detector is biased toward recall
+  and fires on impulsive broadband noise, so laptop typing near the mic held one turn open for
+  86 seconds in production, and its one-bit output cannot express the hysteresis
+  `SpeechEndpointDetector` runs on Silero's per-frame probabilities. The heavier alternatives were
+  rejected on weight or terms: FluidAudio (ASR, TTS, diarization and a Rust XCFramework for 1 MB of
+  VAD, with runtime model downloads), ONNX Runtime (tens of MB to run a 2 MB model), TEN VAD (an
+  Agora non-compete that propagates to derivatives), Picovoice Cobra (closed, server-validated key),
+  and Apple `SoundAnalysis` (windows of 0.5 s or more against 32 ms frames). GPT
   Transcribe and GPT Live receive fixed role-aware recording context; GPT Live also requests low
   transcription delay. Jarvis does not send vocabulary keywords. Automatic is the default language
   selection and sends no language hint. A single expected language guides recognition without
@@ -393,7 +472,9 @@ rather than a per-turn screenshot.
   session-level expectation shared by both speakers, not a language decision per turn; either
   speaker may switch within a sentence. The macOS 26+ opt-in is Apple `SpeechAnalyzer` with one
   `SpeechTranscriber` locale chosen
-  from the framework's runtime-supported list. `AssetInventory` installs that model before the new
+  from the framework's runtime-supported list; `SFSpeechRecognizer` is not offered on older macOS,
+  because it would be a second Apple adapter with its own authorization, availability, and result
+  lifecycle. `AssetInventory` installs that model before the new
   pipeline replaces a running one, and final results alone enter Activity/model context. Apple
   documents `SpeechDetector` as an optional power-saving gate that may trade away transcription
   accuracy, while its result stream does not expose usable VAD boundaries; Jarvis therefore sends
@@ -472,7 +553,8 @@ provider-route policy, and traffic recording are unchanged — only the transpor
   instead invalidates the server because its event stream is no longer known to be synchronized.
 - **The JSON action contract remains provider-neutral.** The CLIs do not expose Jarvis's native
   function calls, so the same `ToolDef`s are rendered as a JSON output protocol and parsed back into
-  `ToolInvocation`. `BrainConversation` changes transport ownership, not `CoachHistory`: completed
+  `ToolInvocation`; wiring the CLIs' MCP interfaces instead would mean a protocol server and a
+  handshake per turn for three tools. `BrainConversation` changes transport ownership, not `CoachHistory`: completed
   memory remains client-managed, provider-neutral, compact, and portable to the next attempt.
 - **Installed CLIs are auto-detected.** `AgentCLIDetector` discovers binaries through file probes
   over stable $PATH entries + known install dirs. Inherited $PATH entries under the system temporary

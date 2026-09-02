@@ -13,12 +13,10 @@ a single-context repo.
   index doesn't exist. Read it before grepping the wiki.
 - **[`status.md`](../status.md)** — what is actually built and what to do next. Read it before assuming
   a feature exists: the design pages describe intent, this one describes reality.
-- **[`decisions.md`](../decisions.md)** — the running log, newest last. Check it for the area you're
-  about to touch **before** proposing a direction. A rejected alternative is recorded there precisely so
-  it doesn't get re-proposed.
 - **The design page for the area you're touching** — `architecture.md` for the coaching loop,
   `sandbox.md` for the security and isolation model, `build-and-run.md` for toolchain and packaging,
-  and the rest per `index.md`.
+  and the rest per `index.md`. Read it **before** proposing a direction: a rejected alternative is
+  recorded there, beside the design it lost to, precisely so it doesn't get re-proposed.
 
 There is no `CONTEXT.md` glossary at the root yet. If one appears, read it too. Until then the wiki
 carries the project's vocabulary. Don't flag its absence or propose creating one upfront —
@@ -29,10 +27,10 @@ Operational facts — targets, commands, the Gate, the runtime safety boundaries
 
 ## Recording a decision
 
-Every load-bearing, non-obvious decision gets a dated entry in [`decisions.md`](../decisions.md) — what
-you chose, why, what you rejected, newest last. That one running log is the whole mechanism; there is no
-ADR folder, by design. [`../AGENTS.md`](../AGENTS.md) → Convention 8 holds the entry format and the
-supersede rule.
+A load-bearing, non-obvious decision is recorded as a sentence or two on the design page it affects,
+beside the fact it explains — what was chosen, and why the obvious alternative was not. That is the
+whole mechanism; there is no decision log and no ADR folder, by design, and the change story goes in
+the pull request. [`../AGENTS.md`](../AGENTS.md) → Convention 8 holds the rule.
 
 ## Editing the wiki
 
@@ -56,8 +54,8 @@ project doesn't use (reconsider), or there's a real gap (note it for `/domain-mo
 
 If your output contradicts a recorded decision, say so explicitly:
 
-> _Contradicts the 2026-07-18 entry on technical-interview context — but worth reopening because…_
+> _Contradicts architecture.md → The turn on when the coach captures the screen — but worth reopening because…_
 
-If a page and the code disagree and no decision explains the gap, that's drift. Treat the code as truth
+If a page and the code disagree and nothing on the page explains the gap, that's drift. Treat the code as truth
 for *what*, but flag it to a human instead of silently rewriting the page — it may encode intent the
 code drifted from.

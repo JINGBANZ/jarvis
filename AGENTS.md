@@ -139,8 +139,8 @@ The five canonical triage roles, each label string equal to its name: `needs-tri
 
 ### Domain docs
 
-Single-context. The wiki is the design source of truth: `wiki/index.md` to navigate and
-`wiki/decisions.md` for the decision log. See `wiki/agents/domain.md`.
+Single-context. The wiki is the design source of truth: `wiki/index.md` to navigate; rationale lives
+on each design page beside the design it explains. See `wiki/agents/domain.md`.
 
 ## Further context
 
