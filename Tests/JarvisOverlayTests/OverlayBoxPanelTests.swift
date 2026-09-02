@@ -20,21 +20,45 @@ import JarvisCore
         #expect(panel.currentSharingType == .none)
     }
 
+    // The box is a session surface: switched on in Settings it still stays off screen until Start,
+    // and goes away again on Stop, so a stopped Jarvis leaves nothing on the desktop.
     @MainActor @Test
-    func showReassertsCaptureExclusion() {
+    func staysHiddenWhileSwitchedOnUntilASessionStarts() {
         let panel = OverlayBoxPanel()
-        let before = panel.captureExclusionReassertCount
-        panel.show()
-        #expect(panel.captureExclusionReassertCount > before, "show() must re-assert capture exclusion")
-        #expect(panel.currentSharingType == .none)
-        #expect(panel.isPanelVisible)
-        panel.hide()
-        #expect(!panel.isPanelVisible)
+        panel.setEnabled(true)
+        #expect(!panel.isPanelVisible, "a box switched on must stay hidden until a session starts")
     }
 
     @MainActor @Test
-    func setEnabledShowsAndHidesTheBox() {
+    func sessionStartShowsTheBoxAndReassertsCaptureExclusion() {
         let panel = OverlayBoxPanel()
+        panel.setEnabled(true)
+        let before = panel.captureExclusionReassertCount
+        panel.setSessionLive(true)
+        #expect(panel.isPanelVisible, "Start must put the box on screen")
+        #expect(panel.captureExclusionReassertCount > before, "showing the box must re-assert capture exclusion")
+        #expect(panel.currentSharingType == .none)
+    }
+
+    @MainActor @Test
+    func sessionStopHidesTheBox() {
+        let panel = liveBox()
+        panel.setSessionLive(false)
+        #expect(!panel.isPanelVisible, "Stop must take the box off screen")
+    }
+
+    @MainActor @Test
+    func sessionStartLeavesASwitchedOffBoxHidden() {
+        let panel = OverlayBoxPanel()
+        panel.setEnabled(false)
+        panel.setSessionLive(true)
+        #expect(!panel.isPanelVisible, "the Settings switch stays the master off switch")
+    }
+
+    @MainActor @Test
+    func setEnabledShowsAndHidesTheBoxDuringASession() {
+        let panel = OverlayBoxPanel()
+        panel.setSessionLive(true)
         panel.setEnabled(true)            // off → shown
         #expect(panel.isPanelVisible)
         #expect(panel.currentSharingType == .none, "showing the box must keep it excluded from capture")
@@ -47,6 +71,7 @@ import JarvisCore
     @MainActor @Test
     func setEnabledOffDuringPreviewHidesOnClose() {
         let panel = OverlayBoxPanel()
+        panel.setSessionLive(true)
         panel.setEnabled(true)             // box on
         panel.showAppearancePreview(true)  // preview owns it
         panel.setEnabled(false)            // user switches it off mid-preview (deferred)
@@ -59,6 +84,7 @@ import JarvisCore
     @MainActor @Test
     func setEnabledOnDuringPreviewShowsOnClose() {
         let panel = OverlayBoxPanel()      // starts hidden
+        panel.setSessionLive(true)
         panel.showAppearancePreview(true)
         panel.setEnabled(true)             // user switches it on mid-preview
         panel.showAppearancePreview(false) // close the tab
@@ -178,8 +204,7 @@ import JarvisCore
 
     @MainActor @Test
     func previewKeepsBoxShownIfItWasAlreadyOpen() {
-        let panel = OverlayBoxPanel()
-        panel.show()                       // user had the box open
+        let panel = liveBox()              // the box was open, a session running
         panel.showAppearancePreview(true)
         panel.showAppearancePreview(false)
         #expect(panel.isPanelVisible, "a box open before preview must stay open after it closes")
@@ -218,6 +243,14 @@ import JarvisCore
 
 // MARK: - Main-actor checks (awaited from nonisolated tests so render's main-actor hop can run)
 
+/// A box in the only state that puts it on screen: switched on in Settings, with a session running.
+@MainActor private func liveBox() -> OverlayBoxPanel {
+    let panel = OverlayBoxPanel()
+    panel.setEnabled(true)
+    panel.setSessionLive(true)
+    return panel
+}
+
 @MainActor
 private func waitUntil(timeout: TimeInterval = 5, _ condition: () -> Bool) async -> Bool {
     let steps = max(1, Int(timeout / 0.02))
@@ -230,11 +263,10 @@ private func waitUntil(timeout: TimeInterval = 5, _ condition: () -> Bool) async
 
 // A render that reaches the screen (box visible) must re-assert capture exclusion — the same
 // defense-in-depth as OverlayCaptionPanel.show, so the box can't be left capturable after an activation-policy
-// flip. Only show()/append-while-visible bump the counter, so an increase proves the re-assert ran.
+// flip. Only becoming visible/append-while-visible bump the counter, so an increase proves the re-assert ran.
 @MainActor
 private func checkReassertOnRenderWhileVisible() async {
-    let panel = OverlayBoxPanel()
-    panel.show()
+    let panel = liveBox()
     let before = panel.captureExclusionReassertCount
     panel.render(["A new response."], perLineSeconds: 0)
     #expect(await waitUntil { panel.entryCount == 1 }, "the response should be logged")

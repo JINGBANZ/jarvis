@@ -92,8 +92,17 @@ on/off flag, a font size, and an opacity; the box additionally carries its width
 The two surfaces default opposite ways — the caption **off**, the box **on** — so a first run shows
 the durable history rather than a flashing caption. `AppDelegate` applies both enabled flags at launch.
 
+The box is a **session surface**: switched on, it reaches the screen on Start (already cleared, for the
+new conversation) and leaves it on Stop, so a stopped Jarvis puts nothing on the desktop. Two flags in
+`OverlayBoxPanel` decide it — the Settings switch (`setEnabled`) and the session (`setSessionLive`,
+called by `AppDelegate` from the one line that declares a session live and the one that ends it) — and
+a single private `applyVisibility()` derives `isEnabled && isSessionLive`. Keeping that rule in one
+place is why the panel, not the two call sites, owns it: switching the box on from Settings while
+stopped would otherwise leave it on screen with no session behind it. The Settings preview overrides
+the rule while the Overlay tab is open and re-derives it on close.
+
 Opacity governs the background fill only, so both surfaces accept 0%: a text-only surface with no
-backdrop, not a hidden one. The On/Off toggle stays the only thing that hides a surface. Both share
+backdrop, not a hidden one. The On/Off toggle stays the only thing that hides a surface outright. Both share
 one range because the tab presents their sliders identically. A corrupted non-finite stored value
 restores the setting's own default rather than the range floor, which at 0% would read as breakage.
 

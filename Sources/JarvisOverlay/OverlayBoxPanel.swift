@@ -10,7 +10,10 @@ import JarvisCore
 /// Like the caption it is excluded from all screen capture (so it stays invisible in a screen share
 /// and the brain never reads it back) and has no window chrome. Unlike the caption it accepts mouse
 /// events: drag anywhere to move it, scroll to read the backlog, drag its edges to resize it.
-/// Settings switches it on/off; each fresh Start clears it.
+///
+/// It is a session surface: it appears on Start (cleared, for the new conversation) and disappears on
+/// Stop, so a stopped Jarvis leaves nothing on the desktop. The Settings toggle is the master switch
+/// over that — switched off, the box never appears at all.
 ///
 /// The panel itself never touches UserDefaults: it reports a finished resize through
 /// `onSizeChanged` and takes the restored size as an `init` parameter, leaving persistence to
@@ -29,10 +32,10 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     /// While the Settings appearance tab is open, the box shows sample text (not the real log) so size
     /// and opacity changes are visible even with no responses yet. Restored on close.
     private var isPreviewing = false
-    /// The user's intended visibility (via the Settings toggle), kept distinct from `panel.isVisible`
-    /// because the Settings preview can show the box without the user asking. The preview restores to
-    /// this on close — so the box's on/off state can never disagree with the persisted setting.
-    private var userWantsShown = false
+    /// The Settings toggle: the user's master switch. Off means the box never appears.
+    private var isEnabled = false
+    /// Whether a coaching session is running. Set by the app on Start and Stop.
+    private var isSessionLive = false
     /// Reports the box's new content size once a resize drag finishes.
     public var onSizeChanged: ((Double, Double) -> Void)?
     /// Stand-in responses shown during the Settings preview.
@@ -188,7 +191,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         textView.textStorage?.setAttributedString(result)
     }
 
-    // MARK: - Visibility (driven by the Settings toggle)
+    // MARK: - Visibility (the Settings toggle, gated on a live session)
 
     /// Wipe the log. Called on each fresh Start so the box shows only the current conversation,
     /// matching how the session rotates.
@@ -198,22 +201,28 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         rerender()
     }
 
-    public func show() {
-        userWantsShown = true
+    /// Whether the box belongs on screen: switched on *and* a session running. Kept distinct from
+    /// `panel.isVisible` because the Settings preview can show the box without either being true; the
+    /// preview restores to this on close, so the box can never disagree with the setting or outlive Stop.
+    private var shouldBeVisible: Bool { isEnabled && isSessionLive }
+
+    /// Bring the panel to whatever `shouldBeVisible` now says. One place owns the rule, so the Start/Stop
+    /// path and the Settings toggle cannot leave the box in disagreeing states.
+    private func applyVisibility() {
+        // Don't tear down or fight a live preview's on-screen sample; the preview applies this on close.
+        guard !isPreviewing else { return }
+        guard shouldBeVisible else { return panel.orderOut(nil) }
         // Re-assert capture exclusion on every show — defense-in-depth against an activation-policy
         // flip dropping `sharingType` (same reason as OverlayCaptionPanel.show).
         reassertCaptureExclusion()
         panel.orderFrontRegardless() // ghost-mode-allowed: capture-excluded coaching overlay
     }
 
-    public func hide() {
-        userWantsShown = false
-        // Don't tear down a live preview's on-screen sample; the preview restores to `userWantsShown`
-        // when it closes. Otherwise order the box out now.
-        if !isPreviewing { panel.orderOut(nil) }
+    /// Follow the session: Start puts the box on screen (if it is switched on), Stop takes it away.
+    public func setSessionLive(_ live: Bool) {
+        isSessionLive = live
+        applyVisibility()
     }
-
-    public var isVisible: Bool { panel.isVisible }
 
     // MARK: - OverlayBoxApplying
 
@@ -236,10 +245,10 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         onSizeChanged?(Double(size.width), Double(size.height))
     }
 
-    /// Switch the box on or off, live — `show()` / `hide()` (which carry the capture-exclusion re-assert
-    /// and the preview-aware visibility handling).
+    /// Switch the box on or off, live. It reaches the screen only while a session is also running.
     public func setEnabled(_ enabled: Bool) {
-        if enabled { show() } else { hide() }
+        isEnabled = enabled
+        applyVisibility()
     }
 
     /// Show the box with sample text (on) while the Settings appearance tab is open so size/opacity
@@ -253,9 +262,9 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
             panel.orderFrontRegardless() // ghost-mode-allowed: capture-excluded coaching overlay
         } else if isPreviewing {
             isPreviewing = false
-            rerender()                                  // restore the real log…
-            textView.scrollToEndOfDocument(nil)         // …scrolled to any responses that arrived during preview
-            if !userWantsShown { panel.orderOut(nil) }  // and the box's user-intended on/off state
+            rerender()                            // restore the real log…
+            textView.scrollToEndOfDocument(nil)   // …scrolled to any responses that arrived during preview
+            applyVisibility()                     // and whether the box belongs on screen at all
         }
     }
 
