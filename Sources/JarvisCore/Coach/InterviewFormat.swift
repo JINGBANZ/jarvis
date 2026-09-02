@@ -5,7 +5,9 @@ import Foundation
 /// guessed or reclassified mid-conversation: an automatic, in-session classifier was considered and
 /// rejected, both for guessing once and locking in (misclassifies a session that shifts formats) and
 /// for continuously re-guessing (the same "brittle state machine" a history-compaction design
-/// already rejected — see wiki/architecture.md § Models and APIs).
+/// already rejected — see wiki/architecture.md § Models and APIs). No selection means no addendum at
+/// all — not a guess assembled from whatever formats happen to have content — so a user who never
+/// opens this setting sees no behavior change at all.
 public enum InterviewFormat: String, CaseIterable, Codable, Sendable, CoachingSkill {
     case coding = "coding"
     case systemDesign = "system-design"
@@ -33,13 +35,5 @@ public enum InterviewFormat: String, CaseIterable, Codable, Sendable, CoachingSk
             return ""
         }
         return "\n\n" + body
-    }
-
-    /// The addendum for an explicit choice, or — when none was made — every format's non-empty
-    /// addendum concatenated, so Jarvis still has the vocabulary without guessing which format this
-    /// is. See wiki/architecture.md § Models and APIs.
-    public static func resolvedPromptAddendum(for format: InterviewFormat?) -> String {
-        if let format { return format.promptAddendum }
-        return allCases.map(\.promptAddendum).filter { !$0.isEmpty }.joined()
     }
 }

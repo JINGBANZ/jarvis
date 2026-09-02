@@ -293,9 +293,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         let transcriptionProvider = transcriptionConfiguration.provider
         let brainRoute = brain.preferences.route
         // Fixed for the whole session, like transcription's language/model choice — never
-        // reclassified mid-conversation. See wiki/decisions.md (2026-09-01).
-        let interviewFormatAddendum = InterviewFormat.resolvedPromptAddendum(
-            for: brain.preferences.interviewFormat)
+        // reclassified mid-conversation. No selection means no addendum, not a guess assembled from
+        // whatever formats have content — see wiki/architecture.md § Models and APIs.
+        let interviewFormatAddendum = brain.preferences.interviewFormat?.promptAddendum ?? ""
         let key = secrets.apiKey() ?? ""
         let requiresOpenAIKey = transcriptionProvider.requiresOpenAIAPIKey(for: brainRoute)
         let preparesAppleSpeech = transcriptionProvider == .appleSpeech

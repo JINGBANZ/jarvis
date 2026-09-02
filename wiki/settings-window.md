@@ -203,12 +203,13 @@ provider is active; its default lives with the others in
 per-thread `model_reasoning_effort`; both CLI scales start at `low`, so None clamps to Low while the
 three shared levels pass through.
 
-**Interview format.** A second Coaching-card picker (`InterviewFormat`: Automatic / Coding / System
-Design / Behavioral) supplies additional coaching-prompt vocabulary for the selected format. No
-selection means Automatic — every format's non-empty guidance is included rather than guessed. Fixed
-for the whole session, like the transcription language/model choice: it applies on the next Start,
-never reclassified mid-conversation. See [architecture.md → Models and
-APIs](./architecture.md#models-and-apis).
+**Interview format.** A second Coaching-card picker (`InterviewFormat`: **None**, plus one entry per
+format that actually has content — System Design today) supplies additional coaching-prompt
+vocabulary for the selected format. **None** persists as no selection and resolves to no addendum at
+all, so a user who never opens this setting sees no behavior change; it is not a guess assembled
+from whatever formats happen to have content. Fixed for the whole session, like the transcription
+language/model choice: it applies on the next Start, never reclassified mid-conversation. See
+[architecture.md → Models and APIs](./architecture.md#models-and-apis).
 
 **Transcription.** This group owns the separate speech-to-text role without conflating it with the
 brain route. Its picker contains **OpenAI** (the default) and **Apple Speech (macOS 26+)**. Apple is

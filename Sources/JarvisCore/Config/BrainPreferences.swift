@@ -97,8 +97,8 @@ public final class BrainPreferences {
     }
 
     /// The interview format the coaching prompt is specialized for this session. `nil` means "not
-    /// selected" — a real, persisted state, not a fallback to a default — resolved to every format's
-    /// combined guidance rather than a guess (`InterviewFormat.resolvedPromptAddendum(for:)`).
+    /// selected" — a real, persisted state, not a fallback to a default — and resolves to no
+    /// addendum at all, so a user who never opens this setting sees no behavior change.
     public var interviewFormat: InterviewFormat? {
         get {
             guard let raw = defaults.string(forKey: Defaults.Brain.interviewFormatKey) else {

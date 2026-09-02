@@ -29,8 +29,8 @@ public enum Defaults {
         /// Keeps a coaching turn fast (sub-2s target) while still allowing tool calls.
         public static let effort: ReasoningEffort = .low
 
-        /// No default value: absent means "not selected," resolved to every format's combined
-        /// guidance rather than a guess — see `InterviewFormat.resolvedPromptAddendum(for:)`.
+        /// No default value: absent means "not selected," which resolves to no addendum at all —
+        /// not a guess assembled from whatever formats have content.
         public static let interviewFormatKey = "brain.interviewFormat"
 
         /// The OpenAI model keeps the pre-provider key ("brain.model") so existing installs keep

@@ -446,12 +446,19 @@ rather than a per-turn screenshot.
   model) — otherwise the skill resolves under `swift build`/`swift test` but silently goes missing
   from the shipped app. Adding or editing a skill still needs a developer and a rebuild — a
   self-service system where a user drops in their own skill file was considered and set aside as
-  speculative infrastructure for a need nothing has yet. No selection
-  includes every format's non-empty addendum rather than guessing which one applies — an automatic
-  classifier was rejected: guessing once and locking in misclassifies a session that shifts formats
-  (a behavioral opener sliding into a system-design round), and re-guessing every turn is a brittle
-  state machine for a signal the model can read from context anyway once it has the vocabulary.
-  Fixed for the whole session like the
+  speculative infrastructure for a need nothing has yet. The picker offers **None** plus only the
+  formats that actually have content (`InterviewFormat.allCases.filter { !$0.promptAddendum.isEmpty
+  }`) — System Design today — so a new `<format>.md` surfaces there with no Swift change, and no
+  entry is ever indistinguishable from None. No selection resolves to no addendum at all
+  (`format?.promptAddendum ?? ""`), not a guess assembled from whatever formats happen to have
+  content: concatenating every non-empty addendum was tried and rejected — with only one format
+  written it silently asserted "this is a system-design interview" into every session by default,
+  including coding and behavioral ones nobody opted into, and it does not scale, since two written
+  formats would concatenate two contradictory interview-format claims into one prompt. An automatic
+  classifier that guesses the format from conversation is separately rejected too: guessing once and
+  locking in misclassifies a session that shifts formats (a behavioral opener sliding into a
+  system-design round), and re-guessing every turn is a brittle state machine for a signal the model
+  can read from context anyway once it has the vocabulary. Fixed for the whole session like the
   transcription language/model choice, for a concrete reason beyond convention: `CLIBrainClient`
   bakes the system prompt into the local-agent process at construction and asserts it never changes,
   so the resolved addendum must be computed once (`BrainComposition.interviewFormatAddendum`, set

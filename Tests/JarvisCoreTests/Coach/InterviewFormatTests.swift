@@ -18,18 +18,11 @@ import Testing
         #expect(InterviewFormat.systemDesign.promptAddendum.contains("API"))
     }
 
-    @Test func explicitSelectionResolvesToExactlyItsOwnAddendum() {
-        #expect(InterviewFormat.resolvedPromptAddendum(for: .coding) == "")
-        #expect(InterviewFormat.resolvedPromptAddendum(for: .behavioral) == "")
-        #expect(InterviewFormat.resolvedPromptAddendum(for: .systemDesign)
-            == InterviewFormat.systemDesign.promptAddendum)
-    }
-
-    /// No selection never guesses — it includes every non-empty addendum, which today means it's
-    /// indistinguishable from selecting system design explicitly, since that's the only one with
-    /// content. This is expected, not a bug: see wiki/decisions.md (2026-09-01).
-    @Test func automaticIncludesEveryNonEmptyAddendumWithoutGuessing() {
-        #expect(InterviewFormat.resolvedPromptAddendum(for: nil)
-            == InterviewFormat.systemDesign.promptAddendum)
+    /// No selection means no addendum at all — not a guess assembled from whatever formats happen
+    /// to have content. `nil` is resolved by callers as `format?.promptAddendum ?? ""`; there is no
+    /// `InterviewFormat` API for it, so this pins the optional-chaining contract those callers rely on.
+    @Test func noSelectionResolvesToNoAddendum() {
+        let noSelection: InterviewFormat? = nil
+        #expect((noSelection?.promptAddendum ?? "") == "")
     }
 }

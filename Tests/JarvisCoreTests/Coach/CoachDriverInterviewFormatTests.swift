@@ -17,7 +17,7 @@ import Testing
             config: .default, transcript: transcript, route: route,
             screen: FakeScreen(), overlay: FakeOverlay(), clock: clock,
             automaticAttemptDelay: { _ in },
-            interviewFormatAddendum: InterviewFormat.resolvedPromptAddendum(for: interviewFormat))
+            interviewFormatAddendum: interviewFormat?.promptAddendum ?? "")
         return (driver, transcript)
     }
 
@@ -62,10 +62,11 @@ import Testing
         })
     }
 
-    /// No selection never guesses — every non-empty format's guidance is included, which today
-    /// means the same content as explicitly selecting system design. See wiki/decisions.md
-    /// (2026-09-01) for why an auto-classifier was rejected in favor of this.
-    @Test func systemPromptIncludesSystemDesignGuidanceWhenNoneSelected() async {
+    /// No selection means no behavior change at all for a user who never opens this setting — the
+    /// system prompt sent is byte-for-byte the same as if the feature didn't exist. Guard against a
+    /// regression back to "no selection guesses from whatever formats have content," which silently
+    /// asserted a false "this is a system-design interview" claim into every session by default.
+    @Test func systemPromptEqualsBaseCoachPromptWhenNoneSelected() async {
         let brain = ScriptedBrain(script: staySilentScript())
         let (driver, transcript) = makeDriver(brain: brain, interviewFormat: nil)
         transcript.append(.init(speaker: .me, text: "let me think out loud", at: 100))
@@ -73,7 +74,7 @@ import Testing
         _ = await driver.handleTrigger(.turnEnd)
 
         #expect(brain.calls[0].contains {
-            $0.role == .system && ($0.text ?? "").contains("functional requirements")
+            $0.role == .system && $0.text == JarvisPrompts.Coach.system
         })
     }
 }
