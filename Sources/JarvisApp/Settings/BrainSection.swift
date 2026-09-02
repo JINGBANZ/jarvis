@@ -166,7 +166,8 @@ final class BrainSection: NSObject, SettingsSection {
         let effortRow = SettingsRowView(
             title: "Reasoning effort",
             detail: "Balances speed and depth",
-            controlView: effortPopup)
+            controlView: effortPopup,
+            showsSeparator: false)
         content.addSubview(effortRow)
 
         // "None" (index 0) persists as `nil` and resolves to no addendum at all — not a guess
@@ -186,8 +187,7 @@ final class BrainSection: NSObject, SettingsSection {
         let formatRow = SettingsRowView(
             title: "Interview format",
             detail: "Applies on the next Start",
-            controlView: formatPopup,
-            showsSeparator: false)
+            controlView: formatPopup)
         content.addSubview(formatRow)
 
         card.onLayout = { [weak card, weak effortRow, weak formatRow] in

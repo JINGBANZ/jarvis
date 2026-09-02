@@ -442,14 +442,13 @@ rather than a per-turn screenshot.
   string literal, so it reads and edits like prose; a missing file resolves to an empty addendum
   rather than an error, since an unwritten skill is a normal state. `InterviewFormat`'s private
   `skillMarkdownURL(named:)` locates it directly rather than trusting the generated `Bundle.module`
-  accessor, which only checks the `.app` root and a compile-time build path and `fatalError`s if
-  neither exists — the same problem `SileroVoiceActivityDetector.bundledModelURL()` already solved
-  for the Silero model, mirrored here; so `scripts/build-app.sh` and `scripts/package-app.sh` still
-  copy `Jarvis_JarvisCore.bundle` into the assembled app's `Contents/Resources` alongside
-  `Jarvis_JarvisApp.bundle` (the Silero VAD model), and `swift test` reads the checked-out source
-  directly since its `Bundle.main` resolves to an unrelated toolchain binary. Adding or editing a
-  skill still needs a developer and a rebuild — a self-service system where a user drops in their
-  own skill file was considered and set aside as speculative infrastructure for a need nothing has
+  accessor, for the same reasons `SileroVoiceActivityDetector.bundledModelURL()` does — see
+  `Sources/JarvisCore/Config/InterviewFormat.swift`; `scripts/build-app.sh` and
+  `scripts/package-app.sh` copy `Jarvis_JarvisCore.bundle` into the assembled app's
+  `Contents/Resources` alongside `Jarvis_JarvisApp.bundle` (the Silero VAD model) accordingly. Adding
+  or editing a skill still needs a developer and a rebuild — a self-service system where a user drops
+  in their own skill file was considered and set aside as speculative infrastructure for a need
+  nothing has
   yet. The picker filters the fixed `InterviewFormat.allCases` down to entries whose addendum is
   non-empty (see `BrainSection.availableFormats`), so an entry is never indistinguishable from None:
   writing Coding's or Behavioral's Markdown file is a resource-only change that surfaces its existing
