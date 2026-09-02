@@ -210,6 +210,13 @@ actor CodexAppServerRuntime: LocalAgentRuntimeBackend {
                 continue
             }
 
+            // Reaching here means no thread to adopt and none we may replace. A prewarm that is no
+            // longer the newest request, or that arrived while an attempt is opening, defers here
+            // too — this is the window, most likely of all in production, where both callers were
+            // still awaiting the server launch and neither a prepared nor a preparing thread exists
+            // yet. Starting one anyway would hand the opening attempt a stale thread to unsubscribe.
+            if !mayReplace { return }
+
             let staleThread = preparedThread
             preparedThread = nil
             let cleanupRequestID = staleThread.map { _ in takeRequestID() }
