@@ -104,6 +104,12 @@ actor CodexAppServerRuntime: LocalAgentRuntimeBackend {
         deadline: Date,
         opening: Bool
     ) async throws {
+        // Order requests by arrival, before the server-launch suspension. Two prewarms can both
+        // park here waiting for the launch and resume in either order; taking the sequence after
+        // that await would let the later arrival receive the lower number and be treated as older,
+        // so the newer target's thread would be evicted for a stale one.
+        latestThreadRequest += 1
+        let request = latestThreadRequest
         let preparedServer = try await prepareServer(
             for: configuration,
             deadline: deadline)
@@ -111,7 +117,8 @@ actor CodexAppServerRuntime: LocalAgentRuntimeBackend {
             for: configuration,
             server: preparedServer,
             deadline: deadline,
-            opening: opening)
+            opening: opening,
+            request: request)
     }
 
     private func prepareServer(
@@ -178,10 +185,9 @@ actor CodexAppServerRuntime: LocalAgentRuntimeBackend {
         for configuration: LocalAgentConversationConfiguration,
         server: CodexAppServer,
         deadline: Date,
-        opening: Bool
+        opening: Bool,
+        request: Int
     ) async throws {
-        latestThreadRequest += 1
-        let request = latestThreadRequest
         while true {
             guard activeThreadID == nil else { return }
             let mayReplace = opening
