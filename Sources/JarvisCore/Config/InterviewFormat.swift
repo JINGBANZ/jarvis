@@ -8,7 +8,7 @@ import Foundation
 /// already rejected — see wiki/architecture.md § Models and APIs). No selection means no addendum at
 /// all — not a guess assembled from whatever formats happen to have content — so a user who never
 /// opens this setting sees no behavior change at all.
-public enum InterviewFormat: String, CaseIterable, Codable, Sendable, CoachingSkill {
+public enum InterviewFormat: String, CaseIterable, Codable, Sendable {
     case coding = "coding"
     case systemDesign = "system-design"
     case behavioral = "behavioral"

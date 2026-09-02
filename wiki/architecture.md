@@ -431,8 +431,8 @@ rather than a per-turn screenshot.
   single-writer lock turns one slow turn into minutes of `conversation_locked` silence. Requests are sent `store:true`
   so they stay inspectable in the OpenAI dashboard for debugging — the retention tradeoff is
   documented in [sandbox.md](./sandbox.md).
-- **Interview format supplies optional coaching-prompt vocabulary (`InterviewFormat`,
-  `CoachingSkill`).** A Start-time picker (**None**, plus one entry per format that actually has
+- **Interview format supplies optional coaching-prompt vocabulary (`InterviewFormat` in
+  `Sources/JarvisCore/Config/`).** A Start-time picker (**None**, plus one entry per format that actually has
   content — System Design today) adds a format-specific addendum to the coach system prompt — today, only System Design has real
   content, added because the coach otherwise has zero system-design vocabulary (functional
   requirements, API design, data model, etc.) and its tips can drift from whatever stage of that
@@ -440,20 +440,22 @@ rather than a per-turn screenshot.
   reported a problem with them, not because the mechanism can't hold their content too. Each format's
   content is a real Markdown file (`Sources/JarvisCore/Resources/Skills/<rawValue>.md`), not a Swift
   string literal, so it reads and edits like prose; a missing file resolves to an empty addendum
-  rather than an error, since an unwritten skill is a normal state. `JarvisCore`'s `Bundle.module`
-  serves it, so `scripts/build-app.sh` and `scripts/package-app.sh` copy `Jarvis_JarvisCore.bundle`
-  into the assembled app's `Contents/Resources` alongside `Jarvis_JarvisApp.bundle` (the Silero VAD
-  model) — otherwise the skill resolves under `swift build`/`swift test` but silently goes missing
-  from the shipped app. Adding or editing a skill still needs a developer and a rebuild — a
-  self-service system where a user drops in their own skill file was considered and set aside as
-  speculative infrastructure for a need nothing has yet. The picker filters the fixed
-  `InterviewFormat.allCases` down to entries whose addendum is non-empty
-  (`InterviewFormat.allCases.filter { !$0.promptAddendum.isEmpty }`), so an entry is never
-  indistinguishable from None: writing Coding's or Behavioral's Markdown file is a resource-only
-  change that surfaces its existing case, but a genuinely new format still needs a new
-  `InterviewFormat` case and display name before any Markdown file can surface it. No selection
-  resolves to no addendum at all
-  (`format?.promptAddendum ?? ""`), not a guess assembled from whatever formats happen to have
+  rather than an error, since an unwritten skill is a normal state. `InterviewFormat`'s private
+  `skillMarkdownURL(named:)` locates it directly rather than trusting the generated `Bundle.module`
+  accessor, which only checks the `.app` root and a compile-time build path and `fatalError`s if
+  neither exists — the same problem `SileroVoiceActivityDetector.bundledModelURL()` already solved
+  for the Silero model, mirrored here; so `scripts/build-app.sh` and `scripts/package-app.sh` still
+  copy `Jarvis_JarvisCore.bundle` into the assembled app's `Contents/Resources` alongside
+  `Jarvis_JarvisApp.bundle` (the Silero VAD model), and `swift test` reads the checked-out source
+  directly since its `Bundle.main` resolves to an unrelated toolchain binary. Adding or editing a
+  skill still needs a developer and a rebuild — a self-service system where a user drops in their
+  own skill file was considered and set aside as speculative infrastructure for a need nothing has
+  yet. The picker filters the fixed `InterviewFormat.allCases` down to entries whose addendum is
+  non-empty (see `BrainSection.availableFormats`), so an entry is never indistinguishable from None:
+  writing Coding's or Behavioral's Markdown file is a resource-only change that surfaces its existing
+  case, but a genuinely new format still needs a new `InterviewFormat` case and display name before
+  any Markdown file can surface it. No selection resolves to no addendum at all (see
+  `CoachAttemptRunner`'s system-prompt assembly), not a guess assembled from whatever formats happen to have
   content: concatenating every non-empty addendum was tried and rejected — with only one format
   written it silently asserted "this is a system-design interview" into every session by default,
   including coding and behavioral ones nobody opted into, and it does not scale, since two written
