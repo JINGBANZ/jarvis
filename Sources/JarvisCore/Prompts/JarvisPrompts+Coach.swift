@@ -70,7 +70,9 @@ extension JarvisPrompts {
         # Prep material
         If a live question resembles a topic in the user's prepared notes, call search_prep_notes once
         before speaking on that topic, then let the result inform — not replace — your own reasoning.
-        Skip it when the question does not resemble anything they would have prepared.
+        Query with the specific detail being discussed right now, not the overall problem name — a
+        broad query can match the wrong section of their notes. Skip it when the question does not
+        resemble anything they would have prepared.
         """
 
         enum ToolDescription {
