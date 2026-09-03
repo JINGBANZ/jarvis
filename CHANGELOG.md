@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.2.0](https://github.com/JINGBANZ/jarvis/compare/v0.1.12...v0.2.0) (2026-09-03)
+
+
+### ⚠ BREAKING CHANGES
+
+* **permissions:** Jarvis will not run without all three grants. The Permissions tab in Settings is removed; the launch gate is the only path.
+
+### Features
+
+* **activity:** export session history to Markdown, plain text, or HTML ([#230](https://github.com/JINGBANZ/jarvis/issues/230)) ([eb71f2c](https://github.com/JINGBANZ/jarvis/commit/eb71f2c0588932cd6e2c7bee9ee027acdce87af4))
+* **capture:** replace classic WebRTC VAD with Silero for local turn detection ([#238](https://github.com/JINGBANZ/jarvis/issues/238)) ([b512e0c](https://github.com/JINGBANZ/jarvis/commit/b512e0c3d1148501a65dd0c50e452b9168a9121e))
+* **coach:** add an interview-format picker with a system-design vocabulary addendum ([#252](https://github.com/JINGBANZ/jarvis/issues/252)) ([26b31c3](https://github.com/JINGBANZ/jarvis/commit/26b31c3fac3f6f0ff1d5b780e31c53f8156ccd09))
+* **coach:** scope prep-notes search queries to the current sub-topic ([#251](https://github.com/JINGBANZ/jarvis/issues/251)) ([2205ede](https://github.com/JINGBANZ/jarvis/commit/2205edec861f0cabc75dd9dd85842064a2ff536f))
+* **menu:** add a Clear Overlay menu item ([#243](https://github.com/JINGBANZ/jarvis/issues/243)) ([d888980](https://github.com/JINGBANZ/jarvis/commit/d888980883cd55af61fcdb9cfea6c8b01e265b30))
+* **menubar:** mark a local build with a red "Dev" caption ([#223](https://github.com/JINGBANZ/jarvis/issues/223)) ([55fa248](https://github.com/JINGBANZ/jarvis/commit/55fa2482d76a33fbc4da241b59a3c2bdadb2ab6d))
+* **permissions:** gate Jarvis behind every grant, proved live ([#233](https://github.com/JINGBANZ/jarvis/issues/233)) ([cab1196](https://github.com/JINGBANZ/jarvis/commit/cab1196e9bd723b5cdbd98f5c8a72a8b11e9643c))
+* **prep:** add local prep-material source configuration to Settings ([#220](https://github.com/JINGBANZ/jarvis/issues/220)) ([5b10338](https://github.com/JINGBANZ/jarvis/commit/5b10338e5eb354a57589ecc81eccb3bfb134b744))
+* **prep:** add prep-notes retrieval to the coaching tool loop ([#226](https://github.com/JINGBANZ/jarvis/issues/226)) ([5e66681](https://github.com/JINGBANZ/jarvis/commit/5e6668102a602ce56e0b6d75edf6306395454b13))
+* **shortcuts:** make the manual hint hotkey configurable ([#235](https://github.com/JINGBANZ/jarvis/issues/235)) ([a8e86d6](https://github.com/JINGBANZ/jarvis/commit/a8e86d63e3bc2ce92d42c659aea8f33f4b396d7d))
+* **transcription:** add vocabulary keyword hints for GPT Transcribe/Live ([#242](https://github.com/JINGBANZ/jarvis/issues/242)) ([42ce409](https://github.com/JINGBANZ/jarvis/commit/42ce4091128cf3684b2ff72aa4f3c05bfdb4ceed))
+
+
+### Bug Fixes
+
+* **brain:** stop a codex prewarm from trading evictions with an attempt's open ([#250](https://github.com/JINGBANZ/jarvis/issues/250)) ([04c5104](https://github.com/JINGBANZ/jarvis/commit/04c51047a237cbec59127b3c72f4fe7c61c08c22))
+* **capture:** make LocalTurnDetector Sendable so the build is warning-free ([#245](https://github.com/JINGBANZ/jarvis/issues/245)) ([2343dbb](https://github.com/JINGBANZ/jarvis/commit/2343dbb7faf70838bd721cad825d8e819b6c28ae))
+* **diagnostics:** account for Codex one-shot exec token usage ([#193](https://github.com/JINGBANZ/jarvis/issues/193)) ([be98777](https://github.com/JINGBANZ/jarvis/commit/be98777d4271c641f55333ad57ddfbd0ace87b5f))
+
 ## [0.1.12](https://github.com/JINGBANZ/jarvis/compare/v0.1.11...v0.1.12) (2026-08-24)
 
 
