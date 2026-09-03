@@ -28,7 +28,10 @@ let package = Package(
         .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.9.6"),
     ],
     targets: [
-        .target(name: "JarvisCore"),
+        // `.copy`, not `.process`, keeps `Resources/Skills` a real subdirectory so
+        // `Bundle.module.url(forResource:withExtension:subdirectory:)` can address it — matching how
+        // JarvisApp's `.copy("Resources/SileroVAD.mlmodelc")` keeps that resource's directory intact.
+        .target(name: "JarvisCore", resources: [.copy("Resources/Skills")]),
         // Concrete brain-provider adapters: the OpenAI Responses client with its HTTP failure
         // classification, and the local-agent CLI subtree (Claude Code, Codex exec, and the Codex
         // app server) with its detector, process runner, and runtime lifetime. Extracted per

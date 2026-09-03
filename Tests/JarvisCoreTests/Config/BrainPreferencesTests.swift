@@ -21,6 +21,24 @@ import Foundation
         #expect(p.fallbackTargets.isEmpty)
         #expect(p.route.targets == [p.primaryTarget])
         #expect(p.primaryTarget.provider == Defaults.Brain.provider)
+        // Absent means "not selected," not a fallback default — unlike every other Brain setting.
+        #expect(p.interviewFormat == nil)
+    }
+
+    @Test func interviewFormatRoundTripsAndClearsBackToNil() {
+        let d = freshDefaults()
+        let p = BrainPreferences(defaults: d)
+        p.interviewFormat = .systemDesign
+        #expect(BrainPreferences(defaults: d).interviewFormat == .systemDesign)
+        p.interviewFormat = nil
+        #expect(BrainPreferences(defaults: d).interviewFormat == nil)
+        #expect(d.string(forKey: "brain.interviewFormat") == nil)
+    }
+
+    @Test func unknownStoredInterviewFormatFallsBackToNilNotADefault() {
+        let d = freshDefaults()
+        d.set("architecture-review", forKey: "brain.interviewFormat")
+        #expect(BrainPreferences(defaults: d).interviewFormat == nil)
     }
 
     @Test func roundTripsThroughDefaults() {

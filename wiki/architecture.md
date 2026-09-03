@@ -431,6 +431,44 @@ rather than a per-turn screenshot.
   single-writer lock turns one slow turn into minutes of `conversation_locked` silence. Requests are sent `store:true`
   so they stay inspectable in the OpenAI dashboard for debugging — the retention tradeoff is
   documented in [sandbox.md](./sandbox.md).
+- **Interview format supplies optional coaching-prompt vocabulary (`InterviewFormat` in
+  `Sources/JarvisCore/Config/`).** A Start-time picker (**None**, plus one entry per format that actually has
+  content — System Design today) adds a format-specific addendum to the coach system prompt — today, only System Design has real
+  content, added because the coach otherwise has zero system-design vocabulary (functional
+  requirements, API design, data model, etc.) and its tips can drift from whatever stage of that
+  discussion the candidate is actually in; Coding and Behavioral stay empty because no one has
+  reported a problem with them, not because the mechanism can't hold their content too. Each format's
+  content is a real Markdown file (`Sources/JarvisCore/Resources/Skills/<rawValue>.md`), not a Swift
+  string literal, so it reads and edits like prose; a missing file resolves to an empty addendum
+  rather than an error, since an unwritten skill is a normal state. `InterviewFormat`'s private
+  `skillMarkdownURL(named:)` locates it directly rather than trusting the generated `Bundle.module`
+  accessor, for the same reasons `SileroVoiceActivityDetector.bundledModelURL()` does — see
+  `Sources/JarvisCore/Config/InterviewFormat.swift`; `scripts/build-app.sh` and
+  `scripts/package-app.sh` copy `Jarvis_JarvisCore.bundle` into the assembled app's
+  `Contents/Resources` alongside `Jarvis_JarvisApp.bundle` (the Silero VAD model) accordingly. Adding
+  or editing a skill still needs a developer and a rebuild — a self-service system where a user drops
+  in their own skill file was considered and set aside as speculative infrastructure for a need
+  nothing has
+  yet. The picker filters the fixed `InterviewFormat.allCases` down to entries whose addendum is
+  non-empty (see `BrainSection.availableFormats`), so an entry is never indistinguishable from None:
+  writing Coding's or Behavioral's Markdown file is a resource-only change that surfaces its existing
+  case, but a genuinely new format still needs a new `InterviewFormat` case and display name before
+  any Markdown file can surface it. No selection resolves to no addendum at all (see
+  `CoachAttemptRunner`'s system-prompt assembly), not a guess assembled from whatever formats happen to have
+  content: concatenating every non-empty addendum was tried and rejected — with only one format
+  written it silently asserted "this is a system-design interview" into every session by default,
+  including coding and behavioral ones nobody opted into, and it does not scale, since two written
+  formats would concatenate two contradictory interview-format claims into one prompt. An automatic
+  classifier that guesses the format from conversation is separately rejected too: guessing once and
+  locking in misclassifies a session that shifts formats (a behavioral opener sliding into a
+  system-design round), and re-guessing every turn is a brittle state machine for a signal the model
+  can read from context anyway once it has the vocabulary. Fixed for the whole session like the
+  transcription language/model choice, for a concrete reason beyond convention: `CLIBrainClient`
+  bakes the system prompt into the local-agent process at construction and asserts it never changes,
+  so the resolved addendum must be computed once (`BrainComposition.interviewFormatAddendum`, set
+  before every route construction or reapply, including a live provider hot-switch) and reused
+  identically by both the per-turn OpenAI-style prompt (`CoachAttemptRunner`) and the CLI-provider
+  construction (`BrainComposition`).
 - **Transcription has its own provider, model, and language settings.** OpenAI remains the provider
   default and `gpt-4o-transcribe` remains its model default; `gpt-transcribe` and
   `gpt-live-transcribe` are opt-in comparison choices. All use the GA Realtime API, but keep their
@@ -737,8 +775,11 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
 
 ## 6. Non-Goals (v1)
 
-- Multiple coaching modes / a tiered sensitivity dial. (One technical-interview mode spans
-  behavioral, system-design, and coding questions.)
+- A tiered sensitivity dial, or genuinely separate coaching modes with different action-policy
+  gating, tool sets, or proactivity behavior. (One technical-interview coaching approach spans
+  behavioral, system-design, and coding questions; an optional Start-time interview-format selection
+  only supplies additional prompt *vocabulary* for the selected format — see [§ Models and
+  APIs](#models-and-apis) — never a different mode of operation.)
 - Continuous OCR or recording the screen/audio to disk ("recall").
 - A dedicated wake-word engine. Direct address is just the word "Jarvis" (or a question) appearing
   in the transcript, which the brain reads and answers — there is no wake-word detector. (A global

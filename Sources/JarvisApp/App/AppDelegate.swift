@@ -292,6 +292,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         let transcriptionConfiguration = transcriptionPreferences.configuration
         let transcriptionProvider = transcriptionConfiguration.provider
         let brainRoute = brain.preferences.route
+        // Fixed for the whole session, like transcription's language/model choice — never
+        // reclassified mid-conversation. No selection means no addendum, not a guess assembled from
+        // whatever formats have content — see wiki/architecture.md § Models and APIs.
+        let interviewFormatAddendum = brain.preferences.interviewFormat?.promptAddendum ?? ""
         let key = secrets.apiKey() ?? ""
         let requiresOpenAIKey = transcriptionProvider.requiresOpenAIAPIKey(for: brainRoute)
         let preparesAppleSpeech = transcriptionProvider == .appleSpeech
@@ -425,6 +429,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             _ = self.installPreparedStart(
                 apiKey: key,
                 brainRoute: brainRoute,
+                interviewFormatAddendum: interviewFormatAddendum,
                 transcriptionConfiguration: transcriptionConfiguration,
                 appleSpeechLocale: appleSpeechLocale,
                 detectedCLIs: detectedCLIs,
@@ -482,6 +487,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     private func installPreparedStart(
         apiKey key: String,
         brainRoute: BrainRoute,
+        interviewFormatAddendum: String,
         transcriptionConfiguration: TranscriptionConfiguration,
         appleSpeechLocale: Locale?,
         detectedCLIs initialDetectedCLIs: [BrainProvider: DetectedAgentCLI],
@@ -532,6 +538,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         // Each target's coach and summarizer share the session traffic log. Every fresh attempt is a
         // distinct audit-visible request; no transport wrapper replays a failed request.
         let sessionDirectory = artifacts.currentSessionDir!
+        // Fixed for the whole session — set before every construction/reapply path that bakes a
+        // system prompt, including a later `applyBrainPreferencesToRunningSession` hot switch.
+        brain.interviewFormatAddendum = interviewFormatAddendum
         let configuredRoute = brain.makeConfiguredRoute(
             brainRoute,
             detectedCLIs: detectedCLIs,
@@ -554,7 +563,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             sessionStart: conversationStart,
             coachingAttempts: artifacts.sessionAudit,
             plan: freshSessionPlan(),
-            activity: artifacts.sessionAudit)
+            activity: artifacts.sessionAudit,
+            interviewFormatAddendum: interviewFormatAddendum)
 
         // Building the index reads files and can shell out to `textutil`, so it runs off the Start
         // path entirely rather than delaying it — a trigger that fires before this lands just

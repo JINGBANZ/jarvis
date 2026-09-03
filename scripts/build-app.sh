@@ -77,10 +77,13 @@ cp "$BIN_PATH" "$APP/Contents/MacOS/$BIN_NAME"
 # Sparkle is linked dynamically, so the framework must be embedded even though the development
 # bundle has no update feed — without it dyld cannot start the app at all.
 ditto "$(dirname "$BIN_PATH")/Sparkle.framework" "$APP/Contents/Frameworks/Sparkle.framework"
-# SwiftPM emits the target's resources (the Silero VAD model) as a side-by-side bundle. Copy it into
+# SwiftPM emits each resource-bearing target's resources as its own side-by-side bundle — JarvisApp's
+# (the Silero VAD model) and JarvisCore's (the interview-format skill Markdown files). Copy both into
 # Contents/Resources so `Bundle.module` resolves inside the assembled app, not just from .build.
 ditto "$(dirname "$BIN_PATH")/Jarvis_JarvisApp.bundle" \
       "$APP/Contents/Resources/Jarvis_JarvisApp.bundle"
+ditto "$(dirname "$BIN_PATH")/Jarvis_JarvisCore.bundle" \
+      "$APP/Contents/Resources/Jarvis_JarvisCore.bundle"
 rm -rf "$APP/Contents/Frameworks/Sparkle.framework/Versions/Current/XPCServices" \
        "$APP/Contents/Frameworks/Sparkle.framework/XPCServices"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
