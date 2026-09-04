@@ -22,10 +22,9 @@ public enum InterviewFormat: String, CaseIterable, Codable, Sendable {
     }
 
     /// Loaded from `Resources/Skills/<rawValue>.md` — a real Markdown file, not a Swift string
-    /// literal, so a skill's content reads and edits like prose. Only `system-design.md` exists
-    /// today: `.coding` and `.behavioral` are already reported as working well, so they stay empty
-    /// rather than getting new prompt guidance nobody asked for. Missing file → empty, not a crash —
-    /// an unwritten skill is a normal state, not an error.
+    /// literal, so a skill's content reads and edits like prose. Coding has no authored override;
+    /// Behavioral and System Design do. Missing file → empty, not a crash — an unwritten skill is
+    /// a normal state, not an error.
     public var promptAddendum: String {
         guard let url = Self.skillMarkdownURL(named: rawValue),
               let body = try? String(contentsOf: url, encoding: .utf8)

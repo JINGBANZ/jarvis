@@ -9,7 +9,9 @@
 ## Current phase
 
 **General technical-interview coaching, audio reliability, and local CLI brain providers are
-implemented.** The coach covers behavioral, system-design, and coding questions. A direct request
+implemented.** The coach covers behavioral, system-design, and coding questions, with selectable
+Behavioral and System Design specialist skills under `Sources/JarvisCore/Resources/Skills/`; their
+policy is defined in [architecture.md → Models and APIs](./architecture.md#models-and-apis). A direct request
 whose specific answer depends on visible context missing from the conversation calls `capture_screen`
 before `speak`; a fresh screenshot/OCR satisfies that request, while a fully stated question can be
 answered without a reflexive capture. The independent Transcription setting keeps **OpenAI as the

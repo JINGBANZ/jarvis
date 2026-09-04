@@ -50,15 +50,18 @@ import Testing
         })
     }
 
-    @Test func systemPromptOmitsFormatGuidanceForBehavioral() async {
+    @Test func systemPromptIncludesBehavioralGuidanceWhenExplicitlySelected() async {
         let brain = ScriptedBrain(script: staySilentScript())
         let (driver, transcript) = makeDriver(brain: brain, interviewFormat: .behavioral)
         transcript.append(.init(speaker: .me, text: "let me think out loud", at: 100))
 
         _ = await driver.handleTrigger(.turnEnd)
 
-        #expect(!brain.calls[0].contains {
-            $0.role == .system && ($0.text ?? "").contains("Interview format")
+        #expect(brain.calls[0].contains {
+            $0.role == .system
+                && ($0.text ?? "").hasPrefix(JarvisPrompts.Coach.system)
+                && ($0.text ?? "").contains("# Interview format: behavioral")
+                && ($0.text ?? "").contains("STAR")
         })
     }
 
