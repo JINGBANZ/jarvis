@@ -468,7 +468,14 @@ rather than a per-turn screenshot.
   so the resolved addendum must be computed once (`BrainComposition.interviewFormatAddendum`, set
   before every route construction or reapply, including a live provider hot-switch) and reused
   identically by both the per-turn OpenAI-style prompt (`CoachAttemptRunner`) and the CLI-provider
-  construction (`BrainComposition`).
+  construction (`BrainComposition`). Both sites assemble the prompt through one builder,
+  `JarvisPrompts.Coach.system(prepMaterial:formatAddendum:)` in `JarvisCore`, so the two cannot
+  drift. The builder takes the addendum as an already-resolved string rather than an
+  `InterviewFormat?` because `promptAddendum` reads its bundled file on every access and the
+  per-turn site would otherwise read it on every coaching turn. The CLI site passes
+  `prepMaterial: false`: prep material is indexed off the Start path and installed later, so its
+  `search_prep_notes` guidance cannot be baked into a process whose instructions are fixed at
+  construction.
 - **Transcription has its own provider, model, and language settings.** OpenAI remains the provider
   default and `gpt-4o-transcribe` remains its model default; `gpt-transcribe` and
   `gpt-live-transcribe` are opt-in comparison choices. All use the GA Realtime API, but keep their
