@@ -168,7 +168,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             appearance.boxWidth = width
             appearance.boxHeight = height
         }
-        overlayBox.setEnabled(appearance.boxEnabled)   // on by default — shows the history box at launch
+        // On by default, but the box is a session surface: this only arms the switch. It reaches the
+        // screen on Start (below) and leaves it on Stop, so a stopped Jarvis shows nothing.
+        overlayBox.setEnabled(appearance.boxEnabled)
 
         // No updater in a development bundle (no feed URL), so the menu omits the item entirely.
         updates = UpdateController()
@@ -784,6 +786,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         // above, so any frame already queued on the main actor is still observed by this monitor.
         startCaptureReadiness(readinessSession: readinessSession)
         sessionIsLive = true
+        // Show the (already cleared) history box, from the one place that declares the session live —
+        // every earlier `return false` leaves the desktop untouched.
+        overlayBox.setSessionLive(true)
         jlog("Jarvis: coaching starting — verifying transcription endpoints.")
         jlog("Jarvis network path at start: \(networkDiagnostics.currentSummary)")
         activityViewer.coachingStateDidChange()   // the live session is no longer evaluable
@@ -811,6 +816,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             && readiness.status.isBlocked
         let endedLiveSession = sessionIsLive
         sessionIsLive = false
+        overlayBox.setSessionLive(false)     // the history box goes away with the session
         requestManualHint = nil              // hotkey beeps again once there's no live session
         // Capture and clear this session handle before a quick Start installs another. The cancelled
         // tasks retain only its observer ports and can finish enqueueing into the old session.

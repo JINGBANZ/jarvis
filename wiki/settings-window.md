@@ -92,10 +92,20 @@ on/off flag, a font size, and an opacity; the box additionally carries its width
 The two surfaces default opposite ways — the caption **off**, the box **on** — so a first run shows
 the durable history rather than a flashing caption. `AppDelegate` applies both enabled flags at launch.
 
+The box is a **session surface**: switched on, it reaches the screen on Start (already cleared, for the
+new conversation) and leaves it on Stop, so a stopped Jarvis puts nothing on the desktop. Two flags in
+`OverlayBoxPanel` decide it — the Settings switch (`setEnabled`) and the session (`setSessionLive`,
+called by `AppDelegate` from the one line that declares a session live and the one that ends it) — and
+a single private `applyVisibility()` derives `isEnabled && isSessionLive`. Keeping that rule in one
+place is why the panel, not the two call sites, owns it: switching the box on from Settings while
+stopped would otherwise leave it on screen with no session behind it. The Settings preview overrides
+the rule while the Overlay tab is open and re-derives it on close.
+
 Opacity governs the background fill only, so both surfaces accept 0%: a text-only surface with no
-backdrop, not a hidden one. The On/Off toggle stays the only thing that hides a surface. Both share
-one range because the tab presents their sliders identically. A corrupted non-finite stored value
-restores the setting's own default rather than the range floor, which at 0% would read as breakage.
+backdrop, not a hidden one. Nothing here takes a surface off screen: that is the On/Off toggle, and
+for the box the end of a session as well. Both share one range because the tab presents their
+sliders identically. A corrupted non-finite stored value restores the setting's own default rather
+than the range floor, which at 0% would read as breakage.
 
 The box is the one surface the user sizes directly, by dragging its edges. `OverlayBoxPanel` reports a
 finished drag through `onSizeChanged` and takes the restored size as an `init` parameter, so the panel
@@ -120,14 +130,14 @@ conformed by `OverlayBoxPanel`. Both are declared in
 round-trip through `OverlayAppearance` so they survive an app relaunch.
 
 `setEnabled(false)` on the caption suppresses coaching tips (dropping any in-flight/queued tip); on
-the box it simply hides the window. A surface's live sample is shown only while the Overlay tab is
-selected **and that surface is on** — `didBecomeActive` previews each surface for its enabled state,
-and flipping a toggle shows/hides that surface's sample (and collapses/expands its sliders via
-`relayout()`) live. Each panel's `showAppearancePreview(_:)` re-asserts capture exclusion so the
-preview stays hidden from screen capture — same defense-in-depth as the coaching display path. The
-box's preview shows sample
-text without disturbing the real log and restores the box's **user-intended** visibility on close (it
-tracks intent separately from `panel.isVisible` so the setting can't desync). The plain setters
+the box it takes the window off screen, and `setEnabled(true)` returns it there only while a session
+is running. A surface's live sample is shown only while the Overlay tab is selected **and that
+surface is on** — `didBecomeActive` previews each surface for its enabled state, and flipping a
+toggle shows/hides that surface's sample (and collapses/expands its sliders via `relayout()`) live.
+Each panel's `showAppearancePreview(_:)` re-asserts capture exclusion so the preview stays hidden
+from screen capture — same defense-in-depth as the coaching display path. The box's preview shows
+sample text without disturbing the real log and re-derives `isEnabled && isSessionLive` on close, so
+closing the tab can leave the box on screen only while both hold. The plain setters
 (`setFontSize`/`setBackgroundOpacity`/`setOpacity`) only change appearance and don't touch
 `sharingType`. See [overlay-invisibility.md](./overlay-invisibility.md).
 

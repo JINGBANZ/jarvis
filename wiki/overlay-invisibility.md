@@ -88,8 +88,8 @@ used was a handful of standalone Swift programs driving `NSPanel` + ScreenCaptur
 It is the *more* sensitive of the two windows — it holds the full, persistent history of every spoken
 tip — so it gets the identical treatment, not less: both panels set the flag through one shared
 `NSPanel.excludeFromScreenCapture()` helper at construction, and the box **re-asserts on every render
-that reaches the screen** (`append` while visible), on `show()`, and in its preview — mirroring the
-overlay's per-`show()` re-assert. Regression-tested the same way via its own
+that reaches the screen** (`append` while visible), whenever it becomes visible (`applyVisibility()`,
+i.e. every Start), and in its preview — mirroring the overlay's per-`show()` re-assert. Regression-tested the same way via its own
 `captureExclusionReassertCount` hook (`reassertsCaptureExclusionOnRenderWhileVisible`).
 
 That is the entire implementation: no package, no entitlement, no private API. Both panels live in

@@ -131,11 +131,13 @@ public enum Defaults {
     /// and an opacity; the ranges are the clamp bounds applied on every read and write.
     ///
     /// Opacity governs only the background fill, so 0 means a text-only surface with no backdrop,
-    /// not a hidden one — the enabled flag is the only thing that hides a surface. Both surfaces
-    /// share one range because the Overlay tab presents their sliders identically.
+    /// not a hidden one — what takes a surface off screen is its enabled flag, and for the box the end
+    /// of a session. Both surfaces share one range because the Overlay tab presents their sliders
+    /// identically.
     ///
     /// The surfaces default opposite ways — the caption off, the box on — so a first run shows the
-    /// durable history rather than a flashing caption.
+    /// durable history rather than a flashing caption. The box is a session surface: switched on, it
+    /// appears on Start and goes away on Stop.
     public enum Overlay {
 
         /// The transient on-screen tip that fades after each response.
