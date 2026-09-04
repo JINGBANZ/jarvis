@@ -1,21 +1,27 @@
 import AppKit
 import CoreImage
 
-/// The menu-bar glyph has two jobs, and they pull in opposite directions, so it is drawn two ways.
+/// The menu-bar glyph has three jobs, and they pull in different directions, so it is drawn three
+/// ways.
 ///
 /// Stopped reuses the application icon with a high-contrast treatment tuned for its tiny display
 /// size: no colour, deeper shadows, and a fine pale edge. That rendering is deliberately unchanged —
 /// it is the resting state a person sees all day.
 ///
-/// A live session gets the Listening Lens redrawn as flat vector art instead. The application icon
-/// is a photographic render — soft gradients, a glass highlight, a wireframe sphere — and none of
-/// that survives being downsampled to 18 points, however much colour is poured into it. Drawn
-/// artwork stays crisp at the only size this glyph is ever seen at, and a saturated plate is the
-/// loudest a status item can be without moving or growing.
+/// Ready draws the same Listening Lens vector art but as a bare template glyph — no plate, no
+/// colour — so a healthy session sits quietly among everyone else's monochrome status icons (Slack,
+/// ChatGPT, Notion, …) instead of announcing itself. `NSImage.isTemplate` hands tinting to AppKit, so
+/// it follows the menu bar's light/dark appearance automatically.
 ///
-/// Both paths render into a 2×-density bitmap at the same logical point size and share the same
-/// rounded-square silhouette, so switching between them changes the icon's colour, never its shape
-/// or footprint. Rendered once each and cached.
+/// Working and blocked get the Listening Lens redrawn onto a saturated colour plate instead. The
+/// application icon is a photographic render — soft gradients, a glass highlight, a wireframe sphere
+/// — and none of that survives being downsampled to 18 points, however much colour is poured into
+/// it. Drawn artwork stays crisp at the only size this glyph is ever seen at, and a saturated plate
+/// is the loudest a status item can be without moving or growing — exactly what those two states,
+/// which both want attention, need and ready deliberately does not.
+///
+/// All three render into a 2×-density bitmap at the same logical point size, so switching between
+/// them never changes the glyph's footprint. Rendered once each and cached.
 ///
 /// OS-bound (AppKit + CoreImage), so it lives in `JarvisApp` rather than Core and is verified by a
 /// live run, not unit tests. Main-actor-isolated: `NSImage` isn't `Sendable`, and the icons are only
@@ -44,7 +50,7 @@ enum MenuBarIcon {
     /// The lit Listening Lens for a live session. Cached per signal.
     static func live(_ signal: Signal) -> NSImage {
         if let cached = liveCache[signal] { return cached }
-        let image = makeLive(signal)
+        let image = signal == .ready ? makeReadyTemplate() : makeLive(signal)
         liveCache[signal] = image
         return image
     }
@@ -108,6 +114,32 @@ enum MenuBarIcon {
         edge.lineWidth = lineWidth
         edge.stroke()
         NSGraphicsContext.restoreGraphicsState()
+    }
+
+    // MARK: - Ready (template)
+
+    /// Ready has nothing to announce, so it drops the colour plate entirely and draws just the
+    /// Listening Lens glyph as a template image — the same convention every other monochrome
+    /// menu-bar icon (Slack, ChatGPT, Notion, …) already follows. `isTemplate = true` hands the fill
+    /// colour to AppKit, which matches it to the current menu bar appearance for free.
+    private static func makeReadyTemplate() -> NSImage {
+        let rep = bitmap()
+        let px = CGFloat(rep.pixelsWide)
+        let unit = px / 36
+
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+
+        // Template images key off alpha, not colour, so any opaque fill works — black is convention.
+        NSColor.black.setFill()
+        coolCrescent(unit).fill()
+        warmCrescent(unit).fill()
+        core(unit).fill()
+
+        NSGraphicsContext.restoreGraphicsState()
+
+        rep.size = NSSize(width: side, height: side)
+        return image(from: rep, describedAs: Signal.ready.accessibilityDescription, template: true)
     }
 
     // MARK: - Live
@@ -201,10 +233,11 @@ enum MenuBarIcon {
         CGFloat(rep.pixelsWide) * 0.225
     }
 
-    private static func image(from rep: NSBitmapImageRep, describedAs description: String) -> NSImage {
+    private static func image(from rep: NSBitmapImageRep, describedAs description: String,
+                              template: Bool = false) -> NSImage {
         let image = NSImage(size: NSSize(width: side, height: side))
         image.addRepresentation(rep)
-        image.isTemplate = false                 // keep our own colours; don't tint to the label colour
+        image.isTemplate = template               // false keeps our own colours; true hands tinting to AppKit
         image.accessibilityDescription = description
         return image
     }
@@ -212,22 +245,23 @@ enum MenuBarIcon {
 
 private extension MenuBarIcon.Signal {
     /// The plate carries the state. It is the largest area in the glyph, so it is the only element
-    /// that reads reliably in peripheral vision.
+    /// that reads reliably in peripheral vision. Ready has no plate — it renders as a template glyph
+    /// via `makeReadyTemplate()` — so this is only ever read for the two states that need attention.
     var plate: NSColor {
         switch self {
-        case .ready:   NSColor(srgbRed: 123 / 255, green: 98 / 255, blue: 232 / 255, alpha: 1)
+        case .ready:   preconditionFailure("ready renders as a template glyph — see makeReadyTemplate()")
         case .working: NSColor(srgbRed: 224 / 255, green: 138 / 255, blue: 30 / 255, alpha: 1)
         case .blocked: NSColor(srgbRed: 216 / 255, green: 69 / 255, blue: 58 / 255, alpha: 1)
         }
     }
 
-    /// Ready keeps the identity's second hue, the app icon's ice blue. The exceptional states drop
-    /// it for a plain white tint: a second brand hue laid over amber or red fights the meaning the
-    /// plate is carrying, and semantics win over decoration when something needs attention.
+    /// Working and blocked drop the identity's ice-blue second hue for a plain white tint: a brand
+    /// hue laid over amber or red fights the meaning the plate is carrying, and semantics win over
+    /// decoration when something needs attention. Ready has no plate to tint — see `plate` above.
     var coolTint: NSColor {
         switch self {
-        case .ready:             NSColor(srgbRed: 127 / 255, green: 196 / 255, blue: 242 / 255, alpha: 1)
-        case .working, .blocked: NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.62)
+        case .ready:              preconditionFailure("ready renders as a template glyph — see makeReadyTemplate()")
+        case .working, .blocked:  NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.62)
         }
     }
 
