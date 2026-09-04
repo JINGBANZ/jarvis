@@ -15,6 +15,8 @@ import Testing
         #expect(InterviewFormat.behavioral.promptAddendum.contains(
             "# Interview format: behavioral"))
         #expect(InterviewFormat.behavioral.promptAddendum.contains("STAR"))
+        #expect(InterviewFormat.behavioral.promptAddendum.contains(
+            "candidate-owned events"))
         #expect(!InterviewFormat.systemDesign.promptAddendum.isEmpty)
         #expect(InterviewFormat.systemDesign.promptAddendum.contains("functional requirements"))
         #expect(InterviewFormat.systemDesign.promptAddendum.contains("API"))
