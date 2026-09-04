@@ -48,7 +48,7 @@ import Testing
         #expect(brain.calls[0].contains {
             $0.role == .system
                 && ($0.text ?? "").hasPrefix(JarvisPrompts.Coach.system)
-                && $0.text != JarvisPrompts.Coach.system
+                && ($0.text ?? "").contains("# Interview format: coding")
         })
     }
 
