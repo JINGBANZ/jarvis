@@ -214,8 +214,12 @@ per-thread `model_reasoning_effort`; both CLI scales start at `low`, so None cla
 three shared levels pass through.
 
 **Interview format.** A second Coaching-card picker (`InterviewFormat`: **None**, plus one entry per
-format that actually has content — System Design today) supplies additional coaching-prompt
-vocabulary for the selected format. **None** persists as no selection and resolves to no addendum at
+format that actually has content — Coding and System Design today) supplies additional
+coaching-prompt vocabulary for the selected format. Coding teaches the coach to distinguish prompt
+comprehension, approach selection, local implementation blocks, visible defects, implementation
+completion, and healthy progress from the transcript and current screen. Its spoken hints stay to
+three short lines, and a completed implementation prompts focused boundary tests when testing has
+not already been discussed. **None** persists as no selection and resolves to no addendum at
 all, so a user who never opens this setting sees no behavior change; it is not a guess assembled
 from whatever formats happen to have content. Fixed for the whole session, like the transcription
 language/model choice: it applies on the next Start, never reclassified mid-conversation. See

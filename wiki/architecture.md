@@ -433,11 +433,15 @@ rather than a per-turn screenshot.
   documented in [sandbox.md](./sandbox.md).
 - **Interview format supplies optional coaching-prompt vocabulary (`InterviewFormat` in
   `Sources/JarvisCore/Config/`).** A Start-time picker (**None**, plus one entry per format that actually has
-  content — System Design today) adds a format-specific addendum to the coach system prompt — today, only System Design has real
-  content, added because the coach otherwise has zero system-design vocabulary (functional
-  requirements, API design, data model, etc.) and its tips can drift from whatever stage of that
-  discussion the candidate is actually in; Coding and Behavioral stay empty because no one has
-  reported a problem with them, not because the mechanism can't hold their content too. Each format's
+  content — Coding and System Design today) adds a format-specific addendum to the coach system
+  prompt. System Design supplies the missing design vocabulary and stage awareness. Coding supplies
+  a compact state-aware coaching policy: an untouched prompt gets a plain-language mental model and
+  tiny example; demonstrated understanding with no approach gets one representation, invariant, or
+  decomposition; work in progress keeps its direction and receives only the local next step or a
+  specific visible defect; a complete implementation gets focused boundary tests unless testing was
+  already discussed; and valid progress stays silent. The model infers those states from the existing
+  transcript and screen rather than a new runtime classifier or dialog with the candidate. Behavioral
+  remains empty because no format-specific correction has been requested. Each format's
   content is a real Markdown file (`Sources/JarvisCore/Resources/Skills/<rawValue>.md`), not a Swift
   string literal, so it reads and edits like prose; a missing file resolves to an empty addendum
   rather than an error, since an unwritten skill is a normal state. `InterviewFormat`'s private
@@ -451,12 +455,12 @@ rather than a per-turn screenshot.
   nothing has
   yet. The picker filters the fixed `InterviewFormat.allCases` down to entries whose addendum is
   non-empty (see `BrainSection.availableFormats`), so an entry is never indistinguishable from None:
-  writing Coding's or Behavioral's Markdown file is a resource-only change that surfaces its existing
+  writing Behavioral's Markdown file is a resource-only change that surfaces its existing
   case, but a genuinely new format still needs a new `InterviewFormat` case and display name before
   any Markdown file can surface it. No selection resolves to no addendum at all (see
   `CoachAttemptRunner`'s system-prompt assembly), not a guess assembled from whatever formats happen to have
   content: concatenating every non-empty addendum was tried and rejected — with only one format
-  written it silently asserted "this is a system-design interview" into every session by default,
+  written it silently asserted one interview type into every session by default,
   including coding and behavioral ones nobody opted into, and it does not scale, since two written
   formats would concatenate two contradictory interview-format claims into one prompt. An automatic
   classifier that guesses the format from conversation is separately rejected too: guessing once and

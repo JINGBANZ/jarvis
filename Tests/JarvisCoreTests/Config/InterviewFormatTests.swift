@@ -8,14 +8,12 @@ import Testing
         #expect(InterviewFormat.behavioral.displayName == "Behavioral")
     }
 
-    /// Coding and behavioral are already reported as working well, so they stay empty rather than
-    /// getting new prompt guidance nobody asked for — system design is the one reported problem.
-    @Test func onlySystemDesignHasContentToday() {
-        #expect(InterviewFormat.coding.promptAddendum.isEmpty)
+    /// A missing skill remains a normal empty state, while each authored format becomes available
+    /// through the same resource lookup the Settings picker consumes.
+    @Test func authoredFormatsHaveContent() {
+        #expect(!InterviewFormat.coding.promptAddendum.isEmpty)
         #expect(InterviewFormat.behavioral.promptAddendum.isEmpty)
         #expect(!InterviewFormat.systemDesign.promptAddendum.isEmpty)
-        #expect(InterviewFormat.systemDesign.promptAddendum.contains("functional requirements"))
-        #expect(InterviewFormat.systemDesign.promptAddendum.contains("API"))
     }
 
     /// No selection means no addendum at all — not a guess assembled from whatever formats happen
