@@ -91,7 +91,7 @@ import WebKit
     @MainActor @Test func readinessBadgeIsLivePageStateNotAnActivityRow() async throws {
         let h = WebViewHarness()
         try await h.load(ActivityLog.htmlShell())
-        try await h.eval("setReadiness('<Ready & listening>','ready'); null")
+        try await h.eval("setReadiness('<Active & listening>','active'); null")
 
         let text = try await h.eval(
             "document.getElementById('readiness').textContent"
@@ -100,8 +100,8 @@ import WebKit
             "document.getElementById('readiness').dataset.state"
         ) as? String
         let rows = try await h.eval("document.querySelectorAll('#log .row').length") as? Int
-        #expect(text == "<Ready & listening>")
-        #expect(state == "ready")
+        #expect(text == "<Active & listening>")
+        #expect(state == "active")
         #expect(rows == 0)
     }
 

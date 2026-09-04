@@ -482,7 +482,7 @@ private extension JarvisReadiness.Status {
         case .recovering:
             ("Recovering", "recovering")
         case .ready(.full):
-            ("Ready", "ready")
+            ("Active", "active")
         case .ready(.microphoneOnly):
             ("Microphone only", "microphone-only")
         case .stopped:

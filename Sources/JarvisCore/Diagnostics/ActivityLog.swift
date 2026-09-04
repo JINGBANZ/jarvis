@@ -456,7 +456,7 @@ public final class ActivityLog: @unchecked Sendable {
                              color: var(--see); font-weight: 600; letter-spacing: 0;
                              text-transform: none; }
           header .evidence:empty { display: none; }
-          header .readiness[data-state="ready"] { color: var(--say); }
+          header .readiness[data-state="active"] { color: var(--say); }
           header .readiness[data-state="microphone-only"],
           header .readiness[data-state="recovering"] { color: var(--see); }
           header .readiness[data-state="blocked"] { color: var(--error); }
