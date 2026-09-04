@@ -21,11 +21,11 @@ import Foundation
         #expect(p.fallbackTargets.isEmpty)
         #expect(p.route.targets == [p.primaryTarget])
         #expect(p.primaryTarget.provider == Defaults.Brain.provider)
-        // Absent means "not selected," not a fallback default — unlike every other Brain setting.
+        // Absence is the persisted representation of Automatic, not an explicit override.
         #expect(p.interviewFormat == nil)
     }
 
-    @Test func interviewFormatRoundTripsAndClearsBackToNil() {
+    @Test func interviewFormatOverrideRoundTripsAndClearsBackToAutomatic() {
         let d = freshDefaults()
         let p = BrainPreferences(defaults: d)
         p.interviewFormat = .systemDesign
@@ -35,7 +35,7 @@ import Foundation
         #expect(d.string(forKey: "brain.interviewFormat") == nil)
     }
 
-    @Test func unknownStoredInterviewFormatFallsBackToNilNotADefault() {
+    @Test func unknownStoredInterviewFormatFallsBackToAutomatic() {
         let d = freshDefaults()
         d.set("architecture-review", forKey: "brain.interviewFormat")
         #expect(BrainPreferences(defaults: d).interviewFormat == nil)

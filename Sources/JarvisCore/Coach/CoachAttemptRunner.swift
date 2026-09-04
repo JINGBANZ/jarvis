@@ -55,8 +55,8 @@ final class CoachAttemptRunner: @unchecked Sendable {
     private let coachingAttempts: (any CoachingAttemptAuditing)?
     private let activity: (any ActivityEventRecording)?
     private let ledger: CoachTranscriptLedger
-    /// Fixed for the whole session — chosen once at Start, never reclassified — so it needs none of
-    /// `prepMaterial`'s live-swap machinery; a plain stored `let` is enough.
+    /// Fixed prompt text for the session. In automatic mode that text tells the model to choose from
+    /// current evidence per response; no mutable runtime classification is required.
     private let interviewFormatAddendum: String
 
     private let runnerLock = NSLock()

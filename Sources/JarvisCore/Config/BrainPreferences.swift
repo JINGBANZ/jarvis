@@ -96,9 +96,7 @@ public final class BrainPreferences {
         set { defaults.set(newValue.rawValue, forKey: Defaults.Brain.effortKey) }
     }
 
-    /// The interview format the coaching prompt is specialized for this session. `nil` means "not
-    /// selected" — a real, persisted state, not a fallback to a default — and resolves to no
-    /// addendum at all, so a user who never opens this setting sees no behavior change.
+    /// An explicit format override. `nil` is the default automatic-routing mode.
     public var interviewFormat: InterviewFormat? {
         get {
             guard let raw = defaults.string(forKey: Defaults.Brain.interviewFormatKey) else {

@@ -431,20 +431,22 @@ rather than a per-turn screenshot.
   single-writer lock turns one slow turn into minutes of `conversation_locked` silence. Requests are sent `store:true`
   so they stay inspectable in the OpenAI dashboard for debugging — the retention tradeoff is
   documented in [sandbox.md](./sandbox.md).
-- **Interview format supplies optional coaching-prompt vocabulary (`InterviewFormat` in
-  `Sources/JarvisCore/Config/`).** A Start-time picker (**None**, plus one entry per format that actually has
-  content — Coding and System Design today) adds a format-specific addendum to the coach system
-  prompt. System Design supplies the missing design vocabulary and stage awareness. Coding supplies
-  a compact state-aware coaching policy: an untouched prompt gets a plain-language mental model and
-  tiny example; demonstrated understanding with no approach gets one representation, invariant, or
-  decomposition; work in progress keeps its direction and receives only the local next step or a
-  specific visible defect; a complete implementation gets focused boundary tests unless testing was
-  already discussed; and valid progress stays silent. The model infers those states from the existing
-  transcript and screen rather than a new runtime classifier or dialog with the candidate. Behavioral
-  remains empty because no format-specific correction has been requested. Each format's
-  content is a real Markdown file (`Sources/JarvisCore/Resources/Skills/<rawValue>.md`), not a Swift
-  string literal, so it reads and edits like prose; a missing file resolves to an empty addendum
-  rather than an error, since an unwritten skill is a normal state. `InterviewFormat`'s private
+- **Interview format supplies automatic coaching behavior plus optional overrides
+  (`InterviewFormat` in `Sources/JarvisCore/Config/`).** The Start-time picker defaults to
+  **Automatic**, with Coding and System Design as explicit overrides. Automatic is a single
+  purpose-built skill: on every model response it uses newest speech and the current screen to apply
+  coding, system-design, behavioral, or neutral behavior to what the candidate is working on now.
+  It does not detect or persist a formal question boundary, so back-to-back format changes naturally
+  follow the new evidence; ambiguous evidence stays on the base coaching policy. This is model prompt
+  routing inside the existing coaching request, not a separate classifier request or runtime state
+  machine. Coding distinguishes first-time comprehension, a repeated hint or demonstrated
+  understanding that needs an approach, local implementation blocks, visible defects, completion
+  tests, and healthy progress. System Design supplies stage vocabulary from requirements through
+  trade-offs. Explicit overrides keep their specialist prompt for the session when predictability is
+  preferred. Behavioral has no separate override content because the base prompt already covers it.
+  Each explicit format's content and the automatic skill are real Markdown files under
+  `Sources/JarvisCore/Resources/Skills/`, not Swift string literals; a missing file resolves to an
+  empty addendum rather than an error. `InterviewFormat`'s private
   `skillMarkdownURL(named:)` locates it directly rather than trusting the generated `Bundle.module`
   accessor, for the same reasons `SileroVoiceActivityDetector.bundledModelURL()` does — see
   `Sources/JarvisCore/Config/InterviewFormat.swift`; `scripts/build-app.sh` and
@@ -454,28 +456,25 @@ rather than a per-turn screenshot.
   in their own skill file was considered and set aside as speculative infrastructure for a need
   nothing has
   yet. The picker filters the fixed `InterviewFormat.allCases` down to entries whose addendum is
-  non-empty (see `BrainSection.availableFormats`), so an entry is never indistinguishable from None:
+  non-empty (see `BrainSection.availableFormats`), so an override is never a no-op:
   writing Behavioral's Markdown file is a resource-only change that surfaces its existing
   case, but a genuinely new format still needs a new `InterviewFormat` case and display name before
-  any Markdown file can surface it. No selection resolves to no addendum at all (see
-  `CoachAttemptRunner`'s system-prompt assembly), not a guess assembled from whatever formats happen to have
-  content: concatenating every non-empty addendum was tried and rejected — with only one format
-  written it silently asserted one interview type into every session by default,
-  including coding and behavioral ones nobody opted into, and it does not scale, since two written
-  formats would concatenate two contradictory interview-format claims into one prompt. An automatic
-  classifier that guesses the format from conversation is separately rejected too: guessing once and
-  locking in misclassifies a session that shifts formats (a behavioral opener sliding into a
-  system-design round), and re-guessing every turn is a brittle state machine for a signal the model
-  can read from context anyway once it has the vocabulary. Fixed for the whole session like the
-  transcription language/model choice, for a concrete reason beyond convention: `CLIBrainClient`
-  bakes the system prompt into the local-agent process at construction and asserts it never changes,
-  so the resolved addendum must be computed once (`BrainComposition.interviewFormatAddendum`, set
+  any Markdown file can surface it. A nil stored override resolves through
+  `InterviewFormat.resolvedPromptAddendum(for:)` to `automatic.md`, not to an empty prompt and not to
+  a concatenation of specialist prompts. Concatenation was rejected because each specialist asserts
+  its own format and the conflicting claims weaken state-specific behavior. A separate automatic
+  classifier was also rejected: locking once mishandles a session that shifts formats, while mutable
+  reclassification adds lifecycle state and another model round trip for evidence the coaching model
+  already receives. The resolved prompt text is fixed for the session like the transcription
+  language/model choice, while Automatic's instruction deliberately re-evaluates the current task on
+  every response. `CLIBrainClient` bakes that prompt into the local-agent process at construction and
+  asserts it never changes, so it is computed once (`BrainComposition.interviewFormatAddendum`, set
   before every route construction or reapply, including a live provider hot-switch) and reused
   identically by both the per-turn OpenAI-style prompt (`CoachAttemptRunner`) and the CLI-provider
   construction (`BrainComposition`). Both sites assemble the prompt through one builder,
   `JarvisPrompts.Coach.system(prepMaterial:formatAddendum:)` in `JarvisCore`, so the two cannot
   drift. The builder takes the addendum as an already-resolved string rather than an
-  `InterviewFormat?` because `promptAddendum` reads its bundled file on every access and the
+  `InterviewFormat?` because resolving the addendum reads its bundled file and the
   per-turn site would otherwise read it on every coaching turn. The CLI site passes
   `prepMaterial: false`: prep material is indexed off the Start path and installed later, so its
   `search_prep_notes` guidance cannot be baked into a process whose instructions are fixed at

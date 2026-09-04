@@ -16,11 +16,19 @@ import Testing
         #expect(!InterviewFormat.systemDesign.promptAddendum.isEmpty)
     }
 
-    /// No selection means no addendum at all — not a guess assembled from whatever formats happen
-    /// to have content. `nil` is resolved by callers as `format?.promptAddendum ?? ""`; there is no
-    /// `InterviewFormat` API for it, so this pins the optional-chaining contract those callers rely on.
-    @Test func noSelectionResolvesToNoAddendum() {
-        let noSelection: InterviewFormat? = nil
-        #expect((noSelection?.promptAddendum ?? "") == "")
+    @Test func noSelectionResolvesToAutomaticGuidance() {
+        let addendum = InterviewFormat.resolvedPromptAddendum(for: nil)
+
+        #expect(addendum.contains("Choose coaching behavior"))
+        #expect(addendum.contains("For a coding task"))
+        #expect(addendum.contains("functional requirements"))
+    }
+
+    @Test func explicitSelectionDoesNotIncludeAutomaticRouting() {
+        let addendum = InterviewFormat.resolvedPromptAddendum(for: .coding)
+
+        #expect(addendum.contains("tokenizer"))
+        #expect(!addendum.contains("functional requirements"))
+        #expect(!addendum.contains("Choose coaching behavior"))
     }
 }
