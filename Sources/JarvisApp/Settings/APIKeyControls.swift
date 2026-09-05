@@ -85,8 +85,8 @@ final class APIKeyControls: NSObject {
 
         let field = NSSecureTextField()
         field.placeholderString = "sk-…"
-        field.setAccessibilityLabel("OpenAI API key")
-        field.identifier = NSUserInterfaceItemIdentifier("openai-key-field")
+        field.setAccessibilityLabel("\(credential.displayName) API key")
+        field.identifier = NSUserInterfaceItemIdentifier("\(credential.rawValue)-key-field")
         content.addSubview(field)
         self.field = field
 
@@ -104,7 +104,7 @@ final class APIKeyControls: NSObject {
 
         let error = NSTextField(labelWithString: "")
         error.textColor = .systemRed
-        error.identifier = NSUserInterfaceItemIdentifier("openai-key-error")
+        error.identifier = NSUserInterfaceItemIdentifier("\(credential.rawValue)-key-error")
         content.addSubview(error)
         errorLabel = error
 

@@ -16,13 +16,13 @@ public enum TranscriptionFailureReason: CaseIterable, Sendable, Equatable {
         case .connectionLost:
             "the transcription connection was lost; check jarvis-debug.log"
         case .quotaExceeded:
-            "the OpenAI API quota is exhausted; check billing"
+            "the transcription API quota is exhausted; check billing"
         case .authenticationFailed:
-            "OpenAI rejected the API key; check Settings → Connections"
+            "the transcription provider rejected the API key; check Settings → Connections"
         case .accessDenied:
-            "OpenAI denied transcription access; check your API project"
+            "the transcription provider denied access; check your API project"
         case .configurationRejected:
-            "OpenAI rejected the transcription configuration; check jarvis-debug.log"
+            "the transcription provider rejected the configuration; check jarvis-debug.log"
         case .appleSpeechUnavailable:
             "Apple Speech transcription became unavailable; check jarvis-debug.log"
         }

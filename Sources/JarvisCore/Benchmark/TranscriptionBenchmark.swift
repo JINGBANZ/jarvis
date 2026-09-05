@@ -65,6 +65,8 @@ public enum TranscriptionBenchmark {
             voice: "Tingting"),
     ]
 
+    /// `model` is typed `OpenAITranscriptionModel?` rather than a provider-neutral identifier, so
+    /// Gemini is not yet a benchmarkable arm — see the note on `standardArms` below.
     public struct Arm: Codable, Equatable, Sendable {
         public let id: String
         public let provider: TranscriptionProvider
@@ -90,6 +92,11 @@ public enum TranscriptionBenchmark {
         }
     }
 
+    /// Gemini has no arms here yet: `Arm.model` is `OpenAITranscriptionModel?`, and
+    /// `TranscriptionBenchmarkRunner`'s `requiredProviders` set only requires `.openAI` (plus
+    /// `.appleSpeech` on macOS 26+), so an unlisted Gemini stays explicitly out of scope rather
+    /// than silently unsupported. Extending the matrix needs a provider-neutral model identifier
+    /// on `Arm` before Gemini arms can be added.
     public static var standardArms: [Arm] {
         let openAI = OpenAITranscriptionModel.allCases.flatMap { model in
             phrases.map { phrase in

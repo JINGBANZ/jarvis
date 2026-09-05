@@ -108,6 +108,12 @@ repetition with continuous capture. Transcript quality and lifecycle measurement
 the summary rather than being hidden behind one universal accuracy threshold, which would make
 provider comparisons less informative.
 
+**Gemini is not in the matrix yet.** `Arm.model` is typed `OpenAITranscriptionModel?`, and
+`TranscriptionBenchmarkRunner`'s `requiredProviders` set names only `.openAI` (plus `.appleSpeech` on
+macOS 26+) — Gemini is explicitly out of scope rather than silently missing. Adding Gemini arms needs
+a provider-neutral model identifier on `Arm` before the matrix can compare it against the other two
+paths.
+
 ## Why Scoring Belongs to the Benchmark
 
 A script that only plays audio and saves whatever transcript arrives is a demo, not a benchmark. A

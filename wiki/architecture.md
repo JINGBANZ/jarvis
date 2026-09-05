@@ -195,7 +195,8 @@ to tool calls and enforces safety.
 
 `AggregateEchoCapture` reads the input device's native sample rate and resamples up to AEC3's
 48 kHz, rather than forcing the aggregate to 48 kHz. The earlier hard **pin** existed for two
-reasons — AEC3 is created at a fixed 48 kHz, and the 48→24 kHz wire downsampler assumes a true
+reasons — AEC3 is created at a fixed 48 kHz, and the downsampler to the selected transcription
+provider's wire rate (see [Models and APIs](#models-and-apis)) assumes a true
 48 kHz input — so an aggregate that inherited a 44.1 kHz mic would corrupt the echo model and
 mislabel the wire rate. But the pin **silently failed to start** on any device that can't do
 48 kHz, notably AirPods (Bluetooth HFP runs them at 16/24 kHz). Reading-and-resampling serves both
@@ -512,6 +513,34 @@ rather than a per-turn screenshot.
   Both adapters apply the client-side transcript-batching window to group rapid final fragments;
   automatic model admission is controlled separately by provider work state, never by extending
   that fixed delay.
+- **Gemini transcription is the third opt-in provider, over the Gemini Live WebSocket
+  (`GeminiLiveSession`, `GeminiLiveTranscriber`).** The socket authenticates with the API key as a
+  URL query parameter rather than a header — the only one of the three providers that does — so
+  `GeminiLiveTranscriber` never logs, interpolates, or stringifies the connect URL, a `URLRequest`
+  built from it, or a raw transport `Error` (a `URLError` can embed the failing URL, key included, in
+  its `description`); every diagnostic instead names the fixed, credential-free
+  `GeminiLiveSession.redactedEndpoint`, and every transport-failure path constructs its own fixed
+  reason string rather than interpolating the caught error. Turn detection is **entirely
+  server-owned**: Gemini finalizes each utterance itself and returns it as `inputTranscription`, so
+  unlike the OpenAI models there is no client-side commit, no Silero endpoint scoring, and no
+  ledger reconciling provisional against final items — one server final is one accepted line, mirrored
+  in `RealtimeContinuityReporter`'s `expectsServerSpeechEvents: false` for this boundary. The opening
+  `setup` frame carries the model, expected-language hints (`languageCodes`, `[]` selects automatic
+  detection rather than an omission the server would have to guess at), the optional vocabulary
+  glossary (`customVocabulary`), and the verbatim/smart mode; the socket is not usable until the
+  server acknowledges it with `setupComplete` — an open socket alone does not prove the format was
+  accepted. Reconnect, ping/pong liveness, and bounded offline audio buffering mirror
+  `RealtimeTranscriber`'s lifecycle so the two providers fail and recover the same way from the rest
+  of the pipeline's perspective.
+- **The wire sample rate is a per-provider requirement, not a quality knob
+  (`TranscriptionProvider.audioFormat`, `TranscriptionAudioFormat`).** OpenAI Realtime and Apple
+  Speech take 24 kHz PCM16 mono; Gemini Live requires 16 kHz PCM16 mono
+  (`audio/pcm;rate=16000`, sent in the chunk's `mimeType`, which must match the PCM actually sent).
+  Speech carries nothing above 8 kHz that a recognizer uses, so 16 kHz is already sufficient for
+  recognition — Gemini's lower rate is what its API accepts, not a deliberate quality tradeoff Jarvis
+  is making. Capture resamples the shared 48 kHz AEC output down to whichever rate the selected
+  provider declares, so the AEC3/downsample pipeline and `WebRTCEchoCanceller` stay provider-agnostic
+  and only the final resample step varies.
 
 ### Local CLI brain providers
 
@@ -756,10 +785,12 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
 - **Development happens inside a git worktree** for recoverability. A worktree does not isolate the
   process from the developer's account; a separate Standard account is optional hardening for long
   unattended agent runs. See [sandbox.md](./sandbox.md).
-- **Egress is narrow and explicit:** the selected OpenAI transcription model receives audio when
-  OpenAI is the provider, while opt-in Apple Speech keeps raw audio on-device; a screenshot +
-  transcript window goes to the selected brain provider/model *only when the model triggers a
-  capture/response*.
+- **Egress is narrow and explicit:** the selected transcription provider's model receives audio —
+  OpenAI Realtime when OpenAI is selected, Gemini Live when Gemini is selected — while opt-in Apple
+  Speech keeps raw audio on-device; a screenshot + transcript window goes to the selected brain
+  provider/model *only when the model triggers a capture/response*. Gemini authenticates its socket
+  with the API key as a URL query parameter rather than a header, so it needs its own logging
+  discipline — see [Models and APIs](#models-and-apis).
   The audio witness persists only counters, sequence/sample metadata, timestamps, provider
   generations, provider audio-clock values, and a local activity bit in the owner-only session
   log — never PCM or recovered words. The only screen-/audio-derived data written to **local** disk

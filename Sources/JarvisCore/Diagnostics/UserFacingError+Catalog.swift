@@ -5,11 +5,10 @@ import Foundation
 /// runtime severity may reveal UI. Dynamic copy composed at the failure site (e.g. a capture reason)
 /// is passed through. Call sites reference these so the policy is centralized and unit-testable.
 public extension UserFacingError {
-    /// No API key on Start when either transcription or one of the configured brain targets uses
-    /// OpenAI, so the requested route cannot be constructed.
+    /// No API key on Start for the selected transcription provider or a configured brain target.
     static var noAPIKey: UserFacingError {
-        .init(title: "No OpenAI API key set",
-              message: "The selected transcription provider or brain route uses OpenAI. Open \u{201C}Settings\u{2026}\u{201D} \u{2192} Connections, paste your OpenAI API key, then press Start.",
+        .init(title: "Missing API key",
+              message: "The selected transcription provider or brain route needs an API key. Open \u{201C}Settings\u{2026}\u{201D} \u{2192} Connections, paste the missing key, then press Start.",
               severity: .fatal,
               sessionEndReason: .openAIAPIKeyMissing)
     }
