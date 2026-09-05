@@ -70,6 +70,10 @@ enum TranscriptionSessionFactory {
             #else
             preconditionFailure("Apple Speech is unavailable in this build")
             #endif
+        case .gemini:
+            // Task 6 adds the real Gemini transcriber; the provider is selectable now (Task 3 wires
+            // its credential through the readiness gate) but constructing a session isn't wired yet.
+            preconditionFailure("Gemini transcription is not yet implemented")
         }
     }
 }

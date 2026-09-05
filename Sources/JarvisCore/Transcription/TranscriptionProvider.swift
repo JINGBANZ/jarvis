@@ -7,6 +7,7 @@ import Foundation
 public enum TranscriptionProvider: String, CaseIterable, Codable, Sendable {
     case openAI = "openai"
     case appleSpeech = "apple-speech"
+    case gemini = "gemini"
 
     public var displayName: String {
         switch self {
@@ -14,16 +15,29 @@ public enum TranscriptionProvider: String, CaseIterable, Codable, Sendable {
             "OpenAI"
         case .appleSpeech:
             "Apple Speech"
+        case .gemini:
+            "Gemini"
         }
     }
 
-    public var requiresOpenAIAPIKey: Bool {
-        self == .openAI
+    /// The credential this provider needs to transcribe, if any. Apple Speech is on-device.
+    /// `public` because `AppDelegate` (JarvisApp) selects the transcription key from it.
+    public var ownCredential: Credential? {
+        switch self {
+        case .openAI: .openAIAPIKey
+        case .gemini: .geminiAPIKey
+        case .appleSpeech: nil
+        }
     }
 
-    /// A key is needed when OpenAI supplies either the ears or any user-authorized brain target.
-    public func requiresOpenAIAPIKey(for brainRoute: BrainRoute?) -> Bool {
-        requiresOpenAIAPIKey
-            || brainRoute?.targets.contains(where: { $0.provider == .openAI }) == true
+    /// Every credential a Start needs: this provider's own, plus OpenAI's when any authorized brain
+    /// target is OpenAI. Both halves can require a key independently — Gemini ears with an OpenAI
+    /// brain needs two — which a single Bool could not express.
+    public func requiredCredentials(for brainRoute: BrainRoute?) -> Set<Credential> {
+        var required = Set(ownCredential.map { [$0] } ?? [])
+        if brainRoute?.targets.contains(where: { $0.provider == .openAI }) == true {
+            required.insert(.openAIAPIKey)
+        }
+        return required
     }
 }

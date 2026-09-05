@@ -81,9 +81,7 @@ import Testing
 
     @Test func displayNamesAndCredentialRequirementsAreStable() {
         #expect(TranscriptionProvider.openAI.displayName == "OpenAI")
-        #expect(TranscriptionProvider.openAI.requiresOpenAIAPIKey)
         #expect(TranscriptionProvider.appleSpeech.displayName == "Apple Speech")
-        #expect(!TranscriptionProvider.appleSpeech.requiresOpenAIAPIKey)
         #expect(OpenAITranscriptionModel.gpt4oTranscribe.displayName
                 == "GPT-4o Transcribe")
         #expect(OpenAITranscriptionModel.gptTranscribe.displayName
@@ -139,9 +137,41 @@ import Testing
                 BrainTarget(provider: .openAI, modelID: "gpt-5.4"),
             ])
 
-        #expect(TranscriptionProvider.openAI.requiresOpenAIAPIKey(for: cliOnly))
-        #expect(!TranscriptionProvider.appleSpeech.requiresOpenAIAPIKey(for: cliOnly))
-        #expect(TranscriptionProvider.appleSpeech.requiresOpenAIAPIKey(
-            for: routeWithOpenAIFallback))
+        #expect(TranscriptionProvider.openAI.requiredCredentials(for: cliOnly) == [.openAIAPIKey])
+        #expect(TranscriptionProvider.appleSpeech.requiredCredentials(for: cliOnly).isEmpty)
+        #expect(TranscriptionProvider.appleSpeech.requiredCredentials(for: routeWithOpenAIFallback)
+            == [.openAIAPIKey])
+    }
+
+    @Test func openAITranscriptionAlwaysNeedsItsOwnKey() {
+        #expect(TranscriptionProvider.openAI.requiredCredentials(for: nil) == [.openAIAPIKey])
+    }
+
+    @Test func appleSpeechNeedsNoCredentialOfItsOwn() {
+        #expect(TranscriptionProvider.appleSpeech.requiredCredentials(for: nil).isEmpty)
+    }
+
+    @Test func geminiTranscriptionNeedsOnlyItsOwnKeyWithACLIBrain() {
+        let cliOnly = BrainRoute(
+            primary: BrainTarget(provider: .claudeCode, modelID: "claude-opus-5"),
+            fallbackTargets: [])
+        #expect(TranscriptionProvider.gemini.requiredCredentials(for: cliOnly) == [.geminiAPIKey])
+    }
+
+    /// The combination the old single-Bool gate could not express: Gemini ears, OpenAI brain.
+    @Test func geminiEarsWithAnOpenAIBrainNeedBothKeys() {
+        let openAIRoute = BrainRoute(
+            primary: BrainTarget(provider: .claudeCode, modelID: "claude-opus-5"),
+            fallbackTargets: [BrainTarget(provider: .openAI, modelID: "gpt-5.4")])
+        #expect(TranscriptionProvider.gemini.requiredCredentials(for: openAIRoute)
+            == [.geminiAPIKey, .openAIAPIKey])
+    }
+
+    @Test func appleSpeechWithAnOpenAIBrainNeedsTheOpenAIKey() {
+        let openAIRoute = BrainRoute(
+            primary: BrainTarget(provider: .claudeCode, modelID: "claude-opus-5"),
+            fallbackTargets: [BrainTarget(provider: .openAI, modelID: "gpt-5.4")])
+        #expect(TranscriptionProvider.appleSpeech.requiredCredentials(for: openAIRoute)
+            == [.openAIAPIKey])
     }
 }

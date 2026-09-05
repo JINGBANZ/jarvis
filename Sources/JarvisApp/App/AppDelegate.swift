@@ -248,10 +248,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             fire()
         }
 
-        if transcriptionPreferences.provider.requiresOpenAIAPIKey(
+        if !transcriptionPreferences.provider.requiredCredentials(
             for: brain.preferences.route
-        ), secrets.apiKey(for: .openAIAPIKey)?.isEmpty != false {
-            jlog("Jarvis: no OpenAI API key yet — paste it in Settings, then press Start.")
+        ).allSatisfy({ secrets.apiKey(for: $0)?.isEmpty == false }) {
+            jlog("Jarvis: missing an API key — paste it in Settings, then press Start.")
         } else {
             jlog("Jarvis: ready — press Start in the menu bar to begin coaching.")
         }
@@ -302,7 +302,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         // whatever formats have content — see wiki/architecture.md § Models and APIs.
         let interviewFormatAddendum = brain.preferences.interviewFormat?.promptAddendum ?? ""
         let key = secrets.apiKey(for: .openAIAPIKey) ?? ""
-        let requiresOpenAIKey = transcriptionProvider.requiresOpenAIAPIKey(for: brainRoute)
+        let requiredCredentials = transcriptionProvider.requiredCredentials(for: brainRoute)
         let preparesAppleSpeech = transcriptionProvider == .appleSpeech
         // Only the readable grants gate a Start here: microphone live, screen recording from this
         // process's preflight. System audio is settled by the probe below, which is the only
@@ -310,7 +310,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         // every later Start until Jarvis was relaunched, while the notice says to press Start again.
         let readinessConfiguration = JarvisReadiness.Configuration(
             requiredPermissions: PermissionGate.required.subtracting([.systemAudio]),
-            requiredCredentials: requiresOpenAIKey ? [.openAIAPIKey] : [],
+            requiredCredentials: requiredCredentials,
             requiresTranscriptionPreparation: preparesAppleSpeech)
         let readinessStart = readiness.begin(configuration: readinessConfiguration)
         let readinessSession = readinessStart.session
@@ -333,11 +333,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             return false
         }
 
-        let availableCredentials: Set<Credential> = key.isEmpty
-            ? [] : [.openAIAPIKey]
+        let availableCredentials = Set(Credential.allCases.filter {
+            secrets.apiKey(for: $0)?.isEmpty == false
+        })
         observeReadiness(.credentials(available: availableCredentials), for: readinessSession)
-        guard !requiresOpenAIKey || !key.isEmpty else {
-            jlog("Jarvis: can't start — no API key.")
+        let missingCredentials = requiredCredentials.subtracting(availableCredentials)
+        guard missingCredentials.isEmpty else {
+            jlog("Jarvis: can't start — missing credential(s): "
+                 + missingCredentials.map(\.rawValue).sorted().joined(separator: ", "))
             if wasRunning {
                 artifacts.sessionAudit?.record(.settingsChangeNotApplied)
             }
@@ -419,7 +422,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                   self.readinessSession == readinessSession else {
                 return
             }
-            let credentialIsCurrent = !requiresOpenAIKey
+            let credentialIsCurrent = !requiredCredentials.contains(.openAIAPIKey)
                 || (self.secrets.apiKey(for: .openAIAPIKey) ?? "") == key
             guard credentialIsCurrent,
                   self.transcriptionPreferences.configuration == transcriptionConfiguration,
@@ -538,6 +541,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             jlog(
                 "Jarvis transcription: provider=Apple Speech "
                     + "locale=\(appleSpeechLocale?.identifier ?? "unprepared")")
+        case .gemini:
+            jlog("Jarvis transcription: provider=Gemini")
         }
 
         // Each target's coach and summarizer share the session traffic log. Every fresh attempt is a
