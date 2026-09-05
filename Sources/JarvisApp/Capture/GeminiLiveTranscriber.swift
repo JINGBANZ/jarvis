@@ -110,9 +110,9 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
             clock: clock,
             sessionStart: sessionStart,
             boundary: .gemini,
-            // Gemini reports no discrete speech-start/stop events, only a finalized transcript per
-            // utterance — same shape as OpenAI's client-commit models. Without this, the witness would
-            // flag every normal utterance as "no provider speech event."
+            // Gemini sends voice-activity frames in live sessions, but this adapter does not consume them.
+            // Without this false, the witness would flag every normal utterance as "no provider speech event."
+            // Consuming these frames is a possible future improvement for more reliable mid-utterance coaching.
             expectsServerSpeechEvents: false)
         super.init()
         continuityReporter.onCaptureHeartbeat = { [weak self] signal in
@@ -539,6 +539,9 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
         }
     }
 
+    // DIVERGENCE HAZARD: The ready-timeout, ping-pong, timer invalidation, and generation-guard logic
+    // below is mirrored in RealtimeTranscriber.swift. A fix made here almost certainly belongs there too.
+    // Extracting a shared lifecycle helper is a separate, focused change; do not refactor here.
     private func armReadyTimeout(task: URLSessionWebSocketTask, generation socketGeneration: Int) {
         DispatchQueue.main.async { [weak self, weak task] in
             guard let self, let task else { return }

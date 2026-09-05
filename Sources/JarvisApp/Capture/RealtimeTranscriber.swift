@@ -1069,6 +1069,9 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         }
     }
 
+    // DIVERGENCE HAZARD: The ready-timeout, ping-pong, timer invalidation, and generation-guard logic
+    // below is mirrored in GeminiLiveTranscriber.swift. A fix made here almost certainly belongs there too.
+    // Extracting a shared lifecycle helper is a separate, focused change; do not refactor here.
     private func armReadyTimeout(task: URLSessionWebSocketTask, generation socketGeneration: Int) {
         DispatchQueue.main.async { [weak self, weak task] in
             guard let self, let task else { return }
