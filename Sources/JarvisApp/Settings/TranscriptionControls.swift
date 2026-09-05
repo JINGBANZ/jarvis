@@ -17,13 +17,31 @@ final class TranscriptionControls: NSObject {
     private var languagesRow: SettingsRowView?
     private var vocabularyRow: SettingsRowView?
     var vocabularyField: NSTextField?
+    private var geminiModelRow: SettingsRowView?
+    private var geminiLanguagesRow: SettingsRowView?
+    private var geminiVocabularyRow: SettingsRowView?
+    var geminiVocabularyField: NSTextField?
+    private var geminiModeRow: SettingsRowView?
     private var localeRow: SettingsRowView?
     private var localePopup: NSPopUpButton?
     private var localeLoadTask: Task<Void, Never>?
 
+    /// The rows one provider shows, top to bottom. The provider row is always first. Read before
+    /// `makeView` runs (rows are still nil), so `compactMap` naturally yields the header-only list.
+    private var visibleRows: [SettingsRowView] {
+        switch preferences.provider {
+        case .openAI:
+            [providerRow, modelRow, languagesRow, vocabularyRow].compactMap { $0 }
+        case .gemini:
+            [providerRow, geminiModelRow, geminiLanguagesRow,
+             geminiVocabularyRow, geminiModeRow].compactMap { $0 }
+        case .appleSpeech:
+            [providerRow, localeRow].compactMap { $0 }
+        }
+    }
+
     var preferredHeight: CGFloat {
-        SettingsStyle.cardHeaderHeight
-            + CGFloat(preferences.provider == .openAI ? 4 : 2) * SettingsStyle.rowHeight
+        SettingsStyle.cardHeaderHeight + CGFloat(visibleRows.count) * SettingsStyle.rowHeight
     }
 
     init(preferences: TranscriptionPreferences) {
@@ -119,6 +137,78 @@ final class TranscriptionControls: NSObject {
         self.vocabularyRow = vocabularyRow
         self.vocabularyField = vocabularyField
 
+        let geminiModel = NSPopUpButton()
+        for choice in GeminiTranscriptionModel.allCases {
+            geminiModel.addItem(withTitle: choice.displayName)
+            geminiModel.lastItem?.representedObject = choice.rawValue
+        }
+        if let selected = geminiModel.itemArray.firstIndex(where: {
+            $0.representedObject as? String == preferences.geminiModel.rawValue
+        }) {
+            geminiModel.selectItem(at: selected)
+        }
+        geminiModel.target = self
+        geminiModel.action = #selector(geminiModelChanged)
+        geminiModel.setAccessibilityLabel("Gemini transcription model")
+        geminiModel.identifier = NSUserInterfaceItemIdentifier("transcription-gemini-model")
+        let geminiModelRow = SettingsRowView(
+            title: "Model",
+            detail: "Speech-to-text model",
+            controlView: geminiModel)
+        content.addSubview(geminiModelRow)
+        self.geminiModelRow = geminiModelRow
+
+        let geminiLanguagePicker = ExpectedLanguagePicker(
+            selectedLanguages: preferences.geminiExpectedLanguages,
+            onChange: { [weak self] languages in self?.geminiLanguagesChanged(languages) })
+        geminiLanguagePicker.identifier =
+            NSUserInterfaceItemIdentifier("transcription-gemini-languages")
+        let geminiLanguagesRow = SettingsRowView(
+            title: "Expected languages",
+            detail: "No selection means automatic",
+            controlView: geminiLanguagePicker,
+            controlSize: NSSize(width: 340, height: 32))
+        content.addSubview(geminiLanguagesRow)
+        self.geminiLanguagesRow = geminiLanguagesRow
+
+        let geminiVocabularyField = NSTextField()
+        geminiVocabularyField.placeholderString = "e.g. Kubernetes, gRPC, Ada Lovelace"
+        geminiVocabularyField.stringValue =
+            preferences.geminiVocabularyKeywords.joined(separator: ", ")
+        geminiVocabularyField.delegate = self
+        geminiVocabularyField.setAccessibilityLabel("Gemini transcription vocabulary")
+        geminiVocabularyField.identifier =
+            NSUserInterfaceItemIdentifier("transcription-gemini-vocabulary")
+        let geminiVocabularyRow = SettingsRowView(
+            title: "Vocabulary",
+            detail: "Comma-separated jargon and names bias recognition",
+            controlView: geminiVocabularyField,
+            controlSize: NSSize(width: 340, height: 24))
+        content.addSubview(geminiVocabularyRow)
+        self.geminiVocabularyRow = geminiVocabularyRow
+        self.geminiVocabularyField = geminiVocabularyField
+
+        let geminiMode = NSPopUpButton()
+        for choice in GeminiTranscriptionMode.allCases {
+            geminiMode.addItem(withTitle: choice.displayName)
+            geminiMode.lastItem?.representedObject = choice.rawValue
+        }
+        if let selected = geminiMode.itemArray.firstIndex(where: {
+            $0.representedObject as? String == preferences.geminiMode.rawValue
+        }) {
+            geminiMode.selectItem(at: selected)
+        }
+        geminiMode.target = self
+        geminiMode.action = #selector(geminiModeChanged)
+        geminiMode.setAccessibilityLabel("Gemini transcription mode")
+        geminiMode.identifier = NSUserInterfaceItemIdentifier("transcription-gemini-mode")
+        let geminiModeRow = SettingsRowView(
+            title: "Mode",
+            detail: "Smart removes filler words",
+            controlView: geminiMode)
+        content.addSubview(geminiModeRow)
+        self.geminiModeRow = geminiModeRow
+
         let locale = NSPopUpButton()
         locale.addItem(withTitle: "Loading locales…")
         locale.isEnabled = false
@@ -142,11 +232,12 @@ final class TranscriptionControls: NSObject {
     }
 
     private func applyState() {
-        let usesOpenAI = preferences.provider == .openAI
-        modelRow?.isHidden = !usesOpenAI
-        languagesRow?.isHidden = !usesOpenAI
-        vocabularyRow?.isHidden = !usesOpenAI
-        localeRow?.isHidden = usesOpenAI
+        let visible = Set(visibleRows.map(ObjectIdentifier.init))
+        for row in [modelRow, languagesRow, vocabularyRow,
+                    geminiModelRow, geminiLanguagesRow, geminiVocabularyRow, geminiModeRow,
+                    localeRow] {
+            row?.isHidden = row.map { !visible.contains(ObjectIdentifier($0)) } ?? true
+        }
         refreshLanguageDetail()
         refreshVocabularyDetail()
         card?.frame.size.height = preferredHeight
@@ -170,9 +261,7 @@ final class TranscriptionControls: NSObject {
 
     private func layoutRows() {
         guard let card else { return }
-        let rows = [providerRow, preferences.provider == .openAI ? modelRow : localeRow,
-                    preferences.provider == .openAI ? languagesRow : nil,
-                    preferences.provider == .openAI ? vocabularyRow : nil].compactMap { $0 }
+        let rows = visibleRows
         var top = card.bodyFrame.maxY
         for row in rows {
             top -= row.preferredHeight
@@ -224,6 +313,41 @@ final class TranscriptionControls: NSObject {
             ? "automatic"
             : languages.map(\.displayName).joined(separator: ", ")
         jlog("Jarvis: \(selection) transcription languages selected for the next Start.")
+    }
+
+    @objc private func geminiModelChanged(_ sender: NSPopUpButton) {
+        guard let raw = sender.selectedItem?.representedObject as? String,
+              let model = GeminiTranscriptionModel(rawValue: raw) else {
+            return
+        }
+        preferences.geminiModel = model
+        jlog("Jarvis: \(model.displayName) selected for the next Start.")
+    }
+
+    func geminiVocabularyChanged(_ rawValue: String) {
+        let keywords = rawValue.split(separator: ",").map(String.init)
+        preferences.geminiVocabularyKeywords = keywords
+        geminiVocabularyField?.stringValue =
+            preferences.geminiVocabularyKeywords.joined(separator: ", ")
+        jlog("Jarvis: \(preferences.geminiVocabularyKeywords.count) transcription vocabulary "
+            + "term(s) selected for the next Start.")
+    }
+
+    private func geminiLanguagesChanged(_ languages: [TranscriptionLanguage]) {
+        preferences.geminiExpectedLanguages = languages
+        let selection = languages.isEmpty
+            ? "automatic"
+            : languages.map(\.displayName).joined(separator: ", ")
+        jlog("Jarvis: \(selection) transcription languages selected for the next Start.")
+    }
+
+    @objc private func geminiModeChanged(_ sender: NSPopUpButton) {
+        guard let raw = sender.selectedItem?.representedObject as? String,
+              let mode = GeminiTranscriptionMode(rawValue: raw) else {
+            return
+        }
+        preferences.geminiMode = mode
+        jlog("Jarvis: \(mode.displayName) selected for the next Start.")
     }
 
     @objc private func localeChanged(_ sender: NSPopUpButton) {
