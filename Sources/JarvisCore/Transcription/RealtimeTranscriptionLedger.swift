@@ -122,12 +122,12 @@ public final class RealtimeTranscriptionLedger: @unchecked Sendable {
         finalizedItemIDs.insert(itemID)
         recordFinalizedAudioBoundaryLocked(item)
 
-        if let final = RealtimeSession.meaningfulTranscript(transcript, speaker: speaker) {
+        if let final = TranscriptFiltering.meaningfulTranscript(transcript, speaker: speaker) {
             return FinalizedItem(itemID: itemID, text: final, spokenAt: item.spokenAt,
                                  spokenEndAt: item.spokenEndAt,
                                  recoveredFromDeltas: false, isTranscriptUnavailable: false)
         }
-        guard let partial = RealtimeSession.meaningfulTranscript(item.deltas, speaker: speaker) else {
+        guard let partial = TranscriptFiltering.meaningfulTranscript(item.deltas, speaker: speaker) else {
             guard let duration = item.detectedSpeechDurationMilliseconds,
                   duration >= Self.minimumContextGapDurationMilliseconds else {
                 return nil
@@ -256,7 +256,7 @@ public final class RealtimeTranscriptionLedger: @unchecked Sendable {
         finalizedItemIDs.insert(itemID)
         recordFinalizedAudioBoundaryLocked(item)
 
-        if let partial = RealtimeSession.meaningfulTranscript(item.deltas, speaker: speaker) {
+        if let partial = TranscriptFiltering.meaningfulTranscript(item.deltas, speaker: speaker) {
             return FinalizedItem(itemID: itemID, text: partial, spokenAt: item.spokenAt,
                                  spokenEndAt: item.spokenEndAt,
                                  recoveredFromDeltas: true, isTranscriptUnavailable: false)
