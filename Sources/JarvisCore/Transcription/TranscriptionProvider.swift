@@ -40,4 +40,13 @@ public enum TranscriptionProvider: String, CaseIterable, Codable, Sendable {
         }
         return required
     }
+
+    /// The PCM format capture must deliver for this provider. Fixed for the session, because the
+    /// provider is resolved before capture is built and never changes inside a live session.
+    public var audioFormat: TranscriptionAudioFormat {
+        switch self {
+        case .openAI, .appleSpeech: .pcm16Mono24k
+        case .gemini: .pcm16Mono16k
+        }
+    }
 }

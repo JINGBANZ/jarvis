@@ -683,6 +683,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             ? TimeInterval(config.localEndpointSilenceDurationMs) / 1_000
             : nil
         let capture = AggregateEchoCapture(
+            audioFormat: transcriptionConfiguration.provider.audioFormat,
             onMicCaptured: { [weak transcriber] sequence, samples, capturedAt in
                 transcriber?.recordCapturedAudio(
                     sequenceNumber: sequence, sampleCount: samples, capturedAt: capturedAt)

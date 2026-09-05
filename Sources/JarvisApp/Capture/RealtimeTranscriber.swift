@@ -130,7 +130,7 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         self.pongTimeout = pongTimeout
         self.networkStatus = networkStatus
         self.benchmark = benchmark
-        self.audioBuffer = PCMBuffer(maxBytes: TranscriptionAudioFormat.pcm16Mono.byteCount(
+        self.audioBuffer = PCMBuffer(maxBytes: TranscriptionAudioFormat.pcm16Mono24k.byteCount(
             forDuration: maxBufferedAudioSeconds))
         let usesJarvisManagedTurns = model.turnDetectionStrategy == .clientCommit
         self.jarvisManagedTurnCoordinator = usesJarvisManagedTurns
@@ -324,7 +324,7 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
             data: pcm,
             sequenceNumber: sequenceNumber,
             capturedAt: sessionRelativeCaptureAt,
-            duration: TranscriptionAudioFormat.pcm16Mono.duration(forByteCount: pcm.count))
+            duration: TranscriptionAudioFormat.pcm16Mono24k.duration(forByteCount: pcm.count))
         lock.lock()
         guard !stopped else { lock.unlock(); return }
         let connectionUnavailable = !connected

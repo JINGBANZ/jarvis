@@ -37,7 +37,8 @@ public enum RealtimeSession {
         expectedLanguages: [OpenAITranscriptionLanguage] = [],
         keywords: [String] = [],
         silenceDurationMs: Int = 1000,
-        noiseReduction: String? = "near_field"
+        noiseReduction: String? = "near_field",
+        sampleRate: Int = TranscriptionAudioFormat.pcm16Mono24k.sampleRate
     ) -> [String: Any] {
         let expectedLanguages = OpenAITranscriptionLanguage.canonicalizing(expectedLanguages)
         var transcription: [String: Any] = ["model": model.rawValue]
@@ -73,7 +74,7 @@ public enum RealtimeSession {
         var input: [String: Any] = [
             "format": [
                 "type": "audio/pcm",
-                "rate": TranscriptionAudioFormat.pcm16Mono.sampleRate,
+                "rate": sampleRate,
             ],
             "transcription": transcription,
             "turn_detection": turnDetection,
