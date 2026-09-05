@@ -34,10 +34,6 @@ public final class JarvisReadiness {
         }
     }
 
-    public enum Credential: String, Sendable, Hashable, CaseIterable {
-        case openAIAPIKey
-    }
-
     public enum Requirement: Sendable, Equatable {
         case permissions
         case credentials

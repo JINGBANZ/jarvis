@@ -23,10 +23,11 @@ final class ConnectionsSection: NSObject, SettingsSection {
     init(
         detector: AgentCLIDetector,
         keyStore: FileSecretStore,
-        onKeySaved: @escaping (String) -> Void
+        onKeySaved: @escaping (Credential, String) -> Void
     ) {
         self.detector = detector
-        self.apiKeyControls = APIKeyControls(store: keyStore, onKeySaved: onKeySaved)
+        self.apiKeyControls = APIKeyControls(
+            credential: .openAIAPIKey, store: keyStore, onKeySaved: onKeySaved)
     }
 
     func makeView() -> NSView {

@@ -200,7 +200,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         let connectionsSection = ConnectionsSection(
             detector: brain.detector,
             keyStore: secretFile,
-            onKeySaved: { [weak self] key in
+            onKeySaved: { [weak self] credential, key in
+                // A later task adds Gemini handling; for now only the OpenAI credential feeds the
+                // running session, so a saved Gemini key can't be pushed into an OpenAI-backed one.
+                guard credential == .openAIAPIKey else { return }
                 self?.applySavedAPIKeyToRunningSession(key)
             })
         let sections: [SettingsSection] = [
@@ -247,7 +250,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
 
         if transcriptionPreferences.provider.requiresOpenAIAPIKey(
             for: brain.preferences.route
-        ), secrets.apiKey()?.isEmpty != false {
+        ), secrets.apiKey(for: .openAIAPIKey)?.isEmpty != false {
             jlog("Jarvis: no OpenAI API key yet — paste it in Settings, then press Start.")
         } else {
             jlog("Jarvis: ready — press Start in the menu bar to begin coaching.")
@@ -298,7 +301,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         // reclassified mid-conversation. No selection means no addendum, not a guess assembled from
         // whatever formats have content — see wiki/architecture.md § Models and APIs.
         let interviewFormatAddendum = brain.preferences.interviewFormat?.promptAddendum ?? ""
-        let key = secrets.apiKey() ?? ""
+        let key = secrets.apiKey(for: .openAIAPIKey) ?? ""
         let requiresOpenAIKey = transcriptionProvider.requiresOpenAIAPIKey(for: brainRoute)
         let preparesAppleSpeech = transcriptionProvider == .appleSpeech
         // Only the readable grants gate a Start here: microphone live, screen recording from this
@@ -330,7 +333,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             return false
         }
 
-        let availableCredentials: Set<JarvisReadiness.Credential> = key.isEmpty
+        let availableCredentials: Set<Credential> = key.isEmpty
             ? [] : [.openAIAPIKey]
         observeReadiness(.credentials(available: availableCredentials), for: readinessSession)
         guard !requiresOpenAIKey || !key.isEmpty else {
@@ -417,7 +420,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                 return
             }
             let credentialIsCurrent = !requiresOpenAIKey
-                || (self.secrets.apiKey() ?? "") == key
+                || (self.secrets.apiKey(for: .openAIAPIKey) ?? "") == key
             guard credentialIsCurrent,
                   self.transcriptionPreferences.configuration == transcriptionConfiguration,
                   self.brain.preferences.route == brainRoute else {

@@ -30,7 +30,7 @@ final class TranscriptionBenchmarkRunner {
     let relay = TranscriptionBenchmarkSessionRelay()
     let player = SyntheticAudioPlayer()
     let networkDiagnostics = NetworkPathDiagnostics()
-    let apiKey = ChainedSecretStore([FileSecretStore(), EnvSecretStore()]).apiKey()
+    let apiKey = ChainedSecretStore([FileSecretStore(), EnvSecretStore()]).apiKey(for: .openAIAPIKey)
     var preparedAppleLocales: [String: Locale] = [:]
     var appleLocaleFailures: [String: String] = [:]
 
