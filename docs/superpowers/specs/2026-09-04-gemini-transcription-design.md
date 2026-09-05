@@ -104,18 +104,25 @@ only place the key appears, and every diagnostic logs the endpoint without its q
 `OPENAI_API_KEY`, and one shared `secrets` instance in `AppDelegate` feeds both the brain and
 transcription. A second key-based provider makes this a per-credential concern.
 
-```swift
-public enum CredentialID: String, CaseIterable, Sendable {
-    case openAI = "openai"
-    case gemini
+A credential-identity enum already exists — `JarvisReadiness.Credential` (`case openAIAPIKey`),
+used as Start-gating set identity and never rendered to the user. Rather than adding a parallel type,
+it is **promoted** out of the diagnostics type to a top-level `Credential` in
+`Sources/JarvisCore/Config/Credential.swift`, gains the Gemini case and its file/env mapping, and
+`JarvisReadiness` refers to the promoted type. Raw values are preserved so readiness semantics and
+its existing tests are unaffected.
 
-    var fileName: String        // "openai-api-key" / "gemini-api-key"
-    var environmentVariable: String  // "OPENAI_API_KEY" / "GEMINI_API_KEY"
-    var displayName: String     // "OpenAI API" / "Gemini API"
+```swift
+public enum Credential: String, Sendable, Hashable, CaseIterable {
+    case openAIAPIKey        // raw values unchanged from JarvisReadiness.Credential
+    case geminiAPIKey
+
+    var fileName: String            // "openai-api-key" / "gemini-api-key"
+    var environmentVariable: String // "OPENAI_API_KEY" / "GEMINI_API_KEY"
+    var displayName: String         // "OpenAI API" / "Gemini API"
 }
 
 public protocol SecretStore {
-    func apiKey(for credential: CredentialID) -> String?
+    func apiKey(for credential: Credential) -> String?
 }
 ```
 
@@ -124,11 +131,11 @@ public protocol SecretStore {
 atomic 0600-file-creation logic and its rationale comment about avoiding the Keychain.
 `EnvSecretStore` reads the matching variable. `ChainedSecretStore` forwards the credential.
 Existing call sites (`AppDelegate`, `BrainComposition`, `TranscriptionBenchmarkRunner`) pass
-`.openAI`; the OpenAI credential path and file location are unchanged.
+`.openAIAPIKey`; the OpenAI credential path and file location are unchanged.
 
 `FileSecretStore.fileURL` is currently a stored property used by `SessionArtifacts` and
 `BrainComposition` to locate the *directory*, not the key file. It becomes
-`fileURL(for: CredentialID)` plus a `directoryURL` those two callers use instead, so the sessions
+`fileURL(for: Credential)` plus a `directoryURL` those two callers use instead, so the sessions
 directory no longer derives from a credential filename.
 
 ### Start-time credential gating
@@ -137,11 +144,13 @@ directory no longer derives from a credential filename.
 single-Bool answer cannot express "Gemini ears + OpenAI brain". It is replaced by:
 
 ```swift
-public func requiredCredentials(for brainRoute: BrainRoute?) -> Set<CredentialID>
+public func requiredCredentials(for brainRoute: BrainRoute?) -> Set<Credential>
 ```
 
-which unions the provider's own credential (`.gemini` or `.openAI`; Apple Speech contributes none)
-with `.openAI` when any authorized brain target is OpenAI. `AppDelegate` fails Start when any
+which unions the provider's own credential (`.geminiAPIKey` or `.openAIAPIKey`; Apple Speech
+contributes none) with `.openAIAPIKey` when any authorized brain target is OpenAI. Its result feeds
+`JarvisReadiness.Configuration.requiredCredentials` directly, replacing the hand-built
+`requiresOpenAIKey ? [.openAIAPIKey] : []` in `AppDelegate.start()`. `AppDelegate` fails Start when any
 required credential is missing, naming the missing one.
 
 ### Transcription types (JarvisCore)
@@ -162,6 +171,11 @@ required credential is missing, naming the missing one.
   `terminalFailure(from:)` mapping Gemini error codes onto `TranscriptionFailureReason`.
   It reuses `RealtimeSession.meaningfulTranscript` for hallucination and punctuation-only filtering,
   which is provider-independent — that helper moves to a shared `TranscriptFiltering` type.
+- `TranscriptionFailureReason.activityDescription` names OpenAI in four of its six cases ("OpenAI
+  rejected the API key…"). That copy is written into the user-facing Activity log, so it becomes
+  wrong when Gemini fails. The wording is made provider-neutral ("the transcription provider rejected
+  the API key; check Settings → Connections"), keeping these notices fixed strings as
+  `ActivityLog`'s contract requires. The provider name stays available in `jarvis-debug.log`.
 
 ### Provider-derived wire audio format
 
@@ -205,7 +219,7 @@ Gemini detects turns server-side.
   and mode — shown when the provider is `.gemini`. `applyState()`/`layoutRows()`/`preferredHeight`
   currently branch on a `provider == .openAI` Bool; they become a per-provider row list, since a
   two-state Bool no longer describes three providers.
-- `APIKeyControls` is parameterized by `CredentialID` instead of hardcoding the OpenAI title and
+- `APIKeyControls` is parameterized by `Credential` instead of hardcoding the OpenAI title and
   store call, so one class serves both cards.
 - `ConnectionsSection` adds a Gemini key card. Its provider list and the three hardcoded card-height
   arrays in `recalculateDocumentHeight()` become one ordered card list, so the next card does not
@@ -220,7 +234,7 @@ and stays on the smoke checklist.
   language list is sent as `[]` (automatic detection) rather than omitted; audio frame encoding and
   mime type; final-vs-interim parsing; an interim message never yields a transcript; error-code →
   `TranscriptionFailureReason` mapping; the connect URL carries the key and diagnostics never do.
-- `CredentialID` / `FileSecretStore`: per-credential filenames resolve inside one directory; saving a
+- `Credential` / `FileSecretStore`: per-credential filenames resolve inside one directory; saving a
   Gemini key leaves the OpenAI key intact; file mode is 0600 and directory 0700; env fallback reads
   the matching variable.
 - `requiredCredentials(for:)`: every provider × brain-route combination, including Gemini ears with
