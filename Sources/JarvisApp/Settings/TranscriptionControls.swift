@@ -217,7 +217,7 @@ final class TranscriptionControls: NSObject {
             + "term(s) selected for the next Start.")
     }
 
-    private func languagesChanged(_ languages: [OpenAITranscriptionLanguage]) {
+    private func languagesChanged(_ languages: [TranscriptionLanguage]) {
         preferences.openAIExpectedLanguages = languages
         refreshLanguageDetail()
         let selection = languages.isEmpty

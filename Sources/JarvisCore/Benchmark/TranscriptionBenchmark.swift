@@ -21,7 +21,7 @@ public enum TranscriptionBenchmark {
         case mandarinChinese = "mandarin-chinese"
         case englishAndMandarinChinese = "english-and-mandarin-chinese"
 
-        public var expectedLanguages: [OpenAITranscriptionLanguage] {
+        public var expectedLanguages: [TranscriptionLanguage] {
             switch self {
             case .automatic: []
             case .english: [.english]

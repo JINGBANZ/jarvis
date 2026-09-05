@@ -194,7 +194,7 @@ import Testing
     @Test func expectedLanguagesUseEachModelsSupportedWireField() throws {
         func transcription(
             model: OpenAITranscriptionModel,
-            languages: [OpenAITranscriptionLanguage]
+            languages: [TranscriptionLanguage]
         ) throws -> [String: Any] {
             let payload = RealtimeSession.sessionUpdate(
                 model: model,

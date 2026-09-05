@@ -58,7 +58,7 @@ public enum Defaults {
 
         public static let openAIExpectedLanguagesKey = "transcription.openai.expected-languages"
         /// Empty means automatic detection — Jarvis never silently assumes English.
-        public static let openAIExpectedLanguages: [OpenAITranscriptionLanguage] = []
+        public static let openAIExpectedLanguages: [TranscriptionLanguage] = []
 
         public static let openAIVocabularyKeywordsKey = "transcription.openai.vocabulary-keywords"
         /// Empty until the user adds terms; only GPT Transcribe and GPT Live send them.

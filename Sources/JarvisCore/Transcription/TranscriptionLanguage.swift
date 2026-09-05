@@ -1,11 +1,12 @@
 import Foundation
 
-/// One language a user expects speakers to use during an OpenAI transcription session.
+/// One language a user expects speakers to use during a transcription session.
 ///
 /// Expected languages are persisted and transported as a list so adding another supported language
 /// never requires defining every possible language combination. An empty list means automatic
-/// detection and sends no language hint to OpenAI.
-public enum OpenAITranscriptionLanguage: String, CaseIterable, Codable, Sendable {
+/// detection and sends no language hint. Shared by every provider that accepts language hints:
+/// `multipleHint` is already BCP-47, which is also what Gemini's `languageCodes` expects.
+public enum TranscriptionLanguage: String, CaseIterable, Codable, Sendable {
     case english
     case mandarinChinese = "mandarin-chinese"
 
@@ -20,8 +21,8 @@ public enum OpenAITranscriptionLanguage: String, CaseIterable, Codable, Sendable
 
     /// Stable declaration order with duplicate selections removed.
     public static func canonicalizing(
-        _ languages: [OpenAITranscriptionLanguage]
-    ) -> [OpenAITranscriptionLanguage] {
+        _ languages: [TranscriptionLanguage]
+    ) -> [TranscriptionLanguage] {
         let selected = Set(languages)
         return allCases.filter(selected.contains)
     }

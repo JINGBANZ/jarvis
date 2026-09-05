@@ -37,17 +37,17 @@ public final class TranscriptionPreferences {
     }
 
     /// Every language speakers may use. An empty list means automatic detection.
-    public var openAIExpectedLanguages: [OpenAITranscriptionLanguage] {
+    public var openAIExpectedLanguages: [TranscriptionLanguage] {
         get {
             guard let stored = defaults.stringArray(
                 forKey: Defaults.Transcription.openAIExpectedLanguagesKey) else {
                 return Defaults.Transcription.openAIExpectedLanguages
             }
-            return OpenAITranscriptionLanguage.canonicalizing(
-                stored.compactMap(OpenAITranscriptionLanguage.init(rawValue:)))
+            return TranscriptionLanguage.canonicalizing(
+                stored.compactMap(TranscriptionLanguage.init(rawValue:)))
         }
         set {
-            let languages = OpenAITranscriptionLanguage.canonicalizing(newValue)
+            let languages = TranscriptionLanguage.canonicalizing(newValue)
             defaults.set(
                 languages.map(\.rawValue),
                 forKey: Defaults.Transcription.openAIExpectedLanguagesKey)

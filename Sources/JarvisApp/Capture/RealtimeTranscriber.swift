@@ -35,7 +35,7 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         maximumRetries: 6, initialDelay: 1, maximumDelay: 30)
     private var apiKey: String
     private let model: OpenAITranscriptionModel
-    private let expectedLanguages: [OpenAITranscriptionLanguage]
+    private let expectedLanguages: [TranscriptionLanguage]
     private let vocabularyKeywords: [String]
     /// Who this socket is transcribing: `.me` (mic) or `.them` (system audio). Two transcribers run
     /// in parallel — one per side — feeding the same `RollingTranscript`, so the coach sees both.
@@ -93,7 +93,7 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
     init(
         apiKey: String,
         model: OpenAITranscriptionModel,
-        expectedLanguages: [OpenAITranscriptionLanguage],
+        expectedLanguages: [TranscriptionLanguage],
         vocabularyKeywords: [String] = [],
         speaker: Speaker = .me,
         transcript: RollingTranscript,
@@ -118,7 +118,7 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
     ) {
         self.apiKey = apiKey
         self.model = model
-        self.expectedLanguages = OpenAITranscriptionLanguage.canonicalizing(expectedLanguages)
+        self.expectedLanguages = TranscriptionLanguage.canonicalizing(expectedLanguages)
         self.vocabularyKeywords = vocabularyKeywords
         self.speaker = speaker
         self.clock = clock

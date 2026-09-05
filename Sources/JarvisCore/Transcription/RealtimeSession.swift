@@ -34,13 +34,13 @@ public enum RealtimeSession {
     public static func sessionUpdate(
         model: OpenAITranscriptionModel,
         speaker: Speaker = .me,
-        expectedLanguages: [OpenAITranscriptionLanguage] = [],
+        expectedLanguages: [TranscriptionLanguage] = [],
         keywords: [String] = [],
         silenceDurationMs: Int = 1000,
         noiseReduction: String? = "near_field",
         sampleRate: Int = TranscriptionAudioFormat.pcm16Mono24k.sampleRate
     ) -> [String: Any] {
-        let expectedLanguages = OpenAITranscriptionLanguage.canonicalizing(expectedLanguages)
+        let expectedLanguages = TranscriptionLanguage.canonicalizing(expectedLanguages)
         var transcription: [String: Any] = ["model": model.rawValue]
         switch model {
         case .gpt4oTranscribe:

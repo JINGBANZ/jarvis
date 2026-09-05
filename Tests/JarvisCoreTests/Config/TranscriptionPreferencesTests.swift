@@ -88,8 +88,8 @@ import Testing
                 == "GPT Transcribe")
         #expect(OpenAITranscriptionModel.gptLiveTranscribe.displayName
                 == "GPT Live Transcribe")
-        #expect(OpenAITranscriptionLanguage.english.displayName == "English")
-        #expect(OpenAITranscriptionLanguage.mandarinChinese.displayName == "Mandarin")
+        #expect(TranscriptionLanguage.english.displayName == "English")
+        #expect(TranscriptionLanguage.mandarinChinese.displayName == "Mandarin")
         #expect(OpenAITranscriptionModel.gpt4oTranscribe.turnDetectionStrategy == .serverVAD)
         #expect(OpenAITranscriptionModel.gptTranscribe.turnDetectionStrategy == .clientCommit)
         #expect(OpenAITranscriptionModel.gptLiveTranscribe.turnDetectionStrategy == .clientCommit)
