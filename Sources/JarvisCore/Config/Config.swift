@@ -33,7 +33,15 @@ public struct Config: Sendable {
     public var overlayMaxDisplaySeconds: TimeInterval
     /// Server-VAD silence window: how long a pause must last before the server ends the turn.
     /// Raised above the ~500 ms server default so a mid-thought pause doesn't split a sentence.
+    /// Applies only to models that run OpenAI's own VAD (GPT-4o Transcribe).
     public var vadSilenceDurationMs: Int
+    /// Local-endpointer silence window for client-commit models, where Silero decides turn edges on
+    /// this machine. Held separate from `vadSilenceDurationMs` because the two configure different
+    /// detectors: tuning one used to silently retune the other.
+    ///
+    /// 800 ms sits at the conservative end of the industry band (LiveKit 550 ms, Pipecat 800 ms).
+    /// Coaching tolerates a slightly late hint far better than cutting someone off mid-explanation.
+    public var localEndpointSilenceDurationMs: Int
     /// Input noise-reduction policy applied *before* VAD, to stop non-speech blips from firing the VAD
     /// and producing phantom transcripts. `.auto` (default) picks `near_field` vs `far_field` from the
     /// active mic's Core Audio transport type each session (see `NoiseReduction` / `InputDeviceProximity`);
@@ -64,6 +72,7 @@ public struct Config: Sendable {
         overlaySecondsPerWord: TimeInterval = 0.35,
         overlayMaxDisplaySeconds: TimeInterval = 8,
         vadSilenceDurationMs: Int = 1000,
+        localEndpointSilenceDurationMs: Int = 800,
         audioNoiseReduction: NoiseReductionMode = .auto,
         transcriptBatchingWindowSeconds: TimeInterval = 0.4,
         maxBufferedAudioSeconds: TimeInterval = 60,
@@ -79,6 +88,7 @@ public struct Config: Sendable {
         self.overlaySecondsPerWord = overlaySecondsPerWord
         self.overlayMaxDisplaySeconds = overlayMaxDisplaySeconds
         self.vadSilenceDurationMs = vadSilenceDurationMs
+        self.localEndpointSilenceDurationMs = localEndpointSilenceDurationMs
         self.audioNoiseReduction = audioNoiseReduction
         self.transcriptBatchingWindowSeconds = transcriptBatchingWindowSeconds
         self.maxBufferedAudioSeconds = maxBufferedAudioSeconds

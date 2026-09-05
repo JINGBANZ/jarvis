@@ -55,6 +55,7 @@ actor CodexAppServerRuntime: LocalAgentRuntimeBackend {
 
     private struct ThreadPreparation: Sendable {
         let id: UUID
+        let configuration: LocalAgentConversationConfiguration
         let task: Task<PreparedThread, Error>
     }
 
@@ -73,6 +74,10 @@ actor CodexAppServerRuntime: LocalAgentRuntimeBackend {
     private var preparingServer: ServerPreparation?
     private var preparedThread: PreparedThread?
     private var preparingThread: ThreadPreparation?
+    /// Ordering for `prepareThread`'s replacement rule: the newest thread request, and how many
+    /// attempts are opening a conversation right now.
+    private var latestThreadRequest = 0
+    private var openingConversations = 0
     private var nextRequestID = 0
     private var activeThreadID: String?
 
@@ -84,23 +89,36 @@ actor CodexAppServerRuntime: LocalAgentRuntimeBackend {
         self.supportedFeatures = supportedFeatures
     }
 
+    /// Opportunistic warm-up: prepares a thread for `configuration` unless an attempt is opening a
+    /// conversation or a newer request wants another configuration, in which case it leaves the
+    /// thread to them and returns.
     func prepare(for configuration: LocalAgentConversationConfiguration) async throws {
         try await prepare(
             for: configuration,
-            deadline: Date().addingTimeInterval(configuration.timeout))
+            deadline: Date().addingTimeInterval(configuration.timeout),
+            opening: false)
     }
 
     private func prepare(
         for configuration: LocalAgentConversationConfiguration,
-        deadline: Date
+        deadline: Date,
+        opening: Bool
     ) async throws {
+        // Order requests by arrival, before the server-launch suspension. Two prewarms can both
+        // park here waiting for the launch and resume in either order; taking the sequence after
+        // that await would let the later arrival receive the lower number and be treated as older,
+        // so the newer target's thread would be evicted for a stale one.
+        latestThreadRequest += 1
+        let request = latestThreadRequest
         let preparedServer = try await prepareServer(
             for: configuration,
             deadline: deadline)
         try await prepareThread(
             for: configuration,
             server: preparedServer,
-            deadline: deadline)
+            deadline: deadline,
+            opening: opening,
+            request: request)
     }
 
     private func prepareServer(
@@ -156,18 +174,30 @@ actor CodexAppServerRuntime: LocalAgentRuntimeBackend {
         }
     }
 
+    /// `opening` marks an attempt's open, which must end with a thread for its own configuration
+    /// and so may always replace one prepared for another. A prewarm may replace one only while it
+    /// is the newest request and no attempt is opening; otherwise it returns and leaves the thread
+    /// to whoever asked for it. Without that rule a prewarm and an open could trade evictions: each
+    /// resumed from a preparation the other had already installed, each finding the other's thread
+    /// stale, one thread/unsubscribe plus thread/start per round until the open happened to be
+    /// resumed first. CI saw it as request counts exactly doubled.
     private func prepareThread(
         for configuration: LocalAgentConversationConfiguration,
         server: CodexAppServer,
-        deadline: Date
+        deadline: Date,
+        opening: Bool,
+        request: Int
     ) async throws {
         while true {
             guard activeThreadID == nil else { return }
-            if let preparedThread, preparedThread.configuration == configuration {
-                return
+            let mayReplace = opening
+                || (request == latestThreadRequest && openingConversations == 0)
+            if let preparedThread {
+                if preparedThread.configuration == configuration || !mayReplace { return }
             }
 
             if let preparation = preparingThread {
+                if preparation.configuration != configuration && !mayReplace { return }
                 do {
                     let thread = try await awaitThreadPreparation(preparation)
                     // Background prewarm and the first attempt may await the same task. Only the
@@ -186,6 +216,13 @@ actor CodexAppServerRuntime: LocalAgentRuntimeBackend {
                 continue
             }
 
+            // Reaching here means no thread to adopt and none we may replace. A prewarm that is no
+            // longer the newest request, or that arrived while an attempt is opening, defers here
+            // too — this is the window, most likely of all in production, where both callers were
+            // still awaiting the server launch and neither a prepared nor a preparing thread exists
+            // yet. Starting one anyway would hand the opening attempt a stale thread to unsubscribe.
+            if !mayReplace { return }
+
             let staleThread = preparedThread
             preparedThread = nil
             let cleanupRequestID = staleThread.map { _ in takeRequestID() }
@@ -193,6 +230,7 @@ actor CodexAppServerRuntime: LocalAgentRuntimeBackend {
             let supportedFeatures = self.supportedFeatures
             preparingThread = ThreadPreparation(
                 id: UUID(),
+                configuration: configuration,
                 task: Task.detached(priority: .utility) {
                     if let staleThread, let cleanupRequestID {
                         try await Self.unsubscribe(
@@ -216,7 +254,9 @@ actor CodexAppServerRuntime: LocalAgentRuntimeBackend {
         deadline: Date
     )
         async throws -> any LocalAgentConversation {
-        try await prepare(for: configuration, deadline: deadline)
+        openingConversations += 1
+        defer { openingConversations -= 1 }
+        try await prepare(for: configuration, deadline: deadline, opening: true)
         guard let server, server.isRunning else {
             throw Self.error("Codex app-server was not ready")
         }

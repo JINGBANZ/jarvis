@@ -22,3 +22,12 @@ public let staySilentTool = ToolDef(
 )
 
 public let coachTools: [ToolDef] = [captureScreenTool, speakTool, staySilentTool]
+
+/// Offered only when the session has a `PrepMaterialSearching` port (i.e. at least one configured
+/// source produced usable text at Session Start) — see the tool-set construction in
+/// `CoachAttemptRunner.runAttempt`.
+public let searchPrepNotesTool = ToolDef(
+    name: "search_prep_notes",
+    description: JarvisPrompts.Coach.ToolDescription.searchPrepNotes,
+    parametersJSON: #"{"type":"object","properties":{"query":{"type":"string"}},"required":["query"],"additionalProperties":false}"#
+)

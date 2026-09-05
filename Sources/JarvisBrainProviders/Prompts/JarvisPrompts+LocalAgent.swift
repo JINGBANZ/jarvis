@@ -6,10 +6,16 @@ import JarvisCore
 // that one name — the same rule the evaluation prompts follow.
 extension JarvisPrompts {
     enum LocalAgent {
+        // Generic on purpose: this ships once as Codex's fixed baseInstructions
+        // (CodexAppServerRuntime.swift/CodexExecRuntime.swift), before the per-turn tool list
+        // (toolProtocol(tools:toolChoice:), rendered separately per turn) is known — and that list
+        // grows over time (search_prep_notes, whatever comes next). Naming specific tools here would
+        // go stale the same way the coach system prompt's old fixed enumeration already did.
         static let codexDirectResponse = """
             Answer this decision request immediately without inspecting files, running commands,
-            browsing, planning, delegating, or invoking any Codex built-in tool. The capture_screen,
-            speak, and stay_silent names below are an output JSON protocol, not callable Codex tools.
+            browsing, planning, delegating, or invoking any Codex built-in tool. Whatever tool names
+            appear in the protocol below are an output JSON protocol only — never callable Codex
+            tools, no matter how tool-like they look.
             """
 
         static func roleBlock(_ role: String, text: String) -> String {

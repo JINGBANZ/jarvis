@@ -13,10 +13,12 @@ final class ScriptedBrain: BrainClient, @unchecked Sendable {
     private let lock = NSLock()
     private var _calls: [[ChatMessage]] = []
     private var _toolChoices: [ToolChoice] = []
+    private var _offeredTools: [[ToolDef]] = []
     private var _requestContexts: [CoachingRequestContext?] = []
     private var _preparationCount = 0
     var calls: [[ChatMessage]] { lock.withLock { _calls } }
     var toolChoices: [ToolChoice] { lock.withLock { _toolChoices } }
+    var offeredTools: [[ToolDef]] { lock.withLock { _offeredTools } }
     var requestContexts: [CoachingRequestContext?] { lock.withLock { _requestContexts } }
     var preparationCount: Int { lock.withLock { _preparationCount } }
     let script: [BrainResponse]
@@ -25,6 +27,7 @@ final class ScriptedBrain: BrainClient, @unchecked Sendable {
         let index = lock.withLock { () -> Int in
             _calls.append(messages)
             _toolChoices.append(toolChoice)
+            _offeredTools.append(tools)
             _requestContexts.append(CoachingRequestAttribution.current)
             return _calls.count - 1
         }
@@ -202,7 +205,9 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 // `GatedScreen` / `HeldCleanupScreen` park their `capture()` until the test releases it, and the
 // driver runs that capture on a `Task.detached`, holding a cooperative-pool thread for the whole
 // park. Three such tests exist in the repository and a CI runner has three pool threads, so
-// overlapping parks can starve every release path. Cap this suite at one at a time.
+// overlapping parks can starve every release path. Cap this suite at one at a time. One case also
+// installs a process-global `JarvisLog` attachment and holds `JarvisLogAttachmentLock` for it, since
+// `.serialized` alone does not protect against the other suites that do the same.
 @Suite(.serialized) struct CoachDriverPipelineTests {
     private func makeDriver(activity: (any ActivityEventRecording)? = nil,
                             brain: BrainClient, brainProvider: BrainProvider? = nil,
@@ -212,7 +217,8 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
                             clock: Clock, config: Config = .default,
                             coachingAttempts: (any CoachingAttemptAuditing)? = nil,
                             automaticAttemptDelay: @escaping CoachDriver.AutomaticAttemptDelay = { _ in },
-                            onBrainFailure: (@MainActor @Sendable (BrainFailure) -> Void)? = nil)
+                            onBrainFailure: (@MainActor @Sendable (BrainFailure) -> Void)? = nil,
+                            prepMaterial: (any PrepMaterialSearching)? = nil)
         -> (CoachDriver, RollingTranscript) {
         let transcript = RollingTranscript()
         let provider = brainProvider ?? .openAI
@@ -229,7 +235,8 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             route: route, screen: screen, overlay: overlay, clock: clock,
             coachingAttempts: coachingAttempts,
             automaticAttemptDelay: automaticAttemptDelay,
-            activity: activity
+            activity: activity,
+            prepMaterial: prepMaterial
         )
         return (driver, transcript)
     }
@@ -434,27 +441,29 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         // what makes this boundary worth pinning: the two projections must still stay separate.
         let (activityLog, evidence) = ActivityLog.recordingSession(in: dir)
         defer { activityLog.disable(); try? FileManager.default.removeItem(at: dir) }
-        JarvisLog.attach(to: evidence)
-        defer { JarvisLog.detach() }
+        try await JarvisLogAttachmentLock.withExclusiveAttachment {
+            JarvisLog.attach(to: evidence)
+            defer { JarvisLog.detach() }
 
-        let brain = ScriptedBrain(script: [
-            .init(toolCalls: [.speak(callId: "s", lines: ["activity-boundary-tip-417"])])
-        ])
-        let (driver, _) = makeDriver(
-            activity: evidence, brain: brain, clock: ManualClock(now: 417))
+            let brain = ScriptedBrain(script: [
+                .init(toolCalls: [.speak(callId: "s", lines: ["activity-boundary-tip-417"])])
+            ])
+            let (driver, _) = makeDriver(
+                activity: evidence, brain: brain, clock: ManualClock(now: 417))
 
-        #expect(await driver.handleTrigger(.silence(secondsQuiet: 417)) == .spoke)
+            #expect(await driver.handleTrigger(.silence(secondsQuiet: 417)) == .spoke)
 
-        _ = await evidence.close()   // barrier: drains this session's accepted rows
-        let jsonl = try String(contentsOf: dir.appendingPathComponent("jarvis-activity.jsonl"), encoding: .utf8)
-        #expect(jsonl.contains("activity-boundary-tip-417"))
-        #expect(!jsonl.contains("quiet for 417s"))
-        #expect(!jsonl.contains("thinking"))
+            _ = await evidence.close()   // barrier: drains this session's accepted rows
+            let jsonl = try String(contentsOf: dir.appendingPathComponent("jarvis-activity.jsonl"), encoding: .utf8)
+            #expect(jsonl.contains("activity-boundary-tip-417"))
+            #expect(!jsonl.contains("quiet for 417s"))
+            #expect(!jsonl.contains("thinking"))
 
-        let debug = try String(contentsOf: dir.appendingPathComponent("jarvis-debug.log"), encoding: .utf8)
-        #expect(debug.contains("quiet for 417s"))
-        #expect(debug.contains("thinking"))
-        #expect(debug.contains("activity-boundary-tip-417"))
+            let debug = try String(contentsOf: dir.appendingPathComponent("jarvis-debug.log"), encoding: .utf8)
+            #expect(debug.contains("quiet for 417s"))
+            #expect(debug.contains("thinking"))
+            #expect(debug.contains("activity-boundary-tip-417"))
+        }
     }
 
     @Test func nonExhaustingAttemptFailuresLandInActivityBeforeRecovery() async throws {

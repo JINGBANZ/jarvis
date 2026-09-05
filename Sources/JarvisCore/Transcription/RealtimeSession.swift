@@ -16,7 +16,7 @@ public enum RealtimeSession {
     /// GPT-4o accepts the legacy singular `language` hint. GPT Transcribe and GPT Live accept the
     /// plural `languages` list and a free-form recording context; GPT Live also receives the low
     /// streaming-delay setting. GPT-4o sessions with zero or multiple expected languages omit
-    /// `language` and use automatic recognition. No literal keyword hints are sent.
+    /// `language` and use automatic recognition.
     ///
     /// GPT-4o uses `server_vad`; `silenceDurationMs` tunes how long a pause must last before the
     /// server ends the turn. GPT Transcribe and GPT Live require committed-turn transcription, so
@@ -27,10 +27,15 @@ public enum RealtimeSession {
     /// nil to disable) filters the input buffer *before* it reaches VAD and the model — OpenAI's
     /// first-line defense against non-speech blips firing the VAD and producing phantom transcripts.
     /// Sent as an object `{"type": …}`; a bare string is rejected by the server.
+    ///
+    /// `keywords` are literal vocabulary terms (jargon, names) that bias recognition. Only GPT
+    /// Transcribe and GPT Live accept them, matching their `prompt` support; GPT-4o Transcribe has
+    /// neither, so keywords are silently inert there rather than rejected by the server.
     public static func sessionUpdate(
         model: OpenAITranscriptionModel,
         speaker: Speaker = .me,
         expectedLanguages: [OpenAITranscriptionLanguage] = [],
+        keywords: [String] = [],
         silenceDurationMs: Int = 1000,
         noiseReduction: String? = "near_field"
     ) -> [String: Any] {
@@ -45,6 +50,9 @@ public enum RealtimeSession {
             transcription["prompt"] = JarvisPrompts.Transcription.context(for: speaker)
             if !expectedLanguages.isEmpty {
                 transcription["languages"] = expectedLanguages.map(\.multipleHint)
+            }
+            if !keywords.isEmpty {
+                transcription["keywords"] = keywords
             }
             if model == .gptLiveTranscribe {
                 transcription["delay"] = "low"

@@ -32,6 +32,12 @@ public final class CoachDriver: @unchecked Sendable {
     private let transcriptionSettlement = TranscriptionSettlementGate()
     private let automaticAttemptDelay: AutomaticAttemptDelay
     private let coachingAttempts: (any CoachingAttemptAuditing)?
+    /// Nil until `installPrepMaterial` lands (or forever, when no source produced usable text).
+    /// Building the index is real I/O (reading files, `textutil` subprocesses), so it happens off to
+    /// the side after Session Start returns rather than blocking it; guarded by `stateLock` and
+    /// snapshotted into each attempt's `AttemptBrain` at selection time, the same way `plan` and
+    /// `configuredRoute` are — an attempt keeps whatever was current when it was selected.
+    private var _prepMaterial: (any PrepMaterialSearching)?
     /// The committed transcript boundary shared with the runner. It only grows, so reading it
     /// inside this type's lock needs no coordination with the runner's.
     private let ledger = CoachTranscriptLedger()
@@ -85,6 +91,9 @@ public final class CoachDriver: @unchecked Sendable {
         let brain: BrainClient
         let summarizer: BrainClient?
         let onSelected: (@MainActor @Sendable (BrainTarget) -> Void)?
+        /// Snapshotted the same way as `plan`: whatever `installPrepMaterial` had landed at
+        /// selection time, frozen for this attempt's whole tool loop.
+        let prepMaterial: (any PrepMaterialSearching)?
     }
 
 
@@ -151,10 +160,13 @@ public final class CoachDriver: @unchecked Sendable {
         coachingAttempts: (any CoachingAttemptAuditing)? = nil,
         plan: SessionPlan = .default,
         automaticAttemptDelay: AutomaticAttemptDelay? = nil,
-        activity: (any ActivityEventRecording)? = nil
+        activity: (any ActivityEventRecording)? = nil,
+        prepMaterial: (any PrepMaterialSearching)? = nil,
+        interviewFormatAddendum: String = ""
     ) {
         self.plan = plan
         self.activity = activity
+        self._prepMaterial = prepMaterial
         self.configuredRoute = route
         self.routeSession = BrainRouteSession(targetCount: route.targets.count)
         self.coachingAttempts = coachingAttempts
@@ -168,7 +180,8 @@ public final class CoachDriver: @unchecked Sendable {
             sessionStart: sessionStart ?? clock.now(),
             coachingAttempts: coachingAttempts,
             activity: activity,
-            ledger: ledger)
+            ledger: ledger,
+            interviewFormatAddendum: interviewFormatAddendum)
     }
 
     private static let defaultAutomaticAttemptDelay: AutomaticAttemptDelay = { sequence in
@@ -183,6 +196,15 @@ public final class CoachDriver: @unchecked Sendable {
     public func updatePlan(_ plan: SessionPlan) {
         stateLock.lock()
         self.plan = plan
+        stateLock.unlock()
+    }
+
+    /// Installs the prep-material search port once its index finishes building. A trigger that fires
+    /// before this lands simply doesn't have `search_prep_notes` available for that attempt — no
+    /// gate waits for it, matching "coaching always continues."
+    public func installPrepMaterial(_ port: (any PrepMaterialSearching)?) {
+        stateLock.lock()
+        _prepMaterial = port
         stateLock.unlock()
     }
 
@@ -559,7 +581,8 @@ public final class CoachDriver: @unchecked Sendable {
                 target: configured.target,
                 brain: brain,
                 summarizer: configured.summarizer,
-                onSelected: configuredRoute.onSelected)
+                onSelected: configuredRoute.onSelected,
+                prepMaterial: _prepMaterial)
             return step
         }
 

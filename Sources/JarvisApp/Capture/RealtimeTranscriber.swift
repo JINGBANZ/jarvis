@@ -36,6 +36,7 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
     private var apiKey: String
     private let model: OpenAITranscriptionModel
     private let expectedLanguages: [OpenAITranscriptionLanguage]
+    private let vocabularyKeywords: [String]
     /// Who this socket is transcribing: `.me` (mic) or `.them` (system audio). Two transcribers run
     /// in parallel — one per side — feeding the same `RollingTranscript`, so the coach sees both.
     private let speaker: Speaker
@@ -93,6 +94,7 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         apiKey: String,
         model: OpenAITranscriptionModel,
         expectedLanguages: [OpenAITranscriptionLanguage],
+        vocabularyKeywords: [String] = [],
         speaker: Speaker = .me,
         transcript: RollingTranscript,
         clock: Clock,
@@ -117,6 +119,7 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         self.apiKey = apiKey
         self.model = model
         self.expectedLanguages = OpenAITranscriptionLanguage.canonicalizing(expectedLanguages)
+        self.vocabularyKeywords = vocabularyKeywords
         self.speaker = speaker
         self.clock = clock
         self.sessionStart = sessionStart
@@ -137,7 +140,10 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
             ? SpeechGatedAudioBuffer(maximumPreRollDuration: jarvisManagedTurnPreRollDuration)
             : nil
         self.continuityReporter = RealtimeContinuityReporter(
-            speaker: speaker, clock: clock, sessionStart: sessionStart)
+            speaker: speaker, clock: clock, sessionStart: sessionStart,
+            // Client-commit models run with `turn_detection: null`, so the server never reports
+            // speech boundaries and the local-vs-server comparison would flag every real utterance.
+            expectsServerSpeechEvents: model.turnDetectionStrategy != .clientCommit)
         super.init()
         continuityReporter.onCaptureHeartbeat = { [weak self] signal in
             self?.onCaptureHeartbeat?(signal)
@@ -292,6 +298,7 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
             model: model,
             speaker: speaker,
             expectedLanguages: expectedLanguages,
+            keywords: vocabularyKeywords,
             silenceDurationMs: silenceDurationMs,
             noiseReduction: profile))
     }

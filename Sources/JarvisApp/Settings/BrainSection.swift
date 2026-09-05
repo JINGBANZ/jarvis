@@ -21,14 +21,19 @@ final class BrainSection: NSObject, SettingsSection {
     let title = "Brain"
     let fillsTab = true
 
-    private static let reasoningHeight =
-        SettingsStyle.cardHeaderHeight + SettingsStyle.rowHeight
+    private static let coachingCardHeight =
+        SettingsStyle.cardHeaderHeight + SettingsStyle.rowHeight * 2
 
     private let preferences: BrainPreferences
     private let detector: AgentCLIDetector
     private let onPreferencesChanged:
         (PreferenceChange, [BrainProvider: DetectedAgentCLI]?) -> Void
     private let transcription: TranscriptionControls
+    /// Only formats with real content are offered — showing an entry that does nothing is worse
+    /// than not showing it, and it means a later `<format>.md` addition needs zero Swift changes to
+    /// appear here. Computed once (`promptAddendum` reads a file per access) since this section is
+    /// built once per app launch, not per keystroke.
+    private let availableFormats = InterviewFormat.allCases.filter { !$0.promptAddendum.isEmpty }
 
     private var pageView: SettingsPageView?
     private var scrollView: SettingsScrollView?
@@ -90,7 +95,7 @@ final class BrainSection: NSObject, SettingsSection {
 
         let reasoningCard = makeReasoningCard()
         reasoningCard.heightAnchor.constraint(
-            equalToConstant: Self.reasoningHeight).isActive = true
+            equalToConstant: Self.coachingCardHeight).isActive = true
         stack.addArrangedSubview(reasoningCard)
 
         let transcriptionCard = transcription.makeView { [weak self] height in
@@ -146,28 +151,54 @@ final class BrainSection: NSObject, SettingsSection {
 
     private func makeReasoningCard() -> SettingsCardView {
         let card = SettingsCardView(
-            frame: NSRect(x: 0, y: 0, width: 712, height: Self.reasoningHeight))
+            frame: NSRect(x: 0, y: 0, width: 712, height: Self.coachingCardHeight))
         card.setHeader(title: "Coaching", detail: "Response behavior")
         guard let content = card.contentView else { return card }
 
-        let popup = NSPopUpButton()
-        popup.addItems(withTitles: ReasoningEffort.allCases.map(\.displayName))
-        popup.target = self
-        popup.action = #selector(effortChanged)
-        popup.setAccessibilityLabel("Reasoning effort")
-        if let row = ReasoningEffort.allCases.firstIndex(of: preferences.effort) {
-            popup.selectItem(at: row)
+        let effortPopup = NSPopUpButton()
+        effortPopup.addItems(withTitles: ReasoningEffort.allCases.map(\.displayName))
+        effortPopup.target = self
+        effortPopup.action = #selector(effortChanged)
+        effortPopup.setAccessibilityLabel("Reasoning effort")
+        if let index = ReasoningEffort.allCases.firstIndex(of: preferences.effort) {
+            effortPopup.selectItem(at: index)
         }
-        let row = SettingsRowView(
+        let effortRow = SettingsRowView(
             title: "Reasoning effort",
             detail: "Balances speed and depth",
-            controlView: popup,
+            controlView: effortPopup,
             showsSeparator: false)
-        content.addSubview(row)
+        content.addSubview(effortRow)
 
-        card.onLayout = { [weak card, weak row] in
-            guard let card, let row else { return }
-            row.frame = card.bodyFrame
+        // "None" (index 0) persists as `nil` and resolves to no addendum at all — not a guess
+        // assembled from whichever formats happen to have content.
+        let formatPopup = NSPopUpButton()
+        formatPopup.addItem(withTitle: "None")
+        formatPopup.addItems(withTitles: availableFormats.map(\.displayName))
+        formatPopup.target = self
+        formatPopup.action = #selector(interviewFormatChanged)
+        formatPopup.setAccessibilityLabel("Interview format")
+        if let format = preferences.interviewFormat,
+           let index = availableFormats.firstIndex(of: format) {
+            formatPopup.selectItem(at: index + 1)
+        } else {
+            formatPopup.selectItem(at: 0)
+        }
+        let formatRow = SettingsRowView(
+            title: "Interview format",
+            detail: "Applies on the next Start",
+            controlView: formatPopup)
+        content.addSubview(formatRow)
+
+        card.onLayout = { [weak card, weak effortRow, weak formatRow] in
+            guard let card, let effortRow, let formatRow else { return }
+            var top = card.bodyFrame.maxY
+            top -= effortRow.preferredHeight
+            effortRow.frame = NSRect(
+                x: 0, y: top, width: card.bodyFrame.width, height: effortRow.preferredHeight)
+            top -= formatRow.preferredHeight
+            formatRow.frame = NSRect(
+                x: 0, y: top, width: card.bodyFrame.width, height: formatRow.preferredHeight)
         }
         card.onLayout?()
         return card
@@ -197,7 +228,7 @@ final class BrainSection: NSObject, SettingsSection {
         guard let stack = documentStack else { return }
         let visibleHeights = [
             providerEditor?.preferredHeight,
-            Self.reasoningHeight,
+            Self.coachingCardHeight,
             transcription.preferredHeight,
         ].compactMap { $0 }
         let contentHeight = visibleHeights.reduce(0, +)
@@ -231,6 +262,17 @@ final class BrainSection: NSObject, SettingsSection {
         guard ReasoningEffort.allCases.indices.contains(row) else { return }
         preferences.effort = ReasoningEffort.allCases[row]
         preferencesDidChange(.effort)
+    }
+
+    /// Fixed for the whole session like the transcription language/model choice — applies on the
+    /// next Start only, so this never triggers the CLI-preflight reapply `preferencesDidChange` owns.
+    @objc private func interviewFormatChanged(_ sender: NSPopUpButton) {
+        let row = sender.indexOfSelectedItem
+        guard row == 0 || availableFormats.indices.contains(row - 1) else { return }
+        let format = row == 0 ? nil : availableFormats[row - 1]
+        preferences.interviewFormat = format
+        jlog("Jarvis: \(format?.displayName ?? "None") interview format selected for the "
+            + "next Start.")
     }
 
     private func preferencesDidChange(_ change: PreferenceChange) {

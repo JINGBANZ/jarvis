@@ -29,6 +29,10 @@ public enum Defaults {
         /// Keeps a coaching turn fast (sub-2s target) while still allowing tool calls.
         public static let effort: ReasoningEffort = .low
 
+        /// No default value: absent means "not selected," which resolves to no addendum at all —
+        /// not a guess assembled from whatever formats have content.
+        public static let interviewFormatKey = "brain.interviewFormat"
+
         /// The OpenAI model keeps the pre-provider key ("brain.model") so existing installs keep
         /// their selection; CLI providers store under a suffixed key each.
         public static func modelKey(for provider: BrainProvider) -> String {
@@ -56,6 +60,10 @@ public enum Defaults {
         /// Empty means automatic detection — Jarvis never silently assumes English.
         public static let openAIExpectedLanguages: [OpenAITranscriptionLanguage] = []
 
+        public static let openAIVocabularyKeywordsKey = "transcription.openai.vocabulary-keywords"
+        /// Empty until the user adds terms; only GPT Transcribe and GPT Live send them.
+        public static let openAIVocabularyKeywords: [String] = []
+
         public static let appleSpeechLocaleKey = "transcription.apple-speech.locale"
         /// A visible initial suggestion only; Settings resolves and displays the supported
         /// equivalent so the user can correct it before Start. Computed, not stored, because the
@@ -77,6 +85,23 @@ public enum Defaults {
         public static let displayIndexMinimum = 1
     }
 
+    // MARK: - Hotkey
+
+    /// The one global shortcut: force an immediate hint mid-session.
+    public enum Hotkey {
+        public static let keyCodeKey = "hotkey.keyCode"
+        public static let modifiersKey = "hotkey.modifiers"
+
+        /// kVK_ANSI_J — the original hardcoded binding, so existing installs see no behavior change
+        /// until they opt to rebind. Carbon virtual key codes are layout-independent (a fixed
+        /// physical key position), so this constant needs no keyboard-layout awareness.
+        public static let keyCode: UInt32 = 38
+        public static let modifiers: HotkeyModifiers = [.command, .option]
+        public static var combination: HotkeyCombination {
+            HotkeyCombination(keyCode: keyCode, modifiers: modifiers)
+        }
+    }
+
     // MARK: - Prep material
 
     /// Local files/folders of interview notes the user has pointed Jarvis at, so the coach can draw
@@ -87,17 +112,32 @@ public enum Defaults {
         public static let sources: [PrepMaterialSource] = []
     }
 
+    // MARK: - Permissions
+
+    /// The one thing Jarvis remembers about macOS permissions. Not a user-editable setting, and
+    /// deliberately not a record of any *grant*: a stored grant cannot be told apart from a current
+    /// one, so grants are proved live instead. This records something Jarvis did, which stays true.
+    public enum Permissions {
+        public static let screenRecordingAskedKey = "permissions.screenRecordingAsked"
+        /// Nobody has asked macOS for Screen Recording yet. Set once the gate has, which is what
+        /// lets a later launch read a still-missing grant as a refusal rather than a pending one.
+        public static let screenRecordingAsked = false
+
+    }
+
     // MARK: - Overlay
 
     /// The two capture-invisible coaching surfaces. Each has an on/off flag, a font size in points,
     /// and an opacity; the ranges are the clamp bounds applied on every read and write.
     ///
     /// Opacity governs only the background fill, so 0 means a text-only surface with no backdrop,
-    /// not a hidden one — the enabled flag is the only thing that hides a surface. Both surfaces
-    /// share one range because the Overlay tab presents their sliders identically.
+    /// not a hidden one — what takes a surface off screen is its enabled flag, and for the box the end
+    /// of a session. Both surfaces share one range because the Overlay tab presents their sliders
+    /// identically.
     ///
     /// The surfaces default opposite ways — the caption off, the box on — so a first run shows the
-    /// durable history rather than a flashing caption.
+    /// durable history rather than a flashing caption. The box is a session surface: switched on, it
+    /// appears on Start and goes away on Stop.
     public enum Overlay {
 
         /// The transient on-screen tip that fades after each response.

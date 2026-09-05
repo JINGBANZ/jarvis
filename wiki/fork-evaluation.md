@@ -1,9 +1,9 @@
 # Fork Evaluation — Can We Build on an Existing Open-Source App?
 
 > Low-level, code-level evaluation of open-source apps as a fork base for the PoC (a proactive
-> LeetCode coach). Each candidate was inspected at the source level (clone + read). Decision on
-> which base — or whether to stay greenfield native Swift — is summarized in
-> [decisions.md](./decisions.md). Companion to [landscape-survey.md](./landscape-survey.md).
+> LeetCode coach). Each candidate was inspected at the source level (clone + read). The outcome,
+> greenfield native Swift with no fork, is in [Status](#status) below. Companion to
+> [landscape-survey.md](./landscape-survey.md).
 
 ## The PoC we're trying to reach by forking
 
@@ -87,11 +87,8 @@ module + proactive loop as a *reference implementation* while building native Sw
 
 ## Status
 
-> **Superseded (2026-06-14):** the two-phase decision below was dropped. Phase 1 is **skipped** and
-> the native Swift app is built directly; this evaluation now stands only as the *why-build-our-own*
-> and reference-material record. See [decisions.md](./decisions.md).
-
-~~**Decided: two-phase build** — fork Natively for the Phase 1 PoC, then a clean native Swift app for
-Phase 2 if it validates~~ (see [decisions.md](./decisions.md)). Whatever the base, the
-`capture_screen` tool-loop (and, except on Natively, the proactive trigger) is net-new — confirming
-that building the trigger loop ourselves is unavoidable either way.
+**No fork.** The native Swift app is built directly, without a Natively-fork PoC phase first: this
+evaluation already establishes why to build our own, and Natively is at most a reference, not a
+base. The page stands as the *why-build-our-own* and reference-material record. Whatever the base,
+the `capture_screen` tool-loop (and, except on Natively, the proactive trigger) is net-new —
+confirming that building the trigger loop ourselves is unavoidable either way.

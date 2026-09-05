@@ -22,6 +22,10 @@ final class MenuBarController: NSObject {
     var onStop: (() -> Void)?
     /// Fired when the user picks "Settings". Opens the unified Settings window.
     var onOpenSettings: (() -> Void)?
+    /// Fired when the user picks "Clear Overlay". Wipes the Overlay Box's logged history — the
+    /// persistent panel only clears itself on the next Start, so this is the only way to dismiss its
+    /// content without starting a new session.
+    var onClearOverlayBox: (() -> Void)?
     /// Fired when the user picks "Check for Updates". Answers whether Sparkle can start a check, so
     /// the item can render its own availability without this adapter importing Sparkle.
     /// Not private for the same reason as `updateItem`.
@@ -48,6 +52,8 @@ final class MenuBarController: NSObject {
             startStopItem,
             .standard("Settings", symbol: "gearshape",
                       action: #selector(openSettings), target: self, keyEquivalent: ","),
+            .standard("Clear Overlay", symbol: "eraser",
+                      action: #selector(clearOverlayBox), target: self),
         ]
         if let updateItem { menu.items.append(updateItem) }
         menu.items.append(contentsOf: [
@@ -118,6 +124,8 @@ final class MenuBarController: NSObject {
     }
 
     @objc private func openSettings() { onOpenSettings?() }
+
+    @objc private func clearOverlayBox() { onClearOverlayBox?() }
 
     @objc private func checkForUpdates() { onCheckForUpdates?() }
 

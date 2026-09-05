@@ -3,8 +3,8 @@
 > Snapshot of what is true *right now*. This is the entry point for picking the project up mid-stream:
 > read [`index.md`](./index.md) first, then this page, then the relevant core page. Edited in place at
 > the close of every change, per [`AGENTS.md`](./AGENTS.md) → "Keep-in-sync checklist". Every file
-> pointer below either resolves to a real file or this page is wrong — fix the page. The load-bearing
-> design decisions live in [`decisions.md`](./decisions.md).
+> pointer below either resolves to a real file or this page is wrong — fix the page. Design rationale
+> lives on each core page beside the design it explains.
 
 ## Current phase
 
@@ -141,9 +141,10 @@ completion: no runtime error autonomously activates Jarvis, opens a browser, or 
 fixed notices remain available in Activity. The gate statically rejects unreviewed presentation APIs.
 The public source tree gives no public input a direct privileged-agent path. CI, release, and agent
 automation use hosted runners; no self-hosted runner remains registered.
-Automatic agent review is limited to same-repository PR branches, `@claude` is owner-invoked, issue
-discovery keeps its scheduled/manual triggers, and automatic issue implementation relies on the
-central workflow's existing author write-access check. Reusable agent workflows track the shared
+CodeRabbit reviews every pull request including forks, as a GitHub App that receives no repository
+secret; the credential-bearing Claude review workflow stays limited to same-repository PR branches,
+`@claude` is owner-invoked, issue discovery keeps its scheduled/manual triggers, and automatic issue
+implementation relies on the central workflow's existing author write-access check. Reusable agent workflows track the shared
 repository's `main` branch; retained third-party Actions are SHA-pinned and Dependabot-managed.
 Public docs disclose the current unsandboxed boundary, contribution and private-reporting paths are
 present, and the latest GitHub Release carries a Developer ID-signed, notarized Apple silicon app.
@@ -171,7 +172,16 @@ coaching kernel's dependency rules are enforced by `scripts/check-coaching-kerne
 
 ## Next action
 
-Run the live smoke checklist for the lean coaching core work: Start, Stop, and an immediate
+Run the live permission-gate smoke, since the gate runs before anything the Gate can test. After resetting each service in turn (`tccutil reset Microphone com.jarvis.coach.dev`, then
+`ScreenCapture`, then `AudioCapture`) and clearing the one marker Jarvis persists (`defaults delete com.jarvis.coach.dev permissions.screenRecordingAsked`): the gate appears with no menu bar behind it; one walk collects all
+three dialogs in order; **Quit** exits; refusing system audio records a refusal rather than a grant
+and the probe tone stays inaudible; refusing screen recording ends on **Quit & Reopen**, and the next
+launch asks once more (silent after a refusal) before offering **Open System Settings** rather than
+looping; enabling Screen Recording after that
+trip to Settings turns the button into **Quit & Reopen** rather than reopening Settings again;
+allowing everything reaches the menu bar after one relaunch.
+
+Then run the live smoke checklist for the lean coaching core work: Start, Stop, and an immediate
 restart; a coaching turn with a screen view; a Settings change applied to a running session and a
 failed preflight; capture readiness and system-audio degradation to microphone-only; one Claude Code
 and one Codex coaching turn; and browsing a finished session in the Activity window. The offline Gate
@@ -187,11 +197,12 @@ ready on `main`; they were disabled during rollout so the old base-branch copies
 removed self-hosted runner.
 Delete the historical self-hosted runs and artifacts after owner approval: the audit found no
 credential leak, but those logs expose runner, account, and installed-tool paths.
-Replace release-please's `GITHUB_TOKEN` with a GitHub App token
-before making CI a required check, because token-authored Release PRs do not trigger `pull_request`
-workflows. Confirm private vulnerability reporting, secret scanning and push protection, Dependabot
-security updates, fork-workflow approval, and a `main` ruleset requiring pull requests and the CI
-check for the public repository. Keep self-hosted runners unavailable to public forks.
+Replace release-please's `GITHUB_TOKEN` with a GitHub App token: the `main` ruleset requires the
+CI `test` check, and token-authored Release PRs do not trigger `pull_request` workflows, so every
+Release PR reports no such check and merges only on a repository admin's pull-request bypass.
+Confirm private vulnerability reporting, secret scanning and push protection, Dependabot security
+updates, and fork-workflow approval for the public repository. Keep self-hosted runners unavailable
+to public forks.
 
 
 Run a live chronology smoke on a fresh session: let one speaker finish a longer question while the
@@ -253,7 +264,7 @@ Tested `JarvisCore` + `JarvisBrainProviders` + `JarvisEvaluation` + `JarvisOverl
 - `Sources/JarvisCore/Screen/` — the model-facing screen port and the pure, Foundation-only capture logic: the `ScreenCapturing` contract, the `ScreenSnapshot` model, front-window selection over window-server candidates, and reading-order OCR layout (`ScreenCapturing`, `ScreenSnapshot`, `FrontWindowSelector`, `WindowCandidate`, `TextFragment`, `RecognizedTextLayout`). No process or file I/O; the kernel dependency guard rejects `Process`/`FileManager` here.
 - `Sources/JarvisScreenCapture/` — the OS-bound screen-capture adapter behind that port ([lean-coaching-core.md → Phase 4 contract](./lean-coaching-core.md#phase-4-implementation-contract--screen-capture-adapter-move)): `ScreenCaptureRunner` owns each cancellable `screencapture` helper and the transient JPEG it writes into the owner-only session directory — it verifies that file is gone before returning, and a capture whose cleanup can't be proven latches the runner so no later capture (or display fallback) starts while a screen-derived file is unaccounted for — and `ScreenCaptureCLI` shoots the display frozen into the attempt's `SessionPlan` revision, or the main display. Depends inward on `JarvisCore`; composed by `WindowScopedScreenCapture` in `JarvisApp`; tested headlessly in `JarvisScreenCaptureTests`.
 - `Sources/JarvisCore/Overlay/` — the enabled output port: overlay text model, length-proportional timing, and fan-out (`OverlayRendering`, `OverlayTiming`, `BroadcastOverlay`).
-- `Sources/JarvisCore/Config/` — the control plane: config, owner-only secrets, transcription/brain/screen/overlay preferences, and the immutable `SessionPlan` revision a coaching attempt runs against so no turn reads storage (`Config`, `Secrets`, `TranscriptionPreferences`, `BrainPreferences`, `ScreenCapturePreferences`, `ScreenCaptureScope`, `OverlayAppearance`, `SessionPlan`). The kernel dependency guard rejects `UserDefaults`, every preference store, and `SecretStore` inside the kernel.
+- `Sources/JarvisCore/Config/` — the control plane: config, owner-only secrets, transcription/brain/screen/overlay preferences, the immutable `SessionPlan` revision a coaching attempt runs against so no turn reads storage, and the Start-time interview-format skill picker with its bundled Markdown addendum (`Config`, `Secrets`, `TranscriptionPreferences`, `BrainPreferences`, `ScreenCapturePreferences`, `ScreenCaptureScope`, `OverlayAppearance`, `SessionPlan`, `InterviewFormat`; skill content in `Sources/JarvisCore/Resources/Skills/`). The kernel dependency guard rejects `UserDefaults`, every preference store, and `SecretStore` inside the kernel — `Config/` itself is excluded from that guard, which is why `InterviewFormat`'s file I/O lives here rather than in `Coach/`.
 - `Sources/JarvisCore/Support/` — small shared runtime primitives (`Clock`, `TurnTaskBox`, `RetrySchedule`, `RetryIncident`).
 - `Sources/JarvisCore/Diagnostics/` — the one [session-evidence stack](./session-audit.md) and the capture-health policy beside it: the versioned `SessionEvent` envelope and its typed producer ports, one bounded worker and per-session handle, the Activity projection with its stable persisted event kinds, occurrence/record timing, fixed typed notices, and incomplete-record signal, `jlog`'s nonblocking admission, privacy-preserving audio continuity, the capture heartbeat and its critical health policy, authoritative session-readiness composition, chronology-aware session history, and user-facing errors (`SessionEvent`, `FileSessionAudit`, `SessionAuditWorker`, `ActivityLog`, `ActivityEvent`, `ActivityEventRecording`, `BrainTrafficAuditing`, `CoachingAttemptAuditing`, `JarvisLog`, `AudioContinuityWitness`, `CaptureHeartbeat`, `CaptureReadinessMonitor`, `JarvisReadiness`, `SessionStore`, `UserFacingError`).
 - `Sources/JarvisEvaluation/` — the sealed-session evaluation target ([lean-coaching-core.md → Phase 3 contract](./lean-coaching-core.md#phase-3-implementation-contract--evaluation-extraction)): loss-aware JSONL parsing, the neutral session evidence index and normalized provider telemetry, delta-aware transcript rendering, the read-only agentic audit over the complete session directory, and the HTML report page (`JSONLRecords`, `SessionAuditEvidence`, `SessionEvidenceIndex`, `SessionMetrics`, `EvaluationTranscript`, `AgenticEvaluation`, `AgenticEvaluator`, `EvalReportPage`). Depends inward on `JarvisCore` and on `JarvisBrainProviders` for the CLI plumbing its agentic evaluator runs; consumed by `JarvisApp` and `EvalPrep`.
@@ -261,12 +272,14 @@ Tested `JarvisCore` + `JarvisBrainProviders` + `JarvisEvaluation` + `JarvisOverl
 - `Sources/JarvisOverlay/` — the capture-invisible `NSPanel` surfaces: `OverlayCaptionPanel` (transient), `OverlayBoxPanel` (persistent), `NSPanel+CaptureExclusion`.
 - `Sources/JarvisApp/App/` + `MenuBar/` — entry point and three owners ([lean-coaching-core.md → Phase 5](./lean-coaching-core.md#phase-5-implementation-contract--appdelegate-split)): `AppDelegate` is the session runtime (Start/Stop/teardown, readiness rendering and effects, capture-heartbeat handling, Settings composition), `SessionArtifacts` owns the owner-only session directory, the evidence handle in it, retention pruning, and the close bookkeeping, and `BrainComposition` owns provider preflight, brain-client and route construction, and live reapply. Plus `ErrorReporter` (startup alerts and an unconditional no-presentation runtime policy).
 - `Sources/JarvisApp/Updates/UpdateController.swift` — the menu bar's Sparkle-backed **Check for Updates** item: user-initiated checks only, disabled while a session is live, and absent from development builds, which carry no feed ([build-and-run.md → In-app updates](./build-and-run.md#in-app-updates--sparkle-over-the-release-feed)).
-- `Sources/JarvisApp/Capture/` — one-clock aggregate mic + sample-preserving system-audio capture that starts without waiting for a system-audio writer, with AEC3 echo cancellation, classic WebRTC VAD, and resampling (`AggregateEchoCapture`, `WebRTCEchoCanceller`, `WebRTCVoiceActivityDetector`, `Resampler`); provider construction (`TranscriptionSessionFactory`); OpenAI Realtime item/readiness/liveness/transactional-reconnect handling (`RealtimeTranscriber`); macOS 26+ on-device final-result transcription and model preparation (`AppleSpeechTranscriber`, `AppleSpeechModelPreparation`); continuity/network diagnostics; permissions; plus the window-scoped screenshot + OCR edge (`WindowScopedScreenCapture`, `ScreenTextRecognizer`).
-- `Sources/JarvisApp/Settings/` — the unified Settings window (`SettingsWindow` hosting Brain behavior, shared Connections, Overlay, Screen, and Activity sections), with shared page, rounded-card, responsive-row, and scroll primitives so every tab keeps one visual system without coupling section behavior.
+- `Sources/JarvisApp/Capture/` — one-clock aggregate mic + sample-preserving system-audio capture that starts without waiting for a system-audio writer, with AEC3 echo cancellation, Silero voice-activity detection, and resampling (`AggregateEchoCapture`, `WebRTCEchoCanceller`, `SileroVoiceActivityDetector`, `Resampler`); provider construction (`TranscriptionSessionFactory`); OpenAI Realtime item/readiness/liveness/transactional-reconnect handling (`RealtimeTranscriber`); macOS 26+ on-device final-result transcription and model preparation (`AppleSpeechTranscriber`, `AppleSpeechModelPreparation`); continuity/network diagnostics; permission reporting and requesting, including the self-tap tone probe that is the only way to ask for or prove the silently-enforced system-audio grant (`Permissions`, `SystemAudioPermissionProbe`); plus the window-scoped screenshot + OCR edge (`WindowScopedScreenCapture`, `ScreenTextRecognizer`).
+- `Sources/JarvisApp/Onboarding/` — the launch permission gate that gathers Microphone, System Audio Recording, and Screen Recording one dialog at a time and keeps Jarvis closed until it holds all three, so no TCC prompt appears mid-session (`PermissionGate`, `PermissionsChecklistView`) ([architecture.md → Permissions](./architecture.md#permissions)).
+- `Sources/JarvisApp/Settings/` — the unified Settings window (`SettingsWindow` hosting Brain behavior, shared Connections, Overlay, Screen, Prep material, and Activity sections), with shared page, rounded-card, responsive-row, and scroll primitives so every tab keeps one visual system without coupling section behavior.
 - `Sources/JarvisApp/Shortcuts/HotkeyController.swift` — the global Carbon ⌥⌘J on-demand-hint hotkey.
 - `Sources/JarvisApp/Viewer/ActivityViewer.swift` — the in-app `WKWebView` activity viewer, with the current non-persisted readiness badge, an exact selectable/copyable session ID, and one-click **Evaluate** / **Open report** agentic audit flow.
 - `Sources/EvalPrep/main.swift` — the Foundation-only terminal entry point for the same `AgenticEvaluator` Activity invokes; `scripts/eval-session.sh` runs it over the repo + session dir.
-- `Sources/CJarvisAEC/lib/libjarvis-aec.a` — the prebuilt, zero-dylib WebRTC AEC3 + classic VAD native edge (the `CJarvisAEC` target; rebuilt by `scripts/build-aec.sh`).
+- `Sources/CJarvisAEC/lib/libjarvis-aec.a` — the prebuilt, zero-dylib WebRTC AEC3 native edge (the `CJarvisAEC` target; rebuilt by `scripts/build-aec.sh`).
+- `Sources/JarvisApp/Resources/SileroVAD.mlmodelc` — the committed Silero VAD model used for local turn detection (rebuilt by `scripts/build-vad.sh`).
 - `scripts/build-app.sh` — the local self-signed `Jarvis Dev.app` build with an independent bundle id and TCC identity; its production plist source remains unchanged.
 - `.github/workflows/` + `scripts/package-app.sh` + `scripts/dmg-settings.py` + `scripts/verify-dmg-layout.py` + `scripts/check-release-sdk.sh` + `scripts/verify-release.sh` — hosted automation only: owner-gated development agents, the repository gate on pull requests, then a macOS-26-SDK release-please Release PR → Developer ID-signed, notarized, stapled, mounted, Finder-layout/SDK/Gatekeeper-checked `Jarvis.dmg` with a visible drag arrow, an Applications shortcut, and bundled Apache and third-party notices; that DMG and the `appcast.xml` update feed signed over it by `scripts/generate-appcast.sh` are the Release's only Jarvis-built assets ([build-and-run.md → Distribution](./build-and-run.md#distribution--signed-notarized-releases-from-ci)).
 - `AGENTS.md` + `.github/workflows/sync-shared-rules.yml` — project-specific agent guidance with a

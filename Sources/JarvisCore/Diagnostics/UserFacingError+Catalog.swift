@@ -64,21 +64,27 @@ public extension UserFacingError {
     static func permissionsMissing(
         _ missing: Set<JarvisReadiness.Permission>
     ) -> UserFacingError {
-        let message = switch (missing.contains(.microphone), missing.contains(.screenRecording)) {
-        case (true, true):
-            "Enable Microphone and Screen Recording in System Settings → Privacy & Security, then press Start again."
-        case (true, false):
-            "Enable Microphone in System Settings → Privacy & Security, then press Start again."
-        case (false, true):
-            "Enable Screen Recording in System Settings → Privacy & Security, then press Start again."
-        case (false, false):
-            "Check Jarvis permissions in System Settings → Privacy & Security, then press Start again."
-        }
+        let named = JarvisReadiness.Permission.allCases
+            .filter(missing.contains)
+            .map(\.displayName)
+        // Screen Recording is only visible to a new process, so telling the user to press Start
+        // again would send them round a loop that cannot end.
+        let ending = missing.contains(.screenRecording) ? "reopen Jarvis." : "press Start again."
+        let message = named.isEmpty
+            ? "Check Jarvis permissions in System Settings → Privacy & Security, then \(ending)"
+            : "Enable \(sentenceList(named)) in System Settings → Privacy & Security, then \(ending)"
         return .init(
             title: missing.count == 1 ? "Permission needed" : "Permissions needed",
             message: message,
             severity: .fatal,
             sessionEndReason: .permissionsMissing)
+    }
+
+    /// "A", "A and B", "A, B, and C" — the shape the permission notice reads in.
+    private static func sentenceList(_ items: [String]) -> String {
+        guard items.count > 1 else { return items.first ?? "" }
+        guard items.count > 2 else { return "\(items[0]) and \(items[1])" }
+        return items.dropLast().joined(separator: ", ") + ", and " + items[items.count - 1]
     }
 
     /// The finite user-authorized brain route was exhausted. Individual target failures never use

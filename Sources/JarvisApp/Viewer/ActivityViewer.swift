@@ -32,6 +32,7 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
     private var copySessionIDButton: NSButton?
     private var evaluateButton: NSButton?
     private var clearHistoryButton: NSButton?
+    private var exportButton: NSButton?
     /// Survives a Settings close/reopen because the viewer itself lives for the whole app run.
     private var isEvaluating = false
     /// Retained so Quit can cancel the direct CLI child instead of leaving an orphaned paid run.
@@ -106,6 +107,13 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         header.addSubview(clear)
         self.clearHistoryButton = clear
 
+        let export = NSButton(title: "Export…", target: self, action: #selector(exportTapped))
+        export.translatesAutoresizingMaskIntoConstraints = false
+        export.bezelStyle = .rounded
+        export.toolTip = "Export one or more sessions' history to a file"
+        header.addSubview(export)
+        self.exportButton = export
+
         let preferredPickerWidth = pop.widthAnchor.constraint(equalToConstant: 230)
         // Prefer the full picker width, but let window resizing compress it.
         preferredPickerWidth.priority = .init(rawValue: 490)
@@ -123,7 +131,10 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
             evaluate.trailingAnchor.constraint(equalTo: clear.leadingAnchor, constant: -8),
             clear.centerYAnchor.constraint(equalTo: header.centerYAnchor),
             clear.widthAnchor.constraint(equalToConstant: 110),
-            clear.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -12),
+            clear.trailingAnchor.constraint(equalTo: export.leadingAnchor, constant: -8),
+            export.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            export.widthAnchor.constraint(equalToConstant: 90),
+            export.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -12),
         ])
 
         let wv = WKWebView(frame: NSRect(x: 0, y: 0,
@@ -149,6 +160,7 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         copySessionIDButton = nil
         evaluateButton = nil
         clearHistoryButton = nil
+        exportButton = nil
         loaded = false
         pending = []
         snapshotRows = []
@@ -444,6 +456,16 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         alert.messageText = title
         alert.informativeText = message
         alert.runModal() // ghost-mode-allowed: guarded explicit Activity action
+    }
+
+    // MARK: - Export
+
+    @objc private func exportTapped() {
+        guard isCoachingRunning?() != true else {
+            jlog("Jarvis: suppressed Activity export presentation while coaching is running.")
+            return
+        }
+        ActivityExportSheet.present(sessions: sessions, store: store)
     }
 
     // MARK: - Clear history

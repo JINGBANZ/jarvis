@@ -13,10 +13,13 @@ import Testing
         #expect(Defaults.Brain.providerKey == "brain.provider")
         #expect(Defaults.Brain.fallbackTargetsKey == "brain.fallbackTargets")
         #expect(Defaults.Brain.effortKey == "brain.reasoningEffort")
+        #expect(Defaults.Brain.interviewFormatKey == "brain.interviewFormat")
         #expect(Defaults.Transcription.providerKey == "transcription.provider")
         #expect(Defaults.Transcription.openAIModelKey == "transcription.openai.model")
         #expect(Defaults.Transcription.openAIExpectedLanguagesKey
             == "transcription.openai.expected-languages")
+        #expect(Defaults.Transcription.openAIVocabularyKeywordsKey
+            == "transcription.openai.vocabulary-keywords")
         #expect(Defaults.Transcription.appleSpeechLocaleKey == "transcription.apple-speech.locale")
         #expect(Defaults.Screen.scopeKey == "screen.captureScope")
         #expect(Defaults.Screen.displayIndexKey == "screen.captureDisplayIndex")
@@ -28,6 +31,8 @@ import Testing
         #expect(Defaults.Overlay.Box.opacityKey == "overlayBox.opacity")
         #expect(Defaults.Overlay.Box.widthKey == "overlayBox.width")
         #expect(Defaults.Overlay.Box.heightKey == "overlayBox.height")
+        #expect(Defaults.Hotkey.keyCodeKey == "hotkey.keyCode")
+        #expect(Defaults.Hotkey.modifiersKey == "hotkey.modifiers")
     }
 
     /// OpenAI keeps the pre-provider key so existing installs keep their model selection.
@@ -58,6 +63,7 @@ import Testing
         #expect(Defaults.Transcription.openAIModel == .gpt4oTranscribe)
         // Empty means automatic detection — never a silent assumption of English.
         #expect(Defaults.Transcription.openAIExpectedLanguages.isEmpty)
+        #expect(Defaults.Transcription.openAIVocabularyKeywords.isEmpty)
         #expect(!Defaults.Transcription.appleSpeechLocaleIdentifier.isEmpty)
     }
 
@@ -65,6 +71,15 @@ import Testing
         #expect(Defaults.Screen.scope == .activeWindow)
         #expect(Defaults.Screen.displayIndex == 1)
         #expect(Defaults.Screen.displayIndexMinimum == 1)
+    }
+
+    /// kVK_ANSI_J + ⌘⌥ — the original hardcoded ⌥⌘J, so an existing install sees no behavior change
+    /// until it opts to rebind.
+    @Test func hotkeyDefaults() {
+        #expect(Defaults.Hotkey.keyCode == 38)
+        #expect(Defaults.Hotkey.modifiers == [.command, .option])
+        #expect(Defaults.Hotkey.combination
+            == HotkeyCombination(keyCode: 38, modifiers: [.command, .option]))
     }
 
     @Test func overlayDefaults() {

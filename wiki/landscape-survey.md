@@ -1,7 +1,8 @@
 # Landscape Survey — What I Tried and Evaluated
 
 > The record of existing tools and products considered before deciding to build. The conclusion
-> drawn from this page — build our own — is summarized in [decisions.md](./decisions.md).
+> drawn from this page is to build our own; [fork-evaluation.md](./fork-evaluation.md) covers the
+> open-source candidates as a fork base.
 
 ## The Requirement Being Tested
 

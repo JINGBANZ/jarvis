@@ -5,7 +5,10 @@ local-process boundaries. Small, testable changes are preferred.
 
 ## Before opening a pull request
 
-1. Use an Apple silicon Mac with macOS 14.2+, Swift 6, and the Command Line Tools.
+1. To build and run the gate locally, use an Apple silicon Mac with macOS 14.2+, Swift 6, and the
+   Command Line Tools. This is what local validation needs, not a condition of contributing: without
+   that hardware you can still open a pull request, CI runs the gate, and a maintainer runs any
+   live smoke.
 2. Create a branch or isolated worktree; never commit directly to `main`.
 3. Put Foundation-only logic in `JarvisCore` and keep OS-bound code thin in `JarvisApp` or
    `JarvisOverlay`. Read [`CLAUDE.md`](./CLAUDE.md) and the relevant page under [`wiki/`](./wiki/).
@@ -19,6 +22,20 @@ local-process boundaries. Small, testable changes are preferred.
 Use Conventional Commits in lowercase imperative form, such as `fix(audio): preserve reconnect
 order`. Pull requests should explain the user-visible behavior, security or privacy impact, and
 validation performed.
+
+## How a pull request merges
+
+`main` takes squash merges only, and requires a pull request, one approving review, and a passing
+`test` check — the same gate as above, run on macOS by CI. Pushing new commits dismisses an existing
+approval, so expect to ask for another look after addressing review feedback.
+
+You do not need write access to contribute: a pull request from your own fork gets the same CI run.
+CodeRabbit comments on every pull request, forks included — it reviews, it never approves, and a
+maintainer still reads the change.
+
+The first workflow run on a fork pull request waits for a maintainer to approve it, so CI can sit
+idle for a while before it starts. That is a repository setting, not something wrong with your
+branch, and it stops applying once your first run has been approved.
 
 ## Security and privacy
 

@@ -31,6 +31,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     private let transcriptionPreferences = TranscriptionPreferences()
     private let screenPreferences = ScreenCapturePreferences()
     private let prepMaterialPreferences = PrepMaterialPreferences()
+    private let permissionPreferences = PermissionPreferences()
+    private var permissionGate: PermissionGate!
+    /// Whether the app's own surfaces exist yet. Nothing is built while the permission gate is up.
+    private var didStartApp = false
+    private let hotkeyPreferences = HotkeyPreferences()
     /// Monotonic revision stamped on each control-plane snapshot. Bumped at Start and whenever an
     /// explicit Settings edit installs a fresh plan; never by runtime health.
     private var planRevision: UInt = 0
@@ -68,6 +73,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     /// A Start that is still discovering local CLIs. Stop or a newer Start cancels it before the
     /// prepared runtime can be installed on the main actor.
     private var pendingStartTask: Task<Void, Never>?
+    /// Reads prep-material files and can shell out to `textutil`; cancelled on Stop like compaction
+    /// is, so it never outlives the session it was built for.
+    private var prepMaterialIndexTask: Task<Void, Never>?
     private var pendingStartRevision: UInt = 0
     /// The global hint hotkey. Lives for the whole app run; its callback beeps when no session runs.
     private var hotkeys: HotkeyController?
@@ -83,9 +91,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     private var pendingTurnDrainIDs: Set<UUID> = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        brain = BrainComposition(secrets: secrets, coachTools: coachTools, host: self)
         NSApp.setActivationPolicy(.accessory) // ghost-mode-allowed: launch configuration
         MainMenu.install() // an Edit menu so ⌘X/⌘C/⌘V/⌘A work in the Settings text fields
+
+        // Nothing else comes up until Jarvis holds every grant: no menu bar, no overlays, no session
+        // runtime. A half-permitted Jarvis is not a usable product, and a Start that can only fail is
+        // worse than no Start at all.
+        permissionGate = PermissionGate(preferences: permissionPreferences)
+        permissionGate.onSatisfied = { [weak self] in self?.startApp() }
+        // Asynchronous because proving the system-audio grant means running a tap, which must not
+        // block the main thread.
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            if await self.permissionGate.holdsEveryGrant() {
+                self.startApp()
+            } else {
+                self.permissionGate.present()
+            }
+        }
+    }
+
+    /// Builds everything a permitted Jarvis needs. Reached either straight from launch or from the
+    /// gate closing, and never twice.
+    private func startApp() {
+        didStartApp = true
+        brain = BrainComposition(secrets: secrets, coachTools: coachTools, host: self)
         networkDiagnostics.start()
 
         // The activity viewer lives for the whole app run, but a *session* is one coaching run: each
@@ -123,9 +153,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                                     preferredProvider: self.brain.preferences.provider)
         }
 
-        // Ask for Microphone + Screen Recording up front, not lazily mid-session.
-        Permissions.primeAll()
-
         overlayCaption = OverlayCaptionPanel()
         overlayCaption.setFontSize(appearance.captionFontSize)
         overlayCaption.setBackgroundOpacity(appearance.captionBackgroundOpacity)
@@ -141,7 +168,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             appearance.boxWidth = width
             appearance.boxHeight = height
         }
-        overlayBox.setEnabled(appearance.boxEnabled)   // on by default — shows the history box at launch
+        // On by default, but the box is a session surface: this only arms the switch. It reaches the
+        // screen on Start (below) and leaves it on Stop, so a stopped Jarvis shows nothing.
+        overlayBox.setEnabled(appearance.boxEnabled)
 
         // No updater in a development bundle (no feed URL), so the menu omits the item entirely.
         updates = UpdateController()
@@ -149,6 +178,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             updateAvailability: updates.map { updater in { updater.canCheckForUpdates } },
             onCheckForUpdates: updates.map { updater in { updater.checkForUpdates() } })
         renderReadinessStatus(readiness.status)
+
+        // The global hint hotkey is constructed before Settings so HotkeySection's closures (built
+        // below) can already read/apply through it. `onRequestHint` is wired later, alongside the
+        // rest of session lifecycle plumbing.
+        hotkeys = HotkeyController(preferences: hotkeyPreferences)
 
         // Unified Settings window: Brain owns behavior; Connections owns shared authentication.
         // A pasted key is stored but does not auto-start. While running, it updates future Realtime
@@ -177,10 +211,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                 self?.reapplySessionPlan()
             },
             PrepMaterialSection(preferences: prepMaterialPreferences),
+            HotkeySection(
+                preferences: hotkeyPreferences,
+                hasActiveHotkey: { [weak self] in self?.hotkeys?.registered != nil },
+                applyCombination: { [weak self] combination in
+                    // `hotkeys` is constructed above, before Settings can ever be shown, so `self`
+                    // being torn down is the only way this falls through — report failure rather
+                    // than falsely claiming a rebind that never happened.
+                    self?.hotkeys?.apply(combination) ?? .failed(status: -1)
+                }),
             ActivitySection(viewer: activityViewer),
         ]
         settingsWindow = SettingsWindow(sections: sections)
         menuBar.onOpenSettings = { [weak self] in self?.settingsWindow.show() }
+        menuBar.onClearOverlayBox = { [weak self] in self?.overlayBox.clear() }
 
         // The menu drives the pipeline lifecycle. Jarvis does NOT auto-start; the user presses Start.
         menuBar.onStart = { [weak self] in self?.start() ?? false }
@@ -191,9 +235,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             self?.stop(reason: reason)
         }
 
-        // Global hint hotkey: while a session is running, screenshot + ask the brain for a hint in one
-        // trip; otherwise beep — there's no live driver/conversation to hint from when stopped.
-        hotkeys = HotkeyController()
+        // While a session is running, screenshot + ask the brain for a hint in one trip; otherwise
+        // beep — there's no live driver/conversation to hint from when stopped.
         hotkeys?.onRequestHint = { [weak self] in
             guard let self, let fire = self.requestManualHint else {
                 NSSound.beep() // ghost-mode-allowed: explicit user hotkey while stopped
@@ -212,6 +255,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        // Quitting from the permission gate happens before anything exists to stop.
+        guard didStartApp else { return .terminateNow }
         activityViewer?.cancelEvaluation()
         stop(reason: .applicationQuit)
         return .terminateNow
@@ -236,7 +281,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         brain.applySavedAPIKey(key)
     }
 
-    /// Validate a Start immediately, then prepare any local-CLI targets and on-device speech assets.
+    /// Validate a Start immediately, then prove system audio and prepare any local-CLI targets and
+    /// on-device speech assets.
     /// Returns `true` once startup is accepted; the menu remains in Starting until preparation and
     /// both transcription endpoints finish. Stop, a newer Start, or a relevant preference/credential
     /// edit makes the prepared result stale before it can install a pipeline.
@@ -248,11 +294,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         let transcriptionConfiguration = transcriptionPreferences.configuration
         let transcriptionProvider = transcriptionConfiguration.provider
         let brainRoute = brain.preferences.route
+        // Fixed for the whole session, like transcription's language/model choice — never
+        // reclassified mid-conversation. No selection means no addendum, not a guess assembled from
+        // whatever formats have content — see wiki/architecture.md § Models and APIs.
+        let interviewFormatAddendum = brain.preferences.interviewFormat?.promptAddendum ?? ""
         let key = secrets.apiKey() ?? ""
         let requiresOpenAIKey = transcriptionProvider.requiresOpenAIAPIKey(for: brainRoute)
         let preparesAppleSpeech = transcriptionProvider == .appleSpeech
+        // Only the readable grants gate a Start here: microphone live, screen recording from this
+        // process's preflight. System audio is settled by the probe below, which is the only
+        // authority on it — requiring the previous answer here would let one failed probe refuse
+        // every later Start until Jarvis was relaunched, while the notice says to press Start again.
         let readinessConfiguration = JarvisReadiness.Configuration(
-            requiredPermissions: [.microphone],
+            requiredPermissions: PermissionGate.required.subtracting([.systemAudio]),
             requiredCredentials: requiresOpenAIKey ? [.openAIAPIKey] : [],
             requiresTranscriptionPreparation: preparesAppleSpeech)
         let readinessStart = readiness.begin(configuration: readinessConfiguration)
@@ -293,21 +347,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         pendingStartTask?.cancel()
         pendingStartTask = nil
         let cliProviders = brainRoute.targets.map(\.provider).filter(\.usesLocalCLI)
-        guard preparesAppleSpeech || !cliProviders.isEmpty else {
-            return installPreparedStart(
-                apiKey: key,
-                brainRoute: brainRoute,
-                transcriptionConfiguration: transcriptionConfiguration,
-                appleSpeechLocale: nil,
-                detectedCLIs: [:],
-                wasRunning: wasRunning,
-                reportContext: reportContext,
-                readinessSession: readinessSession)
-        }
-
         let detector = AgentCLIDetector()
         pendingStartTask = Task { [weak self] in
             guard let self else { return }
+
+            // Prove system audio again for this session. The launch proof can be hours or days old
+            // on a menu-bar app, and a grant withdrawn since would otherwise produce a session that
+            // reports full readiness while hearing nothing: a refused tap still delivers frames, and
+            // capture health counts frames without inspecting amplitude. Microphone and Screen
+            // Recording need no probe — the checks above read them directly.
+            guard await Permissions.request(.systemAudio, remembering: self.permissionPreferences)
+            else {
+                self.rejectStartWithoutSystemAudio(
+                    revision: revision,
+                    wasRunning: wasRunning,
+                    context: reportContext,
+                    readinessSession: readinessSession)
+                return
+            }
+
             var appleSpeechLocale: Locale?
             if preparesAppleSpeech {
                 guard #available(macOS 26.0, *) else {
@@ -373,6 +431,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             _ = self.installPreparedStart(
                 apiKey: key,
                 brainRoute: brainRoute,
+                interviewFormatAddendum: interviewFormatAddendum,
                 transcriptionConfiguration: transcriptionConfiguration,
                 appleSpeechLocale: appleSpeechLocale,
                 detectedCLIs: detectedCLIs,
@@ -404,11 +463,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         errorReporter.reportImmediately(error, context: context)
     }
 
+    /// A Start whose system-audio proof failed. Distinct from a transcription blocker: the session
+    /// never begins, and the notice names the permission rather than the provider.
+    private func rejectStartWithoutSystemAudio(
+        revision: UInt,
+        wasRunning: Bool,
+        context: UserFacingError.PresentationContext,
+        readinessSession: JarvisReadiness.Session
+    ) {
+        guard pendingStartRevision == revision,
+              self.readinessSession == readinessSession else { return }
+        pendingStartTask = nil
+        observeReadiness(
+            .permissions(granted: Permissions.grantedReadinessPermissions()),
+            for: readinessSession)
+        jlog("Jarvis: can't start — system audio is no longer proved for this session.")
+        if wasRunning {
+            artifacts.sessionAudit?.record(.settingsChangeNotApplied)
+        }
+        errorReporter.reportImmediately(.permissionsMissing([.systemAudio]), context: context)
+    }
+
     /// Install a fully prepared route on the main actor. The primary preflight still happens before
     /// tearing down a running pipeline, while unavailable fallback CLIs remain ordered skip targets.
     private func installPreparedStart(
         apiKey key: String,
         brainRoute: BrainRoute,
+        interviewFormatAddendum: String,
         transcriptionConfiguration: TranscriptionConfiguration,
         appleSpeechLocale: Locale?,
         detectedCLIs initialDetectedCLIs: [BrainProvider: DetectedAgentCLI],
@@ -459,6 +540,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         // Each target's coach and summarizer share the session traffic log. Every fresh attempt is a
         // distinct audit-visible request; no transport wrapper replays a failed request.
         let sessionDirectory = artifacts.currentSessionDir!
+        // Fixed for the whole session — set before every construction/reapply path that bakes a
+        // system prompt, including a later `applyBrainPreferencesToRunningSession` hot switch.
+        brain.interviewFormatAddendum = interviewFormatAddendum
         let configuredRoute = brain.makeConfiguredRoute(
             brainRoute,
             detectedCLIs: detectedCLIs,
@@ -481,7 +565,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             sessionStart: conversationStart,
             coachingAttempts: artifacts.sessionAudit,
             plan: freshSessionPlan(),
-            activity: artifacts.sessionAudit)
+            activity: artifacts.sessionAudit,
+            interviewFormatAddendum: interviewFormatAddendum)
+
+        // Building the index reads files and can shell out to `textutil`, so it runs off the Start
+        // path entirely rather than delaying it — a trigger that fires before this lands just
+        // doesn't have search_prep_notes available for that one attempt. Tracked and cancelled in
+        // `stop()` for the same reason compaction is: an untracked task would keep reading files and
+        // spawning textutil subprocesses after the session it belongs to has already torn down.
+        let prepMaterialSources = prepMaterialPreferences.sources
+        prepMaterialIndexTask = Task.detached(priority: .utility) { [weak driver] in
+            let index = await PrepMaterialIndexBuilder.build(from: prepMaterialSources)
+            guard !Task.isCancelled else { return }
+            driver?.installPrepMaterial(index)
+        }
 
         // CoachDriver is @unchecked Sendable; capture it (not @MainActor self) in the callbacks.
         // Route turns through TurnTaskBox so Stop can cancel an in-flight one. Concurrent triggers are
@@ -575,7 +672,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         // gone, so treat it as a full (mic-side) terminal failure.
         let localTurnDetectionSilenceDuration: TimeInterval? =
             transcriptionConfiguration.turnDetectionStrategy == .clientCommit
-            ? TimeInterval(config.vadSilenceDurationMs) / 1_000
+            ? TimeInterval(config.localEndpointSilenceDurationMs) / 1_000
             : nil
         let capture = AggregateEchoCapture(
             onMicCaptured: { [weak transcriber] sequence, samples, capturedAt in
@@ -689,6 +786,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         // above, so any frame already queued on the main actor is still observed by this monitor.
         startCaptureReadiness(readinessSession: readinessSession)
         sessionIsLive = true
+        // Show the (already cleared) history box, from the one place that declares the session live —
+        // every earlier `return false` leaves the desktop untouched.
+        overlayBox.setSessionLive(true)
         jlog("Jarvis: coaching starting — verifying transcription endpoints.")
         jlog("Jarvis network path at start: \(networkDiagnostics.currentSummary)")
         activityViewer.coachingStateDidChange()   // the live session is no longer evaluable
@@ -707,6 +807,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         pendingStartRevision &+= 1
         pendingStartTask?.cancel()
         pendingStartTask = nil
+        prepMaterialIndexTask?.cancel()
+        prepMaterialIndexTask = nil
         let hadAllocatedPipeline = transcriber != nil || themTranscriber != nil
         let preservesReplacementReadiness = readinessToPreserve == readinessSession
         let preservesStartupBlock = !hadAllocatedPipeline
@@ -714,6 +816,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             && readiness.status.isBlocked
         let endedLiveSession = sessionIsLive
         sessionIsLive = false
+        overlayBox.setSessionLive(false)     // the history box goes away with the session
         requestManualHint = nil              // hotkey beeps again once there's no live session
         // Capture and clear this session handle before a quick Start installs another. The cancelled
         // tasks retain only its observer ports and can finish enqueueing into the old session.

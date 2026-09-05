@@ -1,7 +1,10 @@
 name: Claude Code Review
 
 # Review logic follows the shared workflow's main branch. Automatic reviews remain limited to
-# branches in this repository; the reusable workflow defaults to `ubuntu-latest`.
+# branches in this repository: a fork `pull_request` run cannot read CLAUDE_CODE_OAUTH_TOKEN, and a
+# `pull_request_target` caller would hand fork-authored input to a credential-bearing reviewer (the
+# read-only `permissions:` block bounds only GITHUB_TOKEN, not the App token the action posts with).
+# CodeRabbit reviews forks. The reusable workflow defaults to `ubuntu-latest`.
 on:
   pull_request:
     types: [opened, synchronize, ready_for_review, reopened]

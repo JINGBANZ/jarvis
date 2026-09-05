@@ -54,6 +54,24 @@ public final class TranscriptionPreferences {
         }
     }
 
+    /// Literal terms (jargon, names) that bias GPT Transcribe / GPT Live recognition. GPT-4o Transcribe
+    /// does not accept them, so they are inert until the user also picks one of those models.
+    public var openAIVocabularyKeywords: [String] {
+        get {
+            guard let stored = defaults.stringArray(
+                forKey: Defaults.Transcription.openAIVocabularyKeywordsKey) else {
+                return Defaults.Transcription.openAIVocabularyKeywords
+            }
+            return stored
+        }
+        set {
+            let keywords = newValue
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            defaults.set(keywords, forKey: Defaults.Transcription.openAIVocabularyKeywordsKey)
+        }
+    }
+
     /// Apple Speech requires one locale for the complete session. The current macOS locale is a
     /// visible initial suggestion only; Settings resolves and displays the supported equivalent so
     /// the user can correct it before Start.
@@ -77,6 +95,7 @@ public final class TranscriptionPreferences {
             provider: provider,
             openAIModel: openAIModel,
             openAIExpectedLanguages: openAIExpectedLanguages,
+            openAIVocabularyKeywords: openAIVocabularyKeywords,
             appleSpeechLocaleIdentifier: appleSpeechLocaleIdentifier)
     }
 }

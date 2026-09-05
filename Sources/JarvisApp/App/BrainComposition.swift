@@ -69,6 +69,15 @@ final class BrainComposition {
     private var activeBrainTarget: BrainTarget?
     private var pendingBrainChangeFrom: BrainTarget?
 
+    /// The current session's resolved interview-format guidance, fixed once at Start (set directly
+    /// by the App before the first `makeConfiguredRoute` call) and reused by every later hot
+    /// reapply — `applyBrainPreferencesToRunningSession` never re-reads `preferences.interviewFormat`
+    /// live, so a Settings edit mid-session cannot retroactively change a value that was meant to be
+    /// fixed for the whole session. Baked into the CLI system prompt through the same
+    /// `JarvisPrompts.Coach.system(prepMaterial:formatAddendum:)` builder `CoachAttemptRunner`
+    /// calls per turn.
+    var interviewFormatAddendum = ""
+
     /// The two clients that move together with one provider/model route target.
     private struct BrainRuntime {
         let coach: BrainClient
@@ -132,7 +141,12 @@ final class BrainComposition {
                                        workDirectory: sessionDir,
                                        timeout: BrainWorkloadTimeout.liveCoaching,
                                        traffic: host.liveSessionEvidence, trafficTag: "coach",
-                                       systemPrompt: JarvisPrompts.Coach.system,
+                                       // No prep material: it is indexed off the Start path and
+                                       // installed on the driver later, so a prompt fixed at
+                                       // construction cannot describe it.
+                                       systemPrompt: JarvisPrompts.Coach.system(
+                                           prepMaterial: false,
+                                           formatAddendum: interviewFormatAddendum),
                                        tools: coachTools,
                                        toolChoice: .required,
                                        runtime: runtimes.coach,

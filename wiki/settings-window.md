@@ -64,7 +64,7 @@ lazy lifecycle; its adaptive light/dark feed is simply framed by the same page a
 
 | Section class | Tab title | Always present | Description |
 |---|---|---|---|
-| `BrainSection` | "Brain" | yes | Behavior that decides who answers and what Jarvis hears, in one scrolling stack: the primary provider/model, an ordered editable fallback list, reasoning effort, and transcription provider/model/expected-languages-or-locale controls. A live status badge mirrors the active brain provider without moving the saved route. Valid Brain-route changes take effect between coaching attempts while running; transcription changes take effect on the next Start. |
+| `BrainSection` | "Brain" | yes | Behavior that decides who answers and what Jarvis hears, in one scrolling stack: the primary provider/model, an ordered editable fallback list, reasoning effort, interview format, and transcription provider/model/expected-languages-or-locale controls. A live status badge mirrors the active brain provider without moving the saved route. Valid Brain-route changes take effect between coaching attempts while running; interview format and transcription changes take effect on the next Start. |
 | `ConnectionsSection` | "Connections" | yes | Shared authentication and provider readiness in three stacked cards. OpenAI exposes the Jarvis-managed API-key editor; Claude Code and Codex CLI report their externally managed local-account state without importing or changing those accounts. Saving a key never restarts a live conversation: established OpenAI Realtime endpoints stay connected and use it on a later reconnect. |
 | `OverlaySection` | "Overlay" | yes | Two matching cards, one per overlay surface — **Overlay Caption** (the transient on-screen tip) and **Overlay Box** (the persistent response history). Each card has an icon, description, On/Off toggle, and the same Text Size + Opacity row layout. When a surface is **on** its rows and live sample appear only while the Overlay tab is selected (`didBecomeActive`/`didResignActive`); when **off**, its rows and sample are hidden and the card collapses. Persists via `OverlayAppearance`. |
 | `DisplaySection` | "Screen" | yes | One **Screen capture** card with the capture-scope dropdown — **Active window** (default) or one **Entire display** entry per connected display — followed by a concise fallback/privacy callout. Persists via `ScreenCapturePreferences` and applies to the next screenshot. |
@@ -92,10 +92,20 @@ on/off flag, a font size, and an opacity; the box additionally carries its width
 The two surfaces default opposite ways — the caption **off**, the box **on** — so a first run shows
 the durable history rather than a flashing caption. `AppDelegate` applies both enabled flags at launch.
 
+The box is a **session surface**: switched on, it reaches the screen on Start (already cleared, for the
+new conversation) and leaves it on Stop, so a stopped Jarvis puts nothing on the desktop. Two flags in
+`OverlayBoxPanel` decide it — the Settings switch (`setEnabled`) and the session (`setSessionLive`,
+called by `AppDelegate` from the one line that declares a session live and the one that ends it) — and
+a single private `applyVisibility()` derives `isEnabled && isSessionLive`. Keeping that rule in one
+place is why the panel, not the two call sites, owns it: switching the box on from Settings while
+stopped would otherwise leave it on screen with no session behind it. The Settings preview overrides
+the rule while the Overlay tab is open and re-derives it on close.
+
 Opacity governs the background fill only, so both surfaces accept 0%: a text-only surface with no
-backdrop, not a hidden one. The On/Off toggle stays the only thing that hides a surface. Both share
-one range because the tab presents their sliders identically. A corrupted non-finite stored value
-restores the setting's own default rather than the range floor, which at 0% would read as breakage.
+backdrop, not a hidden one. Nothing here takes a surface off screen: that is the On/Off toggle, and
+for the box the end of a session as well. Both share one range because the tab presents their
+sliders identically. A corrupted non-finite stored value restores the setting's own default rather
+than the range floor, which at 0% would read as breakage.
 
 The box is the one surface the user sizes directly, by dragging its edges. `OverlayBoxPanel` reports a
 finished drag through `onSizeChanged` and takes the restored size as an `init` parameter, so the panel
@@ -120,14 +130,14 @@ conformed by `OverlayBoxPanel`. Both are declared in
 round-trip through `OverlayAppearance` so they survive an app relaunch.
 
 `setEnabled(false)` on the caption suppresses coaching tips (dropping any in-flight/queued tip); on
-the box it simply hides the window. A surface's live sample is shown only while the Overlay tab is
-selected **and that surface is on** — `didBecomeActive` previews each surface for its enabled state,
-and flipping a toggle shows/hides that surface's sample (and collapses/expands its sliders via
-`relayout()`) live. Each panel's `showAppearancePreview(_:)` re-asserts capture exclusion so the
-preview stays hidden from screen capture — same defense-in-depth as the coaching display path. The
-box's preview shows sample
-text without disturbing the real log and restores the box's **user-intended** visibility on close (it
-tracks intent separately from `panel.isVisible` so the setting can't desync). The plain setters
+the box it takes the window off screen, and `setEnabled(true)` returns it there only while a session
+is running. A surface's live sample is shown only while the Overlay tab is selected **and that
+surface is on** — `didBecomeActive` previews each surface for its enabled state, and flipping a
+toggle shows/hides that surface's sample (and collapses/expands its sliders via `relayout()`) live.
+Each panel's `showAppearancePreview(_:)` re-asserts capture exclusion so the preview stays hidden
+from screen capture — same defense-in-depth as the coaching display path. The box's preview shows
+sample text without disturbing the real log and re-derives `isEnabled && isSessionLive` on close, so
+closing the tab can leave the box on screen only while both hold. The plain setters
 (`setFontSize`/`setBackgroundOpacity`/`setOpacity`) only change appearance and don't touch
 `sharingType`. See [overlay-invisibility.md](./overlay-invisibility.md).
 
@@ -193,13 +203,23 @@ list. Stop → Start begins at the saved primary again.
 
 **Model + reasoning effort.** A **Model** dropdown is drawn from `BrainModelCatalog` per provider.
 OpenAI API and Codex CLI share one concrete model list; Claude Code exposes the current concrete
-release in each supported family. Each provider remembers its own model; without a valid preference,
+release in each supported family. Concrete releases, never rolling aliases such as `sonnet` or
+`opus` or a CLI's own default: a saved route must keep naming the release the user picked, and an
+alias silently retargets it the day the provider advances it. Each provider remembers its own model; without a valid preference,
 the first entry in that provider's catalog is selected. The **Reasoning effort** picker
 (`ReasoningEffort`: None / Low / Medium / High) is stored once and applies uniformly to whichever
 provider is active; its default lives with the others in
 [`Defaults.Brain`](../Sources/JarvisCore/Config/Defaults.swift). `CLIBrainClient` maps it onto Claude Code's `--effort` and Codex's
 per-thread `model_reasoning_effort`; both CLI scales start at `low`, so None clamps to Low while the
 three shared levels pass through.
+
+**Interview format.** A second Coaching-card picker (`InterviewFormat`: **None**, plus one entry per
+format that actually has content — System Design today) supplies additional coaching-prompt
+vocabulary for the selected format. **None** persists as no selection and resolves to no addendum at
+all, so a user who never opens this setting sees no behavior change; it is not a guess assembled
+from whatever formats happen to have content. Fixed for the whole session, like the transcription
+language/model choice: it applies on the next Start, never reclassified mid-conversation. See
+[architecture.md → Models and APIs](./architecture.md#models-and-apis).
 
 **Transcription.** This group owns the separate speech-to-text role without conflating it with the
 brain route. Its picker contains **OpenAI** (the default) and **Apple Speech (macOS 26+)**. Apple is
@@ -215,7 +235,10 @@ are sent to GPT Transcribe and GPT Live; GPT-4o remains automatic because it acc
 language hint, and the row says so whenever GPT-4o has multiple selections. The canonical list is one
 immutable Start-time expectation shared by `me` and `them`,
 so the transcription model—not a Jarvis per-turn classifier—handles a speaker switching languages
-inside one sentence. Model-specific language, context, and turn-detection behavior is defined in
+inside one sentence. **Vocabulary** is a free-text, comma-separated glossary of literal terms
+(jargon, names) sent as `keywords` to bias recognition; it applies only to GPT Transcribe and GPT
+Live and the row says so whenever GPT-4o Transcribe is selected. Blank entries are dropped on save.
+Model-specific language, context, and turn-detection behavior is defined in
 [architecture.md](./architecture.md#models-and-apis).
 
 With Apple Speech selected, **Conversation locale** is populated from
@@ -294,7 +317,10 @@ The window shot also gets an **on-device OCR sidecar**: `ScreenTextRecognizer` (
 `.accurate`, language correction off so code identifiers survive) recognizes the text and Core's
 `RecognizedTextLayout` rebuilds reading order; `CoachDriver` sends it in the `capture_screen`
 tool-result text beside the image, flagged as fallible, so the model reads exact code instead of
-deciphering pixels. Nothing eligible on screen → fall back to a full shot of the **main display**;
+deciphering pixels. OCR, not accessibility-tree extraction: Chrome exposes web content only under
+assistive-tech flags and Monaco virtualizes to the visible lines, so OCR gets the same text
+generically with none of the per-app fragility. Nor is the text a substitute for the image, which
+stays ground truth: diagrams and layout need vision, and OCR mangles the odd identifier. Nothing eligible on screen → fall back to a full shot of the **main display**;
 fallback and entire-display captures skip OCR deliberately (a whole display's text would feed the
 surrounding clutter back to the model as tokens).
 
@@ -327,7 +353,7 @@ Both values, their keys, and the main-display floor are declared in
 | `Sources/JarvisApp/Settings/SettingsCardView.swift` | Rounded group boundary, optional header, and resize callback |
 | `Sources/JarvisApp/Settings/SettingsRowView.swift` | Shared label/help/trailing-control row |
 | `Sources/JarvisApp/Settings/SettingsScrollView.swift` | Viewport-change adapter for variable-height card documents |
-| `Sources/JarvisApp/Settings/BrainSection.swift` | Minimal Brain tab composition: Provider + Reasoning effort + Transcription |
+| `Sources/JarvisApp/Settings/BrainSection.swift` | Minimal Brain tab composition: Provider + Reasoning effort + Interview format + Transcription |
 | `Sources/JarvisApp/Settings/ConnectionsSection.swift` | Shared OpenAI credential editor + external CLI account readiness |
 | `Sources/JarvisApp/Settings/BrainTargetRowView.swift` | Shared inline provider/model row for primary and fallback targets |
 | `Sources/JarvisApp/Settings/ProviderRouteEditor.swift` | Unified Primary + ordered fallback card and persistence mutations |

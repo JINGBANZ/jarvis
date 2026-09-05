@@ -31,6 +31,9 @@ cd "$(dirname "$0")/.."
 #                   recognized-text-layout logic. Foundation-only: the screencapture helper
 #                   process, transient JPEG, and cleanup-verification latch live at the macOS edge
 #                   in Sources/JarvisScreenCapture, behind the port.
+#   PrepMaterial/   the PrepMaterialSearching port, chunk model, and pure BM25 index — same shape as
+#                   Screen/: file reading and per-format extraction (PDFKit, textutil) live at the
+#                   macOS edge in Sources/JarvisApp/PrepMaterial, behind the port.
 #   Diagnostics/CaptureReadinessMonitor.swift, AudioContinuityWitness*.swift,
 #   AudioContinuityMatcher.swift
 #                   the capture-heartbeat source and capture health policy, which the diagram
@@ -65,6 +68,7 @@ kernel_paths=(
     Sources/JarvisCore/Brain
     Sources/JarvisCore/Prompts
     Sources/JarvisCore/Screen
+    Sources/JarvisCore/PrepMaterial
     Sources/JarvisCore/Diagnostics/CaptureReadinessMonitor.swift
     Sources/JarvisCore/Diagnostics/AudioContinuityWitness.swift
     "Sources/JarvisCore/Diagnostics/AudioContinuityWitness+Types.swift"
