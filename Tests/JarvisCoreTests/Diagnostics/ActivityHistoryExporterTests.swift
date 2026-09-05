@@ -111,6 +111,18 @@ import Foundation
         #expect(export.images.isEmpty)
     }
 
+    @Test func jarvisResponsesOnlyAddsFilenameSuffixForEveryFormat() {
+        let cases: [(ActivityHistoryExporter.ExportFormat, String)] =
+            [(.markdown, "activity-jarvis-only.md"), (.plainText, "activity-jarvis-only.txt"),
+             (.html, "activity-jarvis-only.html")]
+        for (format, expectedFilename) in cases {
+            let export = ActivityHistoryExporter.export(
+                session: session(), entries: [], format: format,
+                includeScreenshots: false, jarvisResponsesOnly: true)
+            #expect(export.filename == expectedFilename)
+        }
+    }
+
     @Test func emptyEntriesStillProduceHeaderOnlyDocument() {
         let export = ActivityHistoryExporter.export(
             session: session(), entries: [], format: .markdown,

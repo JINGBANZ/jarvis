@@ -22,21 +22,22 @@ public enum ActivityHistoryExporter {
         jarvisResponsesOnly: Bool
     ) -> Export {
         let kept = jarvisResponsesOnly ? responsesOnly(entries) : entries
+        let suffix = jarvisResponsesOnly ? "-jarvis-only" : ""
 
         switch format {
         case .markdown:
             return Export(
-                filename: "activity.md",
+                filename: "activity\(suffix).md",
                 text: markdown(session: session, entries: kept, includeScreenshots: includeScreenshots),
                 images: images(for: kept, includeScreenshots: includeScreenshots))
         case .plainText:
             return Export(
-                filename: "activity.txt",
+                filename: "activity\(suffix).txt",
                 text: plainText(session: session, entries: kept, includeScreenshots: includeScreenshots),
                 images: images(for: kept, includeScreenshots: includeScreenshots))
         case .html:
             return Export(
-                filename: "activity.html",
+                filename: "activity\(suffix).html",
                 text: html(session: session, entries: kept, includeScreenshots: includeScreenshots),
                 images: [])
         }
