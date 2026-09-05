@@ -39,7 +39,7 @@ public enum ActivityHistoryExporter {
             return Export(
                 filename: "activity\(suffix).html",
                 text: html(session: session, entries: kept, includeScreenshots: includeScreenshots),
-                images: [])
+                images: images(for: kept, includeScreenshots: includeScreenshots))
         }
     }
 

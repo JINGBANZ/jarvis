@@ -51,7 +51,7 @@ import Foundation
         #expect(export.images.count == 1)
     }
 
-    @Test func htmlInlinesScreenshotsAsBase64AndWritesNoSeparateImages() {
+    @Test func htmlInlinesScreenshotsAsBase64AndAlsoWritesAnImagesFolder() {
         let entries: [(ActivityLog.Entry, Data?)] = [
             (ActivityLog.Entry(time: "10:00:05", message: "👁 looking at your screen", imageFile: "shot-1.jpg"),
              Data([0xFF, 0xD8, 0xFF, 0xD9])),
@@ -61,7 +61,9 @@ import Foundation
             includeScreenshots: true, jarvisResponsesOnly: false)
         #expect(export.filename == "activity.html")
         #expect(export.text.contains("data:image/jpeg;base64,"))
-        #expect(export.images.isEmpty)
+        #expect(export.images.count == 1)
+        #expect(export.images[0].filename == "images/shot-1.jpg")
+        #expect(export.images[0].data == Data([0xFF, 0xD8, 0xFF, 0xD9]))
     }
 
     @Test func jarvisResponsesOnlyKeepsTipsAndScreenViewsButDropsHeardSpeechAndSystemRows() {
