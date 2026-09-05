@@ -71,9 +71,30 @@ enum TranscriptionSessionFactory {
             preconditionFailure("Apple Speech is unavailable in this build")
             #endif
         case .gemini:
-            // Task 6 adds the real Gemini transcriber; the provider is selectable now (Task 3 wires
-            // its credential through the readiness gate) but constructing a session isn't wired yet.
-            preconditionFailure("Gemini transcription is not yet implemented")
+            GeminiLiveTranscriber(
+                apiKey: apiKey,
+                model: configuration.geminiModel,
+                expectedLanguages: configuration.geminiExpectedLanguages,
+                vocabularyKeywords: configuration.geminiVocabularyKeywords,
+                mode: configuration.geminiMode,
+                audioFormat: configuration.provider.audioFormat,
+                speaker: speaker,
+                transcript: transcript,
+                clock: clock,
+                sessionStart: sessionStart,
+                silenceTimeout: config.silenceTimeoutSeconds,
+                silenceMaxInterval: config.silenceMaxIntervalSeconds,
+                silenceIdleCutoff: speaker == .me
+                    ? config.silenceIdleCutoffSeconds
+                    : .infinity,
+                transcriptBatchingWindow: config.transcriptBatchingWindowSeconds,
+                maxBufferedAudioSeconds: config.maxBufferedAudioSeconds,
+                readyTimeout: config.realtimeReadyTimeoutSeconds,
+                pingInterval: config.realtimePingIntervalSeconds,
+                pongTimeout: config.realtimePongTimeoutSeconds,
+                networkStatus: networkStatus,
+                activity: activity,
+                benchmark: benchmark)
         }
     }
 }
