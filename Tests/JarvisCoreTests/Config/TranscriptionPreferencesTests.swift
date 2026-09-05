@@ -174,4 +174,52 @@ import Testing
         #expect(TranscriptionProvider.appleSpeech.requiredCredentials(for: openAIRoute)
             == [.openAIAPIKey])
     }
+
+    @Test func geminiModelExposesItsWireNameWithTheModelsPrefix() {
+        #expect(GeminiTranscriptionModel.geminiTranscribeLive.rawValue == "gemini-3.5-transcribe-live")
+        #expect(GeminiTranscriptionModel.geminiTranscribeLive.wireModelName
+            == "models/gemini-3.5-transcribe-live")
+    }
+
+    @Test func geminiModeMapsToTheUppercaseWireValues() {
+        #expect(GeminiTranscriptionMode.verbatim.wireValue == "VERBATIM")
+        #expect(GeminiTranscriptionMode.smart.wireValue == "SMART")
+    }
+
+    @Test func geminiPreferencesRoundTrip() {
+        let defaults = freshDefaults()
+        let preferences = TranscriptionPreferences(defaults: defaults)
+
+        preferences.geminiExpectedLanguages = [.mandarinChinese, .english]
+        preferences.geminiVocabularyKeywords = [" gRPC ", "", "Kubernetes"]
+        preferences.geminiMode = .smart
+
+        // Canonicalized to declaration order; blank keywords dropped and trimmed.
+        #expect(preferences.geminiExpectedLanguages == [.english, .mandarinChinese])
+        #expect(preferences.geminiVocabularyKeywords == ["gRPC", "Kubernetes"])
+        #expect(preferences.geminiMode == .smart)
+    }
+
+    @Test func geminiPreferencesFallBackToDefaultsWhenUnset() {
+        let preferences = TranscriptionPreferences(defaults: freshDefaults())
+        #expect(preferences.geminiModel == .geminiTranscribeLive)
+        #expect(preferences.geminiExpectedLanguages.isEmpty)
+        #expect(preferences.geminiVocabularyKeywords.isEmpty)
+        #expect(preferences.geminiMode == .verbatim)
+    }
+
+    @Test func startSnapshotCarriesTheGeminiChoices() {
+        let defaults = freshDefaults()
+        let preferences = TranscriptionPreferences(defaults: defaults)
+        preferences.provider = .gemini
+        preferences.geminiMode = .smart
+        preferences.geminiVocabularyKeywords = ["Kubernetes"]
+
+        let configuration = preferences.configuration
+        #expect(configuration.provider == .gemini)
+        #expect(configuration.geminiMode == .smart)
+        #expect(configuration.geminiVocabularyKeywords == ["Kubernetes"])
+        // Gemini's server owns turn boundaries, so no client strategy is derived.
+        #expect(configuration.turnDetectionStrategy == nil)
+    }
 }
