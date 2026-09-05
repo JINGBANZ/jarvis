@@ -1,13 +1,8 @@
 import Foundation
 
-/// The interview format a coaching session is specialized for. Chosen once at Start — like
-/// `TranscriptionPreferences.openAIExpectedLanguages` — and fixed for the whole session, never
-/// guessed or reclassified mid-conversation: an automatic, in-session classifier was considered and
-/// rejected, both for guessing once and locking in (misclassifies a session that shifts formats) and
-/// for continuously re-guessing (the same "brittle state machine" a history-compaction design
-/// already rejected — see wiki/architecture.md § Models and APIs). No selection means no addendum at
-/// all — not a guess assembled from whatever formats happen to have content — so a user who never
-/// opens this setting sees no behavior change at all.
+/// An optional interview-format override. The absence of an override supplies automatic routing
+/// guidance; the model chooses from current evidence on each coaching attempt without a separate
+/// classifier call or persisted in-session format state.
 public enum InterviewFormat: String, CaseIterable, Codable, Sendable {
     case coding = "coding"
     case systemDesign = "system-design"
@@ -22,16 +17,27 @@ public enum InterviewFormat: String, CaseIterable, Codable, Sendable {
     }
 
     /// Loaded from `Resources/Skills/<rawValue>.md` — a real Markdown file, not a Swift string
-    /// literal, so a skill's content reads and edits like prose. Coding has no authored override;
-    /// Behavioral and System Design do. Missing file → empty, not a crash — an unwritten skill is
-    /// a normal state, not an error.
+    /// literal, so a skill's content reads and edits like prose. Coding, Behavioral, and System
+    /// Design have authored guidance. Missing file → empty, not a crash — an unwritten skill is a
+    /// normal state, not an error.
     public var promptAddendum: String {
-        guard let url = Self.skillMarkdownURL(named: rawValue),
+        Self.addendum(named: rawValue)
+    }
+
+    /// Resolve the Start-time prompt once. A nil override uses one purpose-built automatic skill;
+    /// explicit formats remain isolated from it and from one another.
+    public static func resolvedPromptAddendum(for override: InterviewFormat?) -> String {
+        guard let override else {
+            return addendum(named: "automatic")
+        }
+        return override.promptAddendum
+    }
+
+    private static func addendum(named name: String) -> String {
+        guard let url = skillMarkdownURL(named: name),
               let body = try? String(contentsOf: url, encoding: .utf8)
                   .trimmingCharacters(in: .whitespacesAndNewlines),
-              !body.isEmpty else {
-            return ""
-        }
+              !body.isEmpty else { return "" }
         return "\n\n" + body
     }
 

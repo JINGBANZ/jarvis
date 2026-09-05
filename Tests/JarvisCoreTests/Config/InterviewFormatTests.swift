@@ -11,7 +11,7 @@ import Testing
     /// Missing skills remain a normal empty state, while each authored format becomes available
     /// through the same resource lookup the Settings picker consumes.
     @Test func authoredFormatsHaveExpectedContent() {
-        #expect(InterviewFormat.coding.promptAddendum.isEmpty)
+        #expect(InterviewFormat.coding.promptAddendum.contains("# Interview format: coding"))
         #expect(InterviewFormat.behavioral.promptAddendum.contains(
             "# Interview format: behavioral"))
         #expect(InterviewFormat.behavioral.promptAddendum.contains("STAR"))
@@ -22,11 +22,21 @@ import Testing
         #expect(InterviewFormat.systemDesign.promptAddendum.contains("API"))
     }
 
-    /// No selection means no addendum at all — not a guess assembled from whatever formats happen
-    /// to have content. `nil` is resolved by callers as `format?.promptAddendum ?? ""`; there is no
-    /// `InterviewFormat` API for it, so this pins the optional-chaining contract those callers rely on.
-    @Test func noSelectionResolvesToNoAddendum() {
-        let noSelection: InterviewFormat? = nil
-        #expect((noSelection?.promptAddendum ?? "") == "")
+    @Test func noSelectionResolvesToAutomaticGuidance() {
+        let addendum = InterviewFormat.resolvedPromptAddendum(for: nil)
+
+        #expect(addendum.contains("Choose coaching behavior"))
+        #expect(addendum.contains("For a coding task"))
+        #expect(addendum.contains("functional requirements"))
+        #expect(addendum.contains("STAR"))
+        #expect(addendum.contains("candidate-owned events"))
+    }
+
+    @Test func explicitSelectionDoesNotIncludeAutomaticRouting() {
+        let addendum = InterviewFormat.resolvedPromptAddendum(for: .coding)
+
+        #expect(addendum.contains("tokenizer"))
+        #expect(!addendum.contains("functional requirements"))
+        #expect(!addendum.contains("Choose coaching behavior"))
     }
 }

@@ -213,12 +213,14 @@ provider is active; its default lives with the others in
 per-thread `model_reasoning_effort`; both CLI scales start at `low`, so None clamps to Low while the
 three shared levels pass through.
 
-**Interview format.** A second Coaching-card picker (`InterviewFormat`: **None**, plus one entry per
-format that actually has content — Behavioral and System Design today) supplies specialist coaching
-for the selected format. **None** persists as no selection and resolves to no addendum at
-all, so a user who never opens this setting sees no behavior change; it is not a guess assembled
-from whatever formats happen to have content. Fixed for the whole session, like the transcription
-language/model choice: it applies on the next Start, never reclassified mid-conversation. See
+**Interview format.** A second Coaching-card picker defaults to **Automatic**, followed by one
+explicit override per format with authored content — Coding, Behavioral, and System Design today. Automatic
+selects appropriate coding, system-design, behavioral, or neutral coaching from the newest speech
+and current screen on every response; it needs no question-boundary signal and does not carry the
+previous response's inferred format forward. Ambiguous evidence stays on the base policy. Coding,
+Behavioral, and System Design remain optional next-Start overrides. The resolved prompt is fixed at Start so
+CLI and OpenAI providers share identical instructions, but Automatic's model-level choice changes
+with current evidence inside that prompt. Per-format coaching behavior is defined in
 [architecture.md → Models and APIs](./architecture.md#models-and-apis).
 
 **Transcription.** This group owns the separate speech-to-text role without conflating it with the

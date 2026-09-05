@@ -17,7 +17,7 @@ import Testing
             config: .default, transcript: transcript, route: route,
             screen: FakeScreen(), overlay: FakeOverlay(), clock: clock,
             automaticAttemptDelay: { _ in },
-            interviewFormatAddendum: interviewFormat?.promptAddendum ?? "")
+            interviewFormatAddendum: InterviewFormat.resolvedPromptAddendum(for: interviewFormat))
         return (driver, transcript)
     }
 
@@ -38,15 +38,17 @@ import Testing
         })
     }
 
-    @Test func systemPromptOmitsFormatGuidanceForCoding() async {
+    @Test func systemPromptIncludesCodingGuidanceWhenExplicitlySelected() async {
         let brain = ScriptedBrain(script: staySilentScript())
         let (driver, transcript) = makeDriver(brain: brain, interviewFormat: .coding)
         transcript.append(.init(speaker: .me, text: "let me think out loud", at: 100))
 
         _ = await driver.handleTrigger(.turnEnd)
 
-        #expect(!brain.calls[0].contains {
-            $0.role == .system && ($0.text ?? "").contains("Interview format")
+        #expect(brain.calls[0].contains {
+            $0.role == .system
+                && ($0.text ?? "").hasPrefix(JarvisPrompts.Coach.system)
+                && ($0.text ?? "").contains("# Interview format: coding")
         })
     }
 
@@ -65,11 +67,7 @@ import Testing
         })
     }
 
-    /// No selection means no behavior change at all for a user who never opens this setting — the
-    /// system prompt sent is byte-for-byte the same as if the feature didn't exist. Guard against a
-    /// regression back to "no selection guesses from whatever formats have content," which silently
-    /// asserted a false "this is a system-design interview" claim into every session by default.
-    @Test func systemPromptEqualsBaseCoachPromptWhenNoneSelected() async {
+    @Test func systemPromptIncludesAutomaticRoutingWhenNoneSelected() async {
         let brain = ScriptedBrain(script: staySilentScript())
         let (driver, transcript) = makeDriver(brain: brain, interviewFormat: nil)
         transcript.append(.init(speaker: .me, text: "let me think out loud", at: 100))
@@ -77,7 +75,10 @@ import Testing
         _ = await driver.handleTrigger(.turnEnd)
 
         #expect(brain.calls[0].contains {
-            $0.role == .system && $0.text == JarvisPrompts.Coach.system
+            $0.role == .system
+                && ($0.text ?? "").contains("Choose coaching behavior")
+                && ($0.text ?? "").contains("functional requirements")
+                && ($0.text ?? "").contains("For a coding task")
         })
     }
 }
