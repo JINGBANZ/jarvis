@@ -162,7 +162,8 @@ public final class CoachDriver: @unchecked Sendable {
         automaticAttemptDelay: AutomaticAttemptDelay? = nil,
         activity: (any ActivityEventRecording)? = nil,
         prepMaterial: (any PrepMaterialSearching)? = nil,
-        interviewFormatAddendum: String = ""
+        interviewFormatAddendum: String = "",
+        interviewFormat: InterviewFormat? = nil
     ) {
         self.plan = plan
         self.activity = activity
@@ -181,7 +182,8 @@ public final class CoachDriver: @unchecked Sendable {
             coachingAttempts: coachingAttempts,
             activity: activity,
             ledger: ledger,
-            interviewFormatAddendum: interviewFormatAddendum)
+            interviewFormatAddendum: interviewFormatAddendum,
+            interviewFormat: interviewFormat)
     }
 
     private static let defaultAutomaticAttemptDelay: AutomaticAttemptDelay = { sequence in

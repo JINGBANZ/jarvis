@@ -297,7 +297,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         // Fixed for the whole session, like transcription's language/model choice — never
         // reclassified mid-conversation. No selection means no addendum, not a guess assembled from
         // whatever formats have content — see wiki/architecture.md § Models and APIs.
-        let interviewFormatAddendum = brain.preferences.interviewFormat?.promptAddendum ?? ""
+        let interviewFormat = brain.preferences.interviewFormat
+        let interviewFormatAddendum = interviewFormat?.promptAddendum ?? ""
         let key = secrets.apiKey() ?? ""
         let requiresOpenAIKey = transcriptionProvider.requiresOpenAIAPIKey(for: brainRoute)
         let preparesAppleSpeech = transcriptionProvider == .appleSpeech
@@ -432,6 +433,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                 apiKey: key,
                 brainRoute: brainRoute,
                 interviewFormatAddendum: interviewFormatAddendum,
+                interviewFormat: interviewFormat,
                 transcriptionConfiguration: transcriptionConfiguration,
                 appleSpeechLocale: appleSpeechLocale,
                 detectedCLIs: detectedCLIs,
@@ -490,6 +492,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         apiKey key: String,
         brainRoute: BrainRoute,
         interviewFormatAddendum: String,
+        interviewFormat: InterviewFormat?,
         transcriptionConfiguration: TranscriptionConfiguration,
         appleSpeechLocale: Locale?,
         detectedCLIs initialDetectedCLIs: [BrainProvider: DetectedAgentCLI],
@@ -566,7 +569,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             coachingAttempts: artifacts.sessionAudit,
             plan: freshSessionPlan(),
             activity: artifacts.sessionAudit,
-            interviewFormatAddendum: interviewFormatAddendum)
+            interviewFormatAddendum: interviewFormatAddendum,
+            interviewFormat: interviewFormat)
 
         // Building the index reads files and can shell out to `textutil`, so it runs off the Start
         // path entirely rather than delaying it — a trigger that fires before this lands just

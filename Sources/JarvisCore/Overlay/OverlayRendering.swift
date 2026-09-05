@@ -7,9 +7,15 @@ public protocol OverlayRendering: AnyObject {
     /// already split (the `speak` tool's `lines` array), so there is no client-side sentence splitting.
     /// `perLineSeconds` is expected to align with `lines`; a shorter array just truncates safely.
     func render(_ lines: [String], perLineSeconds: [TimeInterval])
+    func render(_ lines: [String], perLineSeconds: [TimeInterval], diagram: DiagramHint?)
 }
 
 extension OverlayRendering {
+    /// Text-only sinks, such as the transient caption, retain their normal behavior.
+    public func render(_ lines: [String], perLineSeconds: [TimeInterval], diagram: DiagramHint?) {
+        render(lines, perLineSeconds: perLineSeconds)
+    }
+
     /// Convenience: show every line for the same duration. Handy for callers/tests that don't need
     /// per-line scaling.
     public func render(_ lines: [String], perLineSeconds: TimeInterval) {

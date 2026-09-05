@@ -10,6 +10,12 @@ public final class BroadcastOverlay: OverlayRendering {
         self.sinks = sinks
     }
 
+    public nonisolated func render(_ lines: [String], perLineSeconds: [TimeInterval], diagram: DiagramHint?) {
+        for sink in sinks {
+            sink.render(lines, perLineSeconds: perLineSeconds, diagram: diagram)
+        }
+    }
+
     public nonisolated func render(_ lines: [String], perLineSeconds: [TimeInterval]) {
         for sink in sinks {
             sink.render(lines, perLineSeconds: perLineSeconds)

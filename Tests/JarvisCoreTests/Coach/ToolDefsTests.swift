@@ -138,7 +138,7 @@ import Testing
     @Test func parseMapsEachCoachTool() {
         if case .captureScreen? = ToolInvocation.parse(callId: "c", name: "capture_screen", argumentsJSON: "{}") {} else { Issue.record("capture_screen") }
         if case .staySilent? = ToolInvocation.parse(callId: "c", name: "stay_silent", argumentsJSON: "{}") {} else { Issue.record("stay_silent") }
-        guard case .speak(_, let lines)? = ToolInvocation.parse(
+        guard case .speak(_, let lines, nil)? = ToolInvocation.parse(
             callId: "c", name: "speak", argumentsJSON: #"{"lines":["a","b"]}"#) else {
             Issue.record("speak"); return
         }
