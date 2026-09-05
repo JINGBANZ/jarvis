@@ -351,14 +351,50 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
                 self.failConnection(task: task, generation: socketGeneration,
                                     diagnostic: "receive failed")
             case .success(let message):
-                if case .string(let text) = message,
-                   let data = text.data(using: .utf8),
-                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                    self.handle(obj, task: task, generation: socketGeneration)
-                }
+                self.decodeAndHandle(message, task: task, generation: socketGeneration)
                 self.receiveLoop(task: task, generation: socketGeneration)
             }
         }
+    }
+
+    /// Normalizes a received frame to the JSON object `handle` expects, regardless of which
+    /// `URLSessionWebSocketTask.Message` case carried it, so there is exactly one parse-and-dispatch
+    /// path for the two frame kinds.
+    ///
+    /// WIRE FACT — do not "simplify" this back to `.string`-only: Gemini's `BidiGenerateContent`
+    /// endpoint sends every server response, including the `setupComplete` handshake acknowledgement,
+    /// as a BINARY frame, not TEXT. That was verified against the live server with an independent
+    /// client; dropping the `.data` branch silently discards every frame again and readiness never
+    /// fires. A `.data` frame carries the same UTF-8 JSON text a `.string` frame would.
+    private func decodeAndHandle(_ message: URLSessionWebSocketTask.Message,
+                                 task: URLSessionWebSocketTask, generation socketGeneration: Int) {
+        let text: String
+        let kind: String
+        switch message {
+        case .string(let value):
+            text = value
+            kind = "string"
+        case .data(let bytes):
+            guard let decoded = String(data: bytes, encoding: .utf8) else {
+                // Never log frame contents — a transcript is user speech. Kind and length only.
+                jlog("Jarvis Gemini [\(speaker.rawValue)]: dropped non-UTF8 binary frame "
+                     + "(\(bytes.count) bytes)")
+                return
+            }
+            text = decoded
+            kind = "data"
+        @unknown default:
+            jlog("Jarvis Gemini [\(speaker.rawValue)]: dropped unknown frame kind")
+            return
+        }
+        guard let jsonData = text.data(using: .utf8),
+              let obj = GeminiLiveSession.parseFrame(jsonData) else {
+            // Never log frame contents — a transcript is user speech. Kind and length only.
+            jlog("Jarvis Gemini [\(speaker.rawValue)]: dropped unparsable \(kind) frame "
+                 + "(\(text.utf8.count) bytes)")
+            return
+        }
+        handle(obj, task: task, generation: socketGeneration)
     }
 
     /// One received frame. Order matters: a terminal error outranks everything, and a setup

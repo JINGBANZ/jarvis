@@ -70,6 +70,24 @@ import Foundation
         #expect(input?["audioStreamEnd"] as? Bool == true)
     }
 
+    /// Gemini's `BidiGenerateContent` endpoint sends its JSON responses as BINARY frames carrying the
+    /// same UTF-8 JSON text a TEXT frame would, so the transport layer feeds both frame kinds through
+    /// this one decoder.
+    @Test func parseFrameDecodesUTF8JSONBytesFromEitherFrameKind() {
+        let bytes = Data(#"{"setupComplete": {}}"#.utf8)
+        let parsed = GeminiLiveSession.parseFrame(bytes)
+        #expect(parsed != nil)
+        #expect(GeminiLiveSession.isSetupComplete(parsed ?? [:]))
+    }
+
+    /// Bytes that are not valid UTF-8, or that are valid UTF-8 but not a JSON object, must decode to
+    /// `nil` so the caller can log and drop the frame instead of tearing down the socket.
+    @Test func parseFrameRejectsUndecodableOrUnparsableBytes() {
+        #expect(GeminiLiveSession.parseFrame(Data([0xFF, 0xFE, 0xFD])) == nil)
+        #expect(GeminiLiveSession.parseFrame(Data("not json".utf8)) == nil)
+        #expect(GeminiLiveSession.parseFrame(Data("[1, 2, 3]".utf8)) == nil)
+    }
+
     @Test func setupIsCompleteOnlyOnTheServersAcknowledgement() {
         #expect(GeminiLiveSession.isSetupComplete(["setupComplete": [String: Any]()]))
         #expect(!GeminiLiveSession.isSetupComplete(["serverContent": [String: Any]()]))

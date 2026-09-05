@@ -60,6 +60,16 @@ public enum GeminiLiveSession {
         ["realtimeInput": ["audioStreamEnd": true]]
     }
 
+    /// Decodes one received frame's UTF-8 JSON bytes into the object the other parsers above expect.
+    /// `BidiGenerateContent` sends every server message — including `setupComplete` — as a BINARY
+    /// WebSocket frame carrying the same UTF-8 JSON text a TEXT frame would carry, so the transport
+    /// layer normalizes both frame kinds to `Data` and shares this one decoder. Returns `nil` for bytes
+    /// that are not valid UTF-8 or do not parse as a JSON object; the caller logs and drops the frame
+    /// rather than treating it as a transport failure.
+    public static func parseFrame(_ bytes: Data) -> [String: Any]? {
+        try? JSONSerialization.jsonObject(with: bytes) as? [String: Any]
+    }
+
     /// The server's acknowledgement that the requested model and transcription config were accepted.
     public static func isSetupComplete(_ event: [String: Any]) -> Bool {
         event["setupComplete"] != nil
