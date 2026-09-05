@@ -354,7 +354,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             if wasRunning {
                 artifacts.sessionAudit?.record(.settingsChangeNotApplied)
             }
-            errorReporter.reportImmediately(.noAPIKey, context: reportContext)
+            errorReporter.reportImmediately(
+                .noAPIKey(missing: missingCredentials),
+                context: reportContext)
             return false
         }
 
