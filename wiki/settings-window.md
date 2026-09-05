@@ -217,7 +217,7 @@ three shared levels pass through.
 explicit override per format with authored content — Coding, Behavioral, and System Design today. Automatic
 selects appropriate coding, system-design, behavioral, or neutral coaching from the newest speech
 and current screen on every response; it needs no question-boundary signal and does not carry the
-previous response's inferred format forward. Ambiguous evidence stays on the base policy. Coding
+previous response's inferred format forward. Ambiguous evidence stays on the base policy. Coding,
 Behavioral, and System Design remain optional next-Start overrides. The resolved prompt is fixed at Start so
 CLI and OpenAI providers share identical instructions, but Automatic's model-level choice changes
 with current evidence inside that prompt. Per-format coaching behavior is defined in
