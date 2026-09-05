@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.2](https://github.com/JINGBANZ/jarvis/compare/v0.2.1...v0.2.2) (2026-09-05)
+
+
+### Features
+
+* **coach:** add behavioral interview skill ([#262](https://github.com/JINGBANZ/jarvis/issues/262)) ([5f0c260](https://github.com/JINGBANZ/jarvis/commit/5f0c260a93b35001326cad0cf1533a113ffd912e))
+
 ## [0.2.1](https://github.com/JINGBANZ/jarvis/compare/v0.2.0...v0.2.1) (2026-09-05)
 
 
