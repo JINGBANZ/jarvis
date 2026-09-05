@@ -31,8 +31,9 @@ a terminal failure through the existing `TranscriptionFailureReason` path and en
 the standard degradation notice. Transient socket loss reconnects with backoff, as OpenAI does.
 
 **Acceptable degradation.** Interim (speculative) transcripts are dropped, not shown — Jarvis coaches
-from finalized text only, matching today's behavior. Resampling 24 kHz → 16 kHz is lossy for content
-above 8 kHz, which is inaudible in speech and irrelevant to recognition.
+from finalized text only, matching today's behavior. A Gemini session captures at 16 kHz rather than
+24 kHz, discarding content above 8 kHz that carries no phonetic information; recognition is
+unaffected and per-stream bandwidth drops from 48 to 32 KB/s.
 
 **Completion criteria.** `swift build && ./scripts/run-tests.sh` passes; a live smoke run transcribes
 both speaker streams through Gemini; the OpenAI and Apple Speech paths are behaviorally unchanged.
@@ -52,11 +53,21 @@ transcript delivery and the coaching triggers derived from it" and is already sh
 providers; it keeps transcript batching, speech gating, and silence backoff identical.
 `RealtimeContinuityReporter` supplies the capture heartbeat.
 
-**Sample-rate mismatch.** `TranscriptionAudioFormat.pcm16Mono` is 24 kHz; Gemini Live specifies
-`audio/pcm;rate=16000`. Rather than change the shared capture format (which AEC and both existing
-providers depend on), Gemini owns a private 24 kHz → 16 kHz `Resampler` per stream. `Resampler`
-already exists for the AEC 24↔48 kHz conversion and is documented as one-instance-per-stream because
-its filter state must carry across calls.
+**The wire sample rate is a provider requirement, not a global constant.**
+`TranscriptionAudioFormat.pcm16Mono` is 24 kHz because that is what OpenAI Realtime requires; Gemini
+Live requires 16 kHz (`audio/pcm;rate=16000`, fixed — the docs specify raw 16-bit mono
+little-endian PCM at 16 kHz with no server-side resampling). Neither rate is an accuracy choice:
+speech carries no phonetically relevant energy above 8 kHz, so 16 kHz (8 kHz Nyquist) already covers
+every formant and fricative, and ASR models are trained at 16 kHz and downsample internally. 24 kHz
+is therefore 1.5× the bytes for no recognition benefit.
+
+This makes the wire format **provider-derived** rather than a shared constant. Capture already
+resamples once, at a single point: `AggregateEchoCapture` runs AEC at 48 kHz and downsamples to the
+wire rate through `micDown`/`sysDown`. Retargeting those two resamplers to 16 kHz for a Gemini
+session gives a single 48 → 16 conversion — an exact 3:1 integer decimation, cheaper and cleaner
+than chaining a second 24 → 16 stage at a 2:3 ratio. Provider selection is resolved before capture
+begins and frozen for the session (that is what the `TranscriptionConfiguration` Start snapshot is
+for), so the target rate is known at capture-build time and never changes mid-session.
 
 ## Wire protocol
 
@@ -75,8 +86,8 @@ Verified against Google's Live API transcription guide (2026-09).
   ```
   Empty `languageCodes` means automatic detection. `customVocabulary` accepts up to 1,000 terms.
   `mode` is `VERBATIM` (raw speech) or `SMART` (filler words removed, output formatted).
-- **Audio frame:** `{"realtimeInput": {"audio": {"data": "<base64 PCM16>", "mimeType": "audio/pcm;rate=16000"}}}`,
-  ~100 ms per chunk.
+- **Audio frame:** `{"realtimeInput": {"audio": {"data": "<base64 PCM16>", "mimeType": "audio/pcm;rate=16000"}}}`.
+  Google recommends ~100 ms per chunk (1,024–2,048 frames).
 - **Stream end:** `{"realtimeInput": {"audioStreamEnd": true}}`
 - **Responses:** `serverContent.interimInputTranscription.text` (dropped) and
   `serverContent.inputTranscription.text` (finalized → transcript).
@@ -152,11 +163,31 @@ required credential is missing, naming the missing one.
   It reuses `RealtimeSession.meaningfulTranscript` for hallucination and punctuation-only filtering,
   which is provider-independent — that helper moves to a shared `TranscriptFiltering` type.
 
+### Provider-derived wire audio format
+
+`TranscriptionAudioFormat.pcm16Mono` is replaced by two named formats — `pcm16Mono24k` (OpenAI,
+Apple Speech) and `pcm16Mono16k` (Gemini) — and `TranscriptionProvider` gains
+`var audioFormat: TranscriptionAudioFormat`. The struct itself is unchanged; only the shared
+singleton goes away.
+
+`AggregateEchoCapture` takes the format in its initializer and builds `micDown`/`sysDown` against it,
+so a Gemini session downsamples 48 → 16 in one step. AEC still runs at 48 kHz regardless.
+`AppleSpeechTranscriber` and `RealtimeTranscriber` read the format they were constructed with instead
+of the global constant, and `RealtimeSession.sessionUpdate` sends OpenAI's 24 kHz explicitly.
+
+`LocalTurnDetector` is **not** affected: it is constructed with `inputSampleRate: aecRate` (48 kHz,
+pre-downsample) and resamples to Silero's own rate, so local turn detection is independent of the
+wire rate. `SystemAudioBenchmarkCapture` takes the format from the benchmark's configured provider.
+
+The two `TranscriptionAudioFormatTests` cases that assert against `pcm16Mono` move to the 24 kHz
+format, with a new case covering 16 kHz.
+
 ### `GeminiLiveTranscriber` (JarvisApp/Capture)
 
 A `TranscriptionSession` conformer owning one WebSocket per speaker stream. Responsibilities:
-connect and await setup acknowledgement with a ready timeout; resample 24 → 16 kHz and send base64
-frames; parse responses, dropping interim and forwarding final text to
+connect and await setup acknowledgement with a ready timeout; base64-encode and send the 16 kHz PCM
+it already receives from capture (it does no resampling of its own); parse responses, dropping
+interim and forwarding final text to
 `TranscriptionCoachingCoordinator`; report `TranscriptionConnectionState` edges and capture heartbeat
 through `RealtimeContinuityReporter`; reconnect with backoff on transient loss, and report terminal
 failures once. It buffers audio while disconnected under the existing
@@ -185,10 +216,10 @@ Gemini detects turns server-side.
 swift-testing, mirroring how `RealtimeSession` is covered today. The live socket is not unit-testable
 and stays on the smoke checklist.
 
-- `GeminiLiveSession`: setup-message shape for each mode/language/vocabulary combination; empty
-  language list omits nothing but sends `[]`; audio frame encoding and mime type; final-vs-interim
-  parsing; interim never yields a transcript; error-code → `TranscriptionFailureReason` mapping;
-  the connect URL carries the key and diagnostics never do.
+- `GeminiLiveSession`: setup-message shape for each mode/language/vocabulary combination; an empty
+  language list is sent as `[]` (automatic detection) rather than omitted; audio frame encoding and
+  mime type; final-vs-interim parsing; an interim message never yields a transcript; error-code →
+  `TranscriptionFailureReason` mapping; the connect URL carries the key and diagnostics never do.
 - `CredentialID` / `FileSecretStore`: per-credential filenames resolve inside one directory; saving a
   Gemini key leaves the OpenAI key intact; file mode is 0600 and directory 0700; env fallback reads
   the matching variable.
@@ -196,8 +227,10 @@ and stays on the smoke checklist.
   an OpenAI brain target and Apple Speech with CLI-only targets.
 - `TranscriptionPreferences`: Gemini values round-trip; unknown stored values fall back to defaults;
   the configuration snapshot carries them.
-- Existing OpenAI and Apple Speech tests must pass unchanged — that is the regression guard for the
-  credential refactor.
+- `TranscriptionProvider.audioFormat`: Gemini reports 16 kHz, OpenAI and Apple Speech 24 kHz; the
+  format's derived `bytesPerSecond`/`duration`/`byteCount` are correct at both rates.
+- Existing OpenAI and Apple Speech tests must pass unchanged — that is the regression guard for both
+  the credential refactor and the audio-format split.
 
 ## Rejected alternatives
 
@@ -208,6 +241,14 @@ reuse. If a third streaming provider arrives, extract the base from two working 
 
 **A dialect switch inside `RealtimeTranscriber`.** Smallest diff, but tangles two wire protocols
 inside one class alongside OpenAI-specific item reconciliation state.
+
+**A Gemini-private 24 → 16 kHz resampler, leaving the shared 24 kHz constant alone.** Smaller
+blast radius, but it resamples twice (48 → 24 → 16) at a 2:3 ratio when capture can produce 16 kHz
+directly with a single exact 3:1 decimation. It also keeps a constant named as if it were
+provider-neutral while it actually encodes one provider's requirement.
+
+**Capturing at 16 kHz for every provider.** One rate everywhere would be simpler, but OpenAI Realtime
+requires 24 kHz, so this is not available.
 
 **A parallel `GeminiSecretStore`.** Avoids touching brain-side code, but duplicates the
 file-permission logic and the key-entry UI, and leaves the next provider with the same choice.
