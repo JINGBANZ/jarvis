@@ -431,13 +431,18 @@ rather than a per-turn screenshot.
   single-writer lock turns one slow turn into minutes of `conversation_locked` silence. Requests are sent `store:true`
   so they stay inspectable in the OpenAI dashboard for debugging — the retention tradeoff is
   documented in [sandbox.md](./sandbox.md).
-- **Interview format supplies optional coaching-prompt vocabulary (`InterviewFormat` in
+- **Interview format supplies optional specialist coaching (`InterviewFormat` in
   `Sources/JarvisCore/Config/`).** A Start-time picker (**None**, plus one entry per format that actually has
-  content — System Design today) adds a format-specific addendum to the coach system prompt — today, only System Design has real
-  content, added because the coach otherwise has zero system-design vocabulary (functional
-  requirements, API design, data model, etc.) and its tips can drift from whatever stage of that
-  discussion the candidate is actually in; Coding and Behavioral stay empty because no one has
-  reported a problem with them, not because the mechanism can't hold their content too. Each format's
+  content — Behavioral and System Design today) adds a format-specific addendum to the coach system
+  prompt. System Design supplies stage vocabulary so tips stay with the part of the design under
+  discussion. Behavioral treats a complete interviewer question as a useful proactive coaching
+  moment, shapes answers with STAR, and follows the newest answer stage to surface only material
+  gaps. When prep search is available it grounds the answer in the candidate's stories and uses
+  company values, leadership principles, role expectations, or behavioral requirements as answer
+  criteria. Without a matching personal story, it may supply a clearly labeled illustrative
+  mini-story; partial candidate facts may be organized but never embellished with invented personal
+  details, outcomes, or metrics. Coding stays empty because no specialist policy has been requested,
+  not because the mechanism cannot hold its content too. Each format's
   content is a real Markdown file (`Sources/JarvisCore/Resources/Skills/<rawValue>.md`), not a Swift
   string literal, so it reads and edits like prose; a missing file resolves to an empty addendum
   rather than an error, since an unwritten skill is a normal state. `InterviewFormat`'s private
@@ -782,11 +787,10 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
 
 ## 6. Non-Goals (v1)
 
-- A tiered sensitivity dial, or genuinely separate coaching modes with different action-policy
-  gating, tool sets, or proactivity behavior. (One technical-interview coaching approach spans
-  behavioral, system-design, and coding questions; an optional Start-time interview-format selection
-  only supplies additional prompt *vocabulary* for the selected format — see [§ Models and
-  APIs](#models-and-apis) — never a different mode of operation.)
+- A tiered sensitivity dial, or code-level coaching modes with separate trigger gates, tool sets, or
+  runtime state. One harness spans behavioral, system-design, and coding questions; an optional
+  Start-time interview-format selection specializes the model's coaching policy inside that shared
+  loop — see [§ Models and APIs](#models-and-apis) — rather than creating another mode of operation.
 - Continuous OCR or recording the screen/audio to disk ("recall").
 - A dedicated wake-word engine. Direct address is just the word "Jarvis" (or a question) appearing
   in the transcript, which the brain reads and answers — there is no wake-word detector. (A global
