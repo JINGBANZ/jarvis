@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.2.1](https://github.com/JINGBANZ/jarvis/compare/v0.2.0...v0.2.1) (2026-09-05)
+
+
+### Features
+
+* **coach:** sequence core entities before API design in the system-design skill ([#258](https://github.com/JINGBANZ/jarvis/issues/258)) ([af71940](https://github.com/JINGBANZ/jarvis/commit/af71940d2af8ac99a5357173d4860ce80e32c173))
+* **menubar:** adopt boxless closed-to-open eye ([#264](https://github.com/JINGBANZ/jarvis/issues/264)) ([4783811](https://github.com/JINGBANZ/jarvis/commit/478381138127940e8ff9ba953c8be19dcdf80ab1))
+* **overlay:** show the Overlay Box on Start and hide it on Stop ([#255](https://github.com/JINGBANZ/jarvis/issues/255)) ([aef9837](https://github.com/JINGBANZ/jarvis/commit/aef983729b36381b817bfb8d2fffc69dbe8d3d9e))
+
+
+### Bug Fixes
+
+* **viewer:** tighten export sheet spacing, add export naming/image options ([#265](https://github.com/JINGBANZ/jarvis/issues/265)) ([401025f](https://github.com/JINGBANZ/jarvis/commit/401025f38106aa57485731dc2be82e771671fc96))
+
 ## [0.2.0](https://github.com/JINGBANZ/jarvis/compare/v0.1.12...v0.2.0) (2026-09-03)
 
 

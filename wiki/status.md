@@ -13,7 +13,7 @@ implemented.** The coach covers behavioral, system-design, and coding questions.
 format is the default: the selected brain uses newest speech and the current screen on every response
 to apply the relevant coaching behavior without a question-boundary detector, persisted format
 classification, extra model request, or candidate dialog. Ambiguous evidence stays neutral, while
-explicit Coding and System Design overrides remain available; their behavior is defined in
+explicit Coding, Behavioral, and System Design overrides remain available; their behavior is defined in
 [architecture.md → Models and APIs](./architecture.md#models-and-apis). A direct request
 whose specific answer depends on visible context missing from the conversation calls `capture_screen`
 before `speak`; a fresh screenshot/OCR satisfies that request, while a fully stated question can be

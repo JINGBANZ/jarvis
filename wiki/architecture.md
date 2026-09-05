@@ -183,7 +183,7 @@ plugins ship only with full Xcode, and Jarvis builds **CLT-only** (see
 | **ScreenTool** | Fulfill `capture_screen`: silently shoot the **active window** (default scope) — the window-server frontmost, on whichever display, clean even when partially covered — and attach an **on-device OCR** of the shot to the tool result so the model reads exact text instead of pixels. Falls back to a full-display capture (no OCR) — the Settings-chosen display in Entire-display scope, the main display when no window is eligible; the overlay window is excluded either way. See [settings-window.md](./settings-window.md#capture-scope). | macOS `screencapture` CLI + Apple Vision (`VNRecognizeTextRequest`). |
 | **Overlay Caption** | Render `speak` output: up to ~3 short lines (model-split), shown one at a time and queued so a newer tip never cuts off the current one; non-activating, always-on-top, excluded from capture. Switchable from Settings — **off by default**; when off, tips are suppressed. | AppKit NSPanel; `OverlayCaptionPanel`. |
 | **Overlay Box** | A persistent window logging every `speak` tip in full, timestamped — the scrollable history of what the caption flashed one line at a time. Movable, resizable, translucent, also excluded from capture; switched on/off from Settings (**on by default**). It follows the session: shown on Start (cleared, for the new conversation) and hidden on Stop. Its size persists across launches; its position does not, so it opens centered. Fed by the same `speak` call as the caption via **`BroadcastOverlay`**, which fans one `OverlayRendering.render` out to both sinks (so `CoachDriver` is unchanged). | AppKit NSPanel; `OverlayBoxPanel`. |
-| **MenuBar** | Manual **Start/Stop** of the pipeline (no auto-start), the same authoritative readiness status shown by Activity, and one-time API-key entry when OpenAI is in use. The status item is a quiet monochrome tile while stopped and a lit Listening Lens in every other readiness state — amber while checking or recovering, violet for a fully ready or explicit microphone-only session, red when a Start is blocked before any session begins — while the menu and tooltip name the requirement behind any non-ready state. A failed system stream may degrade to microphone-only, while a failed microphone stream stops the session. The two overlay surfaces are switched from Settings, not the menu. A centered, disabled caption at the bottom of the menu names the running build, so a user can report it without opening Settings: a release shows a muted `v<version>` from `CFBundleShortVersionString`, and a local build shows a red `Dev`, keyed off the development marker `scripts/build-app.sh` stamps into the assembled bundle (see `MenuBarController.buildCaptionItem()`). | AppKit menu-bar item; owner-only file for the key. |
+| **MenuBar** | Manual **Start/Stop** of the pipeline (no auto-start), the same authoritative readiness status shown by Activity, and one-time API-key entry when OpenAI is in use. Stopped and active use a boxless monochrome eye: closed on the Listening Lens's diagonal axis while stopped and open while active, with the active icon following the system menu-bar foreground instead of a brand color. The attention states retain the lit Listening Lens tile — amber while checking or recovering and red when a Start is blocked before any session begins — and the menu and tooltip name the requirement behind those attention states; stopped is simply labeled `Jarvis is stopped`. A failed system stream may degrade to microphone-only, while a failed microphone stream stops the session. The two overlay surfaces are switched from Settings, not the menu. A centered, disabled caption at the bottom of the menu names the running build, so a user can report it without opening Settings: a release shows a muted `v<version>` from `CFBundleShortVersionString`, and a local build shows a red `Dev`, keyed off the development marker `scripts/build-app.sh` stamps into the assembled bundle (see `MenuBarController.buildCaptionItem()`). | AppKit menu-bar item; owner-only file for the key. |
 | **HotkeyController** | Register the global **⌥⌘J** hint hotkey and route a press to a one-trip `manualHint` turn while a session runs (beep otherwise). See [§2 On-demand hint](#on-demand-hint-j). | Carbon HIToolbox (`RegisterEventHotKey`, no TCC). |
 | **PermissionGate** | Gather every TCC grant at launch instead of mid-session, and keep Jarvis closed until it holds all three: one button walks Microphone, System Audio Recording, and Screen Recording one dialog at a time, and closing the window quits. `SystemAudioPermissionProbe` proves the silently-enforced system-audio grant by playing a muted tone into a tap of Jarvis's own process and listening for it. See [§3 Permissions](#permissions). | AVFoundation, `CGRequestScreenCaptureAccess`, Core Audio process taps. |
 
@@ -433,7 +433,7 @@ rather than a per-turn screenshot.
   documented in [sandbox.md](./sandbox.md).
 - **Interview format supplies automatic coaching behavior plus optional overrides
   (`InterviewFormat` in `Sources/JarvisCore/Config/`).** The Start-time picker defaults to
-  **Automatic**, with Coding and System Design as explicit overrides. Automatic is a single
+  **Automatic**, with Coding, Behavioral, and System Design as explicit overrides. Automatic is a single
   purpose-built skill: on every model response it uses newest speech and the current screen to apply
   coding, system-design, behavioral, or neutral behavior to what the candidate is working on now.
   It does not detect or persist a formal question boundary, so back-to-back format changes naturally
@@ -441,10 +441,15 @@ rather than a per-turn screenshot.
   routing inside the existing coaching request, not a separate classifier request or runtime state
   machine. Coding distinguishes first-time comprehension, a repeated hint or demonstrated
   understanding that needs an approach, local implementation blocks, visible defects, completion
-  tests, and healthy progress. System Design supplies stage vocabulary from requirements through
+  tests, and healthy progress. Behavioral treats a complete interviewer question as a useful proactive coaching
+  moment, shapes answers with STAR, and follows the newest answer stage to surface only material
+  gaps. When prep search is available it grounds the answer in the candidate's stories and uses
+  company values, leadership principles, role expectations, or behavioral requirements as answer
+  criteria. Without a matching personal story, it may supply a clearly labeled illustrative
+  mini-story; partial candidate facts may be organized but never embellished with invented personal
+  details, outcomes, or metrics. System Design supplies stage vocabulary from requirements through
   trade-offs. Explicit overrides keep their specialist prompt for the session when predictability is
-  preferred. Behavioral has no separate override content because the base prompt already covers it.
-  Each explicit format's content and the automatic skill are real Markdown files under
+  preferred. Each explicit format's content and the automatic skill are real Markdown files under
   `Sources/JarvisCore/Resources/Skills/`, not Swift string literals; a missing file resolves to an
   empty addendum rather than an error. `InterviewFormat`'s private
   `skillMarkdownURL(named:)` locates it directly rather than trusting the generated `Bundle.module`
@@ -785,11 +790,10 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
 
 ## 6. Non-Goals (v1)
 
-- A tiered sensitivity dial, or genuinely separate coaching modes with different action-policy
-  gating, tool sets, or proactivity behavior. (One technical-interview coaching approach spans
-  behavioral, system-design, and coding questions; an optional Start-time interview-format selection
-  only supplies additional prompt *vocabulary* for the selected format — see [§ Models and
-  APIs](#models-and-apis) — never a different mode of operation.)
+- A tiered sensitivity dial, or code-level coaching modes with separate trigger gates, tool sets, or
+  runtime state. One harness spans behavioral, system-design, and coding questions; an optional
+  Start-time interview-format selection specializes the model's coaching policy inside that shared
+  loop — see [§ Models and APIs](#models-and-apis) — rather than creating another mode of operation.
 - Continuous OCR or recording the screen/audio to disk ("recall").
 - A dedicated wake-word engine. Direct address is just the word "Jarvis" (or a question) appearing
   in the transcript, which the brain reads and answers — there is no wake-word detector. (A global

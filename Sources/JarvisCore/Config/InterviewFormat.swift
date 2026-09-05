@@ -17,9 +17,9 @@ public enum InterviewFormat: String, CaseIterable, Codable, Sendable {
     }
 
     /// Loaded from `Resources/Skills/<rawValue>.md` — a real Markdown file, not a Swift string
-    /// literal, so a skill's content reads and edits like prose. Coding and system design have
-    /// authored guidance; behavioral remains empty. Missing file → empty, not a crash — an
-    /// unwritten skill is a normal state, not an error.
+    /// literal, so a skill's content reads and edits like prose. Coding, Behavioral, and System
+    /// Design have authored guidance. Missing file → empty, not a crash — an unwritten skill is a
+    /// normal state, not an error.
     public var promptAddendum: String {
         Self.addendum(named: rawValue)
     }

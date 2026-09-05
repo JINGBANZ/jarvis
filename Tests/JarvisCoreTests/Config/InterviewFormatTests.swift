@@ -8,11 +8,17 @@ import Testing
         #expect(InterviewFormat.behavioral.displayName == "Behavioral")
     }
 
-    /// A missing skill remains a normal empty state, while each authored format becomes available
+    /// Missing skills remain a normal empty state, while each authored format becomes available
     /// through the same resource lookup the Settings picker consumes.
-    @Test func authoredFormatsHaveContent() {
+    @Test func authoredFormatsHaveExpectedContent() {
         #expect(InterviewFormat.coding.promptAddendum.contains("# Interview format: coding"))
-        #expect(InterviewFormat.behavioral.promptAddendum.isEmpty)
+        #expect(InterviewFormat.behavioral.promptAddendum.contains(
+            "# Interview format: behavioral"))
+        #expect(InterviewFormat.behavioral.promptAddendum.contains("STAR"))
+        #expect(InterviewFormat.behavioral.promptAddendum.contains(
+            "candidate-owned events"))
+        #expect(!InterviewFormat.systemDesign.promptAddendum.isEmpty)
+        #expect(InterviewFormat.systemDesign.promptAddendum.contains("functional requirements"))
         #expect(InterviewFormat.systemDesign.promptAddendum.contains("API"))
     }
 
@@ -22,6 +28,8 @@ import Testing
         #expect(addendum.contains("Choose coaching behavior"))
         #expect(addendum.contains("For a coding task"))
         #expect(addendum.contains("functional requirements"))
+        #expect(addendum.contains("STAR"))
+        #expect(addendum.contains("candidate-owned events"))
     }
 
     @Test func explicitSelectionDoesNotIncludeAutomaticRouting() {
