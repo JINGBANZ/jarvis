@@ -37,8 +37,7 @@ public enum RealtimeSession {
         expectedLanguages: [TranscriptionLanguage] = [],
         keywords: [String] = [],
         silenceDurationMs: Int = 1000,
-        noiseReduction: String? = "near_field",
-        sampleRate: Int = TranscriptionAudioFormat.pcm16Mono24k.sampleRate
+        noiseReduction: String? = "near_field"
     ) -> [String: Any] {
         let expectedLanguages = TranscriptionLanguage.canonicalizing(expectedLanguages)
         var transcription: [String: Any] = ["model": model.rawValue]
@@ -74,7 +73,10 @@ public enum RealtimeSession {
         var input: [String: Any] = [
             "format": [
                 "type": "audio/pcm",
-                "rate": sampleRate,
+                // OpenAI's rate is fixed, not a caller-selectable option — no production caller ever
+                // passed a different rate, so the spec's "explicit sample rate" requirement is met by
+                // inlining it here rather than threading a parameter nothing varies.
+                "rate": TranscriptionAudioFormat.pcm16Mono24k.sampleRate,
             ],
             "transcription": transcription,
             "turn_detection": turnDetection,

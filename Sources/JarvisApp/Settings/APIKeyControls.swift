@@ -84,7 +84,7 @@ final class APIKeyControls: NSObject {
         keyRow = row
 
         let field = NSSecureTextField()
-        field.placeholderString = "sk-…"
+        field.placeholderString = credential.placeholderHint
         field.setAccessibilityLabel("\(credential.displayName) API key")
         field.identifier = NSUserInterfaceItemIdentifier("\(credential.rawValue)-key-field")
         content.addSubview(field)

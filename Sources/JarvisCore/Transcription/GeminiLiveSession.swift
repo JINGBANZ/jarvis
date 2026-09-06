@@ -100,4 +100,23 @@ public enum GeminiLiveSession {
         default: return nil
         }
     }
+
+    /// Maps a WebSocket close code to a terminal failure, for the one case a rejected credential
+    /// never reaches `terminalFailure(from:)` above: `nil` for every other code, so the caller's
+    /// normal reconnect-with-backoff behavior is unaffected.
+    ///
+    /// EMPIRICAL FACT, established against the live endpoint with a deliberately invalid API key —
+    /// do not "simplify" this away without re-verifying against the real server: Gemini does NOT
+    /// reject a bad key with an HTTP 401 at the WebSocket handshake, and does NOT send an
+    /// `{"error": ...}` frame either. The handshake succeeds, and the server then closes the socket
+    /// with code 1008 (policy violation), reason "Request had invalid authentication credentials.
+    /// Expected OAuth 2 access token, login cookie or other valid authentication credential...". That
+    /// makes close code 1008 the only signal available for a rejected key. It is exactly the "proven
+    /// permanent provider-boundary failure" AGENTS.md allows to exhaust a target immediately, skipping
+    /// the usual reconnect backoff.
+    public static func terminalFailure(
+        forCloseCode closeCode: URLSessionWebSocketTask.CloseCode
+    ) -> TranscriptionFailureReason? {
+        closeCode == .policyViolation ? .authenticationFailed : nil
+    }
 }

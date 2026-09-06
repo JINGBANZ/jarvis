@@ -13,9 +13,11 @@ import JarvisCore
 /// diagnostic that names the endpoint uses `GeminiLiveSession.redactedEndpoint`, and every transport
 /// failure path constructs its own fixed reason string instead of interpolating the caught error.
 ///
-/// `@unchecked Sendable`: every mutable field is guarded by `lock`; timer creation/invalidation is
-/// dispatched to the main queue; `coachingCoordinator` and `continuityReporter` guard their own state
-/// and are themselves Sendable.
+/// `@unchecked Sendable`: most mutable fields are guarded by `lock`. `readyTimer`/`pingTimer`/
+/// `pongTimer` are the exception — they are created, fired, and invalidated only from main-queue
+/// blocks, so main-queue confinement (not `lock`) is what makes them safe, even though `stop()` reads
+/// and nils them while holding `lock`. `coachingCoordinator` and `continuityReporter` guard their own
+/// state and are themselves Sendable.
 final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWebSocketDelegate,
     @unchecked Sendable {
     var onTurnEnd: (@Sendable (_ transcriptBoundary: Int) -> Void)?
@@ -481,6 +483,15 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
         let isStopped = stopped
         lock.unlock()
         if isStopped { return } // An intentional Stop closes the socket on purpose.
+        // A rejected API key surfaces ONLY as close code 1008 — see
+        // `GeminiLiveSession.terminalFailure(forCloseCode:)` for the empirically-established wire
+        // behavior behind this. Route it straight to the terminal path instead of `failConnection`'s
+        // six-attempt, ~61s backoff: a rejected key cannot succeed on retry, and this is the one case
+        // AGENTS.md permits exhausting a target immediately, without the usual retry discipline.
+        if let reason = GeminiLiveSession.terminalFailure(forCloseCode: closeCode) {
+            reportTerminalFailureOnce(reason)
+            return
+        }
         failConnection(task: webSocketTask, generation: socketGeneration,
                       diagnostic: "socket closed: code \(closeCode.rawValue)")
     }

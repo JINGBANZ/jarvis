@@ -32,4 +32,13 @@ public enum Credential: String, Sendable, Hashable, CaseIterable {
         case .geminiAPIKey: "Gemini API"
         }
     }
+
+    /// Placeholder shown in the empty key-entry field, shaped like a real key from this provider so
+    /// the field doesn't show OpenAI's `sk-…` shape on every credential card.
+    public var placeholderHint: String {
+        switch self {
+        case .openAIAPIKey: "sk-…"
+        case .geminiAPIKey: "AIza…"
+        }
+    }
 }

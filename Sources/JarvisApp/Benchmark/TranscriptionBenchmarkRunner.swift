@@ -185,6 +185,9 @@ final class TranscriptionBenchmarkRunner {
         let sessionStart = clock.now()
         let session = TranscriptionSessionFactory.make(
             configuration: configuration,
+            // `apiKey` above is `.openAIAPIKey`-scoped. No arm can select `.gemini` today, so this is
+            // unreachable — but a future Gemini benchmark arm must resolve its key via
+            // `arm.provider.ownCredential` instead of reusing this OpenAI-scoped one.
             apiKey: apiKey ?? "",
             appleSpeechLocale: appleLocale,
             speaker: .them,
