@@ -138,6 +138,41 @@ import Foundation
         #expect(GeminiLiveSession.finalTranscript(from: event, speaker: .them) == "Thank you.")
     }
 
+    @Test func hasFinalizedTranscriptionIsTrueForOrdinaryFinalizedText() {
+        let event: [String: Any] = ["serverContent": [
+            "inputTranscription": ["text": "let's talk about indexes"],
+        ]]
+        #expect(GeminiLiveSession.hasFinalizedTranscription(event))
+    }
+
+    /// This is the whole point of the predicate: a finalized frame whose text the shared
+    /// hallucination filter rejects is STILL a finalized frame — Gemini finished recognizing the
+    /// utterance regardless of what `finalTranscript` goes on to do with the text. A caller using
+    /// `finalTranscript(...) != nil` as its finalized-frame test cannot tell this case apart from "not
+    /// a finalized frame at all," which is exactly the bug this predicate exists to let callers avoid.
+    @Test func hasFinalizedTranscriptionIsTrueEvenWhenTheFilterWouldRejectTheText() {
+        let thankYou: [String: Any] = ["serverContent": ["inputTranscription": ["text": "Thank you."]]]
+        #expect(GeminiLiveSession.hasFinalizedTranscription(thankYou))
+        #expect(GeminiLiveSession.finalTranscript(from: thankYou, speaker: .me) == nil)
+
+        let punctuationOnly: [String: Any] = ["serverContent": ["inputTranscription": ["text": "."]]]
+        #expect(GeminiLiveSession.hasFinalizedTranscription(punctuationOnly))
+        #expect(GeminiLiveSession.finalTranscript(from: punctuationOnly, speaker: .me) == nil)
+        #expect(GeminiLiveSession.finalTranscript(from: punctuationOnly, speaker: .them) == nil)
+    }
+
+    @Test func hasFinalizedTranscriptionIsFalseForAnInterimOnlyFrame() {
+        let event: [String: Any] = ["serverContent": [
+            "interimInputTranscription": ["text": "let's talk about ind"],
+        ]]
+        #expect(!GeminiLiveSession.hasFinalizedTranscription(event))
+    }
+
+    @Test func hasFinalizedTranscriptionIsFalseWithoutServerContent() {
+        #expect(!GeminiLiveSession.hasFinalizedTranscription(["setupComplete": [String: Any]()]))
+        #expect(!GeminiLiveSession.hasFinalizedTranscription([:]))
+    }
+
     /// Real frame shape from a live capture: `voiceActivity` is a TOP-LEVEL key, a sibling of
     /// `serverContent` (which the server sends empty alongside it), not nested inside it.
     @Test func voiceActivityStartFrameIsAStart() {

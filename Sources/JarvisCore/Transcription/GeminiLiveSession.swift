@@ -92,6 +92,21 @@ public enum GeminiLiveSession {
         return TranscriptFiltering.meaningfulTranscript(text, speaker: speaker)
     }
 
+    /// Whether this event carries a finalized `inputTranscription`, independent of whether its text
+    /// survives `TranscriptFiltering` — a pure presence check, symmetric with `hasInterimTranscription`
+    /// below. `finalTranscript(from:speaker:)` returns `nil` for two different reasons a caller cannot
+    /// tell apart: this frame is not a finalized frame at all, OR it is one whose text the shared
+    /// hallucination filter rejected (e.g. a "Thank you." on silence — precisely the artifact
+    /// `TranscriptFiltering.hallucinationDenylist` exists to catch). A caller that needs to know
+    /// "did Gemini finish recognizing this utterance" — regardless of whether the result turned out to
+    /// be speech worth keeping — must use this predicate instead of testing `finalTranscript` for
+    /// non-nil.
+    public static func hasFinalizedTranscription(_ event: [String: Any]) -> Bool {
+        guard let content = event["serverContent"] as? [String: Any],
+              let transcription = content["inputTranscription"] as? [String: Any] else { return false }
+        return transcription["text"] is String
+    }
+
     /// Whether this event carries a speculative, still-revising interim hypothesis. This is a pure
     /// presence check — it never surfaces the interim text itself, only whether some is there. Callers
     /// use this solely as a "Gemini is actively recognizing speech right now" signal (e.g. to keep a

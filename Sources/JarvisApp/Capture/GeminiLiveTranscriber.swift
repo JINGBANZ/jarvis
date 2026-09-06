@@ -498,25 +498,35 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
             markReady(task: task, generation: socketGeneration)
             return
         }
-        if let text = GeminiLiveSession.finalTranscript(from: message, speaker: speaker) {
-            // This utterance is done — recognition is no longer in flight for it.
+        if GeminiLiveSession.hasFinalizedTranscription(message) {
+            // Clear here — on the raw frame, NOT inside the `if let text` below — because Gemini has
+            // definitively finished recognizing this utterance the moment ANY finalized
+            // `inputTranscription` arrives, even one whose text `TranscriptFiltering` goes on to
+            // reject (e.g. a "Thank you." hallucinated on silence — exactly the case
+            // `hallucinationDenylist` exists for). Clearing only inside the filtered branch left
+            // `recognitionInFlight` wedged true after a rejected final, gating automatic coaching on
+            // a signal that had already resolved. A filtered final still means the server is done.
             lock.lock(); recognitionInFlight = false; lock.unlock()
-            continuityReporter.recordServerSpeech(
-                .transcriptionCompleted, audioTimeMilliseconds: nil,
-                socketGeneration: socketGeneration)
-            // Gemini reports no per-utterance start time, so `spokenAt: nil` lets the coordinator
-            // date the line from the session clock. `source` is debug-only detail, never Activity.
-            let accepted = coachingCoordinator.recordFinalizedTranscript(
-                text, spokenAt: nil, source: "gemini-live")
-            benchmark?.observer.record(.init(
-                kind: .finalized,
-                provider: TranscriptionProvider.gemini.rawValue,
-                model: model.rawValue,
-                speaker: speaker.rawValue,
-                generation: socketGeneration,
-                text: text,
-                observedAt: clock.now(),
-                transcriptUnavailable: !accepted))
+            if let text = GeminiLiveSession.finalTranscript(from: message, speaker: speaker) {
+                continuityReporter.recordServerSpeech(
+                    .transcriptionCompleted, audioTimeMilliseconds: nil,
+                    socketGeneration: socketGeneration)
+                // Gemini reports no per-utterance start time, so `spokenAt: nil` lets the coordinator
+                // date the line from the session clock. `source` is debug-only detail, never Activity.
+                let accepted = coachingCoordinator.recordFinalizedTranscript(
+                    text, spokenAt: nil, source: "gemini-live")
+                benchmark?.observer.record(.init(
+                    kind: .finalized,
+                    provider: TranscriptionProvider.gemini.rawValue,
+                    model: model.rawValue,
+                    speaker: speaker.rawValue,
+                    generation: socketGeneration,
+                    text: text,
+                    observedAt: clock.now(),
+                    transcriptUnavailable: !accepted))
+            }
+            // A filtered-out final still needs the work flag re-evaluated: it may be all that was
+            // holding the turn open (see `updateWorkFlag`'s doc comment).
             updateWorkFlag()
             return
         }
