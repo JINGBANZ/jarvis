@@ -7,6 +7,11 @@ public enum GeminiLiveSession {
     private static let endpoint =
         "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
 
+    /// Google's documented maximum for `customVocabulary` on the Live API — sending more can get the
+    /// whole `setup` request rejected. `TranscriptionPreferences.geminiVocabularyKeywords` enforces
+    /// this at write time so a Start can never assemble a setup message that exceeds it.
+    public static let maxVocabularyTerms = 1_000
+
     /// Gemini authenticates with a query parameter rather than a header, so the key is part of the
     /// URL. Never log this value — log `redactedEndpoint` instead. The force-unwraps operate on the
     /// hardcoded `endpoint` constant above, not on `apiKey`, so they cannot fail at runtime.
@@ -105,6 +110,12 @@ public enum GeminiLiveSession {
     /// never reaches `terminalFailure(from:)` above: `nil` for every other code, so the caller's
     /// normal reconnect-with-backoff behavior is unaffected.
     ///
+    /// Takes the raw close code as an `Int` rather than `URLSessionWebSocketTask.CloseCode` — that
+    /// type is Foundation networking, and this file lives in the coaching kernel, which may depend
+    /// only on deterministic in-memory policy, never an OS/transport type (`scripts/check-coaching-
+    /// kernel.sh`). `URLSessionWebSocketTask.CloseCode` is `RawRepresentable` with `Int` raw values,
+    /// so the call site passes `closeCode.rawValue`.
+    ///
     /// EMPIRICAL FACT, established against the live endpoint with a deliberately invalid API key —
     /// do not "simplify" this away without re-verifying against the real server: Gemini does NOT
     /// reject a bad key with an HTTP 401 at the WebSocket handshake, and does NOT send an
@@ -114,9 +125,7 @@ public enum GeminiLiveSession {
     /// makes close code 1008 the only signal available for a rejected key. It is exactly the "proven
     /// permanent provider-boundary failure" AGENTS.md allows to exhaust a target immediately, skipping
     /// the usual reconnect backoff.
-    public static func terminalFailure(
-        forCloseCode closeCode: URLSessionWebSocketTask.CloseCode
-    ) -> TranscriptionFailureReason? {
-        closeCode == .policyViolation ? .authenticationFailed : nil
+    public static func terminalFailure(forCloseCode closeCode: Int) -> TranscriptionFailureReason? {
+        closeCode == 1008 ? .authenticationFailed : nil
     }
 }

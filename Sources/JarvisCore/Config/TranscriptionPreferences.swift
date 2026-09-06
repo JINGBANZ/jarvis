@@ -133,7 +133,8 @@ public final class TranscriptionPreferences {
             let keywords = newValue
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                 .filter { !$0.isEmpty }
-            defaults.set(keywords, forKey: Defaults.Transcription.geminiVocabularyKeywordsKey)
+                .prefix(GeminiLiveSession.maxVocabularyTerms)
+            defaults.set(Array(keywords), forKey: Defaults.Transcription.geminiVocabularyKeywordsKey)
         }
     }
 

@@ -191,7 +191,9 @@ of the global constant, and `RealtimeSession.sessionUpdate` sends OpenAI's 24 kH
 
 `LocalTurnDetector` is **not** affected: it is constructed with `inputSampleRate: aecRate` (48 kHz,
 pre-downsample) and resamples to Silero's own rate, so local turn detection is independent of the
-wire rate. `SystemAudioBenchmarkCapture` takes the format from the benchmark's configured provider.
+wire rate. `SystemAudioBenchmarkCapture` still captures at a fixed 24 kHz (`pcm16Mono24k`) regardless
+of provider; the benchmark harness covers only OpenAI and Apple Speech today, and Gemini benchmark
+support is a follow-up.
 
 The two `TranscriptionAudioFormatTests` cases that assert against `pcm16Mono` move to the 24 kHz
 format, with a new case covering 16 kHz.

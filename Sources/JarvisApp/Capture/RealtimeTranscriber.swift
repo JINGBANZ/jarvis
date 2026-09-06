@@ -261,9 +261,6 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
     func stop() {
         lock.lock()
         stopped = true; connected = false
-        let pt = pingTimer; pingTimer = nil
-        let rt = readyTimer; readyTimer = nil
-        let pot = pongTimer; pongTimer = nil
         let t = task; task = nil
         let s = session; session = nil
         pendingPingGeneration = nil
@@ -276,11 +273,19 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         jarvisManagedSpeechBuffer?.clear()
         lock.unlock()
         benchmark?.transportControl?.uninstallInterruption()
-        // Timers must be invalidated on the thread that scheduled them (main); doing it synchronously
-        // from an off-main Stop (e.g. the onTerminalFailure Task) would silently fail to cancel and
-        // could let a stray timer fire onSilence on a torn-down pipeline.
-        DispatchQueue.main.async {
-            pt?.invalidate(); rt?.invalidate(); pot?.invalidate()
+        // Timers must be read, invalidated, AND nilled on the thread that scheduled them (main) —
+        // one queue owning the field end to end, not just the invalidate call. `pingTimer`/
+        // `readyTimer`/`pongTimer` are assigned from main-queue blocks without `lock` (mirrors
+        // GeminiLiveTranscriber — see its header comment), so reading them under `lock` here and only
+        // hopping to main for the `invalidate()` call would race an off-main Stop (e.g. the
+        // onTerminalFailure Task) against a main-queue writer assigning a replacement timer. `stopped`
+        // is already set above, and every timer body guards on `!stopped`, so a timer firing in the
+        // gap before this hop runs does nothing.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.pingTimer?.invalidate(); self.pingTimer = nil
+            self.readyTimer?.invalidate(); self.readyTimer = nil
+            self.pongTimer?.invalidate(); self.pongTimer = nil
         }
         continuityReporter.stop()
         transcriptionLifecycle.stop()

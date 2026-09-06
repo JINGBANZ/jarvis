@@ -145,16 +145,15 @@ import Foundation
     /// frame — verified empirically against the live endpoint. This is the only close code that
     /// should skip reconnect backoff and go straight to a terminal failure.
     @Test func policyViolationCloseIsTerminalAuthenticationFailure() {
-        #expect(GeminiLiveSession.terminalFailure(forCloseCode: .policyViolation)
-            == .authenticationFailed)
+        #expect(GeminiLiveSession.terminalFailure(forCloseCode: 1008) == .authenticationFailed)
     }
 
     /// Every other close code — normal closure, going away, abnormal closure, etc. — must stay
     /// non-terminal so the caller's existing reconnect-with-backoff behavior is unaffected.
     @Test func otherCloseCodesAreNotTerminal() {
-        #expect(GeminiLiveSession.terminalFailure(forCloseCode: .normalClosure) == nil)
-        #expect(GeminiLiveSession.terminalFailure(forCloseCode: .goingAway) == nil)
-        #expect(GeminiLiveSession.terminalFailure(forCloseCode: .abnormalClosure) == nil)
-        #expect(GeminiLiveSession.terminalFailure(forCloseCode: .internalServerError) == nil)
+        #expect(GeminiLiveSession.terminalFailure(forCloseCode: 1000) == nil) // normal closure
+        #expect(GeminiLiveSession.terminalFailure(forCloseCode: 1001) == nil) // going away
+        #expect(GeminiLiveSession.terminalFailure(forCloseCode: 1006) == nil) // abnormal closure
+        #expect(GeminiLiveSession.terminalFailure(forCloseCode: 1011) == nil) // internal server error
     }
 }

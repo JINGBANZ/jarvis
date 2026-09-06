@@ -310,7 +310,9 @@ cards each report and edit only their own Jarvis-managed owner-only file through
 (one instance per `Credential`, keyed by `credential.rawValue` so their accessibility labels,
 identifiers, and saved-key state never collide); each card's action is **Add API key** or **Edit**.
 The `OPENAI_API_KEY` fallback remains usable by Start but is deliberately not presented as a
-Jarvis-managed saved key; Gemini has no such headless fallback.
+Jarvis-managed saved key; Gemini has the same headless fallback in `GEMINI_API_KEY`
+(`Credential.geminiAPIKey.environmentVariable`, read by `EnvSecretStore`), also not presented as a
+saved key.
 
 Claude Code and Codex CLI keep authentication in their own tools. Connections runs the existing
 bounded `AgentCLIDetector` probes and reports **Signed in**, **Signed out**, **Sign-in unknown**, or

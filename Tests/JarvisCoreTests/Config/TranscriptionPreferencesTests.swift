@@ -200,6 +200,22 @@ import Testing
         #expect(preferences.geminiMode == .smart)
     }
 
+    /// Google's Live API rejects a `customVocabulary` list longer than 1,000 terms, which would fail
+    /// Start. The setter caps at that limit, keeping the first 1,000 (the user's priority order); a
+    /// normal small list is untouched.
+    @Test func vocabularyKeywordsAreCappedAtTheAPILimit() {
+        let defaults = freshDefaults()
+        let preferences = TranscriptionPreferences(defaults: defaults)
+
+        let overLimit = (1...1_001).map { "term\($0)" }
+        preferences.geminiVocabularyKeywords = overLimit
+        #expect(preferences.geminiVocabularyKeywords.count == 1_000)
+        #expect(preferences.geminiVocabularyKeywords == Array(overLimit.prefix(1_000)))
+
+        preferences.geminiVocabularyKeywords = ["gRPC", "Kubernetes"]
+        #expect(preferences.geminiVocabularyKeywords == ["gRPC", "Kubernetes"])
+    }
+
     @Test func geminiPreferencesFallBackToDefaultsWhenUnset() {
         let preferences = TranscriptionPreferences(defaults: freshDefaults())
         #expect(preferences.geminiModel == .geminiTranscribeLive)

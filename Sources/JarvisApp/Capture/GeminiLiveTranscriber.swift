@@ -14,10 +14,10 @@ import JarvisCore
 /// failure path constructs its own fixed reason string instead of interpolating the caught error.
 ///
 /// `@unchecked Sendable`: most mutable fields are guarded by `lock`. `readyTimer`/`pingTimer`/
-/// `pongTimer` are the exception — they are created, fired, and invalidated only from main-queue
-/// blocks, so main-queue confinement (not `lock`) is what makes them safe, even though `stop()` reads
-/// and nils them while holding `lock`. `coachingCoordinator` and `continuityReporter` guard their own
-/// state and are themselves Sendable.
+/// `pongTimer` are the exception — they are created, read, invalidated, and nilled only from
+/// main-queue blocks (including inside `stop()`, which hops to main rather than touching them under
+/// `lock`), so main-queue confinement is what makes them safe. `coachingCoordinator` and
+/// `continuityReporter` guard their own state and are themselves Sendable.
 final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWebSocketDelegate,
     @unchecked Sendable {
     var onTurnEnd: (@Sendable (_ transcriptBoundary: Int) -> Void)?
@@ -58,7 +58,15 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
     /// Audio captured while disconnected, or not yet accepted by the live socket. Plain byte-capped
     /// FIFO: unlike `RealtimeTranscriber`'s `PCMBuffer`, there is no server audio-clock acknowledgement
     /// to correlate against, so a chunk simply leaves this queue once its send completes.
-    private var bufferedAudio: [Data] = []
+    ///
+    /// Each chunk carries a monotonic `token` so a completion can identify the chunk it actually sent
+    /// by identity rather than by `Data` equality: `pumpIfPossible` peeks the head and releases `lock`
+    /// for the duration of `task.send`, during which `sendAudio`'s eviction loop can remove that same
+    /// head. Silent (all-zero) PCM at a fixed callback length is routine — a muted mic, or system audio
+    /// after echo cancellation — so byte-identical chunks are common, and matching on bytes could let a
+    /// completion evict a chunk that was never transmitted.
+    private var bufferedAudio: [(token: UInt64, data: Data)] = []
+    private var nextChunkToken: UInt64 = 0
     private var bufferedByteCount = 0
     private var isSending = false         // one in-flight audio send at a time, preserves order
     private var reconnectAttempt = 0
@@ -160,9 +168,6 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
     func stop() {
         lock.lock()
         stopped = true; connected = false
-        let pt = pingTimer; pingTimer = nil
-        let rt = readyTimer; readyTimer = nil
-        let pot = pongTimer; pongTimer = nil
         let t = task; task = nil
         let s = session; session = nil
         pendingPingGeneration = nil
@@ -171,10 +176,18 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
         bufferedAudio.removeAll(keepingCapacity: false)
         bufferedByteCount = 0
         lock.unlock()
-        // Timers must be invalidated on the thread that scheduled them (main); doing it synchronously
-        // from an off-main Stop would silently fail to cancel and could let a stray timer fire later.
-        DispatchQueue.main.async {
-            pt?.invalidate(); rt?.invalidate(); pot?.invalidate()
+        // Timers must be read, invalidated, AND nilled on the thread that scheduled them (main) —
+        // one queue owning the field end to end, not just the invalidate call. `pingTimer`/
+        // `readyTimer`/`pongTimer` are assigned from main-queue blocks without `lock` (see the type's
+        // header comment), so reading them under `lock` here and only hopping to main for the
+        // `invalidate()` call would race an off-main Stop against a main-queue writer assigning a
+        // replacement timer. `stopped` is already set above, and every timer body guards on
+        // `!stopped`, so a timer firing in the gap before this hop runs does nothing.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.pingTimer?.invalidate(); self.pingTimer = nil
+            self.readyTimer?.invalidate(); self.readyTimer = nil
+            self.pongTimer?.invalidate(); self.pongTimer = nil
         }
         continuityReporter.stop()
         coachingCoordinator.stop()
@@ -258,12 +271,14 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
             sequence: sequenceNumber, pcm16: pcm, at: clock.now() - sessionStart)
         lock.lock()
         guard !stopped else { lock.unlock(); return }
-        bufferedAudio.append(pcm)
+        let token = nextChunkToken
+        nextChunkToken += 1
+        bufferedAudio.append((token: token, data: pcm))
         bufferedByteCount += pcm.count
         var evicted = 0
         while audioFormat.duration(forByteCount: bufferedByteCount) > maxBufferedAudioSeconds,
               !bufferedAudio.isEmpty {
-            bufferedByteCount -= bufferedAudio.removeFirst().count
+            bufferedByteCount -= bufferedAudio.removeFirst().data.count
             evicted += 1
         }
         lock.unlock()
@@ -279,30 +294,36 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
     /// One outstanding send at a time keeps audio strictly ordered without a claim/ack structure.
     private func pumpIfPossible() {
         var frame: Data?
+        var frameToken: UInt64?
         var activeTask: URLSessionWebSocketTask?
         var socketGeneration = 0
         lock.lock()
         if let task, connected, !stopped, !isReconnecting, !isSending,
            let first = bufferedAudio.first {
-            frame = first
+            frame = first.data
+            frameToken = first.token
             activeTask = task
             socketGeneration = generation
             isSending = true
         }
         lock.unlock()
-        guard let frame, let activeTask else { return }
-        sendFrame(frame, task: activeTask, socketGeneration: socketGeneration)
+        guard let frame, let frameToken, let activeTask else { return }
+        sendFrame(frame, token: frameToken, task: activeTask, socketGeneration: socketGeneration)
     }
 
-    private func sendFrame(_ pcm: Data, task: URLSessionWebSocketTask, socketGeneration: Int) {
+    private func sendFrame(_ pcm: Data, token: UInt64, task: URLSessionWebSocketTask, socketGeneration: Int) {
         let frame = GeminiLiveSession.audioFrame(
             base64PCM: pcm.base64EncodedString(), sampleRate: audioFormat.sampleRate)
         guard let data = try? JSONSerialization.data(withJSONObject: frame),
               let text = String(data: data, encoding: .utf8) else {
             // A local encoding bug, not a transport fault — drop this one chunk and keep going
-            // rather than tearing down an otherwise healthy socket.
+            // rather than tearing down an otherwise healthy socket. Match by `token`, not position:
+            // the head may have already been evicted while this frame was being built off-lock, and
+            // the chunk that failed to encode is not necessarily whatever is at the head now.
             lock.lock()
-            if !bufferedAudio.isEmpty { bufferedByteCount -= bufferedAudio.removeFirst().count }
+            if let first = bufferedAudio.first, first.token == token {
+                bufferedByteCount -= bufferedAudio.removeFirst().data.count
+            }
             isSending = false
             lock.unlock()
             updateWorkFlag()
@@ -321,8 +342,12 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
             self.lock.lock()
             let isCurrentLease = self.task === task && self.generation == socketGeneration
                 && self.connected && !self.stopped && !self.isReconnecting
-            if isCurrentLease, let first = self.bufferedAudio.first, first == pcm {
-                self.bufferedByteCount -= self.bufferedAudio.removeFirst().count
+            // Match by `token`, not `Data` equality: silent (all-zero) PCM at a fixed callback length
+            // is routine, so byte-identical chunks are common, and equality could evict a same-bytes
+            // chunk that replaced the one actually sent while `lock` was released for `task.send`. If
+            // the token no longer matches the head, that chunk was evicted — do nothing to the queue.
+            if isCurrentLease, let first = self.bufferedAudio.first, first.token == token {
+                self.bufferedByteCount -= self.bufferedAudio.removeFirst().data.count
             }
             self.isSending = false
             self.lock.unlock()
@@ -488,7 +513,7 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
         // behavior behind this. Route it straight to the terminal path instead of `failConnection`'s
         // six-attempt, ~61s backoff: a rejected key cannot succeed on retry, and this is the one case
         // AGENTS.md permits exhausting a target immediately, without the usual retry discipline.
-        if let reason = GeminiLiveSession.terminalFailure(forCloseCode: closeCode) {
+        if let reason = GeminiLiveSession.terminalFailure(forCloseCode: closeCode.rawValue) {
             reportTerminalFailureOnce(reason)
             return
         }
