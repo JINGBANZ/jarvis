@@ -303,3 +303,9 @@ Tested `JarvisCore` + `JarvisBrainProviders` + `JarvisEvaluation` + `JarvisOverl
 
 - **Universal binary** — `Sources/CJarvisAEC/lib/libjarvis-aec.a` is arm64-only; `lipo` in an x86_64 slice if Intel is ever needed.
 - **Neural double-talk canceller** (DTLN / Muesli-style on the same aligned streams) — the escalation if AEC3 over-attenuates the user under loud far audio in practice.
+- **Gemini Live session resumption** (`sessionResumptionUpdate`) — `GeminiLiveTranscriber` drains and
+  rotates ahead of the ~10-minute `goAway` close ([architecture.md → Resilience](./architecture.md#resilience)),
+  which recovers the common case, but a single utterance long enough to still be in progress exactly
+  when the bounded grace period elapses can still be split across the rotation. Google's own session
+  resumption is the complete fix; adopting it is deliberately left as a follow-up rather than bundled
+  into the drain.

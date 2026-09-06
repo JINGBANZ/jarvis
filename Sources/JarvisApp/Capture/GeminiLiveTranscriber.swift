@@ -14,9 +14,9 @@ import JarvisCore
 /// failure path constructs its own fixed reason string instead of interpolating the caught error.
 ///
 /// `@unchecked Sendable`: most mutable fields are guarded by `lock`. `readyTimer`/`pingTimer`/
-/// `pongTimer` are the exception — they are created, read, invalidated, and nilled only from
-/// main-queue blocks (including inside `stop()`, which hops to main rather than touching them under
-/// `lock`), so main-queue confinement is what makes them safe. `coachingCoordinator` and
+/// `pongTimer`/`drainTimer` are the exception — they are created, read, invalidated, and nilled only
+/// from main-queue blocks (including inside `stop()`, which hops to main rather than touching them
+/// under `lock`), so main-queue confinement is what makes them safe. `coachingCoordinator` and
 /// `continuityReporter` guard their own state and are themselves Sendable.
 final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWebSocketDelegate,
     @unchecked Sendable {
@@ -42,6 +42,11 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
     private let readyTimeout: TimeInterval
     private let pingInterval: TimeInterval
     private let pongTimeout: TimeInterval
+    /// Bound on the drain-then-rotate grace period `beginDrain` arms after a `goAway` — see that
+    /// method's doc comment. Capped independently of `readyTimeout`/`pongTimeout`: those bound how
+    /// long a *new* socket may take to become usable, while this bounds how long an *expiring* one may
+    /// keep an in-flight utterance's final transcript waiting before Jarvis rotates out from under it.
+    private let goAwayGraceTimeout: TimeInterval
     private let networkStatus: @Sendable () -> String
     /// `nil` for every normal coaching session. Optional chaining then skips event construction.
     private let benchmark: TranscriptionBenchmarkInstrumentation?
@@ -55,6 +60,8 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
     private var pingTimer: Timer?
     private var readyTimer: Timer?
     private var pongTimer: Timer?
+    /// Bounds the drain-then-rotate grace period; see `beginDrain`/`armDrainDeadline`.
+    private var drainTimer: Timer?
     /// Audio captured while disconnected, or not yet accepted by the live socket. Plain byte-capped
     /// FIFO: unlike `RealtimeTranscriber`'s `PCMBuffer`, there is no server audio-clock acknowledgement
     /// to correlate against, so a chunk simply leaves this queue once its send completes.
@@ -93,6 +100,11 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
     private var isSending = false         // one in-flight audio send at a time, preserves order
     private var reconnectAttempt = 0
     private var isReconnecting = false
+    /// `true` from a `goAway` frame until the replacement socket is opened (see `openSocket`, which
+    /// clears it for the fresh socket). Gates `pumpIfPossible` so no NEW audio is sent to a socket
+    /// Google already warned is closing, and short-circuits `failConnection` straight to `rotate`
+    /// instead of the backoff path — see both call sites' doc comments for why.
+    private var rotating = false
     private var stopped = true
     private var connected = false         // true only once the server acknowledges setup
     private var terminalFailureReported = false
@@ -118,6 +130,7 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
         readyTimeout: TimeInterval = 10,
         pingInterval: TimeInterval = 20,
         pongTimeout: TimeInterval = 10,
+        goAwayGraceTimeout: TimeInterval = 5,
         networkStatus: @escaping @Sendable () -> String = { "unavailable" },
         activity: (any ActivityEventRecording)? = nil,
         benchmark: TranscriptionBenchmarkInstrumentation? = nil
@@ -135,6 +148,7 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
         self.readyTimeout = readyTimeout
         self.pingInterval = pingInterval
         self.pongTimeout = pongTimeout
+        self.goAwayGraceTimeout = goAwayGraceTimeout
         self.networkStatus = networkStatus
         self.benchmark = benchmark
         self.continuityReporter = RealtimeContinuityReporter(
@@ -170,7 +184,7 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
 
     func connect() {
         lock.lock()
-        stopped = false; reconnectAttempt = 0; isReconnecting = false
+        stopped = false; reconnectAttempt = 0; isReconnecting = false; rotating = false
         terminalFailureReported = false
         lock.unlock()
         coachingCoordinator.start()
@@ -211,6 +225,7 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
             self.pingTimer?.invalidate(); self.pingTimer = nil
             self.readyTimer?.invalidate(); self.readyTimer = nil
             self.pongTimer?.invalidate(); self.pongTimer = nil
+            self.drainTimer?.invalidate(); self.drainTimer = nil
         }
         continuityReporter.stop()
         coachingCoordinator.stop()
@@ -247,6 +262,12 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
         // A fresh socket starts with no recognition in flight — bounds a final lost to whatever
         // socket this one is replacing (see the field's doc comment).
         recognitionInFlight = false
+        // A fresh socket is not draining anything, whether this is the very first connect, a normal
+        // backoff-driven reconnect, or the replacement `rotate` just opened. Clearing it here (rather
+        // than waiting for `markReady`) is what keeps a genuine failure of THIS new socket (e.g. its
+        // own setup send failing) on the normal budget-consuming backoff path instead of being
+        // mistaken for still-expected goAway churn — see `failConnection`'s `rotating` check.
+        rotating = false
         lock.unlock()
         previousSession?.invalidateAndCancel()   // release the previous session's delegate retain
         invalidateConnectionTimers()
@@ -324,7 +345,11 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
         var activeTask: URLSessionWebSocketTask?
         var socketGeneration = 0
         lock.lock()
-        if let task, connected, !stopped, !isReconnecting, !isSending,
+        // `!rotating`: a `goAway` was seen and this socket is being drained — new audio stays queued
+        // in `bufferedAudio` (already true regardless of connection state; see that field's doc
+        // comment) rather than being sent to a socket Google already warned is about to close. It
+        // drains into the replacement once `rotate` opens one and `markReady` flips `connected`.
+        if let task, connected, !stopped, !isReconnecting, !rotating, !isSending,
            let first = bufferedAudio.first {
             frame = first.data
             frameToken = first.token
@@ -488,7 +513,9 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
     /// is trusted. There is no in-frame terminal-error branch here — the Live API's
     /// `BidiGenerateContentServerMessage` has no `error` frame (see `GeminiLiveSession`'s close-code
     /// doc comment); the WebSocket close code handled in `urlSession(_:webSocketTask:didCloseWith:)`
-    /// is the only terminal-failure signal Gemini sends.
+    /// is the only terminal-failure signal Gemini sends. `goAway` is the one other server-initiated
+    /// lifecycle frame besides `setupComplete` — advance warning of an approaching close, not a
+    /// failure; see `beginDrain`.
     private func handle(_ message: [String: Any], task: URLSessionWebSocketTask,
                         generation socketGeneration: Int) {
         // Re-validate the lease even though `receiveLoop` already did: `decodeAndHandle`'s UTF-8 and
@@ -502,6 +529,11 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
             markReady(task: task, generation: socketGeneration)
             return
         }
+        if GeminiLiveSession.isGoAway(message) {
+            beginDrain(task: task, generation: socketGeneration,
+                      timeLeft: GeminiLiveSession.goAwayTimeLeft(message))
+            return
+        }
         if GeminiLiveSession.hasFinalizedTranscription(message) {
             // Clear here — on the raw frame, NOT inside the `if let text` below — because Gemini has
             // definitively finished recognizing this utterance the moment ANY finalized
@@ -510,7 +542,7 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
             // `hallucinationDenylist` exists for). Clearing only inside the filtered branch left
             // `recognitionInFlight` wedged true after a rejected final, gating automatic coaching on
             // a signal that had already resolved. A filtered final still means the server is done.
-            lock.lock(); recognitionInFlight = false; lock.unlock()
+            lock.lock(); recognitionInFlight = false; let isDraining = rotating; lock.unlock()
             if let text = GeminiLiveSession.finalTranscript(from: message, speaker: speaker) {
                 continuityReporter.recordServerSpeech(
                     .transcriptionCompleted, audioTimeMilliseconds: nil,
@@ -532,6 +564,11 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
             // A filtered-out final still needs the work flag re-evaluated: it may be all that was
             // holding the turn open (see `updateWorkFlag`'s doc comment).
             updateWorkFlag()
+            if isDraining {
+                // The utterance the grace period existed for just finished — no reason to wait out
+                // the rest of it. Rotate now instead of on `armDrainDeadline`'s timer.
+                rotate(fromTask: task, generation: socketGeneration, reason: "utterance finalized during drain")
+            }
             return
         }
         if GeminiLiveSession.hasInterimTranscription(message) {
@@ -580,6 +617,100 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
         pumpIfPossible()
         emitState(.ready)
         startPing(task: task, generation: socketGeneration)
+    }
+
+    // MARK: - Drain / rotate (goAway)
+
+    /// Google caps a Live API connection at roughly 10 minutes and sends `goAway` shortly before
+    /// closing it (https://ai.google.dev/gemini-api/docs/live-api/session-management) — advance
+    /// warning, not a failure. Left unhandled, both speaker sockets (opened together, so they expire
+    /// together) would simply drop mid-utterance: the final transcript in flight at that moment would
+    /// be lost, and its buffered audio would replay from the middle on the replacement — a garbled
+    /// line roughly every 10 minutes.
+    ///
+    /// This starts the drain: mark `rotating` so `pumpIfPossible` stops sending NEW audio to this
+    /// socket (it keeps accumulating in the existing bounded `bufferedAudio` FIFO — no second buffer),
+    /// then arm a bounded grace period for the utterance already in flight to produce its final on
+    /// this still-open socket before `rotate` replaces it. `!rotating` in the guard makes this
+    /// idempotent against a resent `goAway` for the same socket.
+    private func beginDrain(task: URLSessionWebSocketTask, generation socketGeneration: Int,
+                            timeLeft: TimeInterval?) {
+        lock.lock()
+        let shouldDrain = self.task === task && self.generation == socketGeneration
+            && !stopped && !isReconnecting && !rotating
+        if shouldDrain { rotating = true }
+        lock.unlock()
+        guard shouldDrain else { return }
+        jlog("Jarvis Gemini [\(speaker.rawValue)]: goAway received (socket #\(socketGeneration)) "
+             + "— draining before rotation")
+        armDrainDeadline(task: task, generation: socketGeneration, timeLeft: timeLeft)
+    }
+
+    /// Bounds the drain with the same main-queue-confined, double-checked timer discipline as
+    /// `armReadyTimeout`/`sendHealthPing`'s pong timer: an outer main-queue hop re-validates the lease
+    /// before arming, and the timer body re-validates again before acting, so a lease that changed in
+    /// between (e.g. an early rotation from the final arriving, or a Stop) leaves it a no-op.
+    ///
+    /// The bound is `goAwayGraceTimeout` unless the server's own `timeLeft` is smaller, in which case
+    /// that takes precedence — waiting past the server's stated deadline would just trade a
+    /// self-inflicted timeout for the same lost-final problem this exists to avoid. This is the
+    /// mandatory backstop: if the final never arrives (a lost frame, or the server closing early),
+    /// rotation proceeds anyway. An unbounded drain would hang the stream — strictly worse than the
+    /// garbled line being fixed.
+    private func armDrainDeadline(task: URLSessionWebSocketTask, generation socketGeneration: Int,
+                                  timeLeft: TimeInterval?) {
+        let bound: TimeInterval
+        if let timeLeft, timeLeft > 0 {
+            bound = min(goAwayGraceTimeout, timeLeft)
+        } else {
+            bound = goAwayGraceTimeout
+        }
+        DispatchQueue.main.async { [weak self, weak task] in
+            guard let self, let task else { return }
+            self.lock.lock()
+            let isPending = self.task === task && self.generation == socketGeneration
+                && self.rotating && !self.stopped
+            self.lock.unlock()
+            guard isPending else { return }
+            self.drainTimer?.invalidate()
+            self.drainTimer = Timer.scheduledTimer(withTimeInterval: bound, repeats: false) {
+                [weak self, weak task] _ in
+                guard let self, let task else { return }
+                self.lock.lock()
+                let isStillPending = self.task === task && self.generation == socketGeneration
+                    && self.rotating && !self.stopped
+                self.lock.unlock()
+                guard isStillPending else { return }
+                self.rotate(fromTask: task, generation: socketGeneration, reason: "grace period elapsed")
+            }
+        }
+    }
+
+    /// Deliberately replace a socket Google already warned is closing, ahead of the actual close —
+    /// not a reactive reconnect. Three callers converge here: the drain deadline elapsing, the
+    /// in-flight utterance's final arriving early, and `failConnection` short-circuiting here for any
+    /// transport failure that lands on a still-draining socket instead of running its backoff path.
+    ///
+    /// None of them touch `reconnectAttempt` or `reconnectSchedule` — a rotation Google told us about
+    /// in advance is expected transport churn, not a fault, so it must not spend the budget a genuine
+    /// failure needs, and must never report `.failed`. `openSocket` does the actual replacement: it
+    /// already bumps `generation` (so a late callback from the old socket is rejected the same way a
+    /// normal reconnect-open rejects one) and clears `recognitionInFlight` — correct here too, since
+    /// whatever the expiring socket was still recognizing when this fires is unknowable, exactly the
+    /// same bound `openSocket`/`failConnection`/`stop` already apply. `openSocket` also clears
+    /// `rotating` itself, so a failure of the fresh replacement socket is never mistaken for
+    /// still-expected drain churn (see its comment).
+    private func rotate(fromTask task: URLSessionWebSocketTask, generation socketGeneration: Int,
+                        reason: String) {
+        lock.lock()
+        let isPending = self.task === task && self.generation == socketGeneration
+            && rotating && !stopped
+        lock.unlock()
+        guard isPending else { return }
+        jlog("Jarvis Gemini [\(speaker.rawValue)]: rotating socket #\(socketGeneration) "
+             + "ahead of goAway close (\(reason))")
+        emitState(.reconnecting(attempt: 1))
+        openSocket()
     }
 
     /// End a green-but-unusable transcription session immediately for permanent provider failures.
@@ -633,6 +764,16 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
         if stopped || terminalFailureReported || isReconnecting
             || generation != failedGeneration || currentTask !== failedTask {
             lock.unlock(); return
+        }
+        if rotating {
+            // `goAway` already told us this socket was going away — any failure it produces while
+            // draining (a close arriving before the grace deadline, a receive failure, ...) is
+            // expected transport churn, not a fault. Skip the backoff path entirely and rotate now
+            // instead of spending a retry attempt or reporting a diagnostic for something already
+            // anticipated. `rotate` re-validates the lease itself, so it is safe to call unlocked.
+            lock.unlock()
+            rotate(fromTask: failedTask, generation: failedGeneration, reason: diagnostic ?? "socket failure")
+            return
         }
         connected = false; isSending = false
         // Bound: whatever this socket was recognizing is now unknowable — a final for it may never
@@ -800,6 +941,7 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
             self?.readyTimer?.invalidate(); self?.readyTimer = nil
             self?.pingTimer?.invalidate(); self?.pingTimer = nil
             self?.pongTimer?.invalidate(); self?.pongTimer = nil
+            self?.drainTimer?.invalidate(); self?.drainTimer = nil
         }
     }
 

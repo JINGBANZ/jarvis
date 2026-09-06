@@ -205,6 +205,45 @@ import Foundation
         #expect(!GeminiLiveSession.isVoiceActivityStart(["voiceActivity": [String: Any]()]))
     }
 
+    /// Real frame shape: `goAway` is a TOP-LEVEL key, a sibling of `serverContent`, carrying the
+    /// protobuf-`Duration`-encoded `timeLeft`.
+    @Test func goAwayFrameIsDetected() {
+        let event: [String: Any] = ["goAway": ["timeLeft": "9.5s"]]
+        #expect(GeminiLiveSession.isGoAway(event))
+    }
+
+    /// Every other frame kind — setup acknowledgement, finalized/interim transcription, voice
+    /// activity, or an empty object — must not read as `goAway`.
+    @Test func otherFrameKindsAreNotGoAway() {
+        #expect(!GeminiLiveSession.isGoAway(["setupComplete": [String: Any]()]))
+        #expect(!GeminiLiveSession.isGoAway(["serverContent": ["inputTranscription": ["text": "hi"]]]))
+        #expect(!GeminiLiveSession.isGoAway(["voiceActivity": ["type": "ACTIVITY_START"]]))
+        #expect(!GeminiLiveSession.isGoAway([:]))
+    }
+
+    /// A malformed `goAway` (wrong value type, or none at all) must not crash and must read as absent.
+    @Test func malformedGoAwayDoesNotCrash() {
+        #expect(!GeminiLiveSession.isGoAway(["goAway": "not an object"]))
+        #expect(!GeminiLiveSession.isGoAway(["goAway": NSNull()]))
+        #expect(GeminiLiveSession.isGoAway(["goAway": [String: Any]()]))  // present, even if empty
+    }
+
+    @Test func goAwayTimeLeftParsesTheProtobufDurationString() {
+        #expect(GeminiLiveSession.goAwayTimeLeft(["goAway": ["timeLeft": "9.5s"]]) == 9.5)
+        #expect(GeminiLiveSession.goAwayTimeLeft(["goAway": ["timeLeft": "3s"]]) == 3.0)
+    }
+
+    /// Missing `goAway`, a missing/non-string `timeLeft`, or a non-numeric/unsuffixed value must all
+    /// read as `nil` rather than crashing or returning a bogus number, so the caller falls back to its
+    /// own fixed grace-period cap.
+    @Test func goAwayTimeLeftIsNilForMissingOrMalformedValues() {
+        #expect(GeminiLiveSession.goAwayTimeLeft([:]) == nil)
+        #expect(GeminiLiveSession.goAwayTimeLeft(["goAway": [String: Any]()]) == nil)
+        #expect(GeminiLiveSession.goAwayTimeLeft(["goAway": ["timeLeft": 9.5]]) == nil)
+        #expect(GeminiLiveSession.goAwayTimeLeft(["goAway": ["timeLeft": "soon"]]) == nil)
+        #expect(GeminiLiveSession.goAwayTimeLeft(["goAway": ["timeLeft": "9.5"]]) == nil)  // no "s" suffix
+    }
+
     /// The exact reason string captured from the live server for a deliberately invalid API key.
     /// Google does not document this wording as a stable contract, but it is what the classifier
     /// below must recognize today.

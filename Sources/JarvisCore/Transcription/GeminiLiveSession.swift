@@ -134,6 +134,29 @@ public enum GeminiLiveSession {
         return type == "ACTIVITY_START"
     }
 
+    /// Whether this event is Google's `goAway` warning that the current Live API connection is about
+    /// to be closed — advance notice of the fixed ~10-minute session cap, not a failure. `goAway` is a
+    /// TOP-LEVEL key in `BidiGenerateContentServerMessage`, a sibling of `serverContent` (verified
+    /// against https://ai.google.dev/api/live), not nested inside it.
+    ///
+    /// See https://ai.google.dev/gemini-api/docs/live-api/session-management: the server sends this
+    /// message "before the connection will be terminated as ABORTED," which is what lets the caller
+    /// drain the socket instead of losing whatever utterance is mid-recognition when it closes.
+    public static func isGoAway(_ event: [String: Any]) -> Bool {
+        event["goAway"] is [String: Any]
+    }
+
+    /// The server's advance warning of how long this socket has left, if present and parseable.
+    /// Google encodes `goAway.timeLeft` as a protobuf `Duration` JSON string (e.g. `"9.5s"`, always
+    /// suffixed `s`) — see https://protobuf.dev/reference/protobuf/google.protobuf/#duration. Returns
+    /// `nil` for a missing, non-string, or non-numeric value so a caller falls back to its own fixed
+    /// bound rather than trusting an unparseable server value.
+    public static func goAwayTimeLeft(_ event: [String: Any]) -> TimeInterval? {
+        guard let goAway = event["goAway"] as? [String: Any],
+              let raw = goAway["timeLeft"] as? String, raw.hasSuffix("s") else { return nil }
+        return TimeInterval(raw.dropLast())
+    }
+
     /// Maps a WebSocket close code (and, for the one code that needs it, the close reason text) to a
     /// terminal failure. `nil` for every other code, so the caller's normal reconnect-with-backoff
     /// behavior is unaffected.

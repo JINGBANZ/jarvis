@@ -531,7 +531,8 @@ rather than a per-turn screenshot.
   server acknowledges it with `setupComplete` — an open socket alone does not prove the format was
   accepted. Reconnect, ping/pong liveness, and bounded offline audio buffering mirror
   `RealtimeTranscriber`'s lifecycle so the two providers fail and recover the same way from the rest
-  of the pipeline's perspective.
+  of the pipeline's perspective, with one deliberate divergence — Gemini's `goAway`-driven
+  drain-then-rotate — covered in [Resilience](#resilience).
 - **The wire sample rate is a per-provider requirement, not a quality knob
   (`TranscriptionProvider.audioFormat`, `TranscriptionAudioFormat`).** OpenAI Realtime and Apple
   Speech take 24 kHz PCM16 mono; Gemini Live requires 16 kHz PCM16 mono
@@ -732,6 +733,26 @@ The always-on legs are built to survive transient failure rather than die on it:
   their retained PCM is transcribed by the replacement session instead of first emitting a partial
   or gap that the replay would duplicate. Stale speech state therefore cannot suppress silence
   coaching after reconnect. Reconnect uses capped exponential backoff.
+- **A Gemini Live socket is capped at roughly 10 minutes, but Google gives advance warning:** a
+  `goAway` frame (with a `timeLeft` countdown) arrives before the close, instead of the close simply
+  happening as OpenAI's does. `GeminiLiveTranscriber` uses that warning to drain rather than just
+  reconnect: `pumpIfPossible` stops sending NEW audio to the expiring socket (it keeps accumulating in
+  the same bounded FIFO used for offline buffering — no second buffer), while the utterance already in
+  flight gets a bounded grace period to produce its final transcript on the still-open socket. The
+  bound is the smaller of a fixed cap and the server's own `timeLeft`, enforced by the same
+  main-queue-confined timer discipline as `readyTimeout`/`pongTimeout`, so a lost final can never hang
+  the rotation — it proceeds on the deadline regardless. Only then does it open the replacement, which
+  sends its own `setup` like any new socket, and the buffered audio drains into it. Both sockets (mic
+  and system audio) are opened together, so without this a session loses the transcript line in flight
+  and replays audio from the middle roughly every 10 minutes — four times in a 45-minute interview.
+  Because Google already warned it was coming, the rotation is not treated as a failure: it skips the
+  reconnect backoff schedule entirely (no retry-budget consumption, no `.failed`), whether the
+  replacement opens on the grace-period deadline, on the utterance's final arriving early, or on any
+  transport failure that lands on the socket while it is draining. A very long utterance that is still
+  being spoken exactly when the deadline is reached can still be split across the rotation — the
+  residual limitation the drain narrows but does not close; the complete fix is Google's own session
+  resumption (`sessionResumptionUpdate`), deliberately left as a follow-up (see
+  [status.md → Not yet built](./status.md#not-yet-built)).
 - **Apple Speech has no network reconnect loop.** Start validates macOS/device support, resolves the
   selected conversation locale to a supported equivalent, and downloads any missing asset before
   capture replaces an existing pipeline. Each endpoint then owns one analyzer and an ordered
