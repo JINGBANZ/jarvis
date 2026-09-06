@@ -532,7 +532,16 @@ rather than a per-turn screenshot.
   accepted. Reconnect, ping/pong liveness, and bounded offline audio buffering mirror
   `RealtimeTranscriber`'s lifecycle so the two providers fail and recover the same way from the rest
   of the pipeline's perspective, with one deliberate divergence — Gemini's `goAway`-driven
-  drain-then-rotate — covered in [Resilience](#resilience).
+  drain-then-rotate — covered in [Resilience](#resilience). `GeminiLiveTranscriber` is a new,
+  independent adapter rather than a generalization of `RealtimeTranscriber` into a shared base: Gemini
+  needs neither `RealtimeTranscriber`'s per-item ledger nor its client-commit path (turn detection is
+  entirely server-owned), so restructuring the OpenAI adapter — whose live socket cannot be
+  unit-tested — to serve a provider that needs neither would risk the primary transcription path for
+  speculative reuse. The two adapters' socket lifecycle (ready-timeout, ping/pong, timer invalidation,
+  generation guards) still duplicates roughly 130 lines as a result, tracked in each file's
+  `DIVERGENCE HAZARD` comment (`RealtimeTranscriber.swift`, `GeminiLiveTranscriber.swift`) so a fix to
+  one is not missed in the other; extracting a shared lifecycle helper stays a deliberately deferred,
+  separate change until a third streaming provider makes the reuse concrete instead of speculative.
 - **The wire sample rate is a per-provider requirement, not a quality knob
   (`TranscriptionProvider.audioFormat`, `TranscriptionAudioFormat`).** OpenAI Realtime and Apple
   Speech take 24 kHz PCM16 mono; Gemini Live requires 16 kHz PCM16 mono
@@ -541,7 +550,11 @@ rather than a per-turn screenshot.
   recognition — Gemini's lower rate is what its API accepts, not a deliberate quality tradeoff Jarvis
   is making. Capture resamples the shared 48 kHz AEC output down to whichever rate the selected
   provider declares, so the AEC3/downsample pipeline and `WebRTCEchoCanceller` stay provider-agnostic
-  and only the final resample step varies.
+  and only the final resample step varies — an exact 3:1 decimation for Gemini's 16 kHz, cheaper and
+  cleaner than a Gemini-private resampler chained after a shared 24 kHz stage (a 24 → 16 kHz second
+  hop at a 2:3 ratio), which was rejected for exactly that reason: it resamples twice for no benefit
+  and keeps a "shared" constant that actually encodes one provider's requirement. Capturing at 16 kHz
+  for every provider — the simplest option — is not available, since OpenAI Realtime requires 24 kHz.
 
 ### Local CLI brain providers
 
