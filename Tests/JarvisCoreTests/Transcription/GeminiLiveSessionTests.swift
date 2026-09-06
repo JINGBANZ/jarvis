@@ -138,6 +138,36 @@ import Foundation
         #expect(GeminiLiveSession.finalTranscript(from: event, speaker: .them) == "Thank you.")
     }
 
+    /// Real frame shape from a live capture: `voiceActivity` is a TOP-LEVEL key, a sibling of
+    /// `serverContent` (which the server sends empty alongside it), not nested inside it.
+    @Test func voiceActivityStartFrameIsAStart() {
+        let event: [String: Any] = [
+            "voiceActivity": ["type": "ACTIVITY_START", "audioOffset": "0.280s"],
+            "serverContent": [String: Any](),
+        ]
+        #expect(GeminiLiveSession.isVoiceActivityStart(event))
+    }
+
+    /// The end marker must NOT read as a start — it is not a substitute finalization signal, and
+    /// treating it as one would defeat the point of having a distinct start-only predicate.
+    @Test func voiceActivityEndFrameIsNotAStart() {
+        let event: [String: Any] = [
+            "voiceActivity": ["type": "ACTIVITY_END", "audioOffset": "1.230s"],
+        ]
+        #expect(!GeminiLiveSession.isVoiceActivityStart(event))
+    }
+
+    @Test func frameWithoutVoiceActivityIsNotAStart() {
+        #expect(!GeminiLiveSession.isVoiceActivityStart(["serverContent": [String: Any]()]))
+        #expect(!GeminiLiveSession.isVoiceActivityStart([:]))
+    }
+
+    /// A malformed or unexpected `type` value must stay false rather than being treated as a start.
+    @Test func voiceActivityWithUnexpectedTypeIsNotAStart() {
+        #expect(!GeminiLiveSession.isVoiceActivityStart(["voiceActivity": ["type": "SOMETHING_ELSE"]]))
+        #expect(!GeminiLiveSession.isVoiceActivityStart(["voiceActivity": [String: Any]()]))
+    }
+
     @Test func authenticationAndQuotaErrorsAreTerminal() {
         #expect(GeminiLiveSession.terminalFailure(from: ["error": [
             "code": 401, "status": "UNAUTHENTICATED",

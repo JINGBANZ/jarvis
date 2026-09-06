@@ -68,11 +68,27 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
     private var bufferedAudio: [(token: UInt64, data: Data)] = []
     private var nextChunkToken: UInt64 = 0
     private var bufferedByteCount = 0
-    /// `true` from the first `interimInputTranscription` frame after a final until the matching
-    /// `inputTranscription` final arrives. Gemini finalizes turns server-side with no client ledger,
-    /// so this is the only local signal that recognition for already-sent audio is still in flight —
-    /// see `updateWorkFlag`. Bounded against a lost final (so it can never wedge true for the rest of
-    /// the session): cleared unconditionally in `openSocket`, `failConnection`, and `stop`.
+    /// `true` from the first voice-activity-start or `interimInputTranscription` frame after a final
+    /// until the matching `inputTranscription` final arrives. Gemini finalizes turns server-side with
+    /// no client ledger, so this is the only local signal that recognition for already-sent audio is
+    /// still in flight — see `updateWorkFlag`.
+    ///
+    /// Driven by BOTH signals on purpose, not just one: `voiceActivity` is Gemini's direct statement
+    /// that it is hearing speech, and empirically the EARLIEST signal available — measured ~500ms
+    /// before the first interim frame for the same utterance — so it closes the leading-edge gap an
+    /// interim-only flag would leave between speech actually starting and the first interim naming it.
+    /// Interim frames are a derived side effect of text production, not a direct speech signal. Keeping
+    /// both means neither a future mode that stops emitting interims nor a single missed
+    /// `ACTIVITY_START` can silently leave coaching un-gated.
+    ///
+    /// Only the finalized transcript ever clears it — deliberately NOT `ACTIVITY_END`. `ACTIVITY_END`
+    /// landed 13ms after the final in one captured trace, but that ordering is coincidence, not a
+    /// documented contract; clearing on it would reintroduce exactly the settle-before-recognition race
+    /// this flag exists to close (see the P1 this field was added to fix). Do not "complete the pair"
+    /// by adding an `ACTIVITY_END` clear.
+    ///
+    /// Bounded against a lost final (so it can never wedge true for the rest of the session): cleared
+    /// unconditionally in `openSocket`, `failConnection`, and `stop`.
     private var recognitionInFlight = false
     private var isSending = false         // one in-flight audio send at a time, preserves order
     private var reconnectAttempt = 0
@@ -392,8 +408,9 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
     }
 
     /// `true` while there is either audio not yet sent to the socket OR a Gemini recognition still in
-    /// flight for audio that WAS already sent (`recognitionInFlight`, driven by interim frames) — the
-    /// coordinator holds a turn open until both settle. Unsent PCM alone is too narrow: the moment the
+    /// flight for audio that WAS already sent (`recognitionInFlight`, driven by voice-activity-start
+    /// AND interim frames — see that field's doc comment for why both) — the coordinator holds a turn
+    /// open until both settle. Unsent PCM alone is too narrow: the moment the
     /// last chunk's send completes, Gemini has not necessarily finished recognizing it, and if the
     /// OTHER speaker's transcript finalizes first, its batching timer could admit an automatic
     /// coaching attempt while this speaker's utterance is still mid-recognition on a perfectly healthy
@@ -509,6 +526,16 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
             // reach Activity or the transcript (see the ActivityLog contract in AGENTS.md). This is
             // what keeps the coordinator's turn open past the moment the last chunk finishes sending,
             // until Gemini actually finishes recognizing it — see `updateWorkFlag`.
+            lock.lock(); recognitionInFlight = true; lock.unlock()
+            updateWorkFlag()
+            return
+        }
+        if GeminiLiveSession.isVoiceActivityStart(message) {
+            // Gemini's voice-activity detector just started hearing speech — the earliest local signal
+            // that recognition is in flight, ahead of the first interim frame for the same utterance
+            // (see `recognitionInFlight`'s doc comment for the measured gap and why both signals are
+            // kept). This frame carries no transcript text of any kind, so nothing here can leak speech
+            // to Activity. Read only the boolean; never log the frame body.
             lock.lock(); recognitionInFlight = true; lock.unlock()
             updateWorkFlag()
             return

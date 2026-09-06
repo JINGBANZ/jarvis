@@ -103,6 +103,22 @@ public enum GeminiLiveSession {
         return interim["text"] is String
     }
 
+    /// Whether this event marks Gemini's voice-activity detector starting to hear speech. `voiceActivity`
+    /// is a TOP-LEVEL key — a sibling of `serverContent`, not nested inside it — whose value carries a
+    /// `"type"` of `"ACTIVITY_START"` or `"ACTIVITY_END"`. Only an exact `"ACTIVITY_START"` match counts;
+    /// `ACTIVITY_END`, a missing `voiceActivity`, and any malformed/unexpected `type` all return false.
+    ///
+    /// Deliberately one-directional: there is no matching `isVoiceActivityEnd` here. Measured against
+    /// the live endpoint, `voiceActivity` arrives ~500ms BEFORE the first interim transcription frame
+    /// for the same utterance, making it the earliest available "Gemini is recognizing speech" signal —
+    /// see the caller's use of it alongside `hasInterimTranscription`. `ACTIVITY_END` is not a substitute
+    /// finalization signal: only the finalized transcript may end a turn (see the caller's doc comment).
+    public static func isVoiceActivityStart(_ event: [String: Any]) -> Bool {
+        guard let activity = event["voiceActivity"] as? [String: Any],
+              let type = activity["type"] as? String else { return false }
+        return type == "ACTIVITY_START"
+    }
+
     /// Classify only failures that cannot recover on a reconnect. An unrecognized or transient status
     /// stays diagnostic, so one bad frame never tears down an otherwise usable session.
     public static func terminalFailure(from event: [String: Any]) -> TranscriptionFailureReason? {
