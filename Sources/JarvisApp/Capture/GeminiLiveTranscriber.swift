@@ -636,11 +636,23 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
     private func beginDrain(task: URLSessionWebSocketTask, generation socketGeneration: Int,
                             timeLeft: TimeInterval?) {
         lock.lock()
-        let shouldDrain = self.task === task && self.generation == socketGeneration
+        let leaseIsCurrent = self.task === task && self.generation == socketGeneration
             && !stopped && !isReconnecting && !rotating
-        if shouldDrain { rotating = true }
+        // Only wait if there is actually an utterance to wait FOR. A drain armed with nothing in
+        // flight stalls new audio for the whole grace period to protect a final that is never
+        // coming: measured over a 62-minute live session, all six rotations took exactly the full
+        // 5s and every one reported "grace period elapsed", because no speech was in flight at any
+        // goAway. That is up to 5s of buffered-instead-of-streamed audio every ~9 minutes on both
+        // sockets, delaying the transcript and the coaching gated on it, for no benefit.
+        let hasUtteranceToDrain = leaseIsCurrent && recognitionInFlight
+        if leaseIsCurrent { rotating = true }
         lock.unlock()
-        guard shouldDrain else { return }
+        guard leaseIsCurrent else { return }
+        guard hasUtteranceToDrain else {
+            // `rotate` logs this with its own reason; no second line for one event.
+            rotate(fromTask: task, generation: socketGeneration, reason: "goAway, nothing in flight")
+            return
+        }
         jlog("Jarvis Gemini [\(speaker.rawValue)]: goAway received (socket #\(socketGeneration)) "
              + "— draining before rotation")
         armDrainDeadline(task: task, generation: socketGeneration, timeLeft: timeLeft)
