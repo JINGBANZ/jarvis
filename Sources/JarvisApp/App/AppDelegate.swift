@@ -162,6 +162,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             width: appearance.boxWidth, height: appearance.boxHeight))
         overlayBox.setFontSize(appearance.boxFontSize)
         overlayBox.setOpacity(appearance.boxOpacity)
+        overlayBox.setDiagramsEnabled(appearance.boxDiagramsEnabled)
         // The panel reports a finished resize drag; persistence stays here, beside the other
         // overlay settings, so the panel keeps knowing nothing about UserDefaults.
         overlayBox.onSizeChanged = { [appearance] width, height in

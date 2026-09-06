@@ -5,36 +5,39 @@ import JarvisCore
 /// diagram with its hint in the existing scrollable, capture-excluded panel, without a third window.
 @MainActor
 enum DiagramHintImage {
-    static func render(_ graph: DiagramHint, width: CGFloat) -> NSImage {
+    static func render(_ graph: DiagramHint, fitting available: NSSize) -> NSImage {
         let gap: CGFloat = 100
         let margin: CGFloat = 36
+        let boxSize = NSSize(width: 172, height: 88)
         let ranks = ranks(graph)
         let rankCount = (ranks.values.max() ?? 0) + 1
         let groups = (0..<rankCount).map { rank in graph.nodes.filter { ranks[$0.id] == rank } }
-        // A long LR graph becomes a vertical sketch in a narrow overlay. Wrap wide layers too:
-        // scrolling vertically preserves readable labels instead of shrinking an entire architecture.
-        let columns = max(1, Int((width - margin * 2 + gap) / (128 + gap)))
-        let horizontal = graph.direction == .leftToRight && rankCount <= columns
-        let usedColumns = horizontal ? rankCount : min(columns, groups.map(\.count).max() ?? 1)
-        let boxSize = NSSize(width: min(172, max(1,
-            (width - margin * 2 - CGFloat(usedColumns - 1) * gap) / CGFloat(usedColumns))), height: 88)
+        let horizontal = graph.direction == .leftToRight
+        let breadth = groups.map(\.count).max() ?? 1
+        let natural = NSSize(
+            width: margin * 2 + CGFloat(horizontal ? rankCount : breadth) * (boxSize.width + gap) - gap,
+            height: margin * 2 + CGFloat(horizontal ? breadth : rankCount) * (boxSize.height + gap) - gap)
         var frames: [String: NSRect] = [:]
-        var rowOffset = 0
         for (rank, nodes) in groups.enumerated() {
             for (index, node) in nodes.enumerated() {
-                let row = horizontal ? index : rowOffset + index / columns
-                let column = horizontal ? rank : index % columns
-                let rowCount = horizontal ? rankCount : min(columns, nodes.count - (index / columns) * columns)
-                let rowWidth = CGFloat(rowCount) * (boxSize.width + gap) - gap
-                let x = (width - rowWidth) / 2 + CGFloat(column) * (boxSize.width + gap)
-                frames[node.id] = NSRect(x: x, y: margin + CGFloat(row) * (boxSize.height + gap),
-                                        width: boxSize.width, height: boxSize.height)
+                let across = CGFloat(index) - CGFloat(nodes.count - 1) / 2
+                let x = horizontal
+                    ? margin + CGFloat(rank) * (boxSize.width + gap)
+                    : natural.width / 2 - boxSize.width / 2 + across * (boxSize.width + gap)
+                let y = horizontal
+                    ? natural.height / 2 - boxSize.height / 2 + across * (boxSize.height + gap)
+                    : margin + CGFloat(rank) * (boxSize.height + gap)
+                frames[node.id] = NSRect(origin: NSPoint(x: x, y: y), size: boxSize)
             }
-            rowOffset += (nodes.count + columns - 1) / columns
         }
-        let natural = NSSize(width: max(1, width), height: (frames.values.map(\.maxY).max() ?? 0) + margin)
-        let image = NSImage(size: natural)
+        // Keep one stable layout and scale the whole sketch uniformly, including text and arrows.
+        // Both window dimensions constrain it, so a short window never gets a tall graph.
+        let scale = min(max(1, available.width) / natural.width, max(1, available.height) / natural.height)
+        let image = NSImage(size: NSSize(width: natural.width * scale, height: natural.height * scale))
         image.lockFocusFlipped(true)
+        let transform = NSAffineTransform()
+        transform.scale(by: scale)
+        transform.concat()
         for edge in graph.edges {
             guard let from = frames[edge.from], let to = frames[edge.to] else { continue }
             let forward = horizontal ? to.minX > from.minX : to.minY > from.minY
@@ -62,7 +65,7 @@ enum DiagramHintImage {
                     : NSPoint(x: end.x, y: middle)
             } else {
                 // Feedback and bypass arrows travel around the outside, avoiding every
-                // intervening box (including wrapped nodes in a wide layer).
+                // intervening box.
                 if horizontal {
                     path.line(to: NSPoint(x: start.x + 16, y: start.y))
                     path.line(to: NSPoint(x: start.x + 16, y: natural.height - 12))

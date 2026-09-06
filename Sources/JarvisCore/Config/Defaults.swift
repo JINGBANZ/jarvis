@@ -156,6 +156,9 @@ public enum Defaults {
 
         /// The persistent, movable history of recent responses.
         public enum Box {
+            public static let diagramsEnabledKey = "overlayBox.diagramsEnabled"
+            public static let diagramsEnabled = true
+
             public static let enabledKey = "overlayBox.enabled"
             public static let enabled = true
 

@@ -159,8 +159,10 @@ rectangular labeled boxes and directed connections. The parser owns the precise 
 the model-facing usage guidance lives in the system-design skill. Native
 [`DiagramHintImage`](../Sources/JarvisOverlay/DiagramHintImage.swift) draws that inert graph into a
 memory-only text attachment. This limited renderer needs no JavaScript, browser, remote assets, or
-extra presentation surface. Long horizontal graphs reflow vertically and wide layers wrap to keep
-labels readable; diagrams remain with their hints in the scrollable box and clear with the session.
+extra presentation surface. Graphs retain their layout and scale uniformly to the available width and a fraction of the
+window height, reserving room for the text hint. They resize during a window drag. The Overlay Box
+settings include a persisted **Show diagrams** switch, enabled by default, that hides or restores
+attachments immediately without discarding text or graph history. Diagrams clear with the session.
 The existing nonactivating panel, capture exclusion, visibility toggle, and Start/Stop rules apply.
 Nothing is drawn on the interviewer's shared canvas.
 

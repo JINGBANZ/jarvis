@@ -45,6 +45,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     ]
     /// Each spoken tip with the time it arrived, newest last. Held as structured entries (not the
     /// rendered string) so `clear()` and the test hooks don't have to parse the text back out.
+    private var diagramsEnabled = Defaults.Overlay.Box.diagramsEnabled
     private var latestEntryStart = 0
     private var entries: [(stamp: String, text: String, diagram: DiagramHint?)] = []
     /// Test hook (internal): counts how many times the panel has re-asserted capture exclusion.
@@ -132,10 +133,8 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         box.addSubview(scroll)
         panel.contentView = box
         super.init()
-        box.onEndLiveResize = { [weak self] in
-            self?.refreshText()
-            self?.reportContentSize()
-        }
+        box.onResize = { [weak self] in self?.refreshText() }
+        box.onEndLiveResize = { [weak self] in self?.reportContentSize() }
         // Centered on screen initially; the user can drag it anywhere from there (the frame persists
         // across menu toggles, since hide() only orders it out).
         panel.center()
@@ -168,7 +167,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         // activation policy and WindowServer drops `sharingType` on vulnerable macOS builds.
         if panel.isVisible { reassertCaptureExclusion() }
         rerender()
-        if diagram != nil {
+        if diagram != nil && diagramsEnabled {
             // A tall diagram may exceed the viewport. Start at its hint, not its last row.
             if let layout = textView.layoutManager, let container = textView.textContainer {
                 layout.ensureLayout(for: container)
@@ -207,10 +206,14 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
             latestEntryStart = result.length
             result.append(NSAttributedString(string: "\(entry.stamp)  ", attributes: stampAttrs))
             result.append(NSAttributedString(string: entry.text, attributes: textAttrs))
-            if let diagram = entry.diagram {
+            if diagramsEnabled, let diagram = entry.diagram {
                 result.append(NSAttributedString(string: "\n"))
                 let attachment = NSTextAttachment()
-                attachment.image = DiagramHintImage.render(diagram, width: max(1, box.bounds.width - 28))
+                let padding = 2 * (textView.textContainer?.lineFragmentPadding ?? 0)
+                attachment.image = DiagramHintImage.render(diagram, fitting: NSSize(
+                    width: max(1, box.bounds.width - 2 * textView.textContainerInset.width - padding),
+                    // Reserve space for the written hint; the diagram never dominates a short box.
+                    height: max(1, box.bounds.height * 0.6)))
                 result.append(NSAttributedString(attachment: attachment))
             }
         }
@@ -251,6 +254,11 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     }
 
     // MARK: - OverlayBoxApplying
+
+    public func setDiagramsEnabled(_ enabled: Bool) {
+        diagramsEnabled = enabled
+        refreshText()
+    }
 
     /// Set the box's background-fill opacity (0–1), live. Only the alpha varies; the fill colour stays
     /// constant. The window stays non-opaque so a dimmed fill reads as translucent over what's behind.
@@ -356,6 +364,12 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
 /// machinery, and AppKit calls it only for a real drag — never for a programmatic `setContentSize`.
 private final class ResizeReportingView: NSView {
     var onEndLiveResize: (() -> Void)?
+    var onResize: (() -> Void)?
+
+    override func resizeSubviews(withOldSize oldSize: NSSize) {
+        super.resizeSubviews(withOldSize: oldSize)
+        onResize?()
+    }
 
     override func viewDidEndLiveResize() {
         super.viewDidEndLiveResize()
