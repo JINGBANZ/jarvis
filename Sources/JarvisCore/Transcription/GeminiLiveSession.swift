@@ -92,6 +92,17 @@ public enum GeminiLiveSession {
         return TranscriptFiltering.meaningfulTranscript(text, speaker: speaker)
     }
 
+    /// Whether this event carries a speculative, still-revising interim hypothesis. This is a pure
+    /// presence check — it never surfaces the interim text itself, only whether some is there. Callers
+    /// use this solely as a "Gemini is actively recognizing speech right now" signal (e.g. to keep a
+    /// coaching turn open until the matching final arrives); the text must never reach Activity or the
+    /// transcript, so nothing here returns it.
+    public static func hasInterimTranscription(_ event: [String: Any]) -> Bool {
+        guard let content = event["serverContent"] as? [String: Any],
+              let interim = content["interimInputTranscription"] as? [String: Any] else { return false }
+        return interim["text"] is String
+    }
+
     /// Classify only failures that cannot recover on a reconnect. An unrecognized or transient status
     /// stays diagnostic, so one bad frame never tears down an otherwise usable session.
     public static func terminalFailure(from event: [String: Any]) -> TranscriptionFailureReason? {

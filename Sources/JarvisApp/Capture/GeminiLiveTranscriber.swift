@@ -68,6 +68,12 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
     private var bufferedAudio: [(token: UInt64, data: Data)] = []
     private var nextChunkToken: UInt64 = 0
     private var bufferedByteCount = 0
+    /// `true` from the first `interimInputTranscription` frame after a final until the matching
+    /// `inputTranscription` final arrives. Gemini finalizes turns server-side with no client ledger,
+    /// so this is the only local signal that recognition for already-sent audio is still in flight —
+    /// see `updateWorkFlag`. Bounded against a lost final (so it can never wedge true for the rest of
+    /// the session): cleared unconditionally in `openSocket`, `failConnection`, and `stop`.
+    private var recognitionInFlight = false
     private var isSending = false         // one in-flight audio send at a time, preserves order
     private var reconnectAttempt = 0
     private var isReconnecting = false
@@ -172,6 +178,7 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
         let s = session; session = nil
         pendingPingGeneration = nil
         isSending = false
+        recognitionInFlight = false     // bound: a final lost to teardown must not wedge coaching gated
         generation += 1                 // invalidate every callback retained by the old task
         bufferedAudio.removeAll(keepingCapacity: false)
         bufferedByteCount = 0
@@ -221,6 +228,9 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
         self.session = session
         self.task = task
         isReconnecting = false; connected = false; isSending = false; pendingPingGeneration = nil
+        // A fresh socket starts with no recognition in flight — bounds a final lost to whatever
+        // socket this one is replacing (see the field's doc comment).
+        recognitionInFlight = false
         lock.unlock()
         previousSession?.invalidateAndCancel()   // release the previous session's delegate retain
         invalidateConnectionTimers()
@@ -320,7 +330,17 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
             // rather than tearing down an otherwise healthy socket. Match by `token`, not position:
             // the head may have already been evicted while this frame was being built off-lock, and
             // the chunk that failed to encode is not necessarily whatever is at the head now.
+            //
+            // Guard on `isCurrentLease` BEFORE touching `isSending` or pumping, same as the send
+            // completion below: this runs synchronously off the lock (JSON/base64 encoding), and a
+            // concurrent `stop()` or `failConnection` on another thread can retire this lease in that
+            // window. `isSending`/the queue at that point belong to whatever replaced this lease (or
+            // to nothing, if the session stopped) — a stale write here would stomp that state exactly
+            // like the send-completion bug this mirrors.
             lock.lock()
+            let isCurrentLease = self.task === task && generation == socketGeneration
+                && connected && !stopped && !isReconnecting
+            guard isCurrentLease else { lock.unlock(); return }
             if let first = bufferedAudio.first, first.token == token {
                 bufferedByteCount -= bufferedAudio.removeFirst().data.count
             }
@@ -334,7 +354,16 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
             guard let self, let task else { return }
             if error != nil {
                 // Never log the caught error — see the security note atop this file.
-                self.lock.lock(); self.isSending = false; self.lock.unlock()
+                self.lock.lock()
+                let isCurrentLease = self.task === task && self.generation == socketGeneration
+                // Only a completion for the CURRENT lease may clear `isSending` — a stale completion
+                // from a socket that has already been replaced would otherwise clear the replacement
+                // socket's in-flight-send flag and let a duplicate send through. `failConnection`
+                // itself carries its own generation guard (see its top), so calling it unconditionally
+                // below is a safe no-op for a stale lease — that guard is what keeps this diagnostic
+                // report from disrupting a healthy replacement, not this early return.
+                if isCurrentLease { self.isSending = false }
+                self.lock.unlock()
                 self.failConnection(task: task, generation: socketGeneration,
                                     diagnostic: "audio send failed")
                 return
@@ -342,11 +371,17 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
             self.lock.lock()
             let isCurrentLease = self.task === task && self.generation == socketGeneration
                 && self.connected && !self.stopped && !self.isReconnecting
+            // A stale completion (this lease was replaced while `task.send` was in flight) must not
+            // touch `isSending` or pump: `isSending` now legitimately belongs to whatever replaced it,
+            // and clearing it here would let that replacement's still-outstanding send race a second,
+            // duplicate send off the queue. Return before any mutation rather than gating each one
+            // separately, so nothing here can partially apply.
+            guard isCurrentLease else { self.lock.unlock(); return }
             // Match by `token`, not `Data` equality: silent (all-zero) PCM at a fixed callback length
             // is routine, so byte-identical chunks are common, and equality could evict a same-bytes
             // chunk that replaced the one actually sent while `lock` was released for `task.send`. If
             // the token no longer matches the head, that chunk was evicted — do nothing to the queue.
-            if isCurrentLease, let first = self.bufferedAudio.first, first.token == token {
+            if let first = self.bufferedAudio.first, first.token == token {
                 self.bufferedByteCount -= self.bufferedAudio.removeFirst().data.count
             }
             self.isSending = false
@@ -356,10 +391,18 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
         }
     }
 
-    /// `true` while buffered audio has not yet been accepted by a live socket — the coordinator holds
-    /// a turn open until this settles, since Gemini's transcript for that audio is still in flight.
+    /// `true` while there is either audio not yet sent to the socket OR a Gemini recognition still in
+    /// flight for audio that WAS already sent (`recognitionInFlight`, driven by interim frames) — the
+    /// coordinator holds a turn open until both settle. Unsent PCM alone is too narrow: the moment the
+    /// last chunk's send completes, Gemini has not necessarily finished recognizing it, and if the
+    /// OTHER speaker's transcript finalizes first, its batching timer could admit an automatic
+    /// coaching attempt while this speaker's utterance is still mid-recognition on a perfectly healthy
+    /// socket. `recognitionInFlight` is bounded against a lost final (see its own doc comment) so this
+    /// can never wedge true for the rest of the session.
     private func updateWorkFlag() {
-        lock.lock(); let hasPendingWork = !bufferedAudio.isEmpty; lock.unlock()
+        lock.lock()
+        let hasPendingWork = !bufferedAudio.isEmpty || recognitionInFlight
+        lock.unlock()
         coachingCoordinator.updateTranscriptionWork(hasPendingWork)
     }
 
@@ -439,6 +482,8 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
             return
         }
         if let text = GeminiLiveSession.finalTranscript(from: message, speaker: speaker) {
+            // This utterance is done — recognition is no longer in flight for it.
+            lock.lock(); recognitionInFlight = false; lock.unlock()
             continuityReporter.recordServerSpeech(
                 .transcriptionCompleted, audioTimeMilliseconds: nil,
                 socketGeneration: socketGeneration)
@@ -455,10 +500,21 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
                 text: text,
                 observedAt: clock.now(),
                 transcriptUnavailable: !accepted))
+            updateWorkFlag()
             return
         }
-        // Interim hypotheses and unknown frames are diagnostic only — never Activity, never the
-        // transcript. See the ActivityLog contract in AGENTS.md.
+        if GeminiLiveSession.hasInterimTranscription(message) {
+            // Gemini is actively recognizing speech right now. Read only the boolean signal — never
+            // the interim text itself, which is speculative and revised mid-utterance; it must never
+            // reach Activity or the transcript (see the ActivityLog contract in AGENTS.md). This is
+            // what keeps the coordinator's turn open past the moment the last chunk finishes sending,
+            // until Gemini actually finishes recognizing it — see `updateWorkFlag`.
+            lock.lock(); recognitionInFlight = true; lock.unlock()
+            updateWorkFlag()
+            return
+        }
+        // Unknown frames are diagnostic only — never Activity, never the transcript. See the
+        // ActivityLog contract in AGENTS.md.
         jlog("Jarvis Gemini [\(speaker.rawValue)]: frame ignored "
              + "(\(message.keys.sorted().joined(separator: ",")))")
     }
@@ -533,6 +589,10 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
             lock.unlock(); return
         }
         connected = false; isSending = false
+        // Bound: whatever this socket was recognizing is now unknowable — a final for it may never
+        // arrive. Clearing here (not just in `openSocket` on the replacement) closes the gap during
+        // the reconnect backoff window itself, when there is no socket to have recognized anything.
+        recognitionInFlight = false
         pendingPingGeneration = nil
         let failedSession = session
         task = nil

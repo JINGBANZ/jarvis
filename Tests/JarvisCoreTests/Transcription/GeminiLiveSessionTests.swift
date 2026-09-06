@@ -109,6 +109,29 @@ import Foundation
         #expect(GeminiLiveSession.finalTranscript(from: event, speaker: .me) == nil)
     }
 
+    /// An interim frame is the only thing that should read as "recognition in flight" — the presence
+    /// check must not require or leak the text itself.
+    @Test func hasInterimTranscriptionIsTrueOnlyForAnInterimFrame() {
+        let event: [String: Any] = ["serverContent": [
+            "interimInputTranscription": ["text": "let's talk about ind"],
+        ]]
+        #expect(GeminiLiveSession.hasInterimTranscription(event))
+    }
+
+    /// A finalized-only frame must NOT read as interim, or the "recognition in flight" flag would
+    /// never clear once the final it was waiting for actually arrives.
+    @Test func hasInterimTranscriptionIsFalseForAFinalizedOnlyFrame() {
+        let event: [String: Any] = ["serverContent": [
+            "inputTranscription": ["text": "let's talk about indexes"],
+        ]]
+        #expect(!GeminiLiveSession.hasInterimTranscription(event))
+    }
+
+    @Test func hasInterimTranscriptionIsFalseForUnrelatedFrames() {
+        #expect(!GeminiLiveSession.hasInterimTranscription(["setupComplete": [String: Any]()]))
+        #expect(!GeminiLiveSession.hasInterimTranscription([:]))
+    }
+
     @Test func finalTranscriptAppliesTheSharedHallucinationFilter() {
         let event: [String: Any] = ["serverContent": ["inputTranscription": ["text": "Thank you."]]]
         #expect(GeminiLiveSession.finalTranscript(from: event, speaker: .me) == nil)
