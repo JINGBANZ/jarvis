@@ -484,24 +484,20 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
         handle(obj, task: task, generation: socketGeneration)
     }
 
-    /// One received frame. Order matters: a terminal error outranks everything, and a setup
-    /// acknowledgement must be seen before any transcript is trusted.
+    /// One received frame. Order matters: a setup acknowledgement must be seen before any transcript
+    /// is trusted. There is no in-frame terminal-error branch here — the Live API's
+    /// `BidiGenerateContentServerMessage` has no `error` frame (see `GeminiLiveSession`'s close-code
+    /// doc comment); the WebSocket close code handled in `urlSession(_:webSocketTask:didCloseWith:)`
+    /// is the only terminal-failure signal Gemini sends.
     private func handle(_ message: [String: Any], task: URLSessionWebSocketTask,
                         generation socketGeneration: Int) {
         // Re-validate the lease even though `receiveLoop` already did: `decodeAndHandle`'s UTF-8 and
         // JSON parsing sits between that check and this one, and the socket can be replaced during it
         // (a failure path bumps `generation` and opens a new task). Acting on a stale frame here is
-        // not cosmetic — `reportTerminalFailureOnce` takes no generation and guards only
-        // `!stopped, !terminalFailureReported`, so a dead socket's error frame would latch
-        // `terminalFailureReported`, emit `.failed`, and tear down the healthy REPLACEMENT session.
-        // Stale frames could also mutate `recognitionInFlight` or admit pre-reconnect transcript text.
-        // `isCurrent` subsumes the `stopped` check this replaces and adds task identity, generation,
-        // and not-reconnecting — do not "simplify" it back to a `stopped` test.
+        // not cosmetic — a stale frame could mutate `recognitionInFlight` or admit pre-reconnect
+        // transcript text. `isCurrent` subsumes a plain `stopped` check by also requiring task
+        // identity, generation, and not-reconnecting — do not "simplify" it back to a `stopped` test.
         guard isCurrent(task: task, generation: socketGeneration) else { return }
-        if let failure = GeminiLiveSession.terminalFailure(from: message) {
-            reportTerminalFailureOnce(failure)
-            return
-        }
         if GeminiLiveSession.isSetupComplete(message) {
             markReady(task: task, generation: socketGeneration)
             return
@@ -609,13 +605,18 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
         let isStopped = stopped
         lock.unlock()
         if isStopped { return } // An intentional Stop closes the socket on purpose.
-        // A rejected API key surfaces ONLY as close code 1008 — see
-        // `GeminiLiveSession.terminalFailure(forCloseCode:)` for the empirically-established wire
-        // behavior behind this. Route it straight to the terminal path instead of `failConnection`'s
-        // six-attempt, ~61s backoff: a rejected key cannot succeed on retry, and this is the one case
+        // A rejected API key, a retired model id, and an unsupported request all surface ONLY as
+        // close code 1008 — see `GeminiLiveSession.terminalFailure(forCloseCode:reason:)` for the
+        // empirically-established wire behavior and how the `reason` text tells them apart. Route it
+        // straight to the terminal path instead of `failConnection`'s six-attempt, ~61s backoff: every
+        // 1008 is a permanent provider-boundary failure a retry cannot fix, and this is the one case
         // AGENTS.md permits exhausting a target immediately, without the usual retry discipline.
-        if let reason = GeminiLiveSession.terminalFailure(forCloseCode: closeCode.rawValue) {
-            reportTerminalFailureOnce(reason)
+        //
+        // `reason` is server-supplied content — decode it only to classify, never log the text (see
+        // the security note atop this file).
+        let reasonText = reason.flatMap { String(data: $0, encoding: .utf8) }
+        if let failure = GeminiLiveSession.terminalFailure(forCloseCode: closeCode.rawValue, reason: reasonText) {
+            reportTerminalFailureOnce(failure)
             return
         }
         failConnection(task: webSocketTask, generation: socketGeneration,

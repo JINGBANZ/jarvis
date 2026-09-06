@@ -4,8 +4,8 @@ import Foundation
 ///
 /// Expected languages are persisted and transported as a list so adding another supported language
 /// never requires defining every possible language combination. An empty list means automatic
-/// detection and sends no language hint. Shared by every provider that accepts language hints:
-/// `multipleHint` is already BCP-47, which is also what Gemini's `languageCodes` expects.
+/// detection and sends no language hint. `singularHint`/`multipleHint` are OpenAI's contract; Gemini
+/// has its own documented codes, see `geminiHint`.
 public enum TranscriptionLanguage: String, CaseIterable, Codable, Sendable {
     case english
     case mandarinChinese = "mandarin-chinese"
@@ -40,6 +40,22 @@ public enum TranscriptionLanguage: String, CaseIterable, Codable, Sendable {
         switch self {
         case .english: "en"
         case .mandarinChinese: "zh-cn"
+        }
+    }
+
+    /// Gemini's own documented `languageCodes` values — distinct from `multipleHint`, which is
+    /// OpenAI's contract and stays untouched here since it is shared with that provider's wire
+    /// payload. Google documents region-qualified codes (`en-US`/`en-GB`/`en-IN`, `cmn-Hans-CN`)
+    /// rather than the bare `en`/`zh-cn` OpenAI accepts.
+    ///
+    /// NOT a proven bug fix: probing the live Gemini endpoint found `languageCodes` accepts anything
+    /// (a nonsense control value was accepted) and behaves as a soft bias rather than a hard
+    /// constraint — English audio still transcribed cleanly even with a Mandarin hint. Sending the
+    /// documented codes is a no-cost risk reduction, not a fix for an observed failure.
+    public var geminiHint: String {
+        switch self {
+        case .english: "en-US"
+        case .mandarinChinese: "cmn-Hans-CN"
         }
     }
 }

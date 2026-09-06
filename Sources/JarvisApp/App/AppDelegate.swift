@@ -672,8 +672,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             guard let themTranscriber else { return }
             Task { @MainActor [weak self] in
                 guard let self, self.themTranscriber === themTranscriber else { return }
-                if transcriptionConfiguration.provider == .openAI,
-                   reason != .connectionLost {
+                // Key on the failure REASON, not the provider: Gemini (unlike Apple Speech) can emit
+                // an account/credential/configuration reason on the system-audio side too, and that
+                // kind of failure threatens the mic side identically — see
+                // `TranscriptionFailureReason.affectsEveryStream`'s doc comment for why degrading on
+                // one of those would hide the real cause behind a misleading system-audio notice.
+                if reason.affectsEveryStream {
                     self.reportTranscriptionFailure(reason)
                     return
                 }

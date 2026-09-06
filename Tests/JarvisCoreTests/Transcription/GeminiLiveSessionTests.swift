@@ -45,9 +45,11 @@ import Foundation
         #expect(transcription(setup())["languageCodes"] as? [String] == [])
     }
 
-    @Test func selectedLanguagesAreSentAsBCP47Codes() {
+    /// Gemini's own documented codes (`geminiHint`), not OpenAI's `multipleHint` — see
+    /// `TranscriptionLanguage.geminiHint`'s doc comment for why they differ.
+    @Test func selectedLanguagesAreSentAsGeminisDocumentedCodes() {
         let codes = transcription(setup(languages: [.english, .mandarinChinese]))["languageCodes"]
-        #expect(codes as? [String] == ["en", "zh-cn"])
+        #expect(codes as? [String] == ["en-US", "cmn-Hans-CN"])
     }
 
     @Test func vocabularyAndModeAreCarriedOnTheSetup() {
@@ -203,45 +205,43 @@ import Foundation
         #expect(!GeminiLiveSession.isVoiceActivityStart(["voiceActivity": [String: Any]()]))
     }
 
-    @Test func authenticationAndQuotaErrorsAreTerminal() {
-        #expect(GeminiLiveSession.terminalFailure(from: ["error": [
-            "code": 401, "status": "UNAUTHENTICATED",
-        ]]) == .authenticationFailed)
-        #expect(GeminiLiveSession.terminalFailure(from: ["error": [
-            "code": 429, "status": "RESOURCE_EXHAUSTED",
-        ]]) == .quotaExceeded)
-        #expect(GeminiLiveSession.terminalFailure(from: ["error": [
-            "code": 403, "status": "PERMISSION_DENIED",
-        ]]) == .accessDenied)
-        #expect(GeminiLiveSession.terminalFailure(from: ["error": [
-            "code": 400, "status": "INVALID_ARGUMENT",
-        ]]) == .configurationRejected)
-        #expect(GeminiLiveSession.terminalFailure(from: ["error": [
-            "code": 404, "status": "NOT_FOUND",
-        ]]) == .configurationRejected)
+    /// The exact reason string captured from the live server for a deliberately invalid API key.
+    /// Google does not document this wording as a stable contract, but it is what the classifier
+    /// below must recognize today.
+    @Test func policyViolationWithAnAuthenticationReasonIsAuthenticationFailure() {
+        let reason = "Request had invalid authentication credentials. Expected OAuth 2 access "
+            + "token, login cookie or other valid authentication credential."
+        #expect(GeminiLiveSession.terminalFailure(forCloseCode: 1008, reason: reason)
+            == .authenticationFailed)
     }
 
-    /// An unknown or transient server error must stay diagnostic rather than tearing the session down.
-    @Test func unknownErrorsAreNotTerminal() {
-        #expect(GeminiLiveSession.terminalFailure(from: ["error": [
-            "code": 503, "status": "UNAVAILABLE",
-        ]]) == nil)
-        #expect(GeminiLiveSession.terminalFailure(from: ["serverContent": [String: Any]()]) == nil)
+    /// 1008 is Google's GENERIC policy-violation code — it also covers a retired/unrecognized model
+    /// id, which has nothing to do with the API key. A model-not-found-style reason must classify as
+    /// `.configurationRejected`, never `.authenticationFailed`, or a user would rotate a perfectly
+    /// good key to fix a problem the key had nothing to do with.
+    @Test func policyViolationWithAModelNotFoundReasonIsConfigurationRejected() {
+        #expect(GeminiLiveSession.terminalFailure(
+            forCloseCode: 1008, reason: "The requested model is not found for this API version.")
+            == .configurationRejected)
     }
 
-    /// Gemini rejects a bad API key by closing the socket with 1008, not with an `{"error": ...}`
-    /// frame — verified empirically against the live endpoint. This is the only close code that
-    /// should skip reconnect backoff and go straight to a terminal failure.
-    @Test func policyViolationCloseIsTerminalAuthenticationFailure() {
-        #expect(GeminiLiveSession.terminalFailure(forCloseCode: 1008) == .authenticationFailed)
+    /// An unrecognized or absent reason on 1008 must default to `.configurationRejected`, never
+    /// `.authenticationFailed` — the whole point of keeping the default conservative.
+    @Test func policyViolationWithNoReasonIsConfigurationRejected() {
+        #expect(GeminiLiveSession.terminalFailure(forCloseCode: 1008, reason: nil)
+            == .configurationRejected)
+        #expect(GeminiLiveSession.terminalFailure(forCloseCode: 1008, reason: "")
+            == .configurationRejected)
     }
 
     /// Every other close code — normal closure, going away, abnormal closure, etc. — must stay
-    /// non-terminal so the caller's existing reconnect-with-backoff behavior is unaffected.
+    /// non-terminal so the caller's existing reconnect-with-backoff behavior is unaffected, whatever
+    /// the reason text says.
     @Test func otherCloseCodesAreNotTerminal() {
-        #expect(GeminiLiveSession.terminalFailure(forCloseCode: 1000) == nil) // normal closure
-        #expect(GeminiLiveSession.terminalFailure(forCloseCode: 1001) == nil) // going away
-        #expect(GeminiLiveSession.terminalFailure(forCloseCode: 1006) == nil) // abnormal closure
-        #expect(GeminiLiveSession.terminalFailure(forCloseCode: 1011) == nil) // internal server error
+        #expect(GeminiLiveSession.terminalFailure(forCloseCode: 1000, reason: nil) == nil) // normal closure
+        #expect(GeminiLiveSession.terminalFailure(forCloseCode: 1001, reason: nil) == nil) // going away
+        #expect(GeminiLiveSession.terminalFailure(forCloseCode: 1006, reason: nil) == nil) // abnormal closure
+        #expect(GeminiLiveSession.terminalFailure(forCloseCode: 1011, reason: "invalid authentication credentials")
+            == nil) // internal server error — code outranks reason text
     }
 }
