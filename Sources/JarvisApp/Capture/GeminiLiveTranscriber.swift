@@ -488,8 +488,16 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
     /// acknowledgement must be seen before any transcript is trusted.
     private func handle(_ message: [String: Any], task: URLSessionWebSocketTask,
                         generation socketGeneration: Int) {
-        lock.lock(); let isStopped = stopped; lock.unlock()
-        if isStopped { return }
+        // Re-validate the lease even though `receiveLoop` already did: `decodeAndHandle`'s UTF-8 and
+        // JSON parsing sits between that check and this one, and the socket can be replaced during it
+        // (a failure path bumps `generation` and opens a new task). Acting on a stale frame here is
+        // not cosmetic — `reportTerminalFailureOnce` takes no generation and guards only
+        // `!stopped, !terminalFailureReported`, so a dead socket's error frame would latch
+        // `terminalFailureReported`, emit `.failed`, and tear down the healthy REPLACEMENT session.
+        // Stale frames could also mutate `recognitionInFlight` or admit pre-reconnect transcript text.
+        // `isCurrent` subsumes the `stopped` check this replaces and adds task identity, generation,
+        // and not-reconnecting — do not "simplify" it back to a `stopped` test.
+        guard isCurrent(task: task, generation: socketGeneration) else { return }
         if let failure = GeminiLiveSession.terminalFailure(from: message) {
             reportTerminalFailureOnce(failure)
             return
