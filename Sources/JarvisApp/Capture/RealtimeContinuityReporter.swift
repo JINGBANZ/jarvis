@@ -10,6 +10,7 @@ final class RealtimeContinuityReporter: @unchecked Sendable {
     enum Boundary: String {
         case openAIRealtime = "OpenAI Realtime"
         case appleSpeech = "Apple Speech"
+        case gemini = "Gemini Live"
     }
 
     private let speaker: Speaker

@@ -2,7 +2,7 @@ import Foundation
 
 /// Provider-neutral live transcription endpoint for one speaker stream. OS- and transport-specific
 /// adapters own their setup and recovery; the app owns the two sessions and feeds them ordered mono
-/// PCM16 captured in `TranscriptionAudioFormat.pcm16Mono`.
+/// PCM16 captured at the rate `TranscriptionProvider.audioFormat` selects for this provider.
 public protocol TranscriptionSession: AnyObject, Sendable {
     /// Exclusive transcript insertion boundary represented by this finalized turn.
     var onTurnEnd: (@Sendable (_ transcriptBoundary: Int) -> Void)? { get set }

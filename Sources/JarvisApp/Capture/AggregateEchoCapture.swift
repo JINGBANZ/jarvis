@@ -6,7 +6,8 @@ import JarvisCore
 /// built-in mic (clock master) + system-output process tap (drift-compensated), so ONE IOProc
 /// delivers mic + reference synchronized at 48 kHz — the single-clock case AEC3 needs (proven live:
 /// 30–50 dB cancellation, works in Zoom on speakers). Inside that callback it runs WebRTC AEC3
-/// (reference = tap, near = mic), then downsamples to 24 kHz: cleaned mic → `onMicClean` ("me"
+/// (reference = tap, near = mic), then downsamples to the selected provider's wire rate: cleaned
+/// mic → `onMicClean` ("me"
 /// socket), raw tap → `onSystem` ("them" socket). Replaces the separate AVAudioEngine mic +
 /// ScreenCaptureKit capture. macOS 14.2+.
 ///
@@ -48,12 +49,11 @@ final class AggregateEchoCapture: @unchecked Sendable {
     private var procID: AudioDeviceIOProcID?
 
     private let aec = WebRTCEchoCanceller()          // adaptive; re-converges across route rebuilds
-    private let micDown = Resampler(
-        fromHz: 48_000,
-        toHz: Double(TranscriptionAudioFormat.pcm16Mono.sampleRate))
-    private let sysDown = Resampler(
-        fromHz: 48_000,
-        toHz: Double(TranscriptionAudioFormat.pcm16Mono.sampleRate))
+    /// The provider-selected wire format — resolved once at Start and injected, since capture never
+    /// switches providers inside a live session.
+    private let audioFormat: TranscriptionAudioFormat
+    private let micDown: Resampler?
+    private let sysDown: Resampler?
     private let usesLocalTurnDetection: Bool
     /// Turn detection runs on `deliveryQueue`, not in the IOProc: neural inference does not belong on
     /// the realtime thread, and the delivery queue is already serial and already ordered by capture,
@@ -89,13 +89,19 @@ final class AggregateEchoCapture: @unchecked Sendable {
     private var micSequence: UInt64 = 0
     private var systemSequence: UInt64 = 0
 
-    init(onMicCaptured: @escaping @Sendable (UInt64, Int, TimeInterval) -> Void,
+    init(audioFormat: TranscriptionAudioFormat,
+         onMicCaptured: @escaping @Sendable (UInt64, Int, TimeInterval) -> Void,
          onSystemCaptured: @escaping @Sendable (UInt64, Int, TimeInterval) -> Void,
          onMicClean: @escaping @Sendable (Data, UInt64, TimeInterval) -> Void,
          onSystem: @escaping @Sendable (Data, UInt64, TimeInterval) -> Void,
          localTurnDetectionSilenceDuration: TimeInterval?,
          onMicSpeechEvent: @escaping @Sendable (LocalSpeechEvent, UInt64) -> Void,
          onSystemSpeechEvent: @escaping @Sendable (LocalSpeechEvent, UInt64) -> Void) {
+        self.audioFormat = audioFormat
+        // AEC always runs at 48 kHz; the wire rate is the selected provider's requirement. Gemini's
+        // 16 kHz is an exact 3:1 decimation from 48, so there is never a second resampling stage.
+        micDown = Resampler(fromHz: Self.aecRate, toHz: Double(audioFormat.sampleRate))
+        sysDown = Resampler(fromHz: Self.aecRate, toHz: Double(audioFormat.sampleRate))
         self.onMicCaptured = onMicCaptured
         self.onSystemCaptured = onSystemCaptured
         self.onMicClean = onMicClean
@@ -205,8 +211,8 @@ final class AggregateEchoCapture: @unchecked Sendable {
         }
         aggregateID = agg
 
-        // Don't fight the device's rate — read it. AEC3, the 480-sample framing, and the 48→24 resamplers
-        // all run at 48 kHz, so resample the device-native rate up to 48 kHz before AEC (mic+tap come off
+        // Don't fight the device's rate — read it. AEC3, the 480-sample framing, and the down-to-wire
+        // resamplers all run at 48 kHz, so resample the device-native rate up to 48 kHz before AEC (mic+tap come off
         // ONE clock, so they stay sample-synced; the far/near lockstep in `handle` absorbs converter slack).
         // If we can't read the rate, fail loud — assuming 48 kHz when it isn't would corrupt the echo
         // model and mislabel the wire rate (the exact thing the old pin guarded).
@@ -406,7 +412,7 @@ final class AggregateEchoCapture: @unchecked Sendable {
                 onMicClean(micChunk.data, micChunk.sequence, micChunk.capturedAt)
                 let commitAt = micChunk.capturedAt
                     + TimeInterval(micChunk.sampleCount)
-                        / TimeInterval(TranscriptionAudioFormat.pcm16Mono.sampleRate)
+                        / TimeInterval(audioFormat.sampleRate)
                 for event in Self.committing(events: micSpeechEvents, through: commitAt) {
                     onMicSpeechEvent(event, micChunk.sequence)
                 }
@@ -416,7 +422,7 @@ final class AggregateEchoCapture: @unchecked Sendable {
                 onSystem(systemChunk.data, systemChunk.sequence, systemChunk.capturedAt)
                 let commitAt = systemChunk.capturedAt
                     + TimeInterval(systemChunk.sampleCount)
-                        / TimeInterval(TranscriptionAudioFormat.pcm16Mono.sampleRate)
+                        / TimeInterval(audioFormat.sampleRate)
                 for event in Self.committing(events: systemSpeechEvents, through: commitAt) {
                     onSystemSpeechEvent(event, systemChunk.sequence)
                 }
@@ -425,7 +431,7 @@ final class AggregateEchoCapture: @unchecked Sendable {
     }
 
 
-    /// Commit through the whole delivered 24 kHz chunk containing the endpoint. This keeps the wire
+    /// Commit through the whole delivered wire-rate chunk containing the endpoint. This keeps the wire
     /// FIFO and capture boundary identical even when a resampler emits a small converter tail.
     private static func committing(
         events: [SpeechEndpointDetector.Event],

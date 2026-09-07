@@ -1,7 +1,9 @@
 @preconcurrency import AVFoundation
 
-/// A stateful mono PCM16 sample-rate converter. AEC3 runs at 48 kHz but our wire format is 24 kHz,
-/// so each AEC stream resamples up on the way in and (for the cleaned mic) back down on the way out.
+/// A stateful mono PCM16 sample-rate converter. AEC3 runs at 48 kHz but the transcription wire rate
+/// is provider-derived (24 kHz for OpenAI/Apple Speech, 16 kHz for Gemini — see
+/// `TranscriptionAudioFormat`), so each AEC stream resamples up on the way in and (for the cleaned
+/// mic) back down to that rate on the way out.
 /// The `AVAudioConverter` is built once and reused so its filter state carries across calls — keep
 /// ONE `Resampler` per audio stream (don't share across the mic and system sides).
 final class Resampler {

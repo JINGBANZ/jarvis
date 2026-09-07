@@ -6,6 +6,9 @@ public enum SessionEndReason: Sendable, Equatable {
     case stoppedByUser
     case applicationQuit
     case replacedByNewSession
+    /// Name kept for persisted session records even though the trigger is now provider-neutral
+    /// (any missing transcription or brain credential, not only OpenAI's) — renaming it would
+    /// invalidate existing logs for no user-visible gain.
     case openAIAPIKeyMissing
     case permissionsMissing
     case brainRouteExhausted(lastProvider: BrainProvider)
@@ -22,7 +25,7 @@ public enum SessionEndReason: Sendable, Equatable {
         case .replacedByNewSession:
             "session ended because a new session started"
         case .openAIAPIKeyMissing:
-            "session ended by error — the OpenAI API key is missing; check Settings → Connections"
+            "session ended by error — an API key is missing; check Settings → Connections"
         case .permissionsMissing:
             "session ended by error — a required permission is missing; check System Settings → Privacy & Security"
         case .brainRouteExhausted(let lastProvider):
