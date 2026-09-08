@@ -107,7 +107,7 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
         self.sessionStart = sessionStart
         self.benchmark = benchmark
         self.finalizationResultTimeout = finalizationResultTimeout
-        maximumBufferedBytes = TranscriptionAudioFormat.pcm16Mono.byteCount(
+        maximumBufferedBytes = TranscriptionAudioFormat.pcm16Mono24k.byteCount(
             forDuration: maxBufferedAudioSeconds)
         continuityReporter = RealtimeContinuityReporter(
             speaker: speaker,
@@ -744,8 +744,8 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
     private static var inputFormat: AVAudioFormat? {
         AVAudioFormat(
             commonFormat: .pcmFormatInt16,
-            sampleRate: Double(TranscriptionAudioFormat.pcm16Mono.sampleRate),
-            channels: AVAudioChannelCount(TranscriptionAudioFormat.pcm16Mono.channelCount),
+            sampleRate: Double(TranscriptionAudioFormat.pcm16Mono24k.sampleRate),
+            channels: AVAudioChannelCount(TranscriptionAudioFormat.pcm16Mono24k.channelCount),
             interleaved: true)
     }
 }

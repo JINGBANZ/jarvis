@@ -38,12 +38,12 @@ import Testing
 
     @Test func envSecretStoreReadsKey() {
         let store = EnvSecretStore(environment: ["OPENAI_API_KEY": "sk-test"])
-        #expect(store.apiKey() == "sk-test")
+        #expect(store.apiKey(for: .openAIAPIKey) == "sk-test")
     }
 
     @Test func envSecretStoreMissingKey() {
         let store = EnvSecretStore(environment: [:])
-        #expect(store.apiKey() == nil)
+        #expect(store.apiKey(for: .openAIAPIKey) == nil)
     }
 
     @Test func chainedSecretStoreUsesFirstAvailableKey() {
@@ -51,12 +51,12 @@ import Testing
             EnvSecretStore(environment: [:]),
             EnvSecretStore(environment: ["OPENAI_API_KEY": "sk-fallback"]),
         ])
-        #expect(fallback.apiKey() == "sk-fallback")
+        #expect(fallback.apiKey(for: .openAIAPIKey) == "sk-fallback")
 
         let primary = ChainedSecretStore([
             EnvSecretStore(environment: ["OPENAI_API_KEY": "sk-primary"]),
             EnvSecretStore(environment: ["OPENAI_API_KEY": "sk-fallback"]),
         ])
-        #expect(primary.apiKey() == "sk-primary")
+        #expect(primary.apiKey(for: .openAIAPIKey) == "sk-primary")
     }
 }

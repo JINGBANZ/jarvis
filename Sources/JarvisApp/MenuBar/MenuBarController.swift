@@ -167,8 +167,8 @@ private extension JarvisReadiness.Status {
     /// user Jarvis was off for the several seconds it takes to come up.
     var iconSignal: MenuBarIcon.Signal? {
         switch self {
-        case .checking, .recovering: .working
-        case .ready: .ready
+        case .checking, .recovering: .preflight
+        case .ready: .active
         case .blocked: .blocked
         case .stopped: nil
         }
@@ -187,9 +187,9 @@ private extension JarvisReadiness.Status {
                 "Jarvis is recovering — \(requirement.menuDescription)"
             }
         case .ready(.full):
-            "Jarvis is ready"
+            "Jarvis is active"
         case .ready(.microphoneOnly):
-            "Jarvis is ready — microphone only"
+            "Jarvis is active — microphone only"
         case .stopped:
             "Jarvis is stopped"
         }

@@ -208,7 +208,7 @@ plugins ship only with full Xcode, and Jarvis builds **CLT-only** (see
 | **ScreenTool** | Fulfill `capture_screen`: silently shoot the **active window** (default scope) — the window-server frontmost, on whichever display, clean even when partially covered — and attach an **on-device OCR** of the shot to the tool result so the model reads exact text instead of pixels. Falls back to a full-display capture (no OCR) — the Settings-chosen display in Entire-display scope, the main display when no window is eligible; the overlay window is excluded either way. See [settings-window.md](./settings-window.md#capture-scope). | macOS `screencapture` CLI + Apple Vision (`VNRecognizeTextRequest`). |
 | **Overlay Caption** | Render `speak` output: up to ~3 short lines (model-split), shown one at a time and queued so a newer tip never cuts off the current one; non-activating, always-on-top, excluded from capture. Switchable from Settings — **off by default**; when off, tips are suppressed. | AppKit NSPanel; `OverlayCaptionPanel`. |
 | **Overlay Box** | A persistent window logging every `speak` tip in full, timestamped — the scrollable history of what the caption flashed one line at a time. Movable, resizable, translucent, also excluded from capture; switched on/off from Settings (**on by default**). It follows the session: shown on Start (cleared, for the new conversation) and hidden on Stop. Its size persists across launches; its position does not, so it opens centered. Fed by the same `speak` call as the caption via **`BroadcastOverlay`**, which fans one `OverlayRendering.render` out to both sinks. System-design visual hints are image attachments beside their text in this same box; the caption remains text-only. See [Private architecture hints](#private-architecture-hints). | AppKit NSPanel; `OverlayBoxPanel`. |
-| **MenuBar** | Manual **Start/Stop** of the pipeline (no auto-start), the same authoritative readiness status shown by Activity, and one-time API-key entry when OpenAI is in use. The status item is a quiet monochrome tile while stopped and a lit Listening Lens in every other readiness state — amber while checking or recovering, violet for a fully ready or explicit microphone-only session, red when a Start is blocked before any session begins — while the menu and tooltip name the requirement behind any non-ready state. A failed system stream may degrade to microphone-only, while a failed microphone stream stops the session. The two overlay surfaces are switched from Settings, not the menu. A centered, disabled caption at the bottom of the menu names the running build, so a user can report it without opening Settings: a release shows a muted `v<version>` from `CFBundleShortVersionString`, and a local build shows a red `Dev`, keyed off the development marker `scripts/build-app.sh` stamps into the assembled bundle (see `MenuBarController.buildCaptionItem()`). | AppKit menu-bar item; owner-only file for the key. |
+| **MenuBar** | Manual **Start/Stop** of the pipeline (no auto-start), the same authoritative readiness status shown by Activity, and one-time API-key entry when OpenAI is in use. Stopped and active use a boxless monochrome eye: closed on the Listening Lens's diagonal axis while stopped and open while active, with the active icon following the system menu-bar foreground instead of a brand color. The attention states retain the lit Listening Lens tile — amber while checking or recovering and red when a Start is blocked before any session begins — and the menu and tooltip name the requirement behind those attention states; stopped is simply labeled `Jarvis is stopped`. A failed system stream may degrade to microphone-only, while a failed microphone stream stops the session. The two overlay surfaces are switched from Settings, not the menu. A centered, disabled caption at the bottom of the menu names the running build, so a user can report it without opening Settings: a release shows a muted `v<version>` from `CFBundleShortVersionString`, and a local build shows a red `Dev`, keyed off the development marker `scripts/build-app.sh` stamps into the assembled bundle (see `MenuBarController.buildCaptionItem()`). | AppKit menu-bar item; owner-only file for the key. |
 | **HotkeyController** | Register the global **⌥⌘J** hint hotkey and route a press to a one-trip `manualHint` turn while a session runs (beep otherwise). See [§2 On-demand hint](#on-demand-hint-j). | Carbon HIToolbox (`RegisterEventHotKey`, no TCC). |
 | **PermissionGate** | Gather every TCC grant at launch instead of mid-session, and keep Jarvis closed until it holds all three: one button walks Microphone, System Audio Recording, and Screen Recording one dialog at a time, and closing the window quits. `SystemAudioPermissionProbe` proves the silently-enforced system-audio grant by playing a muted tone into a tap of Jarvis's own process and listening for it. See [§3 Permissions](#permissions). | AVFoundation, `CGRequestScreenCaptureAccess`, Core Audio process taps. |
 
@@ -220,7 +220,8 @@ to tool calls and enforces safety.
 
 `AggregateEchoCapture` reads the input device's native sample rate and resamples up to AEC3's
 48 kHz, rather than forcing the aggregate to 48 kHz. The earlier hard **pin** existed for two
-reasons — AEC3 is created at a fixed 48 kHz, and the 48→24 kHz wire downsampler assumes a true
+reasons — AEC3 is created at a fixed 48 kHz, and the downsampler to the selected transcription
+provider's wire rate (see [Models and APIs](#models-and-apis)) assumes a true
 48 kHz input — so an aggregate that inherited a 44.1 kHz mic would corrupt the echo model and
 mislabel the wire rate. But the pin **silently failed to start** on any device that can't do
 48 kHz, notably AirPods (Bluetooth HFP runs them at 16/24 kHz). Reading-and-resampling serves both
@@ -458,11 +459,16 @@ rather than a per-turn screenshot.
   documented in [sandbox.md](./sandbox.md).
 - **Interview format supplies coaching guidance and format-specific hint content (`InterviewFormat` in
   `Sources/JarvisCore/Config/`).** A Start-time picker (**None**, plus one entry per format that actually has
-  content — System Design today) adds a format-specific addendum to the coach system prompt — today, only System Design has real
-  content, added because the coach otherwise has zero system-design vocabulary (functional
-  requirements, API design, data model, etc.) and its tips can drift from whatever stage of that
-  discussion the candidate is actually in; Coding and Behavioral stay empty because no one has
-  reported a problem with them, not because the mechanism can't hold their content too. Each format's
+  content — Behavioral and System Design today) adds a format-specific addendum to the coach system
+  prompt. System Design supplies stage vocabulary so tips stay with the part of the design under
+  discussion. Behavioral treats a complete interviewer question as a useful proactive coaching
+  moment, shapes answers with STAR, and follows the newest answer stage to surface only material
+  gaps. When prep search is available it grounds the answer in the candidate's stories and uses
+  company values, leadership principles, role expectations, or behavioral requirements as answer
+  criteria. Without a matching personal story, it may supply a clearly labeled illustrative
+  mini-story; partial candidate facts may be organized but never embellished with invented personal
+  details, outcomes, or metrics. Coding stays empty because no specialist policy has been requested,
+  not because the mechanism cannot hold its content too. Each format's
   content is a real Markdown file (`Sources/JarvisCore/Resources/Skills/<rawValue>.md`), not a Swift
   string literal, so it reads and edits like prose; a missing file resolves to an empty addendum
   rather than an error, since an unwritten skill is a normal state. `InterviewFormat`'s private
@@ -538,6 +544,48 @@ rather than a per-turn screenshot.
   Both adapters apply the client-side transcript-batching window to group rapid final fragments;
   automatic model admission is controlled separately by provider work state, never by extending
   that fixed delay.
+- **Gemini transcription is the third opt-in provider, over the Gemini Live WebSocket
+  (`GeminiLiveSession`, `GeminiLiveTranscriber`).** The socket authenticates with the API key as a
+  URL query parameter rather than a header — the only one of the three providers that does — so
+  `GeminiLiveTranscriber` never logs, interpolates, or stringifies the connect URL, a `URLRequest`
+  built from it, or a raw transport `Error` (a `URLError` can embed the failing URL, key included, in
+  its `description`); every diagnostic instead names the fixed, credential-free
+  `GeminiLiveSession.redactedEndpoint`, and every transport-failure path constructs its own fixed
+  reason string rather than interpolating the caught error. Turn detection is **entirely
+  server-owned**: Gemini finalizes each utterance itself and returns it as `inputTranscription`, so
+  unlike the OpenAI models there is no client-side commit, no Silero endpoint scoring, and no
+  ledger reconciling provisional against final items — one server final is one accepted line, mirrored
+  in `RealtimeContinuityReporter`'s `expectsServerSpeechEvents: false` for this boundary. The opening
+  `setup` frame carries the model, expected-language hints (`languageCodes`, `[]` selects automatic
+  detection rather than an omission the server would have to guess at), the optional vocabulary
+  glossary (`customVocabulary`), and the verbatim/smart mode; the socket is not usable until the
+  server acknowledges it with `setupComplete` — an open socket alone does not prove the format was
+  accepted. Reconnect, ping/pong liveness, and bounded offline audio buffering mirror
+  `RealtimeTranscriber`'s lifecycle so the two providers fail and recover the same way from the rest
+  of the pipeline's perspective, with one deliberate divergence — Gemini's `goAway`-driven
+  drain-then-rotate — covered in [Resilience](#resilience). `GeminiLiveTranscriber` is a new,
+  independent adapter rather than a generalization of `RealtimeTranscriber` into a shared base: Gemini
+  needs neither `RealtimeTranscriber`'s per-item ledger nor its client-commit path (turn detection is
+  entirely server-owned), so restructuring the OpenAI adapter — whose live socket cannot be
+  unit-tested — to serve a provider that needs neither would risk the primary transcription path for
+  speculative reuse. The two adapters' socket lifecycle (ready-timeout, ping/pong, timer invalidation,
+  generation guards) still duplicates roughly 130 lines as a result, tracked in each file's
+  `DIVERGENCE HAZARD` comment (`RealtimeTranscriber.swift`, `GeminiLiveTranscriber.swift`) so a fix to
+  one is not missed in the other; extracting a shared lifecycle helper stays a deliberately deferred,
+  separate change until a third streaming provider makes the reuse concrete instead of speculative.
+- **The wire sample rate is a per-provider requirement, not a quality knob
+  (`TranscriptionProvider.audioFormat`, `TranscriptionAudioFormat`).** OpenAI Realtime and Apple
+  Speech take 24 kHz PCM16 mono; Gemini Live requires 16 kHz PCM16 mono
+  (`audio/pcm;rate=16000`, sent in the chunk's `mimeType`, which must match the PCM actually sent).
+  Speech carries nothing above 8 kHz that a recognizer uses, so 16 kHz is already sufficient for
+  recognition — Gemini's lower rate is what its API accepts, not a deliberate quality tradeoff Jarvis
+  is making. Capture resamples the shared 48 kHz AEC output down to whichever rate the selected
+  provider declares, so the AEC3/downsample pipeline and `WebRTCEchoCanceller` stay provider-agnostic
+  and only the final resample step varies — an exact 3:1 decimation for Gemini's 16 kHz, cheaper and
+  cleaner than a Gemini-private resampler chained after a shared 24 kHz stage (a 24 → 16 kHz second
+  hop at a 2:3 ratio), which was rejected for exactly that reason: it resamples twice for no benefit
+  and keeps a "shared" constant that actually encodes one provider's requirement. Capturing at 16 kHz
+  for every provider — the simplest option — is not available, since OpenAI Realtime requires 24 kHz.
 
 ### Local CLI brain providers
 
@@ -729,6 +777,26 @@ The always-on legs are built to survive transient failure rather than die on it:
   their retained PCM is transcribed by the replacement session instead of first emitting a partial
   or gap that the replay would duplicate. Stale speech state therefore cannot suppress silence
   coaching after reconnect. Reconnect uses capped exponential backoff.
+- **A Gemini Live socket is capped at roughly 10 minutes, but Google gives advance warning:** a
+  `goAway` frame (with a `timeLeft` countdown) arrives before the close, instead of the close simply
+  happening as OpenAI's does. `GeminiLiveTranscriber` uses that warning to drain rather than just
+  reconnect: `pumpIfPossible` stops sending NEW audio to the expiring socket (it keeps accumulating in
+  the same bounded FIFO used for offline buffering — no second buffer), while the utterance already in
+  flight gets a bounded grace period to produce its final transcript on the still-open socket. The
+  bound is the smaller of a fixed cap and the server's own `timeLeft`, enforced by the same
+  main-queue-confined timer discipline as `readyTimeout`/`pongTimeout`, so a lost final can never hang
+  the rotation — it proceeds on the deadline regardless. Only then does it open the replacement, which
+  sends its own `setup` like any new socket, and the buffered audio drains into it. Both sockets (mic
+  and system audio) are opened together, so without this a session loses the transcript line in flight
+  and replays audio from the middle roughly every 10 minutes — four times in a 45-minute interview.
+  Because Google already warned it was coming, the rotation is not treated as a failure: it skips the
+  reconnect backoff schedule entirely (no retry-budget consumption, no `.failed`), whether the
+  replacement opens on the grace-period deadline, on the utterance's final arriving early, or on any
+  transport failure that lands on the socket while it is draining. A very long utterance that is still
+  being spoken exactly when the deadline is reached can still be split across the rotation — the
+  residual limitation the drain narrows but does not close; the complete fix is Google's own session
+  resumption (`sessionResumptionUpdate`), deliberately left as a follow-up (see
+  [status.md → Not yet built](./status.md#not-yet-built)).
 - **Apple Speech has no network reconnect loop.** Start validates macOS/device support, resolves the
   selected conversation locale to a supported equivalent, and downloads any missing asset before
   capture replaces an existing pipeline. Each endpoint then owns one analyzer and an ordered
@@ -782,10 +850,12 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
 - **Development happens inside a git worktree** for recoverability. A worktree does not isolate the
   process from the developer's account; a separate Standard account is optional hardening for long
   unattended agent runs. See [sandbox.md](./sandbox.md).
-- **Egress is narrow and explicit:** the selected OpenAI transcription model receives audio when
-  OpenAI is the provider, while opt-in Apple Speech keeps raw audio on-device; a screenshot +
-  transcript window goes to the selected brain provider/model *only when the model triggers a
-  capture/response*.
+- **Egress is narrow and explicit:** the selected transcription provider's model receives audio —
+  OpenAI Realtime when OpenAI is selected, Gemini Live when Gemini is selected — while opt-in Apple
+  Speech keeps raw audio on-device; a screenshot + transcript window goes to the selected brain
+  provider/model *only when the model triggers a capture/response*. Gemini authenticates its socket
+  with the API key as a URL query parameter rather than a header, so it needs its own logging
+  discipline — see [Models and APIs](#models-and-apis).
   The audio witness persists only counters, sequence/sample metadata, timestamps, provider
   generations, provider audio-clock values, and a local activity bit in the owner-only session
   log — never PCM or recovered words. The only screen-/audio-derived data written to **local** disk
@@ -808,11 +878,11 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
 
 ## 6. Non-Goals (v1)
 
-- A tiered sensitivity dial, or genuinely separate coaching modes with different action-policy
-  gating, tool sets, or proactivity behavior. (One technical-interview coaching approach spans
-  behavioral, system-design, and coding questions; an optional Start-time interview-format selection
-  supplies additional guidance and, for System Design, private architecture sketches — see
-  [§ Models and APIs](#models-and-apis) — while retaining the same action policy and scheduling.)
+- A tiered sensitivity dial, or code-level coaching modes with separate trigger gates or
+  runtime state. One harness spans behavioral, system-design, and coding questions; an optional
+  Start-time interview-format selection specializes the model's coaching policy and, for System
+  Design, enables private architecture sketches inside that shared loop — see
+  [§ Models and APIs](#models-and-apis) — while retaining the same scheduling.
 - Continuous OCR or recording the screen/audio to disk ("recall").
 - A dedicated wake-word engine. Direct address is just the word "Jarvis" (or a question) appearing
   in the transcript, which the brain reads and answers — there is no wake-word detector. (A global

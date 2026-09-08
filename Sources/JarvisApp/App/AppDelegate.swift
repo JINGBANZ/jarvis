@@ -201,8 +201,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         let connectionsSection = ConnectionsSection(
             detector: brain.detector,
             keyStore: secretFile,
-            onKeySaved: { [weak self] key in
-                self?.applySavedAPIKeyToRunningSession(key)
+            onKeySaved: { [weak self] credential, key in
+                self?.applySavedAPIKeyToRunningSession(credential: credential, key: key)
             })
         let sections: [SettingsSection] = [
             brainSection,
@@ -246,10 +246,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             fire()
         }
 
-        if transcriptionPreferences.provider.requiresOpenAIAPIKey(
+        if !transcriptionPreferences.provider.requiredCredentials(
             for: brain.preferences.route
-        ), secrets.apiKey()?.isEmpty != false {
-            jlog("Jarvis: no OpenAI API key yet — paste it in Settings, then press Start.")
+        ).allSatisfy({ secrets.apiKey(for: $0)?.isEmpty == false }) {
+            jlog("Jarvis: missing an API key — paste it in Settings, then press Start.")
         } else {
             jlog("Jarvis: ready — press Start in the menu bar to begin coaching.")
         }
@@ -275,11 +275,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     /// reconnects. The transcription half is session runtime and stays here; the brain half is
     /// composition's, and it installs fresh OpenAI target clients between coaching attempts without
     /// probing or replacing CLI clients, changing route policy, or restarting transcription.
-    private func applySavedAPIKeyToRunningSession(_ key: String) {
+    ///
+    /// Guarded by credential: a saved OpenAI key must never reach a Gemini-backed session (or vice
+    /// versa), so each branch only casts the transcriber to the adapter type that credential feeds.
+    private func applySavedAPIKeyToRunningSession(credential: Credential, key: String) {
         guard let transcriber else { return }
-        (transcriber as? RealtimeTranscriber)?.updateAPIKey(key)
-        (themTranscriber as? RealtimeTranscriber)?.updateAPIKey(key)
-        brain.applySavedAPIKey(key)
+        switch credential {
+        case .openAIAPIKey:
+            (transcriber as? RealtimeTranscriber)?.updateAPIKey(key)
+            (themTranscriber as? RealtimeTranscriber)?.updateAPIKey(key)
+            brain.applySavedAPIKey(key)
+        case .geminiAPIKey:
+            (transcriber as? GeminiLiveTranscriber)?.updateAPIKey(key)
+            (themTranscriber as? GeminiLiveTranscriber)?.updateAPIKey(key)
+        }
     }
 
     /// Validate a Start immediately, then prove system audio and prepare any local-CLI targets and
@@ -300,8 +309,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         // whatever formats have content — see wiki/architecture.md § Models and APIs.
         let interviewFormat = brain.preferences.interviewFormat
         let interviewFormatAddendum = interviewFormat?.promptAddendum ?? ""
-        let key = secrets.apiKey() ?? ""
-        let requiresOpenAIKey = transcriptionProvider.requiresOpenAIAPIKey(for: brainRoute)
+        let key = secrets.apiKey(for: .openAIAPIKey) ?? ""
+        // The brain's key stays OpenAI-only (above); transcription reads whichever credential the
+        // selected provider owns — Apple Speech has none, so this is "" there and unused.
+        let transcriptionKey = transcriptionProvider.ownCredential
+            .flatMap { secrets.apiKey(for: $0) } ?? ""
+        let requiredCredentials = transcriptionProvider.requiredCredentials(for: brainRoute)
         let preparesAppleSpeech = transcriptionProvider == .appleSpeech
         // Only the readable grants gate a Start here: microphone live, screen recording from this
         // process's preflight. System audio is settled by the probe below, which is the only
@@ -309,7 +322,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         // every later Start until Jarvis was relaunched, while the notice says to press Start again.
         let readinessConfiguration = JarvisReadiness.Configuration(
             requiredPermissions: PermissionGate.required.subtracting([.systemAudio]),
-            requiredCredentials: requiresOpenAIKey ? [.openAIAPIKey] : [],
+            requiredCredentials: requiredCredentials,
             requiresTranscriptionPreparation: preparesAppleSpeech)
         let readinessStart = readiness.begin(configuration: readinessConfiguration)
         let readinessSession = readinessStart.session
@@ -332,15 +345,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             return false
         }
 
-        let availableCredentials: Set<JarvisReadiness.Credential> = key.isEmpty
-            ? [] : [.openAIAPIKey]
+        let availableCredentials = Set(Credential.allCases.filter {
+            secrets.apiKey(for: $0)?.isEmpty == false
+        })
         observeReadiness(.credentials(available: availableCredentials), for: readinessSession)
-        guard !requiresOpenAIKey || !key.isEmpty else {
-            jlog("Jarvis: can't start — no API key.")
+        let missingCredentials = requiredCredentials.subtracting(availableCredentials)
+        guard missingCredentials.isEmpty else {
+            jlog("Jarvis: can't start — missing credential(s): "
+                 + missingCredentials.map(\.rawValue).sorted().joined(separator: ", "))
             if wasRunning {
                 artifacts.sessionAudit?.record(.settingsChangeNotApplied)
             }
-            errorReporter.reportImmediately(.noAPIKey, context: reportContext)
+            errorReporter.reportImmediately(
+                .noAPIKey(missing: missingCredentials),
+                context: reportContext)
             return false
         }
 
@@ -418,9 +436,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                   self.readinessSession == readinessSession else {
                 return
             }
-            let credentialIsCurrent = !requiresOpenAIKey
-                || (self.secrets.apiKey() ?? "") == key
-            guard credentialIsCurrent,
+            let credentialIsCurrent = !requiredCredentials.contains(.openAIAPIKey)
+                || (self.secrets.apiKey(for: .openAIAPIKey) ?? "") == key
+            // Mirrors the OpenAI check above for whichever credential the transcription provider
+            // itself owns (Gemini today; Apple Speech has none and is trivially current).
+            let transcriptionCredentialIsCurrent = transcriptionProvider.ownCredential.map {
+                (self.secrets.apiKey(for: $0) ?? "") == transcriptionKey
+            } ?? true
+            guard credentialIsCurrent, transcriptionCredentialIsCurrent,
                   self.transcriptionPreferences.configuration == transcriptionConfiguration,
                   self.brain.preferences.route == brainRoute else {
                 self.pendingStartTask = nil
@@ -432,6 +455,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                 uniqueKeysWithValues: detected.map { ($0.provider, $0) })
             _ = self.installPreparedStart(
                 apiKey: key,
+                transcriptionKey: transcriptionKey,
                 brainRoute: brainRoute,
                 interviewFormatAddendum: interviewFormatAddendum,
                 interviewFormat: interviewFormat,
@@ -491,6 +515,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     /// tearing down a running pipeline, while unavailable fallback CLIs remain ordered skip targets.
     private func installPreparedStart(
         apiKey key: String,
+        transcriptionKey: String,
         brainRoute: BrainRoute,
         interviewFormatAddendum: String,
         interviewFormat: InterviewFormat?,
@@ -539,6 +564,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             jlog(
                 "Jarvis transcription: provider=Apple Speech "
                     + "locale=\(appleSpeechLocale?.identifier ?? "unprepared")")
+        case .gemini:
+            jlog("Jarvis transcription: provider=Gemini")
         }
 
         // Each target's coach and summarizer share the session traffic log. Every fresh attempt is a
@@ -592,7 +619,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         // "Me" side: the mic. Drives turn-end and the backing-off silence check ("are you stuck?").
         let transcriber = TranscriptionSessionFactory.make(
             configuration: transcriptionConfiguration,
-            apiKey: key,
+            apiKey: transcriptionKey,
             appleSpeechLocale: appleSpeechLocale,
             speaker: .me,
             transcript: transcript,
@@ -618,7 +645,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         // stuck?" prompt is about the *user*, so only the mic owns that timer.
         let themTranscriber = TranscriptionSessionFactory.make(
             configuration: transcriptionConfiguration,
-            apiKey: key,
+            apiKey: transcriptionKey,
             appleSpeechLocale: appleSpeechLocale,
             speaker: .them,
             transcript: transcript,
@@ -650,8 +677,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             guard let themTranscriber else { return }
             Task { @MainActor [weak self] in
                 guard let self, self.themTranscriber === themTranscriber else { return }
-                if transcriptionConfiguration.provider == .openAI,
-                   reason != .connectionLost {
+                // Key on the failure REASON, not the provider: Gemini (unlike Apple Speech) can emit
+                // an account/credential/configuration reason on the system-audio side too, and that
+                // kind of failure threatens the mic side identically — see
+                // `TranscriptionFailureReason.affectsEveryStream`'s doc comment for why degrading on
+                // one of those would hide the real cause behind a misleading system-audio notice.
+                if reason.affectsEveryStream {
                     self.reportTranscriptionFailure(reason)
                     return
                 }
@@ -680,6 +711,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             ? TimeInterval(config.localEndpointSilenceDurationMs) / 1_000
             : nil
         let capture = AggregateEchoCapture(
+            audioFormat: transcriptionConfiguration.provider.audioFormat,
             onMicCaptured: { [weak transcriber] sequence, samples, capturedAt in
                 transcriber?.recordCapturedAudio(
                     sequenceNumber: sequence, sampleCount: samples, capturedAt: capturedAt)

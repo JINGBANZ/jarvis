@@ -81,17 +81,15 @@ import Testing
 
     @Test func displayNamesAndCredentialRequirementsAreStable() {
         #expect(TranscriptionProvider.openAI.displayName == "OpenAI")
-        #expect(TranscriptionProvider.openAI.requiresOpenAIAPIKey)
         #expect(TranscriptionProvider.appleSpeech.displayName == "Apple Speech")
-        #expect(!TranscriptionProvider.appleSpeech.requiresOpenAIAPIKey)
         #expect(OpenAITranscriptionModel.gpt4oTranscribe.displayName
                 == "GPT-4o Transcribe")
         #expect(OpenAITranscriptionModel.gptTranscribe.displayName
                 == "GPT Transcribe")
         #expect(OpenAITranscriptionModel.gptLiveTranscribe.displayName
                 == "GPT Live Transcribe")
-        #expect(OpenAITranscriptionLanguage.english.displayName == "English")
-        #expect(OpenAITranscriptionLanguage.mandarinChinese.displayName == "Mandarin")
+        #expect(TranscriptionLanguage.english.displayName == "English")
+        #expect(TranscriptionLanguage.mandarinChinese.displayName == "Mandarin")
         #expect(OpenAITranscriptionModel.gpt4oTranscribe.turnDetectionStrategy == .serverVAD)
         #expect(OpenAITranscriptionModel.gptTranscribe.turnDetectionStrategy == .clientCommit)
         #expect(OpenAITranscriptionModel.gptLiveTranscribe.turnDetectionStrategy == .clientCommit)
@@ -139,9 +137,105 @@ import Testing
                 BrainTarget(provider: .openAI, modelID: "gpt-5.4"),
             ])
 
-        #expect(TranscriptionProvider.openAI.requiresOpenAIAPIKey(for: cliOnly))
-        #expect(!TranscriptionProvider.appleSpeech.requiresOpenAIAPIKey(for: cliOnly))
-        #expect(TranscriptionProvider.appleSpeech.requiresOpenAIAPIKey(
-            for: routeWithOpenAIFallback))
+        #expect(TranscriptionProvider.openAI.requiredCredentials(for: cliOnly) == [.openAIAPIKey])
+        #expect(TranscriptionProvider.appleSpeech.requiredCredentials(for: cliOnly).isEmpty)
+        #expect(TranscriptionProvider.appleSpeech.requiredCredentials(for: routeWithOpenAIFallback)
+            == [.openAIAPIKey])
+    }
+
+    @Test func openAITranscriptionAlwaysNeedsItsOwnKey() {
+        #expect(TranscriptionProvider.openAI.requiredCredentials(for: nil) == [.openAIAPIKey])
+    }
+
+    @Test func appleSpeechNeedsNoCredentialOfItsOwn() {
+        #expect(TranscriptionProvider.appleSpeech.requiredCredentials(for: nil).isEmpty)
+    }
+
+    @Test func geminiTranscriptionNeedsOnlyItsOwnKeyWithACLIBrain() {
+        let cliOnly = BrainRoute(
+            primary: BrainTarget(provider: .claudeCode, modelID: "claude-opus-5"),
+            fallbackTargets: [])
+        #expect(TranscriptionProvider.gemini.requiredCredentials(for: cliOnly) == [.geminiAPIKey])
+    }
+
+    /// The combination the old single-Bool gate could not express: Gemini ears, OpenAI brain.
+    @Test func geminiEarsWithAnOpenAIBrainNeedBothKeys() {
+        let openAIRoute = BrainRoute(
+            primary: BrainTarget(provider: .claudeCode, modelID: "claude-opus-5"),
+            fallbackTargets: [BrainTarget(provider: .openAI, modelID: "gpt-5.4")])
+        #expect(TranscriptionProvider.gemini.requiredCredentials(for: openAIRoute)
+            == [.geminiAPIKey, .openAIAPIKey])
+    }
+
+    @Test func appleSpeechWithAnOpenAIBrainNeedsTheOpenAIKey() {
+        let openAIRoute = BrainRoute(
+            primary: BrainTarget(provider: .claudeCode, modelID: "claude-opus-5"),
+            fallbackTargets: [BrainTarget(provider: .openAI, modelID: "gpt-5.4")])
+        #expect(TranscriptionProvider.appleSpeech.requiredCredentials(for: openAIRoute)
+            == [.openAIAPIKey])
+    }
+
+    @Test func geminiModelExposesItsWireNameWithTheModelsPrefix() {
+        #expect(GeminiTranscriptionModel.geminiTranscribeLive.rawValue == "gemini-3.5-transcribe-live")
+        #expect(GeminiTranscriptionModel.geminiTranscribeLive.wireModelName
+            == "models/gemini-3.5-transcribe-live")
+    }
+
+    @Test func geminiModeMapsToTheUppercaseWireValues() {
+        #expect(GeminiTranscriptionMode.verbatim.wireValue == "VERBATIM")
+        #expect(GeminiTranscriptionMode.smart.wireValue == "SMART")
+    }
+
+    @Test func geminiPreferencesRoundTrip() {
+        let defaults = freshDefaults()
+        let preferences = TranscriptionPreferences(defaults: defaults)
+
+        preferences.geminiExpectedLanguages = [.mandarinChinese, .english]
+        preferences.geminiVocabularyKeywords = [" gRPC ", "", "Kubernetes"]
+        preferences.geminiMode = .smart
+
+        // Canonicalized to declaration order; blank keywords dropped and trimmed.
+        #expect(preferences.geminiExpectedLanguages == [.english, .mandarinChinese])
+        #expect(preferences.geminiVocabularyKeywords == ["gRPC", "Kubernetes"])
+        #expect(preferences.geminiMode == .smart)
+    }
+
+    /// Google's Live API rejects a `customVocabulary` list longer than 1,000 terms, which would fail
+    /// Start. The setter caps at that limit, keeping the first 1,000 (the user's priority order); a
+    /// normal small list is untouched.
+    @Test func vocabularyKeywordsAreCappedAtTheAPILimit() {
+        let defaults = freshDefaults()
+        let preferences = TranscriptionPreferences(defaults: defaults)
+
+        let overLimit = (1...1_001).map { "term\($0)" }
+        preferences.geminiVocabularyKeywords = overLimit
+        #expect(preferences.geminiVocabularyKeywords.count == 1_000)
+        #expect(preferences.geminiVocabularyKeywords == Array(overLimit.prefix(1_000)))
+
+        preferences.geminiVocabularyKeywords = ["gRPC", "Kubernetes"]
+        #expect(preferences.geminiVocabularyKeywords == ["gRPC", "Kubernetes"])
+    }
+
+    @Test func geminiPreferencesFallBackToDefaultsWhenUnset() {
+        let preferences = TranscriptionPreferences(defaults: freshDefaults())
+        #expect(preferences.geminiModel == .geminiTranscribeLive)
+        #expect(preferences.geminiExpectedLanguages.isEmpty)
+        #expect(preferences.geminiVocabularyKeywords.isEmpty)
+        #expect(preferences.geminiMode == .verbatim)
+    }
+
+    @Test func startSnapshotCarriesTheGeminiChoices() {
+        let defaults = freshDefaults()
+        let preferences = TranscriptionPreferences(defaults: defaults)
+        preferences.provider = .gemini
+        preferences.geminiMode = .smart
+        preferences.geminiVocabularyKeywords = ["Kubernetes"]
+
+        let configuration = preferences.configuration
+        #expect(configuration.provider == .gemini)
+        #expect(configuration.geminiMode == .smart)
+        #expect(configuration.geminiVocabularyKeywords == ["Kubernetes"])
+        // Gemini's server owns turn boundaries, so no client strategy is derived.
+        #expect(configuration.turnDetectionStrategy == nil)
     }
 }

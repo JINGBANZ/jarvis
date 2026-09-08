@@ -81,8 +81,11 @@ admission_paths=(
 )
 
 # Direct OS reach-through. File, process, network, and Console access belong behind injected ports
-# and the evidence stack, never inline in coaching policy.
-os_pattern='\bFileManager\b|\bFileHandle\b|\bProcess\b|\bURLSession\b|\bNSLog\b'
+# and the evidence stack, never inline in coaching policy. `\bURLSession\w*` (not `\bURLSession\b`)
+# also catches URLSession-prefixed types like `URLSessionWebSocketTask` and
+# `URLSessionConfiguration`, which have no word boundary after "URLSession" and previously slipped
+# through undetected.
+os_pattern='\bFileManager\b|\bFileHandle\b|\bProcess\b|\bURLSession\w*|\bNSLog\b'
 
 # Evaluator and sealed-session types, plus the concrete evidence-persistence machinery. The kernel
 # may emit through its narrow observer ports (BrainTrafficAuditing, CoachingAttemptAuditing); it may
