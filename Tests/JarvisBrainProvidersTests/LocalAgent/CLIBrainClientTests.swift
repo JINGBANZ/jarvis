@@ -446,7 +446,7 @@ import JarvisCore
             messages: [.system("coach prompt"), .user("help")],
             tools: coachTools,
             toolChoice: .force(speakTool.name))
-        guard case .speak(_, let lines) = response.toolCalls.first else {
+        guard case .speak(_, let lines, nil) = response.toolCalls.first else {
             Issue.record("expected forced speak")
             return
         }
@@ -473,7 +473,7 @@ import JarvisCore
         ] {
             let response = client.parse(
                 reply: reply, tools: coachTools, toolChoice: .required)
-            guard case .speak(_, let lines) = response.toolCalls.first else {
+            guard case .speak(_, let lines, nil) = response.toolCalls.first else {
                 Issue.record("expected speak for \(reply)")
                 continue
             }

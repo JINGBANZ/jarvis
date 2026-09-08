@@ -277,6 +277,12 @@ playback, remains in
 
 ## Built
 
+System Design sessions support [private high-level architecture hints](./architecture.md#private-architecture-hints):
+[`DiagramHint`](../Sources/JarvisCore/Overlay/DiagramHint.swift) validates a small Mermaid subset, and
+[`DiagramHintImage`](../Sources/JarvisOverlay/DiagramHintImage.swift) renders boxes and arrows alongside
+the hint inside the capture-excluded overlay box. Graphs scale proportionally with the window;
+Settings → Overlay → Overlay Box offers **Show diagrams**, enabled by default. Other formats remain text-only.
+
 Tested `JarvisCore` + `JarvisBrainProviders` + `JarvisEvaluation` + `JarvisOverlay` + `JarvisScreenCapture` harness is green
 (`./scripts/run-tests.sh`); `JarvisApp` is the thin OS shell, verified by the smoke run.
 

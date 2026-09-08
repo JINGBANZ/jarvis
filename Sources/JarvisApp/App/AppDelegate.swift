@@ -162,6 +162,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             width: appearance.boxWidth, height: appearance.boxHeight))
         overlayBox.setFontSize(appearance.boxFontSize)
         overlayBox.setOpacity(appearance.boxOpacity)
+        overlayBox.setDiagramsEnabled(appearance.boxDiagramsEnabled)
         // The panel reports a finished resize drag; persistence stays here, beside the other
         // overlay settings, so the panel keeps knowing nothing about UserDefaults.
         overlayBox.onSizeChanged = { [appearance] width, height in
@@ -305,8 +306,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         let brainRoute = brain.preferences.route
         // Resolve once because CLI providers bake the prompt into their session. Automatic mode
         // still re-evaluates the current task on every model response; it carries no runtime mode.
-        let interviewFormatAddendum = InterviewFormat.resolvedPromptAddendum(
-            for: brain.preferences.interviewFormat)
+        let interviewFormat = brain.preferences.interviewFormat
+        let interviewFormatAddendum = InterviewFormat.resolvedPromptAddendum(for: interviewFormat)
         let key = secrets.apiKey(for: .openAIAPIKey) ?? ""
         // The brain's key stays OpenAI-only (above); transcription reads whichever credential the
         // selected provider owns — Apple Speech has none, so this is "" there and unused.
@@ -456,6 +457,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                 transcriptionKey: transcriptionKey,
                 brainRoute: brainRoute,
                 interviewFormatAddendum: interviewFormatAddendum,
+                interviewFormat: interviewFormat,
                 transcriptionConfiguration: transcriptionConfiguration,
                 appleSpeechLocale: appleSpeechLocale,
                 detectedCLIs: detectedCLIs,
@@ -515,6 +517,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         transcriptionKey: String,
         brainRoute: BrainRoute,
         interviewFormatAddendum: String,
+        interviewFormat: InterviewFormat?,
         transcriptionConfiguration: TranscriptionConfiguration,
         appleSpeechLocale: Locale?,
         detectedCLIs initialDetectedCLIs: [BrainProvider: DetectedAgentCLI],
@@ -593,7 +596,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             coachingAttempts: artifacts.sessionAudit,
             plan: freshSessionPlan(),
             activity: artifacts.sessionAudit,
-            interviewFormatAddendum: interviewFormatAddendum)
+            interviewFormatAddendum: interviewFormatAddendum,
+            interviewFormat: interviewFormat)
 
         // Building the index reads files and can shell out to `textutil`, so it runs off the Start
         // path entirely rather than delaying it — a trigger that fires before this lands just
