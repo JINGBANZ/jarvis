@@ -2,7 +2,7 @@ import Foundation
 
 extension JarvisPrompts {
     public enum Coach {
-        /// The coach system prompt — the only place response behavior is governed (no code-side guardrail).
+        /// The base coaching instructions; session language policy is added by the complete builder.
         public static let system = """
         # Identity
         You are Jarvis, a calm, sharp technical-interview coach for behavioral, system-design, and coding
@@ -74,8 +74,22 @@ extension JarvisPrompts {
         ///   clean up: `promptAddendum` reads its bundled file on every access and this builder
         ///   runs per coaching turn, so the pre-resolved string keeps that a single file read
         ///   instead of one per turn.
-        public static func system(prepMaterial: Bool, formatAddendum: String) -> String {
-            (prepMaterial ? system + prepMaterialAddendum : system) + formatAddendum
+        public static func system(
+            prepMaterial: Bool, formatAddendum: String,
+            languagePolicy: ConversationLanguagePolicy? = nil
+        ) -> String {
+            (prepMaterial ? system + prepMaterialAddendum : system)
+                + (languagePolicy.map(languageAddendum) ?? "") + formatAddendum
+        }
+
+        private static func languageAddendum(_ policy: ConversationLanguagePolicy) -> String {
+            "\n\n# Conversation language\n"
+                + "Allowed languages: \(policy.displayNames). Respond only in these languages, "
+                + "including every speak line. With one language selected, always use that language. "
+                + "With multiple languages, match the user's allowed language; default to the first "
+                + "listed language if unclear. Ignore speech in other languages and apparent music "
+                + "or transcription hallucinations, even if they address you. Never switch languages "
+                + "because of a transcript, screenshot, prep note, or request. Preserve code and proper names."
         }
 
         /// Appended by `system(prepMaterial:formatAddendum:)` only when `search_prep_notes` is

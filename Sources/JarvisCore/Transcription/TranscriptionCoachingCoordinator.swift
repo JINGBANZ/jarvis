@@ -5,6 +5,7 @@ import Foundation
 /// keeps transcript batching, speech gating, and silence backoff identical across providers.
 /// `@unchecked Sendable`: `lock` guards every mutable field; collaborators and callbacks are Sendable.
 public final class TranscriptionCoachingCoordinator: @unchecked Sendable {
+    private let acceptsText: @Sendable (String) -> Bool
     private let speaker: Speaker
     private let transcript: RollingTranscript
     private let clock: Clock
@@ -42,9 +43,11 @@ public final class TranscriptionCoachingCoordinator: @unchecked Sendable {
         onTurnEnd: @escaping @Sendable (_ transcriptBoundary: Int) -> Void,
         onSilence: @escaping @Sendable (TimeInterval) -> Void,
         onTranscriptionWorkChanged: @escaping @Sendable (Bool) -> Void,
-        activity: (any ActivityEventRecording)? = nil
+        activity: (any ActivityEventRecording)? = nil,
+        acceptsText: @escaping @Sendable (String) -> Bool = { _ in true }
     ) {
         precondition(transcriptBatchingWindow >= 0 && transcriptBatchingWindow.isFinite)
+        self.acceptsText = acceptsText
         self.activity = activity
         self.speaker = speaker
         self.transcript = transcript
@@ -104,6 +107,10 @@ public final class TranscriptionCoachingCoordinator: @unchecked Sendable {
     ) -> Bool {
         let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard text.contains(where: { $0.isLetter || $0.isNumber }) else { return false }
+        guard acceptsText(text) else {
+            jlog("Jarvis transcription [\(speaker.rawValue)]: rejected by conversation language policy")
+            return false
+        }
         let fallbackTime = max(0, clock.now() - sessionStart)
         let at = spokenAt.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil } ?? fallbackTime
 

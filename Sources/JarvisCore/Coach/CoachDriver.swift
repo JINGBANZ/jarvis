@@ -162,7 +162,9 @@ public final class CoachDriver: @unchecked Sendable {
         automaticAttemptDelay: AutomaticAttemptDelay? = nil,
         activity: (any ActivityEventRecording)? = nil,
         prepMaterial: (any PrepMaterialSearching)? = nil,
-        interviewFormatAddendum: String = ""
+        interviewFormatAddendum: String = "",
+        languagePolicy: ConversationLanguagePolicy? = nil,
+        acceptsOutput: @escaping @Sendable (String) -> Bool = { _ in true }
     ) {
         self.plan = plan
         self.activity = activity
@@ -181,7 +183,8 @@ public final class CoachDriver: @unchecked Sendable {
             coachingAttempts: coachingAttempts,
             activity: activity,
             ledger: ledger,
-            interviewFormatAddendum: interviewFormatAddendum)
+            interviewFormatAddendum: interviewFormatAddendum,
+            languagePolicy: languagePolicy, acceptsOutput: acceptsOutput)
     }
 
     private static let defaultAutomaticAttemptDelay: AutomaticAttemptDelay = { sequence in
@@ -922,6 +925,7 @@ public final class CoachDriver: @unchecked Sendable {
 public enum TurnOutcome: Sendable, Equatable {
     case spoke
     case silentByModel
+    case suppressedLanguage
     case skippedFillerOnly
     case truncated
     case busy

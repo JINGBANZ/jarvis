@@ -247,7 +247,7 @@ import Testing
             model: .gptTranscribe,
             languages: [])
         #expect(transcribeAutomatic["language"] == nil)
-        #expect(transcribeAutomatic["languages"] == nil)
+        #expect(transcribeAutomatic["languages"] as? [String] == ["en", "zh-cn"])
 
         let liveEnglish = try transcription(
             model: .gptLiveTranscribe,
@@ -271,7 +271,7 @@ import Testing
             model: .gptLiveTranscribe,
             languages: [])
         #expect(liveAutomatic["language"] == nil)
-        #expect(liveAutomatic["languages"] == nil)
+        #expect(liveAutomatic["languages"] as? [String] == ["en", "zh-cn"])
     }
 
     @Test func newestModelsUseFixedRoleContextWithoutVocabularyHints() throws {

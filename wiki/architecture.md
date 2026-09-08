@@ -50,8 +50,8 @@ possible and reinvent nothing.
 
 Always-on and cheap: audio streams continuously to the selected transcription adapter, producing a
 rolling, speaker-labeled transcript. OpenAI Realtime is the default; Apple Speech is an opt-in,
-on-device adapter on macOS 26+. OpenAI defaults to automatic language recognition and lets the user
-hint English, Mandarin, or both; Apple uses one user-selected locale per session. The transcript —
+on-device adapter on macOS 26+. OpenAI defaults to automatic recognition within English and Mandarin;
+users can restrict speech and replies to either language. Apple uses one user-selected locale per session. The transcript —
 not the screen — is the constant input signal.
 
 On demand and expensive: the screen is **only** captured when the model asks for it via the
@@ -82,7 +82,7 @@ moments the model judges worthwhile.
    The CoachDriver then calls the brain on every trigger that carries **substance** — there is no
    cooldown, rate cap, or wake-word gate. Whether to speak (and whether the user just addressed
    Jarvis) is the model's call, governed by the system prompt; the only hard gates are the user's
-   Start/Stop and the **substance gate** (`TurnSubstance`): a turn-end whose delta is pure
+   Start/Stop, session language admission (below), and the **substance gate** (`TurnSubstance`): a turn-end whose delta is pure
    clear hesitation sounds ("Hmm", "嗯", or a sequence such as "Uh. Hmm. Oh.") or empty is skipped
    without a request. Those sounds are also removed from a mixed brain-facing delta, while Activity
    keeps the complete finalized transcription. Context-dependent short replies such as "Yes", "No",
@@ -111,7 +111,7 @@ moments the model judges worthwhile.
    has to emit *something*, and at low reasoning effort that came out as leaked deliberation text
    ("final empty. no. final.") that polluted the conversation and was imitated on later turns;
    requiring a tool call prevents the emission rather than filtering it afterwards.
-6. Activity records every brain action, through the session's one evidence handle: successful or failed `capture_screen`, `speak`, and
+6. Activity records every delivered brain action (language-rejected replies remain diagnostic-only), through the session's one evidence handle: successful or failed `capture_screen`, `speak`, and
    `stay_silent`. Heard rows and model-facing transcript deltas share `ConversationChronology`:
    occurrence time is authoritative, and insertion order breaks timestamp ties. A late-finalizing
    earlier utterance is therefore inserted before a faster later reply. When Activity reaches its
@@ -493,13 +493,28 @@ rather than a per-turn screenshot.
   Transcribe and GPT Live receive fixed role-aware recording context; GPT Live also requests low
   transcription delay. Both also receive the user's free-text vocabulary glossary (Settings →
   Transcription) as literal `keywords`, biasing recognition toward jargon and names; GPT-4o
-  Transcribe has no such field and ignores the setting. Automatic is the default language
-  selection and sends no language hint. A single expected language guides recognition without
-  translating. Multiple selections are supplied to GPT Transcribe and GPT Live and leave GPT-4o
-  automatic because the older model accepts at most one language hint. GPT Transcribe's completion-language
-  metadata is logged for diagnosis without entering Activity or model context. This is one
-  session-level expectation shared by both speakers, not a language decision per turn; either
-  speaker may switch within a sentence. The macOS 26+ opt-in is Apple `SpeechAnalyzer` with one
+  Transcribe has no such field and ignores the setting. Automatic permits the supported English
+  and Mandarin set; explicit selections narrow it. GPT Transcribe and GPT Live receive that set
+  and instructions to ignore other languages, music, singing and non-speech rather than translate
+  or invent speech. GPT-4o receives a singular hint only when one language is allowed.
+  Provider completion-language metadata rejects disallowed items, including their streamed and
+  reconnect fallbacks, while still settling their audio/work boundaries.
+
+  `ConversationLanguagePolicy` is frozen at Start for both speakers and the coaching brain,
+  including CLI prewarming and later brain-client changes. The app's `ConversationLanguageFilter`
+  delegates text identification to Apple's NaturalLanguage framework. It checks complete results
+  and sentences before transcript/Activity admission and before either overlay receives a reply.
+  A confident disallowed language suppresses the whole result; an output suppression completes the
+  attempt without a retry, provider switch, Activity row, or rejected reply in client-managed history.
+  The coaching prompt restricts every reply to the selected languages even when screen/prep content
+  uses another language. Apple Speech uses its selected locale for this policy.
+
+  Detection is probabilistic: low-confidence or unidentifiable text passes to preserve names and
+  code (short jargon can be assigned unrelated languages); the detector combines Chinese script
+  variants before comparing confidence. Provider-reported disallowed languages are rejected
+  regardless of text confidence. This cannot guarantee rejection of ambiguous foreign words or
+  music hallucinated as allowed-language speech. It adds no audio classifier or transcription retry.
+  Either speaker may switch within the allowed language set inside a sentence. The macOS 26+ opt-in is Apple `SpeechAnalyzer` with one
   `SpeechTranscriber` locale chosen
   from the framework's runtime-supported list; `SFSpeechRecognizer` is not offered on older macOS,
   because it would be a second Apple adapter with its own authorization, availability, and result

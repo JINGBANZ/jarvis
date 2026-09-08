@@ -167,14 +167,19 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
         return created
     }
 
-    func recordCompleted(itemID: String, transcript text: String, socketGeneration: Int) {
+    func recordCompleted(itemID: String, transcript text: String, socketGeneration: Int,
+                         languageAllowed: Bool = true) {
         lock.lock()
         guard !stopped, isCurrentGeneration(socketGeneration) else { lock.unlock(); return }
-        let item = ledger.recordCompleted(itemID: itemID, transcript: text, speaker: speaker)
+        let item = ledger.recordCompleted(
+            itemID: itemID, transcript: text, speaker: speaker, languageAllowed: languageAllowed)
         locallyCommittedItemIDs.remove(itemID)
         discardServerConfirmedAudioLocked()
         let handled = reconcileReplacementItemLocked(
-            item, reason: item?.recoveredFromDeltas == true ? "completed without usable final" : nil)
+            item, reason: languageAllowed
+                ? (item?.recoveredFromDeltas == true ? "completed without usable final" : nil)
+                : "conversation language rejected",
+            languageRejected: !languageAllowed)
         if !handled {
             jlog("Jarvis realtime [\(speaker.rawValue)] transcription completed "
                  + "with no usable text (item \(itemID))")
@@ -389,10 +394,12 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
 
     @discardableResult
     private func reconcileReplacementItemLocked(
-        _ item: RealtimeTranscriptionLedger.FinalizedItem?, reason: String?
+        _ item: RealtimeTranscriptionLedger.FinalizedItem?, reason: String?,
+        languageRejected: Bool = false
     ) -> Bool {
         let recoveryWasActive = reconnectRecovery.isActive
-        let action = reconnectRecovery.resolveReplacement(hasUsableText: item?.text != nil)
+        let action = reconnectRecovery.resolveReplacement(
+            hasUsableText: item?.text != nil, languageRejected: languageRejected)
         let handled: Bool
         switch action {
         case .appendReplacement:
