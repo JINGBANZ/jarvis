@@ -270,17 +270,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             }
             if shortcut == .showCode && !self.appearance.boxEnabled {
                 if self.appearance.captionEnabled {
-                    self.overlayCaption.render(["Turn on Overlay Box in Settings to show code."], perLineSeconds: [5])
+                    self.overlayCaption.render(["Turn on Overlay Box in Settings to show code."], perLineSeconds: [5]) // ghost-mode-allowed: explicit user shortcut in the capture-excluded caption
                 } else {
                     NSSound.beep() // ghost-mode-allowed: explicit code hotkey with both overlay surfaces disabled
                 }
                 return
-            }
-            if shortcut == .showCode {
-                self.codePreferences.isEnabled = true
-                self.overlayBox.setCodeEnabled(true)
-                self.hotkeySection?.didBecomeActive()
-                self.reapplySessionPlan()
             }
             fire(shortcut)
         }
@@ -848,7 +842,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         }
         // Arm the hint hotkey for this session: capture the screen and force a one-trip hint, routed
         // through the same turn box as audio triggers (so Stop cancels it and rapid presses coalesce).
-        self.requestManualHint = { shortcut in turns.run { await driver.handleTrigger(shortcut.triggerReason) } }
+        self.requestManualHint = { [weak self] shortcut in
+            // Use the frozen session format before persisting or revealing the code dock.
+            if shortcut == .showCode, interviewFormat == nil || interviewFormat == .coding, let self {
+                self.codePreferences.isEnabled = true
+                self.overlayBox.setCodeEnabled(true)
+                self.hotkeySection?.didBecomeActive()
+                self.reapplySessionPlan()
+            }
+            turns.run { await driver.handleTrigger(shortcut.triggerReason) }
+        }
         transcriber.connect()
         themTranscriber.connect()
         if let reason = capture.start() {
