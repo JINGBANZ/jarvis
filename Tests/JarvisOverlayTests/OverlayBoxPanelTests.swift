@@ -318,18 +318,30 @@ import JarvisCore
         #expect(reported.first?.1 == 700, "the collapsed height must never become the saved height")
     }
 
-    /// Claiming the edges for resizing must not cost the box its drag-to-move everywhere else. This
-    /// walks the real subview stack, which the affordance view sits on top of.
+    /// `setContentSize` anchors a window's top-left only while it is on screen, and its bottom-left
+    /// once ordered out. Stop orders the box out, so leaning on it meant a box collapsed before Stop
+    /// expanded upward on the next Start and came back a screenful above where the user left it.
     @MainActor @Test
-    func aPressAwayFromTheEdgesStillMovesTheBox() {
+    func collapsingRollsTheBoxDownFromAFixedTopEdge() {
         let panel = OverlayBoxPanel(contentSize: NSSize(width: 520, height: 440))
+        let before = panel.currentFrame
 
-        #expect(panel.pressMovesWindow(at: NSPoint(x: 260, y: 220)),
-                "a drag in the log must still move the box")
-        #expect(panel.pressMovesWindow(at: NSPoint(x: 260, y: 425)),
-                "a drag on the header must still move the box")
-        #expect(!panel.pressMovesWindow(at: NSPoint(x: 2, y: 220)),
-                "an edge resizes instead of moving")
+        panel.clickCollapseButton()
+        #expect(panel.currentFrame.maxY == before.maxY, "the top edge must not move")
+        #expect(panel.currentFrame.minX == before.minX)
+
+        panel.clickCollapseButton()
+        #expect(panel.currentFrame == before, "expanding must put the box back exactly")
+    }
+
+    /// A tooltip is drawn in a window of AppKit's own, which does not inherit this panel's capture
+    /// exclusion, so one resting under the pointer would appear on the interviewer's screen share.
+    @MainActor @Test
+    func theHeaderButtonsCarryNoTooltipButKeepTheirLabels() {
+        let panel = OverlayBoxPanel()
+        #expect(panel.headerButtonTooltips.allSatisfy { $0 == nil })
+        #expect(panel.headerButtonLabels == ["Collapse", "Clear history"],
+                "dropping the tooltips must not cost the buttons their VoiceOver labels")
     }
 
     @MainActor @Test
@@ -351,6 +363,11 @@ import JarvisCore
     @Test
     func theClearButtonFollowsWhetherTheLogHasAnything() async {
         await checkClearButtonFollowsTheLog()
+    }
+
+    @Test
+    func clearingDuringThePreviewCannotWipeTheSessionsLog() async {
+        await checkPreviewClearLeavesTheLogAlone()
     }
 
     @Test
@@ -436,6 +453,24 @@ private func checkClearButtonFollowsTheLog() async {
     #expect(panel.entryCount == 0, "the header button must erase the log")
     #expect(panel.currentText.isEmpty, "an erased box is blank, with no placeholder")
     #expect(!panel.isClearButtonVisible, "an erased box offers nothing to erase again")
+}
+
+// The preview renders sample entries, so the header offers a clear button over content that is not
+// the real log. Pressing it used to empty `entries` and return before re-rendering, so the sample
+// stayed on screen and the session's history was gone the moment the preview closed: destructive,
+// silent, and one click away.
+@MainActor
+private func checkPreviewClearLeavesTheLogAlone() async {
+    let panel = liveBox()
+    panel.render(["A real tip."], perLineSeconds: 0)
+    #expect(await waitUntil { panel.entryCount == 1 }, "the tip should be logged")
+
+    panel.showAppearancePreview(true)
+    panel.clickClearButton()             // the button the preview itself puts on screen
+    panel.showAppearancePreview(false)
+
+    #expect(panel.entryCount == 1, "the preview's clear button must not erase the session's log")
+    #expect(panel.currentText.contains("A real tip."))
 }
 
 // Each spoken tip becomes one entry, its lines joined into a single paragraph, newest last.

@@ -189,7 +189,13 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
 
     @objc private func toggleCollapsed() { setCollapsed(!isCollapsed) }
 
-    @objc private func clearLog() { clear() }
+    /// Inert while the Settings preview owns the display. The preview renders sample entries, so the
+    /// header shows a clear button over content that is not the real log; clearing there would wipe
+    /// the session's history with nothing on screen changing to show it had happened.
+    @objc private func clearLog() {
+        guard !isPreviewing else { return }
+        clear()
+    }
 
     /// Roll the box down to its header and back. Both the width and the height the user dragged to
     /// survive the round trip, so collapsing costs them nothing.
@@ -200,7 +206,6 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         resizeAffordance.allowsVerticalResize = !collapsed
         scroll.isHidden = collapsed
 
-        let width = panel.contentRect(forFrameRect: panel.frame).width
         let collapsedHeight = OverlayBoxChrome(contentHeight: expandedContentHeight).height
         // Floor and ceiling meet while collapsed: with only the header on screen, a vertical drag has
         // nothing to stretch. Both are set before the resize so neither clamps it.
@@ -209,8 +214,16 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
             height: collapsed ? collapsedHeight : CGFloat(Defaults.Overlay.Box.heightRange.lowerBound))
         panel.maxSize = NSSize(width: panel.maxSize.width,
                                height: collapsed ? collapsedHeight : .greatestFiniteMagnitude)
-        panel.setContentSize(NSSize(width: width,
-                                    height: collapsed ? collapsedHeight : expandedContentHeight))
+
+        // Anchor the top edge explicitly rather than leaning on `setContentSize`, which pins the
+        // top-left only while the window is on screen and the bottom-left once it is ordered out.
+        // Stop orders the box out, so a box collapsed before Stop would expand upward on the next
+        // Start and come back a screenful from where the user left it.
+        let frame = panel.frame          // borderless: the frame is the content rect
+        let height = collapsed ? collapsedHeight : expandedContentHeight
+        panel.setFrame(NSRect(x: frame.minX, y: frame.maxY - height,
+                              width: frame.width, height: height),
+                       display: true)
     }
 
     // MARK: - OverlayRendering
@@ -416,13 +429,18 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     func clickCollapseButton() { header.collapseButton.performClick(nil) }
     func clickClearButton() { header.clearButton.performClick(nil) }
 
-    /// Which view a press at this point lands on, walking the real subview stack. Lets tests assert
-    /// that claiming the edges for resizing did not cost the box its drag-to-move everywhere else.
-    func viewForPress(at point: NSPoint) -> NSView? { box.hitTest(point) }
+    /// The panel's frame on screen — lets tests assert that collapsing rolls the box down from a
+    /// fixed top edge rather than moving it.
+    var currentFrame: NSRect { panel.frame }
 
-    /// Whether a drag starting at this point would move the window.
-    func pressMovesWindow(at point: NSPoint) -> Bool {
-        box.hitTest(point)?.mouseDownCanMoveWindow ?? false
+    /// Whether the header's controls carry a tooltip. They must not: AppKit draws one in a window of
+    /// its own, outside this panel's capture exclusion.
+    var headerButtonTooltips: [String?] { [header.collapseButton.toolTip, header.clearButton.toolTip] }
+
+    /// What VoiceOver reads for the header's controls, so dropping the tooltips cannot quietly cost
+    /// the buttons their labels too.
+    var headerButtonLabels: [String?] {
+        [header.collapseButton.accessibilityLabel(), header.clearButton.accessibilityLabel()]
     }
 
     /// Drives the same AppKit entry point that ends a user resize drag — lets tests assert that a

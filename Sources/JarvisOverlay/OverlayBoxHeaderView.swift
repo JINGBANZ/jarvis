@@ -101,6 +101,10 @@ final class OverlayBoxHeaderButton: NSButton {
     private static let hoverFill = NSColor(white: 1, alpha: 0.14).cgColor
 
     private var symbolName: String
+    /// What the control does, for VoiceOver and for the symbol's accessibility description. It is
+    /// deliberately never a `toolTip`: AppKit draws a tooltip in a window of its own, which does not
+    /// inherit the box's capture exclusion and would put Jarvis on the interviewer's screen share.
+    private var label: String = ""
     private var iconPointSize: CGFloat = 16
     private var hoverTracking: NSTrackingArea?
 
@@ -120,7 +124,7 @@ final class OverlayBoxHeaderButton: NSButton {
 
     func setSymbol(_ name: String, label: String) {
         symbolName = name
-        toolTip = label
+        self.label = label
         setAccessibilityLabel(label)
         refreshImage()
     }
@@ -132,7 +136,7 @@ final class OverlayBoxHeaderButton: NSButton {
     }
 
     private func refreshImage() {
-        image = NSImage(systemSymbolName: symbolName, accessibilityDescription: toolTip)?
+        image = NSImage(systemSymbolName: symbolName, accessibilityDescription: label)?
             .withSymbolConfiguration(
                 NSImage.SymbolConfiguration(pointSize: iconPointSize, weight: .medium))
     }
