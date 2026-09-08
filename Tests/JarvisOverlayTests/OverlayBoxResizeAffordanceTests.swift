@@ -25,6 +25,20 @@ import AppKit
         return view
     }
 
+    /// A drag is computed from the window's frame, so the view cannot start one until it is in a
+    /// window — a bare view returns from `beginResize` without arming anything. Anything covering the
+    /// drag has to be hosted, the way the box hosts it. No delegate is set: assigning one blocks
+    /// AppKit on a runner with no GUI session and hangs the whole main-actor suite.
+    @MainActor
+    private func withHostedView(_ body: (OverlayBoxResizeAffordanceView) -> Void) {
+        let host = NSPanel(contentRect: bounds, styleMask: [.nonactivatingPanel, .borderless],
+                           backing: .buffered, defer: false)
+        let view = OverlayBoxResizeAffordanceView(frame: bounds)
+        host.contentView?.addSubview(view)
+        body(view)
+        withExtendedLifetime(host) {}
+    }
+
     // MARK: - Zones
 
     @MainActor @Test
@@ -172,14 +186,20 @@ import AppKit
     /// pointer outran the frame while an inward one stayed lit.
     @MainActor @Test
     func aDragKeepsItsRunLitEvenWhenThePointerOutrunsTheBox() {
-        let view = view()
-        let edge = NSPoint(x: 518, y: 220)
-        view.pointerMoved(to: edge)
-        view.beginResize(at: edge)
+        withHostedView { view in
+            let edge = NSPoint(x: 518, y: 220)
+            view.pointerMoved(to: edge)
+            view.beginResize(at: edge)
+            #expect(view.drawsRun(for: .right), "the drag must actually arm before this proves anything")
 
-        view.pointerMoved(to: nil)               // what AppKit sends as the pointer overtakes the frame
+            view.pointerMoved(to: nil)           // what AppKit sends as the pointer overtakes the frame
 
-        #expect(view.drawsRun(for: .right), "the run must stay lit for the whole drag")
+            #expect(view.drawsRun(for: .right), "the run must stay lit for the whole drag")
+
+            view.endResize()
+            #expect(!view.drawsRun(for: .right),
+                    "and must clear once the drag ends with the pointer off the box")
+        }
     }
 
     @MainActor @Test
