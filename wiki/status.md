@@ -278,7 +278,8 @@ Proactive clarification and a separate **Explain more** shortcut share the exist
 [`JarvisPrompts.Coach`](../Sources/JarvisCore/Prompts/JarvisPrompts+Coach.swift) supplies the policy across
 formats; `speak.explanation` carries fuller plain-text detail into the persistent overlay box and
 Activity while captions stay short. Semibold hints and labeled, regular-weight explanation paragraphs
-remain visually distinct at the configured text size. Both shortcuts are independently configurable in Settings;
+remain visually distinct at the configured text size. Both shortcuts are independently configurable in Settings; **Enable explanations** controls
+automatic detail and its shortcut while retaining the saved binding;
 see [architecture.md → On-demand hint](./architecture.md#on-demand-hint-j).
 
 System Design sessions support [private high-level architecture hints](./architecture.md#private-architecture-hints):

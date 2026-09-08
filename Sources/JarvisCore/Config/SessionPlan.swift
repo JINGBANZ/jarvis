@@ -34,10 +34,13 @@ public struct SessionPlan: Sendable, Equatable {
     /// log without comparing every field; nothing branches on its value.
     public let revision: UInt
     public let screen: ScreenCaptureSelection
+    public let explanationsEnabled: Bool
 
-    public init(revision: UInt, screen: ScreenCaptureSelection) {
+    public init(revision: UInt, screen: ScreenCaptureSelection,
+                explanationsEnabled: Bool = Defaults.Explanations.enabled) {
         self.revision = revision
         self.screen = screen
+        self.explanationsEnabled = explanationsEnabled
     }
 
     /// The plan a session with no configured control plane runs against: active-window capture on

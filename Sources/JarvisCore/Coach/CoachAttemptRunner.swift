@@ -161,6 +161,11 @@ final class CoachAttemptRunner: @unchecked Sendable {
             return AttemptExecution(id: nil, result: .cancelled)
         }
 
+        guard pendingWork.reason != .manualExplanation || attempt.plan.explanationsEnabled else {
+            // A revoked shortcut is skipped work, not session cancellation: drain any queued hint.
+            return AttemptExecution(id: nil, result: .skipped(.cancelled))
+        }
+
         var work = pendingWork
         let reason = work.reason
         if case .silence(let seconds) = reason {
@@ -219,6 +224,11 @@ final class CoachAttemptRunner: @unchecked Sendable {
             prepMaterial: attempt.prepMaterial != nil,
             formatAddendum: interviewFormatAddendum)
         let historyBase: [ChatMessage] = [.system(systemPrompt)] + history.snapshot()
+        // This setting is request context, never transcript/history. Keeping it out of the system
+        // prompt lets a live toggle reuse the same CLI process and fixed instructions.
+        let explanationSetting: [ChatMessage] = attempt.plan.explanationsEnabled ? [] : [
+            .user(JarvisPrompts.Coach.explanationsDisabled)
+        ]
 
         if reason.isManual && work.preparedManualReason != reason {
             if let prompt = context.promptLine {
@@ -306,7 +316,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         sequence: requestSequence)
                     response = try await CoachingRequestAttribution.$current.withValue(requestContext) {
                         try await conversation.respond(
-                            messages: historyBase + turnMessages,
+                            messages: historyBase + explanationSetting + turnMessages,
                             tools: tools,
                             toolChoice: toolChoice)
                     }
@@ -407,7 +417,8 @@ final class CoachAttemptRunner: @unchecked Sendable {
                             newPhase: .captureScreenContinuation)
                     }
 
-                case .speak(let callID, let lines, let mermaid, let explanation):
+                case .speak(let callID, let lines, let mermaid, let requestedExplanation):
+                    let explanation = attempt.plan.explanationsEnabled ? requestedExplanation : nil
                     if Task.isCancelled {
                         jlog("… attempt cancelled (stopped) before speaking")
                         return .cancelled

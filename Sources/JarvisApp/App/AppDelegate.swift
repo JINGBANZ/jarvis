@@ -35,6 +35,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     private var permissionGate: PermissionGate!
     /// Whether the app's own surfaces exist yet. Nothing is built while the permission gate is up.
     private var didStartApp = false
+    private let explanationPreferences = ExplanationPreferences()
     private let hotkeyPreferences = CoachingShortcut.allCases.map { HotkeyPreferences(shortcut: $0) }
     /// Monotonic revision stamped on each control-plane snapshot. Bumped at Start and whenever an
     /// explicit Settings edit installs a fresh plan; never by runtime health.
@@ -183,7 +184,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         // The global hint hotkey is constructed before Settings so HotkeySection's closures (built
         // below) can already read/apply through it. `onRequest` is wired later, alongside the
         // rest of session lifecycle plumbing.
-        hotkeys = HotkeyController(preferences: hotkeyPreferences)
+        hotkeys = HotkeyController(preferences: hotkeyPreferences.filter {
+            $0.shortcut != .explainMore || explanationPreferences.isEnabled
+        })
 
         // Unified Settings window: Brain owns behavior; Connections owns shared authentication.
         // A pasted key is stored but does not auto-start. While running, it updates future Realtime
@@ -214,6 +217,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             PrepMaterialSection(preferences: prepMaterialPreferences),
             HotkeySection(
                 preferences: hotkeyPreferences,
+                explanationPreferences: explanationPreferences,
+                onExplanationsChanged: { [weak self] in
+                    guard let self else { return }
+                    if self.explanationPreferences.isEnabled,
+                       let preference = self.hotkeyPreferences.first(where: { $0.shortcut == .explainMore }) {
+                        self.hotkeys?.apply(preference.combination, for: .explainMore)
+                    } else {
+                        self.hotkeys?.unregister(.explainMore)
+                    }
+                    self.reapplySessionPlan()
+                },
                 hasActiveHotkey: { [weak self] shortcut in self?.hotkeys?.registered[shortcut] != nil },
                 applyCombination: { [weak self] shortcut, combination in
                     // `hotkeys` is constructed above, before Settings can ever be shown, so `self`
@@ -239,6 +253,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         // While a session is running, screenshot + ask the brain for a hint in one trip; otherwise
         // beep — there's no live driver/conversation to hint from when stopped.
         hotkeys?.onRequest = { [weak self] shortcut in
+            if shortcut == .explainMore, self?.explanationPreferences.isEnabled != true { return }
             guard let self, let fire = self.requestManualHint else {
                 NSSound.beep() // ghost-mode-allowed: explicit user hotkey while stopped
                 return
@@ -1111,7 +1126,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     /// (wiki/lean-coaching-core.md, Phase 4).
     private func freshSessionPlan() -> SessionPlan {
         planRevision &+= 1
-        return SessionPlan(revision: planRevision, screen: screenPreferences.selection)
+        return SessionPlan(revision: planRevision, screen: screenPreferences.selection,
+                           explanationsEnabled: explanationPreferences.isEnabled)
     }
 
     /// An explicit Settings edit takes effect at the next attempt. A turn already running keeps the

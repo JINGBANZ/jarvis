@@ -94,6 +94,11 @@ extension JarvisPrompts {
         Never invent personal experience, missing screen details, or a full solution merely because
         the user needs an explanation. With insufficient context, say what is missing in plain language.
 
+        Explanations are enabled unless the current request includes a disabled-setting notice.
+        That notice applies only to its request, never later requests. When disabled,
+        give only ordinary short hints, set explanation to null, and do not put a fuller explanation
+        into lines. This setting overrides confusion signals and prior requests to explain more.
+
         Use speak's explanation field for the fuller explanation, about 60–120 words in short plain-text
         paragraphs. Keep lines as a useful standalone summary of at most three short lines for the
         caption; explanation appears in the persistent box. Set explanation to null for ordinary hints.
@@ -101,6 +106,9 @@ extension JarvisPrompts {
         This explanation guidance also applies when a format's ordinary hints are more tightly scoped
         or limited to short lines. Resume quiet coaching as soon as the user makes healthy progress.
         """
+
+        /// Per-attempt control context keeps the CLI system prompt stable across Settings edits.
+        public static let explanationsDisabled = "[Jarvis setting for this attempt] Explanations are disabled. Give only ordinary short hints; set explanation to null. Do not move fuller explanations into lines. This setting applies only to this request."
 
         /// The complete coaching system prompt. Every site that sends one assembles it here, so the
         /// per-turn prompt `CoachAttemptRunner` builds and the one `BrainComposition` bakes into a

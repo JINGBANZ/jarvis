@@ -13,6 +13,18 @@ import JarvisCore
 final class HotkeyBindingView: NSObject {
 
     private let preferences: HotkeyPreferences
+    private let explanationPreferences: ExplanationPreferences?
+    private let onExplanationsChanged: () -> Void
+    private var explanationSwitch: NSSwitch?
+    private var shortcutRow: SettingsRowView?
+    private var cardHeightConstraint: NSLayoutConstraint?
+
+    private var isEnabled: Bool { explanationPreferences?.isEnabled ?? true }
+    private var cardHeight: CGFloat {
+        SettingsStyle.cardHeaderHeight
+            + (explanationPreferences == nil ? 0 : SettingsStyle.rowHeight)
+            + (isEnabled ? SettingsStyle.rowHeight : 0)
+    }
     /// Whether the controller currently has *any* combination registered. This is the only thing
     /// that must persist across Settings visits: a rejected rebind always leaves the previous,
     /// still-working combination live (see `HotkeyController.apply`), so the sole way this is false
@@ -32,16 +44,20 @@ final class HotkeyBindingView: NSObject {
     private static let calloutHeight: CGFloat = 60
     var onHeightChanged: (() -> Void)?
     var preferredHeight: CGFloat {
-        SettingsStyle.cardHeaderHeight + SettingsStyle.rowHeight + SettingsStyle.sectionSpacing
+        cardHeight + SettingsStyle.sectionSpacing
             + (calloutHeightConstraint?.constant ?? 0)
     }
 
     init(
         preferences: HotkeyPreferences,
+        explanationPreferences: ExplanationPreferences? = nil,
+        onExplanationsChanged: @escaping () -> Void = {},
         hasActiveHotkey: @escaping () -> Bool,
         applyCombination: @escaping (HotkeyCombination) -> HotkeyRegistrationOutcome
     ) {
         self.preferences = preferences
+        self.explanationPreferences = explanationPreferences
+        self.onExplanationsChanged = onExplanationsChanged
         self.hasActiveHotkey = hasActiveHotkey
         self.applyCombination = applyCombination
     }
@@ -56,7 +72,6 @@ final class HotkeyBindingView: NSObject {
         }
         self.recorder = recorder
 
-        let cardHeight = SettingsStyle.cardHeaderHeight + SettingsStyle.rowHeight
         let card = SettingsCardView(frame: NSRect(x: 0, y: 0, width: 712, height: cardHeight))
         card.translatesAutoresizingMaskIntoConstraints = false
         card.setHeader(title: preferences.shortcut.title, detail: "Works only while a session is running")
@@ -67,10 +82,33 @@ final class HotkeyBindingView: NSObject {
             controlSize: NSSize(width: 170, height: 32),
             preferredHeight: SettingsStyle.rowHeight,
             showsSeparator: false)
+        shortcutRow = row
         card.contentView?.addSubview(row)
-        card.onLayout = { [weak card, weak row] in
+        var toggleRow: SettingsRowView?
+        if explanationPreferences != nil {
+            let toggle = NSSwitch()
+            toggle.target = self
+            toggle.action = #selector(explanationsChanged)
+            toggle.setAccessibilityLabel("Enable explanations")
+            explanationSwitch = toggle
+            let settingsRow = SettingsRowView(
+                title: "Enable explanations",
+                detail: "Automatic help and hotkey · applies to the next answer",
+                controlView: toggle,
+                controlSize: NSSize(width: 44, height: 26))
+            card.contentView?.addSubview(settingsRow)
+            toggleRow = settingsRow
+        }
+        card.onLayout = { [weak card, weak row, weak toggleRow] in
             guard let card, let row else { return }
-            row.frame = card.bodyFrame
+            let bounds = card.bodyFrame
+            if let toggleRow {
+                toggleRow.frame = NSRect(x: 0, y: max(0, bounds.height - SettingsStyle.rowHeight),
+                    width: bounds.width, height: SettingsStyle.rowHeight)
+                row.frame = NSRect(x: 0, y: 0, width: bounds.width, height: SettingsStyle.rowHeight)
+            } else {
+                row.frame = bounds
+            }
         }
 
         let callout = makeCallout()
@@ -83,11 +121,13 @@ final class HotkeyBindingView: NSObject {
             card.topAnchor.constraint(equalTo: body.topAnchor),
             card.leadingAnchor.constraint(equalTo: body.leadingAnchor),
             card.trailingAnchor.constraint(equalTo: body.trailingAnchor),
-            card.heightAnchor.constraint(equalToConstant: cardHeight),
             callout.topAnchor.constraint(equalTo: card.bottomAnchor, constant: SettingsStyle.sectionSpacing),
             callout.leadingAnchor.constraint(equalTo: body.leadingAnchor),
             callout.trailingAnchor.constraint(equalTo: body.trailingAnchor),
         ])
+        let height = card.heightAnchor.constraint(equalToConstant: cardHeight)
+        height.isActive = true
+        cardHeightConstraint = height
         let calloutHeight = callout.heightAnchor.constraint(equalToConstant: 0)
         calloutHeight.isActive = true
         calloutHeightConstraint = calloutHeight
@@ -104,7 +144,16 @@ final class HotkeyBindingView: NSObject {
         renderOutcome()
     }
 
+    @objc private func explanationsChanged() {
+        guard let explanationPreferences, let explanationSwitch else { return }
+        explanationPreferences.isEnabled = explanationSwitch.state == .on
+        onExplanationsChanged()
+        recorder?.setCombination(preferences.combination)
+        renderOutcome()
+    }
+
     private func recorded(_ combination: HotkeyCombination) {
+        guard isEnabled else { return }
         let outcome = applyCombination(combination)
         switch outcome {
         case .registered:
@@ -125,13 +174,17 @@ final class HotkeyBindingView: NSObject {
     /// the callout shows only for the one state that *is* persistent — nothing registered at all.
     private func renderOutcome(_ outcome: HotkeyRegistrationOutcome? = nil) {
         defer { onHeightChanged?() }
+        explanationSwitch?.state = isEnabled ? .on : .off
+        shortcutRow?.isHidden = !isEnabled
+        recorder?.isEnabled = isEnabled
+        cardHeightConstraint?.constant = cardHeight
         let showsFailure: Bool
         switch outcome {
         case .registered: showsFailure = false
         case .failed: showsFailure = true
         case nil: showsFailure = !hasActiveHotkey()
         }
-        guard showsFailure else {
+        guard isEnabled && showsFailure else {
             calloutHeightConstraint?.constant = 0
             callout?.isHidden = true
             return

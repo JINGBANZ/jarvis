@@ -68,6 +68,18 @@ final class HotkeyController {
         return outcome
     }
 
+    /// Release a disabled shortcut so other apps can use its combination.
+    func unregister(_ shortcut: CoachingShortcut) {
+        guard let ref = hotKeyRefs[shortcut] else { return }
+        let status = UnregisterEventHotKey(ref)
+        guard status == noErr else {
+            jlog("Jarvis: failed to release disabled shortcut (status \(status)).")
+            return
+        }
+        hotKeyRefs.removeValue(forKey: shortcut)
+        registered.removeValue(forKey: shortcut)
+    }
+
     /// Install one application-level handler for hot-key-pressed events. The C callback can't capture
     /// context, so we hand it `self` via `userData` and recover it inside.
     private func installHandler() {
@@ -87,7 +99,10 @@ final class HotkeyController {
             let controller = Unmanaged<HotkeyController>.fromOpaque(userData).takeUnretainedValue()
             // Carbon delivers application-target hot-key events on the main thread, so it is safe to
             // assert main-actor isolation here and call back synchronously.
-            MainActor.assumeIsolated { controller.onRequest?(shortcut) }
+            MainActor.assumeIsolated {
+                guard controller.registered[shortcut] != nil else { return }
+                controller.onRequest?(shortcut)
+            }
             return noErr
         }, 1, &spec, selfPtr, &handlerRef)
         // A failed install leaves the hot key dead; without this line that failure is invisible.

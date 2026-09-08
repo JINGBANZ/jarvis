@@ -9,10 +9,14 @@ final class HotkeySection: NSObject, SettingsSection {
     private let bindings: [HotkeyBindingView]
 
     init(preferences: [HotkeyPreferences],
+         explanationPreferences: ExplanationPreferences,
+         onExplanationsChanged: @escaping () -> Void,
          hasActiveHotkey: @escaping (CoachingShortcut) -> Bool,
          applyCombination: @escaping (CoachingShortcut, HotkeyCombination) -> HotkeyRegistrationOutcome) {
         bindings = preferences.map { preference in
             HotkeyBindingView(preferences: preference,
+                explanationPreferences: preference.shortcut == .explainMore ? explanationPreferences : nil,
+                onExplanationsChanged: onExplanationsChanged,
                 hasActiveHotkey: { hasActiveHotkey(preference.shortcut) },
                 applyCombination: { applyCombination(preference.shortcut, $0) })
         }

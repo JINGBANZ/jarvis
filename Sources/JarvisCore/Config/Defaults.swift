@@ -102,6 +102,12 @@ public enum Defaults {
 
     // MARK: - Hotkey
 
+    /// Availability of fuller explanations and their manual fallback.
+    public enum Explanations {
+        public static let enabledKey = "coaching.explanationsEnabled"
+        public static let enabled = true
+    }
+
     /// Independent shortcuts for an immediate hint or explanation mid-session.
     public enum Hotkey {
         public static let explanationKeyCodeKey = "hotkey.explanation.keyCode"

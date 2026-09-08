@@ -101,6 +101,103 @@ import Testing
         #expect(screen.captureCount == 1)
     }
 
+    @Test func disablingExplanationsPreservesBindingAndPersistsAcrossLaunches() {
+        let suite = "ExplanationToggle.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let preferences = ExplanationPreferences(defaults: defaults)
+        let shortcut = HotkeyPreferences(defaults: defaults, shortcut: .explainMore)
+        let chosen = HotkeyCombination(keyCode: 5, modifiers: [.command, .shift])
+        shortcut.combination = chosen
+        preferences.isEnabled = false
+        #expect(!ExplanationPreferences(defaults: defaults).isEnabled)
+        #expect(shortcut.combination == chosen)
+        preferences.isEnabled = true
+        #expect(ExplanationPreferences(defaults: defaults).isEnabled)
+        #expect(shortcut.combination == chosen)
+    }
+
+    @Test(arguments: [TriggerReason.manualHint, .turnEnd])
+    func disabledExplanationsKeepHintsAndCanBeReenabledDuringSession(_ hintReason: TriggerReason) async {
+        let brain = ScriptedBrain(script: [.init(toolCalls: [
+            .speak(callId: "s", lines: ["Track the range."], explanation: "Move its left edge.")])])
+        let screen = FakeScreen()
+        let box = ExplanationSink()
+        let transcript = RollingTranscript()
+        transcript.append(.init(speaker: .me, text: "I do not understand the sliding window", at: 0))
+        let driver = makeDriver(brain: brain, transcript: transcript, screen: screen, overlay: box)
+        driver.updatePlan(SessionPlan(revision: 1, screen: SessionPlan.default.screen, explanationsEnabled: false))
+        #expect(await driver.handleTrigger(.manualExplanation) == .cancelled)
+        #expect(brain.calls.isEmpty)
+        #expect(screen.captureCount == 0)
+        #expect(await driver.handleTrigger(hintReason) == .spoke)
+        #expect(box.lines == ["Track the range."])
+        #expect(box.explanation == nil)
+        driver.updatePlan(SessionPlan(revision: 2, screen: SessionPlan.default.screen, explanationsEnabled: true))
+        #expect(await driver.handleTrigger(.manualExplanation) == .spoke)
+        #expect(box.explanation == "Move its left edge.")
+        #expect(brain.calls[0].first?.text == brain.calls[1].first?.text)
+    }
+
+    @Test func explanationSettingChangesAtNextAttemptBoundary() async {
+        let gate = AsyncGate()
+        let brain = GatedBrain(gate: gate, response: .init(toolCalls: [
+            .speak(callId: "s", lines: ["Track the range."], explanation: "Move its left edge.")]))
+        let box = ExplanationSink()
+        let driver = makeDriver(brain: brain, transcript: RollingTranscript(), screen: FakeScreen(), overlay: box)
+        let task = Task { await driver.handleTrigger(.manualExplanation) }
+        await gate.waitUntilEntered()
+        driver.updatePlan(SessionPlan(revision: 1, screen: SessionPlan.default.screen, explanationsEnabled: false))
+        await gate.release()
+        #expect(await task.value == .spoke)
+        #expect(box.explanation == "Move its left edge.")
+        #expect(await driver.handleTrigger(.manualHint) == .spoke)
+        #expect(box.explanation == nil)
+    }
+
+    @Test func disabledNoticePreservesConversationPrefixAcrossToolContinuation() async {
+        let brain = ScriptedBrain(script: [
+            .init(toolCalls: [.captureScreen(callId: "capture")],
+                  rawToolCalls: [.init(id: "capture", name: "capture_screen", argumentsJSON: "{}")]),
+            .init(toolCalls: [.speak(callId: "s", lines: ["Check the loop bound."], explanation: "Fuller detail.")])
+        ])
+        let transcript = RollingTranscript()
+        transcript.append(.init(speaker: .me, text: "Can you check the loop on my screen?", at: 0))
+        let box = ExplanationSink()
+        let driver = makeDriver(brain: brain, transcript: transcript, screen: FakeScreen(), overlay: box)
+        driver.updatePlan(SessionPlan(revision: 1, screen: SessionPlan.default.screen, explanationsEnabled: false))
+        #expect(await driver.handleTrigger(.turnEnd) == .spoke)
+        #expect(brain.calls.count == 2)
+        guard brain.calls.count == 2 else { return }
+        // Local CLI clients require every continuation to retain the exact prior message prefix.
+        let first = brain.calls[0].map { $0.role.rawValue + ":" + ($0.text ?? "") }
+        let continuedPrefix = brain.calls[1].prefix(first.count).map { $0.role.rawValue + ":" + ($0.text ?? "") }
+        #expect(continuedPrefix == first)
+        #expect(box.lines == ["Check the loop bound."])
+        #expect(box.explanation == nil)
+    }
+
+    @Test @MainActor func disablingQueuedExplanationDoesNotStrandNextHint() async {
+        let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s", lines: ["Continue."])])])
+        let driver = makeDriver(brain: brain, transcript: RollingTranscript(), screen: FakeScreen(), overlay: FakeOverlay())
+        driver.updatePlan(SessionPlan(revision: 1, screen: SessionPlan.default.screen, explanationsEnabled: false))
+        let target = BrainTarget(provider: .openAI, modelID: BrainModelCatalog.defaultModel(for: .openAI).id)
+        var selections = 0
+        driver.updateBrainRoute(ConfiguredBrainRoute(targets: [.init(target: target, brain: brain)], onSelected: { _ in
+            selections += 1
+            guard selections == 1 else { return }
+            // Park selection until a valid hint is queued, before the disabled request is rejected.
+            let queued = DispatchSemaphore(value: 0)
+            Task.detached {
+                #expect(await driver.handleTrigger(.manualHint) == .busy)
+                queued.signal()
+            }
+            #expect(queued.wait(timeout: .now() + 5) == .success)
+        }))
+        #expect(await driver.handleTrigger(.manualExplanation) == .spoke)
+        #expect(brain.calls.count == 1)
+    }
+
     private func makeDriver(brain: BrainClient, transcript: RollingTranscript,
                             screen: ScreenCapturing, overlay: OverlayRendering) -> CoachDriver {
         let target = BrainTarget(provider: .openAI, modelID: BrainModelCatalog.defaultModel(for: .openAI).id)
@@ -113,8 +210,10 @@ import Testing
 // Read only after the awaited driver finishes delivery, with no concurrent mutations.
 private final class ExplanationSink: OverlayRendering {
     var explanation: String?
+    var lines: [String] = []
     func render(_ lines: [String], perLineSeconds: [TimeInterval]) {}
     func render(_ lines: [String], perLineSeconds: [TimeInterval], diagram: DiagramHint?, explanation: String?) {
+        self.lines = lines
         self.explanation = explanation
     }
 }

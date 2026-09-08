@@ -196,6 +196,14 @@ with a simple rationale, a concrete example when useful, and one starting action
 the beginning of that entry and preserves its paragraphs. Hints use semibold text; fuller detail uses
 regular text at the same configured size under an **Explanation** label, separated by whitespace.
 Captions retain only the standalone summary.
+[Enable explanations](./settings-window.md#shortcuts) controls both automatic detail and the manual
+fallback. Each attempt uses its frozen `SessionPlan.explanationsEnabled`: disabled manual explanation
+work is skipped while queued hints are drained; other requests carry an ephemeral disabled notice,
+and any returned explanation field is omitted from overlay and Activity. The notice stays outside
+committed conversation history and the fixed CLI system prompt, allowing a live toggle without
+restarting the provider. Enabled requests use the normal explanation policy. Already-rendered
+history remains visible when the setting changes.
+
 Explanation text follows the existing coaching history and Activity paths. It opens no extra window,
 never activates Jarvis, and respects the box's enabled/session visibility. Disabling the box leaves
 only the brief caption if that surface is enabled; it does not force a hidden surface on.
