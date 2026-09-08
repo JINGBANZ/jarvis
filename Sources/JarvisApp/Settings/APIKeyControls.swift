@@ -1,11 +1,12 @@
 import AppKit
 import JarvisCore
 
-/// Jarvis-managed OpenAI credential editor used by Connections Settings.
+/// Jarvis-managed credential editor used by Connections Settings. One instance per `Credential`.
 @MainActor
 final class APIKeyControls: NSObject {
+    private let credential: Credential
     private let store: FileSecretStore
-    private let onKeySaved: (String) -> Void
+    private let onKeySaved: (Credential, String) -> Void
 
     private var card: SettingsCardView?
     private var keyRow: SettingsRowView?
@@ -25,9 +26,10 @@ final class APIKeyControls: NSObject {
         Self.collapsedHeight + (editing ? Self.editorHeight : 0)
     }
 
-    var hasSavedKey: Bool { store.apiKey() != nil }
+    var hasSavedKey: Bool { store.apiKey(for: credential) != nil }
 
-    init(store: FileSecretStore, onKeySaved: @escaping (String) -> Void) {
+    init(credential: Credential, store: FileSecretStore, onKeySaved: @escaping (Credential, String) -> Void) {
+        self.credential = credential
         self.store = store
         self.onKeySaved = onKeySaved
     }
@@ -38,7 +40,7 @@ final class APIKeyControls: NSObject {
 
         let card = SettingsCardView(
             frame: NSRect(x: 0, y: 0, width: 712, height: preferredHeight))
-        card.setHeader(title: "OpenAI API", detail: "Jarvis-managed credential")
+        card.setHeader(title: credential.displayName, detail: "Jarvis-managed credential")
         card.onLayout = { [weak self] in self?.layout() }
         self.card = card
         guard let content = card.contentView else { return card }
@@ -47,7 +49,7 @@ final class APIKeyControls: NSObject {
         statusBadge.font = .boldSystemFont(ofSize: NSFont.smallSystemFontSize)
         statusBadge.textColor = .systemGreen
         statusBadge.alignment = .right
-        statusBadge.setAccessibilityLabel("OpenAI API key saved")
+        statusBadge.setAccessibilityLabel("\(credential.displayName) key saved")
         self.statusBadge = statusBadge
 
         let action = NSButton(
@@ -55,7 +57,7 @@ final class APIKeyControls: NSObject {
             target: self,
             action: #selector(editTapped))
         action.bezelStyle = .rounded
-        action.identifier = NSUserInterfaceItemIdentifier("openai-key-action")
+        action.identifier = NSUserInterfaceItemIdentifier("\(credential.rawValue)-action")
         self.actionButton = action
 
         let trailingControls = NSStackView(views: [statusBadge, action])
@@ -82,9 +84,9 @@ final class APIKeyControls: NSObject {
         keyRow = row
 
         let field = NSSecureTextField()
-        field.placeholderString = "sk-…"
-        field.setAccessibilityLabel("OpenAI API key")
-        field.identifier = NSUserInterfaceItemIdentifier("openai-key-field")
+        field.placeholderString = credential.placeholderHint
+        field.setAccessibilityLabel("\(credential.displayName) API key")
+        field.identifier = NSUserInterfaceItemIdentifier("\(credential.rawValue)-key-field")
         content.addSubview(field)
         self.field = field
 
@@ -102,7 +104,7 @@ final class APIKeyControls: NSObject {
 
         let error = NSTextField(labelWithString: "")
         error.textColor = .systemRed
-        error.identifier = NSUserInterfaceItemIdentifier("openai-key-error")
+        error.identifier = NSUserInterfaceItemIdentifier("\(credential.rawValue)-key-error")
         content.addSubview(error)
         errorLabel = error
 
@@ -182,11 +184,11 @@ final class APIKeyControls: NSObject {
             errorLabel?.stringValue = "Enter a key first."
             return
         }
-        guard store.setApiKey(token) else {
+        guard store.setApiKey(token, for: credential) else {
             errorLabel?.stringValue = "Couldn’t save the key."
             return
         }
-        onKeySaved(token)
+        onKeySaved(credential, token)
         editing = false
         field?.stringValue = ""
         errorLabel?.stringValue = ""

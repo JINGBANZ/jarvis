@@ -327,8 +327,8 @@ import Foundation
         #expect(messages[1].contains("billing"))
         #expect(messages[2].contains("rejected the API key"))
         #expect(messages[2].contains("Settings → Connections"))
-        #expect(messages[3].contains("denied transcription access"))
-        #expect(messages[4].contains("rejected the transcription configuration"))
+        #expect(messages[3].contains("denied access"))
+        #expect(messages[4].contains("rejected the configuration"))
         #expect(messages[5].contains("Apple Speech transcription became unavailable"))
         #expect(messages[6].contains("audio capture became unavailable"))
         #expect(messages[7].contains("microphone coaching continues"))
@@ -343,7 +343,7 @@ import Foundation
             imageFile: nil
         ))
         #expect(ActivityLog.isHumanFacing(
-            message: "⏹ session ended by error — the OpenAI API quota is exhausted; check billing",
+            message: "⏹ session ended by error — the transcription API quota is exhausted; check billing",
             imageFile: nil
         ))
         #expect(ActivityLog.isHumanFacing(

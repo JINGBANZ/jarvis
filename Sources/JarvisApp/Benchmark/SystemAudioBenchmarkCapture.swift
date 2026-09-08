@@ -122,7 +122,7 @@ final class SystemAudioBenchmarkCapture: @unchecked Sendable {
         }
         guard let downToWire = Resampler(
             fromHz: sampleRate,
-            toHz: Double(TranscriptionAudioFormat.pcm16Mono.sampleRate)),
+            toHz: Double(TranscriptionAudioFormat.pcm16Mono24k.sampleRate)),
               let turnDetector = LocalTurnDetector(
                 inputSampleRate: sampleRate, trailingSilenceDuration: 1.0) else {
             throw Failure.conversionUnavailable
@@ -180,7 +180,7 @@ final class SystemAudioBenchmarkCapture: @unchecked Sendable {
         let sequence = sequence
         let sampleCount = wireSamples.count
         let commitAt = capturedAt + TimeInterval(sampleCount)
-            / TimeInterval(TranscriptionAudioFormat.pcm16Mono.sampleRate)
+            / TimeInterval(TranscriptionAudioFormat.pcm16Mono24k.sampleRate)
         let data = wireSamples.withUnsafeBufferPointer { Data(buffer: $0) }
         let onChunk = self.onChunk
         // Turn detection and delivery both hop off the realtime callback. The queue is serial, so

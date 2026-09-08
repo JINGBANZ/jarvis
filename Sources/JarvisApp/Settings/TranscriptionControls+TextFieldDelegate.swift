@@ -4,7 +4,11 @@ import AppKit
 /// term mid-edit never reaches `TranscriptionPreferences`.
 extension TranscriptionControls: NSTextFieldDelegate {
     func controlTextDidEndEditing(_ obj: Notification) {
-        guard let field = obj.object as? NSTextField, field === vocabularyField else { return }
-        vocabularyChanged(field.stringValue)
+        guard let field = obj.object as? NSTextField else { return }
+        if field === vocabularyField {
+            vocabularyChanged(field.stringValue)
+        } else if field === geminiVocabularyField {
+            geminiVocabularyChanged(field.stringValue)
+        }
     }
 }

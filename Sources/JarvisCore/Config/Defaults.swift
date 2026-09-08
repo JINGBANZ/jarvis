@@ -57,7 +57,7 @@ public enum Defaults {
 
         public static let openAIExpectedLanguagesKey = "transcription.openai.expected-languages"
         /// Empty means automatic detection — Jarvis never silently assumes English.
-        public static let openAIExpectedLanguages: [OpenAITranscriptionLanguage] = []
+        public static let openAIExpectedLanguages: [TranscriptionLanguage] = []
 
         public static let openAIVocabularyKeywordsKey = "transcription.openai.vocabulary-keywords"
         /// Empty until the user adds terms; only GPT Transcribe and GPT Live send them.
@@ -68,6 +68,21 @@ public enum Defaults {
         /// equivalent so the user can correct it before Start. Computed, not stored, because the
         /// machine's locale is the starting point rather than a fixed value.
         public static var appleSpeechLocaleIdentifier: String { Locale.current.identifier }
+
+        public static let geminiModelKey = "transcription.gemini.model"
+        public static let geminiModel: GeminiTranscriptionModel = .geminiTranscribeLive
+
+        public static let geminiExpectedLanguagesKey = "transcription.gemini.expected-languages"
+        /// Empty means automatic detection across every language Gemini supports.
+        public static let geminiExpectedLanguages: [TranscriptionLanguage] = []
+
+        public static let geminiVocabularyKeywordsKey = "transcription.gemini.vocabulary-keywords"
+        /// Empty until the user adds terms; Gemini accepts up to 1,000.
+        public static let geminiVocabularyKeywords: [String] = []
+
+        public static let geminiModeKey = "transcription.gemini.mode"
+        /// Verbatim by default: coaching reasons about what was actually said.
+        public static let geminiMode: GeminiTranscriptionMode = .verbatim
     }
 
     // MARK: - Screen capture

@@ -6,8 +6,8 @@ import CJarvisAEC
 /// aggregate-device capture (`AggregateEchoCapture`) feeds the system-audio tap as the far-end
 /// reference and the mic as near-end — BOTH from one synchronized IOProc, the single-clock case AEC3
 /// needs. There is NO resampling here (input is already 48 kHz mono); the capture downsamples to
-/// 24 kHz afterward for the transcription endpoints. Called from a single IOProc thread, so the framers
-/// need no locking.
+/// the selected transcription provider's wire rate afterward (see `TranscriptionAudioFormat`).
+/// Called from a single IOProc thread, so the framers need no locking.
 final class WebRTCEchoCanceller {
     private let aec: OpaquePointer
     private let frameSamples: Int32                 // 10 ms at the AEC rate (480 at 48 kHz)

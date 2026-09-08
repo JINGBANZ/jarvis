@@ -11,7 +11,8 @@
 // (AggregateEchoCapture) delivers mic + reference already at 48 kHz from one
 // aggregate-device IOProc; the Swift wrapper (WebRTCEchoCanceller) only frames
 // them into 10 ms blocks (see PCM16Framer) and does NO resampling — the cleaned
-// mic + tap are downsampled to the 24 kHz wire afterward.
+// mic + tap are downsampled afterward to the selected transcription provider's
+// wire rate (24 kHz for OpenAI/Apple Speech, 16 kHz for Gemini).
 
 #ifdef __cplusplus
 extern "C" {
@@ -22,7 +23,8 @@ typedef struct JarvisAEC JarvisAEC;
 
 // Create an AEC3 echo canceller for mono audio at `sample_rate_hz`. The WebRTC
 // APM accepts only the native rates 8000/16000/32000/48000 Hz — NOT 24000 — so
-// callers on the 24 kHz wire format must resample to 48000 before/after.
+// callers on a transcription wire rate outside that set (e.g. OpenAI's 24 kHz)
+// must resample to 48000 before/after; Gemini's native 16 kHz needs no resample.
 // Returns NULL on failure.
 JarvisAEC *jarvis_aec_create(int sample_rate_hz);
 

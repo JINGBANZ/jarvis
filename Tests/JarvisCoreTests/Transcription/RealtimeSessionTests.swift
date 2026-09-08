@@ -28,7 +28,7 @@ import Testing
     @Test func completedTranscriptRejectsPunctuationAndWhitespaceOnly() {
         for speaker in [Speaker.me, .them] {
             for junk in [".", " . ", "…", ",", ". .", "?!", "  ", "\n", "-"] {
-                #expect(RealtimeSession.meaningfulTranscript(junk, speaker: speaker) == nil,
+                #expect(TranscriptFiltering.meaningfulTranscript(junk, speaker: speaker) == nil,
                         "\(speaker) should drop \(junk.debugDescription)")
             }
         }
@@ -38,10 +38,10 @@ import Testing
     /// ("Thank you.", "Thanks for watching"). On the ME side these are hallucinations and are dropped —
     /// every entry, plus a Capitalized + trailing-punctuation variant to exercise normalization.
     @Test func completedTranscriptRejectsEveryDenylistedPhraseOnMeSide() {
-        for phrase in RealtimeSession.hallucinationDenylist {
-            #expect(RealtimeSession.meaningfulTranscript(phrase, speaker: .me) == nil,
+        for phrase in TranscriptFiltering.hallucinationDenylist {
+            #expect(TranscriptFiltering.meaningfulTranscript(phrase, speaker: .me) == nil,
                     "me should drop \(phrase.debugDescription)")
-            #expect(RealtimeSession.meaningfulTranscript(phrase.capitalized + ".", speaker: .me) == nil,
+            #expect(TranscriptFiltering.meaningfulTranscript(phrase.capitalized + ".", speaker: .me) == nil,
                     "me should drop normalized \(phrase.debugDescription)")
         }
     }
@@ -50,25 +50,25 @@ import Testing
     /// "Thank you."/"Thanks" is a real conversational closer that must still fire a turn, so it is kept
     /// (trimmed). Punctuation/whitespace-only noise is still dropped for them.
     @Test func completedTranscriptKeepsDenylistedPhrasesOnThemSide() {
-        #expect(RealtimeSession.meaningfulTranscript("Thank you.", speaker: .them) == "Thank you.")
-        #expect(RealtimeSession.meaningfulTranscript("thanks", speaker: .them) == "thanks")
-        #expect(RealtimeSession.meaningfulTranscript(".", speaker: .them) == nil)
+        #expect(TranscriptFiltering.meaningfulTranscript("Thank you.", speaker: .them) == "Thank you.")
+        #expect(TranscriptFiltering.meaningfulTranscript("thanks", speaker: .them) == "thanks")
+        #expect(TranscriptFiltering.meaningfulTranscript(".", speaker: .them) == nil)
     }
 
     /// "bye" was removed from the denylist: a lone sign-off is well-formed real speech even on the me
     /// side, and the punctuation filter already covers the lone-"." artifact.
     @Test func byeIsNotFiltered() {
-        #expect(!RealtimeSession.hallucinationDenylist.contains("bye"))
-        #expect(RealtimeSession.meaningfulTranscript("Bye.", speaker: .me) == "Bye.")
+        #expect(!TranscriptFiltering.hallucinationDenylist.contains("bye"))
+        #expect(TranscriptFiltering.meaningfulTranscript("Bye.", speaker: .me) == "Bye.")
     }
 
     /// Real speech survives, and is returned trimmed of surrounding whitespace. A sentence that merely
     /// contains a denylisted phrase as a substring is NOT dropped.
     @Test func completedTranscriptKeepsAndTrimsRealSpeech() {
-        #expect(RealtimeSession.meaningfulTranscript("  two pointers  ", speaker: .me) == "two pointers")
-        #expect(RealtimeSession.meaningfulTranscript("thank you, let's use a hash map", speaker: .me)
+        #expect(TranscriptFiltering.meaningfulTranscript("  two pointers  ", speaker: .me) == "two pointers")
+        #expect(TranscriptFiltering.meaningfulTranscript("thank you, let's use a hash map", speaker: .me)
                 == "thank you, let's use a hash map")
-        #expect(RealtimeSession.meaningfulTranscript("3", speaker: .me) == "3")  // a lone digit is real
+        #expect(TranscriptFiltering.meaningfulTranscript("3", speaker: .me) == "3")  // a lone digit is real
     }
 
     /// The filtering must take effect through the PUBLIC entry point the app actually calls
@@ -194,7 +194,7 @@ import Testing
     @Test func expectedLanguagesUseEachModelsSupportedWireField() throws {
         func transcription(
             model: OpenAITranscriptionModel,
-            languages: [OpenAITranscriptionLanguage]
+            languages: [TranscriptionLanguage]
         ) throws -> [String: Any] {
             let payload = RealtimeSession.sessionUpdate(
                 model: model,

@@ -290,7 +290,7 @@ final class BrainComposition {
               let sessionDirectory = host.liveSessionDirectory
         else { return }
         let route = preferences.route
-        let key = apiKeyOverride ?? secrets.apiKey() ?? ""
+        let key = apiKeyOverride ?? secrets.apiKey(for: .openAIAPIKey) ?? ""
         guard !route.targets.contains(where: { $0.provider == .openAI }) || !key.isEmpty else {
             jlog("Jarvis: can't apply brain settings — an OpenAI target has no API key.")
             host.liveSessionEvidence?.record(.settingsChangeNotApplied)
@@ -357,6 +357,6 @@ final class BrainComposition {
     /// Where a CLI brain materializes screenshots before a session exists. Only reached when no
     /// session is live, which cannot happen on the coaching path.
     private func sessionDirectoryFallback() -> URL {
-        FileSecretStore().fileURL.deletingLastPathComponent().appendingPathComponent("sessions")
+        FileSecretStore().directoryURL.appendingPathComponent("sessions")
     }
 }
