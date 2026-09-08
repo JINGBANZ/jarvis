@@ -116,12 +116,17 @@ re-centring afterwards would mean a second `center()` call. Building the panel a
 centring once keeps placement correct by construction and keeps the AppKit surface minimal — which
 matters here, because this panel is built on a CI runner with no GUI session.
 
-The drag hook is `viewDidEndLiveResize` on the box's content view: AppKit sends it once the drag
-finishes, unlike a per-frame resize signal that would rewrite the preference dozens of times per
-gesture. Assigning `NSWindow.delegate` would reach the same event but blocks AppKit without a GUI
-session, hanging every main-actor test on CI. A programmatic resize raises no live-resize signal at
-all, so nothing Jarvis does to the panel can read back as a user edit. The panel's `minSize` derives from the persisted range floors,
-so the drag floor and the clamp floor cannot drift apart.
+The drag hook is `OverlayBoxResizeAffordanceView.onResizeFinished`, fired once when the user lets go
+of an edge, not per frame — a per-frame signal would rewrite the preference dozens of times per
+gesture. The affordance owns the drag itself (see [architecture.md → Overlay Box](./architecture.md)),
+so AppKit is not the one resizing and its `viewDidEndLiveResize` does not fire for these; the box's
+content view keeps that hook only for any resize AppKit still drives. Assigning `NSWindow.delegate`
+would reach the same event but blocks AppKit without a GUI session, hanging every main-actor test on
+CI. A programmatic resize raises no signal on either path, so nothing Jarvis does to the panel can
+read back as a user edit — including collapsing it, which reports the height the user last dragged to
+rather than the header's. The panel's `minSize` derives from the persisted range floors, so the drag
+floor and the clamp floor cannot drift apart, and the affordance clamps its own drags against the
+same `minSize`/`maxSize`.
 
 `OverlaySection` applies changes live through two protocols, with no direct dependency on the AppKit
 panels: `OverlayCaptionApplying`, conformed by `OverlayCaptionPanel`, and `OverlayBoxApplying`,
