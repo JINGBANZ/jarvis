@@ -49,10 +49,16 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     /// Point size of the response text; the timestamp is rendered a couple points smaller. Driven by
     /// the Settings slider via `setFontSize`.
     private var fontSize: CGFloat = CGFloat(Defaults.Overlay.Box.fontSize)
-    /// While the Settings appearance tab is open, the box shows sample text (not the real log) so size
-    /// and opacity changes are visible even with no responses yet. Restored on close.
-    private var isPreviewing = false
+    /// What the box is currently showing.
+    ///
+    /// The Settings preview swaps the *source* rather than the panel, so everything derived from what
+    /// is on screen is computed from this in one place (`renderDisplay`). As a boolean consulted at
+    /// each call site it was forgotten three times: by the clear button, by collapse, and by the
+    /// header's clear action, which quietly wiped the session's log.
+    private enum Display { case log, sample }
+    private var display: Display = .log
     /// Whether the box was rolled up when the Settings preview opened, so closing it can restore that.
+    /// It cannot straddle a session: Start ends the preview, which drops it.
     private var wasCollapsedBeforePreview = false
     /// The Settings toggle: the user's master switch. Off means the box never appears.
     private var isEnabled = false
@@ -194,11 +200,12 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
 
     @objc private func toggleCollapsed() { setCollapsed(!isCollapsed) }
 
-    /// The preview hides this button, so this guard is the second lock rather than the first: were it
-    /// ever reachable while the preview owns the display, clearing would wipe the session's history
-    /// with nothing on screen changing to show it had happened.
+    /// `clear()` is the model operation Start uses, and it wipes the log whatever is on screen. This
+    /// is the user's gesture, so it declines while the display is not the log: the button is hidden
+    /// then anyway, and clearing behind a sample would destroy the history with nothing on screen
+    /// changing to show it had happened.
     @objc private func clearLog() {
-        guard !isPreviewing else { return }
+        guard display == .log else { return }
         clear()
     }
 
@@ -247,26 +254,20 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
 
     private func append(_ text: String) {
         entries.append((stamp: timeFormatter.string(from: Date()), text: text))
-        guard !isPreviewing else { return }   // the preview owns the display; restored on close
+        // No preview can be running: one only opens while stopped, and Start ends it.
         // Re-assert capture exclusion on every render that reaches the screen — same defense-in-depth as
         // OverlayCaptionPanel.show, since this box can be visible (full of responses) while Settings flips the
         // activation policy and WindowServer drops `sharingType` on vulnerable macOS builds.
         if panel.isVisible { reassertCaptureExclusion() }
-        rerender()
+        renderDisplay()
         textView.scrollToEndOfDocument(nil)   // keep the newest response in view
     }
 
-    /// Re-render whichever content the box should currently show — sample text while previewing, the
-    /// real log otherwise. Called after a font change so the new size is reflected live in both modes.
-    private func refreshText() {
-        setEntriesText(isPreviewing ? Self.sampleEntries : entries)
-    }
-
-    private func rerender() { setEntriesText(entries) }
-
-    /// Build the readout from `items`: a dimmed monospaced timestamp in front of each response, blank
-    /// line between.
-    private func setEntriesText(_ items: [(stamp: String, text: String)]) {
+    /// The one place the display is built, so anything derived from what is on screen is derived here
+    /// and cannot forget which source is showing. A dimmed monospaced timestamp in front of each
+    /// response, blank line between.
+    private func renderDisplay() {
+        let items = display == .sample ? Self.sampleEntries : entries
         let result = NSMutableAttributedString()
         let stampAttrs: [NSAttributedString.Key: Any] = [
             .foregroundColor: NSColor(white: 1, alpha: 0.5),
@@ -282,9 +283,9 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
             result.append(NSAttributedString(string: entry.text, attributes: textAttrs))
         }
         textView.textStorage?.setAttributedString(result)
-        // The preview's sample is not the user's log, so it offers nothing to erase: the clear button
-        // stays away rather than sitting there as a control that does nothing.
-        header.setHasContent(!isPreviewing && !items.isEmpty)
+        // The sample is not the user's log, so it offers nothing to erase: the clear button stays away
+        // rather than sitting there as a control that does nothing.
+        header.setHasContent(display == .log && !entries.isEmpty)
     }
 
     // MARK: - Visibility (the Settings toggle, gated on a live session)
@@ -293,8 +294,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     /// matching how the session rotates.
     public func clear() {
         entries.removeAll()
-        guard !isPreviewing else { return }   // the preview owns the display; restored on close
-        rerender()
+        renderDisplay()
     }
 
     /// Whether the box belongs on screen: switched on *and* a session running. Kept distinct from
@@ -306,7 +306,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     /// path and the Settings toggle cannot leave the box in disagreeing states.
     private func applyVisibility() {
         // Don't tear down or fight a live preview's on-screen sample; the preview applies this on close.
-        guard !isPreviewing else { return }
+        guard display == .log else { return }
         guard shouldBeVisible else { return panel.orderOut(nil) }
         // Re-assert capture exclusion on every show — defense-in-depth against an activation-policy
         // flip dropping `sharingType` (same reason as OverlayCaptionPanel.show).
@@ -318,6 +318,10 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     /// Start also rolls a collapsed box back open, because collapse belongs to the conversation the
     /// user collapsed it during, not to the next one.
     public func setSessionLive(_ live: Bool) {
+        // Start ends any preview first: the real box, full of the conversation's own tips, is a better
+        // preview than sample text, and letting the two lifecycles overlap is what let a stale collapse
+        // snapshot roll up a live session's box.
+        if live { showAppearancePreview(false) }
         isSessionLive = live
         if live { setCollapsed(false) }
         applyVisibility()
@@ -334,7 +338,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     /// Set the response text's point size, live; the timestamp tracks a couple points smaller.
     public func setFontSize(_ points: Double) {
         fontSize = CGFloat(points)
-        refreshText()
+        renderDisplay()
     }
 
     /// One callback per finished drag rather than per frame: a per-frame hook would rewrite the
@@ -352,24 +356,31 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         applyVisibility()
     }
 
-    /// Show the box with sample text (on) while the Settings appearance tab is open so size/opacity
-    /// changes are visible, then restore the real log and the box's prior visibility (off). Re-asserts
-    /// capture exclusion, mirroring `OverlayCaptionPanel.showAppearancePreview`.
+    /// Stand the box up with sample text while the Settings appearance tab is open, so size and
+    /// opacity changes have something to show, then restore the real log and the box's prior
+    /// visibility. Mirrors `OverlayCaptionPanel.showAppearancePreview`.
+    ///
+    /// Only while stopped. During a session the box is already on screen carrying the conversation's
+    /// own tips, and `setFontSize`/`setOpacity` apply to it live, so sample text would replace real
+    /// content with something worse. Confining the preview to a stopped session is also what keeps
+    /// the two lifecycles from overlapping: no tip can land while a preview is up, and no preview can
+    /// outlive the session boundary carrying a stale collapse snapshot back onto a live box.
     public func showAppearancePreview(_ on: Bool) {
         if on {
-            isPreviewing = true
+            guard !isSessionLive else { return }
+            display = .sample
             // A collapsed box has no log on screen, so its sample would be invisible and the text-size
             // slider would preview nothing. Roll it open for the preview and restore it on close;
             // collapse is the user's gesture, not something a Settings visit should spend.
             wasCollapsedBeforePreview = isCollapsed
             setCollapsed(false)
             reassertCaptureExclusion()
-            setEntriesText(Self.sampleEntries)
+            renderDisplay()
             panel.orderFrontRegardless() // ghost-mode-allowed: capture-excluded coaching overlay
-        } else if isPreviewing {
-            isPreviewing = false
-            rerender()                            // restore the real log…
-            textView.scrollToEndOfDocument(nil)   // …scrolled to any responses that arrived during preview
+        } else if display == .sample {
+            display = .log
+            renderDisplay()                       // restore the real log…
+            textView.scrollToEndOfDocument(nil)   // …scrolled to the newest response
             setCollapsed(wasCollapsedBeforePreview)
             applyVisibility()                     // and whether the box belongs on screen at all
         }

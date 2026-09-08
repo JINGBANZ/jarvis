@@ -71,7 +71,6 @@ import JarvisCore
     @MainActor @Test
     func setEnabledOffDuringPreviewHidesOnClose() {
         let panel = OverlayBoxPanel()
-        panel.setSessionLive(true)
         panel.setEnabled(true)             // box on
         panel.showAppearancePreview(true)  // preview owns it
         panel.setEnabled(false)            // user switches it off mid-preview (deferred)
@@ -80,15 +79,46 @@ import JarvisCore
         #expect(!panel.isPanelVisible, "a box switched off during preview must be ordered out on close")
     }
 
-    // Symmetric: switching the box ON during a preview must leave it shown after the tab closes.
+    // Symmetric: a box switched on during a preview must appear when its session starts.
     @MainActor @Test
-    func setEnabledOnDuringPreviewShowsOnClose() {
+    func setEnabledOnDuringPreviewShowsAtTheNextStart() {
         let panel = OverlayBoxPanel()      // starts hidden
-        panel.setSessionLive(true)
         panel.showAppearancePreview(true)
         panel.setEnabled(true)             // user switches it on mid-preview
         panel.showAppearancePreview(false) // close the tab
-        #expect(panel.isPanelVisible, "a box switched on during preview must stay shown on close")
+        #expect(!panel.isPanelVisible, "still nothing to show: no session is running")
+        panel.setSessionLive(true)
+        #expect(panel.isPanelVisible, "a box switched on during preview must appear on Start")
+    }
+
+    /// The preview exists to give the sliders something to look at when the box is not on screen.
+    /// During a session it already is on screen carrying the conversation's own tips, and the sliders
+    /// apply to it live, so sample text would replace real content with something worse.
+    @MainActor @Test
+    func aPreviewDoesNotOpenWhileASessionIsRunning() {
+        let panel = liveBox()
+
+        panel.showAppearancePreview(true)
+
+        #expect(!panel.currentText.contains("Ask about the time complexity"),
+                "the live box must keep showing the session's own log, not the sample")
+    }
+
+    /// Reported twice on the PR. Collapse during a session, Stop, open the preview (which expands the
+    /// box and snapshots "was collapsed"), then Start without closing Settings: that snapshot used to
+    /// survive and roll the new session's box up when Settings finally closed.
+    @MainActor @Test
+    func startDoesNotInheritACollapseSnapshotFromAnOpenPreview() {
+        let panel = liveBox()
+        panel.clickCollapseButton()
+        panel.setSessionLive(false)
+
+        panel.showAppearancePreview(true)   // expands, and snapshots "was collapsed"
+        panel.setSessionLive(true)          // Start with Settings still open
+        panel.showAppearancePreview(false)  // Settings closes afterwards
+
+        #expect(!panel.isCollapsed, "the new session's box must not inherit the old one's collapse")
+        #expect(panel.isLogVisible)
     }
 
     @MainActor @Test
@@ -356,6 +386,7 @@ import JarvisCore
     func theSettingsPreviewRollsACollapsedBoxOpenAndPutsItBack() {
         let panel = liveBox()
         panel.clickCollapseButton()
+        panel.setSessionLive(false)   // the preview only opens while stopped
 
         panel.showAppearancePreview(true)
         #expect(panel.isLogVisible, "the sample must be on screen for the sliders to preview anything")
@@ -470,9 +501,10 @@ private func checkPreviewClearLeavesTheLogAlone() async {
     let panel = liveBox()
     panel.render(["A real tip."], perLineSeconds: 0)
     #expect(await waitUntil { panel.entryCount == 1 }, "the tip should be logged")
+    panel.setSessionLive(false)          // the preview only opens while stopped
 
     panel.showAppearancePreview(true)
-    panel.clickClearButton()             // the button the preview itself puts on screen
+    panel.clickClearButton()             // hidden by the preview, and inert even if reached
     panel.showAppearancePreview(false)
 
     #expect(panel.entryCount == 1, "the preview's clear button must not erase the session's log")
