@@ -142,15 +142,20 @@ toggle shows/hides that surface's sample (and collapses/expands its sliders via 
 Each panel's `showAppearancePreview(_:)` re-asserts capture exclusion so the preview stays hidden
 from screen capture — same defense-in-depth as the coaching display path. The box's preview shows
 sample text without disturbing the real log and re-derives `isEnabled && isSessionLive` on close, so
-closing the tab can leave the box on screen only while both hold. It also **opens only while
-stopped**: during a session the box is already on screen carrying the conversation's own tips and the
-sliders apply to it live, so a sample would replace real content with something worse. That is a
-correctness boundary as much as a display one. Keeping the two lifecycles apart is what stops a tip
-landing behind a sample and stops a preview outliving the session boundary with a stale collapse
-snapshot, both of which shipped as bugs when the preview could run over a live box. Start ends any
-open preview for the same reason. The box tracks which source is on screen as `Display.log` or
-`.sample` and derives the readout and the clear button from it in one place, rather than each having
-to remember that a preview might be running. The plain setters
+closing the tab can leave the box on screen only while both hold. The box's sample stands in **only
+while stopped**: during a session the box is already on screen carrying the conversation's own tips
+and the sliders apply to it live, so a sample would replace real content with something worse. That
+boundary is a correctness one as much as a display one, because it is what guarantees no tip can land
+behind a sample and no collapse snapshot can cross a session boundary. Start therefore takes the
+sample down.
+
+Settings cannot see the session, so `showAppearancePreview(_:)` records a request rather than
+obeying one, the way `setEnabled(_:)` does: the sample shows when Settings wants it **and** no session
+is running, derived in one place. A request made during a session is still standing when the session
+stops, so a Stop taken without leaving the tab brings the sample up rather than leaving the sliders
+with nothing on screen to act on. Which source is showing is a value, `Display.log` or `.sample`, and
+the readout and the clear button are derived from it together rather than each asking whether a
+preview is running. The plain setters
 (`setFontSize`/`setBackgroundOpacity`/`setOpacity`) only change appearance and don't touch
 `sharingType`. See [overlay-invisibility.md](./overlay-invisibility.md).
 

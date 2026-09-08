@@ -104,6 +104,30 @@ import JarvisCore
                 "the live box must keep showing the session's own log, not the sample")
     }
 
+    /// Settings cannot see the session, so it asks for the sample once when its Overlay tab opens and
+    /// never asks again. Stopping without leaving that tab must therefore bring the sample up on its
+    /// own, or the sliders are left with nothing on screen to act on.
+    @MainActor @Test
+    func stoppingWithTheOverlayTabStillOpenBringsTheSampleUp() {
+        let panel = liveBox()
+        panel.showAppearancePreview(true)   // asked while the session runs, so declined for now
+        #expect(!panel.currentText.contains("Ask about the time complexity"))
+
+        panel.setSessionLive(false)         // Stop, without leaving the tab
+
+        #expect(panel.currentText.contains("Ask about the time complexity"),
+                "the standing request must be honoured once the session is gone")
+        #expect(panel.isPanelVisible)
+    }
+
+    /// The mirror: with no tab open, Stop simply takes the box away.
+    @MainActor @Test
+    func stoppingWithNoPreviewRequestedJustHidesTheBox() {
+        let panel = liveBox()
+        panel.setSessionLive(false)
+        #expect(!panel.isPanelVisible)
+    }
+
     /// Reported twice on the PR. Collapse during a session, Stop, open the preview (which expands the
     /// box and snapshots "was collapsed"), then Start without closing Settings: that snapshot used to
     /// survive and roll the new session's box up when Settings finally closed.

@@ -57,8 +57,14 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     /// header's clear action, which quietly wiped the session's log.
     private enum Display { case log, sample }
     private var display: Display = .log
+    /// Whether the Settings Overlay tab wants the sample standing in. Recorded rather than obeyed,
+    /// exactly like `isEnabled`: Settings cannot see whether a session is running, so it asks once
+    /// when its tab opens and the panel resolves the request whenever either side changes. Discarding
+    /// the request instead left the sliders with nothing on screen to act on after a Stop taken
+    /// without leaving the tab.
+    private var isPreviewRequested = false
     /// Whether the box was rolled up when the Settings preview opened, so closing it can restore that.
-    /// It cannot straddle a session: Start ends the preview, which drops it.
+    /// It cannot straddle a session: Start takes the sample down, which spends it.
     private var wasCollapsedBeforePreview = false
     /// The Settings toggle: the user's master switch. Off means the box never appears.
     private var isEnabled = false
@@ -318,11 +324,10 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     /// Start also rolls a collapsed box back open, because collapse belongs to the conversation the
     /// user collapsed it during, not to the next one.
     public func setSessionLive(_ live: Bool) {
-        // Start ends any preview first: the real box, full of the conversation's own tips, is a better
-        // preview than sample text, and letting the two lifecycles overlap is what let a stale collapse
-        // snapshot roll up a live session's box.
-        if live { showAppearancePreview(false) }
         isSessionLive = live
+        // Start takes the sample down and Stop can put it back, both without Settings saying anything:
+        // whether the preview stands in is derived, not commanded.
+        applyDisplay()
         if live { setCollapsed(false) }
         applyVisibility()
     }
@@ -360,15 +365,30 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     /// opacity changes have something to show, then restore the real log and the box's prior
     /// visibility. Mirrors `OverlayCaptionPanel.showAppearancePreview`.
     ///
-    /// Only while stopped. During a session the box is already on screen carrying the conversation's
-    /// own tips, and `setFontSize`/`setOpacity` apply to it live, so sample text would replace real
-    /// content with something worse. Confining the preview to a stopped session is also what keeps
-    /// the two lifecycles from overlapping: no tip can land while a preview is up, and no preview can
-    /// outlive the session boundary carrying a stale collapse snapshot back onto a live box.
+    /// The sample stands in only while stopped. During a session the box is already on screen carrying
+    /// the conversation's own tips, and `setFontSize`/`setOpacity` apply to it live, so sample text
+    /// would replace real content with something worse. Keeping the two lifecycles apart is also what
+    /// stops a tip landing behind a sample, and stops a collapse snapshot crossing a session boundary.
+    ///
+    /// This records the request rather than acting on it, so a request made during a session is still
+    /// standing when the session stops.
     public func showAppearancePreview(_ on: Bool) {
-        if on {
-            guard !isSessionLive else { return }
-            display = .sample
+        isPreviewRequested = on
+        applyDisplay()
+    }
+
+    /// Whether the sample should be standing in: Settings wants it, and no session is running to put
+    /// real content on screen instead. One place owns the rule, mirroring `shouldBeVisible`, so the
+    /// Settings tab and the Start/Stop path cannot leave the box showing a source neither intended.
+    private var wantedDisplay: Display { isPreviewRequested && !isSessionLive ? .sample : .log }
+
+    /// Bring the box to whatever `wantedDisplay` now says. Stopping a session with the Overlay tab
+    /// still open puts the sample up on its own, so the sliders are never left with nothing to act on.
+    private func applyDisplay() {
+        let wanted = wantedDisplay
+        guard wanted != display else { return }
+        display = wanted
+        if wanted == .sample {
             // A collapsed box has no log on screen, so its sample would be invisible and the text-size
             // slider would preview nothing. Roll it open for the preview and restore it on close;
             // collapse is the user's gesture, not something a Settings visit should spend.
@@ -377,8 +397,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
             reassertCaptureExclusion()
             renderDisplay()
             panel.orderFrontRegardless() // ghost-mode-allowed: capture-excluded coaching overlay
-        } else if display == .sample {
-            display = .log
+        } else {
             renderDisplay()                       // restore the real log…
             textView.scrollToEndOfDocument(nil)   // …scrolled to the newest response
             setCollapsed(wasCollapsedBeforePreview)
