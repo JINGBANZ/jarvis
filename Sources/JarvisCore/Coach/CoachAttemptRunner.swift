@@ -246,12 +246,10 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 jlog("👁 looking at your screen")
                 activity?.record(.screenViewed(imageBase64JPEG: shot.imageBase64))
                 var observations: [ChatMessage] = [.userImage(shot.imageBase64)]
-                turnMessages.append(.userImage(shot.imageBase64))
                 if let text = shot.recognizedText {
                     jlog("🔤 read \(text.count(where: { $0 == "\n" }) + 1) lines of on-screen text")
                     let observation = ChatMessage.user(JarvisPrompts.Coach.recognizedText(text))
                     observations.append(observation)
-                    turnMessages.append(observation)
                 }
                 work.screenObservation = observations
             } else {
@@ -260,8 +258,9 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 work.screenObservation = [
                     .user(JarvisPrompts.Coach.manualHintCaptureFailed),
                 ]
-                turnMessages.append(contentsOf: work.screenObservation)
             }
+            // Replace the carried screen slot while retaining independent prep observations.
+            turnMessages = userText.isEmpty ? work.observations : [.user(userText)] + work.observations
             work.preparedManualReason = reason
         }
 
@@ -434,7 +433,22 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         perLineSeconds: lines.map {
                             OverlayTiming.displaySeconds(for: $0, config: config)
                         }, diagram: diagram, explanation: explanation)
-                    turnMessages.append(.assistantToolCalls(response.rawToolCalls))
+                    var deliveredCalls = response.rawToolCalls
+                    if !attempt.plan.explanationsEnabled {
+                        // History describes what was delivered, not optional text suppressed by Settings.
+                        // These parsed values contain only JSON strings, arrays, and null, so encoding cannot fail.
+                        let arguments: [String: Any] = [
+                            "lines": lines, "mermaid": mermaid as Any? ?? NSNull(), "explanation": NSNull(),
+                        ]
+                        let data = try! JSONSerialization.data(withJSONObject: arguments, options: [.sortedKeys])
+                        deliveredCalls = deliveredCalls.map { call in
+                            call.id == callID
+                                ? RawToolCall(id: call.id, name: call.name,
+                                              argumentsJSON: String(decoding: data, as: UTF8.self))
+                                : call
+                        }
+                    }
+                    turnMessages.append(.assistantToolCalls(deliveredCalls))
                     turnMessages.append(.init(
                         role: .tool,
                         text: JarvisPrompts.Coach.tipShown,
