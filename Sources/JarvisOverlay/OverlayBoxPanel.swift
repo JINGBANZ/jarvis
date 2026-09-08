@@ -8,8 +8,10 @@ import JarvisCore
 /// timing it out.
 ///
 /// Like the caption it is excluded from all screen capture (so it stays invisible in a screen share
-/// and the brain never reads it back) and has no window chrome. Unlike the caption it accepts mouse
-/// events: drag anywhere to move it, scroll to read the backlog, drag its edges to resize it.
+/// and the brain never reads it back) and carries no window-server chrome. Unlike the caption it
+/// accepts mouse events: drag anywhere to move it, scroll to read the backlog, drag its edges to
+/// resize it. Its own chrome is `OverlayBoxHeaderView` across the top — collapse, the name, clear —
+/// sized from the box by `OverlayBoxChrome` rather than fixed.
 ///
 /// It is a session surface: it appears on Start (cleared, for the new conversation) and disappears on
 /// Stop, so a stopped Jarvis leaves nothing on the desktop. The Settings toggle is the master switch
@@ -24,6 +26,19 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     /// The layer-backed, opaque rounded fill behind the text — its alpha is the box's opacity.
     private let box: ResizeReportingView
     private let textView: NSTextView
+    /// The chrome strip across the top: collapse, the name, clear.
+    private let header: OverlayBoxHeaderView
+    /// The scrolling log under the header. Held so the header's height can be taken off it on every
+    /// resize, and so collapsing can put it away.
+    private let scroll: NSScrollView
+    /// Gives the borderless box's edges a resize cursor. Takes no part in hit testing.
+    private let resizeCursors: OverlayBoxResizeCursorView
+    /// Whether the box is rolled up to its header. A gesture for the current conversation rather than
+    /// a preference, so nothing persists it and Start opens the box again.
+    private(set) var isCollapsed = false
+    /// The height the box has when it is not rolled up: the size the user dragged to, and the one the
+    /// header's proportions are taken from at every moment, collapsed or not.
+    private var expandedContentHeight: CGFloat
     /// White level of the box fill; the opacity setting only varies the alpha, keeping this constant.
     private static let boxWhite: CGFloat = 0.10
     /// Point size of the response text; the timestamp is rendered a couple points smaller. Driven by
@@ -101,7 +116,6 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         self.box = box
 
         let scroll = NSScrollView(frame: box.bounds)
-        scroll.autoresizingMask = [.width, .height]
         scroll.hasVerticalScroller = true
         // Keep the history scrollable without reserving a persistent legacy-style gutter. AppKit's
         // preferred style can differ by linked SDK and input device, so this must not be implicit.
@@ -127,15 +141,73 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         tv.textContainer?.containerSize = NSSize(width: scroll.contentSize.width, height: unbounded)
         scroll.documentView = tv
         textView = tv
+        self.scroll = scroll
+
+        let header = OverlayBoxHeaderView(chrome: OverlayBoxChrome(contentHeight: contentSize.height))
+        self.header = header
+        expandedContentHeight = contentSize.height
+        let cursors = OverlayBoxResizeCursorView(frame: box.bounds)
+        resizeCursors = cursors
 
         box.addSubview(scroll)
+        box.addSubview(header)
+        box.addSubview(cursors)     // topmost, so its tracking area sees the whole box
         panel.contentView = box
         super.init()
+        header.collapseButton.target = self
+        header.collapseButton.action = #selector(toggleCollapsed)
+        header.clearButton.target = self
+        header.clearButton.action = #selector(clearLog)
         box.onEndLiveResize = { [weak self] in self?.reportContentSize() }
+        box.onFrameSizeChanged = { [weak self] in self?.layoutContent() }
+        layoutContent()
         // Centered on screen initially; the user can drag it anywhere from there (the frame persists
         // across menu toggles, since hide() only orders it out).
         panel.center()
         panel.excludeFromScreenCapture()
+    }
+
+    /// Place the header and the log for the box's current size, and resize the header to match.
+    /// Driven from the content view's `setFrameSize`, so it settles synchronously on every frame of a
+    /// resize drag rather than waiting on an AppKit layout pass an offscreen panel never runs.
+    private func layoutContent() {
+        let bounds = box.bounds
+        if !isCollapsed { expandedContentHeight = bounds.height }
+        let chrome = OverlayBoxChrome(contentHeight: expandedContentHeight)
+        header.apply(chrome)
+        header.frame = NSRect(x: 0, y: bounds.height - chrome.height,
+                              width: bounds.width, height: chrome.height)
+        scroll.frame = NSRect(x: 0, y: 0,
+                              width: bounds.width, height: max(0, bounds.height - chrome.height))
+        resizeCursors.frame = bounds
+    }
+
+    // MARK: - Header actions
+
+    @objc private func toggleCollapsed() { setCollapsed(!isCollapsed) }
+
+    @objc private func clearLog() { clear() }
+
+    /// Roll the box down to its header and back. Both the width and the height the user dragged to
+    /// survive the round trip, so collapsing costs them nothing.
+    private func setCollapsed(_ collapsed: Bool) {
+        guard collapsed != isCollapsed else { return }
+        isCollapsed = collapsed
+        header.setCollapsed(collapsed)
+        resizeCursors.allowsVerticalResize = !collapsed
+        scroll.isHidden = collapsed
+
+        let width = panel.contentRect(forFrameRect: panel.frame).width
+        let collapsedHeight = OverlayBoxChrome(contentHeight: expandedContentHeight).height
+        // Floor and ceiling meet while collapsed: with only the header on screen, a vertical drag has
+        // nothing to stretch. Both are set before the resize so neither clamps it.
+        panel.minSize = NSSize(
+            width: panel.minSize.width,
+            height: collapsed ? collapsedHeight : CGFloat(Defaults.Overlay.Box.heightRange.lowerBound))
+        panel.maxSize = NSSize(width: panel.maxSize.width,
+                               height: collapsed ? collapsedHeight : .greatestFiniteMagnitude)
+        panel.setContentSize(NSSize(width: width,
+                                    height: collapsed ? collapsedHeight : expandedContentHeight))
     }
 
     // MARK: - OverlayRendering
@@ -189,6 +261,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
             result.append(NSAttributedString(string: entry.text, attributes: textAttrs))
         }
         textView.textStorage?.setAttributedString(result)
+        header.setHasContent(!items.isEmpty)
     }
 
     // MARK: - Visibility (the Settings toggle, gated on a live session)
@@ -219,8 +292,11 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     }
 
     /// Follow the session: Start puts the box on screen (if it is switched on), Stop takes it away.
+    /// Start also rolls a collapsed box back open, because collapse belongs to the conversation the
+    /// user collapsed it during, not to the next one.
     public func setSessionLive(_ live: Bool) {
         isSessionLive = live
+        if live { setCollapsed(false) }
         applyVisibility()
     }
 
@@ -242,7 +318,9 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     /// preference dozens of times per gesture.
     private func reportContentSize() {
         let size = panel.contentRect(forFrameRect: panel.frame).size
-        onSizeChanged?(Double(size.width), Double(size.height))
+        // The horizontal edges stay draggable while collapsed, and the height on screen is then the
+        // header's — so report the height the user actually chose, never the rolled-up one.
+        onSizeChanged?(Double(size.width), Double(isCollapsed ? expandedContentHeight : size.height))
     }
 
     /// Switch the box on or off, live. It reaches the screen only while a session is also running.
@@ -316,6 +394,25 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     /// The smallest size a drag can reach — lets tests assert it matches the persisted floor.
     var minimumContentSize: NSSize { panel.minSize }
 
+    /// The largest size a drag can reach — meets the floor while the box is collapsed.
+    var maximumContentSize: NSSize { panel.maxSize }
+
+    /// The header strip's height — lets tests assert it tracks the box's size.
+    var currentHeaderHeight: CGFloat { header.frame.height }
+
+    /// The name the header shows.
+    var currentHeaderTitle: String { header.title }
+
+    /// Whether the log is on screen under the header.
+    var isLogVisible: Bool { !scroll.isHidden }
+
+    /// Whether the header is offering the clear button.
+    var isClearButtonVisible: Bool { !header.clearButton.isHidden }
+
+    /// Drive the header's own controls, so tests take the path the user takes.
+    func clickCollapseButton() { header.collapseButton.performClick(nil) }
+    func clickClearButton() { header.clearButton.performClick(nil) }
+
     /// Drives the same AppKit entry point that ends a user resize drag — lets tests assert that a
     /// finished drag is reported exactly once.
     func endLiveResize() { box.viewDidEndLiveResize() }
@@ -330,10 +427,18 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
 /// machinery, and AppKit calls it only for a real drag — never for a programmatic `setContentSize`.
 private final class ResizeReportingView: NSView {
     var onEndLiveResize: (() -> Void)?
+    /// Every size change, programmatic or dragged, synchronously — the panel relays the header and
+    /// the log off it. AppKit sends this before any layout pass, which an offscreen panel never runs.
+    var onFrameSizeChanged: (() -> Void)?
 
     override func viewDidEndLiveResize() {
         super.viewDidEndLiveResize()
         onEndLiveResize?()
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        onFrameSizeChanged?()
     }
 }
 

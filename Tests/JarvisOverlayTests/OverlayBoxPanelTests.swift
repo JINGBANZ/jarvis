@@ -220,6 +220,125 @@ import JarvisCore
         #expect(panel.currentText.isEmpty)
     }
 
+    // MARK: - Header
+
+    @MainActor @Test
+    func theHeaderNamesJarvis() {
+        #expect(OverlayBoxPanel().currentHeaderTitle == "Jarvis")
+    }
+
+    /// The header carries no fixed numbers: it is derived from the box's content height, so the same
+    /// panel at two sizes gets two headers. Driven through `setContentSize` because that is what a
+    /// finished resize drag leaves the window at.
+    @MainActor @Test
+    func theHeaderIsSizedFromTheBox() {
+        let panel = OverlayBoxPanel(contentSize: NSSize(width: 520, height: 140))
+        #expect(panel.currentHeaderHeight == 26)
+        panel.setContentSize(NSSize(width: 520, height: 900))
+        #expect(panel.currentHeaderHeight == 44, "resizing the box must resize its header")
+    }
+
+    @MainActor @Test
+    func collapsingLeavesOnlyTheHeaderOnScreen() {
+        let panel = liveBox()
+        panel.clickCollapseButton()
+        #expect(panel.isCollapsed)
+        #expect(panel.currentContentSize.height == panel.currentHeaderHeight)
+        #expect(panel.currentContentSize.width == CGFloat(Defaults.Overlay.Box.width),
+                "collapsing must not change the width the user dragged to")
+        #expect(!panel.isLogVisible, "a collapsed box must not show the log under its header")
+    }
+
+    @MainActor @Test
+    func expandingRestoresTheHeightTheUserDraggedTo() {
+        let panel = OverlayBoxPanel(contentSize: NSSize(width: 520, height: 700))
+        panel.clickCollapseButton()
+        panel.clickCollapseButton()
+        #expect(!panel.isCollapsed)
+        #expect(panel.currentContentSize.height == 700)
+        #expect(panel.isLogVisible)
+    }
+
+    /// Collapsing is not a resize. If it reported one, the collapsed height would overwrite the size
+    /// the user dragged to and come back at the next launch.
+    @MainActor @Test
+    func collapsingDoesNotReportAUserResize() {
+        let panel = OverlayBoxPanel(contentSize: NSSize(width: 520, height: 700))
+        var reportCount = 0
+        panel.onSizeChanged = { _, _ in reportCount += 1 }
+
+        panel.clickCollapseButton()
+        panel.clickCollapseButton()
+
+        #expect(reportCount == 0)
+    }
+
+    /// Collapsed, the height is the header's, so pinning the drag floor to the drag ceiling is what
+    /// stops a vertical drag from stretching a box with nothing in it.
+    @MainActor @Test
+    func aCollapsedBoxCannotBeDraggedTaller() {
+        let panel = OverlayBoxPanel()
+        panel.clickCollapseButton()
+        #expect(panel.minimumContentSize.height == panel.currentHeaderHeight)
+        #expect(panel.maximumContentSize.height == panel.currentHeaderHeight)
+
+        panel.clickCollapseButton()
+        #expect(panel.minimumContentSize.height
+            == CGFloat(Defaults.Overlay.Box.heightRange.lowerBound), "expanding restores the drag floor")
+        #expect(panel.maximumContentSize.height > panel.currentHeaderHeight,
+                "expanding restores the drag ceiling")
+    }
+
+    /// Collapse belongs to the conversation it was made during. Nothing persists it, and a fresh
+    /// Start must not hand the user a box they have to reopen before they can read it.
+    @MainActor @Test
+    func aNewSessionOpensACollapsedBox() {
+        let panel = liveBox()
+        panel.clickCollapseButton()
+        panel.setSessionLive(false)
+        panel.setSessionLive(true)
+        #expect(!panel.isCollapsed)
+        #expect(panel.isLogVisible)
+    }
+
+    /// The horizontal edges stay draggable while collapsed, so a width drag has to persist the width
+    /// the user just chose alongside the height they last dragged to, never the header's.
+    @MainActor @Test
+    func aWidthDragWhileCollapsedKeepsTheExpandedHeight() {
+        let panel = OverlayBoxPanel(contentSize: NSSize(width: 520, height: 700))
+        var reported: [(Double, Double)] = []
+        panel.onSizeChanged = { reported.append(($0, $1)) }
+
+        panel.clickCollapseButton()
+        panel.setContentSize(NSSize(width: 640, height: panel.currentHeaderHeight))
+        panel.endLiveResize()
+
+        #expect(reported.count == 1)
+        #expect(reported.first?.0 == 640)
+        #expect(reported.first?.1 == 700, "the collapsed height must never become the saved height")
+    }
+
+    @MainActor @Test
+    func theClearButtonIsHiddenWhileThereIsNothingToErase() {
+        #expect(!OverlayBoxPanel().isClearButtonVisible)
+    }
+
+    /// The preview is meant to show the header the user will actually get, and its sample is content,
+    /// so the button belongs on screen with it.
+    @MainActor @Test
+    func theSettingsPreviewShowsTheClearButtonWithItsSample() {
+        let panel = OverlayBoxPanel()
+        panel.showAppearancePreview(true)
+        #expect(panel.isClearButtonVisible)
+        panel.showAppearancePreview(false)
+        #expect(!panel.isClearButtonVisible, "the real log is still empty after the preview closes")
+    }
+
+    @Test
+    func theClearButtonFollowsWhetherTheLogHasAnything() async {
+        await checkClearButtonFollowsTheLog()
+    }
+
     @Test
     func rendersAppendEachTipAsAnEntry() async {
         await checkAppendsEntries()
@@ -288,6 +407,21 @@ private func checkAppendDuringPreview() async {
     panel.showAppearancePreview(false)
     #expect(panel.currentText.contains("Mid-preview response."), "closing the preview reveals the mid-preview response")
     #expect(!panel.currentText.contains("Ask about the time complexity"), "the sample is gone after preview closes")
+}
+
+// The clear button exists only when there is something to erase, so an empty box carries no dead
+// control. It erases through the same `clear()` the panel already exposed.
+@MainActor
+private func checkClearButtonFollowsTheLog() async {
+    let panel = liveBox()
+    #expect(!panel.isClearButtonVisible, "an empty box offers nothing to erase")
+    panel.render(["A new response."], perLineSeconds: 0)
+    #expect(await waitUntil { panel.isClearButtonVisible }, "the first tip must reveal the clear button")
+
+    panel.clickClearButton()
+    #expect(panel.entryCount == 0, "the header button must erase the log")
+    #expect(panel.currentText.isEmpty, "an erased box is blank, with no placeholder")
+    #expect(!panel.isClearButtonVisible, "an erased box offers nothing to erase again")
 }
 
 // Each spoken tip becomes one entry, its lines joined into a single paragraph, newest last.
