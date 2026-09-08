@@ -1995,7 +1995,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         })
     }
 
-    @Test(arguments: [TriggerReason.manualHint, .manualExplanation])
+    @Test(arguments: [TriggerReason.manualHint, .manualExplanation, .manualCode])
     func manualHintWakesFailedAttemptEvenWhileSpeechIsUnsettled(_ reason: TriggerReason) async {
         let gate = AsyncGate()
         let brain = GatedFailureThenSpeakingBrain(gate: gate)
@@ -2015,7 +2015,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         driver.updateTranscriptionWork(false, for: .them)
     }
 
-    @Test(arguments: [TriggerReason.manualHint, .manualExplanation])
+    @Test(arguments: [TriggerReason.manualHint, .manualExplanation, .manualCode])
     func automaticRetryOfFailedManualHintWaitsForUnsettledSpeech(_ reason: TriggerReason) async {
         let gate = AsyncGate()
         let delayGate = AsyncGate()

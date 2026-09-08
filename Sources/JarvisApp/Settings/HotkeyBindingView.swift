@@ -74,7 +74,8 @@ final class HotkeyBindingView: NSObject {
 
         let card = SettingsCardView(frame: NSRect(x: 0, y: 0, width: 712, height: cardHeight))
         card.translatesAutoresizingMaskIntoConstraints = false
-        card.setHeader(title: preferences.shortcut.title, detail: "Works only while a session is running")
+        card.setHeader(title: preferences.shortcut.title, detail: preferences.shortcut == .showCode
+            ? "Coding · hotkey only" : "Works only while a session is running")
         let row = SettingsRowView(
             title: "Shortcut",
             detail: "Requires ⌘ or ⌥",

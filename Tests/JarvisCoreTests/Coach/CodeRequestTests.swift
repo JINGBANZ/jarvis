@@ -1,0 +1,130 @@
+import Foundation
+import Testing
+@testable import JarvisCore
+
+@Suite struct CodeRequestTests {
+    @Test(arguments: [TriggerReason.turnEnd, .manualHint, .manualExplanation])
+    func ordinaryTriggersCannotDeliverCode(_ reason: TriggerReason) async throws {
+        let snippet = try #require(CodeSnippet(language: "Python", placement: "Inside your loop", code: "seen[ch] = right"))
+        let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s", lines: ["Remember this position."], codeSnippet: snippet)])])
+        let transcript = RollingTranscript()
+        transcript.append(.init(speaker: .me, text: "I am stuck with the loop", at: 0))
+        let sink = CodeRequestSink()
+        let driver = makeDriver(brain, transcript, sink)
+        #expect(await driver.handleTrigger(reason) == .spoke)
+        #expect(sink.codeUpdates.isEmpty)
+        #expect(sink.lines == ["Remember this position."])
+    }
+
+    @Test func manualCodeUsesCurrentContextAndWorksWithExplanationsDisabled() async throws {
+        let snippet = try #require(CodeSnippet(language: "Python", placement: "Inside your loop", code: "seen[ch] = right"))
+        let brain = ScriptedBrain(script: [
+            .init(toolCalls: [.speak(callId: "s", lines: ["Remember this position."], codeSnippet: snippet)]),
+            .init(toolCalls: [.speak(callId: "s2", lines: ["Your approach needs a different data structure."])])
+        ])
+        let transcript = RollingTranscript()
+        transcript.append(.init(speaker: .them, text: "Find the longest substring without repeats", at: 0))
+        transcript.append(.init(speaker: .me, text: "I used seen and left, but got stuck in the loop", at: 1))
+        let sink = CodeRequestSink()
+        let screen = FakeScreen()
+        let driver = makeDriver(brain, transcript, sink, screen: screen)
+        driver.updatePlan(SessionPlan(revision: 1, screen: SessionPlan.default.screen, explanationsEnabled: false))
+        #expect(await driver.handleTrigger(.manualCode) == .spoke)
+        #expect(sink.codeUpdates.count == 1)
+        #expect((sink.codeUpdates.last ?? nil) == snippet)
+        #expect(screen.captureCount == 1)
+        #expect(brain.toolChoices.last == .force("speak"))
+        #expect(brain.calls[0].contains { $0.imageBase64JPEG != nil })
+        #expect(brain.calls[0].contains { $0.text?.contains("seen and left") == true })
+        #expect(await driver.handleTrigger(.manualCode) == .spoke)
+        #expect(sink.codeUpdates.count == 2)
+        #expect((sink.codeUpdates.last ?? nil) == nil)
+    }
+
+    @Test func malformedCodeRetainsUsefulHint() throws {
+        let payloads = ["null", "42", #"{"language":"Python","placement":"In loop","code":" ","highlightedLines":[]}"#,
+            #"{"language":"Python","placement":"In loop","code":"x = 1","highlightedLines":"bad"}"#]
+        for payload in payloads {
+            let call = ToolInvocation.parse(callId: "s", name: "speak", argumentsJSON: "{\"lines\":[\"Continue here\"],\"codeSnippet\":\(payload)}")
+            guard case .speak(_, let lines, _, _, let snippet) = call else { Issue.record("Lost the hint"); continue }
+            #expect(lines == ["Continue here"])
+            #expect(snippet == nil)
+        }
+    }
+
+    @Test func codeHotkeyPersistsIndependently() {
+        let suite = "CodeRequestTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let code = HotkeyPreferences(defaults: defaults, shortcut: .showCode)
+        let hint = HotkeyPreferences(defaults: defaults, shortcut: .hint)
+        let explain = HotkeyPreferences(defaults: defaults, shortcut: .explainMore)
+        let saved = HotkeyCombination(keyCode: 12, modifiers: [.command, .shift])
+        code.combination = saved
+        #expect(HotkeyPreferences(defaults: defaults, shortcut: .showCode).combination == saved)
+        #expect(hint.combination == Defaults.Hotkey.combination)
+        #expect(explain.combination == Defaults.Hotkey.explanationCombination)
+    }
+
+    @Test(arguments: [InterviewFormat.behavioral, .systemDesign])
+    func nonCodingSessionsExplainUnavailabilityWithoutModelWork(_ format: InterviewFormat) async {
+        let brain = ScriptedBrain(script: [])
+        let sink = CodeRequestSink()
+        let screen = FakeScreen()
+        let driver = makeDriver(brain, RollingTranscript(), sink, screen: screen, format: format)
+        #expect(await driver.handleTrigger(.manualCode) == .spoke)
+        #expect(brain.calls.isEmpty)
+        #expect(screen.captureCount == 0)
+        #expect(sink.lines.first?.contains("Coding") == true)
+    }
+
+    @Test func validCodeParsingPreservesIndentationAndRejectsOversizedComponent() throws {
+        let snippet: [String: Any] = ["language": "Python", "placement": "Inside your loop",
+            "code": "    if ch in seen:\n        left = max(left, seen[ch] + 1)", "highlightedLines": [2]]
+        for oversized in [false, true] {
+            var value = snippet
+            if oversized { value["code"] = Array(repeating: "x = 1", count: 13).joined(separator: "\n") }
+            let json = try JSONSerialization.data(withJSONObject: ["lines": ["Keep the left edge moving forward."], "codeSnippet": value])
+            let call = ToolInvocation.parse(callId: "s", name: "speak", argumentsJSON: String(decoding: json, as: UTF8.self))
+            guard case .speak(_, let lines, _, _, let code) = call else { Issue.record("Expected hint"); continue }
+            #expect(lines.count == 1)
+            if oversized { #expect(code == nil) }
+            else {
+                #expect(code?.code.hasPrefix("    if") == true)
+                #expect(code?.highlightedLines == [2])
+            }
+        }
+    }
+
+    @Test func captureFailureStillAllowsFirstComponentFromKnownContext() async throws {
+        let snippet = try #require(CodeSnippet(language: "Python", placement: "Start window state", code: "seen = {}\nleft = 0"))
+        let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s", lines: ["Start with window state."], codeSnippet: snippet)])])
+        let transcript = RollingTranscript()
+        transcript.append(.init(speaker: .them, text: "Find the longest substring without repeats", at: 0))
+        let sink = CodeRequestSink()
+        let driver = makeDriver(brain, transcript, sink, screen: MissingCodeScreen())
+        #expect(await driver.handleTrigger(.manualCode) == .spoke)
+        #expect((sink.codeUpdates.last ?? nil) == snippet)
+        #expect(brain.calls[0].contains { $0.text?.contains("failed") == true })
+    }
+
+    private func makeDriver(_ brain: BrainClient, _ transcript: RollingTranscript, _ sink: OverlayRendering,
+                            screen: ScreenCapturing = FakeScreen(), format: InterviewFormat? = nil) -> CoachDriver {
+        let target = BrainTarget(provider: .openAI, modelID: BrainModelCatalog.defaultModel(for: .openAI).id)
+        return CoachDriver(config: .default, transcript: transcript,
+            route: .init(targets: [.init(target: target, brain: brain)]),
+            screen: screen, overlay: sink, clock: ManualClock(now: 100), interviewFormat: format)
+    }
+}
+
+private final class CodeRequestSink: OverlayRendering {
+    var codeUpdates: [CodeSnippet?] = []
+    var lines: [String] = []
+    func render(_ lines: [String], perLineSeconds: [TimeInterval]) { self.lines = lines }
+    func showCodeSnippet(_ snippet: CodeSnippet?) { codeUpdates.append(snippet) }
+}
+
+private final class MissingCodeScreen: ScreenCapturing, Sendable {
+    func capture(_ selection: ScreenCaptureSelection) -> ScreenSnapshot? { nil }
+    func cancelCapture() {}
+}

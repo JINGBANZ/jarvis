@@ -6,6 +6,10 @@ import Foundation
 public final class BroadcastOverlay: OverlayRendering {
     private let sinks: [OverlayRendering]
 
+    public nonisolated func showCodeSnippet(_ snippet: CodeSnippet?) {
+        for sink in sinks { sink.showCodeSnippet(snippet) }
+    }
+
     public init(_ sinks: [OverlayRendering]) {
         self.sinks = sinks
     }

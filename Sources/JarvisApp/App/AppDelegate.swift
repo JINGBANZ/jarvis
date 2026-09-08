@@ -257,6 +257,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                 NSSound.beep() // ghost-mode-allowed: explicit user hotkey while stopped
                 return
             }
+            if shortcut == .showCode && !self.appearance.boxEnabled {
+                if self.appearance.captionEnabled {
+                    self.overlayCaption.render(["Turn on Overlay Box in Settings to show code."], perLineSeconds: [5])
+                } else {
+                    NSSound.beep() // ghost-mode-allowed: explicit code hotkey with both overlay surfaces disabled
+                }
+                return
+            }
             fire(shortcut)
         }
 

@@ -68,7 +68,7 @@ lazy lifecycle; its adaptive light/dark feed is simply framed by the same page a
 | `ConnectionsSection` | "Connections" | yes | Shared authentication and provider readiness in four stacked cards — **OpenAI API**, **Gemini API**, **Claude Code**, **Codex CLI**. OpenAI and Gemini each expose their own Jarvis-managed API-key editor (`APIKeyControls`, one instance per `Credential`); Claude Code and Codex CLI report their externally managed local-account state without importing or changing those accounts. Saving a key never restarts a live conversation: an established OpenAI Realtime or Gemini Live socket stays connected and picks up the new key only on its next reconnect. |
 | `OverlaySection` | "Overlay" | yes | Two matching cards, one per overlay surface — **Overlay Caption** (the transient on-screen tip) and **Overlay Box** (the persistent response history). Each card has an icon, description, On/Off toggle, and the same Text Size + Opacity row layout; the box also has **Show diagrams**, enabled by default. When a surface is **on** its rows and live sample appear only while the Overlay tab is selected (`didBecomeActive`/`didResignActive`); when **off**, its rows and sample are hidden and the card collapses. Persists via `OverlayAppearance`. |
 | `DisplaySection` | "Screen" | yes | One **Screen capture** card with the capture-scope dropdown — **Active window** (default) or one **Entire display** entry per connected display — followed by a concise fallback/privacy callout. Persists via `ScreenCapturePreferences` and applies to the next screenshot. |
-| `HotkeySection` | "Shortcuts" | yes | Independent **Give me a hint** and **Explain more** recorders, with per-binding failure feedback and persisted combinations. |
+| `HotkeySection` | "Shortcuts" | yes | Independent **Give me a hint**, **Explain more**, and **Show code** recorders, with per-binding failure feedback and persisted combinations. |
 | `ActivitySection` | "Activity" | yes | Embeds the `ActivityViewer` content (`makeContentView()` / `teardown()`) in the shared page/card shell so the adaptive light/dark feed stretches with the window. Its compact toolbar shows the selected session's exact directory ID with **Copy ID**. A session without a report shows **Evaluate**: one click runs the sole `AgenticEvaluator` through a locally installed Claude Code / Codex CLI over the source checkout plus the complete session directory, writes owner-only `eval-report.md`, and opens it. While it runs the button shows **Evaluating…**; afterward it becomes **Open report**, which reopens the saved result without another model run. The agent reads the full unfiltered `jarvis-activity.jsonl` whenever it needs the user-visible sequence and correlates it with `coaching-attempts.jsonl`, `brain-traffic.jsonl`, screenshots, and live source. The derived transcript leads with a neutral artifact/distribution/correlation-field index and normalized provider-call telemetry; missing evidence remains unavailable, and neither table declares a defect. The findings-driven prompt gives the read-only agent file and source-search tools instead of a historical-incident checklist, and the report uses generic Summary / Findings / Evidence gaps / Recommendations sections. `scripts/eval-session.sh` is a second launcher for this same `JarvisEvaluation` evaluator, not another evaluation path. `EvalReportPage` renders the markdown as `eval-report.html`; **Copy as Markdown** hands the raw report to an agent chat. Evaluation, report opening, and history clearing stay disabled through the live coaching/teardown lifecycle. |
 
 `AppDelegate` builds the section list at launch and passes it to `SettingsWindow`. All tabs are
@@ -168,8 +168,9 @@ preview is running. The plain setters
 
 ## Shortcuts
 
-**Give me a hint** defaults to **⌥⌘J**; **Explain more** defaults to **⌥⌘E**. Both work during a
-session as fallbacks for proactive coaching; [architecture.md](./architecture.md#on-demand-hint-j)
+**Give me a hint** defaults to **⌥⌘J**, **Explain more** to **⌥⌘E**, and **Show code** to **⌥⌘K**.
+They work during a session; code is available in Coding and general sessions only. Hints and
+explanations are fallbacks for proactive coaching, while code requires its explicit hotkey; [architecture.md](./architecture.md#on-demand-hint-j)
 defines their context, output, and scheduling behavior. Each card uses `HotkeyBindingView` and the
 existing recorder, requiring Command or Option. A successful rebind takes effect immediately and
 persists only that shortcut through `HotkeyPreferences`; defaults and storage keys live in
@@ -183,12 +184,16 @@ remain available even if the shortcut cannot register. `ExplanationPreferences` 
 its coaching policy is snapshotted into `SessionPlan` at Start and each explicit edit, so it applies
 from the next attempt while a current answer can finish. Ordinary hints remain available.
 
-A collision with another application or the other Jarvis shortcut leaves the old working binding
+A collision with another application or another Jarvis shortcut leaves the old working binding
 active and displays feedback for that card. If no binding could be registered at launch, its warning
-persists across tab visits. The two cards scroll at small window sizes, including when both warnings
+persists across tab visits. The three cards scroll at small window sizes, including when registration warnings
 are visible. The Overlay Box distinguishes semibold hints from regular explanation paragraphs with an
 **Explanation** label and spacing. Both bodies use the configured text size; the appearance preview
 shows an example. Neither surface's visibility preference changes.
+
+**Show code** is independent of **Enable explanations** and requires Overlay Box to be enabled.
+Its snippet occupies the [dedicated code area](./architecture.md#on-demand-hint-j); incoming hints
+leave it in place. The appearance preview includes a sample snippet.
 
 ## Brain
 

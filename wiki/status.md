@@ -274,11 +274,19 @@ playback, remains in
 
 ## Built
 
+**Show code** supplies the next contextual coding component through an explicit configurable hotkey.
+[`CodeSnippet`](../Sources/JarvisCore/Overlay/CodeSnippet.swift) validates bounded attachments;
+[`OverlayBoxPanel`](../Sources/JarvisOverlay/OverlayBoxPanel.swift) keeps them in a syntax-colored
+bottom dock while hints continue above. Runtime authorization prevents automatic code delivery.
+See [architecture.md](./architecture.md#on-demand-hint-j) for behavior and failure handling.
+Signed synthetic dock/shortcut checks and model scenarios cover the feature; real interview audio,
+capture, cross-app shortcuts, and screen-sharing exclusion still need live verification.
+
 Proactive clarification and a separate **Explain more** shortcut share the existing coach loop.
 [`JarvisPrompts.Coach`](../Sources/JarvisCore/Prompts/JarvisPrompts+Coach.swift) supplies the policy across
 formats; `speak.explanation` carries fuller plain-text detail into the persistent overlay box and
 Activity while captions stay short. Semibold hints and labeled, regular-weight explanation paragraphs
-remain visually distinct at the configured text size. Both shortcuts are independently configurable in Settings; **Enable explanations** controls
+remain visually distinct at the configured text size. Hint and explanation shortcuts are independently configurable in Settings; **Enable explanations** controls
 automatic detail and its shortcut while retaining the saved binding;
 see [architecture.md → On-demand hint](./architecture.md#on-demand-hint-j).
 
@@ -286,7 +294,7 @@ System Design sessions support [private high-level architecture hints](./archite
 [`DiagramHint`](../Sources/JarvisCore/Overlay/DiagramHint.swift) validates a small Mermaid subset, and
 [`DiagramHintImage`](../Sources/JarvisOverlay/DiagramHintImage.swift) renders boxes and arrows alongside
 the hint inside the capture-excluded overlay box. Graphs scale proportionally with the window;
-Settings → Overlay → Overlay Box offers **Show diagrams**, enabled by default. Other formats remain text-only.
+Settings → Overlay → Overlay Box offers **Show diagrams**, enabled by default. Diagrams are limited to System Design.
 
 Tested `JarvisCore` + `JarvisBrainProviders` + `JarvisEvaluation` + `JarvisOverlay` + `JarvisScreenCapture` harness is green
 (`./scripts/run-tests.sh`); `JarvisApp` is the thin OS shell, verified by the smoke run.
@@ -312,7 +320,7 @@ Tested `JarvisCore` + `JarvisBrainProviders` + `JarvisEvaluation` + `JarvisOverl
 - `Sources/JarvisApp/Capture/` — one-clock aggregate mic + sample-preserving system-audio capture that starts without waiting for a system-audio writer, with AEC3 echo cancellation, Silero voice-activity detection, and resampling to whichever wire rate the selected provider requires (`AggregateEchoCapture`, `WebRTCEchoCanceller`, `SileroVoiceActivityDetector`, `Resampler`); provider construction (`TranscriptionSessionFactory`); OpenAI Realtime item/readiness/liveness/transactional-reconnect handling (`RealtimeTranscriber`); Gemini Live readiness/liveness/reconnect handling with server-owned finalization and no client-managed ledger (`GeminiLiveTranscriber`); macOS 26+ on-device final-result transcription and model preparation (`AppleSpeechTranscriber`, `AppleSpeechModelPreparation`); continuity/network diagnostics; permission reporting and requesting, including the self-tap tone probe that is the only way to ask for or prove the silently-enforced system-audio grant (`Permissions`, `SystemAudioPermissionProbe`); plus the window-scoped screenshot + OCR edge (`WindowScopedScreenCapture`, `ScreenTextRecognizer`).
 - `Sources/JarvisApp/Onboarding/` — the launch permission gate that gathers Microphone, System Audio Recording, and Screen Recording one dialog at a time and keeps Jarvis closed until it holds all three, so no TCC prompt appears mid-session (`PermissionGate`, `PermissionsChecklistView`) ([architecture.md → Permissions](./architecture.md#permissions)).
 - `Sources/JarvisApp/Settings/` — the unified Settings window (`SettingsWindow` hosting Brain behavior, shared Connections, Overlay, Screen, Prep material, and Activity sections), with shared page, rounded-card, responsive-row, and scroll primitives so every tab keeps one visual system without coupling section behavior.
-- `Sources/JarvisApp/Shortcuts/HotkeyController.swift` — the global Carbon hint and Explain more shortcuts, with independent persisted bindings.
+- `Sources/JarvisApp/Shortcuts/HotkeyController.swift` — the global Carbon hint, Explain more, and Show code shortcuts, with independent persisted bindings.
 - `Sources/JarvisApp/Viewer/ActivityViewer.swift` — the in-app `WKWebView` activity viewer, with the current non-persisted readiness badge, an exact selectable/copyable session ID, and one-click **Evaluate** / **Open report** agentic audit flow.
 - `Sources/EvalPrep/main.swift` — the Foundation-only terminal entry point for the same `AgenticEvaluator` Activity invokes; `scripts/eval-session.sh` runs it over the repo + session dir.
 - `Sources/CJarvisAEC/lib/libjarvis-aec.a` — the prebuilt, zero-dylib WebRTC AEC3 native edge (the `CJarvisAEC` target; rebuilt by `scripts/build-aec.sh`).

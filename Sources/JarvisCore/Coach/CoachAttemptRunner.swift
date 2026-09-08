@@ -166,6 +166,14 @@ final class CoachAttemptRunner: @unchecked Sendable {
             return AttemptExecution(id: nil, result: .skipped(.cancelled))
         }
 
+        if pendingWork.reason == .manualCode, let interviewFormat, interviewFormat != .coding {
+            let lines = ["Show code is available in Coding sessions."]
+            overlay.showCodeSnippet(nil)
+            overlay.render(lines, perLineSeconds: lines.map { OverlayTiming.displaySeconds(for: $0, config: config) })
+            activity?.record(.tip(lines: lines))
+            return AttemptExecution(id: nil, result: .skipped(.spoke))
+        }
+
         var work = pendingWork
         let reason = work.reason
         if case .silence(let seconds) = reason {
@@ -233,8 +241,11 @@ final class CoachAttemptRunner: @unchecked Sendable {
         if reason.isManual && work.preparedManualReason != reason {
             if let prompt = context.promptLine {
                 jlog("⌨️ coaching shortcut — \(prompt)")
-                activity?.record(reason == .manualExplanation
-                    ? .manualExplanation(prompt: prompt) : .manualHint(prompt: prompt))
+                switch reason {
+                case .manualCode: activity?.record(.manualCode(prompt: prompt))
+                case .manualExplanation: activity?.record(.manualExplanation(prompt: prompt))
+                default: activity?.record(.manualHint(prompt: prompt))
+                }
             }
             let screen = self.screen
             let shot = await Self.captureScreen(using: screen, selecting: attempt.plan.screen)
@@ -416,14 +427,19 @@ final class CoachAttemptRunner: @unchecked Sendable {
                             newPhase: .captureScreenContinuation)
                     }
 
-                case .speak(let callID, let lines, let mermaid, let requestedExplanation):
+                case .speak(let callID, let lines, let mermaid, let requestedExplanation, let requestedCode):
                     let explanation = attempt.plan.explanationsEnabled ? requestedExplanation : nil
                     if Task.isCancelled {
                         jlog("… attempt cancelled (stopped) before speaking")
                         return .cancelled
                     }
                     jlog("💬 \(lines.joined(separator: " "))")
-                    activity?.record(.tip(lines: lines + (explanation.map { [$0] } ?? [])))
+                    // The model may propose code on any turn, but only this explicit manual intent
+                    // can replace the dock. Natural hints leave the user's pinned snippet alone.
+                    let code = reason == .manualCode ? requestedCode : nil
+                    if reason == .manualCode { overlay.showCodeSnippet(code) }
+                    let codeText = code.map { "\($0.placement)\n\($0.code)" }
+                    activity?.record(.tip(lines: lines + (explanation.map { [$0] } ?? []) + (codeText.map { [$0] } ?? [])))
                     let diagram = interviewFormat == .systemDesign ? mermaid.flatMap(DiagramHint.init) : nil
                     if mermaid != nil && diagram == nil {
                         jlog("Diagram hint omitted: unsupported graph or interview format")

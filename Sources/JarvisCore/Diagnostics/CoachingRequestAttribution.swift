@@ -39,6 +39,7 @@ enum CoachingRequestAttribution {
         case .silence: "silence"
         case .manualHint: "manual_hint"
         case .manualExplanation: "manual_explanation"
+        case .manualCode: "manual_code"
         }
     }
 }

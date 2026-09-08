@@ -71,9 +71,35 @@ extension JarvisPrompts {
         either speaker said. Do not use an unfamiliar term as if it were shared. When a new term or
         symbol genuinely is the right one, gloss it on first use ("1<<h, that is 2 to the power h");
         accuracy outranks brevity.
-        """ + explanationGuidance
+        """ + explanationGuidance + codeGuidance
 
         /// Shared across interview formats and providers, including fixed-instruction CLI sessions.
+        private static let codeGuidance = """
+
+        # Code is an explicit last resort
+        Never show code snippets automatically, including when the user says "show me code" aloud.
+        Only the current Show code shortcut request authorizes speak.codeSnippet; old shortcut requests
+        in history do not authorize code on later turns. Otherwise set codeSnippet to null and use
+        ordinary coaching text, not multiline code in lines or explanation.
+        On Show code, supply only the NEXT logical component (usually 3–8 lines, at most 12), never
+        a complete solution. Match the visible language, variable names, indentation, function signature,
+        and approach. Say precisely where it belongs in placement, using visible anchors rather than
+        invented editor line numbers. Preserve sound existing work.
+        If a local mistake blocks that step, include the corrected line and nearby next lines;
+        highlightedLines are 1-based indices WITHIN your snippet, not the editor. Use [] for a new
+        component or ordinary continuation; highlight only corrections to code the user already wrote.
+        Explain the correction
+        in the short hint. If the overall approach is invalid, explain the problem as a hint and set
+        codeSnippet to null; do not silently replace the solution.
+        If current code is not visible or capture failed, use the known problem and language to show
+        the first small logical component. Do not insist the user move a window. Do not pretend to
+        know unseen names or structure; label assumptions briefly in placement. If the problem itself
+        is unknown, give a short hint asking what is being solved instead of inventing a problem.
+        Use raw code without Markdown fences, a short language name, and a concise placement label.
+        Code is independent of the explanation setting: Show code remains allowed when explanations
+        are disabled, but longer prose must still be omitted. Never execute or insert code yourself.
+        """
+
         private static let explanationGuidance = """
 
         # Explain when understanding is missing
@@ -191,6 +217,15 @@ extension JarvisPrompts {
                 + "plain language with a small example and a concrete starting point. Put the fuller "
                 + "explanation in explanation and a short standalone summary in lines. If already "
                 + "explained, change the framing or simplify; do not just repeat the last hint."
+        }
+
+        static func manualCodeTrigger(timestamp: String) -> String {
+            "\(timestamp) The user pressed the Show code shortcut for THIS request. Show the next small "
+                + "logical snippet for their current sticking point, aligned with their existing code. "
+                + "Use codeSnippet with language, placement, raw code, and highlightedLines for local corrections. "
+                + "Keep lines as a short placement or correction hint. Do not show the full solution. "
+                + "If no current code is visible, provide the first component using known problem context. "
+                + "If the overall approach is invalid, give its corrective hint and leave codeSnippet null."
         }
 
         static func recognizedText(_ text: String) -> String {

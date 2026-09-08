@@ -78,7 +78,7 @@ moments the model judges worthwhile.
    progress is consumed from the module stream.
    Natural triggers coalesce while waiting. Each finalized turn carries its transcript boundary, so
    a delayed transcript-batch callback arriving after another attempt committed that same line is
-   consumed instead of buying a duplicate request. Either explicit coaching shortcut bypasses this wait.
+   consumed instead of buying a duplicate request. Any explicit coaching shortcut bypasses this wait.
    The CoachDriver then calls the brain on every trigger that carries **substance** — there is no
    cooldown, rate cap, or wake-word gate. Whether to speak (and whether the user just addressed
    Jarvis) is the model's call, governed by the system prompt; the only hard gates are the user's
@@ -180,14 +180,15 @@ or unchanged code alone does not. Repeated confusion calls for simpler framing o
 while productive progress calls for silence. This policy applies across interview formats without a
 separate classifier, timer, or model request.
 
-Two configurable global shortcuts are fallbacks for a missed need: **Give me a hint** (default
+Three configurable global shortcuts are fallbacks for a missed need: **Give me a hint** (default
 **⌥⌘J**) requests the next useful hint; **Explain more** (default **⌥⌘E**) explicitly requests
-clarification of the relevant gap, which may span several earlier hints. Both snapshot a fresh screen,
+clarification of the relevant gap, which may span several earlier hints; **Show code** (default
+**⌥⌘K**) requests the next small coding component. All snapshot a fresh screen,
 include the available conversation, and force `speak` in one brain round trip. If capture fails, the
 request identifies the missing screen and uses available context without inventing visible details.
 They share the ordinary single-flight coach loop and provider route. Natural wakes preserve pending
 manual intent; the latest explicit shortcut chooses its kind. A fresh manual press may bypass unsettled
-transcription, while an automatic retry waits for settlement. Stop cancels either request; while stopped,
+transcription, while an automatic retry waits for settlement. Stop cancels any request; while stopped,
 an explicit shortcut only beeps. Activity records which shortcut was pressed.
 
 The `speak` action keeps short `lines` for captions and an optional plain-text `explanation` for fuller
@@ -208,11 +209,29 @@ Explanation text follows the existing coaching history and Activity paths. It op
 never activates Jarvis, and respects the box's enabled/session visibility. Disabling the box leaves
 only the brief caption if that surface is enabled; it does not force a hidden surface on.
 
+**Show code** is authorized only by the current manual code request in Coding or general sessions.
+`CoachAttemptRunner` discards code attachments on every other trigger, including spoken requests.
+The fixed `speak.codeSnippet` schema carries language, placement, code, and corrected-line indices;
+[`CodeSnippet`](../Sources/JarvisCore/Overlay/CodeSnippet.swift) bounds and validates it without
+truncating code. Invalid attachments retain the useful text hint. The prompt requests one logical
+component matching visible names, language, and structure. Local mistakes include a highlighted
+correction and relevant next lines; an invalid overall approach receives a corrective hint instead.
+Without visible code, known problem context supports a first component without inventing unseen names.
+
+[`OverlayBoxPanel`](../Sources/JarvisOverlay/OverlayBoxPanel.swift) pins the snippet in a separate
+bottom scroll area inside the existing capture-excluded panel. Its opaque dark background preserves
+syntax contrast regardless of history opacity; monospace text uses the configured size. Hints and
+explanations cannot replace the dock. Dismiss, a new code response (including one without code), or
+session clear removes it. Settings preview restores the real snippet on close. The caption carries
+only the short hint; Activity includes the accepted placement and code. Explanation preferences do
+not govern code. A disabled box produces existing-surface feedback on the explicit hotkey without
+starting a model request or enabling the box.
+
 Shortcuts use **Carbon `RegisterEventHotKey`**, which needs no Accessibility/TCC permission.
 [`CoachingShortcut`](../Sources/JarvisCore/Config/CoachingShortcut.swift) provides stable event identities;
 `HotkeyController` dispatches only matching Jarvis events. Each binding persists independently through
 `HotkeyPreferences`. Registering a replacement happens before releasing the old binding, so a
-collision—including the other Jarvis shortcut—keeps the prior working binding. See
+collision—including another Jarvis shortcut—keeps the prior working binding. See
 [Settings → Shortcuts](./settings-window.md#shortcuts).
 
 ## 3. Components

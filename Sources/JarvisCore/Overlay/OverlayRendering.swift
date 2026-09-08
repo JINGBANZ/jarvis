@@ -2,6 +2,8 @@ import Foundation
 
 /// What the overlay needs to do; the real NSPanel impl lives in JarvisOverlay.
 public protocol OverlayRendering: AnyObject {
+    /// Replace the independent code area; nil clears it. Text-only sinks ignore this.
+    func showCodeSnippet(_ snippet: CodeSnippet?)
     /// Render `lines` one at a time, each shown for the matching entry in `perLineSeconds` (so a
     /// line's time can scale with its length — see `OverlayTiming`). The brain returns the lines
     /// already split (the `speak` tool's `lines` array), so there is no client-side sentence splitting.
@@ -12,6 +14,8 @@ public protocol OverlayRendering: AnyObject {
 }
 
 extension OverlayRendering {
+    public func showCodeSnippet(_ snippet: CodeSnippet?) {}
+
     /// Captions retain the short lines; the persistent box implements the fuller detail.
     public func render(_ lines: [String], perLineSeconds: [TimeInterval], diagram: DiagramHint?, explanation: String?) {
         render(lines, perLineSeconds: perLineSeconds, diagram: diagram)

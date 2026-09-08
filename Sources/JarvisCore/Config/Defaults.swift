@@ -110,6 +110,10 @@ public enum Defaults {
 
     /// Independent shortcuts for an immediate hint or explanation mid-session.
     public enum Hotkey {
+        public static let codeKeyCodeKey = "hotkey.code.keyCode"
+        public static let codeModifiersKey = "hotkey.code.modifiers"
+        /// kVK_ANSI_K. Code is requested only by this explicit shortcut.
+        public static let codeCombination = HotkeyCombination(keyCode: 40, modifiers: [.command, .option])
         public static let explanationKeyCodeKey = "hotkey.explanation.keyCode"
         public static let explanationModifiersKey = "hotkey.explanation.modifiers"
         /// kVK_ANSI_E, with the same modifiers as the hint shortcut.

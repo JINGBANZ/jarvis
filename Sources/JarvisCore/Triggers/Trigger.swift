@@ -8,8 +8,10 @@ public enum TriggerReason: Sendable, Equatable {
     case manualHint                           // capture + force a hint, one trip
     case manualExplanation                    // capture + explain the current confusion
 
+    case manualCode                           // capture + next logical snippet, hotkey only
+
     public var isManual: Bool {
-        self == .manualHint || self == .manualExplanation
+        self == .manualHint || self == .manualExplanation || self == .manualCode
     }
 }
 
@@ -41,6 +43,8 @@ public struct TriggerContext: Sendable {
             return JarvisPrompts.Coach.manualHintTrigger(timestamp: stamp)
         case .manualExplanation:
             return JarvisPrompts.Coach.manualExplanationTrigger(timestamp: stamp)
+        case .manualCode:
+            return JarvisPrompts.Coach.manualCodeTrigger(timestamp: stamp)
         }
     }
 
