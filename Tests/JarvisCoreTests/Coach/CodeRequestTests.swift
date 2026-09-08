@@ -4,7 +4,7 @@ import Testing
 
 @Suite struct CodeRequestTests {
     @Test(arguments: [TriggerReason.turnEnd, .manualHint, .manualExplanation])
-    func ordinaryTriggersCannotDeliverCode(_ reason: TriggerReason) async throws {
+    func disabledTriggersCannotDeliverCode(_ reason: TriggerReason) async throws {
         let snippet = try #require(CodeSnippet(language: "Python", placement: "Inside your loop", code: "seen[ch] = right"))
         let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s", lines: ["Remember this position."], codeSnippet: snippet)])])
         let transcript = RollingTranscript()
@@ -12,7 +12,7 @@ import Testing
         let sink = CodeRequestSink()
         let driver = makeDriver(brain, transcript, sink)
         #expect(await driver.handleTrigger(reason) == .spoke)
-        #expect(sink.codeUpdates.isEmpty)
+        #expect(sink.codeUpdates == [nil])
         #expect(sink.lines == ["Remember this position."])
     }
 
@@ -28,7 +28,7 @@ import Testing
         let sink = CodeRequestSink()
         let screen = FakeScreen()
         let driver = makeDriver(brain, transcript, sink, screen: screen)
-        driver.updatePlan(SessionPlan(revision: 1, screen: SessionPlan.default.screen, explanationsEnabled: false))
+        driver.updatePlan(SessionPlan(revision: 1, screen: SessionPlan.default.screen, explanationsEnabled: false, codeEnabled: true))
         #expect(await driver.handleTrigger(.manualCode) == .spoke)
         #expect(sink.codeUpdates.count == 1)
         #expect((sink.codeUpdates.last ?? nil) == snippet)
@@ -39,6 +39,59 @@ import Testing
         #expect(await driver.handleTrigger(.manualCode) == .spoke)
         #expect(sink.codeUpdates.count == 2)
         #expect((sink.codeUpdates.last ?? nil) == nil)
+    }
+
+    @Test(arguments: [TriggerReason.turnEnd, .manualHint, .manualExplanation])
+    func enabledHintsDeliverMatchingCodeAndClearOnNextHint(_ reason: TriggerReason) async throws {
+        let snippet = try #require(CodeSnippet(language: "Python", placement: "In loop", code: "seen[ch] = right"))
+        let brain = ScriptedBrain(script: [
+            .init(toolCalls: [.speak(callId: "one", lines: ["Remember the position"], codeSnippet: snippet)]),
+            .init(toolCalls: [.speak(callId: "two", lines: ["Reconsider the approach"])])])
+        let transcript = RollingTranscript()
+        transcript.append(.init(speaker: .me, text: "I am stuck implementing the loop", at: 0))
+        let sink = CodeRequestSink()
+        let driver = makeDriver(brain, transcript, sink)
+        driver.updatePlan(SessionPlan(revision: 1, screen: SessionPlan.default.screen, codeEnabled: true))
+        #expect(await driver.handleTrigger(reason) == .spoke)
+        #expect(sink.codeUpdates.count == 1)
+        #expect((sink.codeUpdates.last ?? nil) == snippet)
+        #expect(await driver.handleTrigger(.manualHint) == .spoke)
+        #expect(sink.codeUpdates.count == 2)
+        #expect((sink.codeUpdates.last ?? nil) == nil)
+    }
+
+    @Test func codePreferenceDefaultsOffAndPersistsIndependently() {
+        let suite = "CodePreferencesTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let code = CodePreferences(defaults: defaults)
+        #expect(!code.isEnabled)
+        code.isEnabled = true
+        #expect(CodePreferences(defaults: defaults).isEnabled)
+        ExplanationPreferences(defaults: defaults).isEnabled = false
+        #expect(code.isEnabled)
+        code.isEnabled = false
+        #expect(!CodePreferences(defaults: defaults).isEnabled)
+    }
+
+    @Test func disabledManualCodeDoesNotRequestModel() async {
+        let brain = ScriptedBrain(script: [])
+        let screen = FakeScreen()
+        let driver = makeDriver(brain, RollingTranscript(), CodeRequestSink(), screen: screen)
+        #expect(await driver.handleTrigger(.manualCode) == .cancelled)
+        #expect(brain.calls.isEmpty)
+        #expect(screen.captureCount == 0)
+    }
+
+    @Test(arguments: [InterviewFormat.behavioral, .systemDesign])
+    func enabledNonCodingHintsStillSuppressCode(_ format: InterviewFormat) async throws {
+        let code = try #require(CodeSnippet(language: "Python", placement: "Start", code: "seen = {}"))
+        let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "one", lines: ["Consider the requirements"], codeSnippet: code)])])
+        let sink = CodeRequestSink()
+        let driver = makeDriver(brain, RollingTranscript(), sink, format: format)
+        driver.updatePlan(SessionPlan(revision: 1, screen: SessionPlan.default.screen, codeEnabled: true))
+        #expect(await driver.handleTrigger(.manualHint) == .spoke)
+        #expect(sink.codeUpdates == [nil])
     }
 
     @Test func malformedCodeRetainsUsefulHint() throws {
@@ -103,6 +156,7 @@ import Testing
         transcript.append(.init(speaker: .them, text: "Find the longest substring without repeats", at: 0))
         let sink = CodeRequestSink()
         let driver = makeDriver(brain, transcript, sink, screen: MissingCodeScreen())
+        driver.updatePlan(SessionPlan(revision: 1, screen: SessionPlan.default.screen, codeEnabled: true))
         #expect(await driver.handleTrigger(.manualCode) == .spoke)
         #expect((sink.codeUpdates.last ?? nil) == snippet)
         #expect(brain.calls[0].contains { $0.text?.contains("failed") == true })

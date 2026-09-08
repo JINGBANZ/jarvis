@@ -36,6 +36,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     /// Whether the app's own surfaces exist yet. Nothing is built while the permission gate is up.
     private var didStartApp = false
     private let explanationPreferences = ExplanationPreferences()
+    private let codePreferences = CodePreferences()
+    private var hotkeySection: HotkeySection?
     private let hotkeyPreferences = CoachingShortcut.allCases.map { HotkeyPreferences(shortcut: $0) }
     /// Monotonic revision stamped on each control-plane snapshot. Bumped at Start and whenever an
     /// explicit Settings edit installs a fresh plan; never by runtime health.
@@ -173,6 +175,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         // On by default, but the box is a session surface: this only arms the switch. It reaches the
         // screen on Start (below) and leaves it on Stop, so a stopped Jarvis shows nothing.
         overlayBox.setEnabled(appearance.boxEnabled)
+        overlayBox.setCodeEnabled(codePreferences.isEnabled)
 
         // No updater in a development bundle (no feed URL), so the menu omits the item entirely.
         updates = UpdateController()
@@ -207,17 +210,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             onKeySaved: { [weak self] credential, key in
                 self?.applySavedAPIKeyToRunningSession(credential: credential, key: key)
             })
-        let sections: [SettingsSection] = [
-            brainSection,
-            connectionsSection,
-            OverlaySection(appearance: appearance, caption: overlayCaption, box: overlayBox),
-            DisplaySection(preferences: screenPreferences) { [weak self] in
-                self?.reapplySessionPlan()
-            },
-            PrepMaterialSection(preferences: prepMaterialPreferences),
-            HotkeySection(
+        let hotkeySection = HotkeySection(
                 preferences: hotkeyPreferences,
                 explanationPreferences: explanationPreferences,
+                codePreferences: codePreferences,
+                onCodeChanged: { [weak self] in
+                    guard let self else { return }
+                    self.overlayBox.setCodeEnabled(self.codePreferences.isEnabled)
+                    self.reapplySessionPlan()
+                },
                 onExplanationsChanged: { [weak self] in
                     guard let self else { return }
                     if self.explanationPreferences.isEnabled,
@@ -234,7 +235,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                     // being torn down is the only way this falls through — report failure rather
                     // than falsely claiming a rebind that never happened.
                     self?.hotkeys?.apply(combination, for: shortcut) ?? .failed(status: -1)
-                }),
+                })
+        self.hotkeySection = hotkeySection
+        let sections: [SettingsSection] = [
+            brainSection,
+            connectionsSection,
+            OverlaySection(appearance: appearance, caption: overlayCaption, box: overlayBox),
+            DisplaySection(preferences: screenPreferences) { [weak self] in
+                self?.reapplySessionPlan()
+            },
+            PrepMaterialSection(preferences: prepMaterialPreferences),
+            hotkeySection,
             ActivitySection(viewer: activityViewer),
         ]
         settingsWindow = SettingsWindow(sections: sections)
@@ -264,6 +275,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                     NSSound.beep() // ghost-mode-allowed: explicit code hotkey with both overlay surfaces disabled
                 }
                 return
+            }
+            if shortcut == .showCode {
+                self.codePreferences.isEnabled = true
+                self.overlayBox.setCodeEnabled(true)
+                self.hotkeySection?.didBecomeActive()
+                self.reapplySessionPlan()
             }
             fire(shortcut)
         }
@@ -1134,7 +1151,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     private func freshSessionPlan() -> SessionPlan {
         planRevision &+= 1
         return SessionPlan(revision: planRevision, screen: screenPreferences.selection,
-                           explanationsEnabled: explanationPreferences.isEnabled)
+                           explanationsEnabled: explanationPreferences.isEnabled,
+                           codeEnabled: codePreferences.isEnabled)
     }
 
     /// An explicit Settings edit takes effect at the next attempt. A turn already running keeps the

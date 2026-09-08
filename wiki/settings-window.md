@@ -170,7 +170,7 @@ preview is running. The plain setters
 
 **Give me a hint** defaults to **⌥⌘J**, **Explain more** to **⌥⌘E**, and **Show code** to **⌥⌘K**.
 They work during a session; code is available in Coding and general sessions only. Hints and
-explanations are fallbacks for proactive coaching, while code requires its explicit hotkey; [architecture.md](./architecture.md#on-demand-hint-j)
+explanations are fallbacks for proactive coaching; the code hotkey enables code and requests a snippet; [architecture.md](./architecture.md#on-demand-hint-j)
 defines their context, output, and scheduling behavior. Each card uses `HotkeyBindingView` and the
 existing recorder, requiring Command or Option. A successful rebind takes effect immediately and
 persists only that shortcut through `HotkeyPreferences`; defaults and storage keys live in
@@ -191,9 +191,13 @@ are visible. The Overlay Box distinguishes semibold hints from regular explanati
 **Explanation** label and spacing. Both bodies use the configured text size; the appearance preview
 shows an example. Neither surface's visibility preference changes.
 
-**Show code** is independent of **Enable explanations** and requires Overlay Box to be enabled.
-Its snippet occupies the [dedicated code area](./architecture.md#on-demand-hint-j); incoming hints
-leave it in place. The appearance preview includes a sample snippet.
+The **Show code** card includes **Show code with hints**, off by default, persisted by
+`CodePreferences`. On reserves the [dedicated code area](./architecture.md#on-demand-hint-j) and
+requests matching snippets alongside coding hints; off immediately hides and clears that area.
+Its hotkey stays registered and configurable while off: pressing it enables the setting and requests
+code for the current guidance. The visible switch refreshes if Settings is already open.
+Code remains independent of **Enable explanations** and requires Overlay Box to be enabled;
+its shortcut never changes the master Overlay Box visibility preference.
 
 ## Brain
 

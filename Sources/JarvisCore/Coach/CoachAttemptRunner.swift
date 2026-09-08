@@ -174,6 +174,10 @@ final class CoachAttemptRunner: @unchecked Sendable {
             return AttemptExecution(id: nil, result: .skipped(.spoke))
         }
 
+        guard pendingWork.reason != .manualCode || attempt.plan.codeEnabled else {
+            return AttemptExecution(id: nil, result: .skipped(.cancelled))
+        }
+
         var work = pendingWork
         let reason = work.reason
         if case .silence(let seconds) = reason {
@@ -234,6 +238,8 @@ final class CoachAttemptRunner: @unchecked Sendable {
         let historyBase: [ChatMessage] = [.system(systemPrompt)] + history.snapshot()
         // This setting is request context, never transcript/history. Keeping it out of the system
         // prompt lets a live toggle reuse the same CLI process and fixed instructions.
+        let codeAllowed = attempt.plan.codeEnabled && (interviewFormat == nil || interviewFormat == .coding)
+        let codeSetting: [ChatMessage] = codeAllowed ? [.user(JarvisPrompts.Coach.codeSetting(enabled: true))] : []
         let explanationSetting: [ChatMessage] = attempt.plan.explanationsEnabled ? [] : [
             .user(JarvisPrompts.Coach.explanationsDisabled)
         ]
@@ -326,7 +332,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         sequence: requestSequence)
                     response = try await CoachingRequestAttribution.$current.withValue(requestContext) {
                         try await conversation.respond(
-                            messages: historyBase + explanationSetting + turnMessages,
+                            messages: historyBase + explanationSetting + codeSetting + turnMessages,
                             tools: tools,
                             toolChoice: toolChoice)
                     }
@@ -434,10 +440,9 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         return .cancelled
                     }
                     jlog("💬 \(lines.joined(separator: " "))")
-                    // The model may propose code on any turn, but only this explicit manual intent
-                    // can replace the dock. Natural hints leave the user's pinned snippet alone.
-                    let code = reason == .manualCode ? requestedCode : nil
-                    if reason == .manualCode { overlay.showCodeSnippet(code) }
+                    // Replace or clear alongside every hint so code always belongs to that guidance.
+                    let code = codeAllowed ? requestedCode : nil
+                    overlay.showCodeSnippet(code)
                     let codeText = code.map { "\($0.placement)\n\($0.code)" }
                     activity?.record(.tip(lines: lines + (explanation.map { [$0] } ?? []) + (codeText.map { [$0] } ?? [])))
                     let diagram = interviewFormat == .systemDesign ? mermaid.flatMap(DiagramHint.init) : nil

@@ -86,6 +86,7 @@ import Testing
         transcript.append(.init(speaker: .me, text: "Let's work through this problem", at: 0))
         let screen = FakeScreen()
         let driver = makeDriver(brain: brain, transcript: transcript, screen: screen, overlay: FakeOverlay())
+        driver.updatePlan(SessionPlan(revision: 1, screen: SessionPlan.default.screen, codeEnabled: true))
         let task = Task { await driver.handleTrigger(.turnEnd) }
         await gate.waitUntilEntered()
         let first: TriggerReason = latest == .manualHint ? .manualExplanation : .manualHint

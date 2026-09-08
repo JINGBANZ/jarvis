@@ -274,10 +274,12 @@ playback, remains in
 
 ## Built
 
-**Show code** supplies the next contextual coding component through an explicit configurable hotkey.
+**Show code with hints** optionally supplies the next contextual coding component with each hint.
+Its configurable fallback hotkey turns the setting on and requests code for the current guidance.
 [`CodeSnippet`](../Sources/JarvisCore/Overlay/CodeSnippet.swift) validates bounded attachments;
 [`OverlayBoxPanel`](../Sources/JarvisOverlay/OverlayBoxPanel.swift) keeps them in a syntax-colored
-bottom dock while hints continue above. Runtime authorization prevents automatic code delivery.
+bottom dock while hints continue above. Runtime authorization suppresses code when the setting is off;
+each new hint replaces or clears its matching snippet.
 See [architecture.md](./architecture.md#on-demand-hint-j) for behavior and failure handling.
 Signed synthetic dock/shortcut checks and model scenarios cover the feature; real interview audio,
 capture, cross-app shortcuts, and screen-sharing exclusion still need live verification.

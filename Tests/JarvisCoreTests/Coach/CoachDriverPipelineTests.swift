@@ -2002,6 +2002,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let (driver, transcript) = makeDriver(
             brain: brain,
             clock: ManualClock())
+        driver.updatePlan(SessionPlan(revision: 1, screen: SessionPlan.default.screen, codeEnabled: true))
         transcript.append(.init(speaker: .me, text: "first attempt", at: 0))
 
         async let outcome = driver.handleTrigger(.turnEnd)
@@ -2024,6 +2025,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             brain: brain,
             clock: ManualClock(),
             automaticAttemptDelay: { _ in await delayGate.enter() })
+        driver.updatePlan(SessionPlan(revision: 1, screen: SessionPlan.default.screen, codeEnabled: true))
         driver.updateTranscriptionWork(true, for: .them)
 
         let outcome = Task {

@@ -4,8 +4,29 @@ import Testing
 @testable import JarvisOverlay
 
 @Suite struct CodeSnippetRenderingTests {
+    @MainActor @Test func codeSettingControlsEmptyDockAndRejectsLateOutput() async throws {
+        let box = OverlayBoxPanel()
+        #expect(box.currentCodeHeight == 0)
+        box.setCodeEnabled(true)
+        #expect(box.currentCodeHeight > 0)
+        #expect(box.currentCodeSnippet == nil)
+        let code = try #require(CodeSnippet(language: "Python", placement: "Start", code: "seen = {}"))
+        box.showCodeSnippet(code)
+        box.setCodeEnabled(false)
+        try await Task.sleep(for: .milliseconds(30))
+        #expect(box.currentCodeHeight == 0)
+        #expect(box.currentCodeSnippet == nil)
+        box.showAppearancePreview(true)
+        #expect(box.currentCodeHeight == 0)
+        box.showAppearancePreview(false)
+        box.setCodeEnabled(true)
+        #expect(box.currentCodeSnippet == nil)
+        #expect(box.currentCodeHeight > 0)
+    }
+
     @MainActor @Test func hintsDoNotReplaceCodeAndPreviewRestoresUntilClearOrStop() async throws {
         let box = OverlayBoxPanel()
+        box.setCodeEnabled(true)
         let snippet = try #require(CodeSnippet(language: "swift", placement: "Inside solve", code: "  return value"))
         BroadcastOverlay([box]).showCodeSnippet(snippet)
         for _ in 0..<100 where box.currentCodeSnippet != snippet { try await Task.sleep(for: .milliseconds(10)) }
@@ -34,6 +55,7 @@ import Testing
 
     @MainActor @Test func dockHeightIsBoundedAndDisabledBoxStaysHidden() async throws {
         let box = OverlayBoxPanel(contentSize: NSSize(width: 320, height: 240))
+        box.setCodeEnabled(true)
         box.setFontSize(32)
         let snippet = try #require(CodeSnippet(language: "python", placement: "Inside solve",
             code: "for item in items:\n    if item:\n        result.append(item)\nreturn result"))
@@ -53,6 +75,7 @@ import Testing
 
     @MainActor @Test func minimumBoxKeepsCodeReadableAndPlacementScrollableWithoutTooltips() async throws {
         let box = OverlayBoxPanel(contentSize: NSSize(width: 240, height: 140))
+        box.setCodeEnabled(true)
         let snippet = try #require(CodeSnippet(language: "swift",
             placement: "Inside solve, after collecting the current window and before updating the result with the next candidate", code: "return result"))
         box.showCodeSnippet(snippet)
@@ -76,6 +99,7 @@ import Testing
         let snippet = try #require(CodeSnippet(language: "swift", placement: "Inside solve",
             code: "let next = value + 1\nresult.append(next)\nreturn result"))
         let box = OverlayBoxPanel(contentSize: NSSize(width: 580, height: 420))
+        box.setCodeEnabled(true)
         box.setFontSize(18)
         box.showCodeSnippet(snippet)
         for _ in 0..<100 where box.currentCodeSnippet == nil { try await Task.sleep(for: .milliseconds(10)) }

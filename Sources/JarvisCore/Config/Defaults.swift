@@ -103,6 +103,11 @@ public enum Defaults {
     // MARK: - Hotkey
 
     /// Availability of fuller explanations and their manual fallback.
+    public enum Code {
+        public static let enabledKey = "coaching.codeEnabled"
+        public static let enabled = false
+    }
+
     public enum Explanations {
         public static let enabledKey = "coaching.explanationsEnabled"
         public static let enabled = true

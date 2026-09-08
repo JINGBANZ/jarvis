@@ -9,6 +9,7 @@ final class CodeSnippetView: NSView {
     var onDismiss: (() -> Void)?
     private let title = NSTextField(labelWithString: "")
     private let scroll = NSScrollView()
+    private let emptyLabel = NSTextField(wrappingLabelWithString: "Code for your next coding hint will appear here.")
     private let document = CodeSnippetDocumentView(frame: .zero)
     private(set) var snippet: CodeSnippet?
     var codeText: NSAttributedString { document.codeText }
@@ -36,7 +37,9 @@ final class CodeSnippetView: NSView {
         scroll.autohidesScrollers = true
         scroll.drawsBackground = false
         scroll.documentView = document
-        for view in [title, dismissButton, scroll] { addSubview(view) }
+        emptyLabel.textColor = NSColor(white: 0.8, alpha: 1)
+        emptyLabel.font = .systemFont(ofSize: 13)
+        for view in [title, dismissButton, scroll, emptyLabel] { addSubview(view) }
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -46,13 +49,19 @@ final class CodeSnippetView: NSView {
         title.frame = NSRect(x: 14, y: bounds.height - 25, width: max(0, bounds.width - 100), height: 18)
         dismissButton.frame = NSRect(x: bounds.width - 78, y: bounds.height - 27, width: 66, height: 22)
         scroll.frame = NSRect(x: 0, y: 0, width: bounds.width, height: max(0, bounds.height - 28))
+        emptyLabel.frame = NSRect(x: 14, y: 12, width: max(0, bounds.width - 28), height: max(0, bounds.height - 44))
         document.fit(viewportWidth: scroll.contentSize.width)
     }
 
-    func show(_ snippet: CodeSnippet?, fontSize: CGFloat) {
+    func show(_ snippet: CodeSnippet?, fontSize: CGFloat, enabled: Bool = true) {
         let changed = self.snippet != snippet
         self.snippet = snippet
-        isHidden = snippet == nil
+        isHidden = !enabled
+        emptyLabel.isHidden = snippet != nil
+        scroll.isHidden = snippet == nil
+        dismissButton.isHidden = snippet == nil
+        title.stringValue = "CODE"
+        needsLayout = true
         guard let snippet else { return }
         title.stringValue = snippet.language.isEmpty ? "CODE" : "CODE · \(snippet.language)"
         document.show(snippet, fontSize: fontSize)

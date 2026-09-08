@@ -209,8 +209,10 @@ Explanation text follows the existing coaching history and Activity paths. It op
 never activates Jarvis, and respects the box's enabled/session visibility. Disabling the box leaves
 only the brief caption if that surface is enabled; it does not force a hidden surface on.
 
-**Show code** is authorized only by the current manual code request in Coding or general sessions.
-`CoachAttemptRunner` discards code attachments on every other trigger, including spoken requests.
+**Show code with hints** enables matching snippets in Coding or general sessions, defaulting off.
+`CoachAttemptRunner` accepts attachments only when the frozen `SessionPlan.codeEnabled` is true.
+An enabled per-attempt notice stays outside committed history and the fixed CLI instructions.
+The Show code shortcut enables the persisted setting and requests code for the current guidance.
 The fixed `speak.codeSnippet` schema carries language, placement, code, and corrected-line indices;
 [`CodeSnippet`](../Sources/JarvisCore/Overlay/CodeSnippet.swift) bounds and validates it without
 truncating code. Invalid attachments retain the useful text hint. The prompt requests one logical
@@ -220,9 +222,11 @@ Without visible code, known problem context supports a first component without i
 
 [`OverlayBoxPanel`](../Sources/JarvisOverlay/OverlayBoxPanel.swift) pins the snippet in a separate
 bottom scroll area inside the existing capture-excluded panel. Its opaque dark background preserves
-syntax contrast regardless of history opacity; monospace text uses the configured size. Hints and
-explanations cannot replace the dock. Dismiss, a new code response (including one without code), or
-session clear removes it. Settings preview restores the real snippet on close. The caption carries
+syntax contrast regardless of history opacity; monospace text uses the configured size. Each new hint
+replaces its snippet, or clears the previous code when none is appropriate, so guidance and code agree.
+Dismiss and session clear remove the snippet. While enabled, an empty code area remains reserved;
+disabling code immediately hides it, clears it, and rejects late delivery while off. Settings preview
+includes code only when enabled and restores the real snippet on close. The caption carries
 only the short hint; Activity includes the accepted placement and code. Explanation preferences do
 not govern code. A disabled box produces existing-surface feedback on the explicit hotkey without
 starting a model request or enabling the box.

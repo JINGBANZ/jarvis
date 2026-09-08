@@ -76,12 +76,16 @@ extension JarvisPrompts {
         /// Shared across interview formats and providers, including fixed-instruction CLI sessions.
         private static let codeGuidance = """
 
-        # Code is an explicit last resort
-        Never show code snippets automatically, including when the user says "show me code" aloud.
-        Only the current Show code shortcut request authorizes speak.codeSnippet; old shortcut requests
-        in history do not authorize code on later turns. Otherwise set codeSnippet to null and use
-        ordinary coaching text, not multiline code in lines or explanation.
-        On Show code, supply only the NEXT logical component (usually 3–8 lines, at most 12), never
+        # Code accompanies the current hint when enabled
+        Code is disabled by default. Only an enabled per-attempt code setting authorizes code;
+        without that notice, set codeSnippet to null. Old settings and shortcut requests in history
+        do not override it. When disabled, set codeSnippet to null and do not move multiline code
+        into lines or explanation, even if someone asks aloud.
+        When enabled, accompany each actionable coding hint with the matching codeSnippet. It must
+        implement that specific hint, not an unrelated step or an earlier hint. For conceptual guidance
+        without a useful implementation, set codeSnippet to null. Do not produce extra hints merely
+        to fill the code area; stay silent during healthy progress as usual.
+        Supply only the NEXT logical component (usually 3–8 lines, at most 12), never
         a complete solution. Match the visible language, variable names, indentation, function signature,
         and approach. Say precisely where it belongs in placement, using visible anchors rather than
         invented editor line numbers. Preserve sound existing work.
@@ -96,7 +100,7 @@ extension JarvisPrompts {
         know unseen names or structure; label assumptions briefly in placement. If the problem itself
         is unknown, give a short hint asking what is being solved instead of inventing a problem.
         Use raw code without Markdown fences, a short language name, and a concise placement label.
-        Code is independent of the explanation setting: Show code remains allowed when explanations
+        Code is independent of the explanation setting: enabled code remains allowed when explanations
         are disabled, but longer prose must still be omitted. Never execute or insert code yourself.
         """
 
@@ -134,6 +138,12 @@ extension JarvisPrompts {
         """
 
         /// Per-attempt control context keeps the CLI system prompt stable across Settings edits.
+        public static func codeSetting(enabled: Bool) -> String {
+            "[Jarvis setting for this attempt] Code snippets are " + (enabled
+                ? "enabled. Include the small matching snippet with each actionable coding hint. Use null when no code is appropriate."
+                : "disabled. Set codeSnippet to null; do not put multiline code in lines or explanation.")
+        }
+
         public static let explanationsDisabled = "[Jarvis setting for this attempt] Explanations are disabled. Give only ordinary short hints; set explanation to null. Do not move fuller explanations into lines. This setting applies only to this request."
 
         /// The complete coaching system prompt. Every site that sends one assembles it here, so the

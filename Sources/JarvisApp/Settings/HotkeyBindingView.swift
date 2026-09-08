@@ -13,6 +13,8 @@ import JarvisCore
 final class HotkeyBindingView: NSObject {
 
     private let preferences: HotkeyPreferences
+    private let codePreferences: CodePreferences?
+    private let onCodeChanged: () -> Void
     private let explanationPreferences: ExplanationPreferences?
     private let onExplanationsChanged: () -> Void
     private var explanationSwitch: NSSwitch?
@@ -22,7 +24,7 @@ final class HotkeyBindingView: NSObject {
     private var isEnabled: Bool { explanationPreferences?.isEnabled ?? true }
     private var cardHeight: CGFloat {
         SettingsStyle.cardHeaderHeight
-            + (explanationPreferences == nil ? 0 : SettingsStyle.rowHeight)
+            + (explanationPreferences == nil && codePreferences == nil ? 0 : SettingsStyle.rowHeight)
             + (isEnabled ? SettingsStyle.rowHeight : 0)
     }
     /// Whether the controller currently has *any* combination registered. This is the only thing
@@ -51,10 +53,14 @@ final class HotkeyBindingView: NSObject {
     init(
         preferences: HotkeyPreferences,
         explanationPreferences: ExplanationPreferences? = nil,
+        codePreferences: CodePreferences? = nil,
+        onCodeChanged: @escaping () -> Void = {},
         onExplanationsChanged: @escaping () -> Void = {},
         hasActiveHotkey: @escaping () -> Bool,
         applyCombination: @escaping (HotkeyCombination) -> HotkeyRegistrationOutcome
     ) {
+        self.codePreferences = codePreferences
+        self.onCodeChanged = onCodeChanged
         self.preferences = preferences
         self.explanationPreferences = explanationPreferences
         self.onExplanationsChanged = onExplanationsChanged
@@ -75,7 +81,7 @@ final class HotkeyBindingView: NSObject {
         let card = SettingsCardView(frame: NSRect(x: 0, y: 0, width: 712, height: cardHeight))
         card.translatesAutoresizingMaskIntoConstraints = false
         card.setHeader(title: preferences.shortcut.title, detail: preferences.shortcut == .showCode
-            ? "Coding · hotkey only" : "Works only while a session is running")
+            ? "Coding · snippets follow your hints" : "Works only while a session is running")
         let row = SettingsRowView(
             title: "Shortcut",
             detail: "Requires ⌘ or ⌥",
@@ -86,15 +92,16 @@ final class HotkeyBindingView: NSObject {
         shortcutRow = row
         card.contentView?.addSubview(row)
         var toggleRow: SettingsRowView?
-        if explanationPreferences != nil {
+        if explanationPreferences != nil || codePreferences != nil {
             let toggle = NSSwitch()
             toggle.target = self
             toggle.action = #selector(explanationsChanged)
-            toggle.setAccessibilityLabel("Enable explanations")
+            toggle.setAccessibilityLabel(codePreferences == nil ? "Enable explanations" : "Show code with hints")
             explanationSwitch = toggle
             let settingsRow = SettingsRowView(
-                title: "Enable explanations",
-                detail: "Automatic help and hotkey · applies to the next answer",
+                title: codePreferences == nil ? "Enable explanations" : "Show code with hints",
+                detail: codePreferences == nil ? "Automatic help and hotkey · applies to the next answer"
+                    : "Shortcut turns this on and requests code",
                 controlView: toggle,
                 controlSize: NSSize(width: 44, height: 26))
             card.contentView?.addSubview(settingsRow)
@@ -146,9 +153,14 @@ final class HotkeyBindingView: NSObject {
     }
 
     @objc private func explanationsChanged() {
-        guard let explanationPreferences, let explanationSwitch else { return }
-        explanationPreferences.isEnabled = explanationSwitch.state == .on
-        onExplanationsChanged()
+        guard let explanationSwitch else { return }
+        if let codePreferences {
+            codePreferences.isEnabled = explanationSwitch.state == .on
+            onCodeChanged()
+        } else if let explanationPreferences {
+            explanationPreferences.isEnabled = explanationSwitch.state == .on
+            onExplanationsChanged()
+        }
         recorder?.setCombination(preferences.combination)
         renderOutcome()
     }
@@ -175,7 +187,7 @@ final class HotkeyBindingView: NSObject {
     /// the callout shows only for the one state that *is* persistent — nothing registered at all.
     private func renderOutcome(_ outcome: HotkeyRegistrationOutcome? = nil) {
         defer { onHeightChanged?() }
-        explanationSwitch?.state = isEnabled ? .on : .off
+        explanationSwitch?.state = (codePreferences?.isEnabled ?? isEnabled) ? .on : .off
         shortcutRow?.isHidden = !isEnabled
         recorder?.isEnabled = isEnabled
         cardHeightConstraint?.constant = cardHeight
