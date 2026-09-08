@@ -13,8 +13,9 @@ import AppKit
 /// The events, unlike the cursor, do arrive while inactive. One `.activeAlways` tracking area is
 /// enough, and this view turns the pointer's position into one of eight zones.
 ///
-/// It takes no part in hit testing, so clicks still reach the header buttons underneath and a drag
-/// anywhere still moves the window.
+/// It also owns the drag on those zones, so the region it lights and the region that resizes are the
+/// same one. Everywhere else it stays out of hit testing, so the header's buttons take their clicks
+/// and a drag on the box still moves the window.
 final class OverlayBoxResizeAffordanceView: NSView {
     /// Which edge or corner of the box the pointer is over.
     enum Zone: Hashable, CaseIterable {
@@ -28,11 +29,13 @@ final class OverlayBoxResizeAffordanceView: NSView {
     /// Matches the panel's `layer.cornerRadius`, so the corner runs arc through the box's own curve.
     private static let cornerRadius: CGFloat = 12
 
-    /// Quiet enough to ignore while reading a tip, present enough to answer "is this resizable".
-    private static let outlineWidth: CGFloat = 1
-    private static let outlineAlpha: CGFloat = 0.18
-    private static let runWidth: CGFloat = 2
-    private static let runAlpha: CGFloat = 0.78
+    /// Quiet enough to ignore while reading a tip, present enough to answer "is this resizable". A
+    /// 1 pt hairline at 18% was invisible in practice against a live screen share, so the outline is
+    /// wider and brighter than first drawn; the run keeps a wide margin over it either way.
+    private static let outlineWidth: CGFloat = 1.5
+    private static let outlineAlpha: CGFloat = 0.35
+    private static let runWidth: CGFloat = 2.5
+    private static let runAlpha: CGFloat = 0.9
     private static let outlineFade: CFTimeInterval = 0.14
     private static let runFade: CFTimeInterval = 0.12
 
@@ -69,7 +72,22 @@ final class OverlayBoxResizeAffordanceView: NSView {
 
     required init?(coder: NSCoder) { fatalError("built in code; this project has no nibs") }
 
-    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    /// Claim exactly the zones this view lights, and nothing else.
+    ///
+    /// Two things used to claim a drag on an edge: `isMovableByWindowBackground` moved the window, and
+    /// AppKit's borderless edge-resize resized it. AppKit's resize region is much thinner than the run
+    /// drawn here, so the same edge sometimes moved the box and sometimes resized it. Claiming the
+    /// zone makes what lights up and what drags the same region, and the interior still falls through
+    /// so a drag there moves the box and the header's buttons still take their clicks.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        let local = convert(point, from: superview)
+        guard Self.zone(at: local, in: bounds, allowsVerticalResize: allowsVerticalResize) != nil
+        else { return nil }
+        return self
+    }
+
+    /// A claimed edge resizes; it must never start a window move.
+    override var mouseDownCanMoveWindow: Bool { false }
 
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
@@ -97,6 +115,77 @@ final class OverlayBoxResizeAffordanceView: NSView {
     override func mouseExited(with event: NSEvent) { pointerMoved(to: nil) }
 
     private func location(of event: NSEvent) -> NSPoint { convert(event.locationInWindow, from: nil) }
+
+    // MARK: - Dragging
+
+    /// Reports the end of a resize drag, so the panel can persist the size the user settled on. The
+    /// panel's own `viewDidEndLiveResize` never fires for these: AppKit is not the one resizing.
+    var onResizeFinished: (() -> Void)?
+
+    private var dragZone: Zone?
+    private var dragStartPointer: NSPoint = .zero
+    private var dragStartFrame: NSRect = .zero
+
+    override func mouseDown(with event: NSEvent) {
+        guard let window,
+              let zone = Self.zone(at: location(of: event), in: bounds,
+                                   allowsVerticalResize: allowsVerticalResize)
+        else { return }
+        dragZone = zone
+        // Screen coordinates throughout: the window's own frame moves under the pointer as it is
+        // dragged, so a window-relative delta would chase itself.
+        dragStartPointer = NSEvent.mouseLocation
+        dragStartFrame = window.frame
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let zone = dragZone, let window else { return }
+        window.setFrame(Self.resizedFrame(draggingTo: NSEvent.mouseLocation,
+                                          from: dragStartPointer,
+                                          startFrame: dragStartFrame,
+                                          zone: zone,
+                                          minSize: window.minSize,
+                                          maxSize: window.maxSize),
+                        display: true)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard dragZone != nil else { return }
+        dragZone = nil
+        onResizeFinished?()
+    }
+
+    /// The frame a drag lands on: the dragged edge follows the pointer, the opposite edge stays put,
+    /// and the window's own declared limits are the floor and ceiling, so they remain the single
+    /// source of the box's size range.
+    static func resizedFrame(draggingTo pointer: NSPoint, from origin: NSPoint,
+                             startFrame: NSRect, zone: Zone,
+                             minSize: NSSize, maxSize: NSSize) -> NSRect {
+        let delta = CGSize(width: pointer.x - origin.x, height: pointer.y - origin.y)
+        var frame = startFrame
+
+        switch zone {
+        case .left, .topLeft, .bottomLeft:
+            frame.size.width = min(max(startFrame.width - delta.width, minSize.width), maxSize.width)
+            frame.origin.x = startFrame.maxX - frame.width   // the right edge is anchored
+        case .right, .topRight, .bottomRight:
+            frame.size.width = min(max(startFrame.width + delta.width, minSize.width), maxSize.width)
+        case .top, .bottom:
+            break
+        }
+
+        switch zone {
+        case .bottom, .bottomLeft, .bottomRight:
+            frame.size.height = min(max(startFrame.height - delta.height, minSize.height), maxSize.height)
+            frame.origin.y = startFrame.maxY - frame.height  // the top edge is anchored
+        case .top, .topLeft, .topRight:
+            frame.size.height = min(max(startFrame.height + delta.height, minSize.height), maxSize.height)
+        case .left, .right:
+            break
+        }
+
+        return frame
+    }
 
     /// The one entry point for every pointer event: nil means the pointer has left the box.
     func pointerMoved(to point: NSPoint?) {
@@ -263,6 +352,9 @@ final class OverlayBoxResizeAffordanceView: NSView {
 
     /// Whether the whole-box outline is drawn.
     var isOutlineShown: Bool { outlineLayer.opacity > 0 }
+
+    /// Whether the outline has geometry to stroke. Opacity alone proves nothing if the path is nil.
+    var hasOutlinePath: Bool { outlineLayer.path != nil }
 
     /// Which zones this box can currently light: all eight, or the two side caps while collapsed.
     var drawableZones: Set<Zone> { Set(runPaths.keys) }

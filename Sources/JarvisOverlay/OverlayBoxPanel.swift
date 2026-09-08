@@ -161,6 +161,8 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         header.clearButton.action = #selector(clearLog)
         box.onEndLiveResize = { [weak self] in self?.reportContentSize() }
         box.onFrameSizeChanged = { [weak self] in self?.layoutContent() }
+        // The affordance drives edge drags itself, so AppKit's live-resize hook never fires for them.
+        affordance.onResizeFinished = { [weak self] in self?.reportContentSize() }
         layoutContent()
         // Centered on screen initially; the user can drag it anywhere from there (the frame persists
         // across menu toggles, since hide() only orders it out).
