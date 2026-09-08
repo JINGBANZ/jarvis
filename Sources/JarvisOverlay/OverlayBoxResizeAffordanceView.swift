@@ -1,97 +1,95 @@
 import AppKit
 
-/// A transparent sheet over the Overlay Box that draws its resize affordance.
+/// A transparent sheet over the Overlay Box that draws its resize affordance and owns the drag.
 ///
 /// The panel has always been resizable, but a borderless window has no chrome to advertise it. The
 /// obvious answer, a resize cursor, is not available: macOS refuses to let an inactive application
 /// change the cursor, and Jarvis is a background app for all of a session, so a cursor would appear
 /// only in the one state where Settings happens to be open. Apple's own `screencapture` reaches for
 /// private SkyLight calls to get around that, which is not a dependency worth taking for a cursor.
-/// So the panel draws the affordance itself, the way Picture-in-Picture does: an outline while the
-/// pointer is anywhere inside, and a brighter run on whichever edge or corner it is over.
+/// So the panel draws the affordance itself: the edge or corner under the pointer lights up.
 ///
 /// The events, unlike the cursor, do arrive while inactive. One `.activeAlways` tracking area is
 /// enough, and this view turns the pointer's position into one of eight zones.
 ///
-/// It also owns the drag on those zones, so the region it lights and the region that resizes are the
-/// same one. Everywhere else it stays out of hit testing, so the header's buttons take their clicks
-/// and a drag on the box still moves the window.
+/// The drag belongs here too, so the region that lights and the region that resizes are one region.
+/// That is what `ResizeGripView` is for: AppKit applies `mouseDownCanMoveWindow == false` to a view's
+/// entire frame rather than to what it hit-tests, so this full-size view refusing the drag would
+/// freeze the whole box in place. The grips are thin strips along the edges, so only the ring that
+/// resizes refuses to move, and a drag anywhere else still moves the box.
 final class OverlayBoxResizeAffordanceView: NSView {
     /// Which edge or corner of the box the pointer is over.
     enum Zone: Hashable, CaseIterable {
         case top, bottom, left, right, topLeft, topRight, bottomLeft, bottomRight
     }
 
-    /// How close to an edge the pointer must be for that edge to claim it.
-    private static let edgeReach: CGFloat = 6
+    /// How close to an edge the pointer must be for that edge to claim it. Also the thickness of the
+    /// grips, so the ring that refuses a window drag is exactly the ring that resizes.
+    static let edgeReach: CGFloat = 6
     /// How far along an edge a corner still claims the pointer.
     private static let cornerReach: CGFloat = 14
     /// Matches the panel's `layer.cornerRadius`, so the corner runs arc through the box's own curve.
     private static let cornerRadius: CGFloat = 12
 
-    /// Quiet enough to ignore while reading a tip, present enough to answer "is this resizable". A
-    /// 1 pt hairline at 18% was invisible in practice against a live screen share, so the outline is
-    /// wider and brighter than first drawn; the run keeps a wide margin over it either way.
-    private static let outlineWidth: CGFloat = 1.5
-    private static let outlineAlpha: CGFloat = 0.35
     private static let runWidth: CGFloat = 2.5
     private static let runAlpha: CGFloat = 0.9
-    private static let outlineFade: CFTimeInterval = 0.14
     private static let runFade: CFTimeInterval = 0.12
 
     /// Collapsed, the box's height is the header's, so a vertical drag has nothing to do.
     var allowsVerticalResize = true {
         didSet {
             guard allowsVerticalResize != oldValue else { return }
-            rebuildPaths()
+            layoutAffordance()
             // The run under the pointer may have just become undraggable.
             if let highlightedZone, runPaths[highlightedZone] == nil { highlight(nil) }
         }
     }
 
-    private let outlineLayer = CAShapeLayer()
+    /// Reports the end of a resize drag, so the panel can persist the size the user settled on. The
+    /// panel's own `viewDidEndLiveResize` never fires for these: AppKit is not the one resizing.
+    var onResizeFinished: (() -> Void)?
+
     private let runLayer = CAShapeLayer()
     private var runPaths: [Zone: CGPath] = [:]
     private(set) var highlightedZone: Zone?
     private var edgeTracking: NSTrackingArea?
+    private let grips: [ResizeGripView]
 
     override init(frame frameRect: NSRect) {
+        grips = (0..<4).map { _ in ResizeGripView() }
         super.init(frame: frameRect)
         wantsLayer = true
-        for (shape, width, alpha) in [(outlineLayer, Self.outlineWidth, Self.outlineAlpha),
-                                      (runLayer, Self.runWidth, Self.runAlpha)] {
-            shape.fillColor = nil
-            shape.strokeColor = NSColor(white: 1, alpha: alpha).cgColor
-            shape.lineWidth = width
-            shape.lineCap = .round
-            shape.opacity = 0
-            layer?.addSublayer(shape)
+        runLayer.fillColor = nil
+        runLayer.strokeColor = NSColor(white: 1, alpha: Self.runAlpha).cgColor
+        runLayer.lineWidth = Self.runWidth
+        runLayer.lineCap = .round
+        runLayer.opacity = 0
+        layer?.addSublayer(runLayer)
+        for grip in grips {
+            grip.owner = self
+            addSubview(grip)
         }
-        rebuildPaths()
+        layoutAffordance()
     }
 
     required init?(coder: NSCoder) { fatalError("built in code; this project has no nibs") }
 
-    /// Claim exactly the zones this view lights, and nothing else.
-    ///
-    /// Two things used to claim a drag on an edge: `isMovableByWindowBackground` moved the window, and
-    /// AppKit's borderless edge-resize resized it. AppKit's resize region is much thinner than the run
-    /// drawn here, so the same edge sometimes moved the box and sometimes resized it. Claiming the
-    /// zone makes what lights up and what drags the same region, and the interior still falls through
-    /// so a drag there moves the box and the header's buttons still take their clicks.
+    /// This view must never refuse the window drag: AppKit would apply that to its whole frame, which
+    /// is the whole box. Only the grips refuse it, and only over the edges they cover.
+    override var mouseDownCanMoveWindow: Bool { true }
+
+    /// Claim exactly the zones this view lights, and nothing else. The press is handed to the grip
+    /// covering that edge, which is the view whose frame tells AppKit not to move the window there.
     override func hitTest(_ point: NSPoint) -> NSView? {
         let local = convert(point, from: superview)
         guard Self.zone(at: local, in: bounds, allowsVerticalResize: allowsVerticalResize) != nil
         else { return nil }
-        return self
+        return grips.first { $0.frame.contains(local) }
     }
-
-    /// A claimed edge resizes; it must never start a window move.
-    override var mouseDownCanMoveWindow: Bool { false }
 
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
-        rebuildPaths()
+        layoutAffordance()
     }
 
     // MARK: - Tracking
@@ -116,29 +114,53 @@ final class OverlayBoxResizeAffordanceView: NSView {
 
     private func location(of event: NSEvent) -> NSPoint { convert(event.locationInWindow, from: nil) }
 
-    // MARK: - Dragging
+    /// The one entry point for every pointer event: nil means the pointer has left the box.
+    func pointerMoved(to point: NSPoint?) {
+        guard let point, bounds.contains(point) else { return highlight(nil) }
+        highlight(Self.zone(at: point, in: bounds, allowsVerticalResize: allowsVerticalResize))
+    }
 
-    /// Reports the end of a resize drag, so the panel can persist the size the user settled on. The
-    /// panel's own `viewDidEndLiveResize` never fires for these: AppKit is not the one resizing.
-    var onResizeFinished: (() -> Void)?
+    private func highlight(_ zone: Zone?) {
+        guard zone != highlightedZone else { return }
+        highlightedZone = zone
+        // Swapping the path outright rather than cross-fading two layers: adjacent runs are 120 ms
+        // apart, and a moment with both lit would read as a glitch rather than as a transition.
+        if let zone, let path = runPaths[zone] {
+            runLayer.path = path
+            fade(to: 1)
+        } else {
+            fade(to: 0)
+        }
+    }
+
+    private func fade(to opacity: Float) {
+        CATransaction.begin()
+        CATransaction.setAnimationDuration(
+            NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : Self.runFade)
+        runLayer.opacity = opacity
+        CATransaction.commit()
+    }
+
+    // MARK: - Dragging
 
     private var dragZone: Zone?
     private var dragStartPointer: NSPoint = .zero
     private var dragStartFrame: NSRect = .zero
 
-    override func mouseDown(with event: NSEvent) {
+    /// Called by whichever grip took the press.
+    fileprivate func beginResize(at pointInGrip: NSPoint, from grip: NSView) {
         guard let window,
-              let zone = Self.zone(at: location(of: event), in: bounds,
+              let zone = Self.zone(at: convert(pointInGrip, from: grip), in: bounds,
                                    allowsVerticalResize: allowsVerticalResize)
         else { return }
         dragZone = zone
-        // Screen coordinates throughout: the window's own frame moves under the pointer as it is
-        // dragged, so a window-relative delta would chase itself.
+        // Screen coordinates throughout: the window's frame moves under the pointer as it is dragged,
+        // so a window-relative delta would chase itself.
         dragStartPointer = NSEvent.mouseLocation
         dragStartFrame = window.frame
     }
 
-    override func mouseDragged(with event: NSEvent) {
+    fileprivate func continueResize() {
         guard let zone = dragZone, let window else { return }
         window.setFrame(Self.resizedFrame(draggingTo: NSEvent.mouseLocation,
                                           from: dragStartPointer,
@@ -149,7 +171,7 @@ final class OverlayBoxResizeAffordanceView: NSView {
                         display: true)
     }
 
-    override func mouseUp(with event: NSEvent) {
+    fileprivate func endResize() {
         guard dragZone != nil else { return }
         dragZone = nil
         onResizeFinished?()
@@ -187,43 +209,6 @@ final class OverlayBoxResizeAffordanceView: NSView {
         return frame
     }
 
-    /// The one entry point for every pointer event: nil means the pointer has left the box.
-    func pointerMoved(to point: NSPoint?) {
-        guard let point, bounds.contains(point) else {
-            showOutline(false)
-            highlight(nil)
-            return
-        }
-        showOutline(true)
-        highlight(Self.zone(at: point, in: bounds, allowsVerticalResize: allowsVerticalResize))
-    }
-
-    private func showOutline(_ shown: Bool) {
-        guard (outlineLayer.opacity > 0) != shown else { return }
-        fade(outlineLayer, to: shown ? 1 : 0, over: Self.outlineFade)
-    }
-
-    private func highlight(_ zone: Zone?) {
-        guard zone != highlightedZone else { return }
-        highlightedZone = zone
-        // Swapping the path outright rather than cross-fading two layers: adjacent runs are 120 ms
-        // apart, and a moment with both lit would read as a glitch rather than as a transition.
-        if let zone, let path = runPaths[zone] {
-            runLayer.path = path
-            fade(runLayer, to: 1, over: Self.runFade)
-        } else {
-            fade(runLayer, to: 0, over: Self.runFade)
-        }
-    }
-
-    private func fade(_ shape: CAShapeLayer, to opacity: Float, over duration: CFTimeInterval) {
-        CATransaction.begin()
-        CATransaction.setAnimationDuration(
-            NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : duration)
-        shape.opacity = opacity
-        CATransaction.commit()
-    }
-
     // MARK: - Geometry
 
     /// The zone a point falls in, or nil for the box's interior. Pure, so the geometry can be checked
@@ -255,27 +240,38 @@ final class OverlayBoxResizeAffordanceView: NSView {
         return nil
     }
 
+    private func layoutAffordance() {
+        placeGrips()
+        rebuildPaths()
+    }
+
+    /// Four strips whose union is the resizable ring. The vertical pair collapses to nothing when the
+    /// box is rolled up, so those edges neither resize nor block a drag.
+    private func placeGrips() {
+        let reach = Self.edgeReach
+        let (w, h) = (bounds.width, bounds.height)
+        grips[0].frame = allowsVerticalResize
+            ? NSRect(x: 0, y: h - reach, width: w, height: reach) : .zero   // top
+        grips[1].frame = allowsVerticalResize
+            ? NSRect(x: 0, y: 0, width: w, height: reach) : .zero           // bottom
+        grips[2].frame = NSRect(x: 0, y: 0, width: reach, height: h)        // left
+        grips[3].frame = NSRect(x: w - reach, y: 0, width: reach, height: h)
+    }
+
     /// The panel clips to its rounded corners (`box.layer.masksToBounds`), so a stroke centred on the
-    /// box's edge would lose its outer half. Each shape is inset by its own half-width plus one point,
-    /// which puts the whole stroke inside the clip and reads as a hairline just within the edge.
+    /// box's edge would lose its outer half. The run is inset by its half-width plus one point, which
+    /// puts the whole stroke inside the clip and reads as a hairline just within the edge.
     private func rebuildPaths() {
-        let outlineInset = Self.outlineWidth / 2 + 1
-        let runInset = Self.runWidth / 2 + 1
-        let frame = bounds.insetBy(dx: runInset, dy: runInset)
+        let inset = Self.runWidth / 2 + 1
+        let frame = bounds.insetBy(dx: inset, dy: inset)
         guard frame.width > 2 * Self.cornerRadius, frame.height > 0 else {
-            outlineLayer.path = nil
             runLayer.path = nil
             runPaths = [:]
             return
         }
-        outlineLayer.path = CGPath(
-            roundedRect: bounds.insetBy(dx: outlineInset, dy: outlineInset),
-            cornerWidth: Self.cornerRadius - outlineInset,
-            cornerHeight: Self.cornerRadius - outlineInset,
-            transform: nil)
         runPaths = allowsVerticalResize
-            ? Self.fullRuns(in: frame, radius: Self.cornerRadius - runInset)
-            : Self.sideCaps(in: frame, radius: Self.cornerRadius - runInset)
+            ? Self.fullRuns(in: frame, radius: Self.cornerRadius - inset)
+            : Self.sideCaps(in: frame, radius: Self.cornerRadius - inset)
         runLayer.path = highlightedZone.flatMap { runPaths[$0] }
     }
 
@@ -291,11 +287,10 @@ final class OverlayBoxResizeAffordanceView: NSView {
             return path
         }
         /// An L: along one edge, around the arc, out along the other.
-        func corner(_ start: CGPoint, _ arcStart: CGPoint, _ center: CGPoint,
+        func corner(_ start: CGPoint, _ center: CGPoint,
                     _ from: CGFloat, _ to: CGFloat, _ end: CGPoint) -> CGPath {
             let path = CGMutablePath()
             path.move(to: start)
-            path.addLine(to: arcStart)
             path.addArc(center: center, radius: r, startAngle: from, endAngle: to, clockwise: true)
             path.addLine(to: end)
             return path
@@ -306,18 +301,14 @@ final class OverlayBoxResizeAffordanceView: NSView {
             .bottom: line(CGPoint(x: x0 + r + arm, y: y0), CGPoint(x: x1 - r - arm, y: y0)),
             .left: line(CGPoint(x: x0, y: y0 + r + arm), CGPoint(x: x0, y: y1 - r - arm)),
             .right: line(CGPoint(x: x1, y: y0 + r + arm), CGPoint(x: x1, y: y1 - r - arm)),
-            .topLeft: corner(CGPoint(x: x0, y: y1 - r - arm), CGPoint(x: x0, y: y1 - r),
-                             CGPoint(x: x0 + r, y: y1 - r), .pi, .pi / 2,
-                             CGPoint(x: x0 + r + arm, y: y1)),
-            .topRight: corner(CGPoint(x: x1 - r - arm, y: y1), CGPoint(x: x1 - r, y: y1),
-                              CGPoint(x: x1 - r, y: y1 - r), .pi / 2, 0,
-                              CGPoint(x: x1, y: y1 - r - arm)),
-            .bottomRight: corner(CGPoint(x: x1, y: y0 + r + arm), CGPoint(x: x1, y: y0 + r),
-                                 CGPoint(x: x1 - r, y: y0 + r), 0, -.pi / 2,
-                                 CGPoint(x: x1 - r - arm, y: y0)),
-            .bottomLeft: corner(CGPoint(x: x0 + r + arm, y: y0), CGPoint(x: x0 + r, y: y0),
-                                CGPoint(x: x0 + r, y: y0 + r), -.pi / 2, -.pi,
-                                CGPoint(x: x0, y: y0 + r + arm)),
+            .topLeft: corner(CGPoint(x: x0, y: y1 - r - arm), CGPoint(x: x0 + r, y: y1 - r),
+                             .pi, .pi / 2, CGPoint(x: x0 + r + arm, y: y1)),
+            .topRight: corner(CGPoint(x: x1 - r - arm, y: y1), CGPoint(x: x1 - r, y: y1 - r),
+                              .pi / 2, 0, CGPoint(x: x1, y: y1 - r - arm)),
+            .bottomRight: corner(CGPoint(x: x1, y: y0 + r + arm), CGPoint(x: x1 - r, y: y0 + r),
+                                 0, -.pi / 2, CGPoint(x: x1 - r - arm, y: y0)),
+            .bottomLeft: corner(CGPoint(x: x0 + r + arm, y: y0), CGPoint(x: x0 + r, y: y0 + r),
+                                -.pi / 2, -.pi, CGPoint(x: x0, y: y0 + r + arm)),
         ]
     }
 
@@ -350,12 +341,34 @@ final class OverlayBoxResizeAffordanceView: NSView {
 
     // MARK: - Test hooks (internal; reached via `@testable import JarvisOverlay`)
 
-    /// Whether the whole-box outline is drawn.
-    var isOutlineShown: Bool { outlineLayer.opacity > 0 }
-
-    /// Whether the outline has geometry to stroke. Opacity alone proves nothing if the path is nil.
-    var hasOutlinePath: Bool { outlineLayer.path != nil }
-
     /// Which zones this box can currently light: all eight, or the two side caps while collapsed.
     var drawableZones: Set<Zone> { Set(runPaths.keys) }
+
+    /// Whether a run is drawn right now.
+    var isRunShown: Bool { runLayer.opacity > 0 && runLayer.path != nil }
+
+    /// Every region that tells AppKit not to move the window. Each must stay a thin edge strip: AppKit
+    /// applies the refusal to a view's whole frame, so anything larger freezes the box in place.
+    var dragBlockingFrames: [NSRect] {
+        (mouseDownCanMoveWindow ? [] : [bounds])
+            + grips.filter { !$0.mouseDownCanMoveWindow && !$0.frame.isEmpty }.map(\.frame)
+    }
+}
+
+/// A strip along one edge of the box, thick enough to grab and no thicker.
+///
+/// It exists because AppKit applies `mouseDownCanMoveWindow == false` to a view's entire frame rather
+/// than to what it hit-tests. The full-size affordance view refusing the drag therefore froze the
+/// whole box; these strips refuse it only over the ring that actually resizes.
+private final class ResizeGripView: NSView {
+    weak var owner: OverlayBoxResizeAffordanceView?
+
+    override var mouseDownCanMoveWindow: Bool { false }
+
+    override func mouseDown(with event: NSEvent) {
+        owner?.beginResize(at: convert(event.locationInWindow, from: nil), from: self)
+    }
+
+    override func mouseDragged(with event: NSEvent) { owner?.continueResize() }
+    override func mouseUp(with event: NSEvent) { owner?.endResize() }
 }

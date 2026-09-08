@@ -318,6 +318,20 @@ import JarvisCore
         #expect(reported.first?.1 == 700, "the collapsed height must never become the saved height")
     }
 
+    /// Claiming the edges for resizing must not cost the box its drag-to-move everywhere else. This
+    /// walks the real subview stack, which the affordance view sits on top of.
+    @MainActor @Test
+    func aPressAwayFromTheEdgesStillMovesTheBox() {
+        let panel = OverlayBoxPanel(contentSize: NSSize(width: 520, height: 440))
+
+        #expect(panel.pressMovesWindow(at: NSPoint(x: 260, y: 220)),
+                "a drag in the log must still move the box")
+        #expect(panel.pressMovesWindow(at: NSPoint(x: 260, y: 425)),
+                "a drag on the header must still move the box")
+        #expect(!panel.pressMovesWindow(at: NSPoint(x: 2, y: 220)),
+                "an edge resizes instead of moving")
+    }
+
     @MainActor @Test
     func theClearButtonIsHiddenWhileThereIsNothingToErase() {
         #expect(!OverlayBoxPanel().isClearButtonVisible)

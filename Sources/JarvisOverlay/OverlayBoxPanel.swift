@@ -416,6 +416,15 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     func clickCollapseButton() { header.collapseButton.performClick(nil) }
     func clickClearButton() { header.clearButton.performClick(nil) }
 
+    /// Which view a press at this point lands on, walking the real subview stack. Lets tests assert
+    /// that claiming the edges for resizing did not cost the box its drag-to-move everywhere else.
+    func viewForPress(at point: NSPoint) -> NSView? { box.hitTest(point) }
+
+    /// Whether a drag starting at this point would move the window.
+    func pressMovesWindow(at point: NSPoint) -> Bool {
+        box.hitTest(point)?.mouseDownCanMoveWindow ?? false
+    }
+
     /// Drives the same AppKit entry point that ends a user resize drag — lets tests assert that a
     /// finished drag is reported exactly once.
     func endLiveResize() { box.viewDidEndLiveResize() }

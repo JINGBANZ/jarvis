@@ -68,18 +68,17 @@ import AppKit
 
     // MARK: - What gets drawn
 
-    /// The outline answers "can this be resized at all", which is the question a cursor never got to
-    /// answer here. It shows for the whole box, not just its edges.
+    /// Only the edges draw. The box's interior stays exactly as it was, so nothing appears over the
+    /// log while the pointer crosses it.
     @MainActor @Test
-    func thePointerInsideTheBoxShowsTheOutline() {
+    func theInteriorDrawsNothing() {
         let view = view()
-        #expect(!view.isOutlineShown, "an untouched box draws nothing")
+        #expect(!view.isRunShown, "an untouched box draws nothing")
 
         view.pointerMoved(to: NSPoint(x: 260, y: 220))   // deep interior
 
-        #expect(view.isOutlineShown)
-        #expect(view.hasOutlinePath, "opacity alone draws nothing without a path")
-        #expect(view.highlightedZone == nil, "the interior lights no run")
+        #expect(!view.isRunShown)
+        #expect(view.highlightedZone == nil)
     }
 
     @MainActor @Test
@@ -87,18 +86,18 @@ import AppKit
         let view = view()
         view.pointerMoved(to: NSPoint(x: 518, y: 220))
         #expect(view.highlightedZone == .right)
-        #expect(view.isOutlineShown, "the outline stays up under the highlighted run")
+        #expect(view.isRunShown)
 
         view.pointerMoved(to: NSPoint(x: 517, y: 437))
         #expect(view.highlightedZone == .topRight, "moving into the corner swaps the run")
     }
 
     @MainActor @Test
-    func thePointerLeavingClearsEverything() {
+    func thePointerLeavingClearsTheRun() {
         let view = view()
         view.pointerMoved(to: NSPoint(x: 518, y: 220))
         view.pointerMoved(to: nil)
-        #expect(!view.isOutlineShown, "nothing is left drawn on a box you are not touching")
+        #expect(!view.isRunShown, "nothing is left drawn on a box you are not touching")
         #expect(view.highlightedZone == nil)
     }
 
@@ -133,19 +132,36 @@ import AppKit
     @MainActor @Test
     func itClaimsTheZonesItLightsAndNothingElse() {
         let view = view()
-        #expect(view.hitTest(NSPoint(x: 2, y: 220)) === view, "an edge must resize, never move")
-        #expect(view.hitTest(NSPoint(x: 3, y: 437)) === view, "a corner too")
+        #expect(view.hitTest(NSPoint(x: 2, y: 220)) != nil, "an edge must resize, never move")
+        #expect(view.hitTest(NSPoint(x: 3, y: 437)) != nil, "a corner too")
         #expect(view.hitTest(NSPoint(x: 260, y: 220)) == nil,
                 "the interior must fall through, so a drag still moves the box")
-        #expect(!view.mouseDownCanMoveWindow, "a claimed edge must not start a window move")
+    }
+
+    /// The regression that made the box impossible to move: AppKit applies
+    /// `mouseDownCanMoveWindow == false` to a view's whole frame, not to what it hit-tests, so this
+    /// full-size view refusing the drag froze the entire box. Only the edge strips may refuse it.
+    @MainActor @Test
+    func nothingWiderThanAnEdgeStripRefusesTheWindowDrag() {
+        let view = view()
+        #expect(view.mouseDownCanMoveWindow, "the full-size sheet must never refuse the drag itself")
+
+        let reach = OverlayBoxResizeAffordanceView.edgeReach
+        #expect(!view.dragBlockingFrames.isEmpty, "the edges do have to refuse it")
+        for frame in view.dragBlockingFrames {
+            #expect(frame.width <= reach || frame.height <= reach,
+                    "\(frame) is thicker than an edge strip, so it would freeze the box")
+        }
     }
 
     @MainActor @Test
-    func aCollapsedBoxDoesNotClaimItsDeadEdges() {
+    func aCollapsedBoxDoesNotClaimOrBlockItsDeadEdges() {
         let view = view(collapsed: true)
         #expect(view.hitTest(NSPoint(x: 260, y: 438)) == nil,
                 "the top edge cannot resize while collapsed, so it must not swallow the drag either")
-        #expect(view.hitTest(NSPoint(x: 2, y: 220)) === view)
+        #expect(view.hitTest(NSPoint(x: 2, y: 220)) != nil)
+        #expect(view.dragBlockingFrames.allSatisfy { $0.width <= OverlayBoxResizeAffordanceView.edgeReach },
+                "only the side strips may refuse the drag while collapsed")
     }
 
     // MARK: - Resize geometry (screen coordinates, y-up like NSWindow.frame)
