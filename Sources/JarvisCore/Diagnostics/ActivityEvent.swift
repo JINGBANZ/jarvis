@@ -15,6 +15,7 @@ public enum ActivityEvent: Sendable {
     public enum Kind: String, Codable, CaseIterable, Sendable {
         case heard
         case manualHint
+        case manualExplanation
         case screenViewed
         case screenViewFailed
         case tip
@@ -33,6 +34,7 @@ public enum ActivityEvent: Sendable {
     case heard(speaker: Speaker, text: String)
     /// The user explicitly requested help through the manual-hint shortcut.
     case manualHint(prompt: String)
+    case manualExplanation(prompt: String)
     /// Jarvis captured and viewed the screen while preparing a coaching response.
     case screenViewed(imageBase64JPEG: String)
     /// The brain chose to view the screen, but capture failed. Activity gets fixed recovery
@@ -72,6 +74,8 @@ public enum ActivityEvent: Sendable {
             return (.heard, "🗣 heard (\(speaker.rawValue)): \"\(text)\"", nil)
         case .manualHint(let prompt):
             return (.manualHint, "⌨️ hint shortcut — \(prompt)", nil)
+        case .manualExplanation(let prompt):
+            return (.manualExplanation, "⌨️ explain more shortcut — \(prompt)", nil)
         case .screenViewed(let imageBase64JPEG):
             return (.screenViewed, "👁 looking at your screen", imageBase64JPEG)
         case .screenViewFailed:

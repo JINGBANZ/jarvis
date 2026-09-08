@@ -179,6 +179,14 @@ coaching kernel's dependency rules are enforced by `scripts/check-coaching-kerne
 
 ## Next action
 
+Run the signed-app Explain more smoke: with an interview session active, press both configured
+shortcuts from another app and verify distinct hint/explanation requests; rebind them independently
+and try a collision. Check automatic explanation after clear confusion, a simpler follow-up after
+another Explain more press, and silence during healthy progress. Confirm longer text stays in the
+capture-excluded box, caption summaries stay short, and Stop prevents late delivery. The offline
+Gate covers context delivery, caption/box separation, preferences, and manual retry/coalescing;
+real audio, capture, screen sharing, and shortcut use during a live interview still need this smoke.
+
 Run the live permission-gate smoke, since the gate runs before anything the Gate can test. After resetting each service in turn (`tccutil reset Microphone com.jarvis.coach.dev`, then
 `ScreenCapture`, then `AudioCapture`) and clearing the one marker Jarvis persists (`defaults delete com.jarvis.coach.dev permissions.screenRecordingAsked`): the gate appears with no menu bar behind it; one walk collects all
 three dialogs in order; **Quit** exits; refusing system audio records a refusal rather than a grant
@@ -266,6 +274,12 @@ playback, remains in
 
 ## Built
 
+Proactive clarification and a separate **Explain more** shortcut share the existing coach loop.
+[`JarvisPrompts.Coach`](../Sources/JarvisCore/Prompts/JarvisPrompts+Coach.swift) supplies the policy across
+formats; `speak.explanation` carries fuller plain-text detail into the persistent overlay box and
+Activity while captions stay short. Both shortcuts are independently configurable in Settings;
+see [architecture.md → On-demand hint](./architecture.md#on-demand-hint-j).
+
 System Design sessions support [private high-level architecture hints](./architecture.md#private-architecture-hints):
 [`DiagramHint`](../Sources/JarvisCore/Overlay/DiagramHint.swift) validates a small Mermaid subset, and
 [`DiagramHintImage`](../Sources/JarvisOverlay/DiagramHintImage.swift) renders boxes and arrows alongside
@@ -296,7 +310,7 @@ Tested `JarvisCore` + `JarvisBrainProviders` + `JarvisEvaluation` + `JarvisOverl
 - `Sources/JarvisApp/Capture/` — one-clock aggregate mic + sample-preserving system-audio capture that starts without waiting for a system-audio writer, with AEC3 echo cancellation, Silero voice-activity detection, and resampling to whichever wire rate the selected provider requires (`AggregateEchoCapture`, `WebRTCEchoCanceller`, `SileroVoiceActivityDetector`, `Resampler`); provider construction (`TranscriptionSessionFactory`); OpenAI Realtime item/readiness/liveness/transactional-reconnect handling (`RealtimeTranscriber`); Gemini Live readiness/liveness/reconnect handling with server-owned finalization and no client-managed ledger (`GeminiLiveTranscriber`); macOS 26+ on-device final-result transcription and model preparation (`AppleSpeechTranscriber`, `AppleSpeechModelPreparation`); continuity/network diagnostics; permission reporting and requesting, including the self-tap tone probe that is the only way to ask for or prove the silently-enforced system-audio grant (`Permissions`, `SystemAudioPermissionProbe`); plus the window-scoped screenshot + OCR edge (`WindowScopedScreenCapture`, `ScreenTextRecognizer`).
 - `Sources/JarvisApp/Onboarding/` — the launch permission gate that gathers Microphone, System Audio Recording, and Screen Recording one dialog at a time and keeps Jarvis closed until it holds all three, so no TCC prompt appears mid-session (`PermissionGate`, `PermissionsChecklistView`) ([architecture.md → Permissions](./architecture.md#permissions)).
 - `Sources/JarvisApp/Settings/` — the unified Settings window (`SettingsWindow` hosting Brain behavior, shared Connections, Overlay, Screen, Prep material, and Activity sections), with shared page, rounded-card, responsive-row, and scroll primitives so every tab keeps one visual system without coupling section behavior.
-- `Sources/JarvisApp/Shortcuts/HotkeyController.swift` — the global Carbon ⌥⌘J on-demand-hint hotkey.
+- `Sources/JarvisApp/Shortcuts/HotkeyController.swift` — the global Carbon hint and Explain more shortcuts, with independent persisted bindings.
 - `Sources/JarvisApp/Viewer/ActivityViewer.swift` — the in-app `WKWebView` activity viewer, with the current non-persisted readiness badge, an exact selectable/copyable session ID, and one-click **Evaluate** / **Open report** agentic audit flow.
 - `Sources/EvalPrep/main.swift` — the Foundation-only terminal entry point for the same `AgenticEvaluator` Activity invokes; `scripts/eval-session.sh` runs it over the repo + session dir.
 - `Sources/CJarvisAEC/lib/libjarvis-aec.a` — the prebuilt, zero-dylib WebRTC AEC3 native edge (the `CJarvisAEC` target; rebuilt by `scripts/build-aec.sh`).

@@ -102,8 +102,13 @@ public enum Defaults {
 
     // MARK: - Hotkey
 
-    /// The one global shortcut: force an immediate hint mid-session.
+    /// Independent shortcuts for an immediate hint or explanation mid-session.
     public enum Hotkey {
+        public static let explanationKeyCodeKey = "hotkey.explanation.keyCode"
+        public static let explanationModifiersKey = "hotkey.explanation.modifiers"
+        /// kVK_ANSI_E, with the same modifiers as the hint shortcut.
+        public static let explanationCombination = HotkeyCombination(
+            keyCode: 14, modifiers: [.command, .option])
         public static let keyCodeKey = "hotkey.keyCode"
         public static let modifiersKey = "hotkey.modifiers"
 

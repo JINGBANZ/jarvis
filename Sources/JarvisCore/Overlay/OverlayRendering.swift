@@ -8,9 +8,15 @@ public protocol OverlayRendering: AnyObject {
     /// `perLineSeconds` is expected to align with `lines`; a shorter array just truncates safely.
     func render(_ lines: [String], perLineSeconds: [TimeInterval])
     func render(_ lines: [String], perLineSeconds: [TimeInterval], diagram: DiagramHint?)
+    func render(_ lines: [String], perLineSeconds: [TimeInterval], diagram: DiagramHint?, explanation: String?)
 }
 
 extension OverlayRendering {
+    /// Captions retain the short lines; the persistent box implements the fuller detail.
+    public func render(_ lines: [String], perLineSeconds: [TimeInterval], diagram: DiagramHint?, explanation: String?) {
+        render(lines, perLineSeconds: perLineSeconds, diagram: diagram)
+    }
+
     /// Text-only sinks, such as the transient caption, retain their normal behavior.
     public func render(_ lines: [String], perLineSeconds: [TimeInterval], diagram: DiagramHint?) {
         render(lines, perLineSeconds: perLineSeconds)

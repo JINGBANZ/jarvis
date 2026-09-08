@@ -17,7 +17,9 @@ public extension ToolInvocation {
             let lines = (object?["lines"] as? [String] ?? [])
                 .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
             guard !lines.isEmpty else { return nil }
-            return .speak(callId: callId, lines: lines, mermaid: object?["mermaid"] as? String)
+            let detail = (object?["explanation"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            return .speak(callId: callId, lines: lines, mermaid: object?["mermaid"] as? String,
+                          explanation: detail.flatMap { $0.isEmpty ? nil : $0 })
         case staySilentTool.name:
             return .staySilent(callId: callId)
         case searchPrepNotesTool.name:

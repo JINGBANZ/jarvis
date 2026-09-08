@@ -5,7 +5,12 @@ import Foundation
 public enum TriggerReason: Sendable, Equatable {
     case turnEnd                              // the transcriber finalized an utterance
     case silence(secondsQuiet: TimeInterval)  // no speech for the current backoff interval
-    case manualHint                           // user pressed the hint hotkey — capture + force a hint, one trip
+    case manualHint                           // capture + force a hint, one trip
+    case manualExplanation                    // capture + explain the current confusion
+
+    public var isManual: Bool {
+        self == .manualHint || self == .manualExplanation
+    }
 }
 
 /// Timing context handed to the model so it can tell "thinking" from "stuck".
@@ -34,6 +39,8 @@ public struct TriggerContext: Sendable {
             )
         case .manualHint:
             return JarvisPrompts.Coach.manualHintTrigger(timestamp: stamp)
+        case .manualExplanation:
+            return JarvisPrompts.Coach.manualExplanationTrigger(timestamp: stamp)
         }
     }
 

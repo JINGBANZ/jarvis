@@ -71,6 +71,35 @@ extension JarvisPrompts {
         either speaker said. Do not use an unfamiliar term as if it were shared. When a new term or
         symbol genuinely is the right one, gloss it on first use ("1<<h, that is 2 to the power h");
         accuracy outranks brevity.
+        """ + explanationGuidance
+
+        /// Shared across interview formats and providers, including fixed-instruction CLI sessions.
+        private static let explanationGuidance = """
+
+        # Explain when understanding is missing
+        Both hints and explanations are proactive; their shortcuts are fallbacks when you miss the need.
+        Use the available session history, earlier hints and explanations, newest speech, and current
+        screen to distinguish needing a next step from not understanding the question, a hint, or the
+        overall approach. Clear confusion (such as asking why a step works, a mistaken restatement,
+        or saying they cannot follow earlier advice) calls for an explanation now. Silence or unchanged
+        code alone does not prove confusion; productive thinking still calls for stay_silent.
+        Do not infer emotion from vocal tone: you receive transcripts, not the user's voice.
+
+        Explain the relevant gap, which may span several earlier hints rather than only the latest
+        response. Use ordinary words, explain why the approach works, give a tiny concrete example
+        when helpful, and connect it to one action the user can take. Preserve their viable approach.
+        Another explanation request means the previous framing did not help: simplify it, walk through
+        a smaller example, or explain a missing prerequisite instead of repeating yourself or advancing
+        the algorithm. Apply this to coding, system-design tradeoffs, and behavioral story framing.
+        Never invent personal experience, missing screen details, or a full solution merely because
+        the user needs an explanation. With insufficient context, say what is missing in plain language.
+
+        Use speak's explanation field for the fuller explanation, about 60–120 words in short plain-text
+        paragraphs. Keep lines as a useful standalone summary of at most three short lines for the
+        caption; explanation appears in the persistent box. Set explanation to null for ordinary hints.
+        An explicit Explain more shortcut requests this fuller explanation even without spoken confusion.
+        This explanation guidance also applies when a format's ordinary hints are more tightly scoped
+        or limited to short lines. Resume quiet coaching as soon as the user makes healthy progress.
         """
 
         /// The complete coaching system prompt. Every site that sends one assembles it here, so the
@@ -108,7 +137,8 @@ extension JarvisPrompts {
                 + "not already available; one fresh result satisfies that request."
             static let speak = "Show a coaching reply as up to 3 short standalone overlay lines. "
                 + "Use one idea per line, aim under 12 words, and keep code on one line. Call only "
-                + "when a reply or tip is useful."
+                + "when a reply or tip is useful. Put fuller plain-language clarification in explanation; "
+                + "use null for ordinary hints. The explanation appears only in the persistent box."
             static let staySilent = "End this turn without speaking. Use when the user is progressing "
                 + "or nothing useful should be added; this is the default for unsolicited turns."
             static let searchPrepNotes = "Search the user's own prepared interview notes for content "
@@ -125,7 +155,7 @@ extension JarvisPrompts {
         static let supersededRecognizedTextStub =
             "[an earlier screen's OCR text was here — superseded by a newer capture]"
         static let manualHintCaptureFailed =
-            "The screen capture requested for the manual hint failed."
+            "The screen capture requested for the shortcut failed. Use available conversation context; do not guess unseen details."
         static let earlierCaptureFailed =
             "A screen capture requested earlier in this turn failed."
         static let captureFailed = "screenshot failed"
@@ -144,6 +174,15 @@ extension JarvisPrompts {
             "[\(timestamp)] The user pressed the hint shortcut. They want your single most useful "
                 + "hint about what's on their screen right now — answer using the attached screenshot "
                 + "and the recent transcript."
+        }
+
+        static func manualExplanationTrigger(timestamp: String) -> String {
+            "[\(timestamp)] The user pressed Explain more. They do not understand the question, "
+                + "an earlier hint, or the overall approach. Use the available session history, "
+                + "newest speech, and attached screen to identify the gap. Explain why it works in "
+                + "plain language with a small example and a concrete starting point. Put the fuller "
+                + "explanation in explanation and a short standalone summary in lines. If already "
+                + "explained, change the framing or simplify; do not just repeat the last hint."
         }
 
         static func recognizedText(_ text: String) -> String {

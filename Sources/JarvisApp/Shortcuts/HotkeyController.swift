@@ -2,8 +2,8 @@ import AppKit
 import Carbon.HIToolbox
 import JarvisCore   // jlog, HotkeyPreferences, HotkeyCombination
 
-/// Registers the single global hint hotkey via Carbon's `RegisterEventHotKey` and forwards each press
-/// to `onRequestHint`. The shortcut is system-wide (it fires even when Jarvis, a menu-bar accessory,
+/// Registers the global coaching shortcuts via Carbon's `RegisterEventHotKey` and forwards each press
+/// to `onRequest`. The shortcut is system-wide (it fires even when Jarvis, a menu-bar accessory,
 /// isn't frontmost) and needs no Accessibility permission or permission dialog.
 ///
 /// Carbon's hot-key API is the one global-shortcut mechanism Apple never gave a modern replacement,
@@ -15,10 +15,10 @@ import JarvisCore   // jlog, HotkeyPreferences, HotkeyCombination
 /// the policy (ignore-when-stopped, route through the turn box) via the callback.
 @MainActor
 final class HotkeyController {
-    /// Called on the main actor each time the hint hotkey fires.
-    var onRequestHint: (() -> Void)?
+    /// Called on the main actor each time the coaching shortcut fires.
+    var onRequest: ((CoachingShortcut) -> Void)?
 
-    private var hotKeyRef: EventHotKeyRef?
+    private var hotKeyRefs: [CoachingShortcut: EventHotKeyRef] = [:]
     private var handlerRef: EventHandlerRef?
     /// The combination actually registered right now — nil only if nothing has registered
     /// successfully yet this run. Kept separate from `HotkeyPreferences.combination` so a failed
@@ -26,14 +26,14 @@ final class HotkeyController {
     /// (`HotkeySection.hasActiveHotkey`) to tell "the previous shortcut stays active" apart from
     /// "nothing is registered at all" — the only state that must persist across Settings visits;
     /// the transient result of the last `apply(_:)` call does not need to persist and isn't stored.
-    private(set) var registered: HotkeyCombination?
+    private(set) var registered: [CoachingShortcut: HotkeyCombination] = [:]
 
     /// 'JRVS' — a unique signature so our hot-key id can't be confused with another component's.
     private static let signature: OSType = 0x4A_52_56_53
 
-    init(preferences: HotkeyPreferences) {
+    init(preferences: [HotkeyPreferences]) {
         installHandler()
-        register(preferences.combination)
+        for preference in preferences { register(preference.combination, for: preference.shortcut) }
     }
 
     // No teardown: the controller lives for the whole app run (like the menu bar and overlay), and
@@ -47,21 +47,21 @@ final class HotkeyController {
     /// unregister-then-register-then-restore dance used to be able to manufacture on a double failure).
     /// The caller decides whether to persist `combination` based on the returned outcome.
     @discardableResult
-    func apply(_ combination: HotkeyCombination) -> HotkeyRegistrationOutcome {
+    func apply(_ combination: HotkeyCombination, for shortcut: CoachingShortcut) -> HotkeyRegistrationOutcome {
         // Re-registering the exact combination Jarvis itself already holds would otherwise fail:
         // Carbon's hot-key registry rejects a second RegisterEventHotKey for a combo it hasn't
         // released yet, even from the same process — surfacing as a spurious "already in use by
         // another app" the moment the user re-picks their current shortcut.
-        guard combination != registered else { return .registered }
-        let previousRef = hotKeyRef
-        let outcome = register(combination)
+        guard combination != registered[shortcut] else { return .registered }
+        let previousRef = hotKeyRefs[shortcut]
+        let outcome = register(combination, for: shortcut)
         if case .registered = outcome, let previousRef {
             let status = UnregisterEventHotKey(previousRef)
             // Releasing a ref that was just live practically never fails, but if it does, don't
             // pretend otherwise — the old binding may still be registered at the OS level alongside
             // the new one.
             if status != noErr {
-                jlog("Jarvis: hint hotkey failed to release the previous binding after rebinding "
+                jlog("Jarvis: coaching shortcut failed to release the previous binding after rebinding "
                      + "(status \(status)).")
             }
         }
@@ -74,12 +74,20 @@ final class HotkeyController {
         var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard),
                                  eventKind: UInt32(kEventHotKeyPressed))
         let selfPtr = Unmanaged.passUnretained(self).toOpaque()
-        let status = InstallEventHandler(GetApplicationEventTarget(), { _, _, userData -> OSStatus in
-            guard let userData else { return noErr }
+        let status = InstallEventHandler(GetApplicationEventTarget(), { _, event, userData -> OSStatus in
+            guard let userData, let event else { return OSStatus(eventNotHandledErr) }
+            var identifier = EventHotKeyID()
+            let status = GetEventParameter(
+                event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID),
+                nil, MemoryLayout<EventHotKeyID>.size, nil, &identifier)
+            guard status == noErr, identifier.signature == HotkeyController.signature,
+                  let shortcut = CoachingShortcut(rawValue: identifier.id) else {
+                return OSStatus(eventNotHandledErr)
+            }
             let controller = Unmanaged<HotkeyController>.fromOpaque(userData).takeUnretainedValue()
             // Carbon delivers application-target hot-key events on the main thread, so it is safe to
             // assert main-actor isolation here and call back synchronously.
-            MainActor.assumeIsolated { controller.onRequestHint?() }
+            MainActor.assumeIsolated { controller.onRequest?(shortcut) }
             return noErr
         }, 1, &spec, selfPtr, &handlerRef)
         // A failed install leaves the hot key dead; without this line that failure is invisible.
@@ -87,8 +95,8 @@ final class HotkeyController {
     }
 
     @discardableResult
-    private func register(_ combination: HotkeyCombination) -> HotkeyRegistrationOutcome {
-        let id = EventHotKeyID(signature: Self.signature, id: 1)
+    private func register(_ combination: HotkeyCombination, for shortcut: CoachingShortcut) -> HotkeyRegistrationOutcome {
+        let id = EventHotKeyID(signature: Self.signature, id: shortcut.rawValue)
         var ref: EventHotKeyRef?
         let status = RegisterEventHotKey(
             combination.keyCode, combination.modifiers.rawValue, id,
@@ -97,12 +105,12 @@ final class HotkeyController {
         // Log it so a silently-dead hotkey is diagnosable instead of looking like nothing happened
         // on press.
         guard status == noErr else {
-            jlog("Jarvis: hint hotkey \(HotkeyKeyNames.displayString(for: combination)) unavailable "
+            jlog("Jarvis: coaching shortcut \(HotkeyKeyNames.displayString(for: combination)) unavailable "
                  + "(status \(status)) — another app may already own it.")
             return .failed(status: status)
         }
-        hotKeyRef = ref
-        registered = combination
+        hotKeyRefs[shortcut] = ref
+        registered[shortcut] = combination
         return .registered
     }
 }

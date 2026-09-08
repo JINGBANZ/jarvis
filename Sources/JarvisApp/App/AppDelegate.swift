@@ -35,7 +35,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     private var permissionGate: PermissionGate!
     /// Whether the app's own surfaces exist yet. Nothing is built while the permission gate is up.
     private var didStartApp = false
-    private let hotkeyPreferences = HotkeyPreferences()
+    private let hotkeyPreferences = CoachingShortcut.allCases.map { HotkeyPreferences(shortcut: $0) }
     /// Monotonic revision stamped on each control-plane snapshot. Bumped at Start and whenever an
     /// explicit Settings edit installs a fresh plan; never by runtime health.
     private var planRevision: UInt = 0
@@ -82,7 +82,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     /// Fires an on-demand hint for the running session. Non-nil only while running — set in `start()`,
     /// cleared in `stop()` — so the hotkey beeps when there's no session. Captures the Sendable driver
     /// + turn box (not `@MainActor` self), like the transcriber callbacks do.
-    private var requestManualHint: (() -> Void)?
+    private var requestManualHint: ((CoachingShortcut) -> Void)?
     /// Everything this session leaves on disk: the owner-only directory, the evidence handle in it,
     /// retention pruning, and the close bookkeeping. See `SessionArtifacts` for the boundary.
     private let artifacts = SessionArtifacts()
@@ -181,7 +181,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         renderReadinessStatus(readiness.status)
 
         // The global hint hotkey is constructed before Settings so HotkeySection's closures (built
-        // below) can already read/apply through it. `onRequestHint` is wired later, alongside the
+        // below) can already read/apply through it. `onRequest` is wired later, alongside the
         // rest of session lifecycle plumbing.
         hotkeys = HotkeyController(preferences: hotkeyPreferences)
 
@@ -214,12 +214,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             PrepMaterialSection(preferences: prepMaterialPreferences),
             HotkeySection(
                 preferences: hotkeyPreferences,
-                hasActiveHotkey: { [weak self] in self?.hotkeys?.registered != nil },
-                applyCombination: { [weak self] combination in
+                hasActiveHotkey: { [weak self] shortcut in self?.hotkeys?.registered[shortcut] != nil },
+                applyCombination: { [weak self] shortcut, combination in
                     // `hotkeys` is constructed above, before Settings can ever be shown, so `self`
                     // being torn down is the only way this falls through — report failure rather
                     // than falsely claiming a rebind that never happened.
-                    self?.hotkeys?.apply(combination) ?? .failed(status: -1)
+                    self?.hotkeys?.apply(combination, for: shortcut) ?? .failed(status: -1)
                 }),
             ActivitySection(viewer: activityViewer),
         ]
@@ -238,12 +238,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
 
         // While a session is running, screenshot + ask the brain for a hint in one trip; otherwise
         // beep — there's no live driver/conversation to hint from when stopped.
-        hotkeys?.onRequestHint = { [weak self] in
+        hotkeys?.onRequest = { [weak self] shortcut in
             guard let self, let fire = self.requestManualHint else {
                 NSSound.beep() // ghost-mode-allowed: explicit user hotkey while stopped
                 return
             }
-            fire()
+            fire(shortcut)
         }
 
         if !transcriptionPreferences.provider.requiredCredentials(
@@ -809,7 +809,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         }
         // Arm the hint hotkey for this session: capture the screen and force a one-trip hint, routed
         // through the same turn box as audio triggers (so Stop cancels it and rapid presses coalesce).
-        self.requestManualHint = { turns.run { await driver.handleTrigger(.manualHint) } }
+        self.requestManualHint = { shortcut in turns.run { await driver.handleTrigger(shortcut.triggerReason) } }
         transcriber.connect()
         themTranscriber.connect()
         if let reason = capture.start() {

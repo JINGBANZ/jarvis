@@ -151,15 +151,21 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     }
 
     public nonisolated func render(_ lines: [String], perLineSeconds: [TimeInterval], diagram: DiagramHint?) {
-        let text = lines
+        render(lines, perLineSeconds: perLineSeconds, diagram: diagram, explanation: nil)
+    }
+
+    public nonisolated func render(_ lines: [String], perLineSeconds: [TimeInterval], diagram: DiagramHint?, explanation: String?) {
+        let summary = lines
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
             .joined(separator: " ")
-        guard !text.isEmpty else { return }
-        Task { @MainActor in self.append(text, diagram: diagram) }
+        guard !summary.isEmpty else { return }
+        let detail = explanation?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let text = detail.isEmpty ? summary : summary + "\n\n" + detail
+        Task { @MainActor in self.append(text, diagram: diagram, startsAtTop: !detail.isEmpty) }
     }
 
-    private func append(_ text: String, diagram: DiagramHint?) {
+    private func append(_ text: String, diagram: DiagramHint?, startsAtTop: Bool = false) {
         entries.append((stamp: timeFormatter.string(from: Date()), text: text, diagram: diagram))
         guard !isPreviewing else { return }   // the preview owns the display; restored on close
         // Re-assert capture exclusion on every render that reaches the screen — same defense-in-depth as
@@ -167,7 +173,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         // activation policy and WindowServer drops `sharingType` on vulnerable macOS builds.
         if panel.isVisible { reassertCaptureExclusion() }
         rerender()
-        if diagram != nil && diagramsEnabled {
+        if startsAtTop || (diagram != nil && diagramsEnabled) {
             // A tall diagram may exceed the viewport. Start at its hint, not its last row.
             if let layout = textView.layoutManager, let container = textView.textContainer {
                 layout.ensureLayout(for: container)

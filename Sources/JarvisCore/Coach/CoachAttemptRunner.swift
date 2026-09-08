@@ -127,11 +127,11 @@ final class CoachAttemptRunner: @unchecked Sendable {
         var observations: [ChatMessage] {
             screenObservation + (prepNotesObservation.map { [$0] } ?? [])
         }
-        var manualHintPrepared = false
+        var preparedManualReason: TriggerReason?
 
         init(reason: TriggerReason) {
             self.reason = reason
-            bypassesTranscriptionSettlement = reason == .manualHint
+            bypassesTranscriptionSettlement = reason.isManual
         }
     }
 
@@ -220,10 +220,11 @@ final class CoachAttemptRunner: @unchecked Sendable {
             formatAddendum: interviewFormatAddendum)
         let historyBase: [ChatMessage] = [.system(systemPrompt)] + history.snapshot()
 
-        if reason == .manualHint && !work.manualHintPrepared {
+        if reason.isManual && work.preparedManualReason != reason {
             if let prompt = context.promptLine {
-                jlog("⌨️ hint shortcut — \(prompt)")
-                activity?.record(.manualHint(prompt: prompt))
+                jlog("⌨️ coaching shortcut — \(prompt)")
+                activity?.record(reason == .manualExplanation
+                    ? .manualExplanation(prompt: prompt) : .manualHint(prompt: prompt))
             }
             let screen = self.screen
             let shot = await Self.captureScreen(using: screen, selecting: attempt.plan.screen)
@@ -249,12 +250,13 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 work.screenObservation = [
                     .user(JarvisPrompts.Coach.manualHintCaptureFailed),
                 ]
+                turnMessages.append(contentsOf: work.screenObservation)
             }
-            work.manualHintPrepared = true
+            work.preparedManualReason = reason
         }
 
         let toolChoice: ToolChoice =
-            reason == .manualHint ? .force(speakTool.name) : .required
+            reason.isManual ? .force(speakTool.name) : .required
         jlog("💭 thinking… [\(attempt.target.provider.displayName)]")
 
         var requestPhase: CoachingAttemptAuditEvent.RequestPhase = .initial
@@ -405,13 +407,13 @@ final class CoachAttemptRunner: @unchecked Sendable {
                             newPhase: .captureScreenContinuation)
                     }
 
-                case .speak(let callID, let lines, let mermaid):
+                case .speak(let callID, let lines, let mermaid, let explanation):
                     if Task.isCancelled {
                         jlog("… attempt cancelled (stopped) before speaking")
                         return .cancelled
                     }
                     jlog("💬 \(lines.joined(separator: " "))")
-                    activity?.record(.tip(lines: lines))
+                    activity?.record(.tip(lines: lines + (explanation.map { [$0] } ?? [])))
                     let diagram = interviewFormat == .systemDesign ? mermaid.flatMap(DiagramHint.init) : nil
                     if mermaid != nil && diagram == nil {
                         jlog("Diagram hint omitted: unsupported graph or interview format")
@@ -420,7 +422,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         lines,
                         perLineSeconds: lines.map {
                             OverlayTiming.displaySeconds(for: $0, config: config)
-                        }, diagram: diagram)
+                        }, diagram: diagram, explanation: explanation)
                     turnMessages.append(.assistantToolCalls(response.rawToolCalls))
                     turnMessages.append(.init(
                         role: .tool,
