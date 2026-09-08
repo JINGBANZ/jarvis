@@ -39,15 +39,16 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     /// Reports the box's new content size once a resize drag finishes.
     public var onSizeChanged: ((Double, Double) -> Void)?
     /// Stand-in responses shown during the Settings preview.
-    private static let sampleEntries: [(stamp: String, text: String, diagram: DiagramHint?)] = [
-        ("10:30:00", "Ask about the time complexity of that loop.", nil),
-        ("10:30:08", "Mention the edge case when the list is empty.", nil),
+    private static let sampleEntries: [(stamp: String, text: String, explanation: String?, diagram: DiagramHint?)] = [
+        ("10:30:00", "Ask about the time complexity of that loop.", nil, nil),
+        ("10:30:08", "Check the empty list before reading its first item.",
+         "An empty list has no first item. Handle that case before indexing into it, then continue with the normal path.", nil),
     ]
     /// Each spoken tip with the time it arrived, newest last. Held as structured entries (not the
     /// rendered string) so `clear()` and the test hooks don't have to parse the text back out.
     private var diagramsEnabled = Defaults.Overlay.Box.diagramsEnabled
     private var latestEntryStart = 0
-    private var entries: [(stamp: String, text: String, diagram: DiagramHint?)] = []
+    private var entries: [(stamp: String, text: String, explanation: String?, diagram: DiagramHint?)] = []
     /// Test hook (internal): counts how many times the panel has re-asserted capture exclusion.
     private(set) var captureExclusionReassertCount = 0
 
@@ -161,19 +162,20 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
             .joined(separator: " ")
         guard !summary.isEmpty else { return }
         let detail = explanation?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let text = detail.isEmpty ? summary : summary + "\n\n" + detail
-        Task { @MainActor in self.append(text, diagram: diagram, startsAtTop: !detail.isEmpty) }
+        Task { @MainActor in
+            self.append(summary, explanation: detail.isEmpty ? nil : detail, diagram: diagram)
+        }
     }
 
-    private func append(_ text: String, diagram: DiagramHint?, startsAtTop: Bool = false) {
-        entries.append((stamp: timeFormatter.string(from: Date()), text: text, diagram: diagram))
+    private func append(_ text: String, explanation: String?, diagram: DiagramHint?) {
+        entries.append((stamp: timeFormatter.string(from: Date()), text: text, explanation: explanation, diagram: diagram))
         guard !isPreviewing else { return }   // the preview owns the display; restored on close
         // Re-assert capture exclusion on every render that reaches the screen — same defense-in-depth as
         // OverlayCaptionPanel.show, since this box can be visible (full of responses) while Settings flips the
         // activation policy and WindowServer drops `sharingType` on vulnerable macOS builds.
         if panel.isVisible { reassertCaptureExclusion() }
         rerender()
-        if startsAtTop || (diagram != nil && diagramsEnabled) {
+        if explanation != nil || (diagram != nil && diagramsEnabled) {
             // A tall diagram may exceed the viewport. Start at its hint, not its last row.
             if let layout = textView.layoutManager, let container = textView.textContainer {
                 layout.ensureLayout(for: container)
@@ -197,7 +199,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
 
     /// Build the readout from `items`: a dimmed monospaced timestamp in front of each response, blank
     /// line between.
-    private func setEntriesText(_ items: [(stamp: String, text: String, diagram: DiagramHint?)]) {
+    private func setEntriesText(_ items: [(stamp: String, text: String, explanation: String?, diagram: DiagramHint?)]) {
         let result = NSMutableAttributedString()
         let stampAttrs: [NSAttributedString.Key: Any] = [
             .foregroundColor: NSColor(white: 1, alpha: 0.5),
@@ -207,11 +209,23 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
             .foregroundColor: NSColor.white,
             .font: NSFont.systemFont(ofSize: fontSize),
         ]
+        let hintAttrs: [NSAttributedString.Key: Any] = [
+            .foregroundColor: NSColor.white,
+            .font: NSFont.systemFont(ofSize: fontSize, weight: .semibold),
+        ]
+        let explanationLabelAttrs: [NSAttributedString.Key: Any] = [
+            .foregroundColor: NSColor(white: 1, alpha: 0.75),
+            .font: NSFont.systemFont(ofSize: max(8, fontSize - 2), weight: .medium),
+        ]
         for (i, entry) in items.enumerated() {
             if i > 0 { result.append(NSAttributedString(string: "\n\n")) }
             latestEntryStart = result.length
             result.append(NSAttributedString(string: "\(entry.stamp)  ", attributes: stampAttrs))
-            result.append(NSAttributedString(string: entry.text, attributes: textAttrs))
+            result.append(NSAttributedString(string: entry.text, attributes: hintAttrs))
+            if let explanation = entry.explanation {
+                result.append(NSAttributedString(string: "\n\nExplanation\n", attributes: explanationLabelAttrs))
+                result.append(NSAttributedString(string: explanation, attributes: textAttrs))
+            }
             if diagramsEnabled, let diagram = entry.diagram {
                 result.append(NSAttributedString(string: "\n"))
                 let attachment = NSTextAttachment()

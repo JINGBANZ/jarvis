@@ -160,8 +160,9 @@ persists only that shortcut through `HotkeyPreferences`; defaults and storage ke
 A collision with another application or the other Jarvis shortcut leaves the old working binding
 active and displays feedback for that card. If no binding could be registered at launch, its warning
 persists across tab visits. The two cards scroll at small window sizes, including when both warnings
-are visible. Explanation paragraphs appear in the existing Overlay Box, without changing either
-surface's visibility preference.
+are visible. The Overlay Box distinguishes semibold hints from regular explanation paragraphs with an
+**Explanation** label and spacing. Both bodies use the configured text size; the appearance preview
+shows an example. Neither surface's visibility preference changes.
 
 ## Brain
 

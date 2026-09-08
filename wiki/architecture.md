@@ -193,7 +193,9 @@ an explicit shortcut only beeps. Activity records which shortcut was pressed.
 The `speak` action keeps short `lines` for captions and an optional plain-text `explanation` for fuller
 clarification in the persistent box. The prompt targets roughly 60–120 words in short paragraphs,
 with a simple rationale, a concrete example when useful, and one starting action. The box scrolls to
-the beginning of that entry and preserves its paragraphs; captions retain only the standalone summary.
+the beginning of that entry and preserves its paragraphs. Hints use semibold text; fuller detail uses
+regular text at the same configured size under an **Explanation** label, separated by whitespace.
+Captions retain only the standalone summary.
 Explanation text follows the existing coaching history and Activity paths. It opens no extra window,
 never activates Jarvis, and respects the box's enabled/session visibility. Disabling the box leaves
 only the brief caption if that surface is enabled; it does not force a hidden surface on.
