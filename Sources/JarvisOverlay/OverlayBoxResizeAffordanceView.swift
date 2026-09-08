@@ -68,6 +68,13 @@ final class OverlayBoxResizeAffordanceView: NSView {
         runLayer.lineWidth = Self.runWidth
         runLayer.lineCap = .round
         runLayer.opacity = 0
+        // AppKit suppresses implicit CoreAnimation actions only for a view's *own* backing layer,
+        // through its delegate. This is a manually added sublayer with no delegate, so CoreAnimation
+        // supplies its default quarter-second animation for every `path` assignment: the lit run would
+        // interpolate toward the edge instead of tracking it through a drag, and morphing between an
+        // edge run and a corner run is undefined anyway, their paths having different element counts.
+        // Keyed on `path` alone, so the opacity fade in `fade(to:)` stays.
+        runLayer.actions = ["path": NSNull()]
         layer?.addSublayer(runLayer)
         for grip in grips {
             grip.owner = self
@@ -373,6 +380,13 @@ final class OverlayBoxResizeAffordanceView: NSView {
 
     /// Whether a run is drawn right now.
     var isRunShown: Bool { runLayer.opacity > 0 && runLayer.path != nil }
+
+    /// Whether a change to `key` on the run's layer is set to land at once.
+    ///
+    /// It reports the suppression rather than the resulting behaviour: `action(forKey:)` cannot tell
+    /// the two apart, answering nil both where an action is suppressed and where CoreAnimation would
+    /// still supply its own built-in default for an animatable property.
+    func suppressesImplicitAnimation(of key: String) -> Bool { runLayer.actions?[key] is NSNull }
 
     /// Whether the run actually drawn is the one belonging to `zone`. `highlightedZone` only reports
     /// what the zone lookup returned; this proves the matching geometry reached the layer.

@@ -106,6 +106,19 @@ import AppKit
         #expect(!view.drawsRun(for: .right))
     }
 
+    /// The run is drawn by a sublayer added by hand, which AppKit does not shield from CoreAnimation's
+    /// implicit actions the way it shields a view's own backing layer. Left alone, each new path would
+    /// animate over a quarter second: the run would lag the edge through a drag, and an edge-to-corner
+    /// swap would morph between paths of different element counts, which is undefined.
+    @MainActor @Test
+    func aNewRunIsDrawnAtOnceRatherThanAnimatedInto() {
+        let view = view()
+        #expect(view.suppressesImplicitAnimation(of: "path"),
+                "a new run must land at once, or it would lag the edge it is tracking")
+        #expect(!view.suppressesImplicitAnimation(of: "opacity"),
+                "and only `path`: the fade is deliberate")
+    }
+
     @MainActor @Test
     func thePointerLeavingClearsTheRun() {
         let view = view()
