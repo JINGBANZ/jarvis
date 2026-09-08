@@ -31,8 +31,9 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     /// The scrolling log under the header. Held so the header's height can be taken off it on every
     /// resize, and so collapsing can put it away.
     private let scroll: NSScrollView
-    /// Gives the borderless box's edges a resize cursor. Takes no part in hit testing.
-    private let resizeCursors: OverlayBoxResizeCursorView
+    /// Draws the box's resize affordance along whichever edge the pointer is over. Takes no part in
+    /// hit testing.
+    private let resizeAffordance: OverlayBoxResizeAffordanceView
     /// Whether the box is rolled up to its header. A gesture for the current conversation rather than
     /// a preference, so nothing persists it and Start opens the box again.
     private(set) var isCollapsed = false
@@ -146,12 +147,12 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         let header = OverlayBoxHeaderView(chrome: OverlayBoxChrome(contentHeight: contentSize.height))
         self.header = header
         expandedContentHeight = contentSize.height
-        let cursors = OverlayBoxResizeCursorView(frame: box.bounds)
-        resizeCursors = cursors
+        let affordance = OverlayBoxResizeAffordanceView(frame: box.bounds)
+        resizeAffordance = affordance
 
         box.addSubview(scroll)
         box.addSubview(header)
-        box.addSubview(cursors)     // topmost, so its tracking area sees the whole box
+        box.addSubview(affordance)   // topmost, so its tracking area sees the whole box
         panel.contentView = box
         super.init()
         header.collapseButton.target = self
@@ -179,7 +180,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
                               width: bounds.width, height: chrome.height)
         scroll.frame = NSRect(x: 0, y: 0,
                               width: bounds.width, height: max(0, bounds.height - chrome.height))
-        resizeCursors.frame = bounds
+        resizeAffordance.frame = bounds
     }
 
     // MARK: - Header actions
@@ -194,7 +195,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         guard collapsed != isCollapsed else { return }
         isCollapsed = collapsed
         header.setCollapsed(collapsed)
-        resizeCursors.allowsVerticalResize = !collapsed
+        resizeAffordance.allowsVerticalResize = !collapsed
         scroll.isHidden = collapsed
 
         let width = panel.contentRect(forFrameRect: panel.frame).width
