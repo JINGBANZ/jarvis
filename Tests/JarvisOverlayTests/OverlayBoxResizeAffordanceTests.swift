@@ -4,8 +4,8 @@ import AppKit
 
 /// The box has always been resizable, but a borderless window gives no sign of it. macOS refuses to
 /// let an inactive app set the cursor, and Jarvis is a background app for all of an interview, so the
-/// panel draws the affordance itself: an outline while the pointer is anywhere inside, and a brighter
-/// run on whichever edge or corner it is over.
+/// panel draws the affordance itself: the edge or corner under the pointer lights up. That view also
+/// owns the drag on those edges, so the region it lights and the region that resizes are one region.
 ///
 /// AppKit views are not flipped, so y grows upward: the top edge is `maxY`.
 @Suite(.serialized) struct OverlayBoxResizeAffordanceTests {
@@ -85,11 +85,11 @@ import AppKit
     func thePointerOnAnEdgeHighlightsThatRun() {
         let view = view()
         view.pointerMoved(to: NSPoint(x: 518, y: 220))
-        #expect(view.highlightedZone == .right)
-        #expect(view.isRunShown)
+        #expect(view.drawsRun(for: .right), "the right edge's own run must be the one drawn")
 
         view.pointerMoved(to: NSPoint(x: 517, y: 437))
-        #expect(view.highlightedZone == .topRight, "moving into the corner swaps the run")
+        #expect(view.drawsRun(for: .topRight), "moving into the corner swaps the run")
+        #expect(!view.drawsRun(for: .right))
     }
 
     @MainActor @Test
@@ -152,6 +152,34 @@ import AppKit
             #expect(frame.width <= reach || frame.height <= reach,
                     "\(frame) is thicker than an edge strip, so it would freeze the box")
         }
+    }
+
+    /// `zone` tests its edges closed while `NSRect.contains` is half-open, so picking the grip by
+    /// frame containment left exactly one lit column on the left and bottom that fell through and
+    /// moved the box instead of resizing it.
+    @MainActor @Test
+    func theLastColumnOfALitEdgeStillResizes() {
+        let view = view()
+        let reach = OverlayBoxResizeAffordanceView.edgeReach
+        #expect(zone(reach, 220) == .left, "the boundary column is lit…")
+        #expect(view.hitTest(NSPoint(x: reach, y: 220)) != nil, "…so it must resize too")
+        #expect(zone(260, reach) == .bottom)
+        #expect(view.hitTest(NSPoint(x: 260, y: reach)) != nil)
+    }
+
+    /// The tracking area has no `.enabledDuringMouseDrag`, so AppKit reports the pointer leaving
+    /// mid-drag but not entering again until mouse-up. An outward drag would go dark the moment the
+    /// pointer outran the frame while an inward one stayed lit.
+    @MainActor @Test
+    func aDragKeepsItsRunLitEvenWhenThePointerOutrunsTheBox() {
+        let view = view()
+        let edge = NSPoint(x: 518, y: 220)
+        view.pointerMoved(to: edge)
+        view.beginResize(at: edge)
+
+        view.pointerMoved(to: nil)               // what AppKit sends as the pointer overtakes the frame
+
+        #expect(view.drawsRun(for: .right), "the run must stay lit for the whole drag")
     }
 
     @MainActor @Test

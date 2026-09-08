@@ -65,7 +65,17 @@ final class OverlayBoxHeaderButton: NSButton {
         contentTintColor = Self.hoverTint
     }
 
-    override func mouseExited(with event: NSEvent) {
+    override func mouseExited(with event: NSEvent) { clearHover() }
+
+    /// AppKit sends no `mouseExited` to a view that is hidden out from under the pointer, and clearing
+    /// the log hides this button while the pointer is still on it. Without this the hover fill would
+    /// be baked in, and the button would come back looking hovered when the next tip lands.
+    override func viewDidHide() {
+        super.viewDidHide()
+        clearHover()
+    }
+
+    private func clearHover() {
         layer?.backgroundColor = nil
         contentTintColor = Self.idleTint
     }

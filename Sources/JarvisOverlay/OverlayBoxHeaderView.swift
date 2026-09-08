@@ -14,8 +14,6 @@ final class OverlayBoxHeaderView: NSView {
     /// Hidden while collapsed: with no log under it, the rule would underline nothing.
     private var showsSeparator = true
 
-    var title: String { titleLabel.stringValue }
-
     init(chrome: OverlayBoxChrome) {
         self.chrome = chrome
         super.init(frame: .zero)

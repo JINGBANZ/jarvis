@@ -31,8 +31,8 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     /// The scrolling log under the header. Held so the header's height can be taken off it on every
     /// resize, and so collapsing can put it away.
     private let scroll: NSScrollView
-    /// Draws the box's resize affordance along whichever edge the pointer is over. Takes no part in
-    /// hit testing.
+    /// Draws the box's resize affordance along whichever edge the pointer is over, and owns the drag
+    /// on those edges so the region that lights is the region that resizes.
     private let resizeAffordance: OverlayBoxResizeAffordanceView
     /// Whether the box is rolled up to its header. A gesture for the current conversation rather than
     /// a preference, so nothing persists it and Start opens the box again.
@@ -40,6 +40,10 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     /// The height the box has when it is not rolled up: the size the user dragged to, and the one the
     /// header's proportions are taken from at every moment, collapsed or not.
     private var expandedContentHeight: CGFloat
+    /// The smallest height a drag may reach, and the one the collapsed box restores on expand.
+    private static let heightFloor = CGFloat(Defaults.Overlay.Box.heightRange.lowerBound)
+    /// The header's geometry for the box's expanded height, which is what it keeps while collapsed.
+    private var chrome: OverlayBoxChrome { OverlayBoxChrome(contentHeight: expandedContentHeight) }
     /// White level of the box fill; the opacity setting only varies the alpha, keeping this constant.
     private static let boxWhite: CGFloat = 0.10
     /// Point size of the response text; the timestamp is rendered a couple points smaller. Driven by
@@ -48,6 +52,8 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     /// While the Settings appearance tab is open, the box shows sample text (not the real log) so size
     /// and opacity changes are visible even with no responses yet. Restored on close.
     private var isPreviewing = false
+    /// Whether the box was rolled up when the Settings preview opened, so closing it can restore that.
+    private var wasCollapsedBeforePreview = false
     /// The Settings toggle: the user's master switch. Off means the box never appears.
     private var isEnabled = false
     /// Whether a coaching session is running. Set by the app on Start and Stop.
@@ -93,7 +99,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         // The drag floor is the persisted floor, so a dragged size always survives a round trip.
         panel.minSize = NSSize(
             width: Defaults.Overlay.Box.widthRange.lowerBound,
-            height: Defaults.Overlay.Box.heightRange.lowerBound)
+            height: Self.heightFloor)
         panel.level = .floating
         panel.isFloatingPanel = true
         panel.hidesOnDeactivate = false
@@ -112,7 +118,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         box.layer?.backgroundColor = NSColor(
             white: Self.boxWhite,
             alpha: CGFloat(Defaults.Overlay.Box.opacity)).cgColor
-        box.layer?.cornerRadius = 12
+        box.layer?.cornerRadius = OverlayBoxChrome.cornerRadius
         box.layer?.masksToBounds = true
         self.box = box
 
@@ -176,7 +182,6 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     private func layoutContent() {
         let bounds = box.bounds
         if !isCollapsed { expandedContentHeight = bounds.height }
-        let chrome = OverlayBoxChrome(contentHeight: expandedContentHeight)
         header.apply(chrome)
         header.frame = NSRect(x: 0, y: bounds.height - chrome.height,
                               width: bounds.width, height: chrome.height)
@@ -189,9 +194,9 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
 
     @objc private func toggleCollapsed() { setCollapsed(!isCollapsed) }
 
-    /// Inert while the Settings preview owns the display. The preview renders sample entries, so the
-    /// header shows a clear button over content that is not the real log; clearing there would wipe
-    /// the session's history with nothing on screen changing to show it had happened.
+    /// The preview hides this button, so this guard is the second lock rather than the first: were it
+    /// ever reachable while the preview owns the display, clearing would wipe the session's history
+    /// with nothing on screen changing to show it had happened.
     @objc private func clearLog() {
         guard !isPreviewing else { return }
         clear()
@@ -206,12 +211,12 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         resizeAffordance.allowsVerticalResize = !collapsed
         scroll.isHidden = collapsed
 
-        let collapsedHeight = OverlayBoxChrome(contentHeight: expandedContentHeight).height
+        let collapsedHeight = chrome.height
         // Floor and ceiling meet while collapsed: with only the header on screen, a vertical drag has
         // nothing to stretch. Both are set before the resize so neither clamps it.
         panel.minSize = NSSize(
             width: panel.minSize.width,
-            height: collapsed ? collapsedHeight : CGFloat(Defaults.Overlay.Box.heightRange.lowerBound))
+            height: collapsed ? collapsedHeight : Self.heightFloor)
         panel.maxSize = NSSize(width: panel.maxSize.width,
                                height: collapsed ? collapsedHeight : .greatestFiniteMagnitude)
 
@@ -277,7 +282,9 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
             result.append(NSAttributedString(string: entry.text, attributes: textAttrs))
         }
         textView.textStorage?.setAttributedString(result)
-        header.setHasContent(!items.isEmpty)
+        // The preview's sample is not the user's log, so it offers nothing to erase: the clear button
+        // stays away rather than sitting there as a control that does nothing.
+        header.setHasContent(!isPreviewing && !items.isEmpty)
     }
 
     // MARK: - Visibility (the Settings toggle, gated on a live session)
@@ -351,6 +358,11 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     public func showAppearancePreview(_ on: Bool) {
         if on {
             isPreviewing = true
+            // A collapsed box has no log on screen, so its sample would be invisible and the text-size
+            // slider would preview nothing. Roll it open for the preview and restore it on close;
+            // collapse is the user's gesture, not something a Settings visit should spend.
+            wasCollapsedBeforePreview = isCollapsed
+            setCollapsed(false)
             reassertCaptureExclusion()
             setEntriesText(Self.sampleEntries)
             panel.orderFrontRegardless() // ghost-mode-allowed: capture-excluded coaching overlay
@@ -358,6 +370,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
             isPreviewing = false
             rerender()                            // restore the real log…
             textView.scrollToEndOfDocument(nil)   // …scrolled to any responses that arrived during preview
+            setCollapsed(wasCollapsedBeforePreview)
             applyVisibility()                     // and whether the box belongs on screen at all
         }
     }
@@ -415,9 +428,6 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
 
     /// The header strip's height — lets tests assert it tracks the box's size.
     var currentHeaderHeight: CGFloat { header.frame.height }
-
-    /// The name the header shows.
-    var currentHeaderTitle: String { header.title }
 
     /// Whether the log is on screen under the header.
     var isLogVisible: Bool { !scroll.isHidden }

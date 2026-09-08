@@ -10,6 +10,11 @@ import CoreGraphics
 /// The title tracks the header rather than the Settings text-size slider, so that slider keeps
 /// meaning "how big are the tips".
 struct OverlayBoxChrome: Equatable {
+    /// The box's rounded-corner radius. It lives here because two places need to agree on it: the
+    /// panel rounds its fill by it, and the affordance arcs its corner runs through it. Split into a
+    /// literal in each, they could drift and the runs would silently stop following the box's curve.
+    static let cornerRadius: CGFloat = 12
+
     /// Height of the header strip, and so the height of the whole panel while collapsed.
     let height: CGFloat
     let titlePointSize: CGFloat

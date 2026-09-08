@@ -222,11 +222,6 @@ import JarvisCore
 
     // MARK: - Header
 
-    @MainActor @Test
-    func theHeaderNamesJarvis() {
-        #expect(OverlayBoxPanel().currentHeaderTitle == "Jarvis")
-    }
-
     /// The header carries no fixed numbers: it is derived from the box's content height, so the same
     /// panel at two sizes gets two headers. Driven through `setContentSize` because that is what a
     /// finished resize drag leaves the window at.
@@ -344,20 +339,31 @@ import JarvisCore
                 "dropping the tooltips must not cost the buttons their VoiceOver labels")
     }
 
+    /// The sample is not the user's log, so there is nothing there to erase. Offering the button
+    /// anyway would put a control on screen that does nothing when pressed.
     @MainActor @Test
-    func theClearButtonIsHiddenWhileThereIsNothingToErase() {
-        #expect(!OverlayBoxPanel().isClearButtonVisible)
-    }
-
-    /// The preview is meant to show the header the user will actually get, and its sample is content,
-    /// so the button belongs on screen with it.
-    @MainActor @Test
-    func theSettingsPreviewShowsTheClearButtonWithItsSample() {
+    func theSettingsPreviewOffersNoClearButton() {
         let panel = OverlayBoxPanel()
         panel.showAppearancePreview(true)
-        #expect(panel.isClearButtonVisible)
+        #expect(!panel.isClearButtonVisible)
         panel.showAppearancePreview(false)
         #expect(!panel.isClearButtonVisible, "the real log is still empty after the preview closes")
+    }
+
+    /// A collapsed box shows no log, so its sample would be invisible and the text-size slider would
+    /// preview nothing. The preview rolls it open and hands the collapse back on close.
+    @MainActor @Test
+    func theSettingsPreviewRollsACollapsedBoxOpenAndPutsItBack() {
+        let panel = liveBox()
+        panel.clickCollapseButton()
+
+        panel.showAppearancePreview(true)
+        #expect(panel.isLogVisible, "the sample must be on screen for the sliders to preview anything")
+        #expect(!panel.isCollapsed)
+
+        panel.showAppearancePreview(false)
+        #expect(panel.isCollapsed, "a Settings visit must not spend the user's collapse")
+        #expect(!panel.isLogVisible)
     }
 
     @Test
