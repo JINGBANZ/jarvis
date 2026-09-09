@@ -21,21 +21,22 @@ import Foundation
         #expect(p.fallbackTargets.isEmpty)
         #expect(p.route.targets == [p.primaryTarget])
         #expect(p.primaryTarget.provider == Defaults.Brain.provider)
-        // Absence is the persisted representation of Automatic, not an explicit override.
+        // Absence is the persisted representation of None, not an explicit override.
         #expect(p.interviewFormat == nil)
     }
 
-    @Test func interviewFormatOverrideRoundTripsAndClearsBackToAutomatic() {
+    @Test(arguments: InterviewFormat.allCases)
+    func interviewFormatOverrideRoundTripsAndClearsBackToNone(_ format: InterviewFormat) {
         let d = freshDefaults()
         let p = BrainPreferences(defaults: d)
-        p.interviewFormat = .systemDesign
-        #expect(BrainPreferences(defaults: d).interviewFormat == .systemDesign)
+        p.interviewFormat = format
+        #expect(BrainPreferences(defaults: d).interviewFormat == format)
         p.interviewFormat = nil
         #expect(BrainPreferences(defaults: d).interviewFormat == nil)
         #expect(d.string(forKey: "brain.interviewFormat") == nil)
     }
 
-    @Test func unknownStoredInterviewFormatFallsBackToAutomatic() {
+    @Test func unknownStoredInterviewFormatFallsBackToNone() {
         let d = freshDefaults()
         d.set("architecture-review", forKey: "brain.interviewFormat")
         #expect(BrainPreferences(defaults: d).interviewFormat == nil)

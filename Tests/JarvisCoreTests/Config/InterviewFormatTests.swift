@@ -22,21 +22,9 @@ import Testing
         #expect(InterviewFormat.systemDesign.promptAddendum.contains("API"))
     }
 
-    @Test func noSelectionResolvesToAutomaticGuidance() {
-        let addendum = InterviewFormat.resolvedPromptAddendum(for: nil)
-
-        #expect(addendum.contains("Choose coaching behavior"))
-        #expect(addendum.contains("For a coding task"))
-        #expect(addendum.contains("functional requirements"))
-        #expect(addendum.contains("STAR"))
-        #expect(addendum.contains("candidate-owned events"))
-    }
-
-    @Test func explicitSelectionDoesNotIncludeAutomaticRouting() {
-        let addendum = InterviewFormat.resolvedPromptAddendum(for: .coding)
-
-        #expect(addendum.contains("tokenizer"))
-        #expect(!addendum.contains("functional requirements"))
-        #expect(!addendum.contains("Choose coaching behavior"))
+    @Test func generalTechnicalIsAnExplicitAuthoredFormat() {
+        #expect(InterviewFormat.generalTechnical.displayName == "General Technical")
+        #expect(InterviewFormat.generalTechnical.promptAddendum.contains("# Interview format: general technical"))
+        #expect(InterviewFormat.allCases.contains(.generalTechnical))
     }
 }

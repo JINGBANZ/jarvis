@@ -96,7 +96,7 @@ public final class BrainPreferences {
         set { defaults.set(newValue.rawValue, forKey: Defaults.Brain.effortKey) }
     }
 
-    /// An explicit format override. `nil` is the default automatic-routing mode.
+    /// An explicit format override. `nil` keeps the base prompt unchanged.
     public var interviewFormat: InterviewFormat? {
         get {
             guard let raw = defaults.string(forKey: Defaults.Brain.interviewFormatKey) else {

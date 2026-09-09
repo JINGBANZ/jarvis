@@ -170,9 +170,9 @@ final class BrainSection: NSObject, SettingsSection {
             showsSeparator: false)
         content.addSubview(effortRow)
 
-        // Automatic (index 0) persists as nil; explicit formats remain optional overrides.
+        // None (index 0) persists as nil; explicit formats remain optional overrides.
         let formatPopup = NSPopUpButton()
-        formatPopup.addItem(withTitle: "Automatic")
+        formatPopup.addItem(withTitle: "None")
         formatPopup.addItems(withTitles: availableFormats.map(\.displayName))
         formatPopup.target = self
         formatPopup.action = #selector(interviewFormatChanged)
@@ -270,7 +270,7 @@ final class BrainSection: NSObject, SettingsSection {
         guard row == 0 || availableFormats.indices.contains(row - 1) else { return }
         let format = row == 0 ? nil : availableFormats[row - 1]
         preferences.interviewFormat = format
-        jlog("Jarvis: \(format?.displayName ?? "Automatic") interview format selected for the "
+        jlog("Jarvis: \(format?.displayName ?? "None") interview format selected for the "
             + "next Start.")
     }
 

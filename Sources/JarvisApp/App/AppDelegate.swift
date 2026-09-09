@@ -304,10 +304,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         let transcriptionConfiguration = transcriptionPreferences.configuration
         let transcriptionProvider = transcriptionConfiguration.provider
         let brainRoute = brain.preferences.route
-        // Resolve once because CLI providers bake the prompt into their session. Automatic mode
-        // still re-evaluates the current task on every model response; it carries no runtime mode.
+        // Resolve once because CLI providers bake the prompt into their session. None adds nothing.
         let interviewFormat = brain.preferences.interviewFormat
-        let interviewFormatAddendum = InterviewFormat.resolvedPromptAddendum(for: interviewFormat)
+        let interviewFormatAddendum = interviewFormat?.promptAddendum ?? ""
         let key = secrets.apiKey(for: .openAIAPIKey) ?? ""
         // The brain's key stays OpenAI-only (above); transcription reads whichever credential the
         // selected provider owns — Apple Speech has none, so this is "" there and unused.

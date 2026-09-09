@@ -3,7 +3,7 @@ import Testing
 @testable import JarvisCore
 
 @Suite struct CoachDriverDiagramTests {
-    @Test(arguments: [InterviewFormat.systemDesign, .coding, .behavioral, nil])
+    @Test(arguments: [InterviewFormat.systemDesign, .coding, .behavioral, .generalTechnical, nil])
     func graphOnlyReachesOverlayInSystemDesign(_ format: InterviewFormat?) async throws {
         let source = "flowchart LR\nA[Client] --> B[API]"
         let arguments = #"{"lines":["Sketch the request path."],"mermaid":"flowchart LR\nA[Client] --> B[API]"}"#

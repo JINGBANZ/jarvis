@@ -1,36 +1,27 @@
 import Foundation
 
-/// An optional interview-format override. The absence of an override supplies automatic routing
-/// guidance; the model chooses from current evidence on each coaching attempt without a separate
-/// classifier call or persisted in-session format state.
+/// An optional Start-time interview-format addendum. Nil keeps the base coach prompt unchanged.
 public enum InterviewFormat: String, CaseIterable, Codable, Sendable {
     case coding = "coding"
     case systemDesign = "system-design"
     case behavioral = "behavioral"
+    case generalTechnical = "general-technical"
 
     public var displayName: String {
         switch self {
         case .coding: "Coding"
         case .systemDesign: "System Design"
         case .behavioral: "Behavioral"
+        case .generalTechnical: "General Technical"
         }
     }
 
     /// Loaded from `Resources/Skills/<rawValue>.md` — a real Markdown file, not a Swift string
-    /// literal, so a skill's content reads and edits like prose. Coding, Behavioral, and System
-    /// Design have authored guidance. Missing file → empty, not a crash — an unwritten skill is a
+    /// literal, so a skill's content reads and edits like prose. Coding, Behavioral, System Design, and
+    /// General Technical have authored guidance. Missing file → empty, not a crash — an unwritten skill is a
     /// normal state, not an error.
     public var promptAddendum: String {
         Self.addendum(named: rawValue)
-    }
-
-    /// Resolve the Start-time prompt once. A nil override uses one purpose-built automatic skill;
-    /// explicit formats remain isolated from it and from one another.
-    public static func resolvedPromptAddendum(for override: InterviewFormat?) -> String {
-        guard let override else {
-            return addendum(named: "automatic")
-        }
-        return override.promptAddendum
     }
 
     private static func addendum(named name: String) -> String {

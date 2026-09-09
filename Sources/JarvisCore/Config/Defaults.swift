@@ -29,7 +29,7 @@ public enum Defaults {
         /// Keeps a coaching turn fast (sub-2s target) while still allowing tool calls.
         public static let effort: ReasoningEffort = .low
 
-        /// No stored default: absence selects automatic interview-format routing.
+        /// No stored default: absence selects None (base prompt only).
         public static let interviewFormatKey = "brain.interviewFormat"
 
         /// The OpenAI model keeps the pre-provider key ("brain.model") so existing installs keep
