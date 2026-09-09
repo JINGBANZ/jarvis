@@ -167,7 +167,8 @@ import Testing
         let brain = ScriptedBrain(script: [])
         let sink = CodeRequestSink()
         let screen = FakeScreen()
-        let driver = makeDriver(brain, RollingTranscript(), sink, screen: screen, format: format)
+        let driver = makeDriver(brain, RollingTranscript(), sink, screen: screen, format: format,
+                                activity: UnexpectedCodeActivity())
         #expect(await driver.handleTrigger(.manualCode) == .spoke)
         #expect(brain.calls.isEmpty)
         #expect(screen.captureCount == 0)
@@ -206,14 +207,15 @@ import Testing
 
     private func makeDriver(_ brain: BrainClient, _ transcript: RollingTranscript, _ sink: OverlayRendering,
                             screen: ScreenCapturing = FakeScreen(), format: InterviewFormat? = nil,
-                            codeEnabled: Bool = false, explanationsEnabled: Bool = true) -> CoachDriver {
+                            codeEnabled: Bool = false, explanationsEnabled: Bool = true,
+                            activity: (any ActivityEventRecording)? = nil) -> CoachDriver {
         let target = BrainTarget(provider: .openAI, modelID: BrainModelCatalog.defaultModel(for: .openAI).id)
         return CoachDriver(config: .default, transcript: transcript,
             route: .init(targets: [.init(target: target, brain: brain)]),
             screen: screen, overlay: sink, clock: ManualClock(now: 100),
             plan: SessionPlan(revision: 0, screen: SessionPlan.default.screen,
                               explanationsEnabled: explanationsEnabled, codeEnabled: codeEnabled),
-            interviewFormat: format)
+            activity: activity, interviewFormat: format)
     }
 }
 
@@ -233,4 +235,10 @@ private final class CodeRequestSink: OverlayRendering {
 private final class MissingCodeScreen: ScreenCapturing, Sendable {
     func capture(_ selection: ScreenCaptureSelection) -> ScreenSnapshot? { nil }
     func cancelCapture() {}
+}
+
+private struct UnexpectedCodeActivity: ActivityEventRecording {
+    func record(_ event: ActivityEvent, at date: Date) {
+        Issue.record("Unavailable shortcut feedback must not create an orphan Activity row")
+    }
 }

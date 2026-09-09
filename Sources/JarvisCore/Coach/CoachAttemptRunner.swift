@@ -165,7 +165,6 @@ final class CoachAttemptRunner: @unchecked Sendable {
             let lines = ["Show code is available in Coding sessions."]
             overlay.showCodeSnippet(nil)
             overlay.render(lines, perLineSeconds: lines.map { OverlayTiming.displaySeconds(for: $0, config: config) })
-            activity?.record(.tip(lines: lines))
             return AttemptExecution(id: nil, result: .skipped(.spoke))
         }
 

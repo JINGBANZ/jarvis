@@ -4,6 +4,18 @@ import Testing
 @testable import JarvisOverlay
 
 @Suite struct CodeSnippetRenderingTests {
+    @MainActor @Test(arguments: ["'", "\""])
+    func unmatchedQuotesDoNotColorAcrossLines(_ quote: String) throws {
+        let snippet = try #require(CodeSnippet(language: "text", placement: "Current component",
+            code: "prefix \(quote)a\nreturn value\nend \(quote)"))
+        let text = CodeSnippetFormatting.render(snippet, fontSize: 16)
+        let baseline = try #require(CodeSnippet(language: "text", placement: "Next step", code: "return value"))
+        let expected = CodeSnippetFormatting.render(baseline, fontSize: 16)
+        let keyword = (snippet.code as NSString).range(of: "return")
+        #expect((text.attribute(.foregroundColor, at: keyword.location, effectiveRange: nil) as? NSColor)
+            == (expected.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor))
+    }
+
     @MainActor @Test func deliveryAcceptsOnlyVisibleCodeAndExplanation() throws {
         let box = OverlayBoxPanel()
         let sink = BroadcastOverlay([box])

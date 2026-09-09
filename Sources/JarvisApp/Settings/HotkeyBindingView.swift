@@ -209,7 +209,7 @@ final class HotkeyBindingView: NSObject {
             return
         }
         calloutLabel?.stringValue = hasActiveHotkey()
-            ? "That shortcut is already in use. The previous shortcut stays active."
+            ? "That shortcut is already in use. Your previous shortcut is unchanged."
             : "That shortcut is already in use, and this shortcut is not "
                 + "currently active."
         calloutHeightConstraint?.constant = Self.calloutHeight

@@ -12,7 +12,8 @@ enum CodeSnippetFormatting {
         let source = snippet.code as NSString
         let fullRange = NSRange(location: 0, length: source.length)
         // A single ordered lexer prevents keywords inside strings or comments being recolored.
-        let pattern = #"(?m)(//[^\n]*|#[^\n]*)|("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')|\b(func|def|let|var|const|return|if|else|for|while|in|class|struct|enum|guard|import|from|public|private|static|new|nil|null|true|false|None|True|False|async|await|throw|try|catch|break|continue)\b|\b\d+(?:\.\d+)?\b"#
+        // Keep quoted tokens on one line: a lifetime or truncated string must not color later code.
+        let pattern = #"(?m)(//[^\n]*|#[^\n]*)|("(?:\\.|[^"\\\r\n])*"|'(?:\\.|[^'\\\r\n])*')|\b(func|def|let|var|const|return|if|else|for|while|in|class|struct|enum|guard|import|from|public|private|static|new|nil|null|true|false|None|True|False|async|await|throw|try|catch|break|continue)\b|\b\d+(?:\.\d+)?\b"#
         if let lexer = try? NSRegularExpression(pattern: pattern) {
             for match in lexer.matches(in: snippet.code, range: fullRange) {
                 let color: NSColor
