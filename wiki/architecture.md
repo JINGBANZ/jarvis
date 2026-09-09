@@ -212,10 +212,13 @@ only the brief caption if that surface is enabled; it does not force a hidden su
 **Show code with hints** enables matching snippets in Coding or general sessions, defaulting off.
 `CoachAttemptRunner` accepts attachments only when the frozen `SessionPlan.codeEnabled` is true.
 An enabled per-attempt notice stays outside committed history and the fixed CLI instructions.
+The dock also follows the frozen active format when a saved preference is applied or Settings changes;
+a non-coding live session cannot reserve an empty code area.
 The Show code shortcut enables the persisted setting and requests code for the current guidance.
 The fixed `speak.codeSnippet` schema carries language, placement, code, and corrected-line indices;
 [`CodeSnippet`](../Sources/JarvisCore/Overlay/CodeSnippet.swift) bounds and validates it without
-truncating code. Invalid attachments retain the useful text hint. The prompt requests one logical
+truncating code. Highlight arrays are bounded before normalization, and trimming leading blank lines
+rebases correction indices. Invalid attachments retain the useful text hint. The prompt requests one logical
 component matching visible names, language, and structure. Local mistakes include a highlighted
 correction and relevant next lines; an invalid overall approach receives a corrective hint instead.
 Without visible code, known problem context supports a first component without inventing unseen names.
@@ -225,7 +228,8 @@ bottom scroll area inside the existing capture-excluded panel. Its opaque dark b
 syntax contrast regardless of history opacity; monospace text uses the configured size. Each new hint
 replaces its snippet, or clears the previous code when none is appropriate, so guidance and code agree.
 Dismiss and session clear remove the snippet. While enabled, an empty code area remains reserved;
-disabling code immediately hides it, clears it, and rejects late delivery while off. Settings preview
+disabling code immediately hides it, clears it, and rejects late delivery while off. The dock collapses
+with the header and restores its snippet on expansion. Settings preview
 includes code only when enabled and restores the real snippet on close. The caption carries
 only the short hint; Activity includes the accepted placement and code. Explanation preferences do
 not govern code. A disabled box produces existing-surface feedback on the explicit hotkey without

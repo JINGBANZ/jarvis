@@ -9,9 +9,11 @@ public struct CodeSnippet: Sendable, Equatable {
     public let highlightedLines: [Int]
 
     public init?(language: String, placement: String, code: String, highlightedLines: [Int] = []) {
+        guard highlightedLines.count <= 12 else { return nil }
         let lineNormalized = code.replacingOccurrences(of: "\r\n", with: "\n")
         // Reject other rendered line separators rather than rewriting possible string-literal content.
         guard lineNormalized.allSatisfy({ !$0.isNewline || $0 == "\n" }) else { return nil }
+        let droppedLeading = lineNormalized.prefix { $0 == "\n" }.count
         let normalized = lineNormalized.trimmingCharacters(in: .newlines)
         let placement = placement.trimmingCharacters(in: .whitespacesAndNewlines)
         let language = language.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -24,6 +26,10 @@ public struct CodeSnippet: Sendable, Equatable {
         self.language = language
         self.placement = placement
         self.code = normalized
-        self.highlightedLines = Array(Set(highlightedLines.filter { (1...lineCount).contains($0) })).sorted()
+        self.highlightedLines = Array(Set(highlightedLines.compactMap { index in
+            // Check bounds before subtraction, including malformed Int.min/Int.max indices.
+            guard index > droppedLeading, index <= droppedLeading + lineCount else { return nil }
+            return index - droppedLeading
+        })).sorted()
     }
 }

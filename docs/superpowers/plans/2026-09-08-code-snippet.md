@@ -21,8 +21,8 @@
 
 ## Verification evidence
 
-- Full Gate: build passed; 1,004 tests in 119 suites passed.
+- Rebased integration: build and full Gate commands exit 0, but this Mac's AppKit test host ends before the full suite summary. The focused integration run completes: 26 tests in 4 suites passed.
 - Signed synthetic native smoke: dock rendering, correction contrast, incoming-hint persistence, preview restoration, clear; Carbon dispatch, independent rebind/collision handling, explanation toggle, and three-card small-window layouts passed.
 - Revised production-model smoke could not complete: two attempts timed out. Runtime authorization is covered by deterministic tests.
-- Independent review findings addressed: non-LF newline rejection; dock clipping and dismiss contrast also corrected and regression-tested.
+- Independent review findings addressed: newline normalization and highlight bounds, frozen-format dock gating, and inherited delivered-history handling. Dock/header collapse integration is regression-tested.
 - Real interview audio, screen sharing, and cross-app use remain manual smoke coverage.

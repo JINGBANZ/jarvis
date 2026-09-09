@@ -454,20 +454,23 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         perLineSeconds: lines.map {
                             OverlayTiming.displaySeconds(for: $0, config: config)
                         }, diagram: diagram, explanation: explanation)
-                    var deliveredCalls = response.rawToolCalls
-                    if !attempt.plan.explanationsEnabled {
-                        // History describes what was delivered, not optional text suppressed by Settings.
-                        // These parsed values contain only JSON strings, arrays, and null, so encoding cannot fail.
-                        let arguments: [String: Any] = [
-                            "lines": lines, "mermaid": mermaid as Any? ?? NSNull(), "explanation": NSNull(),
-                        ]
-                        let data = try! JSONSerialization.data(withJSONObject: arguments, options: [.sortedKeys])
-                        deliveredCalls = deliveredCalls.map { call in
-                            call.id == callID
-                                ? RawToolCall(id: call.id, name: call.name,
-                                              argumentsJSON: String(decoding: data, as: UTF8.self))
-                                : call
-                        }
+                    // History describes delivered optional content, including independently enabled code.
+                    // Parsed values contain only JSON primitives, so encoding cannot fail.
+                    let codeArguments: [String: Any]? = code.map {
+                        ["language": $0.language, "placement": $0.placement, "code": $0.code,
+                         "highlightedLines": $0.highlightedLines]
+                    }
+                    let arguments: [String: Any] = [
+                        "lines": lines, "mermaid": diagram == nil ? NSNull() : mermaid as Any,
+                        "explanation": explanation as Any? ?? NSNull(),
+                        "codeSnippet": codeArguments as Any? ?? NSNull(),
+                    ]
+                    let data = try! JSONSerialization.data(withJSONObject: arguments, options: [.sortedKeys])
+                    let deliveredCalls = response.rawToolCalls.map { call in
+                        call.id == callID
+                            ? RawToolCall(id: call.id, name: call.name,
+                                          argumentsJSON: String(decoding: data, as: UTF8.self))
+                            : call
                     }
                     turnMessages.append(.assistantToolCalls(deliveredCalls))
                     turnMessages.append(.init(

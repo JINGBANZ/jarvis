@@ -37,6 +37,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     private var didStartApp = false
     private let explanationPreferences = ExplanationPreferences()
     private let codePreferences = CodePreferences()
+    private var activeInterviewFormat: InterviewFormat?
     private var hotkeySection: HotkeySection?
     private let hotkeyPreferences = CoachingShortcut.allCases.map { HotkeyPreferences(shortcut: $0) }
     /// Monotonic revision stamped on each control-plane snapshot. Bumped at Start and whenever an
@@ -216,7 +217,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                 codePreferences: codePreferences,
                 onCodeChanged: { [weak self] in
                     guard let self else { return }
-                    self.overlayBox.setCodeEnabled(self.codePreferences.isEnabled)
+                    self.applyCodePreference()
                     self.reapplySessionPlan()
                 },
                 onExplanationsChanged: { [weak self] in
@@ -606,6 +607,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         let sessionDirectory = artifacts.currentSessionDir!
         // Fixed for the whole session — set before every construction/reapply path that bakes a
         // system prompt, including a later `applyBrainPreferencesToRunningSession` hot switch.
+        activeInterviewFormat = interviewFormat
+        applyCodePreference()
         brain.interviewFormatAddendum = interviewFormatAddendum
         let configuredRoute = brain.makeConfiguredRoute(
             brainRoute,
@@ -897,6 +900,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         sessionIsLive = false
         overlayBox.setSessionLive(false)     // the history box goes away with the session
         requestManualHint = nil              // hotkey beeps again once there's no live session
+        activeInterviewFormat = nil
+        applyCodePreference()
         // Capture and clear this session handle before a quick Start installs another. The cancelled
         // tasks retain only its observer ports and can finish enqueueing into the old session.
         let (audit, auditDirectory) = artifacts.takeCurrentSession()
@@ -1145,6 +1150,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     }
 
 
+
+    /// Live visibility follows the frozen session format, not a future format chosen in Settings.
+    private func applyCodePreference() {
+        overlayBox.setCodeEnabled(codePreferences.isEnabled
+            && (activeInterviewFormat == nil || activeInterviewFormat == .coding))
+    }
 
     /// Read the persisted control plane once and freeze it as the next revision.
     ///

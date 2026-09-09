@@ -94,6 +94,24 @@ import Testing
         #expect(sink.codeUpdates == [nil])
     }
 
+    @Test(arguments: [true, false])
+    func deliveredHistoryKeepsOnlyEnabledCodeWhenExplanationsAreOff(_ enabled: Bool) async throws {
+        let args = #"{"lines":["Initialize state"],"explanation":"Hidden detail","codeSnippet":{"language":"Python","placement":"Start","code":"seen = {}","highlightedLines":[]}}"#
+        let response = BrainResponse(toolCalls: [try #require(ToolInvocation.parse(callId: "s", name: "speak", argumentsJSON: args))],
+            rawToolCalls: [.init(id: "s", name: "speak", argumentsJSON: args)])
+        let brain = ScriptedBrain(script: [response, response])
+        let driver = makeDriver(brain, RollingTranscript(), CodeRequestSink())
+        driver.updatePlan(SessionPlan(revision: 1, screen: SessionPlan.default.screen,
+                                     explanationsEnabled: false, codeEnabled: enabled))
+        #expect(await driver.handleTrigger(.manualHint) == .spoke)
+        #expect(await driver.handleTrigger(.manualHint) == .spoke)
+        let call = try #require(brain.calls.last?.flatMap { $0.toolCalls ?? [] }.first { $0.name == "speak" })
+        let object = try #require(JSONSerialization.jsonObject(with: Data(call.argumentsJSON.utf8)) as? [String: Any])
+        #expect(object["explanation"] is NSNull)
+        if enabled { #expect((object["codeSnippet"] as? [String: Any])?["code"] as? String == "seen = {}") }
+        else { #expect(object["codeSnippet"] is NSNull) }
+    }
+
     @Test func malformedCodeRetainsUsefulHint() throws {
         let payloads = ["null", "42", #"{"language":"Python","placement":"In loop","code":" ","highlightedLines":[]}"#,
             #"{"language":"Python","placement":"In loop","code":"x = 1","highlightedLines":"bad"}"#]

@@ -26,6 +26,11 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     /// The layer-backed, opaque rounded fill behind the text — its alpha is the box's opacity.
     private let box: ResizeReportingView
     private let textView: NSTextView
+    private let codeView = CodeSnippetView(frame: .zero)
+    private var codeSnippet: CodeSnippet?
+    private var codeEnabled = Defaults.Code.enabled
+    private static let sampleCode = CodeSnippet(language: "swift", placement: "At the start of solve",
+        code: "guard !items.isEmpty else { return nil }\nlet first = items[0]")
     /// The chrome strip across the top: collapse, the name, clear.
     private let header: OverlayBoxHeaderView
     /// The scrolling log under the header. Held so the header's height can be taken off it on every
@@ -172,10 +177,18 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         resizeAffordance = affordance
 
         box.addSubview(scroll)
+        box.addSubview(codeView)
+        codeView.isHidden = true
         box.addSubview(header)
         box.addSubview(affordance)   // topmost, so its tracking area sees the whole box
         panel.contentView = box
         super.init()
+        codeView.onDismiss = { [weak self] in
+            guard let self else { return }
+            if self.display == .log { self.codeSnippet = nil }
+            self.codeView.show(nil, fontSize: self.fontSize, enabled: self.codeEnabled && !self.isCollapsed)
+            self.layoutCode()
+        }
         header.collapseButton.target = self
         header.collapseButton.action = #selector(toggleCollapsed)
         header.clearButton.target = self
@@ -274,6 +287,37 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         }
     }
 
+    public nonisolated func showCodeSnippet(_ snippet: CodeSnippet?) {
+        Task { @MainActor in
+            guard self.codeEnabled else { return }
+            self.codeSnippet = snippet
+            self.refreshCode()
+            if self.panel.isVisible { self.reassertCaptureExclusion() }
+        }
+    }
+
+    public func setCodeEnabled(_ enabled: Bool) {
+        codeEnabled = enabled
+        if !enabled { codeSnippet = nil }
+        refreshCode()
+    }
+
+    private func refreshCode() {
+        codeView.show(codeEnabled ? (display == .sample ? Self.sampleCode : codeSnippet) : nil,
+                      fontSize: fontSize, enabled: codeEnabled && !isCollapsed)
+        layoutCode()
+    }
+
+    private func layoutCode() {
+        let available = max(0, box.bounds.height - chrome.height)
+        let preferred = min(box.bounds.height * 0.45,
+            76 + CGFloat(codeView.snippet?.code.components(separatedBy: "\n").count ?? 0) * (fontSize + 4))
+        // Preserve the header and one history line even at the minimum expanded size.
+        let height = codeView.isHidden ? 0 : min(max(0, available - 44), max(96, preferred))
+        codeView.frame = NSRect(x: 0, y: 0, width: box.bounds.width, height: height)
+        scroll.frame = NSRect(x: 0, y: height, width: box.bounds.width, height: max(0, available - height))
+    }
+
     private func append(_ text: String, explanation: String?, diagram: DiagramHint?) {
         entries.append((stamp: timeFormatter.string(from: Date()), text: text, explanation: explanation, diagram: diagram))
         // No preview can be running: one only opens while stopped, and Start ends it.
@@ -340,6 +384,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         // The sample is not the user's log, so it offers nothing to erase: the clear button stays away
         // rather than sitting there as a control that does nothing.
         header.setHasContent(display == .log && !entries.isEmpty)
+        refreshCode()
     }
 
     // MARK: - Visibility (the Settings toggle, gated on a live session)
@@ -347,6 +392,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     /// Wipe the log. Called on each fresh Start so the box shows only the current conversation,
     /// matching how the session rotates.
     public func clear() {
+        codeSnippet = nil
         entries.removeAll()
         renderDisplay()
     }
@@ -373,10 +419,12 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     /// user collapsed it during, not to the next one.
     public func setSessionLive(_ live: Bool) {
         isSessionLive = live
+        if !live { codeSnippet = nil }
         // Start takes the sample down and Stop can put it back, both without Settings saying anything:
         // whether the preview stands in is derived, not commanded.
         applyDisplay()
         if live { setCollapsed(false) }
+        refreshCode()
         applyVisibility()
     }
 
@@ -466,6 +514,9 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     // MARK: - Test hooks (internal; reached via `@testable import JarvisOverlay`)
 
     /// The panel's current capture-sharing type. `.none` means excluded from screen capture.
+    var currentCodeSnippet: CodeSnippet? { codeView.snippet }
+    var currentCodeHeight: CGFloat { codeView.frame.height }
+
     var currentSharingType: NSWindow.SharingType { panel.sharingType }
 
     /// Number of logged responses — lets tests assert append/clear behavior.

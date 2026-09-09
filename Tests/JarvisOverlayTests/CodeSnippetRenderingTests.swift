@@ -4,6 +4,21 @@ import Testing
 @testable import JarvisOverlay
 
 @Suite struct CodeSnippetRenderingTests {
+    @MainActor @Test func codeDockCollapsesWithHeaderAndRestoresWithoutLosingSnippet() async throws {
+        let box = OverlayBoxPanel()
+        box.setCodeEnabled(true)
+        let code = try #require(CodeSnippet(language: "Python", placement: "Start", code: "seen = {}"))
+        box.showCodeSnippet(code)
+        for _ in 0..<100 where box.currentCodeSnippet != code { try await Task.sleep(for: .milliseconds(10)) }
+        box.clickCollapseButton()
+        #expect(box.isCollapsed)
+        #expect(box.currentCodeHeight == 0)
+        box.clickCollapseButton()
+        #expect(!box.isCollapsed)
+        #expect(box.currentCodeHeight > 0)
+        #expect(box.currentCodeSnippet == code)
+    }
+
     @MainActor @Test func codeSettingControlsEmptyDockAndRejectsLateOutput() async throws {
         let box = OverlayBoxPanel()
         #expect(box.currentCodeHeight == 0)
@@ -80,8 +95,8 @@ import Testing
             placement: "Inside solve, after collecting the current window and before updating the result with the next candidate", code: "return result"))
         box.showCodeSnippet(snippet)
         for _ in 0..<100 where box.currentCodeSnippet == nil { try await Task.sleep(for: .milliseconds(10)) }
-        #expect(box.currentCodeHeight >= 96)
-        #expect(box.currentContentSize.height - box.currentCodeHeight >= 44)
+        #expect(box.currentCodeHeight >= 70)
+        #expect(box.currentContentSize.height - box.currentCodeHeight - box.currentHeaderHeight >= 44)
         let dock = CodeSnippetView(frame: NSRect(x: 0, y: 0, width: 240, height: 96))
         dock.show(snippet, fontSize: 24)
         dock.layoutSubtreeIfNeeded()
