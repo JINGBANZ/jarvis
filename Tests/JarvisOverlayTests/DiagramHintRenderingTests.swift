@@ -16,13 +16,17 @@ import Testing
         #expect(panel.currentText.contains("Sketch the request path."))
         #expect(panel.currentText.contains("\u{FFFC}"))
         #expect(panel.currentSharingType == .none)
+
+        // The Settings sample only stands in while stopped: during a session the box is already on
+        // screen carrying the real log, which is a better preview than sample text.
+        panel.setSessionLive(false)
         panel.showAppearancePreview(true)
-        #expect(!panel.currentText.contains("\u{FFFC}"))
+        #expect(!panel.currentText.contains("\u{FFFC}"), "the sample carries no diagram")
         panel.showAppearancePreview(false)
-        #expect(panel.currentText.contains("\u{FFFC}"))
+        #expect(panel.currentText.contains("\u{FFFC}"), "and the logged diagram comes back with it")
+
         panel.clear()
         #expect(panel.currentText.isEmpty)
-        panel.setSessionLive(false)
         #expect(!panel.isPanelVisible)
     }
 
