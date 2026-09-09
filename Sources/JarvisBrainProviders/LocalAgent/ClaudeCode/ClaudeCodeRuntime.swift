@@ -104,7 +104,7 @@ actor ClaudeCodeRuntime: LocalAgentRuntimeBackend {
     }
 
     private static func error(_ detail: String) -> NSError {
-        NSError(domain: "ClaudeCodeRuntime", code: 1,
+        NSError(domain: LocalAgentFailureClassifier.claudeCodeDomain, code: 1,
                 userInfo: [NSLocalizedDescriptionKey: detail])
     }
 }
@@ -339,7 +339,7 @@ private final class ClaudeCodeQuery: @unchecked Sendable {
     /// Marks the deadline expiring between reads, so `describingTurnFailure` can restate it with the
     /// same budget and stream detail it gives a timeout raised inside the read itself.
     private static func deadlineExpired() -> NSError {
-        NSError(domain: "ClaudeCodeRuntime", code: NSURLErrorTimedOut,
+        NSError(domain: LocalAgentFailureClassifier.claudeCodeDomain, code: NSURLErrorTimedOut,
                 userInfo: [NSLocalizedDescriptionKey: "Claude response timed out"])
     }
 
@@ -359,7 +359,7 @@ private final class ClaudeCodeQuery: @unchecked Sendable {
         let nsError = error as NSError
         let isRuntimeTimeout = nsError.domain == AgentRuntimeProcess.errorDomain
             && nsError.code == NSURLErrorTimedOut
-        let isDeadlineBetweenReads = nsError.domain == "ClaudeCodeRuntime"
+        let isDeadlineBetweenReads = nsError.domain == LocalAgentFailureClassifier.claudeCodeDomain
             && nsError.code == NSURLErrorTimedOut
         guard isRuntimeTimeout || isDeadlineBetweenReads else { return error }
         let elapsed = milliseconds(from: dispatchedAt, to: DispatchTime.now().uptimeNanoseconds)
@@ -384,7 +384,7 @@ private final class ClaudeCodeQuery: @unchecked Sendable {
     }
 
     private static func error(_ detail: String) -> NSError {
-        NSError(domain: "ClaudeCodeRuntime", code: 1,
+        NSError(domain: LocalAgentFailureClassifier.claudeCodeDomain, code: 1,
                 userInfo: [NSLocalizedDescriptionKey: detail])
     }
 }

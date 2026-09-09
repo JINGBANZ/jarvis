@@ -26,7 +26,7 @@ final class AgentRuntimeProcess: @unchecked Sendable {
         let byteCount: Int
     }
 
-    static let errorDomain = "AgentRuntimeProcess"
+    static let errorDomain = LocalAgentFailureClassifier.runtimeProcessDomain
     private static let exitDrainSeconds: TimeInterval = 0.1
     private static let terminationGraceSeconds: TimeInterval = 1
     private static let maxBufferedStdoutBytes = 1_048_576

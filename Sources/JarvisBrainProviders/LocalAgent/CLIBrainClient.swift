@@ -330,13 +330,13 @@ public struct CLIBrainClient: BrainClient, Sendable {
     }
 
     static func error(_ message: String, code: Int = 1) -> NSError {
-        NSError(domain: "CLIBrainClient", code: code,
+        NSError(domain: LocalAgentFailureClassifier.clientDomain, code: code,
                 userInfo: [NSLocalizedDescriptionKey: message])
     }
 
     static func timeoutError(seconds: TimeInterval) -> NSError {
         NSError(
-            domain: "CLIBrainClient",
+            domain: LocalAgentFailureClassifier.clientDomain,
             code: NSURLErrorTimedOut,
             userInfo: [
                 NSLocalizedDescriptionKey:

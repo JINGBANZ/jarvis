@@ -210,7 +210,7 @@ private struct CodexExecConversation: LocalAgentConversation {
     }
 
     private static func error(_ detail: String) -> NSError {
-        NSError(domain: "CodexExecRuntime", code: 1,
+        NSError(domain: LocalAgentFailureClassifier.codexExecDomain, code: 1,
                 userInfo: [NSLocalizedDescriptionKey: detail])
     }
 }
