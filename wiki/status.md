@@ -15,9 +15,11 @@ before `speak`; a fresh screenshot/OCR satisfies that request, while a fully sta
 answered without a reflexive capture. The independent Transcription setting keeps **OpenAI as the
 default**, keeps **GPT-4o Transcribe** as its default model, adds opt-in **GPT Transcribe** and
 **GPT Live Transcribe**, and adds opt-in, on-device **Apple Speech** on macOS 26 or later. OpenAI
-language selection defaults to Automatic within English and Mandarin; explicit selections restrict
-both admitted speech and coaching replies. The session policy, provider metadata rejection, and
-Apple text-detection boundary are described in [architecture.md](./architecture.md#models-and-apis). One Start snapshots the provider, OpenAI model/expected-language list, or Apple
+language expectations default to Automatic rather than English; English and Mandarin are
+independent multi-select session-level hints rather than fixed combination profiles or per-turn
+language choices. The coach prompt follows the user's language or one explicitly selected language;
+transcription context asks supported models to ignore music/noise rather than invent speech.
+These are prompt instructions, with no language-based rejection. One Start snapshots the provider, OpenAI model/expected-language list, or Apple
 locale for both `me` and `them`; there
 is no automatic provider or model fallback. An initial same-input macOS 26 system-audio comparison
 keeps GPT-4o Transcribe as the default: among the tested GPT-4o, GPT Live, and Apple Speech arms, it
@@ -217,11 +219,11 @@ Transcribe bilingual final-stream timeout from the first 36-repetition run. The 
 reconnect run is complete and passes all three OpenAI models without changing host networking. These
 live runs are not part of the gate and do not use the microphone.
 
-Verify the language policy live with English selected: play background music, speak English,
-then speak Russian and Mandarin; confirm disallowed detected text never appears in Activity and
-all delivered tips are English. Repeat with Mandarin and both languages, reconnect during an
-utterance, and change the selection during a running session to confirm it applies at the next
-Start. Offline policy tests and synthetic text-detector checks do not exercise real audio/TCC.
+The language-independent music-hallucination investigation is tracked in
+[issue #280](https://github.com/JINGBANZ/jarvis/issues/280). For the prompt change, verify a live
+English-selected session still hears a Mandarin-speaking participant and guides replies into
+English; with Automatic, verify the coach follows the user's language. Repeat with a CLI brain
+and after a brain-client refresh. Offline tests verify prompt wiring, not model compliance.
 
 Finish the remaining transcription configuration smoke:
 confirm Apple Speech plus a CLI-only brain route starts without an API key, while any OpenAI
@@ -261,7 +263,7 @@ Tested `JarvisCore` + `JarvisBrainProviders` + `JarvisEvaluation` + `JarvisOverl
 (`./scripts/run-tests.sh`); `JarvisApp` is the thin OS shell, verified by the smoke run.
 
 - `Sources/JarvisCore/Audio/` — transactional PCM + utterance buffering, bounded speech pre-roll, adaptive content-free activity detection, stable frame-decision endpoints, non-destructive AEC reference alignment, and system-audio timeline preservation (`PCMBuffer`, `SpeechGatedAudioBuffer`, `UtteranceBuffer`, `PCM16Framer`, `SpeechEndpointDetector`, `AudioDownmix`, `AdaptiveAudioActivityDetector`, `PCM16SpeechActivityTracker`, `EchoReferenceAlignment`, `SystemAudioTimeline`).
-- `Sources/JarvisCore/Transcription/` — provider-neutral session/provider contracts and immutable Start configuration, selectable OpenAI model/expected-language values, the shared `ConversationLanguagePolicy`, the OpenAI Realtime wire contract, reconnect-safe Jarvis-managed turn coordinator and recovery state, per-item ledger, analyzer-finalization state, and the single spoken-time ordering policy used by the rolling transcript and Activity (`TranscriptionSession`, `TranscriptionProvider`, `TranscriptionConfiguration`, `OpenAITranscriptionModel`, `OpenAITranscriptionLanguage`, `RealtimeSession`, `RealtimeJarvisManagedTurnCoordinator`, `RealtimeReconnectTranscriptionRecovery`, `RealtimeTranscriptionLedger`, `TranscriptionFinalizationState`, `ConversationChronology`, `Transcript`, `NoiseReduction`).
+- `Sources/JarvisCore/Transcription/` — provider-neutral session/provider contracts and immutable Start configuration, selectable OpenAI model/expected-language values, the OpenAI Realtime wire contract, reconnect-safe Jarvis-managed turn coordinator and recovery state, per-item ledger, analyzer-finalization state, and the single spoken-time ordering policy used by the rolling transcript and Activity (`TranscriptionSession`, `TranscriptionProvider`, `TranscriptionConfiguration`, `OpenAITranscriptionModel`, `OpenAITranscriptionLanguage`, `RealtimeSession`, `RealtimeJarvisManagedTurnCoordinator`, `RealtimeReconnectTranscriptionRecovery`, `RealtimeTranscriptionLedger`, `TranscriptionFinalizationState`, `ConversationChronology`, `Transcript`, `NoiseReduction`).
 - `Sources/JarvisCore/Benchmark/` + `Sources/JarvisApp/Benchmark/` — the Foundation-only fixed transcription matrix, optional absence-means-disabled instrumentation, scoring and deterministic summary contract, plus the hidden signed-app runner, process-scoped synthetic system-audio tap, and automated transcription-transport reconnect regression (`TranscriptionBenchmark`, `TranscriptionBenchmarkEvent`, `TranscriptionBenchmarkInstrumentation`, `TranscriptionBenchmarkRunner`, `SystemAudioBenchmarkCapture`; operating, isolation, and scoring contract in [transcription-benchmark.md](./transcription-benchmark.md)).
 - `Sources/JarvisCore/Brain/` — the provider-neutral brain domain, and nothing that runs one: the `BrainClient`/attempt-scoped `BrainConversation` contracts, provider-neutral failure classification (`BrainFailure`), immutable `BrainTarget`/`BrainRoute`, `BrainProvider`, `BrainModelCatalog` (first per-provider entry is the default), `ReasoningEffort`, and `BrainWorkloadTimeout`. The kernel dependency guard rejects `Process`, `FileManager`, `FileHandle`, and `URLSession` here.
 - `Sources/JarvisBrainProviders/` — every concrete brain adapter ([lean-coaching-core.md → Phase 4 contracts](./lean-coaching-core.md#phase-4-implementation-contract--openai-provider-extraction)): the OpenAI Responses transport with its HTTP permanence classification (`OpenAIBrainClient`, `BrainFailure+OpenAI`), and the local-agent CLI subtree — detection, `CLIBrainClient` with its reply parsing, the bounded shared process edge, runtime lifetime, and the Claude Code, Codex exec, and Codex app-server runtimes (`AgentCLIDetector`, `AgentCLIProcessRunner`, `CLIBrainRuntime`, `LocalAgentRuntimeSet`, `ClaudeCodeRuntime`, `CodexAppServerRuntime`, `CodexExecRuntime`), plus their model-facing prompt text. Depends inward on `JarvisCore`; composed by `JarvisApp` at Start, and reused by `JarvisEvaluation` to run the agentic evaluator's CLI.

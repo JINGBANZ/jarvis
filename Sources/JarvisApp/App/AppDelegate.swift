@@ -543,8 +543,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         // Fixed for the whole session — set before every construction/reapply path that bakes a
         // system prompt, including a later `applyBrainPreferencesToRunningSession` hot switch.
         brain.interviewFormatAddendum = interviewFormatAddendum
-        let languagePolicy = transcriptionConfiguration.languagePolicy
-        brain.languagePolicy = languagePolicy
+        let replyLanguage = transcriptionConfiguration.coachingReplyLanguage
+        brain.replyLanguage = replyLanguage
         let configuredRoute = brain.makeConfiguredRoute(
             brainRoute,
             detectedCLIs: detectedCLIs,
@@ -569,8 +569,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             plan: freshSessionPlan(),
             activity: artifacts.sessionAudit,
             interviewFormatAddendum: interviewFormatAddendum,
-            languagePolicy: languagePolicy,
-            acceptsOutput: ConversationLanguageFilter(policy: languagePolicy).accepts)
+            replyLanguage: replyLanguage)
 
         // Building the index reads files and can shell out to `textutil`, so it runs off the Start
         // path entirely rather than delaying it — a trigger that fires before this lands just

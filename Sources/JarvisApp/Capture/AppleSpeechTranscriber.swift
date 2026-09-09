@@ -132,9 +132,7 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
             onTranscriptionWorkChanged: { [weak self] hasPendingWork in
                 self?.onTranscriptionWorkChanged?(hasPendingWork)
             },
-            activity: activity,
-            acceptsText: ConversationLanguageFilter(
-                policy: ConversationLanguagePolicy(localeIdentifier: locale.identifier)).accepts)
+            activity: activity)
         continuityReporter.onCaptureHeartbeat = { [weak self] signal in
             self?.onCaptureHeartbeat?(signal)
         }

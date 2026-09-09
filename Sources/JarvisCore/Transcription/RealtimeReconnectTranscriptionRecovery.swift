@@ -74,9 +74,7 @@ public struct RealtimeReconnectTranscriptionRecovery: Sendable {
         return abandonReplay()
     }
 
-    public mutating func resolveReplacement(
-        hasUsableText: Bool, languageRejected: Bool = false
-    ) -> ReplacementAction {
+    public mutating func resolveReplacement(hasUsableText: Bool) -> ReplacementAction {
         guard blocksCoaching else { return .appendReplacement }
         if duplicateRiskCount > 0 {
             duplicateRiskCount -= 1
@@ -90,9 +88,7 @@ public struct RealtimeReconnectTranscriptionRecovery: Sendable {
         }
         let fallback = interruptedFallbackItems.removeFirst()
         finishIfSettled()
-        // An explicit language rejection is authoritative even when the prior socket had
-        // apparently usable deltas. Falling back here would undo the rejection.
-        return hasUsableText || languageRejected ? .appendReplacement : .useFallback(fallback)
+        return hasUsableText ? .appendReplacement : .useFallback(fallback)
     }
 
     public mutating func timeout() -> [RealtimeTranscriptionLedger.FinalizedItem] {

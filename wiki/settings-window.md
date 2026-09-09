@@ -229,12 +229,15 @@ enabled only when the running Mac and OS expose `SpeechTranscriber`; selecting i
 With OpenAI selected, **Model** offers **GPT-4o Transcribe** (the default), opt-in **GPT
 Transcribe**, and opt-in **GPT Live Transcribe** for session-by-session comparison. **Expected
 languages** is a multi-select generated from the supported language values; English and Mandarin
-are currently available and can be selected independently. No selection means Automatic within
-English and Mandarin. Selecting English restricts speech and replies to English; selecting Mandarin
-or both applies the corresponding language set. The row describes the restriction and its next-Start
-application. The same immutable selection governs both `me` and `them` and the coaching prompt.
-Provider hints improve recognition; language admission also checks detected text before publication,
-with the ambiguity limits described in [architecture.md](./architecture.md#models-and-apis). **Vocabulary** is a free-text, comma-separated glossary of literal terms
+are currently available and can be selected independently. No selection means Automatic and
+sends no language hint. One selection guides recognition but does not translate. Multiple selections
+are sent to GPT Transcribe and GPT Live; GPT-4o remains automatic because it accepts at most one
+language hint, and the row says so whenever GPT-4o has multiple selections. The canonical list is one
+immutable Start-time expectation shared by `me` and `them`,
+so the transcription model—not a Jarvis per-turn classifier—handles a speaker switching languages
+inside one sentence. A single selected language also guides the coach's reply language; with
+Automatic or multiple selections the coach follows the user's conversational language. This is
+prompt guidance only and never drops input or output. **Vocabulary** is a free-text, comma-separated glossary of literal terms
 (jargon, names) sent as `keywords` to bias recognition; it applies only to GPT Transcribe and GPT
 Live and the row says so whenever GPT-4o Transcribe is selected. Blank entries are dropped on save.
 Model-specific language, context, and turn-detection behavior is defined in

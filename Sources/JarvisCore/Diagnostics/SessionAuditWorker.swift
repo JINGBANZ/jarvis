@@ -687,7 +687,6 @@ final class SessionAuditWorker: @unchecked Sendable {
         switch outcome {
         case .spoke: "spoke"
         case .silentByModel: "silent_by_model"
-        case .suppressedLanguage: "suppressed_language"
         case .skippedFillerOnly: "skipped_filler_only"
         case .truncated: "truncated"
         case .busy: "busy"

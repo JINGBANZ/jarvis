@@ -77,7 +77,7 @@ final class BrainComposition {
     /// `JarvisPrompts.Coach.system(prepMaterial:formatAddendum:)` builder `CoachAttemptRunner`
     /// calls per turn.
     var interviewFormatAddendum = ""
-    var languagePolicy = ConversationLanguagePolicy()
+    var replyLanguage: String?
 
     /// The two clients that move together with one provider/model route target.
     private struct BrainRuntime {
@@ -148,7 +148,7 @@ final class BrainComposition {
                                        systemPrompt: JarvisPrompts.Coach.system(
                                            prepMaterial: false,
                                            formatAddendum: interviewFormatAddendum,
-                                           languagePolicy: languagePolicy),
+                                           replyLanguage: replyLanguage),
                                        tools: coachTools,
                                        toolChoice: .required,
                                        runtime: runtimes.coach,

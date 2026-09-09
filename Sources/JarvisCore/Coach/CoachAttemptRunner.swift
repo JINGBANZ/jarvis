@@ -48,8 +48,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
     private let config: Config
     private let transcript: RollingTranscript
     private let screen: ScreenCapturing
-    private let languagePolicy: ConversationLanguagePolicy?
-    private let acceptsOutput: @Sendable (String) -> Bool
+    private let replyLanguage: String?
     private let overlay: OverlayRendering
     private let clock: Clock
     private let sessionStart: TimeInterval
@@ -83,14 +82,12 @@ final class CoachAttemptRunner: @unchecked Sendable {
         activity: (any ActivityEventRecording)?,
         ledger: CoachTranscriptLedger,
         interviewFormatAddendum: String = "",
-        languagePolicy: ConversationLanguagePolicy? = nil,
-        acceptsOutput: @escaping @Sendable (String) -> Bool = { _ in true }
+        replyLanguage: String? = nil
     ) {
         self.config = config
         self.transcript = transcript
         self.screen = screen
-        self.languagePolicy = languagePolicy
-        self.acceptsOutput = acceptsOutput
+        self.replyLanguage = replyLanguage
         self.overlay = overlay
         self.clock = clock
         self.sessionStart = sessionStart
@@ -220,7 +217,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
         // must track the real tool set (`tools`, below) exactly, not just hint at it.
         let systemPrompt = JarvisPrompts.Coach.system(
             prepMaterial: attempt.prepMaterial != nil,
-            formatAddendum: interviewFormatAddendum, languagePolicy: languagePolicy)
+            formatAddendum: interviewFormatAddendum, replyLanguage: replyLanguage)
         let historyBase: [ChatMessage] = [.system(systemPrompt)] + history.snapshot()
 
         if reason == .manualHint && !work.manualHintPrepared {
@@ -409,13 +406,6 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     if Task.isCancelled {
                         jlog("… attempt cancelled (stopped) before speaking")
                         return .cancelled
-                    }
-                    guard acceptsOutput(lines.joined(separator: "\n")) else {
-                        jlog("Jarvis coach: reply rejected by conversation language policy")
-                        // Consume this attempt without a retry or retaining the rejected reply.
-                        commitIfWorthKeeping(turnMessages, deltaText: substantiveDeltaText)
-                        ledger.commit(through: delta.upTo)
-                        return .completed(.suppressedLanguage)
                     }
                     jlog("💬 \(lines.joined(separator: " "))")
                     activity?.record(.tip(lines: lines))

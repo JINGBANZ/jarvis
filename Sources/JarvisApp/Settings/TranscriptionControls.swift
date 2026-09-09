@@ -98,7 +98,7 @@ final class TranscriptionControls: NSObject {
         languagePicker.identifier = NSUserInterfaceItemIdentifier("transcription-languages")
         let languagesRow = SettingsRowView(
             title: "Expected languages",
-            detail: "No selection allows English and Mandarin",
+            detail: "No selection means automatic",
             controlView: languagePicker,
             controlSize: NSSize(width: 340, height: 32))
         content.addSubview(languagesRow)
@@ -155,9 +155,11 @@ final class TranscriptionControls: NSObject {
     }
 
     private func refreshLanguageDetail() {
-        languagesRow?.setDetail(preferences.openAIExpectedLanguages.isEmpty
-            ? "Automatic: English and Mandarin only"
-            : "Limits speech and replies; applies on next Start")
+        let gpt4oIgnoresSelection = preferences.openAIModel == .gpt4oTranscribe
+            && preferences.openAIExpectedLanguages.count > 1
+        languagesRow?.setDetail(gpt4oIgnoresSelection
+            ? "GPT-4o treats multiple selections as Automatic"
+            : "No selection means Automatic")
     }
 
     private func refreshVocabularyDetail() {

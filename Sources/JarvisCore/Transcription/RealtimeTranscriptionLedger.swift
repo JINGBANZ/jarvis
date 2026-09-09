@@ -114,7 +114,7 @@ public final class RealtimeTranscriptionLedger: @unchecked Sendable {
     /// that partial text rather than dropping the spoken turn. A long VAD-confirmed item with neither
     /// remains a diagnostic-only resolution; very short/no-timing items stay ignored as noise blips.
     public func recordCompleted(itemID: String, transcript: String,
-                                speaker: Speaker, languageAllowed: Bool = true) -> FinalizedItem? {
+                                speaker: Speaker) -> FinalizedItem? {
         guard !itemID.isEmpty else { return nil }
         lock.lock(); defer { lock.unlock() }
         guard !finalizedItemIDs.contains(itemID) else { return nil }
@@ -122,11 +122,6 @@ public final class RealtimeTranscriptionLedger: @unchecked Sendable {
         finalizedItemIDs.insert(itemID)
         recordFinalizedAudioBoundaryLocked(item)
 
-        guard languageAllowed else {
-            return FinalizedItem(itemID: itemID, text: nil, spokenAt: item.spokenAt,
-                                 spokenEndAt: item.spokenEndAt,
-                                 recoveredFromDeltas: false, isTranscriptUnavailable: false)
-        }
         if let final = RealtimeSession.meaningfulTranscript(transcript, speaker: speaker) {
             return FinalizedItem(itemID: itemID, text: final, spokenAt: item.spokenAt,
                                  spokenEndAt: item.spokenEndAt,

@@ -163,9 +163,7 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
             onTranscriptionWorkChanged: { [weak self] hasPendingWork in
                 self?.onTranscriptionWorkChanged?(hasPendingWork)
             },
-            activity: activity,
-            acceptsText: ConversationLanguageFilter(
-                policy: ConversationLanguagePolicy(expectedLanguages: expectedLanguages)).accepts)
+            activity: activity)
         let onFinalizedItem: (@Sendable (RealtimeTranscriptionLedger.FinalizedItem) -> Void)?
         if benchmark == nil {
             onFinalizedItem = nil
@@ -723,9 +721,7 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
                                    itemID: itemID,
                                    socketGeneration: socketGeneration)
             transcriptionLifecycle.recordCompleted(
-                itemID: itemID, transcript: transcriptText, socketGeneration: socketGeneration,
-                languageAllowed: ConversationLanguagePolicy(expectedLanguages: expectedLanguages)
-                    .allows(detectedLanguageCodes: RealtimeSession.detectedLanguageCodes(from: obj)))
+                itemID: itemID, transcript: transcriptText, socketGeneration: socketGeneration)
         case RealtimeSession.failedTranscriptionType:
             guard let itemID = obj["item_id"] as? String else {
                 jlog("Jarvis realtime [\(speaker.rawValue)]: failed transcription missing item_id: \(text)")

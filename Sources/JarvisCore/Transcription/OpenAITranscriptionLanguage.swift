@@ -4,7 +4,7 @@ import Foundation
 ///
 /// Expected languages are persisted and transported as a list so adding another supported language
 /// never requires defining every possible language combination. An empty list means automatic
-/// detection within the supported language set; explicit selections restrict that set.
+/// detection and sends no language hint to OpenAI.
 public enum OpenAITranscriptionLanguage: String, CaseIterable, Codable, Sendable {
     case english
     case mandarinChinese = "mandarin-chinese"

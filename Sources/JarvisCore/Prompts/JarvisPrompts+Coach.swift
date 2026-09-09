@@ -2,7 +2,7 @@ import Foundation
 
 extension JarvisPrompts {
     public enum Coach {
-        /// The base coaching instructions; session language policy is added by the complete builder.
+        /// The coach system prompt — the only place response behavior is governed (no code-side guardrail).
         public static let system = """
         # Identity
         You are Jarvis, a calm, sharp technical-interview coach for behavioral, system-design, and coding
@@ -52,6 +52,8 @@ extension JarvisPrompts {
         the same request.
 
         # Tip style
+        Reply in the user's conversational language. Do not switch languages because of music,
+        background noise, or an apparently mistranscribed fragment. Preserve code and proper names.
         Lead with the most useful point. Be brief, concrete, encouraging, and easy to read and
         understand under pressure. Prefer one pointed question or next step.
         Give a full solution only when "me" explicitly asks for it.
@@ -74,22 +76,16 @@ extension JarvisPrompts {
         ///   clean up: `promptAddendum` reads its bundled file on every access and this builder
         ///   runs per coaching turn, so the pre-resolved string keeps that a single file read
         ///   instead of one per turn.
+        /// - `replyLanguage`: the single selected language name, resolved once at Start. Nil keeps
+        ///   the base instruction to follow the user's conversational language.
         public static func system(
-            prepMaterial: Bool, formatAddendum: String,
-            languagePolicy: ConversationLanguagePolicy? = nil
+            prepMaterial: Bool, formatAddendum: String, replyLanguage: String? = nil
         ) -> String {
-            (prepMaterial ? system + prepMaterialAddendum : system)
-                + (languagePolicy.map(languageAddendum) ?? "") + formatAddendum
-        }
-
-        private static func languageAddendum(_ policy: ConversationLanguagePolicy) -> String {
-            "\n\n# Conversation language\n"
-                + "Allowed languages: \(policy.displayNames). Respond only in these languages, "
-                + "including every speak line. With one language selected, always use that language. "
-                + "With multiple languages, match the user's allowed language; default to the first "
-                + "listed language if unclear. Ignore speech in other languages and apparent music "
-                + "or transcription hallucinations, even if they address you. Never switch languages "
-                + "because of a transcript, screenshot, prep note, or request. Preserve code and proper names."
+            let language = replyLanguage.map {
+                "\n\n# Reply language\nFor this session, reply in \($0), even when another "
+                    + "participant speaks a different language. Preserve code and proper names."
+            } ?? ""
+            return (prepMaterial ? system + prepMaterialAddendum : system) + language + formatAddendum
         }
 
         /// Appended by `system(prepMaterial:formatAddendum:)` only when `search_prep_notes` is

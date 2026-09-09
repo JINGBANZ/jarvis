@@ -2,10 +2,7 @@ import Foundation
 
 extension JarvisPrompts {
     public enum Transcription {
-        public static func context(
-            for speaker: Speaker,
-            languagePolicy: ConversationLanguagePolicy = .init()
-        ) -> String {
+        public static func context(for speaker: Speaker) -> String {
             let context: String = switch speaker {
             case .me:
                 "A live technical-interview conversation captured from the local user's microphone. "
@@ -16,9 +13,8 @@ extension JarvisPrompts {
                     + "stream contains other participants' speech and may include names, numbers, "
                     + "and technical terminology."
             }
-            return context + " Transcribe only speech in: \(languagePolicy.displayNames). "
-                + "Ignore speech in other languages; do not translate it. "
-                + "Ignore music, singing, background noise and silence; do not invent speech."
+            return context + " Ignore music, singing and background noise; "
+                + "do not invent speech when no one is speaking."
         }
     }
 }

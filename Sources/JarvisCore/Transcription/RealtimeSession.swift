@@ -15,9 +15,8 @@ public enum RealtimeSession {
     ///
     /// GPT-4o accepts the legacy singular `language` hint. GPT Transcribe and GPT Live accept the
     /// plural `languages` list and a free-form recording context; GPT Live also receives the low
-    /// streaming-delay setting. Automatic sends the supported language set to newer models.
-    /// GPT-4o omits `language` with multiple allowed languages; app-side admission enforces
-    /// the same policy for every model, independent of these recognition hints.
+    /// streaming-delay setting. GPT-4o sessions with zero or multiple expected languages omit
+    /// `language` and use automatic recognition.
     ///
     /// GPT-4o uses `server_vad`; `silenceDurationMs` tunes how long a pause must last before the
     /// server ends the turn. GPT Transcribe and GPT Live require committed-turn transcription, so
@@ -40,9 +39,7 @@ public enum RealtimeSession {
         silenceDurationMs: Int = 1000,
         noiseReduction: String? = "near_field"
     ) -> [String: Any] {
-        let expectedLanguages = expectedLanguages.isEmpty
-            ? OpenAITranscriptionLanguage.allCases
-            : OpenAITranscriptionLanguage.canonicalizing(expectedLanguages)
+        let expectedLanguages = OpenAITranscriptionLanguage.canonicalizing(expectedLanguages)
         var transcription: [String: Any] = ["model": model.rawValue]
         switch model {
         case .gpt4oTranscribe:
@@ -50,8 +47,7 @@ public enum RealtimeSession {
                 transcription["language"] = language.singularHint
             }
         case .gptTranscribe, .gptLiveTranscribe:
-            transcription["prompt"] = JarvisPrompts.Transcription.context(
-                for: speaker, languagePolicy: ConversationLanguagePolicy(expectedLanguages: expectedLanguages))
+            transcription["prompt"] = JarvisPrompts.Transcription.context(for: speaker)
             if !expectedLanguages.isEmpty {
                 transcription["languages"] = expectedLanguages.map(\.multipleHint)
             }
