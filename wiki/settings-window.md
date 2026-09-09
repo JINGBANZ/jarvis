@@ -122,12 +122,17 @@ re-centring afterwards would mean a second `center()` call. Building the panel a
 centring once keeps placement correct by construction and keeps the AppKit surface minimal — which
 matters here, because this panel is built on a CI runner with no GUI session.
 
-The drag hook is `viewDidEndLiveResize` on the box's content view: AppKit sends it once the drag
-finishes, unlike a per-frame resize signal that would rewrite the preference dozens of times per
-gesture. Assigning `NSWindow.delegate` would reach the same event but blocks AppKit without a GUI
-session, hanging every main-actor test on CI. A programmatic resize raises no live-resize signal at
-all, so nothing Jarvis does to the panel can read back as a user edit. The panel's `minSize` derives from the persisted range floors,
-so the drag floor and the clamp floor cannot drift apart.
+The drag hook is `OverlayBoxResizeAffordanceView.onResizeFinished`, fired once when the user lets go
+of an edge, not per frame — a per-frame signal would rewrite the preference dozens of times per
+gesture. The affordance owns the drag itself (see [architecture.md → Overlay Box](./architecture.md)),
+so AppKit is not the one resizing and its `viewDidEndLiveResize` does not fire for these; the box's
+content view keeps that hook only for any resize AppKit still drives. Assigning `NSWindow.delegate`
+would reach the same event but blocks AppKit without a GUI session, hanging every main-actor test on
+CI. A programmatic resize raises no signal on either path, so nothing Jarvis does to the panel can
+read back as a user edit — including collapsing it, which reports the height the user last dragged to
+rather than the header's. The panel's `minSize` derives from the persisted range floors, so the drag
+floor and the clamp floor cannot drift apart, and the affordance clamps its own drags against the
+same `minSize`/`maxSize`.
 
 `OverlaySection` applies changes live through two protocols, with no direct dependency on the AppKit
 panels: `OverlayCaptionApplying`, conformed by `OverlayCaptionPanel`, and `OverlayBoxApplying`,
@@ -143,7 +148,20 @@ toggle shows/hides that surface's sample (and collapses/expands its sliders via 
 Each panel's `showAppearancePreview(_:)` re-asserts capture exclusion so the preview stays hidden
 from screen capture — same defense-in-depth as the coaching display path. The box's preview shows
 sample text without disturbing the real log and re-derives `isEnabled && isSessionLive` on close, so
-closing the tab can leave the box on screen only while both hold. The plain setters
+closing the tab can leave the box on screen only while both hold. The box's sample stands in **only
+while stopped**: during a session the box is already on screen carrying the conversation's own tips
+and the sliders apply to it live, so a sample would replace real content with something worse. That
+boundary is a correctness one as much as a display one, because it is what guarantees no tip can land
+behind a sample and no collapse snapshot can cross a session boundary. Start therefore takes the
+sample down.
+
+Settings cannot see the session, so `showAppearancePreview(_:)` records a request rather than
+obeying one, the way `setEnabled(_:)` does: the sample shows when Settings wants it **and** no session
+is running, derived in one place. A request made during a session is still standing when the session
+stops, so a Stop taken without leaving the tab brings the sample up rather than leaving the sliders
+with nothing on screen to act on. Which source is showing is a value, `Display.log` or `.sample`, and
+the readout and the clear button are derived from it together rather than each asking whether a
+preview is running. The plain setters
 (`setFontSize`/`setBackgroundOpacity`/`setOpacity`) only change appearance and don't touch
 `sharingType`. See [overlay-invisibility.md](./overlay-invisibility.md).
 
