@@ -24,6 +24,9 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     /// The layer-backed, opaque rounded fill behind the text — its alpha is the box's opacity.
     private let box: ResizeReportingView
     private let textView: NSTextView
+    private let formatLabel = NSTextField(labelWithString: "")
+    private let historyTopWithFormat: NSLayoutConstraint
+    private let historyTopWithoutFormat: NSLayoutConstraint
     /// White level of the box fill; the opacity setting only varies the alpha, keeping this constant.
     private static let boxWhite: CGFloat = 0.10
     /// Point size of the response text; the timestamp is rendered a couple points smaller. Driven by
@@ -101,7 +104,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         self.box = box
 
         let scroll = NSScrollView(frame: box.bounds)
-        scroll.autoresizingMask = [.width, .height]
+        scroll.translatesAutoresizingMaskIntoConstraints = false
         scroll.hasVerticalScroller = true
         // Keep the history scrollable without reserving a persistent legacy-style gutter. AppKit's
         // preferred style can differ by linked SDK and input device, so this must not be implicit.
@@ -128,7 +131,25 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         scroll.documentView = tv
         textView = tv
 
+        formatLabel.translatesAutoresizingMaskIntoConstraints = false
+        formatLabel.textColor = NSColor(white: 1, alpha: 0.7)
+        formatLabel.font = .systemFont(ofSize: fontSize, weight: .semibold)
+        formatLabel.lineBreakMode = .byTruncatingTail
+        formatLabel.isHidden = true
+        box.addSubview(formatLabel)
         box.addSubview(scroll)
+        // Keep the format outside the scrolling document so new responses never scroll it away.
+        historyTopWithFormat = scroll.topAnchor.constraint(equalTo: formatLabel.bottomAnchor, constant: 4)
+        historyTopWithoutFormat = scroll.topAnchor.constraint(equalTo: box.topAnchor)
+        NSLayoutConstraint.activate([
+            formatLabel.topAnchor.constraint(equalTo: box.topAnchor, constant: 12),
+            formatLabel.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 14),
+            formatLabel.trailingAnchor.constraint(equalTo: box.trailingAnchor, constant: -14),
+            scroll.leadingAnchor.constraint(equalTo: box.leadingAnchor),
+            scroll.trailingAnchor.constraint(equalTo: box.trailingAnchor),
+            scroll.bottomAnchor.constraint(equalTo: box.bottomAnchor),
+            historyTopWithoutFormat,
+        ])
         panel.contentView = box
         super.init()
         box.onEndLiveResize = { [weak self] in self?.reportContentSize() }
@@ -201,6 +222,19 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         rerender()
     }
 
+    /// The app supplies the same Start-time selection used by the coaching prompt.
+    public func setInterviewFormat(_ format: InterviewFormat?) {
+        formatLabel.stringValue = format?.displayName ?? ""
+        formatLabel.isHidden = format == nil
+        historyTopWithFormat.isActive = false
+        historyTopWithoutFormat.isActive = false
+        if format == nil {
+            historyTopWithoutFormat.isActive = true
+        } else {
+            historyTopWithFormat.isActive = true
+        }
+    }
+
     /// Whether the box belongs on screen: switched on *and* a session running. Kept distinct from
     /// `panel.isVisible` because the Settings preview can show the box without either being true; the
     /// preview restores to this on close, so the box can never disagree with the setting or outlive Stop.
@@ -221,6 +255,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     /// Follow the session: Start puts the box on screen (if it is switched on), Stop takes it away.
     public func setSessionLive(_ live: Bool) {
         isSessionLive = live
+        if !live { setInterviewFormat(nil) }
         applyVisibility()
     }
 
@@ -235,6 +270,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     /// Set the response text's point size, live; the timestamp tracks a couple points smaller.
     public func setFontSize(_ points: Double) {
         fontSize = CGFloat(points)
+        formatLabel.font = .systemFont(ofSize: fontSize, weight: .semibold)
         refreshText()
     }
 

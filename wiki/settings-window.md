@@ -101,6 +101,11 @@ place is why the panel, not the two call sites, owns it: switching the box on fr
 stopped would otherwise leave it on screen with no session behind it. The Settings preview overrides
 the rule while the Overlay tab is open and re-derives it on close.
 
+The box keeps the session’s selected interview format in a fixed header above the scrolling response
+history. The header uses the same Start-time selection as the coaching prompt and stays unchanged
+until the next Start; no selection hides it and gives the space back to the history. Clearing responses
+keeps the header, while Stop clears it. It shares the box’s text-size and opacity controls.
+
 Opacity governs the background fill only, so both surfaces accept 0%: a text-only surface with no
 backdrop, not a hidden one. Nothing here takes a surface off screen: that is the On/Off toggle, and
 for the box the end of a session as well. Both share one range because the tab presents their

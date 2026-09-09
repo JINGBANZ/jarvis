@@ -297,7 +297,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         // Fixed for the whole session, like transcription's language/model choice — never
         // reclassified mid-conversation. No selection means no addendum, not a guess assembled from
         // whatever formats have content — see wiki/architecture.md § Models and APIs.
-        let interviewFormatAddendum = brain.preferences.interviewFormat?.promptAddendum ?? ""
+        let interviewFormat = brain.preferences.interviewFormat
+        let interviewFormatAddendum = interviewFormat?.promptAddendum ?? ""
         let key = secrets.apiKey() ?? ""
         let requiresOpenAIKey = transcriptionProvider.requiresOpenAIAPIKey(for: brainRoute)
         let preparesAppleSpeech = transcriptionProvider == .appleSpeech
@@ -431,6 +432,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             _ = self.installPreparedStart(
                 apiKey: key,
                 brainRoute: brainRoute,
+                interviewFormat: interviewFormat,
                 interviewFormatAddendum: interviewFormatAddendum,
                 transcriptionConfiguration: transcriptionConfiguration,
                 appleSpeechLocale: appleSpeechLocale,
@@ -489,6 +491,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     private func installPreparedStart(
         apiKey key: String,
         brainRoute: BrainRoute,
+        interviewFormat: InterviewFormat?,
         interviewFormatAddendum: String,
         transcriptionConfiguration: TranscriptionConfiguration,
         appleSpeechLocale: Locale?,
@@ -521,6 +524,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         transcript = RollingTranscript()
         artifacts.beginNewSession()  // rotate to a fresh session dir + activity/debug log
         overlayBox.clear() // …and a fresh response history for the new conversation
+        overlayBox.setInterviewFormat(interviewFormat)
         switch transcriptionConfiguration.provider {
         case .openAI:
             jlog(
