@@ -389,7 +389,7 @@ stream owns unfinished work so it does not cross an earlier utterance that is ab
 explicit coaching shortcut interrupts that postponement even after the wait begins and upgrades the same
 pending-work attempt to a forced hint; ordinary natural triggers remain parked until transcription
 settles. `TriggerReason` remains the model-facing
-reason that made coaching useful (`turnEnd`, `silence`, or `manualHint`); pending work is scheduler
+reason that made coaching useful (`turnEnd`, `silence`, `manualHint`, or `manualExplanation`); pending work is scheduler
 state, not a fourth instruction to the model. An automatic attempt with no newer trigger reuses the
 pending work's reason; when another natural trigger arrives, its newer reason describes the fresh
 snapshot.

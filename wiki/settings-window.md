@@ -186,7 +186,7 @@ from the next attempt while a current answer can finish. Ordinary hints remain a
 A collision with another application or the other Jarvis shortcut leaves the old working binding
 active and displays feedback for that card. If no binding could be registered at launch, its warning
 persists across tab visits. The two cards scroll at small window sizes, including when both warnings
-are visible. The Overlay Box distinguishes semibold hints from regular explanation paragraphs with an
+are visible. Resizing or changing a binding card preserves the reading offset, clamped to the available content. The Overlay Box distinguishes semibold hints from regular explanation paragraphs with an
 **Explanation** label and spacing. Both bodies use the configured text size; the appearance preview
 shows an example. Neither surface's visibility preference changes.
 

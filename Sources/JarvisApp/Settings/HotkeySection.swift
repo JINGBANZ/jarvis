@@ -39,15 +39,21 @@ final class HotkeySection: NSObject, SettingsSection {
         if let last = stack.arrangedSubviews.last { stack.setCustomSpacing(0, after: last) }
         stack.addArrangedSubview(spacer)
         scroll.documentView = stack
+        var previousViewportHeight = scroll.contentView.bounds.height
         let relayout: () -> Void = { [weak self, weak scroll, weak stack] in
             guard let self, let scroll, let stack else { return }
+            // The stack is non-flipped: retain the reading offset from its top as cards resize.
+            let distanceFromTop = max(0, stack.bounds.height
+                - scroll.contentView.bounds.origin.y - previousViewportHeight)
+            previousViewportHeight = scroll.contentView.bounds.height
             let height = self.bindings.reduce(CGFloat(0)) { $0 + $1.preferredHeight }
                 + CGFloat(max(0, self.bindings.count - 1)) * SettingsStyle.sectionSpacing
             stack.frame.size = NSSize(width: scroll.contentView.bounds.width,
                                       height: max(height, scroll.contentView.bounds.height))
             stack.layoutSubtreeIfNeeded()
+            let maximumY = max(0, stack.bounds.height - scroll.contentView.bounds.height)
             scroll.contentView.scroll(to: NSPoint(x: 0,
-                y: max(0, stack.bounds.height - scroll.contentView.bounds.height)))
+                y: min(maximumY, max(0, maximumY - distanceFromTop))))
             scroll.reflectScrolledClipView(scroll.contentView)
         }
         bindings.forEach { $0.onHeightChanged = relayout }
