@@ -55,8 +55,8 @@ final class CoachAttemptRunner: @unchecked Sendable {
     private let coachingAttempts: (any CoachingAttemptAuditing)?
     private let activity: (any ActivityEventRecording)?
     private let ledger: CoachTranscriptLedger
-    /// Fixed for the whole session — chosen once at Start, never reclassified — so it needs none of
-    /// `prepMaterial`'s live-swap machinery; a plain stored `let` is enough.
+    /// Fixed prompt text for the session. In automatic mode that text tells the model to choose from
+    /// current evidence per response; no mutable runtime classification is required.
     private let interviewFormatAddendum: String
     private let interviewFormat: InterviewFormat?
 
@@ -426,10 +426,9 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     guard delivery.accepted else { return .cancelled }
                     let explanation = delivery.explanation
                     activity?.record(.tip(lines: lines + (explanation.map { [$0] } ?? [])))
-                    var deliveredCalls = response.rawToolCalls
+                    // Only the selected call executes; extra provider calls were never delivered.
+                    var deliveredCalls = response.rawToolCalls.filter { $0.id == callID }
                     if explanation == nil {
-                        // Only the first tool executes. This scrub relies on OpenAI parallel_tool_calls:false;
-                        // providers must not return extra calls that would be replayed as delivered.
                         // History describes what was delivered, not optional text suppressed by Settings.
                         // These parsed values contain only JSON strings, arrays, and null, so encoding cannot fail.
                         let arguments: [String: Any] = [

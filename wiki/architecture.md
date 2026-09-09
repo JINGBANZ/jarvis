@@ -88,7 +88,7 @@ moments the model judges worthwhile.
    keeps the complete finalized transcription. Context-dependent short replies such as "Yes", "No",
    "Okay", "对", and "可以" fail open for either speaker, as do unknown short fragments. Interviewer
    questions remain first-class and may draw a proactive tip. Consumed noise never rides into a
-   later request; silence checks and the hint hotkey always go through. The gate is a small explicit
+   later request; silence checks and both coaching shortcuts always go through. The gate is a small explicit
    class on purpose: a classifier model would add latency and cost for it, and asking the
    transcription model to drop filler is not a deterministic boundary and would silently alter the
    audit record.
@@ -482,57 +482,38 @@ rather than a per-turn screenshot.
   single-writer lock turns one slow turn into minutes of `conversation_locked` silence. Requests are sent `store:true`
   so they stay inspectable in the OpenAI dashboard for debugging — the retention tradeoff is
   documented in [sandbox.md](./sandbox.md).
-- **Interview format supplies coaching guidance and format-specific hint content (`InterviewFormat` in
-  `Sources/JarvisCore/Config/`).** A Start-time picker (**None**, plus one entry per format that actually has
-  content — Behavioral and System Design today) adds a format-specific addendum to the coach system
-  prompt. System Design supplies stage vocabulary so tips stay with the part of the design under
-  discussion. Behavioral treats a complete interviewer question as a useful proactive coaching
-  moment, shapes answers with STAR, and follows the newest answer stage to surface only material
-  gaps. When prep search is available it grounds the answer in the candidate's stories and uses
-  company values, leadership principles, role expectations, or behavioral requirements as answer
-  criteria. Without a matching personal story, it may supply a clearly labeled illustrative
-  mini-story; partial candidate facts may be organized but never embellished with invented personal
-  details, outcomes, or metrics. Coding stays empty because no specialist policy has been requested,
-  not because the mechanism cannot hold its content too. Each format's
-  content is a real Markdown file (`Sources/JarvisCore/Resources/Skills/<rawValue>.md`), not a Swift
-  string literal, so it reads and edits like prose; a missing file resolves to an empty addendum
-  rather than an error, since an unwritten skill is a normal state. `InterviewFormat`'s private
-  `skillMarkdownURL(named:)` locates it directly rather than trusting the generated `Bundle.module`
-  accessor, for the same reasons `SileroVoiceActivityDetector.bundledModelURL()` does — see
-  `Sources/JarvisCore/Config/InterviewFormat.swift`; `scripts/build-app.sh` and
-  `scripts/package-app.sh` copy `Jarvis_JarvisCore.bundle` into the assembled app's
-  `Contents/Resources` alongside `Jarvis_JarvisApp.bundle` (the Silero VAD model) accordingly. Adding
-  or editing a skill still needs a developer and a rebuild — a self-service system where a user drops
-  in their own skill file was considered and set aside as speculative infrastructure for a need
-  nothing has
-  yet. The picker filters the fixed `InterviewFormat.allCases` down to entries whose addendum is
-  non-empty (see `BrainSection.availableFormats`), so an entry is never indistinguishable from None:
-  writing Coding's or Behavioral's Markdown file is a resource-only change that surfaces its existing
-  case, but a genuinely new format still needs a new `InterviewFormat` case and display name before
-  any Markdown file can surface it. No selection resolves to no addendum at all (see
-  `CoachAttemptRunner`'s system-prompt assembly), not a guess assembled from whatever formats happen to have
-  content: concatenating every non-empty addendum was tried and rejected — with only one format
-  written it silently asserted "this is a system-design interview" into every session by default,
-  including coding and behavioral ones nobody opted into, and it does not scale, since two written
-  formats would concatenate two contradictory interview-format claims into one prompt. An automatic
-  classifier that guesses the format from conversation is separately rejected too: guessing once and
-  locking in misclassifies a session that shifts formats (a behavioral opener sliding into a
-  system-design round), and re-guessing every turn is a brittle state machine for a signal the model
-  can read from context anyway once it has the vocabulary. Fixed for the whole session like the
-  transcription language/model choice, for a concrete reason beyond convention: `CLIBrainClient`
-  bakes the system prompt into the local-agent process at construction and asserts it never changes,
-  so the resolved addendum must be computed once (`BrainComposition.interviewFormatAddendum`, set
-  before every route construction or reapply, including a live provider hot-switch) and reused
-  identically by both the per-turn OpenAI-style prompt (`CoachAttemptRunner`) and the CLI-provider
-  construction (`BrainComposition`). Both sites assemble the prompt through one builder,
-  `JarvisPrompts.Coach.system(prepMaterial:formatAddendum:)` in `JarvisCore`, so the two cannot
-  drift. The builder takes the addendum as an already-resolved string rather than an
-  `InterviewFormat?` because `promptAddendum` reads its bundled file on every access and the
-  per-turn site would otherwise read it on every coaching turn. The CLI site passes
-  `prepMaterial: false`: prep material is indexed off the Start path and installed later, so its
-  `search_prep_notes` guidance cannot be baked into a process whose instructions are fixed at
-  construction. The selected format also enables [private architecture hints](#private-architecture-hints)
-  through the System Design variant of the speak schema.
+- **Interview format is an optional Start-time addendum (`InterviewFormat` in
+  `Sources/JarvisCore/Config/`).** The picker defaults to **None**, which supplies the byte-for-byte
+  base coach prompt. Coding, Behavioral, System Design, and General Technical are explicit choices.
+  This keeps behavior unchanged for a user who never opens Settings. General Technical is one
+  purpose-built routing skill, not a concatenation of specialist prompts: it selects relevant
+  format-specific guidance from the newest conversation and available screen evidence. Screen
+  capture remains on demand under the base action policy; no fresh capture is assumed on every turn.
+  There is no runtime classifier or persisted question classification.
+
+  The base prompt owns when to speak or stay silent, the hint length, and conditional comprehension
+  before strategy. Coding adds representation/invariant guidance, local implementation and defect
+  diagnosis, and boundary-test content for a post-completion hint already warranted by the base
+  policy. Finishing code alone does not trigger a hint. Behavioral shapes candidate-owned answers
+  with STAR and prepared criteria, labels constructed examples, and avoids refinement of a concrete,
+  complete, aligned answer. General Technical follows the same behavioral completion standard.
+  System Design supplies stage vocabulary from requirements through trade-offs.
+
+  Each explicit format is a Markdown file under `Sources/JarvisCore/Resources/Skills/`; missing content
+  resolves to an empty addendum, and Settings filters it out. `InterviewFormat.promptAddendum` loads
+  the selected resource through `skillMarkdownURL(named:)`, including installed-app, SwiftPM, and test
+  layouts. Packaging copies `Jarvis_JarvisCore.bundle` into `Contents/Resources`. New formats require an
+  enum case and display name as well as a resource; user-supplied skill files are not supported.
+  Nil resolves directly to an empty string, preserving the default rather than composing skills.
+
+  The selected text is frozen at Start (`BrainComposition.interviewFormatAddendum`) and reused during
+  provider reapply. Both OpenAI and CLI construction use
+  `JarvisPrompts.Coach.system(prepMaterial:formatAddendum:)`; passing resolved text keeps resource I/O
+  outside coaching turns. CLI instructions remain fixed for the session, while General Technical can
+  use new task evidence within those instructions. CLI construction passes `prepMaterial: false`
+  because prep material is installed later. [Private architecture hints](#private-architecture-hints)
+  require explicit **System Design** in both the tool schema and runtime; General Technical's
+  system-design guidance does not enable diagrams.
 - **Transcription has its own provider, model, and language settings.** OpenAI remains the provider
   default and `gpt-4o-transcribe` remains its model default; `gpt-transcribe` and
   `gpt-live-transcribe` are opt-in comparison choices. All use the GA Realtime API, but keep their
