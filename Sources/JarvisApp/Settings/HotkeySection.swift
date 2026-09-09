@@ -33,11 +33,17 @@ final class HotkeySection: NSObject, SettingsSection {
         scroll.autoresizingMask = [.width, .height]
         let stack = NSStackView(frame: scroll.bounds)
         stack.orientation = .vertical
-        stack.alignment = .width
+        stack.alignment = .leading
         stack.distribution = .fill
         stack.spacing = SettingsStyle.sectionSpacing
         stack.autoresizingMask = [.width]
-        for binding in bindings { stack.addArrangedSubview(binding.makeView()) }
+        for binding in bindings {
+            let view = binding.makeView()
+            stack.addArrangedSubview(view)
+            // These containers have no intrinsic width; pin them to the viewport-sized stack
+            // so AppKit cannot collapse the cards to their callouts' minimum fitting width.
+            view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        }
         let spacer = NSView()
         spacer.setContentHuggingPriority(.defaultLow, for: .vertical)
         spacer.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
