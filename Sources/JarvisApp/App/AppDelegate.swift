@@ -115,7 +115,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     /// gate closing, and never twice.
     private func startApp() {
         didStartApp = true
-        brain = BrainComposition(secrets: secrets, coachTools: coachTools, host: self)
+        brain = BrainComposition(secrets: secrets, host: self)
         networkDiagnostics.start()
 
         // The activity viewer lives for the whole app run, but a *session* is one coaching run: each
@@ -574,6 +574,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         // Fixed for the whole session — set before every construction/reapply path that bakes a
         // system prompt, including a later `applyBrainPreferencesToRunningSession` hot switch.
         brain.interviewFormatAddendum = interviewFormatAddendum
+        // One tool set for the session, handed to both the targets that bake it into their
+        // instructions and the driver that sends it. Prep material counts as configured sources, not
+        // a finished index: the index lands later and must not change what the session offers (#273).
+        let prepMaterialSources = prepMaterialPreferences.sources
+        let sessionTools = sessionCoachTools(
+            interviewFormat: interviewFormat, prepMaterial: !prepMaterialSources.isEmpty)
+        brain.coachTools = sessionTools
         let configuredRoute = brain.makeConfiguredRoute(
             brainRoute,
             detectedCLIs: detectedCLIs,
@@ -597,15 +604,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             coachingAttempts: artifacts.sessionAudit,
             plan: freshSessionPlan(),
             activity: artifacts.sessionAudit,
+            coachTools: sessionTools,
             interviewFormatAddendum: interviewFormatAddendum,
             interviewFormat: interviewFormat)
 
         // Building the index reads files and can shell out to `textutil`, so it runs off the Start
-        // path entirely rather than delaying it — a trigger that fires before this lands just
-        // doesn't have search_prep_notes available for that one attempt. Tracked and cancelled in
-        // `stop()` for the same reason compaction is: an untracked task would keep reading files and
-        // spawning textutil subprocesses after the session it belongs to has already torn down.
-        let prepMaterialSources = prepMaterialPreferences.sources
+        // path entirely rather than delaying it — a search that fires before this lands returns no
+        // matches for that one attempt. The tool itself was offered from Start, with the rest of the
+        // session's fixed set. Tracked and cancelled in `stop()` for the same reason compaction is:
+        // an untracked task would keep reading files and spawning textutil subprocesses after the
+        // session it belongs to has already torn down.
         prepMaterialIndexTask = Task.detached(priority: .utility) { [weak driver] in
             let index = await PrepMaterialIndexBuilder.build(from: prepMaterialSources)
             guard !Task.isCancelled else { return }

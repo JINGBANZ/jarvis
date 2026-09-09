@@ -1,0 +1,96 @@
+import Foundation
+import Testing
+@testable import JarvisCore
+
+/// The session's coach tool set is fixed for the session's whole life.
+///
+/// This is not a preference: a local-agent target bakes each tool's `parametersJSON` into the
+/// instructions its process is warmed with, and re-checks the composed string on every turn
+/// (`CLIBrainClient.prepareTurn`). A set that grows or changes shape mid-session is rejected there,
+/// failing every remaining attempt on that target. See #273.
+@Suite(.serialized) struct SessionToolSetTests {
+    private func makeDriver(
+        brain: BrainClient,
+        coachTools: [ToolDef]? = nil,
+        prepMaterial: (any PrepMaterialSearching)? = nil,
+        interviewFormat: InterviewFormat? = nil
+    ) -> (CoachDriver, RollingTranscript) {
+        let transcript = RollingTranscript()
+        let target = BrainTarget(
+            provider: .openAI, modelID: BrainModelCatalog.defaultModel(for: .openAI).id)
+        let route = ConfiguredBrainRoute(
+            targets: [ConfiguredBrainTarget(target: target, brain: brain)])
+        let driver = CoachDriver(
+            config: .default, transcript: transcript, route: route,
+            screen: FakeScreen(), overlay: FakeOverlay(), clock: ManualClock(now: 100),
+            automaticAttemptDelay: { _ in },
+            coachTools: coachTools,
+            prepMaterial: prepMaterial,
+            interviewFormat: interviewFormat)
+        return (driver, transcript)
+    }
+
+    private var staySilent: BrainResponse {
+        .init(toolCalls: [.staySilent(callId: "s1")],
+              rawToolCalls: [RawToolCall(id: "s1", name: "stay_silent", argumentsJSON: "{}")])
+    }
+
+    /// How the app actually composes a session: prep sources are configured at Start, but the index
+    /// is still building, so the port lands only after the first attempts have already run. The tool
+    /// set must not change when it does.
+    @Test func prepMaterialLandingMidSessionDoesNotChangeTheToolSet() async {
+        let brain = ScriptedBrain(script: [staySilent, staySilent])
+        let (driver, transcript) = makeDriver(
+            brain: brain,
+            coachTools: sessionCoachTools(interviewFormat: nil, prepMaterial: true),
+            prepMaterial: nil)
+        transcript.append(.init(speaker: .me, text: "let me think about the ordering", at: 100))
+
+        _ = await driver.handleTrigger(.turnEnd)
+
+        driver.installPrepMaterial(FakePrepMaterialSearch())
+        transcript.append(.init(speaker: .me, text: "so the map keeps the last index", at: 140))
+
+        _ = await driver.handleTrigger(.turnEnd)
+
+        #expect(brain.offeredTools.count == 2)
+        #expect(brain.offeredTools[0].map(\.name).contains(searchPrepNotesTool.name))
+        #expect(brain.offeredTools[0].map(\.name) == brain.offeredTools[1].map(\.name))
+        #expect(brain.offeredTools[0].map(\.parametersJSON)
+            == brain.offeredTools[1].map(\.parametersJSON))
+    }
+
+    /// The resolver both the app's brain composition and the coach loop read, so the schemas a
+    /// local-agent process is warmed with are the schemas the loop later sends.
+    @Test func systemDesignResolvesToTheDiagramSpeakSchema() {
+        let tools = sessionCoachTools(interviewFormat: .systemDesign, prepMaterial: false)
+
+        #expect(tools.first { $0.name == speakTool.name }?.parametersJSON.contains("mermaid") == true)
+        #expect(!tools.map(\.name).contains(searchPrepNotesTool.name))
+    }
+
+    @Test func codingWithPrepNotesResolvesToThePlainSpeakSchemaPlusSearch() {
+        let tools = sessionCoachTools(interviewFormat: .coding, prepMaterial: true)
+
+        #expect(tools.first { $0.name == speakTool.name }?.parametersJSON.contains("mermaid") == false)
+        #expect(tools.map(\.name).contains(searchPrepNotesTool.name))
+    }
+
+    /// The inverse of the case above: a session composed without prep material keeps the tool absent
+    /// even after a port is installed, because its target was never warmed with that schema.
+    @Test func aSessionComposedWithoutPrepMaterialNeverGainsTheTool() async {
+        let brain = ScriptedBrain(script: [staySilent, staySilent])
+        let (driver, transcript) = makeDriver(brain: brain, prepMaterial: nil)
+        transcript.append(.init(speaker: .me, text: "let me think about the ordering", at: 100))
+
+        _ = await driver.handleTrigger(.turnEnd)
+
+        driver.installPrepMaterial(FakePrepMaterialSearch())
+        transcript.append(.init(speaker: .me, text: "so the map keeps the last index", at: 140))
+
+        _ = await driver.handleTrigger(.turnEnd)
+
+        #expect(brain.offeredTools.count == 2)
+        #expect(!brain.offeredTools[1].map(\.name).contains(searchPrepNotesTool.name))
+    }
+}
