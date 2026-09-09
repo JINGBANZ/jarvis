@@ -83,7 +83,7 @@ public struct CLIBrainClient: BrainClient, Sendable {
                 requestRecord: nil,
                 respondEntered: openEntered,
                 kind: .preRequestFailure)
-            throw BrainFailure(error)
+            throw LocalAgentFailureClassifier.classify(error: error, provider: provider)
         }
     }
 
@@ -421,7 +421,7 @@ private actor CLIBrainConversation: BrainConversation {
                 respondEntered: respondEntered,
                 kind: dispatchWitness.wasDispatched ? .providerCall : .preRequestFailure)
             if Task.isCancelled || error is CancellationError { throw error }
-            throw BrainFailure(error)
+            throw LocalAgentFailureClassifier.classify(error: error, provider: client.provider)
         }
     }
 
