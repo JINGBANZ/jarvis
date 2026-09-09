@@ -207,7 +207,7 @@ extension JarvisPrompts {
         }
 
         static func manualCodeTrigger(timestamp: String) -> String {
-            "\(timestamp) The user pressed the Show code shortcut for THIS request. Show the next small "
+            "[\(timestamp)] The user pressed the Show code shortcut for THIS request. Show the next small "
                 + "logical snippet for their current sticking point, aligned with their existing code. "
                 + "Use codeSnippet with language, placement, raw code, and highlightedLines for local corrections. "
                 + "Keep lines as a short placement or correction hint. Do not show the full solution. "

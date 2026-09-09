@@ -286,7 +286,8 @@ Its capability is fixed at Start; the configurable fallback hotkey requests code
 guidance only in enabled sessions. Settings changes take effect on the next Start.
 [`CodeSnippet`](../Sources/JarvisCore/Overlay/CodeSnippet.swift) validates bounded attachments;
 [`OverlayBoxPanel`](../Sources/JarvisOverlay/OverlayBoxPanel.swift) keeps them in a syntax-colored
-bottom dock while hints continue above. Runtime authorization suppresses code when the session capability is off;
+bottom dock while hints continue above. Disabling Overlay Box turns off the saved code setting and releases its shortcut.
+Runtime authorization suppresses code when the session capability is off;
 each new hint replaces or clears its matching snippet.
 See [architecture.md](./architecture.md#on-demand-coaching-shortcuts) for behavior and failure handling.
 Signed synthetic dock/shortcut checks and model scenarios cover the feature; real interview audio,
@@ -298,6 +299,7 @@ formats; `speak.explanation` carries fuller plain-text detail into the persisten
 Activity while captions stay short. Semibold hints and labeled, regular-weight explanation paragraphs
 remain visually distinct at the configured text size. Hint and explanation shortcuts are independently configurable in Settings; **Enable explanations** controls
 automatic detail and its shortcut for the next Start while retaining the saved binding.
+Disabling Overlay Box turns off the saved explanation setting and releases its shortcut.
 The persistent box gates detail delivery live; hidden detail is omitted from Activity and history;
 see [architecture.md → On-demand coaching shortcuts](./architecture.md#on-demand-coaching-shortcuts).
 

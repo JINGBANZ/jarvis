@@ -170,7 +170,7 @@ preview is running. The plain setters
 
 **Give me a hint** defaults to **⌥⌘J**, **Explain more** to **⌥⌘E**, and **Show code** to **⌥⌘K**.
 They work during a session; code is available in Coding and general sessions only. Hints and
-explanations are fallbacks for proactive coaching; the code hotkey enables code and requests a snippet; [architecture.md](./architecture.md#on-demand-coaching-shortcuts)
+explanations are fallbacks for proactive coaching; the code hotkey requests a snippet only when the session started with code enabled; [architecture.md](./architecture.md#on-demand-coaching-shortcuts)
 defines their context, output, and scheduling behavior. Each card uses `HotkeyBindingView` and the
 existing recorder, requiring Command or Option. A successful rebind takes effect immediately and
 persists only that shortcut through `HotkeyPreferences`; defaults and storage keys live in

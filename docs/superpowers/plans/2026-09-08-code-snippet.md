@@ -4,11 +4,11 @@
 
 **Goal:** A Show code with hints setting and configurable fallback hotkey reveal the next logical coding snippet in a dedicated bottom area of the existing overlay.
 
-**Approved spec:** User-approved conversation/mock, `jarvis-code-dock.html`: preserve visible names/structure/language, show a small coherent component rather than full solution, highlight nearby corrections with surrounding snippet, diagnose invalid overall approaches in hints, use the first component when code is not visible. The setting defaults off. When on, hints carry matching code and replace or clear the previous snippet. The hotkey enables the setting and requests current code. Code syntax must contrast with its background.
+**Approved spec:** User-approved conversation/mock, `jarvis-code-dock.html`: preserve visible names/structure/language, show a small coherent component rather than full solution, highlight nearby corrections with surrounding snippet, diagnose invalid overall approaches in hints, use the first component when code is not visible. The setting defaults off. When on, hints carry matching code and replace or clear the previous snippet. The hotkey requests current code only when the session started with code enabled; it never enables the setting. Code syntax must contrast with its background.
 
 **Architecture:** Extend the existing manual trigger and strict speak schema with optional typed CodeSnippet. Harness accepts snippets only when enabled in SessionPlan in coding/general sessions. Keep system/tool schemas stable for local CLI clients. Add independent `showCodeSnippet` overlay delivery with default no-op for captions. The existing box owns a bottom snippet view and separate scrolling history, with no new windows or capture paths.
 
-**Constraints:** Swift 6; macOS 14.2 floor; Foundation-only Core. One provider per attempt. User prefs read only at existing explicit boundaries. Ghost mode unchanged. No editor insertion, clipboard automation, new dependencies, or model-generated executable content. Code opt-in is the setting or its enabling hotkey; default Cmd-Option-K, independently configurable. Explain toggle does not govern code.
+**Constraints:** Swift 6; macOS 14.2 floor; Foundation-only Core. One provider per attempt. User prefs read only at existing explicit boundaries. Ghost mode unchanged. No editor insertion, clipboard automation, new dependencies, or model-generated executable content. Code opt-in is the setting captured at Start; the default Cmd-Option-K hotkey requests code only for an enabled session and is independently configurable. Explain toggle does not govern code.
 
 ## Work
 
@@ -21,7 +21,7 @@
 
 ## Verification evidence
 
-- Rebased integration: build and full Gate commands exit 0, but this Mac's AppKit test host ends before the full suite summary. The focused integration run completes: 26 tests in 4 suites passed.
+- Rebased integration: build and full Gate commands exit 0, but this Mac's AppKit test host ends before the full suite summary. The focused integration run completes: 91 tests in 12 suites passed.
 - Signed synthetic native smoke: dock rendering, correction contrast, incoming-hint persistence, preview restoration, clear; Carbon dispatch, independent rebind/collision handling, explanation toggle, and three-card small-window layouts passed.
 - Revised production-model smoke could not complete: two attempts timed out. Runtime authorization is covered by deterministic tests.
 - Independent review findings addressed: newline normalization and highlight bounds, frozen-format dock gating, and inherited delivered-history handling. Dock/header collapse integration is regression-tested.
