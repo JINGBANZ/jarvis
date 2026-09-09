@@ -118,28 +118,29 @@ import Testing
     }
 
     @Test(arguments: [TriggerReason.manualHint, .turnEnd])
-    func disabledExplanationsKeepHintsAndCanBeReenabledDuringSession(_ hintReason: TriggerReason) async {
+    func disabledSessionKeepsHintsAndRequiresNewStartToEnable(_ hintReason: TriggerReason) async {
         let brain = ScriptedBrain(script: [.init(toolCalls: [
             .speak(callId: "s", lines: ["Track the range."], explanation: "Move its left edge.")])])
-        let screen = FakeScreen()
         let box = ExplanationSink()
         let transcript = RollingTranscript()
         transcript.append(.init(speaker: .me, text: "I do not understand the sliding window", at: 0))
-        let driver = makeDriver(brain: brain, transcript: transcript, screen: screen, overlay: box)
-        driver.updatePlan(SessionPlan(revision: 1, screen: SessionPlan.default.screen, explanationsEnabled: false))
-        #expect(await driver.handleTrigger(.manualExplanation) == .cancelled)
-        #expect(brain.calls.isEmpty)
-        #expect(screen.captureCount == 0)
+        let driver = makeDriver(brain: brain, transcript: transcript, screen: FakeScreen(), overlay: box,
+                                explanationsEnabled: false)
         #expect(await driver.handleTrigger(hintReason) == .spoke)
         #expect(box.lines == ["Track the range."])
         #expect(box.explanation == nil)
         driver.updatePlan(SessionPlan(revision: 2, screen: SessionPlan.default.screen, explanationsEnabled: true))
-        #expect(await driver.handleTrigger(.manualExplanation) == .spoke)
-        #expect(box.explanation == "Move its left edge.")
+        #expect(await driver.handleTrigger(.manualHint) == .spoke)
+        #expect(box.explanation == nil)
         #expect(brain.calls[0].first?.text == brain.calls[1].first?.text)
+        #expect(brain.calls[0].first?.text?.contains("# Explain when understanding is missing") == false)
+        let restarted = makeDriver(brain: brain, transcript: transcript, screen: FakeScreen(), overlay: box)
+        #expect(await restarted.handleTrigger(.manualExplanation) == .spoke)
+        #expect(box.explanation == "Move its left edge.")
+        #expect(brain.calls.last?.first?.text?.contains("# Explain when understanding is missing") == true)
     }
 
-    @Test func explanationSettingChangesAtNextAttemptBoundary() async {
+    @Test func explanationCapabilitySurvivesPlanEdits() async {
         let gate = AsyncGate()
         let brain = GatedBrain(gate: gate, response: .init(toolCalls: [
             .speak(callId: "s", lines: ["Track the range."], explanation: "Move its left edge.")]))
@@ -152,10 +153,10 @@ import Testing
         #expect(await task.value == .spoke)
         #expect(box.explanation == "Move its left edge.")
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
-        #expect(box.explanation == nil)
+        #expect(box.explanation == "Move its left edge.")
     }
 
-    @Test func disabledNoticePreservesConversationPrefixAcrossToolContinuation() async {
+    @Test func disabledSessionPreservesConversationPrefixAcrossToolContinuation() async {
         let brain = ScriptedBrain(script: [
             .init(toolCalls: [.captureScreen(callId: "capture")],
                   rawToolCalls: [.init(id: "capture", name: "capture_screen", argumentsJSON: "{}")]),
@@ -164,8 +165,7 @@ import Testing
         let transcript = RollingTranscript()
         transcript.append(.init(speaker: .me, text: "Can you check the loop on my screen?", at: 0))
         let box = ExplanationSink()
-        let driver = makeDriver(brain: brain, transcript: transcript, screen: FakeScreen(), overlay: box)
-        driver.updatePlan(SessionPlan(revision: 1, screen: SessionPlan.default.screen, explanationsEnabled: false))
+        let driver = makeDriver(brain: brain, transcript: transcript, screen: FakeScreen(), overlay: box, explanationsEnabled: false)
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
         #expect(brain.calls.count == 2)
         guard brain.calls.count == 2 else { return }
@@ -177,7 +177,7 @@ import Testing
         #expect(box.explanation == nil)
     }
 
-    @Test @MainActor func disablingQueuedExplanationDoesNotStrandNextHint() async {
+    @Test @MainActor func queuedExplanationDoesNotStrandNextHint() async {
         let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s", lines: ["Continue."])])])
         let driver = makeDriver(brain: brain, transcript: RollingTranscript(), screen: FakeScreen(), overlay: FakeOverlay())
         driver.updatePlan(SessionPlan(revision: 1, screen: SessionPlan.default.screen, explanationsEnabled: false))
@@ -195,20 +195,22 @@ import Testing
             #expect(queued.wait(timeout: .now() + 5) == .success)
         }))
         #expect(await driver.handleTrigger(.manualExplanation) == .spoke)
-        #expect(brain.calls.count == 1)
+        #expect(brain.calls.count == 2)
     }
 
     private func makeDriver(brain: BrainClient, transcript: RollingTranscript,
-                            screen: ScreenCapturing, overlay: OverlayRendering) -> CoachDriver {
+                            screen: ScreenCapturing, overlay: OverlayRendering, explanationsEnabled: Bool = true) -> CoachDriver {
         let target = BrainTarget(provider: .openAI, modelID: BrainModelCatalog.defaultModel(for: .openAI).id)
         return CoachDriver(config: .default, transcript: transcript,
             route: ConfiguredBrainRoute(targets: [.init(target: target, brain: brain)]),
-            screen: screen, overlay: overlay, clock: ManualClock(now: 100))
+            screen: screen, overlay: overlay, clock: ManualClock(now: 100),
+            plan: SessionPlan(revision: 0, screen: SessionPlan.default.screen, explanationsEnabled: explanationsEnabled))
     }
 }
 
 // Read only after the awaited driver finishes delivery, with no concurrent mutations.
 private final class ExplanationSink: OverlayRendering {
+    @MainActor var acceptsDetail: Bool { true }
     var explanation: String?
     var lines: [String] = []
     func render(_ lines: [String], perLineSeconds: [TimeInterval]) {}

@@ -161,11 +161,6 @@ final class CoachAttemptRunner: @unchecked Sendable {
             return AttemptExecution(id: nil, result: .cancelled)
         }
 
-        guard pendingWork.reason != .manualExplanation || attempt.plan.explanationsEnabled else {
-            // A revoked shortcut is skipped work, not session cancellation: drain any queued hint.
-            return AttemptExecution(id: nil, result: .skipped(.cancelled))
-        }
-
         var work = pendingWork
         let reason = work.reason
         if case .silence(let seconds) = reason {
@@ -222,14 +217,9 @@ final class CoachAttemptRunner: @unchecked Sendable {
         // must track the real tool set (`tools`, below) exactly, not just hint at it.
         let systemPrompt = JarvisPrompts.Coach.system(
             prepMaterial: attempt.prepMaterial != nil,
-            formatAddendum: interviewFormatAddendum)
+            formatAddendum: interviewFormatAddendum,
+            explanationsEnabled: attempt.plan.explanationsEnabled)
         let historyBase: [ChatMessage] = [.system(systemPrompt)] + history.snapshot()
-        // This setting is request context, never transcript/history. Keeping it out of the system
-        // prompt lets a live toggle reuse the same CLI process and fixed instructions.
-        let explanationSetting: [ChatMessage] = attempt.plan.explanationsEnabled ? [] : [
-            .user(JarvisPrompts.Coach.explanationsDisabled)
-        ]
-
         if reason.isManual && work.preparedManualReason != reason {
             if let prompt = context.promptLine {
                 jlog("⌨️ coaching shortcut — \(prompt)")
@@ -315,7 +305,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         sequence: requestSequence)
                     response = try await CoachingRequestAttribution.$current.withValue(requestContext) {
                         try await conversation.respond(
-                            messages: historyBase + explanationSetting + turnMessages,
+                            messages: historyBase + turnMessages,
                             tools: tools,
                             toolChoice: toolChoice)
                     }
@@ -417,24 +407,29 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     }
 
                 case .speak(let callID, let lines, let mermaid, let requestedExplanation):
-                    let explanation = attempt.plan.explanationsEnabled ? requestedExplanation : nil
                     if Task.isCancelled {
                         jlog("… attempt cancelled (stopped) before speaking")
                         return .cancelled
                     }
                     jlog("💬 \(lines.joined(separator: " "))")
-                    activity?.record(.tip(lines: lines + (explanation.map { [$0] } ?? [])))
                     let diagram = interviewFormat == .systemDesign ? mermaid.flatMap(DiagramHint.init) : nil
                     if mermaid != nil && diagram == nil {
                         jlog("Diagram hint omitted: unsupported graph or interview format")
                     }
-                    overlay.render(
-                        lines,
-                        perLineSeconds: lines.map {
-                            OverlayTiming.displaySeconds(for: $0, config: config)
-                        }, diagram: diagram, explanation: explanation)
+                    let delivery = await MainActor.run { () -> (accepted: Bool, explanation: String?) in
+                        guard !Task.isCancelled else { return (false, nil) }
+                        let detail = self.overlay.deliver(lines, perLineSeconds: lines.map {
+                            OverlayTiming.displaySeconds(for: $0, config: self.config)
+                        }, diagram: diagram, explanation: attempt.plan.explanationsEnabled ? requestedExplanation : nil)
+                        return (true, detail)
+                    }
+                    guard delivery.accepted else { return .cancelled }
+                    let explanation = delivery.explanation
+                    activity?.record(.tip(lines: lines + (explanation.map { [$0] } ?? [])))
                     var deliveredCalls = response.rawToolCalls
-                    if !attempt.plan.explanationsEnabled {
+                    if explanation == nil {
+                        // Only the first tool executes. This scrub relies on OpenAI parallel_tool_calls:false;
+                        // providers must not return extra calls that would be replayed as delivered.
                         // History describes what was delivered, not optional text suppressed by Settings.
                         // These parsed values contain only JSON strings, arrays, and null, so encoding cannot fail.
                         let arguments: [String: Any] = [

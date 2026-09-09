@@ -197,12 +197,14 @@ the beginning of that entry and preserves its paragraphs. Hints use semibold tex
 regular text at the same configured size under an **Explanation** label, separated by whitespace.
 Captions retain only the standalone summary.
 [Enable explanations](./settings-window.md#shortcuts) controls both automatic detail and the manual
-fallback. Each attempt uses its frozen `SessionPlan.explanationsEnabled`: disabled manual explanation
-work is skipped while queued hints are drained; other requests carry an ephemeral disabled notice,
-and any returned explanation field is omitted from overlay and Activity. The notice stays outside
-committed conversation history and the fixed CLI system prompt, allowing a live toggle without
-restarting the provider. Enabled requests use the normal explanation policy. Already-rendered
-history remains visible when the setting changes.
+fallback. `SessionPlan.explanationsEnabled` is fixed at Start and preserved across screen-plan
+revisions. Only enabled sessions receive explanation guidance in the system prompt; saved edits take
+effect on the next Start, keeping CLI instructions stable. The nullable tool field remains until
+[#273](https://github.com/JINGBANZ/jarvis/issues/273) establishes session-composed tools.
+At delivery, the runner checks whether the persistent box can show detail. Hidden explanations are
+omitted from both Activity and committed tool-call history. This live visibility check also covers a
+box hidden while the request was running. Disabling the box turns off the saved explanation setting
+and releases its shortcut; enabling the box does not implicitly enable explanations.
 
 Explanation text follows the existing coaching history and Activity paths. It opens no extra window,
 never activates Jarvis, and respects the box's enabled/session visibility. Disabling the box leaves

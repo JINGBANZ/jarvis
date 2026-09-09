@@ -279,7 +279,8 @@ Proactive clarification and a separate **Explain more** shortcut share the exist
 formats; `speak.explanation` carries fuller plain-text detail into the persistent overlay box and
 Activity while captions stay short. Semibold hints and labeled, regular-weight explanation paragraphs
 remain visually distinct at the configured text size. Both shortcuts are independently configurable in Settings; **Enable explanations** controls
-automatic detail and its shortcut while retaining the saved binding;
+automatic detail and its shortcut for the next Start while retaining the saved binding.
+The persistent box gates detail delivery live; hidden detail is omitted from Activity and history;
 see [architecture.md → On-demand coaching shortcuts](./architecture.md#on-demand-coaching-shortcuts).
 
 System Design sessions support [private high-level architecture hints](./architecture.md#private-architecture-hints):

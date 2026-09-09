@@ -10,12 +10,14 @@ final class HotkeySection: NSObject, SettingsSection {
 
     init(preferences: [HotkeyPreferences],
          explanationPreferences: ExplanationPreferences,
+         boxEnabled: @escaping () -> Bool = { true },
          onExplanationsChanged: @escaping () -> Void,
          hasActiveHotkey: @escaping (CoachingShortcut) -> Bool,
          applyCombination: @escaping (CoachingShortcut, HotkeyCombination) -> HotkeyRegistrationOutcome) {
         bindings = preferences.map { preference in
             HotkeyBindingView(preferences: preference,
                 explanationPreferences: preference.shortcut == .explainMore ? explanationPreferences : nil,
+                boxEnabled: boxEnabled,
                 onExplanationsChanged: onExplanationsChanged,
                 hasActiveHotkey: { hasActiveHotkey(preference.shortcut) },
                 applyCombination: { applyCombination(preference.shortcut, $0) })

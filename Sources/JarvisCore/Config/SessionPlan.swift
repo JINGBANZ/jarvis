@@ -34,6 +34,7 @@ public struct SessionPlan: Sendable, Equatable {
     /// log without comparing every field; nothing branches on its value.
     public let revision: UInt
     public let screen: ScreenCaptureSelection
+    /// Fixed at Start; screen revisions preserve this session capability.
     public let explanationsEnabled: Bool
 
     public init(revision: UInt, screen: ScreenCaptureSelection,

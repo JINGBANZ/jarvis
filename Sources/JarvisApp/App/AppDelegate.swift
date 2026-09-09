@@ -35,6 +35,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     private var permissionGate: PermissionGate!
     /// Whether the app's own surfaces exist yet. Nothing is built while the permission gate is up.
     private var didStartApp = false
+    private var sessionExplanationsEnabled = false
     private let explanationPreferences = ExplanationPreferences()
     private let hotkeyPreferences = CoachingShortcut.allCases.map { HotkeyPreferences(shortcut: $0) }
     /// Monotonic revision stamped on each control-plane snapshot. Bumped at Start and whenever an
@@ -184,6 +185,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         // The global hint hotkey is constructed before Settings so HotkeySection's closures (built
         // below) can already read/apply through it. `onRequest` is wired later, alongside the
         // rest of session lifecycle plumbing.
+        if !appearance.boxEnabled { explanationPreferences.isEnabled = false }
         hotkeys = HotkeyController(preferences: hotkeyPreferences.filter {
             $0.shortcut != .explainMore || explanationPreferences.isEnabled
         })
@@ -210,7 +212,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         let sections: [SettingsSection] = [
             brainSection,
             connectionsSection,
-            OverlaySection(appearance: appearance, caption: overlayCaption, box: overlayBox),
+            OverlaySection(appearance: appearance, caption: overlayCaption, box: overlayBox,
+                onBoxEnabledChanged: { [weak self] enabled in
+                    guard let self, !enabled else { return }
+                    self.explanationPreferences.isEnabled = false
+                    self.hotkeys?.unregister(.explainMore)
+                }),
             DisplaySection(preferences: screenPreferences) { [weak self] in
                 self?.reapplySessionPlan()
             },
@@ -218,22 +225,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             HotkeySection(
                 preferences: hotkeyPreferences,
                 explanationPreferences: explanationPreferences,
+                boxEnabled: { [weak self] in self?.appearance.boxEnabled == true },
                 onExplanationsChanged: { [weak self] in
                     guard let self else { return }
                     if self.explanationPreferences.isEnabled,
+                       self.requestManualHint == nil || self.sessionExplanationsEnabled,
                        let preference = self.hotkeyPreferences.first(where: { $0.shortcut == .explainMore }) {
                         self.hotkeys?.apply(preference.combination, for: .explainMore)
                     } else {
                         self.hotkeys?.unregister(.explainMore)
                     }
-                    self.reapplySessionPlan()
                 },
-                hasActiveHotkey: { [weak self] shortcut in self?.hotkeys?.registered[shortcut] != nil },
+                hasActiveHotkey: { [weak self] shortcut in (shortcut == .explainMore && self?.requestManualHint != nil && self?.sessionExplanationsEnabled != true) || self?.hotkeys?.registered[shortcut] != nil },
                 applyCombination: { [weak self] shortcut, combination in
                     // `hotkeys` is constructed above, before Settings can ever be shown, so `self`
                     // being torn down is the only way this falls through — report failure rather
                     // than falsely claiming a rebind that never happened.
-                    self?.hotkeys?.apply(combination, for: shortcut) ?? .failed(status: -1)
+                    guard let self else { return .failed(status: -1) }
+                    if shortcut == .explainMore, self.requestManualHint != nil, !self.sessionExplanationsEnabled {
+                        let outcome = self.hotkeys?.apply(combination, for: shortcut) ?? .failed(status: -1)
+                        self.hotkeys?.unregister(shortcut) // Validate ownership, then release until Start.
+                        return outcome
+                    }
+                    return self.hotkeys?.apply(combination, for: shortcut) ?? .failed(status: -1)
                 }),
             ActivitySection(viewer: activityViewer),
         ]
@@ -252,7 +266,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         // While a session is running, screenshot + ask the brain for a hint in one trip; otherwise
         // beep — there's no live driver/conversation to hint from when stopped.
         hotkeys?.onRequest = { [weak self] shortcut in
-            if shortcut == .explainMore, self?.explanationPreferences.isEnabled != true { return }
+            if shortcut == .explainMore, self?.sessionExplanationsEnabled != true { return }
             guard let self, let fire = self.requestManualHint else {
                 NSSound.beep() // ghost-mode-allowed: explicit user hotkey while stopped
                 return
@@ -323,6 +337,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         // whatever formats have content — see wiki/architecture.md § Models and APIs.
         let interviewFormat = brain.preferences.interviewFormat
         let interviewFormatAddendum = interviewFormat?.promptAddendum ?? ""
+        let explanationsEnabled = explanationPreferences.isEnabled && appearance.boxEnabled
         let key = secrets.apiKey(for: .openAIAPIKey) ?? ""
         // The brain's key stays OpenAI-only (above); transcription reads whichever credential the
         // selected provider owns — Apple Speech has none, so this is "" there and unused.
@@ -473,6 +488,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                 brainRoute: brainRoute,
                 interviewFormatAddendum: interviewFormatAddendum,
                 interviewFormat: interviewFormat,
+                explanationsEnabled: explanationsEnabled,
                 transcriptionConfiguration: transcriptionConfiguration,
                 appleSpeechLocale: appleSpeechLocale,
                 detectedCLIs: detectedCLIs,
@@ -533,6 +549,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         brainRoute: BrainRoute,
         interviewFormatAddendum: String,
         interviewFormat: InterviewFormat?,
+        explanationsEnabled: Bool,
         transcriptionConfiguration: TranscriptionConfiguration,
         appleSpeechLocale: Locale?,
         detectedCLIs initialDetectedCLIs: [BrainProvider: DetectedAgentCLI],
@@ -587,6 +604,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         let sessionDirectory = artifacts.currentSessionDir!
         // Fixed for the whole session — set before every construction/reapply path that bakes a
         // system prompt, including a later `applyBrainPreferencesToRunningSession` hot switch.
+        sessionExplanationsEnabled = explanationsEnabled
+        brain.explanationsEnabled = explanationsEnabled
+        if explanationsEnabled, let preference = hotkeyPreferences.first(where: { $0.shortcut == .explainMore }) {
+            hotkeys?.apply(preference.combination, for: .explainMore)
+        } else {
+            hotkeys?.unregister(.explainMore)
+        }
         brain.interviewFormatAddendum = interviewFormatAddendum
         let configuredRoute = brain.makeConfiguredRoute(
             brainRoute,
@@ -1126,7 +1150,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     private func freshSessionPlan() -> SessionPlan {
         planRevision &+= 1
         return SessionPlan(revision: planRevision, screen: screenPreferences.selection,
-                           explanationsEnabled: explanationPreferences.isEnabled)
+                           explanationsEnabled: sessionExplanationsEnabled)
     }
 
     /// An explicit Settings edit takes effect at the next attempt. A turn already running keeps the

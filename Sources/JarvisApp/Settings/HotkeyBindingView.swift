@@ -13,6 +13,8 @@ import JarvisCore
 final class HotkeyBindingView: NSObject {
 
     private let preferences: HotkeyPreferences
+    private let boxEnabled: () -> Bool
+    private var explanationRow: SettingsRowView?
     private let explanationPreferences: ExplanationPreferences?
     private let onExplanationsChanged: () -> Void
     private var explanationSwitch: NSSwitch?
@@ -51,10 +53,12 @@ final class HotkeyBindingView: NSObject {
     init(
         preferences: HotkeyPreferences,
         explanationPreferences: ExplanationPreferences? = nil,
+        boxEnabled: @escaping () -> Bool = { true },
         onExplanationsChanged: @escaping () -> Void = {},
         hasActiveHotkey: @escaping () -> Bool,
         applyCombination: @escaping (HotkeyCombination) -> HotkeyRegistrationOutcome
     ) {
+        self.boxEnabled = boxEnabled
         self.preferences = preferences
         self.explanationPreferences = explanationPreferences
         self.onExplanationsChanged = onExplanationsChanged
@@ -93,11 +97,12 @@ final class HotkeyBindingView: NSObject {
             explanationSwitch = toggle
             let settingsRow = SettingsRowView(
                 title: "Enable explanations",
-                detail: "Automatic help and hotkey · applies to the next answer",
+                detail: "Takes effect the next time you start",
                 controlView: toggle,
                 controlSize: NSSize(width: 44, height: 26))
             card.contentView?.addSubview(settingsRow)
             toggleRow = settingsRow
+            explanationRow = settingsRow
         }
         card.onLayout = { [weak card, weak row, weak toggleRow] in
             guard let card, let row else { return }
@@ -174,6 +179,8 @@ final class HotkeyBindingView: NSObject {
     /// the callout shows only for the one state that *is* persistent — nothing registered at all.
     private func renderOutcome(_ outcome: HotkeyRegistrationOutcome? = nil) {
         defer { onHeightChanged?() }
+        explanationSwitch?.isEnabled = boxEnabled()
+        explanationRow?.setDetail(boxEnabled() ? "Takes effect the next time you start" : "Requires Overlay Box · enable it in Overlay settings")
         explanationSwitch?.state = isEnabled ? .on : .off
         shortcutRow?.isHidden = !isEnabled
         recorder?.isEnabled = isEnabled
