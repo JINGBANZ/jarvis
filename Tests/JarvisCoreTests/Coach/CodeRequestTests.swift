@@ -27,8 +27,7 @@ import Testing
         transcript.append(.init(speaker: .me, text: "I used seen and left, but got stuck in the loop", at: 1))
         let sink = CodeRequestSink()
         let screen = FakeScreen()
-        let driver = makeDriver(brain, transcript, sink, screen: screen)
-        driver.updatePlan(SessionPlan(revision: 1, screen: SessionPlan.default.screen, explanationsEnabled: false, codeEnabled: true))
+        let driver = makeDriver(brain, transcript, sink, screen: screen, codeEnabled: true, explanationsEnabled: false)
         #expect(await driver.handleTrigger(.manualCode) == .spoke)
         #expect(sink.codeUpdates.count == 1)
         #expect((sink.codeUpdates.last ?? nil) == snippet)
@@ -50,8 +49,7 @@ import Testing
         let transcript = RollingTranscript()
         transcript.append(.init(speaker: .me, text: "I am stuck implementing the loop", at: 0))
         let sink = CodeRequestSink()
-        let driver = makeDriver(brain, transcript, sink)
-        driver.updatePlan(SessionPlan(revision: 1, screen: SessionPlan.default.screen, codeEnabled: true))
+        let driver = makeDriver(brain, transcript, sink, codeEnabled: true)
         #expect(await driver.handleTrigger(reason) == .spoke)
         #expect(sink.codeUpdates.count == 1)
         #expect((sink.codeUpdates.last ?? nil) == snippet)
@@ -74,13 +72,21 @@ import Testing
         #expect(!CodePreferences(defaults: defaults).isEnabled)
     }
 
-    @Test func disabledManualCodeDoesNotRequestModel() async {
-        let brain = ScriptedBrain(script: [])
-        let screen = FakeScreen()
-        let driver = makeDriver(brain, RollingTranscript(), CodeRequestSink(), screen: screen)
-        #expect(await driver.handleTrigger(.manualCode) == .cancelled)
-        #expect(brain.calls.isEmpty)
-        #expect(screen.captureCount == 0)
+    @Test(arguments: [true, false])
+    func codeCapabilityAndPromptRemainFixedAcrossPlanEdits(_ enabled: Bool) async throws {
+        let snippet = try #require(CodeSnippet(language: "Python", placement: "Start", code: "seen = {}"))
+        let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s", lines: ["Initialize state"], codeSnippet: snippet)])])
+        let sink = CodeRequestSink()
+        let driver = makeDriver(brain, RollingTranscript(), sink, codeEnabled: enabled)
+        #expect(await driver.handleTrigger(.manualHint) == .spoke)
+        driver.updatePlan(SessionPlan(revision: 1, screen: SessionPlan.default.screen, codeEnabled: !enabled))
+        #expect(await driver.handleTrigger(.manualHint) == .spoke)
+        #expect(sink.codeUpdates == [enabled ? snippet : nil, enabled ? snippet : nil])
+        #expect(brain.calls[0].first?.text == brain.calls[1].first?.text)
+        #expect(brain.calls[0].first?.text?.contains("# Code accompanies") == enabled)
+        let restarted = makeDriver(brain, RollingTranscript(), sink, codeEnabled: !enabled)
+        #expect(await restarted.handleTrigger(.manualHint) == .spoke)
+        #expect((sink.codeUpdates.last ?? nil) == (enabled ? nil : snippet))
     }
 
     @Test(arguments: [InterviewFormat.behavioral, .systemDesign])
@@ -88,8 +94,7 @@ import Testing
         let code = try #require(CodeSnippet(language: "Python", placement: "Start", code: "seen = {}"))
         let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "one", lines: ["Consider the requirements"], codeSnippet: code)])])
         let sink = CodeRequestSink()
-        let driver = makeDriver(brain, RollingTranscript(), sink, format: format)
-        driver.updatePlan(SessionPlan(revision: 1, screen: SessionPlan.default.screen, codeEnabled: true))
+        let driver = makeDriver(brain, RollingTranscript(), sink, format: format, codeEnabled: true)
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
         #expect(sink.codeUpdates == [nil])
     }
@@ -100,9 +105,7 @@ import Testing
         let response = BrainResponse(toolCalls: [try #require(ToolInvocation.parse(callId: "s", name: "speak", argumentsJSON: args))],
             rawToolCalls: [.init(id: "s", name: "speak", argumentsJSON: args)])
         let brain = ScriptedBrain(script: [response, response])
-        let driver = makeDriver(brain, RollingTranscript(), CodeRequestSink())
-        driver.updatePlan(SessionPlan(revision: 1, screen: SessionPlan.default.screen,
-                                     explanationsEnabled: false, codeEnabled: enabled))
+        let driver = makeDriver(brain, RollingTranscript(), CodeRequestSink(), codeEnabled: enabled, explanationsEnabled: false)
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
         let call = try #require(brain.calls.last?.flatMap { $0.toolCalls ?? [] }.first { $0.name == "speak" })
@@ -110,6 +113,28 @@ import Testing
         #expect(object["explanation"] is NSNull)
         if enabled { #expect((object["codeSnippet"] as? [String: Any])?["code"] as? String == "seen = {}") }
         else { #expect(object["codeSnippet"] is NSNull) }
+    }
+
+    @Test @MainActor func hidingBoxDuringCodeRequestScrubsHistory() async throws {
+        let args = #"{"lines":["Initialize state"],"codeSnippet":{"language":"Python","placement":"Start","code":"seen = {}","highlightedLines":[]}}"#
+        let response = BrainResponse(toolCalls: [try #require(ToolInvocation.parse(callId: "s", name: "speak", argumentsJSON: args))],
+            rawToolCalls: [.init(id: "s", name: "speak", argumentsJSON: args)])
+        let gate = AsyncGate()
+        let brain = GatedBrain(gate: gate, response: response)
+        let sink = CodeRequestSink()
+        let driver = makeDriver(brain, RollingTranscript(), sink, codeEnabled: true)
+        let task = Task { await driver.handleTrigger(.manualCode) }
+        await gate.waitUntilEntered()
+        sink.acceptsDetail = false
+        await gate.release()
+        #expect(await task.value == .spoke)
+        #expect(sink.codeUpdates == [nil])
+        sink.acceptsDetail = true
+        #expect(await driver.handleTrigger(.manualHint) == .spoke)
+        #expect((sink.codeUpdates.last ?? nil)?.code == "seen = {}")
+        let call = try #require(brain.calls.last?.flatMap { $0.toolCalls ?? [] }.first { $0.name == "speak" })
+        let object = try #require(JSONSerialization.jsonObject(with: Data(call.argumentsJSON.utf8)) as? [String: Any])
+        #expect(object["codeSnippet"] is NSNull)
     }
 
     @Test func malformedCodeRetainsUsefulHint() throws {
@@ -173,23 +198,32 @@ import Testing
         let transcript = RollingTranscript()
         transcript.append(.init(speaker: .them, text: "Find the longest substring without repeats", at: 0))
         let sink = CodeRequestSink()
-        let driver = makeDriver(brain, transcript, sink, screen: MissingCodeScreen())
-        driver.updatePlan(SessionPlan(revision: 1, screen: SessionPlan.default.screen, codeEnabled: true))
+        let driver = makeDriver(brain, transcript, sink, screen: MissingCodeScreen(), codeEnabled: true)
         #expect(await driver.handleTrigger(.manualCode) == .spoke)
         #expect((sink.codeUpdates.last ?? nil) == snippet)
         #expect(brain.calls[0].contains { $0.text?.contains("failed") == true })
     }
 
     private func makeDriver(_ brain: BrainClient, _ transcript: RollingTranscript, _ sink: OverlayRendering,
-                            screen: ScreenCapturing = FakeScreen(), format: InterviewFormat? = nil) -> CoachDriver {
+                            screen: ScreenCapturing = FakeScreen(), format: InterviewFormat? = nil,
+                            codeEnabled: Bool = false, explanationsEnabled: Bool = true) -> CoachDriver {
         let target = BrainTarget(provider: .openAI, modelID: BrainModelCatalog.defaultModel(for: .openAI).id)
         return CoachDriver(config: .default, transcript: transcript,
             route: .init(targets: [.init(target: target, brain: brain)]),
-            screen: screen, overlay: sink, clock: ManualClock(now: 100), interviewFormat: format)
+            screen: screen, overlay: sink, clock: ManualClock(now: 100),
+            plan: SessionPlan(revision: 0, screen: SessionPlan.default.screen,
+                              explanationsEnabled: explanationsEnabled, codeEnabled: codeEnabled),
+            interviewFormat: format)
     }
 }
 
 private final class CodeRequestSink: OverlayRendering {
+    @MainActor var acceptsDetail = true
+    @MainActor func deliverCodeSnippet(_ snippet: CodeSnippet?) -> CodeSnippet? {
+        let code = acceptsDetail ? snippet : nil
+        codeUpdates.append(code)
+        return code
+    }
     var codeUpdates: [CodeSnippet?] = []
     var lines: [String] = []
     func render(_ lines: [String], perLineSeconds: [TimeInterval]) { self.lines = lines }

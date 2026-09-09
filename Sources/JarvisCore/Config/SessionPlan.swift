@@ -35,6 +35,7 @@ public struct SessionPlan: Sendable, Equatable {
     public let revision: UInt
     public let screen: ScreenCaptureSelection
     public let codeEnabled: Bool
+    /// Fixed at Start; screen revisions preserve this session capability.
     public let explanationsEnabled: Bool
 
     public init(revision: UInt, screen: ScreenCaptureSelection,

@@ -24,6 +24,32 @@ import Testing
         #expect(messages.compactMap(\.imageBase64JPEG) == (captureSucceeds ? ["fresh-image"] : []))
     }
 
+    @Test @MainActor func hidingBoxDuringRequestScrubsDeliveredHistory() async throws {
+        let args = #"{"lines":["Keep this hint."],"explanation":"Hidden explanation."}"#
+        let response = BrainResponse(toolCalls: [try #require(ToolInvocation.parse(
+            callId: "s", name: "speak", argumentsJSON: args))],
+            rawToolCalls: [.init(id: "s", name: "speak", argumentsJSON: args)])
+        let gate = AsyncGate()
+        let brain = GatedBrain(gate: gate, response: response)
+        let target = BrainTarget(provider: .openAI, modelID: BrainModelCatalog.defaultModel(for: .openAI).id)
+        let box = ReviewDetailSink()
+        let driver = CoachDriver(config: .default, transcript: RollingTranscript(),
+            route: ConfiguredBrainRoute(targets: [.init(target: target, brain: brain)]),
+            screen: ReviewScreen(succeeds: true), overlay: box, clock: ManualClock(now: 100))
+        let task = Task { await driver.handleTrigger(.manualExplanation) }
+        await gate.waitUntilEntered()
+        box.acceptsDetail = false
+        await gate.release()
+        #expect(await task.value == .spoke)
+        #expect(box.explanation == nil)
+        box.acceptsDetail = true
+        #expect(await driver.handleTrigger(.manualHint) == .spoke)
+        #expect(box.explanation == "Hidden explanation.")
+        let prior = try #require(brain.calls.last?.flatMap { $0.toolCalls ?? [] }.first { $0.name == "speak" })
+        let object = try #require(JSONSerialization.jsonObject(with: Data(prior.argumentsJSON.utf8)) as? [String: Any])
+        #expect(object["explanation"] is NSNull)
+    }
+
     @Test func suppressedExplanationIsNotReplayedAsDelivered() async throws {
         let args = #"{"lines":["Keep this hint."],"explanation":"Hidden explanation."}"#
         let response = BrainResponse(toolCalls: [try #require(ToolInvocation.parse(
@@ -51,4 +77,13 @@ private struct ReviewScreen: ScreenCapturing {
         succeeds ? ScreenSnapshot(imageBase64: "fresh-image", recognizedText: "fresh-ocr") : nil
     }
     func cancelCapture() {}
+}
+
+private final class ReviewDetailSink: OverlayRendering {
+    @MainActor var acceptsDetail = true
+    var explanation: String?
+    func render(_ lines: [String], perLineSeconds: [TimeInterval]) {}
+    func render(_ lines: [String], perLineSeconds: [TimeInterval], diagram: DiagramHint?, explanation: String?) {
+        self.explanation = explanation
+    }
 }

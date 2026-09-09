@@ -296,6 +296,13 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         }
     }
 
+    public func deliverCodeSnippet(_ snippet: CodeSnippet?) -> CodeSnippet? {
+        codeSnippet = acceptsDetail && codeEnabled ? snippet : nil
+        refreshCode()
+        if panel.isVisible { reassertCaptureExclusion() }
+        return codeSnippet
+    }
+
     public func setCodeEnabled(_ enabled: Bool) {
         codeEnabled = enabled
         if !enabled { codeSnippet = nil }
@@ -316,6 +323,16 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         let height = codeView.isHidden ? 0 : min(max(0, available - 44), max(96, preferred))
         codeView.frame = NSRect(x: 0, y: 0, width: box.bounds.width, height: height)
         scroll.frame = NSRect(x: 0, y: height, width: box.bounds.width, height: max(0, available - height))
+    }
+
+    public func deliver(_ lines: [String], perLineSeconds: [TimeInterval],
+                        diagram: DiagramHint?, explanation: String?) -> String? {
+        let summary = lines.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }.joined(separator: " ")
+        guard !summary.isEmpty else { return nil }
+        let detail = acceptsDetail ? explanation : nil
+        append(summary, explanation: detail, diagram: diagram)
+        return detail
     }
 
     private func append(_ text: String, explanation: String?, diagram: DiagramHint?) {
@@ -400,6 +417,8 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     /// Whether the box belongs on screen: switched on *and* a session running. Kept distinct from
     /// `panel.isVisible` because the Settings preview can show the box without either being true; the
     /// preview restores to this on close, so the box can never disagree with the setting or outlive Stop.
+    public var acceptsDetail: Bool { shouldBeVisible && !isCollapsed }
+
     private var shouldBeVisible: Bool { isEnabled && isSessionLive }
 
     /// Bring the panel to whatever `shouldBeVisible` now says. One place owns the rule, so the Start/Stop

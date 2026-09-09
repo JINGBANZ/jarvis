@@ -275,10 +275,11 @@ playback, remains in
 ## Built
 
 **Show code with hints** optionally supplies the next contextual coding component with each hint.
-Its configurable fallback hotkey turns the setting on and requests code for the current guidance.
+Its capability is fixed at Start; the configurable fallback hotkey requests code for the current
+guidance only in enabled sessions. Settings changes take effect on the next Start.
 [`CodeSnippet`](../Sources/JarvisCore/Overlay/CodeSnippet.swift) validates bounded attachments;
 [`OverlayBoxPanel`](../Sources/JarvisOverlay/OverlayBoxPanel.swift) keeps them in a syntax-colored
-bottom dock while hints continue above. Runtime authorization suppresses code when the setting is off;
+bottom dock while hints continue above. Runtime authorization suppresses code when the session capability is off;
 each new hint replaces or clears its matching snippet.
 See [architecture.md](./architecture.md#on-demand-coaching-shortcuts) for behavior and failure handling.
 Signed synthetic dock/shortcut checks and model scenarios cover the feature; real interview audio,
@@ -289,7 +290,8 @@ Proactive clarification and a separate **Explain more** shortcut share the exist
 formats; `speak.explanation` carries fuller plain-text detail into the persistent overlay box and
 Activity while captions stay short. Semibold hints and labeled, regular-weight explanation paragraphs
 remain visually distinct at the configured text size. Hint and explanation shortcuts are independently configurable in Settings; **Enable explanations** controls
-automatic detail and its shortcut while retaining the saved binding;
+automatic detail and its shortcut for the next Start while retaining the saved binding.
+The persistent box gates detail delivery live; hidden detail is omitted from Activity and history;
 see [architecture.md → On-demand coaching shortcuts](./architecture.md#on-demand-coaching-shortcuts).
 
 System Design sessions support [private high-level architecture hints](./architecture.md#private-architecture-hints):

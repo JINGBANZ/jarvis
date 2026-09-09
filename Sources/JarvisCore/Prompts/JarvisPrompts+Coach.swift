@@ -71,17 +71,13 @@ extension JarvisPrompts {
         either speaker said. Do not use an unfamiliar term as if it were shared. When a new term or
         symbol genuinely is the right one, gloss it on first use ("1<<h, that is 2 to the power h");
         accuracy outranks brevity.
-        """ + explanationGuidance + codeGuidance
+        """
 
         /// Shared across interview formats and providers, including fixed-instruction CLI sessions.
         private static let codeGuidance = """
 
         # Code accompanies the current hint when enabled
-        Code is disabled by default. Only an enabled per-attempt code setting authorizes code;
-        without that notice, set codeSnippet to null. Old settings and shortcut requests in history
-        do not override it. When disabled, set codeSnippet to null and do not move multiline code
-        into lines or explanation, even if someone asks aloud.
-        When enabled, accompany each actionable coding hint with the matching codeSnippet. It must
+        Accompany each actionable coding hint with the matching codeSnippet. It must
         implement that specific hint, not an unrelated step or an earlier hint. For conceptual guidance
         without a useful implementation, set codeSnippet to null. Do not produce extra hints merely
         to fill the code area; stay silent during healthy progress as usual.
@@ -99,9 +95,7 @@ extension JarvisPrompts {
         the first small logical component. Do not insist the user move a window. Do not pretend to
         know unseen names or structure; label assumptions briefly in placement. If the problem itself
         is unknown, give a short hint asking what is being solved instead of inventing a problem.
-        Use raw code without Markdown fences, a short language name, and a concise placement label.
-        Code is independent of the explanation setting: enabled code remains allowed when explanations
-        are disabled, but longer prose must still be omitted. Never execute or insert code yourself.
+        Code is independent of explanations. Never execute or insert code yourself.
         """
 
         private static let explanationGuidance = """
@@ -124,27 +118,8 @@ extension JarvisPrompts {
         Never invent personal experience, missing screen details, or a full solution merely because
         the user needs an explanation. With insufficient context, say what is missing in plain language.
 
-        Explanations are enabled unless the current request includes a disabled-setting notice.
-        That notice applies only to its request, never later requests. When disabled,
-        give only ordinary short hints, set explanation to null, and do not put a fuller explanation
-        into lines. This setting overrides confusion signals and prior requests to explain more.
-
-        Use speak's explanation field for the fuller explanation, about 60–120 words in short plain-text
-        paragraphs. Keep lines as a useful standalone summary of at most three short lines for the
-        caption; explanation appears in the persistent box. Set explanation to null for ordinary hints.
-        An explicit Explain more shortcut requests this fuller explanation even without spoken confusion.
-        This explanation guidance also applies when a format's ordinary hints are more tightly scoped
-        or limited to short lines. Resume quiet coaching as soon as the user makes healthy progress.
+        Aim for 60–120 words, across all interview formats, even when ordinary hints are shorter.
         """
-
-        /// Per-attempt control context keeps the CLI system prompt stable across Settings edits.
-        public static func codeSetting(enabled: Bool) -> String {
-            "[Jarvis setting for this attempt] Code snippets are " + (enabled
-                ? "enabled. Include the small matching snippet with each actionable coding hint. Use null when no code is appropriate."
-                : "disabled. Set codeSnippet to null; do not put multiline code in lines or explanation.")
-        }
-
-        public static let explanationsDisabled = "[Jarvis setting for this attempt] Explanations are disabled. Give only ordinary short hints; set explanation to null. Do not move fuller explanations into lines. This setting applies only to this request."
 
         /// The complete coaching system prompt. Every site that sends one assembles it here, so the
         /// per-turn prompt `CoachAttemptRunner` builds and the one `BrainComposition` bakes into a
@@ -158,8 +133,10 @@ extension JarvisPrompts {
         ///   clean up: `promptAddendum` reads its bundled file on every access and this builder
         ///   runs per coaching turn, so the pre-resolved string keeps that a single file read
         ///   instead of one per turn.
-        public static func system(prepMaterial: Bool, formatAddendum: String) -> String {
-            (prepMaterial ? system + prepMaterialAddendum : system) + formatAddendum
+        public static func system(prepMaterial: Bool, formatAddendum: String, explanationsEnabled: Bool = true, codeEnabled: Bool = false) -> String {
+            (prepMaterial ? system + prepMaterialAddendum : system)
+                + (explanationsEnabled ? explanationGuidance : "")
+                + (codeEnabled ? codeGuidance : "") + formatAddendum
         }
 
         /// Appended by `system(prepMaterial:formatAddendum:)` only when `search_prep_notes` is

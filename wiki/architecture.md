@@ -198,23 +198,25 @@ the beginning of that entry and preserves its paragraphs. Hints use semibold tex
 regular text at the same configured size under an **Explanation** label, separated by whitespace.
 Captions retain only the standalone summary.
 [Enable explanations](./settings-window.md#shortcuts) controls both automatic detail and the manual
-fallback. Each attempt uses its frozen `SessionPlan.explanationsEnabled`: disabled manual explanation
-work is skipped while queued hints are drained; other requests carry an ephemeral disabled notice,
-and any returned explanation field is omitted from overlay and Activity. The notice stays outside
-committed conversation history and the fixed CLI system prompt, allowing a live toggle without
-restarting the provider. Enabled requests use the normal explanation policy. Already-rendered
-history remains visible when the setting changes.
+fallback. `SessionPlan.explanationsEnabled` is fixed at Start and preserved across screen-plan
+revisions. Only enabled sessions receive explanation guidance in the system prompt; saved edits take
+effect on the next Start, keeping CLI instructions stable. The nullable tool field remains until
+[#273](https://github.com/JINGBANZ/jarvis/issues/273) establishes session-composed tools.
+At delivery, the runner checks whether the persistent box can show detail. Hidden explanations are
+omitted from both Activity and committed tool-call history. This live visibility check also covers a
+box hidden while the request was running. Disabling the box turns off the saved explanation setting
+and releases its shortcut; enabling the box does not implicitly enable explanations.
 
 Explanation text follows the existing coaching history and Activity paths. It opens no extra window,
 never activates Jarvis, and respects the box's enabled/session visibility. Disabling the box leaves
 only the brief caption if that surface is enabled; it does not force a hidden surface on.
 
 **Show code with hints** enables matching snippets in Coding or general sessions, defaulting off.
-`CoachAttemptRunner` accepts attachments only when the frozen `SessionPlan.codeEnabled` is true.
-An enabled per-attempt notice stays outside committed history and the fixed CLI instructions.
-The dock also follows the frozen active format when a saved preference is applied or Settings changes;
-a non-coding live session cannot reserve an empty code area.
-The Show code shortcut enables the persisted setting and requests code for the current guidance.
+`SessionPlan.codeEnabled` is frozen at Start and preserved across screen revisions. The app resolves
+the session format at Start, so non-coding sessions cannot reserve an empty code area. Only enabled
+sessions receive the shortened code guidance in their fixed system prompt. The Show code shortcut
+requests the next snippet; it never edits the preference or enables code during a disabled session.
+Saved settings take effect on the next Start. Tool-field removal is deferred with explanations to #273.
 The fixed `speak.codeSnippet` schema carries language, placement, code, and corrected-line indices;
 [`CodeSnippet`](../Sources/JarvisCore/Overlay/CodeSnippet.swift) bounds and validates it without
 truncating code. Highlight arrays are bounded before normalization, and trimming leading blank lines
@@ -228,12 +230,13 @@ bottom scroll area inside the existing capture-excluded panel. Its opaque dark b
 syntax contrast regardless of history opacity; monospace text uses the configured size. Each new hint
 replaces its snippet, or clears the previous code when none is appropriate, so guidance and code agree.
 Dismiss and session clear remove the snippet. While enabled, an empty code area remains reserved;
-disabling code immediately hides it, clears it, and rejects late delivery while off. The dock collapses
+a session started with code off has no dock. The dock collapses
 with the header and restores its snippet on expansion. Settings preview
 includes code only when enabled and restores the real snippet on close. The caption carries
 only the short hint; Activity includes the accepted placement and code. Explanation preferences do
-not govern code. A disabled box produces existing-surface feedback on the explicit hotkey without
-starting a model request or enabling the box.
+not govern code. Box visibility and code acceptance are checked together on the main actor at delivery;
+a hidden snippet is also removed from committed tool history and Activity. Disabling the master box
+releases the shortcut and disables the saved code setting for the next Start.
 
 Shortcuts use **Carbon `RegisterEventHotKey`**, which needs no Accessibility/TCC permission.
 [`CoachingShortcut`](../Sources/JarvisCore/Config/CoachingShortcut.swift) provides stable event identities;

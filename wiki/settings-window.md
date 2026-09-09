@@ -178,11 +178,13 @@ persists only that shortcut through `HotkeyPreferences`; defaults and storage ke
 
 The **Explain more** card includes **Enable explanations**, on by default. Switching it off hides
 its shortcut recorder and releases the global key while preserving the chosen combination.
-Switching it on shows the recorder and registers that saved combination; a collision displays the
-same inline feedback and leaves the recorder available to choose another key. Automatic explanations
-remain available even if the shortcut cannot register. `ExplanationPreferences` persists the switch;
-its coaching policy is snapshotted into `SessionPlan` at Start and each explicit edit, so it applies
-from the next attempt while a current answer can finish. Ordinary hints remain available.
+Switching it on shows the recorder and saves the combination for the next Start. During a session
+that started without explanations, neither enabling the setting nor rebinding registers a usable
+explanation shortcut. Automatic explanations remain available for an enabled session even if its
+shortcut cannot register. `ExplanationPreferences` persists the switch; the capability is frozen at
+Start. The row says “Takes effect the next time you start.” Disabling Overlay Box also disables the
+saved explanation setting and its switch remains unavailable until the box is enabled again.
+Ordinary hints remain available.
 
 A collision with another application or another Jarvis shortcut leaves the old working binding
 active and displays feedback for that card. If no binding could be registered at launch, its warning
@@ -193,12 +195,14 @@ content. The Overlay Box distinguishes semibold hints from regular explanation p
 shows an example. Neither surface's visibility preference changes.
 
 The **Show code** card includes **Show code with hints**, off by default, persisted by
-`CodePreferences`. On reserves the [dedicated code area](./architecture.md#on-demand-coaching-shortcuts) and
-requests matching snippets alongside coding hints; off immediately hides and clears that area.
-Its hotkey stays registered and configurable while off: pressing it enables the setting and requests
-code for the current guidance. The visible switch refreshes if Settings is already open.
-Code remains independent of **Enable explanations** and requires Overlay Box to be enabled;
-its shortcut never changes the master Overlay Box visibility preference.
+`CodePreferences`. It is captured at Start: enabled coding/general sessions reserve the
+[dedicated code area](./architecture.md#on-demand-coaching-shortcuts) and request matching snippets
+alongside hints. Saved changes affect the next Start; they do not alter the active dock or prompt.
+The hotkey requests the next snippet only for a session that started with code enabled. Turning the
+setting off hides its recorder and releases the binding; enabling or rebinding during a disabled
+session leaves the shortcut deferred until Start. Code remains independent of **Enable explanations**.
+Both features require Overlay Box; switching the box off also disables their saved settings and
+releases their shortcuts. The rows show the dependency. No shortcut enables the master box.
 
 ## Brain
 

@@ -12,6 +12,7 @@ final class HotkeySection: NSObject, SettingsSection {
          explanationPreferences: ExplanationPreferences,
          codePreferences: CodePreferences,
          onCodeChanged: @escaping () -> Void,
+         boxEnabled: @escaping () -> Bool = { true },
          onExplanationsChanged: @escaping () -> Void,
          hasActiveHotkey: @escaping (CoachingShortcut) -> Bool,
          applyCombination: @escaping (CoachingShortcut, HotkeyCombination) -> HotkeyRegistrationOutcome) {
@@ -20,6 +21,7 @@ final class HotkeySection: NSObject, SettingsSection {
                 explanationPreferences: preference.shortcut == .explainMore ? explanationPreferences : nil,
                 codePreferences: preference.shortcut == .showCode ? codePreferences : nil,
                 onCodeChanged: onCodeChanged,
+                boxEnabled: boxEnabled,
                 onExplanationsChanged: onExplanationsChanged,
                 hasActiveHotkey: { hasActiveHotkey(preference.shortcut) },
                 applyCombination: { applyCombination(preference.shortcut, $0) })

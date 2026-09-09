@@ -197,7 +197,9 @@ public final class CoachDriver: @unchecked Sendable {
     /// user edit does, and it never rewrites the persisted preference either.
     public func updatePlan(_ plan: SessionPlan) {
         stateLock.lock()
-        self.plan = plan
+        self.plan = SessionPlan(revision: plan.revision, screen: plan.screen,
+                                explanationsEnabled: self.plan.explanationsEnabled,
+                                codeEnabled: self.plan.codeEnabled)
         stateLock.unlock()
     }
 

@@ -4,6 +4,25 @@ import Testing
 @testable import JarvisOverlay
 
 @Suite struct CodeSnippetRenderingTests {
+    @MainActor @Test func deliveryAcceptsOnlyVisibleCodeAndExplanation() throws {
+        let box = OverlayBoxPanel()
+        let sink = BroadcastOverlay([box])
+        box.setCodeEnabled(true)
+        let snippet = try #require(CodeSnippet(language: "python", placement: "Start", code: "seen = {}"))
+        #expect(sink.deliverCodeSnippet(snippet) == nil)
+        #expect(sink.deliver(["Initialize"], perLineSeconds: [1], diagram: nil, explanation: "Keep state") == nil)
+        box.setEnabled(true)
+        box.setSessionLive(true)
+        #expect(sink.deliverCodeSnippet(snippet) == snippet)
+        #expect(box.currentCodeSnippet == snippet)
+        #expect(sink.deliver(["Initialize"], perLineSeconds: [1], diagram: nil, explanation: "Keep state") == "Keep state")
+        box.setEnabled(false)
+        #expect(sink.deliverCodeSnippet(snippet) == nil)
+        #expect(box.currentCodeSnippet == nil)
+        #expect(sink.deliver(["Initialize"], perLineSeconds: [1], diagram: nil, explanation: "Keep state") == nil)
+        box.setSessionLive(false)
+    }
+
     @MainActor @Test func codeDockCollapsesWithHeaderAndRestoresWithoutLosingSnippet() async throws {
         let box = OverlayBoxPanel()
         box.setCodeEnabled(true)

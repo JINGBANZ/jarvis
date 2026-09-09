@@ -161,21 +161,12 @@ final class CoachAttemptRunner: @unchecked Sendable {
             return AttemptExecution(id: nil, result: .cancelled)
         }
 
-        guard pendingWork.reason != .manualExplanation || attempt.plan.explanationsEnabled else {
-            // A revoked shortcut is skipped work, not session cancellation: drain any queued hint.
-            return AttemptExecution(id: nil, result: .skipped(.cancelled))
-        }
-
         if pendingWork.reason == .manualCode, let interviewFormat, interviewFormat != .coding {
             let lines = ["Show code is available in Coding sessions."]
             overlay.showCodeSnippet(nil)
             overlay.render(lines, perLineSeconds: lines.map { OverlayTiming.displaySeconds(for: $0, config: config) })
             activity?.record(.tip(lines: lines))
             return AttemptExecution(id: nil, result: .skipped(.spoke))
-        }
-
-        guard pendingWork.reason != .manualCode || attempt.plan.codeEnabled else {
-            return AttemptExecution(id: nil, result: .skipped(.cancelled))
         }
 
         var work = pendingWork
@@ -232,18 +223,12 @@ final class CoachAttemptRunner: @unchecked Sendable {
         // Describing search_prep_notes when it isn't actually offered invites the model to call a
         // tool it doesn't have — and that call is a hard attempt failure (below), so `prepMaterial`
         // must track the real tool set (`tools`, below) exactly, not just hint at it.
+        let codeAllowed = attempt.plan.codeEnabled && (interviewFormat == nil || interviewFormat == .coding)
         let systemPrompt = JarvisPrompts.Coach.system(
             prepMaterial: attempt.prepMaterial != nil,
-            formatAddendum: interviewFormatAddendum)
+            formatAddendum: interviewFormatAddendum,
+            explanationsEnabled: attempt.plan.explanationsEnabled, codeEnabled: codeAllowed)
         let historyBase: [ChatMessage] = [.system(systemPrompt)] + history.snapshot()
-        // This setting is request context, never transcript/history. Keeping it out of the system
-        // prompt lets a live toggle reuse the same CLI process and fixed instructions.
-        let codeAllowed = attempt.plan.codeEnabled && (interviewFormat == nil || interviewFormat == .coding)
-        let codeSetting: [ChatMessage] = codeAllowed ? [.user(JarvisPrompts.Coach.codeSetting(enabled: true))] : []
-        let explanationSetting: [ChatMessage] = attempt.plan.explanationsEnabled ? [] : [
-            .user(JarvisPrompts.Coach.explanationsDisabled)
-        ]
-
         if reason.isManual && work.preparedManualReason != reason {
             if let prompt = context.promptLine {
                 jlog("⌨️ coaching shortcut — \(prompt)")
@@ -332,7 +317,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         sequence: requestSequence)
                     response = try await CoachingRequestAttribution.$current.withValue(requestContext) {
                         try await conversation.respond(
-                            messages: historyBase + explanationSetting + codeSetting + turnMessages,
+                            messages: historyBase + turnMessages,
                             tools: tools,
                             toolChoice: toolChoice)
                     }
@@ -434,26 +419,30 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     }
 
                 case .speak(let callID, let lines, let mermaid, let requestedExplanation, let requestedCode):
-                    let explanation = attempt.plan.explanationsEnabled ? requestedExplanation : nil
                     if Task.isCancelled {
                         jlog("… attempt cancelled (stopped) before speaking")
                         return .cancelled
                     }
                     jlog("💬 \(lines.joined(separator: " "))")
-                    // Replace or clear alongside every hint so code always belongs to that guidance.
-                    let code = codeAllowed ? requestedCode : nil
-                    overlay.showCodeSnippet(code)
-                    let codeText = code.map { "\($0.placement)\n\($0.code)" }
-                    activity?.record(.tip(lines: lines + (explanation.map { [$0] } ?? []) + (codeText.map { [$0] } ?? [])))
                     let diagram = interviewFormat == .systemDesign ? mermaid.flatMap(DiagramHint.init) : nil
                     if mermaid != nil && diagram == nil {
                         jlog("Diagram hint omitted: unsupported graph or interview format")
                     }
-                    overlay.render(
-                        lines,
-                        perLineSeconds: lines.map {
-                            OverlayTiming.displaySeconds(for: $0, config: config)
-                        }, diagram: diagram, explanation: explanation)
+                    let delivery = await MainActor.run { () -> (accepted: Bool, explanation: String?, code: CodeSnippet?) in
+                        guard !Task.isCancelled else { return (false, nil, nil) }
+                        let code = self.overlay.deliverCodeSnippet(codeAllowed ? requestedCode : nil)
+                        let detail = self.overlay.deliver(lines, perLineSeconds: lines.map {
+                            OverlayTiming.displaySeconds(for: $0, config: self.config)
+                        }, diagram: diagram, explanation: attempt.plan.explanationsEnabled ? requestedExplanation : nil)
+                        return (true, detail, code)
+                    }
+                    guard delivery.accepted else { return .cancelled }
+                    let explanation = delivery.explanation
+                    let code = delivery.code
+                    let codeText = code.map { "\($0.placement)\n\($0.code)" }
+                    activity?.record(.tip(lines: lines + (explanation.map { [$0] } ?? []) + (codeText.map { [$0] } ?? [])))
+                    // Only the first tool executes. This scrub relies on OpenAI parallel_tool_calls:false;
+                    // providers must not return extra calls that would be replayed as delivered.
                     // History describes delivered optional content, including independently enabled code.
                     // Parsed values contain only JSON primitives, so encoding cannot fail.
                     let codeArguments: [String: Any]? = code.map {
