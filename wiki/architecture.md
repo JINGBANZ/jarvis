@@ -146,6 +146,31 @@ drop*, not *show-freshest-only* — and adding direct-reply priority/preemption 
 rejected as solving a problem the interview workflow doesn't have. (The must-reply-on-direct-address
 path still works for testing/practice; it is simply not latency-critical there.)
 
+### Private architecture hints
+
+An explicitly selected System Design session can attach a visual sketch to `speak` during the
+high-level-architecture stage. The format addendum tells the model when a graph is helpful; the
+harness does not classify interview stages. `CoachAttemptRunner` offers the nullable diagram field
+only for that Start-time format and ignores unexpected diagram output in other formats. Keeping it
+on `speak` also makes the manual-hint shortcut work in one response.
+
+[`DiagramHint`](../Sources/JarvisCore/Overlay/DiagramHint.swift) accepts a bounded Mermaid subset:
+rectangular labeled boxes and directed connections. The parser owns the precise grammar and limits;
+the model-facing usage guidance lives in the system-design skill. Native
+[`DiagramHintImage`](../Sources/JarvisOverlay/DiagramHintImage.swift) draws that inert graph into a
+memory-only text attachment. This limited renderer needs no JavaScript, browser, remote assets, or
+extra presentation surface. Graphs retain their layout and scale uniformly to the available width and a fraction of the
+window height, reserving room for the text hint. They resize during a window drag. The Overlay Box
+settings include a persisted **Show diagrams** switch, enabled by default, that hides or restores
+attachments immediately without discarding text or graph history. Diagrams clear with the session.
+The existing nonactivating panel, capture exclusion, visibility toggle, and Start/Stop rules apply.
+Nothing is drawn on the interviewer's shared canvas.
+
+Invalid or unsupported graph syntax degrades to the same text hint, with diagnostic detail only in
+`jlog`. Activity records the text tip; graph source follows the existing brain-history and wire-audit
+path, and rendered images are never archived. A graph is a suggested sketch accompanying one hint,
+not a continuously synchronized model of the discussion.
+
 ### On-demand hint (⌥⌘J)
 
 Proactive coaching is the default, but the user can also **pull** a hint on demand. Pressing the
@@ -182,7 +207,7 @@ plugins ship only with full Xcode, and Jarvis builds **CLT-only** (see
 | **Local agent runtime** | Keep provider startup outside the coaching latency path while preserving the attempt boundary: a `BrainConversation` lease owns every model turn in one attempt, including a `capture_screen` continuation, then is explicitly finished. Claude leases one initialized safe-mode query; Codex prepares the first target-specific ephemeral thread at Session Start and opens a fresh thread for each later attempt on one session-scoped app-server. A runtime failure fails the attempt; it never switches to a one-shot transport. | Claude Code stream-json control protocol; Codex app-server JSON-RPC over stdio. |
 | **ScreenTool** | Fulfill `capture_screen`: silently shoot the **active window** (default scope) — the window-server frontmost, on whichever display, clean even when partially covered — and attach an **on-device OCR** of the shot to the tool result so the model reads exact text instead of pixels. Falls back to a full-display capture (no OCR) — the Settings-chosen display in Entire-display scope, the main display when no window is eligible; the overlay window is excluded either way. See [settings-window.md](./settings-window.md#capture-scope). | macOS `screencapture` CLI + Apple Vision (`VNRecognizeTextRequest`). |
 | **Overlay Caption** | Render `speak` output: up to ~3 short lines (model-split), shown one at a time and queued so a newer tip never cuts off the current one; non-activating, always-on-top, excluded from capture. Switchable from Settings — **off by default**; when off, tips are suppressed. | AppKit NSPanel; `OverlayCaptionPanel`. |
-| **Overlay Box** | A persistent window logging every `speak` tip in full, timestamped — the scrollable history of what the caption flashed one line at a time. Movable, resizable, translucent, also excluded from capture; switched on/off from Settings (**on by default**). Its own header carries the box's controls: **collapse** on the left, which rolls the panel down to the header strip and back without losing the size the user dragged to, the name in the middle, and **clear** on the right, which appears only when there is something to erase. The header's proportions are derived from the box's height (`OverlayBoxChrome`) rather than fixed, so the strip stays aimable at the floor of `Defaults.Overlay.Box.heightRange` and stays chrome on a box dragged to fill a display. A borderless window advertises no resize affordance, and macOS refuses to let an inactive app set the cursor, so the box draws its own (`OverlayBoxResizeAffordanceView`): the edge or corner under the pointer lights up, on an `.activeAlways` tracking area, which is what reaches a background app. That view also owns the drag, so the region that lights is the region that resizes. Its thin edge grips are the only thing that refuses a window drag, because AppKit applies `mouseDownCanMoveWindow == false` to a view's whole frame: a full-size view refusing it freezes the box in place. It follows the session: shown on Start (cleared and rolled open, for the new conversation) and hidden on Stop. Its size persists across launches; its position does not, so it opens centered. Fed by the same `speak` call as the caption via **`BroadcastOverlay`**, which fans one `OverlayRendering.render` out to both sinks (so `CoachDriver` is unchanged). | AppKit NSPanel; `OverlayBoxPanel`. |
+| **Overlay Box** | A persistent window logging every `speak` tip in full, timestamped — the scrollable history of what the caption flashed one line at a time. Movable, resizable, translucent, also excluded from capture; switched on/off from Settings (**on by default**). Its own header carries the box's controls: **collapse** on the left, which rolls the panel down to the header strip and back without losing the size the user dragged to, the name in the middle, and **clear** on the right, which appears only when there is something to erase. The header's proportions are derived from the box's height (`OverlayBoxChrome`) rather than fixed, so the strip stays aimable at the floor of `Defaults.Overlay.Box.heightRange` and stays chrome on a box dragged to fill a display. A borderless window advertises no resize affordance, and macOS refuses to let an inactive app set the cursor, so the box draws its own (`OverlayBoxResizeAffordanceView`): the edge or corner under the pointer lights up, on an `.activeAlways` tracking area, which is what reaches a background app. That view also owns the drag, so the region that lights is the region that resizes. Its thin edge grips are the only thing that refuses a window drag, because AppKit applies `mouseDownCanMoveWindow == false` to a view's whole frame: a full-size view refusing it freezes the box in place. It follows the session: shown on Start (cleared and rolled open, for the new conversation) and hidden on Stop. Its size persists across launches; its position does not, so it opens centered. Fed by the same `speak` call as the caption via **`BroadcastOverlay`**, which fans one `OverlayRendering.render` out to both sinks (so `CoachDriver` is unchanged). System-design visual hints are image attachments beside their text in this same box; the caption remains text-only. See [Private architecture hints](#private-architecture-hints). | AppKit NSPanel; `OverlayBoxPanel`. |
 | **MenuBar** | Manual **Start/Stop** of the pipeline (no auto-start), the same authoritative readiness status shown by Activity, and one-time API-key entry when OpenAI is in use. Stopped and active use a boxless monochrome eye: closed on the Listening Lens's diagonal axis while stopped and open while active, with the active icon following the system menu-bar foreground instead of a brand color. The attention states retain the lit Listening Lens tile — amber while checking or recovering and red when a Start is blocked before any session begins — and the menu and tooltip name the requirement behind those attention states; stopped is simply labeled `Jarvis is stopped`. A failed system stream may degrade to microphone-only, while a failed microphone stream stops the session. The two overlay surfaces are switched from Settings, and the Overlay Box is cleared from its own header, not from the menu. A centered, disabled caption at the bottom of the menu names the running build, so a user can report it without opening Settings: a release shows a muted `v<version>` from `CFBundleShortVersionString`, and a local build shows a red `Dev`, keyed off the development marker `scripts/build-app.sh` stamps into the assembled bundle (see `MenuBarController.buildCaptionItem()`). | AppKit menu-bar item; owner-only file for the key. |
 | **HotkeyController** | Register the global **⌥⌘J** hint hotkey and route a press to a one-trip `manualHint` turn while a session runs (beep otherwise). See [§2 On-demand hint](#on-demand-hint-j). | Carbon HIToolbox (`RegisterEventHotKey`, no TCC). |
 | **PermissionGate** | Gather every TCC grant at launch instead of mid-session, and keep Jarvis closed until it holds all three: one button walks Microphone, System Audio Recording, and Screen Recording one dialog at a time, and closing the window quits. `SystemAudioPermissionProbe` proves the silently-enforced system-audio grant by playing a muted tone into a tap of Jarvis's own process and listening for it. See [§3 Permissions](#permissions). | AVFoundation, `CGRequestScreenCaptureAccess`, Core Audio process taps. |
@@ -432,7 +457,7 @@ rather than a per-turn screenshot.
   single-writer lock turns one slow turn into minutes of `conversation_locked` silence. Requests are sent `store:true`
   so they stay inspectable in the OpenAI dashboard for debugging — the retention tradeoff is
   documented in [sandbox.md](./sandbox.md).
-- **Interview format supplies optional specialist coaching (`InterviewFormat` in
+- **Interview format supplies coaching guidance and format-specific hint content (`InterviewFormat` in
   `Sources/JarvisCore/Config/`).** A Start-time picker (**None**, plus one entry per format that actually has
   content — Behavioral and System Design today) adds a format-specific addendum to the coach system
   prompt. System Design supplies stage vocabulary so tips stay with the part of the design under
@@ -481,7 +506,8 @@ rather than a per-turn screenshot.
   per-turn site would otherwise read it on every coaching turn. The CLI site passes
   `prepMaterial: false`: prep material is indexed off the Start path and installed later, so its
   `search_prep_notes` guidance cannot be baked into a process whose instructions are fixed at
-  construction.
+  construction. The selected format also enables [private architecture hints](#private-architecture-hints)
+  through the System Design variant of the speak schema.
 - **Transcription has its own provider, model, and language settings.** OpenAI remains the provider
   default and `gpt-4o-transcribe` remains its model default; `gpt-transcribe` and
   `gpt-live-transcribe` are opt-in comparison choices. All use the GA Realtime API, but keep their
@@ -852,10 +878,11 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
 
 ## 6. Non-Goals (v1)
 
-- A tiered sensitivity dial, or code-level coaching modes with separate trigger gates, tool sets, or
+- A tiered sensitivity dial, or code-level coaching modes with separate trigger gates or
   runtime state. One harness spans behavioral, system-design, and coding questions; an optional
-  Start-time interview-format selection specializes the model's coaching policy inside that shared
-  loop — see [§ Models and APIs](#models-and-apis) — rather than creating another mode of operation.
+  Start-time interview-format selection specializes the model's coaching policy and, for System
+  Design, enables private architecture sketches inside that shared loop — see
+  [§ Models and APIs](#models-and-apis) — while retaining the same scheduling.
 - Continuous OCR or recording the screen/audio to disk ("recall").
 - A dedicated wake-word engine. Direct address is just the word "Jarvis" (or a question) appearing
   in the transcript, which the brain reads and answers — there is no wake-word detector. (A global

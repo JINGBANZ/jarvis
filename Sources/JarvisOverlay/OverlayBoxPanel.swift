@@ -73,13 +73,15 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     /// Reports the box's new content size once a resize drag finishes.
     public var onSizeChanged: ((Double, Double) -> Void)?
     /// Stand-in responses shown during the Settings preview.
-    private static let sampleEntries: [(stamp: String, text: String)] = [
-        ("10:30:00", "Ask about the time complexity of that loop."),
-        ("10:30:08", "Mention the edge case when the list is empty."),
+    private static let sampleEntries: [(stamp: String, text: String, diagram: DiagramHint?)] = [
+        ("10:30:00", "Ask about the time complexity of that loop.", nil),
+        ("10:30:08", "Mention the edge case when the list is empty.", nil),
     ]
     /// Each spoken tip with the time it arrived, newest last. Held as structured entries (not the
     /// rendered string) so `clear()` and the test hooks don't have to parse the text back out.
-    private var entries: [(stamp: String, text: String)] = []
+    private var diagramsEnabled = Defaults.Overlay.Box.diagramsEnabled
+    private var latestEntryStart = 0
+    private var entries: [(stamp: String, text: String, diagram: DiagramHint?)] = []
     /// Test hook (internal): counts how many times the panel has re-asserted capture exclusion.
     private(set) var captureExclusionReassertCount = 0
 
@@ -200,6 +202,8 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         scroll.frame = NSRect(x: 0, y: 0,
                               width: bounds.width, height: max(0, bounds.height - chrome.height))
         resizeAffordance.frame = bounds
+        // After the scroll view has its new width, so a diagram hint is rasterized to fit it.
+        renderDisplay()
     }
 
     // MARK: - Header actions
@@ -250,28 +254,43 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     /// to satisfy the protocol; hops to the main actor. Empty/whitespace-only lines are dropped,
     /// matching the overlay, so a no-text tip never adds a blank entry.
     public nonisolated func render(_ lines: [String], perLineSeconds: [TimeInterval]) {
+        render(lines, perLineSeconds: perLineSeconds, diagram: nil)
+    }
+
+    public nonisolated func render(_ lines: [String], perLineSeconds: [TimeInterval], diagram: DiagramHint?) {
         let text = lines
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
             .joined(separator: " ")
         guard !text.isEmpty else { return }
-        Task { @MainActor in self.append(text) }
+        Task { @MainActor in self.append(text, diagram: diagram) }
     }
 
-    private func append(_ text: String) {
-        entries.append((stamp: timeFormatter.string(from: Date()), text: text))
+    private func append(_ text: String, diagram: DiagramHint?) {
+        entries.append((stamp: timeFormatter.string(from: Date()), text: text, diagram: diagram))
         // No preview can be running: one only opens while stopped, and Start ends it.
         // Re-assert capture exclusion on every render that reaches the screen — same defense-in-depth as
         // OverlayCaptionPanel.show, since this box can be visible (full of responses) while Settings flips the
         // activation policy and WindowServer drops `sharingType` on vulnerable macOS builds.
         if panel.isVisible { reassertCaptureExclusion() }
         renderDisplay()
-        textView.scrollToEndOfDocument(nil)   // keep the newest response in view
+        if diagram != nil && diagramsEnabled {
+            // A tall diagram may exceed the viewport. Start at its hint, not its last row.
+            if let layout = textView.layoutManager, let container = textView.textContainer {
+                layout.ensureLayout(for: container)
+                let glyphs = layout.glyphRange(
+                    forCharacterRange: NSRange(location: latestEntryStart, length: 1), actualCharacterRange: nil)
+                let rect = layout.boundingRect(forGlyphRange: glyphs, in: container)
+                textView.scroll(NSPoint(x: 0, y: rect.minY + textView.textContainerInset.height))
+            }
+        } else {
+            textView.scrollToEndOfDocument(nil)   // keep the newest response in view
+        }
     }
 
     /// The one place the display is built, so anything derived from what is on screen is derived here
     /// and cannot forget which source is showing. A dimmed monospaced timestamp in front of each
-    /// response, blank line between.
+    /// response, blank line between, and the diagram hint under it when one came with the tip.
     private func renderDisplay() {
         let items = display == .sample ? Self.sampleEntries : entries
         let result = NSMutableAttributedString()
@@ -285,8 +304,19 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         ]
         for (i, entry) in items.enumerated() {
             if i > 0 { result.append(NSAttributedString(string: "\n\n")) }
+            latestEntryStart = result.length
             result.append(NSAttributedString(string: "\(entry.stamp)  ", attributes: stampAttrs))
             result.append(NSAttributedString(string: entry.text, attributes: textAttrs))
+            if diagramsEnabled, let diagram = entry.diagram {
+                result.append(NSAttributedString(string: "\n"))
+                let attachment = NSTextAttachment()
+                let padding = 2 * (textView.textContainer?.lineFragmentPadding ?? 0)
+                attachment.image = DiagramHintImage.render(diagram, fitting: NSSize(
+                    width: max(1, box.bounds.width - 2 * textView.textContainerInset.width - padding),
+                    // Reserve space for the written hint; the diagram never dominates a short box.
+                    height: max(1, box.bounds.height * 0.6)))
+                result.append(NSAttributedString(attachment: attachment))
+            }
         }
         textView.textStorage?.setAttributedString(result)
         // The sample is not the user's log, so it offers nothing to erase: the clear button stays away
@@ -333,6 +363,11 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     }
 
     // MARK: - OverlayBoxApplying
+
+    public func setDiagramsEnabled(_ enabled: Bool) {
+        diagramsEnabled = enabled
+        renderDisplay()
+    }
 
     /// Set the box's background-fill opacity (0–1), live. Only the alpha varies; the fill colour stays
     /// constant. The window stays non-opaque so a dimmed fill reads as translucent over what's behind.
@@ -498,7 +533,8 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
 private final class ResizeReportingView: NSView {
     var onEndLiveResize: (() -> Void)?
     /// Every size change, programmatic or dragged, synchronously — the panel relays the header and
-    /// the log off it. AppKit sends this before any layout pass, which an offscreen panel never runs.
+    /// the log off it, and re-renders so a diagram hint is rasterized to the new width. AppKit sends
+    /// this before any layout pass, which an offscreen panel never runs.
     var onFrameSizeChanged: (() -> Void)?
 
     override func viewDidEndLiveResize() {

@@ -12,11 +12,12 @@ public extension ToolInvocation {
         case captureScreenTool.name:
             return .captureScreen(callId: callId)
         case speakTool.name:
-            let lines = ((try? JSONDecoder().decode([String: [String]].self,
-                                                    from: Data(argumentsJSON.utf8)))?["lines"] ?? [])
-                .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+            let object = (try? JSONSerialization.jsonObject(
+                with: Data(argumentsJSON.utf8))) as? [String: Any]
+            let lines = (object?["lines"] as? [String] ?? [])
+                .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
             guard !lines.isEmpty else { return nil }
-            return .speak(callId: callId, lines: lines)
+            return .speak(callId: callId, lines: lines, mermaid: object?["mermaid"] as? String)
         case staySilentTool.name:
             return .staySilent(callId: callId)
         case searchPrepNotesTool.name:
