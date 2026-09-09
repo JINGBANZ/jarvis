@@ -169,7 +169,7 @@ preview is running. The plain setters
 ## Shortcuts
 
 **Give me a hint** defaults to **⌥⌘J**; **Explain more** defaults to **⌥⌘E**. Both work during a
-session as fallbacks for proactive coaching; [architecture.md](./architecture.md#on-demand-hint-j)
+session as fallbacks for proactive coaching; [architecture.md](./architecture.md#on-demand-coaching-shortcuts)
 defines their context, output, and scheduling behavior. Each card uses `HotkeyBindingView` and the
 existing recorder, requiring Command or Option. A successful rebind takes effect immediately and
 persists only that shortcut through `HotkeyPreferences`; defaults and storage keys live in

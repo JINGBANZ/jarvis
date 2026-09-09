@@ -280,7 +280,7 @@ formats; `speak.explanation` carries fuller plain-text detail into the persisten
 Activity while captions stay short. Semibold hints and labeled, regular-weight explanation paragraphs
 remain visually distinct at the configured text size. Both shortcuts are independently configurable in Settings; **Enable explanations** controls
 automatic detail and its shortcut while retaining the saved binding;
-see [architecture.md → On-demand hint](./architecture.md#on-demand-hint-j).
+see [architecture.md → On-demand coaching shortcuts](./architecture.md#on-demand-coaching-shortcuts).
 
 System Design sessions support [private high-level architecture hints](./architecture.md#private-architecture-hints):
 [`DiagramHint`](../Sources/JarvisCore/Overlay/DiagramHint.swift) validates a small Mermaid subset, and
