@@ -115,6 +115,16 @@ final class OverlayBoxResizeAffordanceView: NSView {
         layoutAffordance()
     }
 
+    /// AppKit hands the window's backing scale to a view's *own* layer and stops there, so this
+    /// manually added sublayer would keep its default 1.0 and rasterize a 2.5 pt hairline at half
+    /// resolution on a Retina display — blurry exactly where the line is thinnest. Also fires when the
+    /// view first joins a window, and again when the box is dragged between screens of different
+    /// scales, so no separate `viewDidMoveToWindow` is needed.
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        runLayer.contentsScale = window?.backingScaleFactor ?? runLayer.contentsScale
+    }
+
     // MARK: - Tracking
 
     override func updateTrackingAreas() {
@@ -144,7 +154,11 @@ final class OverlayBoxResizeAffordanceView: NSView {
         // mouse-up: an outward drag would otherwise go dark the moment the pointer outran the frame,
         // while an inward one stayed lit.
         guard dragZone == nil else { return }
-        guard let point, bounds.contains(point) else { return highlight(nil) }
+        // No `bounds.contains` guard: it is half-open where `zone` tests its edges closed, so the
+        // outermost row of the top and right edges lit nothing while `hitTest` still routed it into a
+        // drag. `zone` rejects anything outside the box on its own, and letting it decide alone is
+        // what keeps the region that lights and the region that drags identical.
+        guard let point else { return highlight(nil) }
         highlight(Self.zone(at: point, in: bounds, allowsVerticalResize: allowsVerticalResize))
     }
 
@@ -380,6 +394,9 @@ final class OverlayBoxResizeAffordanceView: NSView {
 
     /// Whether a run is drawn right now.
     var isRunShown: Bool { runLayer.opacity > 0 && runLayer.path != nil }
+
+    /// The resolution the run rasterizes at, which has to follow the window it is in.
+    var runContentsScale: CGFloat { runLayer.contentsScale }
 
     /// Whether a change to `key` on the run's layer is set to land at once.
     ///

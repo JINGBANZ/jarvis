@@ -119,6 +119,30 @@ import AppKit
                 "and only `path`: the fade is deliberate")
     }
 
+    /// `CGRect.contains` is half-open where `zone` tests its edges closed, so guarding the lighting
+    /// path on it left the outermost row of the top and right edges dark while `hitTest` still routed
+    /// it into a resize drag.
+    @MainActor @Test
+    func theOutermostRowOfALitEdgeLightsToo() {
+        let view = view()
+        view.pointerMoved(to: NSPoint(x: 260, y: bounds.maxY))
+        #expect(view.drawsRun(for: .top), "the topmost row resizes, so it must light")
+
+        view.pointerMoved(to: NSPoint(x: bounds.maxX, y: 220))
+        #expect(view.drawsRun(for: .right), "so must the outermost column")
+    }
+
+    /// A manually added sublayer keeps `contentsScale` at 1.0 unless told otherwise: AppKit hands the
+    /// window's backing scale to a view's own layer and stops there, which would rasterize the run at
+    /// half resolution on a Retina display.
+    @MainActor @Test
+    func theRunRasterizesAtTheWindowsBackingScale() {
+        withHostedView { view in
+            view.viewDidChangeBackingProperties()
+            #expect(view.runContentsScale == view.window?.backingScaleFactor)
+        }
+    }
+
     @MainActor @Test
     func thePointerLeavingClearsTheRun() {
         let view = view()
