@@ -55,8 +55,8 @@ final class CoachAttemptRunner: @unchecked Sendable {
     private let coachingAttempts: (any CoachingAttemptAuditing)?
     private let activity: (any ActivityEventRecording)?
     private let ledger: CoachTranscriptLedger
-    /// Fixed for the whole session — chosen once at Start, never reclassified — so it needs none of
-    /// `prepMaterial`'s live-swap machinery; a plain stored `let` is enough.
+    /// Fixed prompt text for the session. In automatic mode that text tells the model to choose from
+    /// current evidence per response; no mutable runtime classification is required.
     private let interviewFormatAddendum: String
     private let interviewFormat: InterviewFormat?
 
@@ -161,8 +161,8 @@ final class CoachAttemptRunner: @unchecked Sendable {
             return AttemptExecution(id: nil, result: .cancelled)
         }
 
-        if pendingWork.reason == .manualCode, let interviewFormat, interviewFormat != .coding {
-            let lines = ["Show code is available in Coding sessions."]
+        if pendingWork.reason == .manualCode, let interviewFormat, interviewFormat != .coding, interviewFormat != .generalTechnical {
+            let lines = ["Show code is available in Coding and General Technical sessions."]
             overlay.showCodeSnippet(nil)
             overlay.render(lines, perLineSeconds: lines.map { OverlayTiming.displaySeconds(for: $0, config: config) })
             return AttemptExecution(id: nil, result: .skipped(.spoke))
@@ -222,7 +222,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
         // Describing search_prep_notes when it isn't actually offered invites the model to call a
         // tool it doesn't have — and that call is a hard attempt failure (below), so `prepMaterial`
         // must track the real tool set (`tools`, below) exactly, not just hint at it.
-        let codeAllowed = attempt.plan.codeEnabled && (interviewFormat == nil || interviewFormat == .coding)
+        let codeAllowed = attempt.plan.codeEnabled && (interviewFormat == nil || interviewFormat == .coding || interviewFormat == .generalTechnical)
         let systemPrompt = JarvisPrompts.Coach.system(
             prepMaterial: attempt.prepMaterial != nil,
             formatAddendum: interviewFormatAddendum,
@@ -440,8 +440,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     let code = delivery.code
                     let codeText = code.map { "\($0.placement)\n\($0.code)" }
                     activity?.record(.tip(lines: lines + (explanation.map { [$0] } ?? []) + (codeText.map { [$0] } ?? [])))
-                    // Only the first tool executes. This scrub relies on OpenAI parallel_tool_calls:false;
-                    // providers must not return extra calls that would be replayed as delivered.
+                    // Only the selected call executes; extra provider calls were never delivered.
                     // History describes delivered optional content, including independently enabled code.
                     // Parsed values contain only JSON primitives, so encoding cannot fail.
                     let codeArguments: [String: Any]? = code.map {
@@ -454,7 +453,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         "codeSnippet": codeArguments as Any? ?? NSNull(),
                     ]
                     let data = try! JSONSerialization.data(withJSONObject: arguments, options: [.sortedKeys])
-                    let deliveredCalls = response.rawToolCalls.map { call in
+                    let deliveredCalls = response.rawToolCalls.filter { $0.id == callID }.map { call in
                         call.id == callID
                             ? RawToolCall(id: call.id, name: call.name,
                                           argumentsJSON: String(decoding: data, as: UTF8.self))

@@ -276,13 +276,11 @@ provider is active; its default lives with the others in
 per-thread `model_reasoning_effort`; both CLI scales start at `low`, so None clamps to Low while the
 three shared levels pass through.
 
-**Interview format.** A second Coaching-card picker (`InterviewFormat`: **None**, plus one entry per
-format that actually has content — Behavioral and System Design today) supplies specialist coaching
-for the selected format. **None** persists as no selection and resolves to no addendum at
-all, so a user who never opens this setting sees no behavior change; it is not a guess assembled
-from whatever formats happen to have content. Fixed for the whole session, like the transcription
-language/model choice: it applies on the next Start, never reclassified mid-conversation. See
-[architecture.md → Models and APIs](./architecture.md#models-and-apis).
+**Interview format.** The Coaching-card picker defaults to **None** (base prompt only), with
+**Coding**, **Behavioral**, **System Design**, and **General Technical** as explicit selections.
+The selected addendum applies on the next Start. General Technical uses available conversation and
+screen context; capture remains on demand. Per-format policy and the explicit System Design
+requirement for diagrams are defined in [architecture.md → Models and APIs](./architecture.md#models-and-apis).
 
 **Transcription.** This group owns the separate speech-to-text role without conflating it with the
 brain route. Its picker contains **OpenAI** (the default), **Gemini**, and **Apple Speech (macOS

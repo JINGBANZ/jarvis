@@ -24,6 +24,30 @@ import Testing
         #expect(messages.compactMap(\.imageBase64JPEG) == (captureSucceeds ? ["fresh-image"] : []))
     }
 
+    @Test func unexecutedSpeakIsNotReplayedAsDelivered() async throws {
+        let shown = #"{"lines":["Shown hint."],"explanation":"Hidden detail."}"#
+        let unexecuted = #"{"lines":["Unexecuted hint."],"explanation":"Unexecuted detail."}"#
+        let calls = [RawToolCall(id: "shown", name: "speak", argumentsJSON: shown),
+                     RawToolCall(id: "extra", name: "speak", argumentsJSON: unexecuted)]
+        let response = BrainResponse(toolCalls: calls.compactMap {
+            ToolInvocation.parse(callId: $0.id, name: $0.name, argumentsJSON: $0.argumentsJSON)
+        }, rawToolCalls: calls)
+        let brain = ScriptedBrain(script: [response])
+        let target = BrainTarget(provider: .openAI, modelID: BrainModelCatalog.defaultModel(for: .openAI).id)
+        let driver = CoachDriver(config: .default, transcript: RollingTranscript(),
+            route: ConfiguredBrainRoute(targets: [.init(target: target, brain: brain)]),
+            screen: ReviewScreen(succeeds: true), overlay: FakeOverlay(), clock: ManualClock(now: 100),
+            plan: SessionPlan(revision: 0, screen: SessionPlan.default.screen, explanationsEnabled: false))
+        #expect(await driver.handleTrigger(.manualHint) == .spoke)
+        #expect(await driver.handleTrigger(.manualHint) == .spoke)
+        let history = try #require(brain.calls.last).flatMap { $0.toolCalls ?? [] }
+        #expect(history.map(\.id) == ["shown"])
+        let call = try #require(history.first)
+        let object = try #require(JSONSerialization.jsonObject(with: Data(call.argumentsJSON.utf8)) as? [String: Any])
+        #expect(object["explanation"] is NSNull)
+        #expect(object["lines"] as? [String] == ["Shown hint."])
+    }
+
     @Test @MainActor func hidingBoxDuringRequestScrubsDeliveredHistory() async throws {
         let args = #"{"lines":["Keep this hint."],"explanation":"Hidden explanation."}"#
         let response = BrainResponse(toolCalls: [try #require(ToolInvocation.parse(

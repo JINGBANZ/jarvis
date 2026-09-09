@@ -58,6 +58,17 @@ import Testing
         #expect((sink.codeUpdates.last ?? nil) == nil)
     }
 
+    @Test(arguments: [TriggerReason.manualHint, .manualCode])
+    func generalTechnicalSessionsCanDeliverCode(_ reason: TriggerReason) async throws {
+        let code = try #require(CodeSnippet(language: "Python", placement: "Start", code: "seen = {}"))
+        let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s", lines: ["Initialize state"], codeSnippet: code)])])
+        let sink = CodeRequestSink()
+        let driver = makeDriver(brain, RollingTranscript(), sink, format: .generalTechnical, codeEnabled: true)
+        #expect(await driver.handleTrigger(reason) == .spoke)
+        #expect(sink.codeUpdates == [code])
+        #expect(brain.calls.count == 1)
+    }
+
     @Test func codePreferenceDefaultsOffAndPersistsIndependently() {
         let suite = "CodePreferencesTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!

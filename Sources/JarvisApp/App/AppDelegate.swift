@@ -347,14 +347,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         let transcriptionConfiguration = transcriptionPreferences.configuration
         let transcriptionProvider = transcriptionConfiguration.provider
         let brainRoute = brain.preferences.route
-        // Fixed for the whole session, like transcription's language/model choice — never
-        // reclassified mid-conversation. No selection means no addendum, not a guess assembled from
-        // whatever formats have content — see wiki/architecture.md § Models and APIs.
+        // Resolve once because CLI providers bake the prompt into their session. None adds nothing.
         let interviewFormat = brain.preferences.interviewFormat
         let interviewFormatAddendum = interviewFormat?.promptAddendum ?? ""
         let explanationsEnabled = explanationPreferences.isEnabled && appearance.boxEnabled
         let codeEnabled = codePreferences.isEnabled && appearance.boxEnabled
-            && (interviewFormat == nil || interviewFormat == .coding)
+            && (interviewFormat == nil || interviewFormat == .coding || interviewFormat == .generalTechnical)
         let key = secrets.apiKey(for: .openAIAPIKey) ?? ""
         // The brain's key stays OpenAI-only (above); transcription reads whichever credential the
         // selected provider owns — Apple Speech has none, so this is "" there and unused.

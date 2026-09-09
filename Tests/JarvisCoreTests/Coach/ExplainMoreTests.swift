@@ -182,13 +182,12 @@ import Testing
     @Test @MainActor func queuedExplanationDoesNotStrandNextHint() async {
         let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s", lines: ["Continue."])])])
         let driver = makeDriver(brain: brain, transcript: RollingTranscript(), screen: FakeScreen(), overlay: FakeOverlay())
-        driver.updatePlan(SessionPlan(revision: 1, screen: SessionPlan.default.screen, explanationsEnabled: false))
         let target = BrainTarget(provider: .openAI, modelID: BrainModelCatalog.defaultModel(for: .openAI).id)
         var selections = 0
         driver.updateBrainRoute(ConfiguredBrainRoute(targets: [.init(target: target, brain: brain)], onSelected: { _ in
             selections += 1
             guard selections == 1 else { return }
-            // Park selection until a valid hint is queued, before the disabled request is rejected.
+            // Park selection until the hint queues behind the in-flight explanation request.
             let queued = DispatchSemaphore(value: 0)
             Task.detached {
                 #expect(await driver.handleTrigger(.manualHint) == .busy)

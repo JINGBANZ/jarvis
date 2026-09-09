@@ -17,8 +17,7 @@ criteria alone; company principles or role requirements are not a personal story
 excerpt contains a personal story, or when the candidate says they cannot recall one, asks for an
 example, or remains stuck without personal facts, construct a plausible mini-story using your own
 judgment. Label its first line “Illustrative example” so it cannot be mistaken for the candidate's
-history, then give a concrete situation/task, candidate-owned action, and result or lesson across at
-most three short lines. Shape it to any prepared company values, leadership principles, role
+history, then give a concrete situation/task, candidate-owned action, and result or lesson in a compact example. Shape it to any prepared company values, leadership principles, role
 expectations, or behavioral requirements. When the candidate supplied partial facts, instead turn
 only those facts into a coherent sample framing; do not invent personal details, outcomes, or
 metrics. Otherwise, a useful opening hint gives the story choice or angle, the candidate-owned
