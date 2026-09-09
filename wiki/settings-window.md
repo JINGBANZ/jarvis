@@ -65,8 +65,8 @@ lazy lifecycle; its adaptive light/dark feed is simply framed by the same page a
 | Section class | Tab title | Always present | Description |
 |---|---|---|---|
 | `BrainSection` | "Brain" | yes | Behavior that decides who answers and what Jarvis hears, in one scrolling stack: the primary provider/model, an ordered editable fallback list, reasoning effort, interview format, and transcription provider/model/expected-languages-or-locale controls. A live status badge mirrors the active brain provider without moving the saved route. Valid Brain-route changes take effect between coaching attempts while running; interview format and transcription changes take effect on the next Start. |
-| `ConnectionsSection` | "Connections" | yes | Shared authentication and provider readiness in three stacked cards. OpenAI exposes the Jarvis-managed API-key editor; Claude Code and Codex CLI report their externally managed local-account state without importing or changing those accounts. Saving a key never restarts a live conversation: established OpenAI Realtime endpoints stay connected and use it on a later reconnect. |
-| `OverlaySection` | "Overlay" | yes | Two matching cards, one per overlay surface — **Overlay Caption** (the transient on-screen tip) and **Overlay Box** (the persistent response history). Each card has an icon, description, On/Off toggle, and the same Text Size + Opacity row layout. When a surface is **on** its rows and live sample appear only while the Overlay tab is selected (`didBecomeActive`/`didResignActive`); when **off**, its rows and sample are hidden and the card collapses. Persists via `OverlayAppearance`. |
+| `ConnectionsSection` | "Connections" | yes | Shared authentication and provider readiness in four stacked cards — **OpenAI API**, **Gemini API**, **Claude Code**, **Codex CLI**. OpenAI and Gemini each expose their own Jarvis-managed API-key editor (`APIKeyControls`, one instance per `Credential`); Claude Code and Codex CLI report their externally managed local-account state without importing or changing those accounts. Saving a key never restarts a live conversation: an established OpenAI Realtime or Gemini Live socket stays connected and picks up the new key only on its next reconnect. |
+| `OverlaySection` | "Overlay" | yes | Two matching cards, one per overlay surface — **Overlay Caption** (the transient on-screen tip) and **Overlay Box** (the persistent response history). Each card has an icon, description, On/Off toggle, and the same Text Size + Opacity row layout; the box also has **Show diagrams**, enabled by default. When a surface is **on** its rows and live sample appear only while the Overlay tab is selected (`didBecomeActive`/`didResignActive`); when **off**, its rows and sample are hidden and the card collapses. Persists via `OverlayAppearance`. |
 | `DisplaySection` | "Screen" | yes | One **Screen capture** card with the capture-scope dropdown — **Active window** (default) or one **Entire display** entry per connected display — followed by a concise fallback/privacy callout. Persists via `ScreenCapturePreferences` and applies to the next screenshot. |
 | `ActivitySection` | "Activity" | yes | Embeds the `ActivityViewer` content (`makeContentView()` / `teardown()`) in the shared page/card shell so the adaptive light/dark feed stretches with the window. Its compact toolbar shows the selected session's exact directory ID with **Copy ID**. A session without a report shows **Evaluate**: one click runs the sole `AgenticEvaluator` through a locally installed Claude Code / Codex CLI over the source checkout plus the complete session directory, writes owner-only `eval-report.md`, and opens it. While it runs the button shows **Evaluating…**; afterward it becomes **Open report**, which reopens the saved result without another model run. The agent reads the full unfiltered `jarvis-activity.jsonl` whenever it needs the user-visible sequence and correlates it with `coaching-attempts.jsonl`, `brain-traffic.jsonl`, screenshots, and live source. The derived transcript leads with a neutral artifact/distribution/correlation-field index and normalized provider-call telemetry; missing evidence remains unavailable, and neither table declares a defect. The findings-driven prompt gives the read-only agent file and source-search tools instead of a historical-incident checklist, and the report uses generic Summary / Findings / Evidence gaps / Recommendations sections. `scripts/eval-session.sh` is a second launcher for this same `JarvisEvaluation` evaluator, not another evaluation path. `EvalReportPage` renders the markdown as `eval-report.html`; **Copy as Markdown** hands the raw report to an agent chat. Evaluation, report opening, and history clearing stay disabled through the live coaching/teardown lifecycle. |
 
@@ -107,6 +107,12 @@ for the box the end of a session as well. Both share one range because the tab p
 sliders identically. A corrupted non-finite stored value restores the setting's own default rather
 than the range floor, which at 0% would read as breakage.
 
+The box's **Show diagrams** switch controls [private architecture hints](./architecture.md#private-architecture-hints).
+It defaults on, persists across launches, and immediately hides or restores graph attachments while
+keeping their text hints and history. Graphs scale proportionally to fit the available window width
+and the renderer's height budget, leaving room for text; resizing updates the image during the drag
+without writing preferences until the drag ends.
+
 The box is the one surface the user sizes directly, by dragging its edges. `OverlayBoxPanel` reports a
 finished drag through `onSizeChanged` and takes the restored size as an `init` parameter, so the panel
 never touches UserDefaults and the size round-trips like every other appearance value. Construction,
@@ -116,12 +122,17 @@ re-centring afterwards would mean a second `center()` call. Building the panel a
 centring once keeps placement correct by construction and keeps the AppKit surface minimal — which
 matters here, because this panel is built on a CI runner with no GUI session.
 
-The drag hook is `viewDidEndLiveResize` on the box's content view: AppKit sends it once the drag
-finishes, unlike a per-frame resize signal that would rewrite the preference dozens of times per
-gesture. Assigning `NSWindow.delegate` would reach the same event but blocks AppKit without a GUI
-session, hanging every main-actor test on CI. A programmatic resize raises no live-resize signal at
-all, so nothing Jarvis does to the panel can read back as a user edit. The panel's `minSize` derives from the persisted range floors,
-so the drag floor and the clamp floor cannot drift apart.
+The drag hook is `OverlayBoxResizeAffordanceView.onResizeFinished`, fired once when the user lets go
+of an edge, not per frame — a per-frame signal would rewrite the preference dozens of times per
+gesture. The affordance owns the drag itself (see [architecture.md → Overlay Box](./architecture.md)),
+so AppKit is not the one resizing and its `viewDidEndLiveResize` does not fire for these; the box's
+content view keeps that hook only for any resize AppKit still drives. Assigning `NSWindow.delegate`
+would reach the same event but blocks AppKit without a GUI session, hanging every main-actor test on
+CI. A programmatic resize raises no signal on either path, so nothing Jarvis does to the panel can
+read back as a user edit — including collapsing it, which reports the height the user last dragged to
+rather than the header's. The panel's `minSize` derives from the persisted range floors, so the drag
+floor and the clamp floor cannot drift apart, and the affordance clamps its own drags against the
+same `minSize`/`maxSize`.
 
 `OverlaySection` applies changes live through two protocols, with no direct dependency on the AppKit
 panels: `OverlayCaptionApplying`, conformed by `OverlayCaptionPanel`, and `OverlayBoxApplying`,
@@ -137,7 +148,20 @@ toggle shows/hides that surface's sample (and collapses/expands its sliders via 
 Each panel's `showAppearancePreview(_:)` re-asserts capture exclusion so the preview stays hidden
 from screen capture — same defense-in-depth as the coaching display path. The box's preview shows
 sample text without disturbing the real log and re-derives `isEnabled && isSessionLive` on close, so
-closing the tab can leave the box on screen only while both hold. The plain setters
+closing the tab can leave the box on screen only while both hold. The box's sample stands in **only
+while stopped**: during a session the box is already on screen carrying the conversation's own tips
+and the sliders apply to it live, so a sample would replace real content with something worse. That
+boundary is a correctness one as much as a display one, because it is what guarantees no tip can land
+behind a sample and no collapse snapshot can cross a session boundary. Start therefore takes the
+sample down.
+
+Settings cannot see the session, so `showAppearancePreview(_:)` records a request rather than
+obeying one, the way `setEnabled(_:)` does: the sample shows when Settings wants it **and** no session
+is running, derived in one place. A request made during a session is still standing when the session
+stops, so a Stop taken without leaving the tab brings the sample up rather than leaving the sliders
+with nothing on screen to act on. Which source is showing is a value, `Display.log` or `.sample`, and
+the readout and the clear button are derived from it together rather than each asking whether a
+preview is running. The plain setters
 (`setFontSize`/`setBackgroundOpacity`/`setOpacity`) only change appearance and don't touch
 `sharingType`. See [overlay-invisibility.md](./overlay-invisibility.md).
 
@@ -213,18 +237,19 @@ provider is active; its default lives with the others in
 per-thread `model_reasoning_effort`; both CLI scales start at `low`, so None clamps to Low while the
 three shared levels pass through.
 
-**Interview format.** A second Coaching-card picker (`InterviewFormat`: **None**, plus one entry per
-format that actually has content — System Design today) supplies additional coaching-prompt
-vocabulary for the selected format. **None** persists as no selection and resolves to no addendum at
-all, so a user who never opens this setting sees no behavior change; it is not a guess assembled
-from whatever formats happen to have content. Fixed for the whole session, like the transcription
-language/model choice: it applies on the next Start, never reclassified mid-conversation. See
-[architecture.md → Models and APIs](./architecture.md#models-and-apis).
+**Interview format.** The Coaching-card picker defaults to **None** (base prompt only), with
+**Coding**, **Behavioral**, **System Design**, and **General Technical** as explicit selections.
+The selected addendum applies on the next Start. General Technical uses available conversation and
+screen context; capture remains on demand. Per-format policy and the explicit System Design
+requirement for diagrams are defined in [architecture.md → Models and APIs](./architecture.md#models-and-apis).
 
 **Transcription.** This group owns the separate speech-to-text role without conflating it with the
-brain route. Its picker contains **OpenAI** (the default) and **Apple Speech (macOS 26+)**. Apple is
-enabled only when the running Mac and OS expose `SpeechTranscriber`; selecting it persists through
-`TranscriptionPreferences` and applies on the next Start, never halfway through a live session.
+brain route. Its picker contains **OpenAI** (the default), **Gemini**, and **Apple Speech (macOS
+26+)**. Apple is enabled only when the running Mac and OS expose `SpeechTranscriber`; selecting any
+provider persists through `TranscriptionPreferences` and applies on the next Start, never halfway
+through a live session. `TranscriptionControls` shows one fixed row set per provider — the provider
+row plus only that provider's rows (`visibleRows`) — so switching providers never leaves a stale
+control from the previous choice visible.
 
 With OpenAI selected, **Model** offers **GPT-4o Transcribe** (the default), opt-in **GPT
 Transcribe**, and opt-in **GPT Live Transcribe** for session-by-session comparison. **Expected
@@ -243,6 +268,19 @@ Live and the row says so whenever GPT-4o Transcribe is selected. Blank entries a
 Model-specific language, context, and turn-detection behavior is defined in
 [architecture.md](./architecture.md#models-and-apis).
 
+With Gemini selected, the card shows its own **Model**, **Expected languages**, **Vocabulary**, and
+**Mode** rows, backed by their own preference fields (`geminiModel`, `geminiExpectedLanguages`,
+`geminiVocabularyKeywords`, `geminiMode`) — none shared with the OpenAI rows above. **Model** offers
+the one live/streaming model Jarvis supports (`GeminiTranscriptionModel`; Gemini's batch model has no
+place in a live coaching session). **Expected languages** and **Vocabulary** behave the same as their
+OpenAI counterparts — a multi-select language hint (empty means automatic) and a comma-separated
+glossary sent as `customVocabulary` — but always apply, since Gemini's one live model accepts both
+without the GPT-4o carve-out. **Mode** (`GeminiTranscriptionMode`) picks **Verbatim** (the default,
+preserves the raw utterance) or **Smart** (removes filler words and formats the output, so it reads
+better but is no longer exactly what was said). Gemini's turn detection, wire format, and the
+provider-derived wire sample rate are covered in
+[architecture.md](./architecture.md#models-and-apis).
+
 With Apple Speech selected, **Conversation locale** is populated from
 `SpeechTranscriber.supportedLocales`; the initial suggestion is the supported equivalent of the
 current macOS locale. Start downloads or reuses that selected model before replacing a running
@@ -255,7 +293,9 @@ provider default without rewriting the invalid value, while invalid fallback row
 route normalization. An unrecognized provider/effort likewise uses its existing default rather than
 reaching the API. Transcription preferences are validated independently: unknown OpenAI model ids
 use GPT-4o; unknown or duplicate expected-language values are discarded and the remaining values use
-stable declaration order; an empty list means Automatic. Existing fixed-profile preferences are read
+stable declaration order; an empty list means Automatic. Gemini's model, expected languages,
+vocabulary, and mode each fall back to their own default the same way on an unrecognized stored
+value. Existing fixed-profile preferences are read
 into the matching list until the user edits it. An unsupported Apple locale fails visibly at Start
 rather than choosing a different language. A running `CoachDriver` applies valid brain edits
 atomically at the coaching-attempt boundary while transcript, client-managed history, audio
@@ -288,21 +328,29 @@ types own validation and normalization; every key and default value they read co
 
 ## Connections
 
-The Connections tab owns authentication shared across Brain and Transcription. Its three stacked
-cards are **OpenAI API**, **Claude Code**, and **Codex CLI**. The OpenAI card reports and edits only
-the Jarvis-managed owner-only file through `APIKeyControls`; its action is **Add API key** or **Edit**.
+The Connections tab owns authentication shared across Brain and Transcription. Its four stacked
+cards are **OpenAI API**, **Gemini API**, **Claude Code**, and **Codex CLI**. The OpenAI and Gemini
+cards each report and edit only their own Jarvis-managed owner-only file through `APIKeyControls`
+(one instance per `Credential`, keyed by `credential.rawValue` so their accessibility labels,
+identifiers, and saved-key state never collide); each card's action is **Add API key** or **Edit**.
 The `OPENAI_API_KEY` fallback remains usable by Start but is deliberately not presented as a
-Jarvis-managed saved key.
+Jarvis-managed saved key; Gemini has the same headless fallback in `GEMINI_API_KEY`
+(`Credential.geminiAPIKey.environmentVariable`, read by `EnvSecretStore`), also not presented as a
+saved key.
 
 Claude Code and Codex CLI keep authentication in their own tools. Connections runs the existing
 bounded `AgentCLIDetector` probes and reports **Signed in**, **Signed out**, **Sign-in unknown**, or
 **Not installed** without opening a login flow or storing another secret. The page's compact ready
-count includes a managed OpenAI key and confirmed signed-in local accounts.
+count includes every managed API key that is saved and confirmed signed-in local accounts.
 
 An OpenAI key is required only when OpenAI is selected for transcription or appears anywhere in the
-brain route; Apple Speech plus a CLI-only route can start without one. Saving a managed key while a
-session runs preserves route health, refreshes only OpenAI brain clients and future OpenAI
-transcription reconnect credentials, and never probes or replaces a CLI client.
+brain route; a Gemini key is required only when Gemini is selected for transcription — Gemini is not
+a brain provider. Apple Speech plus a CLI-only route can start without either key. Saving a managed
+key while a session runs preserves route health: an OpenAI save refreshes both the OpenAI brain
+clients and a live OpenAI transcription socket's future reconnect credential, while a Gemini save
+refreshes only a live Gemini transcription socket's future reconnect credential. Neither ever probes
+or replaces a CLI client, and a saved credential only ever reaches the transcriber built for that same
+provider.
 
 ## Capture Scope
 
@@ -356,13 +404,13 @@ Both values, their keys, and the main-display floor are declared in
 | `Sources/JarvisApp/Settings/SettingsRowView.swift` | Shared label/help/trailing-control row |
 | `Sources/JarvisApp/Settings/SettingsScrollView.swift` | Viewport-change adapter for variable-height card documents |
 | `Sources/JarvisApp/Settings/BrainSection.swift` | Minimal Brain tab composition: Provider + Reasoning effort + Interview format + Transcription |
-| `Sources/JarvisApp/Settings/ConnectionsSection.swift` | Shared OpenAI credential editor + external CLI account readiness |
+| `Sources/JarvisApp/Settings/ConnectionsSection.swift` | Per-credential API-key editors (OpenAI, Gemini) + external CLI account readiness |
 | `Sources/JarvisApp/Settings/BrainTargetRowView.swift` | Shared inline provider/model row for primary and fallback targets |
 | `Sources/JarvisApp/Settings/ProviderRouteEditor.swift` | Unified Primary + ordered fallback card and persistence mutations |
 | `Sources/JarvisApp/Settings/TranscriptionControls.swift` | Transcription provider/model/language-or-locale behavior card |
 | `Sources/JarvisApp/Settings/ExpectedLanguagePicker.swift` | Scalable expected-language chips + multi-select popover |
-| `Sources/JarvisApp/Settings/APIKeyControls.swift` | Collapsed Jarvis-managed OpenAI API-key editor |
-| `Sources/JarvisCore/Transcription/TranscriptionProvider.swift` | Provider identities, labels, and OpenAI-key requirement |
+| `Sources/JarvisApp/Settings/APIKeyControls.swift` | Collapsed Jarvis-managed API-key editor, one instance per `Credential` |
+| `Sources/JarvisCore/Transcription/TranscriptionProvider.swift` | Provider identities, labels, per-provider credential + audio format |
 | `Sources/JarvisApp/Settings/OverlaySection.swift` | Overlay-appearance tab |
 | `Sources/JarvisApp/Settings/OverlaySurfaceSettingsView.swift` | One reusable overlay-surface card and its slider/readout rows |
 | `Sources/JarvisApp/Settings/DisplaySection.swift` | Capture-scope tab (scope + display in one dropdown) |

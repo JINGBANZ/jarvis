@@ -37,17 +37,17 @@ public final class TranscriptionPreferences {
     }
 
     /// Every language speakers may use. An empty list means automatic detection.
-    public var openAIExpectedLanguages: [OpenAITranscriptionLanguage] {
+    public var openAIExpectedLanguages: [TranscriptionLanguage] {
         get {
             guard let stored = defaults.stringArray(
                 forKey: Defaults.Transcription.openAIExpectedLanguagesKey) else {
                 return Defaults.Transcription.openAIExpectedLanguages
             }
-            return OpenAITranscriptionLanguage.canonicalizing(
-                stored.compactMap(OpenAITranscriptionLanguage.init(rawValue:)))
+            return TranscriptionLanguage.canonicalizing(
+                stored.compactMap(TranscriptionLanguage.init(rawValue:)))
         }
         set {
-            let languages = OpenAITranscriptionLanguage.canonicalizing(newValue)
+            let languages = TranscriptionLanguage.canonicalizing(newValue)
             defaults.set(
                 languages.map(\.rawValue),
                 forKey: Defaults.Transcription.openAIExpectedLanguagesKey)
@@ -89,6 +89,68 @@ public final class TranscriptionPreferences {
         }
     }
 
+    public var geminiModel: GeminiTranscriptionModel {
+        get {
+            guard let raw = defaults.string(forKey: Defaults.Transcription.geminiModelKey),
+                  let model = GeminiTranscriptionModel(rawValue: raw) else {
+                return Defaults.Transcription.geminiModel
+            }
+            return model
+        }
+        set {
+            defaults.set(newValue.rawValue, forKey: Defaults.Transcription.geminiModelKey)
+        }
+    }
+
+    /// Every language speakers may use. An empty list means automatic detection.
+    public var geminiExpectedLanguages: [TranscriptionLanguage] {
+        get {
+            guard let stored = defaults.stringArray(
+                forKey: Defaults.Transcription.geminiExpectedLanguagesKey) else {
+                return Defaults.Transcription.geminiExpectedLanguages
+            }
+            return TranscriptionLanguage.canonicalizing(
+                stored.compactMap(TranscriptionLanguage.init(rawValue:)))
+        }
+        set {
+            let languages = TranscriptionLanguage.canonicalizing(newValue)
+            defaults.set(
+                languages.map(\.rawValue),
+                forKey: Defaults.Transcription.geminiExpectedLanguagesKey)
+        }
+    }
+
+    /// Literal terms (jargon, names) that bias Gemini recognition; the API accepts up to 1,000.
+    public var geminiVocabularyKeywords: [String] {
+        get {
+            guard let stored = defaults.stringArray(
+                forKey: Defaults.Transcription.geminiVocabularyKeywordsKey) else {
+                return Defaults.Transcription.geminiVocabularyKeywords
+            }
+            return stored
+        }
+        set {
+            let keywords = newValue
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .prefix(GeminiLiveSession.maxVocabularyTerms)
+            defaults.set(Array(keywords), forKey: Defaults.Transcription.geminiVocabularyKeywordsKey)
+        }
+    }
+
+    public var geminiMode: GeminiTranscriptionMode {
+        get {
+            guard let raw = defaults.string(forKey: Defaults.Transcription.geminiModeKey),
+                  let mode = GeminiTranscriptionMode(rawValue: raw) else {
+                return Defaults.Transcription.geminiMode
+            }
+            return mode
+        }
+        set {
+            defaults.set(newValue.rawValue, forKey: Defaults.Transcription.geminiModeKey)
+        }
+    }
+
     /// One atomic value for Start-time snapshotting and stale-preparation detection.
     public var configuration: TranscriptionConfiguration {
         TranscriptionConfiguration(
@@ -96,6 +158,10 @@ public final class TranscriptionPreferences {
             openAIModel: openAIModel,
             openAIExpectedLanguages: openAIExpectedLanguages,
             openAIVocabularyKeywords: openAIVocabularyKeywords,
-            appleSpeechLocaleIdentifier: appleSpeechLocaleIdentifier)
+            appleSpeechLocaleIdentifier: appleSpeechLocaleIdentifier,
+            geminiModel: geminiModel,
+            geminiExpectedLanguages: geminiExpectedLanguages,
+            geminiVocabularyKeywords: geminiVocabularyKeywords,
+            geminiMode: geminiMode)
     }
 }

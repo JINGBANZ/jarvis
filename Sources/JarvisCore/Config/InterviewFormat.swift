@@ -1,38 +1,34 @@
 import Foundation
 
-/// The interview format a coaching session is specialized for. Chosen once at Start — like
-/// `TranscriptionPreferences.openAIExpectedLanguages` — and fixed for the whole session, never
-/// guessed or reclassified mid-conversation: an automatic, in-session classifier was considered and
-/// rejected, both for guessing once and locking in (misclassifies a session that shifts formats) and
-/// for continuously re-guessing (the same "brittle state machine" a history-compaction design
-/// already rejected — see wiki/architecture.md § Models and APIs). No selection means no addendum at
-/// all — not a guess assembled from whatever formats happen to have content — so a user who never
-/// opens this setting sees no behavior change at all.
+/// An optional Start-time interview-format addendum. Nil keeps the base coach prompt unchanged.
 public enum InterviewFormat: String, CaseIterable, Codable, Sendable {
     case coding = "coding"
     case systemDesign = "system-design"
     case behavioral = "behavioral"
+    case generalTechnical = "general-technical"
 
     public var displayName: String {
         switch self {
         case .coding: "Coding"
         case .systemDesign: "System Design"
         case .behavioral: "Behavioral"
+        case .generalTechnical: "General Technical"
         }
     }
 
     /// Loaded from `Resources/Skills/<rawValue>.md` — a real Markdown file, not a Swift string
-    /// literal, so a skill's content reads and edits like prose. Only `system-design.md` exists
-    /// today: `.coding` and `.behavioral` are already reported as working well, so they stay empty
-    /// rather than getting new prompt guidance nobody asked for. Missing file → empty, not a crash —
-    /// an unwritten skill is a normal state, not an error.
+    /// literal, so a skill's content reads and edits like prose. Coding, Behavioral, System Design, and
+    /// General Technical have authored guidance. Missing file → empty, not a crash — an unwritten skill is a
+    /// normal state, not an error.
     public var promptAddendum: String {
-        guard let url = Self.skillMarkdownURL(named: rawValue),
+        Self.addendum(named: rawValue)
+    }
+
+    private static func addendum(named name: String) -> String {
+        guard let url = skillMarkdownURL(named: name),
               let body = try? String(contentsOf: url, encoding: .utf8)
                   .trimmingCharacters(in: .whitespacesAndNewlines),
-              !body.isEmpty else {
-            return ""
-        }
+              !body.isEmpty else { return "" }
         return "\n\n" + body
     }
 

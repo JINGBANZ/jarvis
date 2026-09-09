@@ -5,12 +5,26 @@ import Testing
 /// loudness of each canonical failure so a regression (e.g. silently downgrading a capture failure, or
 /// making the graceful "them"-socket degrade pop a modal) is caught without a UI session.
 @Suite struct UserFacingErrorCatalogTests {
-    @Test func noAPIKeyIsFatal() {
-        #expect(UserFacingError.noAPIKey.severity == .fatal)
-        #expect(UserFacingError.noAPIKey.severity.showsAlert)
-        #expect(UserFacingError.noAPIKey.message.contains("transcription provider or brain route"))
-        #expect(UserFacingError.noAPIKey.message.contains("Connections"))
-        #expect(UserFacingError.noAPIKey.sessionEndReason == .openAIAPIKeyMissing)
+    @Test func noAPIKeyIsFatalAndNamesTheMissingCredential() {
+        // A single missing Gemini key must name Gemini, not send the user hunting through both
+        // providers — this is the defect the spec calls out.
+        let geminiOnly = UserFacingError.noAPIKey(missing: [.geminiAPIKey])
+        #expect(geminiOnly.message.contains("Gemini API"))
+        #expect(!geminiOnly.message.contains("OpenAI"))
+
+        let openAIOnly = UserFacingError.noAPIKey(missing: [.openAIAPIKey])
+        #expect(openAIOnly.message.contains("OpenAI API"))
+        #expect(!openAIOnly.message.contains("Gemini"))
+
+        // Gemini transcription plus an OpenAI-only brain route can legitimately miss both at once;
+        // the message must name both, in a stable (sorted) order regardless of set iteration order.
+        let both = UserFacingError.noAPIKey(missing: [.geminiAPIKey, .openAIAPIKey])
+        #expect(both.message.contains("Gemini API and OpenAI API"))
+
+        #expect(geminiOnly.message.contains("Connections"))
+        #expect(geminiOnly.severity == .fatal)
+        #expect(geminiOnly.severity.showsAlert)
+        #expect(geminiOnly.sessionEndReason == .openAIAPIKeyMissing)
     }
 
     @Test func appleSpeechPreflightFailuresAlertWithoutStopping() {

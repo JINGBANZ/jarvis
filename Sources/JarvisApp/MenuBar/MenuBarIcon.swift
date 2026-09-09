@@ -1,32 +1,27 @@
 import AppKit
-import CoreImage
 
-/// The menu-bar glyph has two jobs, and they pull in opposite directions, so it is drawn two ways.
+/// The menu-bar glyph has four readings. Stopped is a closed eye; active is the same eye open.
+/// Both are bare template glyphs, so AppKit supplies the correct monochrome tint for the current
+/// menu-bar appearance. That closed-to-open change carries the normal state transition without a
+/// coloured plate competing with the rest of the menu bar.
 ///
-/// Stopped reuses the application icon with a high-contrast treatment tuned for its tiny display
-/// size: no colour, deeper shadows, and a fine pale edge. That rendering is deliberately unchanged —
-/// it is the resting state a person sees all day.
+/// Preflight and blocked are the exceptions because they need attention. They keep the open eye on
+/// an amber or red plate. The application icon is a photographic render, but its gradients and glass
+/// detail do not survive at 18 points, so every state uses crisp vector silhouettes instead.
 ///
-/// A live session gets the Listening Lens redrawn as flat vector art instead. The application icon
-/// is a photographic render — soft gradients, a glass highlight, a wireframe sphere — and none of
-/// that survives being downsampled to 18 points, however much colour is poured into it. Drawn
-/// artwork stays crisp at the only size this glyph is ever seen at, and a saturated plate is the
-/// loudest a status item can be without moving or growing.
+/// All states render into a 2×-density bitmap at the same logical point size, so switching between
+/// them never changes the glyph's footprint. Each image is rendered once and cached.
 ///
-/// Both paths render into a 2×-density bitmap at the same logical point size and share the same
-/// rounded-square silhouette, so switching between them changes the icon's colour, never its shape
-/// or footprint. Rendered once each and cached.
-///
-/// OS-bound (AppKit + CoreImage), so it lives in `JarvisApp` rather than Core and is verified by a
-/// live run, not unit tests. Main-actor-isolated: `NSImage` isn't `Sendable`, and the icons are only
-/// ever touched from the `@MainActor` `MenuBarController`.
+/// OS-bound (AppKit), so it lives in `JarvisApp` rather than Core and is verified by a live run, not
+/// unit tests. Main-actor-isolated: `NSImage` isn't `Sendable`, and the icons are only ever touched
+/// from the `@MainActor` `MenuBarController`.
 @MainActor
 enum MenuBarIcon {
-    /// What a live session looks like. Three readings, not four: `checking` and `recovering` share
-    /// one, because both mean the same thing to someone glancing at the menu bar — working on it.
+    /// Checking and recovering share preflight because both mean Jarvis is establishing or
+    /// restoring readiness, while active means it is listening.
     enum Signal: Hashable {
-        case ready
-        case working
+        case active
+        case preflight
         case blocked
     }
 
@@ -34,17 +29,16 @@ enum MenuBarIcon {
     private static let side: CGFloat = 18
     /// Render at 2× the logical size so the glyph is crisp on Retina displays.
     private static let scale: CGFloat = 2
-    /// The drawn artwork is authored in a 36-unit square whose plate is inset by 2 on every side.
-    /// Scaling it up by 36/32 lets the plate go full-bleed while the lens keeps its proportions.
+    /// The open artwork is authored in a 36-unit square with a two-unit inset.
     private static let artScale: CGFloat = 36.0 / 32.0
 
-    /// Quieter monochrome Listening Lens, shown while stopped.
-    static let stopped: NSImage = makeStopped()
+    /// The closed, boxless eye shown while stopped.
+    static let stopped: NSImage = makeStoppedTemplate()
 
-    /// The lit Listening Lens for a live session. Cached per signal.
+    /// The icon for a session in progress. Cached per signal.
     static func live(_ signal: Signal) -> NSImage {
         if let cached = liveCache[signal] { return cached }
-        let image = makeLive(signal)
+        let image = signal == .active ? makeActiveTemplate() : makeAttention(signal)
         liveCache[signal] = image
         return image
     }
@@ -53,91 +47,78 @@ enum MenuBarIcon {
 
     // MARK: - Stopped
 
-    private static func makeStopped() -> NSImage {
-        let base = renderBitmap()
-        let rep = drainColour(base) ?? base
-        addEdge(to: rep)
-        rep.size = NSSize(width: side, height: side)   // logical points → 2× pixel density
-        return image(from: rep, describedAs: "Jarvis stopped")
-    }
-
-    /// Draw the application icon into a 2×-density RGBA bitmap whose logical size is `side` points.
-    private static func renderBitmap() -> NSBitmapImageRep {
+    /// Two opposed eyelids rotated onto the open eye's 45-degree orbital axis.
+    private static func makeStoppedTemplate() -> NSImage {
         let rep = bitmap()
-        NSGraphicsContext.saveGraphicsState()
-        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
-        guard let applicationIcon = NSApplication.shared.applicationIconImage else {
-            preconditionFailure("Jarvis application icon is missing")
-        }
-        let px = CGFloat(rep.pixelsWide)
-        applicationIcon.draw(in: NSRect(x: 0, y: 0, width: px, height: px),
-                             from: .zero, operation: .sourceOver, fraction: 1,
-                             respectFlipped: false, hints: [.interpolation: NSImageInterpolation.high])
-        NSGraphicsContext.restoreGraphicsState()
-        return rep
+        let unit = CGFloat(rep.pixelsWide) / 36
+        paintTemplate(in: rep, paths: [closedCoolLid(unit), closedWarmLid(unit)])
+        rep.size = NSSize(width: side, height: side)
+        return image(from: rep, describedAs: "Jarvis is stopped", template: true)
     }
 
-    /// Increase contrast only after downsampling so dark backing pixels recede while the glass arcs
-    /// and core remain obvious at 18 points, and drop the colour entirely.
-    private static func drainColour(_ rep: NSBitmapImageRep) -> NSBitmapImageRep? {
-        guard let cg = rep.cgImage,
-              let filter = CIFilter(name: "CIColorControls") else { return nil }
-        filter.setValue(CIImage(cgImage: cg), forKey: kCIInputImageKey)
-        filter.setValue(0.0, forKey: kCIInputSaturationKey)
-        filter.setValue(1.35, forKey: kCIInputContrastKey)
-        filter.setValue(-0.05, forKey: kCIInputBrightnessKey)
-        guard let output = filter.outputImage,
-              let outCG = CIContext().createCGImage(output, from: output.extent) else { return nil }
-        return NSBitmapImageRep(cgImage: outCG)
-    }
+    // MARK: - Active
 
-    /// A sub-point pale edge separates the dark rounded tile from a dark or translucent menu bar.
-    /// It is drawn in Retina pixels before `rep.size` establishes the final logical point size.
-    private static func addEdge(to rep: NSBitmapImageRep) {
-        let lineWidth: CGFloat = 1.5
-        let inset = lineWidth / 2
-        let bounds = NSRect(x: inset, y: inset,
-                            width: CGFloat(rep.pixelsWide) - lineWidth,
-                            height: CGFloat(rep.pixelsHigh) - lineWidth)
-
-        NSGraphicsContext.saveGraphicsState()
-        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
-        NSColor(calibratedWhite: 1, alpha: 0.5).setStroke()
-        let edge = NSBezierPath(roundedRect: bounds,
-                                xRadius: cornerRadius(for: rep), yRadius: cornerRadius(for: rep))
-        edge.lineWidth = lineWidth
-        edge.stroke()
-        NSGraphicsContext.restoreGraphicsState()
-    }
-
-    // MARK: - Live
-
-    private static func makeLive(_ signal: Signal) -> NSImage {
+    /// An active session has nothing exceptional to announce, so the open eye stays monochrome.
+    private static func makeActiveTemplate() -> NSImage {
         let rep = bitmap()
-        let px = CGFloat(rep.pixelsWide)
-        let unit = px / 36
+        let unit = CGFloat(rep.pixelsWide) / 36
+        paintTemplate(in: rep, paths: [coolCrescent(unit), warmCrescent(unit), core(unit)])
+        rep.size = NSSize(width: side, height: side)
+        return image(from: rep, describedAs: Signal.active.accessibilityDescription, template: true)
+    }
 
-        NSGraphicsContext.saveGraphicsState()
-        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+    // MARK: - Attention states
 
-        signal.plate.setFill()
-        NSBezierPath(roundedRect: NSRect(x: 0, y: 0, width: px, height: px),
-                     xRadius: cornerRadius(for: rep), yRadius: cornerRadius(for: rep)).fill()
-
-        signal.coolTint.setFill()
-        coolCrescent(unit).fill()
-
-        NSColor.white.setFill()
-        warmCrescent(unit).fill()
-        core(unit).fill()
-
-        NSGraphicsContext.restoreGraphicsState()
-
+    private static func makeAttention(_ signal: Signal) -> NSImage {
+        let rep = bitmap()
+        paintPlateGlyph(in: rep, plate: signal.plate, coolTint: signal.coolTint)
         rep.size = NSSize(width: side, height: side)
         return image(from: rep, describedAs: signal.accessibilityDescription)
     }
 
-    /// The upper-left crescent, in the artwork's own coordinates.
+    /// Upper and lower lids are authored horizontally, then rotated together so the stopped eye
+    /// keeps the same diagonal axis as the open orbital mark. The negative seam is the state cue.
+    private static func closedCoolLid(_ unit: CGFloat) -> NSBezierPath {
+        let path = NSBezierPath()
+        path.move(to: closedPoint(4.5, 17.4, unit))
+        path.curve(
+            to: closedPoint(31.5, 17.4, unit),
+            controlPoint1: closedPoint(10, 6.5, unit),
+            controlPoint2: closedPoint(26, 6.5, unit))
+        path.curve(
+            to: closedPoint(4.5, 17.4, unit),
+            controlPoint1: closedPoint(25, 16.6, unit),
+            controlPoint2: closedPoint(11, 16.6, unit))
+        path.close()
+        return path
+    }
+
+    private static func closedWarmLid(_ unit: CGFloat) -> NSBezierPath {
+        let path = NSBezierPath()
+        path.move(to: closedPoint(4.5, 18.6, unit))
+        path.curve(
+            to: closedPoint(31.5, 18.6, unit),
+            controlPoint1: closedPoint(11, 19.4, unit),
+            controlPoint2: closedPoint(25, 19.4, unit))
+        path.curve(
+            to: closedPoint(4.5, 18.6, unit),
+            controlPoint1: closedPoint(26, 29.5, unit),
+            controlPoint2: closedPoint(10, 29.5, unit))
+        path.close()
+        return path
+    }
+
+    /// Rotate in the artwork's y-down coordinate space before mapping into AppKit's y-up bitmap.
+    private static func closedPoint(_ x: CGFloat, _ y: CGFloat, _ unit: CGFloat) -> CGPoint {
+        let angle = -CGFloat.pi / 4
+        let dx = x - 18
+        let dy = y - 18
+        let rotatedX = 18 + dx * cos(angle) - dy * sin(angle)
+        let rotatedY = 18 + dx * sin(angle) + dy * cos(angle)
+        return point(rotatedX, rotatedY, unit)
+    }
+
+    /// The upper-left crescent in the open eye.
     private static func coolCrescent(_ unit: CGFloat) -> NSBezierPath {
         let path = NSBezierPath()
         path.move(to: point(26.4, 7.7, unit))
@@ -153,7 +134,7 @@ enum MenuBarIcon {
         return path
     }
 
-    /// The lower-right crescent, always white — it is the one that has to read at 18 points.
+    /// The lower-right crescent in the open eye.
     private static func warmCrescent(_ unit: CGFloat) -> NSBezierPath {
         let path = NSBezierPath()
         path.move(to: point(9.6, 28.3, unit))
@@ -169,24 +150,52 @@ enum MenuBarIcon {
         return path
     }
 
-    /// The glowing core the crescents wrap around.
+    /// The core visible only while the eye is open.
     private static func core(_ unit: CGFloat) -> NSBezierPath {
         let radius: CGFloat = 4.2
-        let topLeft = point(18 - radius, 18 + radius, unit)   // y flips, so this is the rect's origin
+        let topLeft = point(18 - radius, 18 + radius, unit)
         let diameter = radius * 2 * artScale * unit
         return NSBezierPath(ovalIn: NSRect(x: topLeft.x, y: topLeft.y,
                                            width: diameter, height: diameter))
     }
 
-    /// Map the artwork's design space — 36 units, y pointing down, plate inset by 2 — onto the
-    /// bitmap's pixel space, where y points up and the plate is full-bleed. Done per point rather
-    /// than with a composed `AffineTransform` so the order of operations is impossible to misread.
+    /// Map the artwork's 36-unit, y-down design space onto the bitmap's y-up pixel space.
     private static func point(_ x: CGFloat, _ y: CGFloat, _ unit: CGFloat) -> CGPoint {
         CGPoint(x: (18 + (x - 18) * artScale) * unit,
                 y: (18 - (y - 18) * artScale) * unit)
     }
 
     // MARK: - Shared
+
+    private static func paintTemplate(in rep: NSBitmapImageRep, paths: [NSBezierPath]) {
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        // Template images use alpha as their mask, so the source fill colour is irrelevant.
+        NSColor.black.setFill()
+        paths.forEach { $0.fill() }
+        NSGraphicsContext.restoreGraphicsState()
+    }
+
+    private static func paintPlateGlyph(in rep: NSBitmapImageRep, plate: NSColor, coolTint: NSColor) {
+        let px = CGFloat(rep.pixelsWide)
+        let unit = px / 36
+
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+
+        plate.setFill()
+        NSBezierPath(roundedRect: NSRect(x: 0, y: 0, width: px, height: px),
+                     xRadius: cornerRadius(for: rep), yRadius: cornerRadius(for: rep)).fill()
+
+        coolTint.setFill()
+        coolCrescent(unit).fill()
+
+        NSColor.white.setFill()
+        warmCrescent(unit).fill()
+        core(unit).fill()
+
+        NSGraphicsContext.restoreGraphicsState()
+    }
 
     private static func bitmap() -> NSBitmapImageRep {
         let px = Int((side * scale).rounded())
@@ -196,47 +205,47 @@ enum MenuBarIcon {
                                 bytesPerRow: 0, bitsPerPixel: 0)!
     }
 
-    /// Both renderings share the stopped tile's corner radius, so the silhouette never changes.
     private static func cornerRadius(for rep: NSBitmapImageRep) -> CGFloat {
         CGFloat(rep.pixelsWide) * 0.225
     }
 
-    private static func image(from rep: NSBitmapImageRep, describedAs description: String) -> NSImage {
+    private static func image(from rep: NSBitmapImageRep, describedAs description: String,
+                              template: Bool = false) -> NSImage {
         let image = NSImage(size: NSSize(width: side, height: side))
         image.addRepresentation(rep)
-        image.isTemplate = false                 // keep our own colours; don't tint to the label colour
+        image.isTemplate = template
         image.accessibilityDescription = description
         return image
     }
 }
 
 private extension MenuBarIcon.Signal {
-    /// The plate carries the state. It is the largest area in the glyph, so it is the only element
-    /// that reads reliably in peripheral vision.
     var plate: NSColor {
         switch self {
-        case .ready:   NSColor(srgbRed: 123 / 255, green: 98 / 255, blue: 232 / 255, alpha: 1)
-        case .working: NSColor(srgbRed: 224 / 255, green: 138 / 255, blue: 30 / 255, alpha: 1)
-        case .blocked: NSColor(srgbRed: 216 / 255, green: 69 / 255, blue: 58 / 255, alpha: 1)
+        case .active:
+            preconditionFailure("active renders as a template glyph")
+        case .preflight:
+            NSColor(srgbRed: 224 / 255, green: 138 / 255, blue: 30 / 255, alpha: 1)
+        case .blocked:
+            NSColor(srgbRed: 216 / 255, green: 69 / 255, blue: 58 / 255, alpha: 1)
         }
     }
 
-    /// Ready keeps the identity's second hue, the app icon's ice blue. The exceptional states drop
-    /// it for a plain white tint: a second brand hue laid over amber or red fights the meaning the
-    /// plate is carrying, and semantics win over decoration when something needs attention.
     var coolTint: NSColor {
         switch self {
-        case .ready:             NSColor(srgbRed: 127 / 255, green: 196 / 255, blue: 242 / 255, alpha: 1)
-        case .working, .blocked: NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.62)
+        case .active:
+            preconditionFailure("active renders as a template glyph")
+        case .preflight, .blocked:
+            NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.62)
         }
     }
 
-    /// Describes the picture, not the session — `MenuBarController` labels the button itself with
-    /// the exact status, and one image is shared by checking and recovering.
+    /// The status item's accessibility label carries exact readiness detail. This description names
+    /// only the cached image shared by checking and recovering.
     var accessibilityDescription: String {
         switch self {
-        case .ready:   "Jarvis is listening"
-        case .working: "Jarvis is connecting"
+        case .active: "Jarvis is active"
+        case .preflight: "Jarvis is checking readiness"
         case .blocked: "Jarvis needs attention"
         }
     }

@@ -163,6 +163,7 @@ public final class CoachDriver: @unchecked Sendable {
         activity: (any ActivityEventRecording)? = nil,
         prepMaterial: (any PrepMaterialSearching)? = nil,
         interviewFormatAddendum: String = "",
+        interviewFormat: InterviewFormat? = nil,
         replyLanguage: String? = nil
     ) {
         self.plan = plan
@@ -183,6 +184,7 @@ public final class CoachDriver: @unchecked Sendable {
             activity: activity,
             ledger: ledger,
             interviewFormatAddendum: interviewFormatAddendum,
+            interviewFormat: interviewFormat,
             replyLanguage: replyLanguage)
     }
 

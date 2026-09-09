@@ -9,13 +9,15 @@ final class ConnectionsSection: NSObject, SettingsSection {
     let fillsTab = true
 
     private static let cliCardHeight = SettingsStyle.cardHeaderHeight + SettingsStyle.rowHeight
+    private static let credentialOrder: [Credential] = [.openAIAPIKey, .geminiAPIKey]
+    private static let cliProviders: [BrainProvider] = [.claudeCode, .codexCLI]
 
     private let detector: AgentCLIDetector
-    private let apiKeyControls: APIKeyControls
+    private let apiKeyControls: [Credential: APIKeyControls]
     private var pageView: SettingsPageView?
     private var scrollView: SettingsScrollView?
     private var documentStack: NSStackView?
-    private var apiKeyHeightConstraint: NSLayoutConstraint?
+    private var apiKeyHeightConstraints: [Credential: NSLayoutConstraint] = [:]
     private var statusLabels: [BrainProvider: NSTextField] = [:]
     private var detectedCLIs: [BrainProvider: DetectedAgentCLI]?
     private var detectionTask: Task<Void, Never>?
@@ -23,10 +25,12 @@ final class ConnectionsSection: NSObject, SettingsSection {
     init(
         detector: AgentCLIDetector,
         keyStore: FileSecretStore,
-        onKeySaved: @escaping (String) -> Void
+        onKeySaved: @escaping (Credential, String) -> Void
     ) {
         self.detector = detector
-        self.apiKeyControls = APIKeyControls(store: keyStore, onKeySaved: onKeySaved)
+        self.apiKeyControls = Dictionary(uniqueKeysWithValues: Self.credentialOrder.map { credential in
+            (credential, APIKeyControls(credential: credential, store: keyStore, onKeySaved: onKeySaved))
+        })
     }
 
     func makeView() -> NSView {
@@ -44,19 +48,22 @@ final class ConnectionsSection: NSObject, SettingsSection {
         stack.autoresizingMask = [.width]
         documentStack = stack
 
-        let apiKeyCard = apiKeyControls.makeView { [weak self] height in
-            self?.apiKeyHeightConstraint?.constant = height
-            self?.recalculateDocumentHeight()
-            self?.renderPageStatus()
+        apiKeyHeightConstraints.removeAll()
+        for credential in Self.credentialOrder {
+            guard let controls = apiKeyControls[credential] else { continue }
+            let card = controls.makeView { [weak self] height in
+                self?.apiKeyHeightConstraints[credential]?.constant = height
+                self?.recalculateDocumentHeight()
+                self?.renderPageStatus()
+            }
+            card.translatesAutoresizingMaskIntoConstraints = false
+            let height = card.heightAnchor.constraint(equalToConstant: controls.preferredHeight)
+            height.isActive = true
+            apiKeyHeightConstraints[credential] = height
+            stack.addArrangedSubview(card)
         }
-        apiKeyCard.translatesAutoresizingMaskIntoConstraints = false
-        let apiKeyHeight = apiKeyCard.heightAnchor.constraint(
-            equalToConstant: apiKeyControls.preferredHeight)
-        apiKeyHeight.isActive = true
-        apiKeyHeightConstraint = apiKeyHeight
-        stack.addArrangedSubview(apiKeyCard)
 
-        for provider in [BrainProvider.claudeCode, .codexCLI] {
+        for provider in Self.cliProviders {
             let card = makeCLICard(for: provider)
             card.heightAnchor.constraint(equalToConstant: Self.cliCardHeight).isActive = true
             stack.addArrangedSubview(card)
@@ -127,7 +134,7 @@ final class ConnectionsSection: NSObject, SettingsSection {
         guard detectionTask == nil else { return }
         let detector = detector
         detectionTask = Task { [weak self] in
-            let values = await detector.detectAllAsync([.claudeCode, .codexCLI])
+            let values = await detector.detectAllAsync(Self.cliProviders)
             guard !Task.isCancelled, let self else { return }
             detectionTask = nil
             detectedCLIs = Dictionary(uniqueKeysWithValues: values.map { ($0.provider, $0) })
@@ -136,7 +143,7 @@ final class ConnectionsSection: NSObject, SettingsSection {
     }
 
     private func renderStatuses() {
-        for provider in [BrainProvider.claudeCode, .codexCLI] {
+        for provider in Self.cliProviders {
             guard let label = statusLabels[provider] else { continue }
             guard let detectedCLIs else {
                 set(label, text: "Checking…", color: .secondaryLabelColor)
@@ -172,17 +179,15 @@ final class ConnectionsSection: NSObject, SettingsSection {
         let signedInCount = detectedCLIs?.values.filter {
             $0.authenticationStatus == .signedIn
         }.count ?? 0
-        let readyCount = signedInCount + (apiKeyControls.hasSavedKey ? 1 : 0)
+        let savedKeyCount = apiKeyControls.values.filter(\.hasSavedKey).count
+        let readyCount = signedInCount + savedKeyCount
         pageView?.setStatus("\(readyCount) ready")
     }
 
     private func recalculateDocumentHeight() {
         guard let stack = documentStack else { return }
-        let visibleHeights = [
-            apiKeyControls.preferredHeight,
-            Self.cliCardHeight,
-            Self.cliCardHeight,
-        ]
+        let visibleHeights = Self.credentialOrder.compactMap { apiKeyControls[$0]?.preferredHeight }
+            + Self.cliProviders.map { _ in Self.cliCardHeight }
         let contentHeight = visibleHeights.reduce(0, +)
             + CGFloat(visibleHeights.count - 1) * SettingsStyle.sectionSpacing
         let viewportHeight = scrollView?.contentView.bounds.height ?? 0

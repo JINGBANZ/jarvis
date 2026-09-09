@@ -151,6 +151,17 @@ public final class OverlayAppearance {
         }
     }
 
+    /// Show system-design graph attachments alongside their text hints. On by default.
+    public var boxDiagramsEnabled: Bool {
+        get {
+            guard defaults.object(forKey: Defaults.Overlay.Box.diagramsEnabledKey) != nil else {
+                return Defaults.Overlay.Box.diagramsEnabled
+            }
+            return defaults.bool(forKey: Defaults.Overlay.Box.diagramsEnabledKey)
+        }
+        set { defaults.set(newValue, forKey: Defaults.Overlay.Box.diagramsEnabledKey) }
+    }
+
     /// Whether the persistent box is shown. On by default.
     public var boxEnabled: Bool {
         get {
@@ -199,6 +210,8 @@ public protocol OverlayBoxApplying: AnyObject {
     /// Called once per finished resize drag with the box's new content size, so the app can persist
     /// it. The restored size is supplied at construction instead, so it never fires for one.
     var onSizeChanged: ((Double, Double) -> Void)? { get set }
+    /// Hide or restore graph attachments without removing the accompanying text or history.
+    func setDiagramsEnabled(_ enabled: Bool)
     /// Show or hide the box live, mirroring the persisted setting.
     func setEnabled(_ enabled: Bool)
     /// Show the box with sample text (on) or restore the real log and prior visibility (off) so size

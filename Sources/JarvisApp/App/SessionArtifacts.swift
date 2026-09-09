@@ -137,7 +137,7 @@ final class SessionArtifacts {
         if let i = args.firstIndex(of: "--log-dir"), i + 1 < args.count {
             return URL(fileURLWithPath: args[i + 1])
         }
-        return secretFile.fileURL.deletingLastPathComponent().appendingPathComponent("sessions")
+        return secretFile.directoryURL.appendingPathComponent("sessions")
     }
 
     /// The agentic evaluator must inspect the live source checkout, not a baked description. Prefer

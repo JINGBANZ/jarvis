@@ -11,6 +11,16 @@ import Foundation
         return d
     }
 
+    @Test func diagramsDefaultOnAndPersistAnExplicitOff() {
+        let defaults = freshDefaults()
+        let appearance = OverlayAppearance(defaults: defaults)
+        #expect(appearance.boxDiagramsEnabled)
+        appearance.boxDiagramsEnabled = false
+        #expect(!OverlayAppearance(defaults: defaults).boxDiagramsEnabled)
+        appearance.boxDiagramsEnabled = true
+        #expect(OverlayAppearance(defaults: defaults).boxDiagramsEnabled)
+    }
+
     @Test func defaultsWhenUnset() {
         let a = OverlayAppearance(defaults: freshDefaults())
         #expect(a.captionFontSize == Defaults.Overlay.Caption.fontSize)

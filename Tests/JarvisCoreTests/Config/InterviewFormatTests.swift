@@ -8,21 +8,23 @@ import Testing
         #expect(InterviewFormat.behavioral.displayName == "Behavioral")
     }
 
-    /// Coding and behavioral are already reported as working well, so they stay empty rather than
-    /// getting new prompt guidance nobody asked for — system design is the one reported problem.
-    @Test func onlySystemDesignHasContentToday() {
-        #expect(InterviewFormat.coding.promptAddendum.isEmpty)
-        #expect(InterviewFormat.behavioral.promptAddendum.isEmpty)
+    /// Missing skills remain a normal empty state, while each authored format becomes available
+    /// through the same resource lookup the Settings picker consumes.
+    @Test func authoredFormatsHaveExpectedContent() {
+        #expect(InterviewFormat.coding.promptAddendum.contains("# Interview format: coding"))
+        #expect(InterviewFormat.behavioral.promptAddendum.contains(
+            "# Interview format: behavioral"))
+        #expect(InterviewFormat.behavioral.promptAddendum.contains("STAR"))
+        #expect(InterviewFormat.behavioral.promptAddendum.contains(
+            "candidate-owned events"))
         #expect(!InterviewFormat.systemDesign.promptAddendum.isEmpty)
         #expect(InterviewFormat.systemDesign.promptAddendum.contains("functional requirements"))
         #expect(InterviewFormat.systemDesign.promptAddendum.contains("API"))
     }
 
-    /// No selection means no addendum at all — not a guess assembled from whatever formats happen
-    /// to have content. `nil` is resolved by callers as `format?.promptAddendum ?? ""`; there is no
-    /// `InterviewFormat` API for it, so this pins the optional-chaining contract those callers rely on.
-    @Test func noSelectionResolvesToNoAddendum() {
-        let noSelection: InterviewFormat? = nil
-        #expect((noSelection?.promptAddendum ?? "") == "")
+    @Test func generalTechnicalIsAnExplicitAuthoredFormat() {
+        #expect(InterviewFormat.generalTechnical.displayName == "General Technical")
+        #expect(InterviewFormat.generalTechnical.promptAddendum.contains("# Interview format: general technical"))
+        #expect(InterviewFormat.allCases.contains(.generalTechnical))
     }
 }

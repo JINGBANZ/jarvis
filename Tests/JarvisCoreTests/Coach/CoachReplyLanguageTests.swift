@@ -4,12 +4,13 @@ import Testing
 
 @Suite struct CoachReplyLanguageTests {
     private func configuration(
-        languages: [OpenAITranscriptionLanguage] = [],
+        languages: [TranscriptionLanguage] = [],
         provider: TranscriptionProvider = .openAI,
         locale: String = "en_US"
     ) -> TranscriptionConfiguration {
         .init(provider: provider, openAIModel: .gpt4oTranscribe,
-              openAIExpectedLanguages: languages, appleSpeechLocaleIdentifier: locale)
+              openAIExpectedLanguages: languages, appleSpeechLocaleIdentifier: locale,
+              geminiExpectedLanguages: languages)
     }
 
     @Test func onlyOneSelectionOverridesConversationalReplyLanguage() {
@@ -17,6 +18,10 @@ import Testing
         #expect(configuration(languages: [.english, .mandarinChinese]).coachingReplyLanguage == nil)
         #expect(configuration(languages: [.english]).coachingReplyLanguage == "English")
         #expect(configuration(languages: [.mandarinChinese]).coachingReplyLanguage == "Mandarin")
+        #expect(configuration(languages: [.english], provider: .gemini).coachingReplyLanguage == "English")
+        #expect(configuration(provider: .gemini).coachingReplyLanguage == nil)
+        #expect(configuration(languages: [.english, .mandarinChinese], provider: .gemini)
+            .coachingReplyLanguage == nil)
         #expect(configuration(provider: .appleSpeech, locale: "fr_FR").coachingReplyLanguage == "French")
     }
 

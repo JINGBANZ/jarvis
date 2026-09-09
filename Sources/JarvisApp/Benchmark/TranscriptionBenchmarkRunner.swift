@@ -30,7 +30,7 @@ final class TranscriptionBenchmarkRunner {
     let relay = TranscriptionBenchmarkSessionRelay()
     let player = SyntheticAudioPlayer()
     let networkDiagnostics = NetworkPathDiagnostics()
-    let apiKey = ChainedSecretStore([FileSecretStore(), EnvSecretStore()]).apiKey()
+    let apiKey = ChainedSecretStore([FileSecretStore(), EnvSecretStore()]).apiKey(for: .openAIAPIKey)
     var preparedAppleLocales: [String: Locale] = [:]
     var appleLocaleFailures: [String: String] = [:]
 
@@ -185,6 +185,9 @@ final class TranscriptionBenchmarkRunner {
         let sessionStart = clock.now()
         let session = TranscriptionSessionFactory.make(
             configuration: configuration,
+            // `apiKey` above is `.openAIAPIKey`-scoped. No arm can select `.gemini` today, so this is
+            // unreachable — but a future Gemini benchmark arm must resolve its key via
+            // `arm.provider.ownCredential` instead of reusing this OpenAI-scoped one.
             apiKey: apiKey ?? "",
             appleSpeechLocale: appleLocale,
             speaker: .them,

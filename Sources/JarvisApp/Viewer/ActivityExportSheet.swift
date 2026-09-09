@@ -118,7 +118,12 @@ private final class SessionPickerWindow: NSObject, NSTableViewDataSource, NSTabl
         window.isReleasedWhenClosed = false
         super.init()
         window.delegate = self
-        window.contentView = makeContentView()
+        let content = makeContentView()
+        window.contentView = content
+        // The stack's actual height (sessions list + format + toggles + buttons) is shorter than
+        // the placeholder frame above; shrink the window to fit instead of leaving whitespace.
+        content.layoutSubtreeIfNeeded()
+        window.setContentSize(NSSize(width: 380, height: content.fittingSize.height))
     }
 
     /// Blocks until Export/Cancel/the window's close button is used; returns whether the user
@@ -132,6 +137,7 @@ private final class SessionPickerWindow: NSObject, NSTableViewDataSource, NSTabl
 
     private func makeContentView() -> NSView {
         let content = NSView(frame: NSRect(x: 0, y: 0, width: 380, height: 440))
+        content.translatesAutoresizingMaskIntoConstraints = false
 
         let scrollView = NSScrollView()
         scrollView.translatesAutoresizingMaskIntoConstraints = false
@@ -187,7 +193,8 @@ private final class SessionPickerWindow: NSObject, NSTableViewDataSource, NSTabl
             root.topAnchor.constraint(equalTo: content.topAnchor),
             root.leadingAnchor.constraint(equalTo: content.leadingAnchor),
             root.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-            root.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+            content.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            content.widthAnchor.constraint(equalToConstant: 380),
             scrollView.heightAnchor.constraint(equalToConstant: 180),
             buttonRow.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -16),
         ])

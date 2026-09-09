@@ -51,6 +51,13 @@ final class OverlaySection: NSObject, SettingsSection {
             opacityAction: #selector(captionOpacityChanged),
             opacityAccessibilityLabel: "Overlay caption background opacity")
 
+        let diagramToggle = NSSwitch()
+        diagramToggle.state = appearance.boxDiagramsEnabled ? .on : .off
+        diagramToggle.target = self
+        diagramToggle.action = #selector(diagramsEnabledChanged)
+        diagramToggle.setAccessibilityLabel("Show diagrams")
+        diagramToggle.sizeToFit()
+
         boxView = makeSurface(
             title: "Overlay Box",
             description: "A persistent history of recent Jarvis messages.",
@@ -66,7 +73,8 @@ final class OverlaySection: NSObject, SettingsSection {
             opacityValue: appearance.boxOpacity,
             opacityRange: Defaults.Overlay.Box.opacityRange,
             opacityAction: #selector(boxOpacityChanged),
-            opacityAccessibilityLabel: "Overlay box opacity")
+            opacityAccessibilityLabel: "Overlay box opacity",
+            diagramToggle: diagramToggle)
 
         if let captionView { document.addSubview(captionView) }
         if let boxView { document.addSubview(boxView) }
@@ -96,7 +104,8 @@ final class OverlaySection: NSObject, SettingsSection {
         opacityValue: Double,
         opacityRange: ClosedRange<Double>,
         opacityAction: Selector,
-        opacityAccessibilityLabel: String
+        opacityAccessibilityLabel: String,
+        diagramToggle: NSSwitch? = nil
     ) -> OverlaySurfaceSettingsView {
         OverlaySurfaceSettingsView(
             title: title,
@@ -114,7 +123,8 @@ final class OverlaySection: NSObject, SettingsSection {
             opacityValue: opacityValue,
             opacityRange: opacityRange,
             opacityAction: opacityAction,
-            opacityAccessibilityLabel: opacityAccessibilityLabel)
+            opacityAccessibilityLabel: opacityAccessibilityLabel,
+            diagramToggle: diagramToggle)
     }
 
     private func relayout() {
@@ -167,6 +177,11 @@ final class OverlaySection: NSObject, SettingsSection {
         caption.showAppearancePreview(enabled)
         captionView?.updateEnabledState(enabled)
         relayout()
+    }
+
+    @objc private func diagramsEnabledChanged(_ sender: NSSwitch) {
+        appearance.boxDiagramsEnabled = sender.state == .on
+        box.setDiagramsEnabled(appearance.boxDiagramsEnabled)
     }
 
     @objc private func boxEnabledChanged(_ sender: NSSwitch) {

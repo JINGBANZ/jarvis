@@ -31,3 +31,11 @@ public let searchPrepNotesTool = ToolDef(
     description: JarvisPrompts.Coach.ToolDescription.searchPrepNotes,
     parametersJSON: #"{"type":"object","properties":{"query":{"type":"string"}},"required":["query"],"additionalProperties":false}"#
 )
+
+/// System-design sessions can attach a visual hint without changing the terminal speak action
+/// (including force(speak) for the manual shortcut). Null means an ordinary text hint.
+public let systemDesignSpeakTool = ToolDef(
+    name: speakTool.name,
+    description: JarvisPrompts.Coach.ToolDescription.speak,
+    parametersJSON: #"{"type":"object","properties":{"lines":{"type":"array","items":{"type":"string"}},"mermaid":{"type":["string","null"]}},"required":["lines","mermaid"],"additionalProperties":false}"#
+)

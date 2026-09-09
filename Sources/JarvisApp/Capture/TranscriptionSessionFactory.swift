@@ -70,6 +70,31 @@ enum TranscriptionSessionFactory {
             #else
             preconditionFailure("Apple Speech is unavailable in this build")
             #endif
+        case .gemini:
+            GeminiLiveTranscriber(
+                apiKey: apiKey,
+                model: configuration.geminiModel,
+                expectedLanguages: configuration.geminiExpectedLanguages,
+                vocabularyKeywords: configuration.geminiVocabularyKeywords,
+                mode: configuration.geminiMode,
+                audioFormat: configuration.provider.audioFormat,
+                speaker: speaker,
+                transcript: transcript,
+                clock: clock,
+                sessionStart: sessionStart,
+                silenceTimeout: config.silenceTimeoutSeconds,
+                silenceMaxInterval: config.silenceMaxIntervalSeconds,
+                silenceIdleCutoff: speaker == .me
+                    ? config.silenceIdleCutoffSeconds
+                    : .infinity,
+                transcriptBatchingWindow: config.transcriptBatchingWindowSeconds,
+                maxBufferedAudioSeconds: config.maxBufferedAudioSeconds,
+                readyTimeout: config.realtimeReadyTimeoutSeconds,
+                pingInterval: config.realtimePingIntervalSeconds,
+                pongTimeout: config.realtimePongTimeoutSeconds,
+                networkStatus: networkStatus,
+                activity: activity,
+                benchmark: benchmark)
         }
     }
 }

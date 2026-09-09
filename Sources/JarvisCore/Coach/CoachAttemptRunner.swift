@@ -56,9 +56,10 @@ final class CoachAttemptRunner: @unchecked Sendable {
     private let coachingAttempts: (any CoachingAttemptAuditing)?
     private let activity: (any ActivityEventRecording)?
     private let ledger: CoachTranscriptLedger
-    /// Fixed for the whole session — chosen once at Start, never reclassified — so it needs none of
-    /// `prepMaterial`'s live-swap machinery; a plain stored `let` is enough.
+    /// Fixed prompt text for the session. In automatic mode that text tells the model to choose from
+    /// current evidence per response; no mutable runtime classification is required.
     private let interviewFormatAddendum: String
+    private let interviewFormat: InterviewFormat?
 
     private let runnerLock = NSLock()
     private var nextAttemptID = 0
@@ -82,6 +83,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
         activity: (any ActivityEventRecording)?,
         ledger: CoachTranscriptLedger,
         interviewFormatAddendum: String = "",
+        interviewFormat: InterviewFormat? = nil,
         replyLanguage: String? = nil
     ) {
         self.config = config
@@ -95,6 +97,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
         self.activity = activity
         self.ledger = ledger
         self.interviewFormatAddendum = interviewFormatAddendum
+        self.interviewFormat = interviewFormat
     }
 
     private func takeNextAttemptID() -> Int {
@@ -283,9 +286,12 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 result: .failed(outcome: .brainError, failure: failure, work: work))
         }
 
-        // search_prep_notes joins the fixed set only when a source actually indexed usable text —
-        // a session without prep material offers a tool set identical to before this feature existed.
-        let tools: [ToolDef] = attempt.prepMaterial != nil ? coachTools + [searchPrepNotesTool] : coachTools
+        // Search joins only when usable prep text exists; the format-specific speak schema
+        // still ends the same attempt, including the manual shortcut's forced speak.
+        let baseTools = coachTools.map {
+            interviewFormat == .systemDesign && $0.name == speakTool.name ? systemDesignSpeakTool : $0
+        }
+        let tools = attempt.prepMaterial != nil ? baseTools + [searchPrepNotesTool] : baseTools
 
         let result: AttemptResult = await { () async -> AttemptResult in
             var iterations = 0
@@ -402,18 +408,22 @@ final class CoachAttemptRunner: @unchecked Sendable {
                             newPhase: .captureScreenContinuation)
                     }
 
-                case .speak(let callID, let lines):
+                case .speak(let callID, let lines, let mermaid):
                     if Task.isCancelled {
                         jlog("… attempt cancelled (stopped) before speaking")
                         return .cancelled
                     }
                     jlog("💬 \(lines.joined(separator: " "))")
                     activity?.record(.tip(lines: lines))
+                    let diagram = interviewFormat == .systemDesign ? mermaid.flatMap(DiagramHint.init) : nil
+                    if mermaid != nil && diagram == nil {
+                        jlog("Diagram hint omitted: unsupported graph or interview format")
+                    }
                     overlay.render(
                         lines,
                         perLineSeconds: lines.map {
                             OverlayTiming.displaySeconds(for: $0, config: config)
-                        })
+                        }, diagram: diagram)
                     turnMessages.append(.assistantToolCalls(response.rawToolCalls))
                     turnMessages.append(.init(
                         role: .tool,
