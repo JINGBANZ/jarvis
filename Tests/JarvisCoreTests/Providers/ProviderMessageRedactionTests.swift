@@ -32,9 +32,21 @@ import Testing
         #expect(redacted.hasSuffix("…"))
     }
 
+    /// Redaction has to leave the evidence intact: `message` is the only place a provider's own
+    /// wording survives, so a pattern that eats an ordinary word is a silent corruption. `sk-` only
+    /// starts a key at a word boundary (not inside "task-force" or "disk-image"), and "bearer" only
+    /// precedes a token when something token-shaped and long follows it.
     @Test func leavesOrdinaryTextAlone() {
         #expect(ProviderMessageRedaction.redact("Country, region, or territory not supported")
                 == "Country, region, or territory not supported")
         #expect(ProviderMessageRedaction.redact("   ") == "")
+        #expect(ProviderMessageRedaction.redact("the task-force runner failed on disk-image volume")
+                == "the task-force runner failed on disk-image volume")
+        #expect(ProviderMessageRedaction.redact("The bearer of this message is the model")
+                == "The bearer of this message is the model")
+        let advice = ProviderMessageRedaction.redact(
+            "using Bearer auth (i.e. Authorization: Bearer YOUR_KEY_1234567)")
+        #expect(!advice.contains("YOUR_KEY_1234567"))
+        #expect(advice.contains("using Bearer auth"))
     }
 }

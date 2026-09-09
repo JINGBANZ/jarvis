@@ -9,10 +9,14 @@ import Foundation
 public enum ProviderMessageRedaction {
     public static let maximumLength = 300
 
+    // `sk-` starts a key only at a word boundary, and "bearer" precedes a token only when something
+    // long and token-shaped follows: an unanchored pattern eats ordinary words ("task-force",
+    // "disk-image", "the bearer of this message"), and a message with words silently missing is
+    // worse evidence than no message at all.
     private static let patterns: [(NSRegularExpression, String)] = [
-        (regex(#"sk-[A-Za-z0-9_\-*.]{4,}"#), "sk-…"),
+        (regex(#"(?<![A-Za-z0-9])sk-[A-Za-z0-9_\-*.]{4,}"#), "sk-…"),
         (regex(#"AIza[A-Za-z0-9_\-*]{4,}"#), "AIza…"),
-        (regex(#"(?i)bearer\s+[^\s"']+"#), "Bearer …"),
+        (regex(#"(?i)bearer\s+[A-Za-z0-9._\-]{8,}"#), "Bearer …"),
         (regex(#"(?i)([?&](?:key|api_key|apikey|token|access_token)=)[^&\s"']+"#), "$1…"),
         (regex(#"(?i)(x-goog-api-key:\s*)[^\s"']+"#), "$1…"),
     ]
