@@ -34,7 +34,6 @@ public final class ActivityLog: @unchecked Sendable {
         public let time: String
         public let message: String
         public let imageFile: String?
-        public let response: ActivityResponse?
         /// Numeric event time and stable insertion tie-breaker. Both are nil for old or mixed
         /// sessions that cannot be reordered safely.
         public let occurredAt: TimeInterval?
@@ -44,13 +43,11 @@ public final class ActivityLog: @unchecked Sendable {
             message: String,
             imageFile: String?,
             occurredAt: TimeInterval? = nil,
-            insertionOrder: UInt64? = nil,
-            response: ActivityResponse? = nil
+            insertionOrder: UInt64? = nil
         ) {
             self.time = time
             self.message = message
             self.imageFile = imageFile
-            self.response = response
             self.occurredAt = occurredAt
             self.insertionOrder = insertionOrder
         }
@@ -73,7 +70,6 @@ public final class ActivityLog: @unchecked Sendable {
     /// On-disk line format for `jarvis-activity.jsonl` (one JSON object per line).
     private struct PersistedEntry: Codable {
         let t: String       // time, HH:mm:ss
-        let response: ActivityResponse? // absent in legacy, unstructured rows
         let m: String       // message
         let s: String?      // shot filename, if any
         let k: ActivityEvent.Kind?  // stable event identity; nil only for backward-compatible old rows
@@ -221,14 +217,14 @@ public final class ActivityLog: @unchecked Sendable {
             let baseEntry = Entry(
                 time: df.string(from: date),
                 message: rendered.message,
-                imageFile: shotFilename, response: event.response)
+                imageFile: shotFilename)
             let item = entries.append(baseEntry, occurredAt: date.timeIntervalSince1970)
             let entry = Entry(
                 time: baseEntry.time,
                 message: baseEntry.message,
                 imageFile: baseEntry.imageFile,
                 occurredAt: item.occurredAt,
-                insertionOrder: item.insertionOrder, response: baseEntry.response)
+                insertionOrder: item.insertionOrder)
             totalCount += 1
             if rendered.kind == .sessionEnded {
                 sessionHasEnded = true
@@ -248,8 +244,7 @@ public final class ActivityLog: @unchecked Sendable {
                     imageBase64: rendered.imageBase64,
                     insertionIndex: chronologicalIndex,
                     insertionOrder: item.insertionOrder,
-                    removedInsertionOrders: removedItems.map(\.insertionOrder),
-                    response: entry.response)))
+                    removedInsertionOrders: removedItems.map(\.insertionOrder))))
         }
     }
 
@@ -278,7 +273,7 @@ public final class ActivityLog: @unchecked Sendable {
                     time: e.time,
                     message: e.message,
                     imageBase64: b64,
-                    insertionOrder: item.insertionOrder, response: e.response)
+                    insertionOrder: item.insertionOrder)
             }
             return Snapshot(
                 shellHTML: Self.htmlShell(),
@@ -300,7 +295,6 @@ public final class ActivityLog: @unchecked Sendable {
     ) -> Data? {
         try? JSONEncoder().encode(PersistedEntry(
             t: entry.time,
-            response: entry.response,
             m: entry.message,
             s: entry.imageFile,
             k: kind,
@@ -322,13 +316,11 @@ public final class ActivityLog: @unchecked Sendable {
         imageBase64: String?,
         insertionIndex: Int? = nil,
         insertionOrder: UInt64? = nil,
-        removedInsertionOrders: [UInt64] = [],
-        response: ActivityResponse? = nil
+        removedInsertionOrders: [UInt64] = []
     ) -> String {
         struct Row: Encodable {
             let time: String
             let message: String
-            let response: ActivityResponse?
             let cls: String
             let img: String?
             let insertionIndex: Int?
@@ -336,7 +328,7 @@ public final class ActivityLog: @unchecked Sendable {
             let insertionOrder: String?
             let removedInsertionOrders: [String]?
         }
-        let row = Row(time: time, message: message, response: response, cls: cssClass(for: message),
+        let row = Row(time: time, message: message, cls: cssClass(for: message),
                       img: imageBase64.map { "data:image/jpeg;base64,\($0)" },
                       insertionIndex: insertionIndex,
                       insertionOrder: insertionOrder.map(String.init),
@@ -475,15 +467,6 @@ public final class ActivityLog: @unchecked Sendable {
                  white-space: pre-wrap; }
           .t { color: var(--muted); font-size: 10px; }
           .m { min-width: 0; }
-          .response-section + .response-section { margin-top: 12px; padding-top: 10px;
-                                                  border-top: 1px solid var(--line); }
-          .response-section h3 { margin: 0 0 4px; color: var(--muted); font-size: 10px;
-                                 font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
-          .response-section p { margin: 0; }
-          .response-section .code-language { color: var(--muted); font-size: 10px; }
-          .response-section pre { margin: 6px 0 0; padding: 10px; overflow-x: auto;
-                                  white-space: pre; background: var(--surface); color: var(--text);
-                                  border-radius: 6px; font: 11px/1.5 ui-monospace, Menlo, monospace; }
           .say .m  { color: var(--say); }
           .see .m  { color: var(--see); }
           .hear .m { color: var(--hear); }
@@ -506,31 +489,6 @@ public final class ActivityLog: @unchecked Sendable {
         <main id="log"></main>
         <div class="lightbox" id="lightbox"><img id="lightbox-img" alt="full-size screenshot"></div>
         <script>
-          function responseSection(parent,label){
-            var section=document.createElement('section'); section.className='response-section';
-            var heading=document.createElement('h3'); heading.textContent=label;
-            section.appendChild(heading); parent.appendChild(section); return section;
-          }
-          function responseText(parent,text,cls){
-            var body=document.createElement('p'); body.textContent=text;
-            if(cls) body.className=cls;
-            parent.appendChild(body);
-          }
-          function renderResponse(parent,response){
-            if(response.lines && response.lines.length){
-              responseText(responseSection(parent,'Hint'),response.lines.join('\\n'));
-            }
-            if(response.explanation && response.explanation.trim()){
-              responseText(responseSection(parent,'Explanation'),response.explanation);
-            }
-            if(response.code && response.code.code && response.code.code.trim()){
-              var section=responseSection(parent,'Code');
-              if(response.code.language) responseText(section,response.code.language,'code-language');
-              if(response.code.placement) responseText(section,response.code.placement);
-              var pre=document.createElement('pre'), code=document.createElement('code');
-              code.textContent=response.code.code; pre.appendChild(code); section.appendChild(pre);
-            }
-          }
           function appendRow(p){
             var log=document.getElementById('log');
             var near=(window.innerHeight+window.scrollY)>=(document.body.scrollHeight-60);
@@ -545,8 +503,7 @@ public final class ActivityLog: @unchecked Sendable {
               row.dataset.insertionOrder=p.insertionOrder;
             }
             var t=document.createElement('span'); t.className='t'; t.textContent=p.time||'';
-            var m=document.createElement('div'); m.className='m';
-            if(p.response) renderResponse(m,p.response); else m.textContent=p.message||'';
+            var m=document.createElement('span'); m.className='m'; m.textContent=p.message||'';
             if(p.img){
               var a=document.createElement('a'); a.className='shot'; a.href=p.img;
               var img=document.createElement('img'); img.src=p.img; img.alt='screenshot of the user\\'s screen';

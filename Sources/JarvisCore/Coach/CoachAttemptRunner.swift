@@ -431,7 +431,8 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     guard delivery.accepted else { return .cancelled }
                     let explanation = delivery.explanation
                     let code = delivery.code
-                    activity?.record(.tip(lines: lines, explanation: explanation, codeSnippet: code))
+                    let codeText = code.map { "\($0.placement)\n\($0.code)" }
+                    activity?.record(.tip(lines: lines + (explanation.map { [$0] } ?? []) + (codeText.map { [$0] } ?? [])))
                     // Only the selected call executes; extra provider calls were never delivered.
                     // History describes delivered optional content, including independently enabled code.
                     // Parsed values contain only JSON primitives, so encoding cannot fail.

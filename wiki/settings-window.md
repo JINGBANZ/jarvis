@@ -207,18 +207,6 @@ Both features require Overlay Box; switching the box off also disables their sav
 releases their shortcuts, and clears/disables the live code dock. Re-enabling the box alone does not
 restore code; enable code before the next Start. The rows show the dependency. No shortcut enables the master box.
 
-## Activity response sections
-
-Each new coaching response retains its delivered **Hint**, optional **Explanation**, and optional
-**Code** as separate fields through `ActivityResponse`. The Activity feed labels each present part;
-code keeps its indentation in a monospace block with language and placement guidance. The same
-sections survive live replay, reopening a saved session, and Markdown, plain-text, or HTML export.
-The recorder includes only explanation and code actually accepted by the overlay.
-
-Existing sessions without structured response fields display their original messages. Activity does
-not guess boundaries from old flattened prose. New records also retain a readable text message for
-older readers and the session evaluator; structured fields drive the sectioned viewer.
-
 ## Brain
 
 The Brain tab owns the whole "who answers a coaching attempt" decision, persisted through

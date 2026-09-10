@@ -309,7 +309,7 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
             retainingMostRecentInsertions: ActivityLog.retainedEntryLimit)
         let rows = snapshot.entries.map { entry, data in
             ActivityLog.rowScript(time: entry.time, message: entry.message,
-                                  imageBase64: data?.base64EncodedString(), response: entry.response)
+                                  imageBase64: data?.base64EncodedString())
         }
         beginLoad(shell: ActivityLog.htmlShell(), rows: rows,
                   shown: rows.count, total: snapshot.total)
