@@ -11,13 +11,25 @@ public final class HotkeyPreferences: @unchecked Sendable {
     private let defaults: UserDefaults
     public let shortcut: CoachingShortcut
     private var keyCodeKey: String {
-        shortcut == .hint ? Defaults.Hotkey.keyCodeKey : Defaults.Hotkey.explanationKeyCodeKey
+        switch shortcut {
+        case .hint: Defaults.Hotkey.keyCodeKey
+        case .explainMore: Defaults.Hotkey.explanationKeyCodeKey
+        case .showCode: Defaults.Hotkey.codeKeyCodeKey
+        }
     }
     private var modifiersKey: String {
-        shortcut == .hint ? Defaults.Hotkey.modifiersKey : Defaults.Hotkey.explanationModifiersKey
+        switch shortcut {
+        case .hint: Defaults.Hotkey.modifiersKey
+        case .explainMore: Defaults.Hotkey.explanationModifiersKey
+        case .showCode: Defaults.Hotkey.codeModifiersKey
+        }
     }
     private var defaultCombination: HotkeyCombination {
-        shortcut == .hint ? Defaults.Hotkey.combination : Defaults.Hotkey.explanationCombination
+        switch shortcut {
+        case .hint: Defaults.Hotkey.combination
+        case .explainMore: Defaults.Hotkey.explanationCombination
+        case .showCode: Defaults.Hotkey.codeCombination
+        }
     }
 
     public init(defaults: UserDefaults = .standard, shortcut: CoachingShortcut = .hint) {
