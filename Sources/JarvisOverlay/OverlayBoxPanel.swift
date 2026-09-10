@@ -23,12 +23,18 @@ import JarvisCore
 @MainActor
 public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplying {
     private let panel: NSPanel
-    /// The layer-backed, opaque rounded fill behind the text — its alpha is the box's opacity.
+    /// The rounded container clips the independently adjustable history and code fills.
     private let box: ResizeReportingView
     private let textView: NSTextView
+    private let historyBackground = NSView(frame: .zero)
+    private var codeFontSize = CGFloat(Defaults.Overlay.Code.fontSize)
+    private var codePreviewEnabled: Bool?
     private let codeView = CodeSnippetView(frame: .zero)
     private var codeSnippet: CodeSnippet?
     private var codeEnabled = Defaults.Code.enabled
+    private var displayedCodeEnabled: Bool {
+        display == .sample ? (codePreviewEnabled ?? codeEnabled) : codeEnabled
+    }
     private static let sampleCode = CodeSnippet(language: "swift", placement: "At the start of solve",
         code: "guard !items.isEmpty else { return nil }\nlet first = items[0]")
     /// The chrome strip across the top: collapse, the name, clear.
@@ -135,9 +141,12 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         box.wantsLayer = true
         // From the registry, like `fontSize` above: a literal here would be a second default that
         // silently disagrees with `Defaults.Overlay.Box.opacity` for any caller but `AppDelegate`.
-        box.layer?.backgroundColor = NSColor(
+        // Separate fills keep the history's opacity from showing through the code backdrop.
+        historyBackground.wantsLayer = true
+        historyBackground.layer?.backgroundColor = NSColor(
             white: Self.boxWhite,
             alpha: CGFloat(Defaults.Overlay.Box.opacity)).cgColor
+        box.addSubview(historyBackground)
         box.layer?.cornerRadius = OverlayBoxChrome.cornerRadius
         box.layer?.masksToBounds = true
         self.box = box
@@ -186,7 +195,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         codeView.onDismiss = { [weak self] in
             guard let self else { return }
             if self.display == .log { self.codeSnippet = nil }
-            self.codeView.show(nil, fontSize: self.fontSize, enabled: self.codeEnabled && !self.isCollapsed)
+            self.codeView.show(nil, fontSize: self.codeFontSize, enabled: self.displayedCodeEnabled && !self.isCollapsed)
             self.layoutCode()
         }
         header.collapseButton.target = self
@@ -301,8 +310,9 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     }
 
     private func refreshCode() {
-        codeView.show(codeEnabled ? (display == .sample ? Self.sampleCode : codeSnippet) : nil,
-                      fontSize: fontSize, enabled: codeEnabled && !isCollapsed)
+        let enabled = displayedCodeEnabled
+        codeView.show(enabled ? (display == .sample ? Self.sampleCode : codeSnippet) : nil,
+                      fontSize: codeFontSize, enabled: enabled && !isCollapsed)
         layoutCode()
     }
 
@@ -312,6 +322,8 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
             codeView.preferredHeight(viewportWidth: box.bounds.width))
         // Preserve the header and one history line even at the minimum expanded size.
         let height = codeView.isHidden ? 0 : min(max(0, available - 44), max(96, preferred))
+        historyBackground.frame = NSRect(x: 0, y: height, width: box.bounds.width,
+                                         height: max(0, box.bounds.height - height))
         codeView.frame = NSRect(x: 0, y: 0, width: box.bounds.width, height: height)
         codeView.needsLayout = true
         codeView.layoutSubtreeIfNeeded()
@@ -448,6 +460,20 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
 
     // MARK: - OverlayBoxApplying
 
+    public func setCodeFontSize(_ points: Double) {
+        codeFontSize = CGFloat(points)
+        refreshCode()
+    }
+
+    public func setCodeBackgroundOpacity(_ opacity: Double) {
+        codeView.layer?.backgroundColor = CodeSnippetView.background.withAlphaComponent(CGFloat(opacity)).cgColor
+    }
+
+    public func setCodePreviewEnabled(_ enabled: Bool) {
+        codePreviewEnabled = enabled
+        refreshCode()
+    }
+
     public func setDiagramsEnabled(_ enabled: Bool) {
         diagramsEnabled = enabled
         renderDisplay()
@@ -456,7 +482,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     /// Set the box's background-fill opacity (0–1), live. Only the alpha varies; the fill colour stays
     /// constant. The window stays non-opaque so a dimmed fill reads as translucent over what's behind.
     public func setOpacity(_ opacity: Double) {
-        box.layer?.backgroundColor = NSColor(white: Self.boxWhite, alpha: CGFloat(opacity)).cgColor
+        historyBackground.layer?.backgroundColor = NSColor(white: Self.boxWhite, alpha: CGFloat(opacity)).cgColor
     }
 
     /// Set the response text's point size, live; the timestamp tracks a couple points smaller.
@@ -547,7 +573,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     var isPanelVisible: Bool { panel.isVisible }
 
     /// The box fill's current alpha (the opacity the user picked).
-    var currentBoxOpacity: CGFloat { box.layer?.backgroundColor?.alpha ?? 0 }
+    var currentBoxOpacity: CGFloat { historyBackground.layer?.backgroundColor?.alpha ?? 0 }
 
     /// The response text's current point size (the size the user picked).
     var currentFontPointSize: CGFloat { fontSize }

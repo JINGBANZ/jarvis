@@ -166,6 +166,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             width: appearance.boxWidth, height: appearance.boxHeight))
         overlayBox.setFontSize(appearance.boxFontSize)
         overlayBox.setOpacity(appearance.boxOpacity)
+        overlayBox.setCodeFontSize(appearance.codeFontSize)
+        overlayBox.setCodeBackgroundOpacity(appearance.codeBackgroundOpacity)
         overlayBox.setDiagramsEnabled(appearance.boxDiagramsEnabled)
         // The panel reports a finished resize drag; persistence stays here, beside the other
         // overlay settings, so the panel keeps knowing nothing about UserDefaults.
@@ -220,7 +222,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                 preferences: hotkeyPreferences,
                 explanationPreferences: explanationPreferences,
                 codePreferences: codePreferences,
-                onCodeChanged: { [weak self] in self?.refreshOptionalShortcut(.showCode) },
                 boxEnabled: { [weak self] in self?.appearance.boxEnabled == true },
                 onExplanationsChanged: { [weak self] in self?.refreshOptionalShortcut(.explainMore) },
                 hasActiveHotkey: { [weak self] shortcut in
@@ -235,7 +236,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                     // than falsely claiming a rebind that never happened.
                     guard let self else { return .failed(status: -1) }
                     let outcome = self.hotkeys?.apply(combination, for: shortcut) ?? .failed(status: -1)
-                    if self.requestManualHint != nil, !self.sessionAllows(shortcut) {
+                    if (shortcut == .showCode && !self.codePreferences.isEnabled)
+                        || (self.requestManualHint != nil && !self.sessionAllows(shortcut)) {
                         self.hotkeys?.unregister(shortcut) // Validate ownership, then release until Start.
                     }
                     return outcome
@@ -244,6 +246,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             brainSection,
             connectionsSection,
             OverlaySection(appearance: appearance, caption: overlayCaption, box: overlayBox,
+                codePreferences: codePreferences,
+                onCodeChanged: { [weak self] in self?.refreshOptionalShortcut(.showCode) },
                 onBoxEnabledChanged: { [weak self] enabled in
                     guard let self, !enabled else { return }
                     self.explanationPreferences.isEnabled = false

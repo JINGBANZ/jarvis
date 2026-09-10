@@ -14,7 +14,6 @@ final class HotkeyBindingView: NSObject {
 
     private let preferences: HotkeyPreferences
     private let codePreferences: CodePreferences?
-    private let onCodeChanged: () -> Void
     private let boxEnabled: () -> Bool
     private var explanationRow: SettingsRowView?
     private let explanationPreferences: ExplanationPreferences?
@@ -23,10 +22,10 @@ final class HotkeyBindingView: NSObject {
     private var shortcutRow: SettingsRowView?
     private var cardHeightConstraint: NSLayoutConstraint?
 
-    private var isEnabled: Bool { explanationPreferences?.isEnabled ?? codePreferences?.isEnabled ?? true }
+    private var isEnabled: Bool { explanationPreferences?.isEnabled ?? true }
     private var cardHeight: CGFloat {
         SettingsStyle.cardHeaderHeight
-            + (explanationPreferences == nil && codePreferences == nil ? 0 : SettingsStyle.rowHeight)
+            + (explanationPreferences == nil ? 0 : SettingsStyle.rowHeight)
             + (isEnabled ? SettingsStyle.rowHeight : 0)
     }
     /// Whether the controller currently has *any* combination registered. This is the only thing
@@ -56,14 +55,12 @@ final class HotkeyBindingView: NSObject {
         preferences: HotkeyPreferences,
         explanationPreferences: ExplanationPreferences? = nil,
         codePreferences: CodePreferences? = nil,
-        onCodeChanged: @escaping () -> Void = {},
         boxEnabled: @escaping () -> Bool = { true },
         onExplanationsChanged: @escaping () -> Void = {},
         hasActiveHotkey: @escaping () -> Bool,
         applyCombination: @escaping (HotkeyCombination) -> HotkeyRegistrationOutcome
     ) {
         self.codePreferences = codePreferences
-        self.onCodeChanged = onCodeChanged
         self.boxEnabled = boxEnabled
         self.preferences = preferences
         self.explanationPreferences = explanationPreferences
@@ -96,14 +93,14 @@ final class HotkeyBindingView: NSObject {
         shortcutRow = row
         card.contentView?.addSubview(row)
         var toggleRow: SettingsRowView?
-        if explanationPreferences != nil || codePreferences != nil {
+        if explanationPreferences != nil {
             let toggle = NSSwitch()
             toggle.target = self
             toggle.action = #selector(explanationsChanged)
-            toggle.setAccessibilityLabel(codePreferences == nil ? "Enable explanations" : "Show code with hints")
+            toggle.setAccessibilityLabel("Enable explanations")
             explanationSwitch = toggle
             let settingsRow = SettingsRowView(
-                title: codePreferences == nil ? "Enable explanations" : "Show code with hints",
+                title: "Enable explanations",
                 detail: "Takes effect the next time you start",
                 controlView: toggle,
                 controlSize: NSSize(width: 44, height: 26))
@@ -158,10 +155,7 @@ final class HotkeyBindingView: NSObject {
 
     @objc private func explanationsChanged() {
         guard let explanationSwitch else { return }
-        if let codePreferences {
-            codePreferences.isEnabled = explanationSwitch.state == .on
-            onCodeChanged()
-        } else if let explanationPreferences {
+        if let explanationPreferences {
             explanationPreferences.isEnabled = explanationSwitch.state == .on
             onExplanationsChanged()
         }
@@ -201,7 +195,11 @@ final class HotkeyBindingView: NSObject {
         switch outcome {
         case .registered: showsFailure = false
         case .failed: showsFailure = true
-        case nil: showsFailure = !hasActiveHotkey()
+        case nil: showsFailure = (codePreferences?.isEnabled ?? true) && !hasActiveHotkey()
+        }
+        if preferences.shortcut == .showCode {
+            shortcutRow?.setDetail(codePreferences?.isEnabled == true
+                ? "Requires ⌘ or ⌥" : "Enable Show code with hints in Overlay settings")
         }
         guard isEnabled && showsFailure else {
             calloutHeightConstraint?.constant = 0

@@ -21,6 +21,28 @@ import Foundation
         #expect(OverlayAppearance(defaults: defaults).boxDiagramsEnabled)
     }
 
+    @Test func codeAppearancePersistsIndependentlyAndRejectsNonfiniteValues() {
+        let defaults = freshDefaults()
+        let appearance = OverlayAppearance(defaults: defaults)
+        #expect(appearance.codeFontSize == 18)
+        #expect(appearance.codeBackgroundOpacity == 1)
+        appearance.codeFontSize = 14
+        appearance.codeBackgroundOpacity = 0.2
+        appearance.boxFontSize = 30
+        appearance.boxOpacity = 0.9
+        let restored = OverlayAppearance(defaults: defaults)
+        #expect(restored.codeFontSize == 14)
+        #expect(restored.codeBackgroundOpacity == 0.2)
+        restored.codeFontSize = .nan
+        restored.codeBackgroundOpacity = .infinity
+        #expect(restored.codeFontSize == 18)
+        #expect(restored.codeBackgroundOpacity == 1)
+        restored.codeFontSize = 0
+        restored.codeBackgroundOpacity = -1
+        #expect(restored.codeFontSize == 12)
+        #expect(restored.codeBackgroundOpacity == 0)
+    }
+
     @Test func defaultsWhenUnset() {
         let a = OverlayAppearance(defaults: freshDefaults())
         #expect(a.captionFontSize == Defaults.Overlay.Caption.fontSize)

@@ -173,6 +173,16 @@ public enum Defaults {
     /// durable history rather than a flashing caption. The box is a session surface: switched on, it
     /// appears on Start and goes away on Stop.
     public enum Overlay {
+        /// Appearance of the code area within the persistent box.
+        public enum Code {
+            public static let fontSizeKey = "overlayCode.fontSize"
+            public static let fontSize: Double = 18
+            public static let fontSizeRange: ClosedRange<Double> = 12...18
+            public static let opacityKey = "overlayCode.backgroundOpacity"
+            public static let opacity: Double = 1
+            public static let opacityRange: ClosedRange<Double> = 0...1
+        }
+
 
         /// The transient on-screen tip that fades after each response.
         public enum Caption {

@@ -56,8 +56,17 @@ final class OverlaySurfaceSettingsView: NSView {
     private let opacityRow: SettingsRowView
     private let diagramRow: SettingsRowView?
 
+    var supplementaryView: OverlaySurfaceSettingsView? {
+        didSet {
+            oldValue?.removeFromSuperview()
+            if let supplementaryView { card.contentView?.addSubview(supplementaryView) }
+        }
+    }
+
     var preferredHeight: CGFloat {
-        Self.headerHeight + (toggle.state == .on ? SettingsStyle.rowHeight * (diagramRow == nil ? 2 : 3) : 0)
+        guard toggle.state == .on else { return Self.headerHeight }
+        return Self.headerHeight + SettingsStyle.rowHeight * (diagramRow == nil ? 2 : 3)
+            + (supplementaryView?.preferredHeight ?? 0)
     }
 
     init(
@@ -156,6 +165,7 @@ final class OverlaySurfaceSettingsView: NSView {
         sizeRow.isHidden = !enabled
         opacityRow.isHidden = !enabled
         diagramRow?.isHidden = !enabled
+        supplementaryView?.isHidden = !enabled
         needsLayout = true
     }
 
@@ -196,8 +206,11 @@ final class OverlaySurfaceSettingsView: NSView {
             height: 18)
 
         if toggle.state == .on {
-            let extraHeight = diagramRow == nil ? 0 : SettingsStyle.rowHeight
-            diagramRow?.frame = NSRect(x: 0, y: 0, width: content.bounds.width, height: extraHeight)
+            let supplementaryHeight = supplementaryView?.preferredHeight ?? 0
+            supplementaryView?.frame = NSRect(x: 0, y: 0, width: content.bounds.width, height: supplementaryHeight)
+            let diagramHeight = diagramRow == nil ? 0 : SettingsStyle.rowHeight
+            let extraHeight = diagramHeight + supplementaryHeight
+            diagramRow?.frame = NSRect(x: 0, y: supplementaryHeight, width: content.bounds.width, height: diagramHeight)
             opacityRow.frame = NSRect(
                 x: 0,
                 y: extraHeight,

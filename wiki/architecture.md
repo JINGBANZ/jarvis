@@ -226,17 +226,17 @@ correction and relevant next lines; an invalid overall approach receives a corre
 Without visible code, known problem context supports a first component without inventing unseen names.
 
 [`OverlayBoxPanel`](../Sources/JarvisOverlay/OverlayBoxPanel.swift) pins the snippet in a separate
-bottom scroll area inside the existing capture-excluded panel. Its opaque dark background preserves
-syntax contrast regardless of history opacity. Long code lines wrap within the dock without changing
+bottom scroll area inside the existing capture-excluded panel. Its dark background defaults to opaque
+and has its own opacity, independent of the history fill (see [Overlay appearance](./settings-window.md#overlay-appearance)). Long code lines wrap within the dock without changing
 source text or correction highlights. The dock measures wrapped content to use available space;
-code uses a compact monospace size and shrinks only as needed to fit, down to a readable minimum
+code uses its configured compact monospace size and shrinks only as needed to fit, down to a readable minimum
 (see `CodeSnippetView`). Very small panels retain vertical scrolling rather than clipping code or
 shrinking it indefinitely. Each new hint
 replaces its snippet, or clears the previous code when none is appropriate, so guidance and code agree.
 Dismiss and session clear remove the snippet. While enabled, an empty code area remains reserved;
 a session started with code off has no dock. The dock collapses
 with the header and restores its snippet on expansion. Settings preview
-includes code only when enabled and restores the real snippet on close. The caption carries
+follows saved code enablement while stopped and restores the real snippet on close. The caption carries
 only the short hint; Activity includes the accepted placement and code. Explanation preferences do
 not govern code. Box visibility and code acceptance are checked together on the main actor at delivery;
 a hidden snippet is also removed from committed tool history and Activity. Disabling the master box

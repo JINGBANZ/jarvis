@@ -281,7 +281,8 @@ playback, remains in
 
 ## Built
 
-**Show code with hints** optionally supplies the next contextual coding component with each hint.
+**Show code with hints**, configured under Overlay Box with independent live code text-size and
+background-opacity controls (`OverlaySection`, `OverlayAppearance`), optionally supplies the next contextual coding component with each hint.
 Its capability is fixed at Start; the configurable fallback hotkey requests code for the current
 guidance only in enabled sessions. Settings changes take effect on the next Start.
 [`CodeSnippet`](../Sources/JarvisCore/Overlay/CodeSnippet.swift) validates bounded attachments;

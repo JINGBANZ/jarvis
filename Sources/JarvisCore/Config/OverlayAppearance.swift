@@ -65,6 +65,49 @@ public final class OverlayAppearance {
         set { defaults.set(newValue, forKey: Defaults.Overlay.Caption.enabledKey) }
     }
 
+    // MARK: - Code area
+
+    public var codeFontSize: Double {
+        get {
+            guard defaults.object(forKey: Defaults.Overlay.Code.fontSizeKey) != nil else {
+                return Defaults.Overlay.Code.fontSize
+            }
+            return Self.clamp(
+                defaults.double(forKey: Defaults.Overlay.Code.fontSizeKey),
+                to: Defaults.Overlay.Code.fontSizeRange,
+                fallback: Defaults.Overlay.Code.fontSize)
+        }
+        set {
+            defaults.set(
+                Self.clamp(
+                    newValue,
+                    to: Defaults.Overlay.Code.fontSizeRange,
+                    fallback: Defaults.Overlay.Code.fontSize),
+                forKey: Defaults.Overlay.Code.fontSizeKey)
+        }
+    }
+
+    /// Opacity (0–1) of the code area's background fill.
+    public var codeBackgroundOpacity: Double {
+        get {
+            guard defaults.object(forKey: Defaults.Overlay.Code.opacityKey) != nil else {
+                return Defaults.Overlay.Code.opacity
+            }
+            return Self.clamp(
+                defaults.double(forKey: Defaults.Overlay.Code.opacityKey),
+                to: Defaults.Overlay.Code.opacityRange,
+                fallback: Defaults.Overlay.Code.opacity)
+        }
+        set {
+            defaults.set(
+                Self.clamp(
+                    newValue,
+                    to: Defaults.Overlay.Code.opacityRange,
+                    fallback: Defaults.Overlay.Code.opacity),
+                forKey: Defaults.Overlay.Code.opacityKey)
+        }
+    }
+
     // MARK: - Overlay Box (persistent response history)
 
     /// Point size of the box's response text.
@@ -205,6 +248,10 @@ public protocol OverlayCaptionApplying: AnyObject {
 /// `OverlayBoxPanel` (in the overlay target) conforms; tests can supply a fake.
 @MainActor
 public protocol OverlayBoxApplying: AnyObject {
+    func setCodeFontSize(_ points: Double)
+    func setCodeBackgroundOpacity(_ opacity: Double)
+    /// Preview the saved setting without changing the active session's code availability.
+    func setCodePreviewEnabled(_ enabled: Bool)
     func setOpacity(_ opacity: Double)
     func setFontSize(_ points: Double)
     /// Called once per finished resize drag with the box's new content size, so the app can persist

@@ -75,6 +75,51 @@ import Testing
         #expect(box.currentCodeHeight > 0)
     }
 
+    @MainActor @Test func codeAppearanceDoesNotInheritHistoryAppearance() throws {
+        let previousWindows = Set(NSApplication.shared.windows.map(\.windowNumber))
+        let box = OverlayBoxPanel()
+        let window = try #require(NSApplication.shared.windows.first { !previousWindows.contains($0.windowNumber) })
+        let content = try #require(window.contentView)
+        let dock = try #require(content.subviews.compactMap { $0 as? CodeSnippetView }.first)
+        box.setEnabled(true)
+        box.setSessionLive(true)
+        defer { box.setSessionLive(false) }
+        box.setCodeEnabled(true)
+        box.setCodeFontSize(14)
+        box.setCodeBackgroundOpacity(0.2)
+        box.setFontSize(30)
+        box.setOpacity(0.9)
+        let snippet = try #require(CodeSnippet(language: "swift", placement: "Start", code: "return result"))
+        #expect(box.deliverCodeSnippet(snippet) == snippet)
+        let font = try #require(dock.codeText.attribute(.font, at: 0, effectiveRange: nil) as? NSFont)
+        #expect(font.pointSize == 14)
+        #expect(abs((dock.layer?.backgroundColor?.alpha ?? 0) - 0.2) < 0.001)
+        #expect(content.layer?.backgroundColor == nil)
+        #expect(abs(box.currentBoxOpacity - 0.9) < 0.001)
+        box.setCodeBackgroundOpacity(0)
+        #expect(dock.layer?.backgroundColor?.alpha == 0)
+        #expect(dock.codeText.string == snippet.code)
+    }
+
+    @MainActor @Test func savedCodePreviewDoesNotChangeSessionAvailability() throws {
+        let box = OverlayBoxPanel()
+        box.setEnabled(true)
+        box.setCodePreviewEnabled(true)
+        box.showAppearancePreview(true)
+        #expect(box.currentCodeSnippet != nil)
+        box.setSessionLive(true)
+        defer { box.setSessionLive(false); box.showAppearancePreview(false) }
+        #expect(box.currentCodeHeight == 0)
+        let snippet = try #require(CodeSnippet(language: "swift", placement: "Start", code: "return result"))
+        #expect(box.deliverCodeSnippet(snippet) == nil)
+        box.setCodeEnabled(true)
+        #expect(box.deliverCodeSnippet(snippet) == snippet)
+        box.setCodePreviewEnabled(false)
+        #expect(box.currentCodeSnippet == snippet)
+        box.setSessionLive(false)
+        #expect(box.currentCodeHeight == 0)
+    }
+
     @MainActor @Test func hintsPreserveCodeAndPreviewCannotReplaceLiveDelivery() throws {
         let box = OverlayBoxPanel()
         box.setEnabled(true)
