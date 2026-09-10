@@ -426,11 +426,17 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         panel.orderFrontRegardless() // ghost-mode-allowed: capture-excluded coaching overlay
     }
 
+    /// The app supplies the same Start-time selection used by the coaching prompt.
+    public func setInterviewFormat(_ format: InterviewFormat?) {
+        header.setInterviewFormat(format)
+    }
+
     /// Follow the session: Start puts the box on screen (if it is switched on), Stop takes it away.
     /// Start also rolls a collapsed box back open, because collapse belongs to the conversation the
     /// user collapsed it during, not to the next one.
     public func setSessionLive(_ live: Bool) {
         isSessionLive = live
+        if !live { header.setInterviewFormat(nil) }
         if !live { codeSnippet = nil }
         // Start takes the sample down and Stop can put it back, both without Settings saying anything:
         // whether the preview stands in is derived, not commanded.

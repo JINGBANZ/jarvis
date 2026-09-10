@@ -102,6 +102,11 @@ place is why the panel, not the two call sites, owns it: switching the box on fr
 stopped would otherwise leave it on screen with no session behind it. The Settings preview overrides
 the rule while the Overlay tab is open and re-derives it on close.
 
+The session’s selected interview format appears beside the name in the box’s existing header
+(for example, **Jarvis · Coding**). It uses the same Start-time selection as the coaching prompt,
+remains visible when collapsed, and survives clearing responses. With no selection or after Stop,
+the title reads **Jarvis**. The format shares the header’s sizing and adds no extra row.
+
 Opacity governs the background fill only, so both surfaces accept 0%: a text-only surface with no
 backdrop, not a hidden one. Nothing here takes a surface off screen: that is the On/Off toggle, and
 for the box the end of a session as well. Both share one range because the tab presents their

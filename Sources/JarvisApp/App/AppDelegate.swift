@@ -591,6 +591,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         transcript = RollingTranscript()
         artifacts.beginNewSession()  // rotate to a fresh session dir + activity/debug log
         overlayBox.clear() // …and a fresh response history for the new conversation
+        overlayBox.setInterviewFormat(interviewFormat)
         switch transcriptionConfiguration.provider {
         case .openAI:
             jlog(
