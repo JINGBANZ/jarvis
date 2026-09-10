@@ -221,7 +221,21 @@ public final class CoachDriver: @unchecked Sendable {
         pendingTransitionOrigin = nil
         routeIsExhausted = false
         pendingExhaustionDeliveryGeneration = nil
+        let topologyRevision = routeTopologyRevision
         stateLock.unlock()
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let callback = stateLock.withLock {
+                // A Settings edit discards old route health. A delayed reset must not erase
+                // an outage already reported by the replacement route.
+                guard routeTopologyRevision == topologyRevision,
+                      routeSession.consecutiveFailures == 0, !routeIsExhausted else {
+                    return Optional<(@MainActor @Sendable (BrainProvider?) -> Void)>.none
+                }
+                return configuredRoute.onRecoveryChanged
+            }
+            callback?(nil)
+        }
     }
 
     /// Refresh credential-bound clients for the same ordered route without changing session-local

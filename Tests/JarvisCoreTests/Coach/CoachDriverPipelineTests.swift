@@ -2404,6 +2404,33 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     }
 
     @MainActor
+    @Test func topologyEditClearsOutageBeforeOldAttemptCompletes() async {
+        let recorder = BrainRecoveryRecorder()
+        let gate = AsyncGate()
+        let original = TwoFailuresThenGatedSuccessBrain(gate: gate)
+        let target = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
+        let transcript = RollingTranscript()
+        let driver = CoachDriver(
+            config: .default, transcript: transcript,
+            route: ConfiguredBrainRoute(targets: [ConfiguredBrainTarget(target: target, brain: original)],
+                onRecoveryChanged: { recorder.providers.append($0) }),
+            screen: FakeScreen(), overlay: FakeOverlay(), clock: ManualClock(), automaticAttemptDelay: { _ in })
+        transcript.append(.init(speaker: .them, text: "how would you scale this?", at: 0))
+        let outcome = Task { await driver.handleTrigger(.turnEnd) }
+        #expect(await waitUntilAsync { await gate.hasEntered })
+        #expect(recorder.providers == [.openAI, .openAI])
+        let replacement = ScriptedBrain(script: [.init(toolCalls: [.staySilent(callId: "unused")])])
+        driver.updateBrainRoute(ConfiguredBrainRoute(
+            targets: [ConfiguredBrainTarget(target: BrainTarget(provider: .codexCLI, modelID: "gpt-5.5"), brain: replacement)],
+            onRecoveryChanged: { recorder.providers.append($0) }))
+        #expect(await waitUntilAsync { await MainActor.run { recorder.providers == [.openAI, .openAI, nil] } })
+        await gate.release()
+        #expect(await outcome.value == .silentByModel)
+        #expect(recorder.providers == [.openAI, .openAI, nil])
+        #expect(replacement.calls.isEmpty)
+    }
+
+    @MainActor
     @Test(arguments: [false, true])
     func refreshedRouteReportsOutageAndRecovery(reconfigure: Bool) async {
         let recorder = BrainRecoveryRecorder()
