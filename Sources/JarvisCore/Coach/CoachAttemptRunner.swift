@@ -130,11 +130,11 @@ final class CoachAttemptRunner: @unchecked Sendable {
         var observations: [ChatMessage] {
             screenObservation + (prepNotesObservation.map { [$0] } ?? [])
         }
-        var manualHintPrepared = false
+        var preparedManualReason: TriggerReason?
 
         init(reason: TriggerReason) {
             self.reason = reason
-            bypassesTranscriptionSettlement = reason == .manualHint
+            bypassesTranscriptionSettlement = reason.isManual
         }
     }
 
@@ -218,15 +218,20 @@ final class CoachAttemptRunner: @unchecked Sendable {
         // Describing search_prep_notes when it isn't actually offered invites the model to call a
         // tool it doesn't have — and that call is a hard attempt failure (below), so `prepMaterial`
         // must track the real tool set (`tools`, below) exactly, not just hint at it.
+        let codeAllowed = attempt.plan.codeEnabled && (interviewFormat == nil || interviewFormat == .coding || interviewFormat == .generalTechnical)
         let systemPrompt = JarvisPrompts.Coach.system(
             prepMaterial: attempt.prepMaterial != nil,
-            formatAddendum: interviewFormatAddendum, replyLanguage: replyLanguage)
+            formatAddendum: interviewFormatAddendum, replyLanguage: replyLanguage,
+            explanationsEnabled: attempt.plan.explanationsEnabled, codeEnabled: codeAllowed)
         let historyBase: [ChatMessage] = [.system(systemPrompt)] + history.snapshot()
-
-        if reason == .manualHint && !work.manualHintPrepared {
+        if reason.isManual && work.preparedManualReason != reason {
             if let prompt = context.promptLine {
-                jlog("⌨️ hint shortcut — \(prompt)")
-                activity?.record(.manualHint(prompt: prompt))
+                jlog("⌨️ coaching shortcut — \(prompt)")
+                switch reason {
+                case .manualCode: activity?.record(.manualCode(prompt: prompt))
+                case .manualExplanation: activity?.record(.manualExplanation(prompt: prompt))
+                default: activity?.record(.manualHint(prompt: prompt))
+                }
             }
             let screen = self.screen
             let shot = await Self.captureScreen(using: screen, selecting: attempt.plan.screen)
@@ -238,12 +243,10 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 jlog("👁 looking at your screen")
                 activity?.record(.screenViewed(imageBase64JPEG: shot.imageBase64))
                 var observations: [ChatMessage] = [.userImage(shot.imageBase64)]
-                turnMessages.append(.userImage(shot.imageBase64))
                 if let text = shot.recognizedText {
                     jlog("🔤 read \(text.count(where: { $0 == "\n" }) + 1) lines of on-screen text")
                     let observation = ChatMessage.user(JarvisPrompts.Coach.recognizedText(text))
                     observations.append(observation)
-                    turnMessages.append(observation)
                 }
                 work.screenObservation = observations
             } else {
@@ -253,11 +256,13 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     .user(JarvisPrompts.Coach.manualHintCaptureFailed),
                 ]
             }
-            work.manualHintPrepared = true
+            // Replace the carried screen slot while retaining independent prep observations.
+            turnMessages = userText.isEmpty ? work.observations : [.user(userText)] + work.observations
+            work.preparedManualReason = reason
         }
 
         let toolChoice: ToolChoice =
-            reason == .manualHint ? .force(speakTool.name) : .required
+            reason.isManual ? .force(speakTool.name) : .required
         jlog("💭 thinking… [\(attempt.target.provider.displayName)]")
 
         var requestPhase: CoachingAttemptAuditEvent.RequestPhase = .initial
@@ -408,23 +413,47 @@ final class CoachAttemptRunner: @unchecked Sendable {
                             newPhase: .captureScreenContinuation)
                     }
 
-                case .speak(let callID, let lines, let mermaid):
+                case .speak(let callID, let lines, let mermaid, let requestedExplanation, let requestedCode):
                     if Task.isCancelled {
                         jlog("… attempt cancelled (stopped) before speaking")
                         return .cancelled
                     }
                     jlog("💬 \(lines.joined(separator: " "))")
-                    activity?.record(.tip(lines: lines))
                     let diagram = interviewFormat == .systemDesign ? mermaid.flatMap(DiagramHint.init) : nil
                     if mermaid != nil && diagram == nil {
                         jlog("Diagram hint omitted: unsupported graph or interview format")
                     }
-                    overlay.render(
-                        lines,
-                        perLineSeconds: lines.map {
-                            OverlayTiming.displaySeconds(for: $0, config: config)
-                        }, diagram: diagram)
-                    turnMessages.append(.assistantToolCalls(response.rawToolCalls))
+                    let delivery = await MainActor.run { () -> (accepted: Bool, explanation: String?, code: CodeSnippet?) in
+                        guard !Task.isCancelled else { return (false, nil, nil) }
+                        let code = self.overlay.deliverCodeSnippet(codeAllowed ? requestedCode : nil)
+                        let detail = self.overlay.deliver(lines, perLineSeconds: lines.map {
+                            OverlayTiming.displaySeconds(for: $0, config: self.config)
+                        }, diagram: diagram, explanation: attempt.plan.explanationsEnabled ? requestedExplanation : nil)
+                        return (true, detail, code)
+                    }
+                    guard delivery.accepted else { return .cancelled }
+                    let explanation = delivery.explanation
+                    let code = delivery.code
+                    let codeText = code.map { "\($0.placement)\n\($0.code)" }
+                    activity?.record(.tip(lines: lines + (explanation.map { [$0] } ?? []) + (codeText.map { [$0] } ?? [])))
+                    // Only the selected call executes; extra provider calls were never delivered.
+                    // History describes delivered optional content, including independently enabled code.
+                    // Parsed values contain only JSON primitives, so encoding cannot fail.
+                    let codeArguments: [String: Any]? = code.map {
+                        ["language": $0.language, "placement": $0.placement, "code": $0.code,
+                         "highlightedLines": $0.highlightedLines]
+                    }
+                    let arguments: [String: Any] = [
+                        "lines": lines, "mermaid": diagram == nil ? NSNull() : mermaid as Any,
+                        "explanation": explanation as Any? ?? NSNull(),
+                        "codeSnippet": codeArguments as Any? ?? NSNull(),
+                    ]
+                    let data = try! JSONSerialization.data(withJSONObject: arguments, options: [.sortedKeys])
+                    let deliveredCalls = response.rawToolCalls.filter { $0.id == callID }.map { call in
+                        RawToolCall(id: call.id, name: call.name,
+                                    argumentsJSON: String(decoding: data, as: UTF8.self))
+                    }
+                    turnMessages.append(.assistantToolCalls(deliveredCalls))
                     turnMessages.append(.init(
                         role: .tool,
                         text: JarvisPrompts.Coach.tipShown,

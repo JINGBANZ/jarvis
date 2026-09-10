@@ -199,7 +199,9 @@ public final class CoachDriver: @unchecked Sendable {
     /// user edit does, and it never rewrites the persisted preference either.
     public func updatePlan(_ plan: SessionPlan) {
         stateLock.lock()
-        self.plan = plan
+        self.plan = SessionPlan(revision: plan.revision, screen: plan.screen,
+                                explanationsEnabled: self.plan.explanationsEnabled,
+                                codeEnabled: self.plan.codeEnabled)
         stateLock.unlock()
     }
 
@@ -353,7 +355,7 @@ public final class CoachDriver: @unchecked Sendable {
         if let pending = wake.trigger?.reason {
             receivedTrigger = true
             settledWork.reason = Self.coalescing(settledWork.reason, with: pending)
-            settledWork.bypassesTranscriptionSettlement = pending == .manualHint
+            settledWork.bypassesTranscriptionSettlement = pending.isManual
         }
         guard !settledWork.bypassesTranscriptionSettlement else {
             settledWork.wake = .trigger
@@ -366,7 +368,7 @@ public final class CoachDriver: @unchecked Sendable {
         if let pending = wake.trigger?.reason {
             receivedTrigger = true
             settledWork.reason = Self.coalescing(settledWork.reason, with: pending)
-            settledWork.bypassesTranscriptionSettlement = pending == .manualHint
+            settledWork.bypassesTranscriptionSettlement = pending.isManual
         }
         if receivedTrigger {
             settledWork.wake = .trigger
@@ -399,7 +401,7 @@ public final class CoachDriver: @unchecked Sendable {
             pendingTriggerWaiters.removeAll()
             stateLock.unlock()
             waiters.forEach { $0.resume() }
-            if trigger.reason == .manualHint {
+            if trigger.reason.isManual {
                 // A hint arriving after an automatic attempt has parked on unsettled speech must
                 // wake that exact pending attempt. The trigger stays queued until the fresh-attempt
                 // boundary consumes it together with the newest transcript.
@@ -416,9 +418,9 @@ public final class CoachDriver: @unchecked Sendable {
         _ existing: TriggerReason?,
         with incoming: TriggerReason
     ) -> TriggerReason {
-        if existing == .manualHint || incoming == .manualHint {
-            return .manualHint
-        }
+        // Manual intent survives natural wakes; the latest explicit request chooses the help kind.
+        if incoming.isManual { return incoming }
+        if let existing, existing.isManual { return existing }
         // For natural wakes, the latest reason best describes the transcript snapshot the next
         // attempt will actually see (for example, turn-end supersedes an older silence wake).
         return incoming
@@ -883,7 +885,7 @@ public final class CoachDriver: @unchecked Sendable {
 
                 var wake = takePendingTriggerSnapshot()
                 var receivedTrigger = wake.trigger != nil
-                var explicitManualWake = wake.trigger?.reason == .manualHint
+                var explicitManualWake = wake.trigger?.reason.isManual == true
                 if let reason = wake.trigger?.reason {
                     failedWork.reason = Self.coalescing(failedWork.reason, with: reason)
                 }
@@ -907,7 +909,7 @@ public final class CoachDriver: @unchecked Sendable {
                 wake = takePendingTriggerSnapshot()
                 if let reason = wake.trigger?.reason {
                     receivedTrigger = true
-                    explicitManualWake = explicitManualWake || reason == .manualHint
+                    explicitManualWake = explicitManualWake || reason.isManual
                     work.reason = Self.coalescing(work.reason, with: reason)
                 }
                 work.bypassesTranscriptionSettlement = explicitManualWake

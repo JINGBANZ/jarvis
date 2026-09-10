@@ -17,7 +17,20 @@ public extension ToolInvocation {
             let lines = (object?["lines"] as? [String] ?? [])
                 .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
             guard !lines.isEmpty else { return nil }
-            return .speak(callId: callId, lines: lines, mermaid: object?["mermaid"] as? String)
+            let detail = (object?["explanation"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let snippet: CodeSnippet?
+            if let value = object?["codeSnippet"] as? [String: Any],
+               let language = value["language"] as? String,
+               let placement = value["placement"] as? String,
+               let code = value["code"] as? String,
+               let highlightedLines = value["highlightedLines"] as? [Int] {
+                snippet = CodeSnippet(language: language, placement: placement, code: code,
+                                      highlightedLines: highlightedLines)
+            } else {
+                snippet = nil
+            }
+            return .speak(callId: callId, lines: lines, mermaid: object?["mermaid"] as? String,
+                          explanation: detail.flatMap { $0.isEmpty ? nil : $0 }, codeSnippet: snippet)
         case staySilentTool.name:
             return .staySilent(callId: callId)
         case searchPrepNotesTool.name:

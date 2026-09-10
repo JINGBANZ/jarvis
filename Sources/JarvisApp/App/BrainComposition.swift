@@ -78,6 +78,8 @@ final class BrainComposition {
     /// calls per turn.
     var interviewFormatAddendum = ""
     var replyLanguage: String?
+    var explanationsEnabled = true
+    var codeEnabled = false
 
     /// The two clients that move together with one provider/model route target.
     private struct BrainRuntime {
@@ -148,7 +150,8 @@ final class BrainComposition {
                                        systemPrompt: JarvisPrompts.Coach.system(
                                            prepMaterial: false,
                                            formatAddendum: interviewFormatAddendum,
-                                           replyLanguage: replyLanguage),
+                                           replyLanguage: replyLanguage,
+                                           explanationsEnabled: explanationsEnabled, codeEnabled: codeEnabled),
                                        tools: coachTools,
                                        toolChoice: .required,
                                        runtime: runtimes.coach,

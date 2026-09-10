@@ -8,6 +8,7 @@ final class OverlaySection: NSObject, SettingsSection {
     let title = "Overlay"
     let fillsTab = true
 
+    private let onBoxEnabledChanged: (Bool) -> Void
     private let appearance: OverlayAppearance
     private let caption: OverlayCaptionApplying
     private let box: OverlayBoxApplying
@@ -17,7 +18,9 @@ final class OverlaySection: NSObject, SettingsSection {
     private var captionView: OverlaySurfaceSettingsView?
     private var boxView: OverlaySurfaceSettingsView?
 
-    init(appearance: OverlayAppearance, caption: OverlayCaptionApplying, box: OverlayBoxApplying) {
+    init(appearance: OverlayAppearance, caption: OverlayCaptionApplying, box: OverlayBoxApplying,
+         onBoxEnabledChanged: @escaping (Bool) -> Void = { _ in }) {
+        self.onBoxEnabledChanged = onBoxEnabledChanged
         self.appearance = appearance
         self.caption = caption
         self.box = box
@@ -187,6 +190,7 @@ final class OverlaySection: NSObject, SettingsSection {
     @objc private func boxEnabledChanged(_ sender: NSSwitch) {
         let enabled = sender.state == .on
         appearance.boxEnabled = enabled
+        onBoxEnabledChanged(enabled)
         box.setEnabled(enabled)
         box.showAppearancePreview(enabled)
         boxView?.updateEnabledState(enabled)

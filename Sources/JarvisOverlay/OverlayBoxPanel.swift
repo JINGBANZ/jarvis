@@ -26,6 +26,11 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     /// The layer-backed, opaque rounded fill behind the text — its alpha is the box's opacity.
     private let box: ResizeReportingView
     private let textView: NSTextView
+    private let codeView = CodeSnippetView(frame: .zero)
+    private var codeSnippet: CodeSnippet?
+    private var codeEnabled = Defaults.Code.enabled
+    private static let sampleCode = CodeSnippet(language: "swift", placement: "At the start of solve",
+        code: "guard !items.isEmpty else { return nil }\nlet first = items[0]")
     /// The chrome strip across the top: collapse, the name, clear.
     private let header: OverlayBoxHeaderView
     /// The scrolling log under the header. Held so the header's height can be taken off it on every
@@ -73,15 +78,16 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     /// Reports the box's new content size once a resize drag finishes.
     public var onSizeChanged: ((Double, Double) -> Void)?
     /// Stand-in responses shown during the Settings preview.
-    private static let sampleEntries: [(stamp: String, text: String, diagram: DiagramHint?)] = [
-        ("10:30:00", "Ask about the time complexity of that loop.", nil),
-        ("10:30:08", "Mention the edge case when the list is empty.", nil),
+    private static let sampleEntries: [(stamp: String, text: String, explanation: String?, diagram: DiagramHint?)] = [
+        ("10:30:00", "Ask about the time complexity of that loop.", nil, nil),
+        ("10:30:08", "Check the empty list before reading its first item.",
+         "An empty list has no first item. Handle that case before indexing into it, then continue with the normal path.", nil),
     ]
     /// Each spoken tip with the time it arrived, newest last. Held as structured entries (not the
     /// rendered string) so `clear()` and the test hooks don't have to parse the text back out.
     private var diagramsEnabled = Defaults.Overlay.Box.diagramsEnabled
     private var latestEntryStart = 0
-    private var entries: [(stamp: String, text: String, diagram: DiagramHint?)] = []
+    private var entries: [(stamp: String, text: String, explanation: String?, diagram: DiagramHint?)] = []
     /// Test hook (internal): counts how many times the panel has re-asserted capture exclusion.
     private(set) var captureExclusionReassertCount = 0
 
@@ -171,10 +177,18 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         resizeAffordance = affordance
 
         box.addSubview(scroll)
+        box.addSubview(codeView)
+        codeView.isHidden = true
         box.addSubview(header)
         box.addSubview(affordance)   // topmost, so its tracking area sees the whole box
         panel.contentView = box
         super.init()
+        codeView.onDismiss = { [weak self] in
+            guard let self else { return }
+            if self.display == .log { self.codeSnippet = nil }
+            self.codeView.show(nil, fontSize: self.fontSize, enabled: self.codeEnabled && !self.isCollapsed)
+            self.layoutCode()
+        }
         header.collapseButton.target = self
         header.collapseButton.action = #selector(toggleCollapsed)
         header.clearButton.target = self
@@ -258,23 +272,69 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     }
 
     public nonisolated func render(_ lines: [String], perLineSeconds: [TimeInterval], diagram: DiagramHint?) {
-        let text = lines
+        render(lines, perLineSeconds: perLineSeconds, diagram: diagram, explanation: nil)
+    }
+
+    public nonisolated func render(_ lines: [String], perLineSeconds: [TimeInterval], diagram: DiagramHint?, explanation: String?) {
+        let summary = lines
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
             .joined(separator: " ")
-        guard !text.isEmpty else { return }
-        Task { @MainActor in self.append(text, diagram: diagram) }
+        guard !summary.isEmpty else { return }
+        let detail = explanation?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        Task { @MainActor in
+            self.append(summary, explanation: detail.isEmpty ? nil : detail, diagram: diagram)
+        }
     }
 
-    private func append(_ text: String, diagram: DiagramHint?) {
-        entries.append((stamp: timeFormatter.string(from: Date()), text: text, diagram: diagram))
+    public func deliverCodeSnippet(_ snippet: CodeSnippet?) -> CodeSnippet? {
+        codeSnippet = acceptsDetail && codeEnabled ? snippet : nil
+        refreshCode()
+        if panel.isVisible { reassertCaptureExclusion() }
+        return codeSnippet
+    }
+
+    public func setCodeEnabled(_ enabled: Bool) {
+        codeEnabled = enabled
+        if !enabled { codeSnippet = nil }
+        refreshCode()
+    }
+
+    private func refreshCode() {
+        codeView.show(codeEnabled ? (display == .sample ? Self.sampleCode : codeSnippet) : nil,
+                      fontSize: fontSize, enabled: codeEnabled && !isCollapsed)
+        layoutCode()
+    }
+
+    private func layoutCode() {
+        let available = max(0, box.bounds.height - chrome.height)
+        let preferred = min(box.bounds.height * 0.45,
+            76 + CGFloat(codeView.snippet?.code.components(separatedBy: "\n").count ?? 0) * (fontSize + 4))
+        // Preserve the header and one history line even at the minimum expanded size.
+        let height = codeView.isHidden ? 0 : min(max(0, available - 44), max(96, preferred))
+        codeView.frame = NSRect(x: 0, y: 0, width: box.bounds.width, height: height)
+        scroll.frame = NSRect(x: 0, y: height, width: box.bounds.width, height: max(0, available - height))
+    }
+
+    public func deliver(_ lines: [String], perLineSeconds: [TimeInterval],
+                        diagram: DiagramHint?, explanation: String?) -> String? {
+        let summary = lines.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }.joined(separator: " ")
+        guard !summary.isEmpty else { return nil }
+        let detail = acceptsDetail ? explanation : nil
+        append(summary, explanation: detail, diagram: diagram)
+        return detail
+    }
+
+    private func append(_ text: String, explanation: String?, diagram: DiagramHint?) {
+        entries.append((stamp: timeFormatter.string(from: Date()), text: text, explanation: explanation, diagram: diagram))
         // No preview can be running: one only opens while stopped, and Start ends it.
         // Re-assert capture exclusion on every render that reaches the screen — same defense-in-depth as
         // OverlayCaptionPanel.show, since this box can be visible (full of responses) while Settings flips the
         // activation policy and WindowServer drops `sharingType` on vulnerable macOS builds.
         if panel.isVisible { reassertCaptureExclusion() }
         renderDisplay()
-        if diagram != nil && diagramsEnabled {
+        if explanation != nil || (diagram != nil && diagramsEnabled) {
             // A tall diagram may exceed the viewport. Start at its hint, not its last row.
             if let layout = textView.layoutManager, let container = textView.textContainer {
                 layout.ensureLayout(for: container)
@@ -288,9 +348,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         }
     }
 
-    /// The one place the display is built, so anything derived from what is on screen is derived here
-    /// and cannot forget which source is showing. A dimmed monospaced timestamp in front of each
-    /// response, blank line between, and the diagram hint under it when one came with the tip.
+    /// Build the current display, including labeled explanations and optional diagrams.
     private func renderDisplay() {
         let items = display == .sample ? Self.sampleEntries : entries
         let result = NSMutableAttributedString()
@@ -302,11 +360,23 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
             .foregroundColor: NSColor.white,
             .font: NSFont.systemFont(ofSize: fontSize),
         ]
+        let hintAttrs: [NSAttributedString.Key: Any] = [
+            .foregroundColor: NSColor.white,
+            .font: NSFont.systemFont(ofSize: fontSize, weight: .semibold),
+        ]
+        let explanationLabelAttrs: [NSAttributedString.Key: Any] = [
+            .foregroundColor: NSColor(white: 1, alpha: 0.75),
+            .font: NSFont.systemFont(ofSize: max(8, fontSize - 2), weight: .medium),
+        ]
         for (i, entry) in items.enumerated() {
             if i > 0 { result.append(NSAttributedString(string: "\n\n")) }
             latestEntryStart = result.length
             result.append(NSAttributedString(string: "\(entry.stamp)  ", attributes: stampAttrs))
-            result.append(NSAttributedString(string: entry.text, attributes: textAttrs))
+            result.append(NSAttributedString(string: entry.text, attributes: hintAttrs))
+            if let explanation = entry.explanation {
+                result.append(NSAttributedString(string: "\n\nExplanation\n", attributes: explanationLabelAttrs))
+                result.append(NSAttributedString(string: explanation, attributes: textAttrs))
+            }
             if diagramsEnabled, let diagram = entry.diagram {
                 result.append(NSAttributedString(string: "\n"))
                 let attachment = NSTextAttachment()
@@ -322,6 +392,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         // The sample is not the user's log, so it offers nothing to erase: the clear button stays away
         // rather than sitting there as a control that does nothing.
         header.setHasContent(display == .log && !entries.isEmpty)
+        refreshCode()
     }
 
     // MARK: - Visibility (the Settings toggle, gated on a live session)
@@ -329,6 +400,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     /// Wipe the log. Called on each fresh Start so the box shows only the current conversation,
     /// matching how the session rotates.
     public func clear() {
+        codeSnippet = nil
         entries.removeAll()
         renderDisplay()
     }
@@ -336,6 +408,8 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     /// Whether the box belongs on screen: switched on *and* a session running. Kept distinct from
     /// `panel.isVisible` because the Settings preview can show the box without either being true; the
     /// preview restores to this on close, so the box can never disagree with the setting or outlive Stop.
+    public var acceptsDetail: Bool { shouldBeVisible && !isCollapsed }
+
     private var shouldBeVisible: Bool { isEnabled && isSessionLive }
 
     /// Bring the panel to whatever `shouldBeVisible` now says. One place owns the rule, so the Start/Stop
@@ -355,10 +429,12 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     /// user collapsed it during, not to the next one.
     public func setSessionLive(_ live: Bool) {
         isSessionLive = live
+        if !live { codeSnippet = nil }
         // Start takes the sample down and Stop can put it back, both without Settings saying anything:
         // whether the preview stands in is derived, not commanded.
         applyDisplay()
         if live { setCollapsed(false) }
+        refreshCode()
         applyVisibility()
     }
 
@@ -448,6 +524,9 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     // MARK: - Test hooks (internal; reached via `@testable import JarvisOverlay`)
 
     /// The panel's current capture-sharing type. `.none` means excluded from screen capture.
+    var currentCodeSnippet: CodeSnippet? { codeView.snippet }
+    var currentCodeHeight: CGFloat { codeView.frame.height }
+
     var currentSharingType: NSWindow.SharingType { panel.sharingType }
 
     /// Number of logged responses — lets tests assert append/clear behavior.

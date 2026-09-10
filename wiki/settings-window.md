@@ -41,7 +41,7 @@ its tab is visible** rather than for the whole time the window is open.
 One user-resizable window size for every tab — 820×600 by default, minimum 560×460. Switching tabs
 never resizes the window; whatever size the user set stays. Every built-in section returns
 `fillsTab == true` and uses `SettingsPageView`, so page margins and headers expand consistently while
-cards and trailing controls adapt to the available width. Brain, Connections, and Overlay put their
+cards and trailing controls adapt to the available width. Brain, Connections, Overlay, and Shortcuts put their
 variable-height cards in `SettingsScrollView`; Screen and Activity use the same page shell without an
 unnecessary outer scroll view.
 
@@ -68,9 +68,10 @@ lazy lifecycle; its adaptive light/dark feed is simply framed by the same page a
 | `ConnectionsSection` | "Connections" | yes | Shared authentication and provider readiness in four stacked cards — **OpenAI API**, **Gemini API**, **Claude Code**, **Codex CLI**. OpenAI and Gemini each expose their own Jarvis-managed API-key editor (`APIKeyControls`, one instance per `Credential`); Claude Code and Codex CLI report their externally managed local-account state without importing or changing those accounts. Saving a key never restarts a live conversation: an established OpenAI Realtime or Gemini Live socket stays connected and picks up the new key only on its next reconnect. |
 | `OverlaySection` | "Overlay" | yes | Two matching cards, one per overlay surface — **Overlay Caption** (the transient on-screen tip) and **Overlay Box** (the persistent response history). Each card has an icon, description, On/Off toggle, and the same Text Size + Opacity row layout; the box also has **Show diagrams**, enabled by default. When a surface is **on** its rows and live sample appear only while the Overlay tab is selected (`didBecomeActive`/`didResignActive`); when **off**, its rows and sample are hidden and the card collapses. Persists via `OverlayAppearance`. |
 | `DisplaySection` | "Screen" | yes | One **Screen capture** card with the capture-scope dropdown — **Active window** (default) or one **Entire display** entry per connected display — followed by a concise fallback/privacy callout. Persists via `ScreenCapturePreferences` and applies to the next screenshot. |
+| `HotkeySection` | "Shortcuts" | yes | Independent **Give me a hint**, **Explain more**, and **Show code** recorders, with per-binding failure feedback and persisted combinations. |
 | `ActivitySection` | "Activity" | yes | Embeds the `ActivityViewer` content (`makeContentView()` / `teardown()`) in the shared page/card shell so the adaptive light/dark feed stretches with the window. Its compact toolbar shows the selected session's exact directory ID with **Copy ID**. A session without a report shows **Evaluate**: one click runs the sole `AgenticEvaluator` through a locally installed Claude Code / Codex CLI over the source checkout plus the complete session directory, writes owner-only `eval-report.md`, and opens it. While it runs the button shows **Evaluating…**; afterward it becomes **Open report**, which reopens the saved result without another model run. The agent reads the full unfiltered `jarvis-activity.jsonl` whenever it needs the user-visible sequence and correlates it with `coaching-attempts.jsonl`, `brain-traffic.jsonl`, screenshots, and live source. The derived transcript leads with a neutral artifact/distribution/correlation-field index and normalized provider-call telemetry; missing evidence remains unavailable, and neither table declares a defect. The findings-driven prompt gives the read-only agent file and source-search tools instead of a historical-incident checklist, and the report uses generic Summary / Findings / Evidence gaps / Recommendations sections. `scripts/eval-session.sh` is a second launcher for this same `JarvisEvaluation` evaluator, not another evaluation path. `EvalReportPage` renders the markdown as `eval-report.html`; **Copy as Markdown** hands the raw report to an agent chat. Evaluation, report opening, and history clearing stay disabled through the live coaching/teardown lifecycle. |
 
-`AppDelegate` builds the section list at launch and passes it to `SettingsWindow`. All five tabs are
+`AppDelegate` builds the section list at launch and passes it to `SettingsWindow`. All tabs are
 always present, but each tab's content is created lazily on first selection during that open.
 
 ## Activation-Policy Switch
@@ -164,6 +165,45 @@ the readout and the clear button are derived from it together rather than each a
 preview is running. The plain setters
 (`setFontSize`/`setBackgroundOpacity`/`setOpacity`) only change appearance and don't touch
 `sharingType`. See [overlay-invisibility.md](./overlay-invisibility.md).
+
+## Shortcuts
+
+**Give me a hint** defaults to **⌥⌘J**, **Explain more** to **⌥⌘E**, and **Show code** to **⌥⌘K**.
+They work during a session; code is available in Coding and general sessions only. Hints and
+explanations are fallbacks for proactive coaching; the code hotkey requests a snippet only when the session started with code enabled; [architecture.md](./architecture.md#on-demand-coaching-shortcuts)
+defines their context, output, and scheduling behavior. Each card uses `HotkeyBindingView` and the
+existing recorder, requiring Command or Option. A successful rebind takes effect immediately and
+persists only that shortcut through `HotkeyPreferences`; defaults and storage keys live in
+`Defaults.Hotkey`. Escape cancels recording.
+
+The **Explain more** card includes **Enable explanations**, on by default. Switching it off hides
+its shortcut recorder and releases the global key while preserving the chosen combination.
+Switching it on shows the recorder and saves the combination for the next Start. During a session
+that started without explanations, neither enabling the setting nor rebinding registers a usable
+explanation shortcut. Automatic explanations remain available for an enabled session even if its
+shortcut cannot register. `ExplanationPreferences` persists the switch; the capability is frozen at
+Start. The row says “Takes effect the next time you start.” Disabling Overlay Box also disables the
+saved explanation setting and its switch remains unavailable until the box is enabled again.
+Ordinary hints remain available.
+
+A collision with another application or another Jarvis shortcut leaves the old working binding
+active and displays feedback for that card. If no binding could be registered at launch, its warning
+persists across tab visits. The three cards scroll at small window sizes, including when registration warnings
+are visible. Resizing or changing a binding card preserves the reading offset, clamped to the available
+content. The Overlay Box distinguishes semibold hints from regular explanation paragraphs with an
+**Explanation** label and spacing. Both bodies use the configured text size; the appearance preview
+shows an example. Neither surface's visibility preference changes.
+
+The **Show code** card includes **Show code with hints**, off by default, persisted by
+`CodePreferences`. It is captured at Start: enabled coding/general sessions reserve the
+[dedicated code area](./architecture.md#on-demand-coaching-shortcuts) and request matching snippets
+alongside hints. Saved changes affect the next Start; they do not alter the active dock or prompt.
+The hotkey requests the next snippet only for a session that started with code enabled. Turning the
+setting off hides its recorder and releases the binding; enabling or rebinding during a disabled
+session leaves the shortcut deferred until Start. Code remains independent of **Enable explanations**.
+Both features require Overlay Box; switching the box off also disables their saved settings,
+releases their shortcuts, and clears/disables the live code dock. Re-enabling the box alone does not
+restore code; enable code before the next Start. The rows show the dependency. No shortcut enables the master box.
 
 ## Brain
 

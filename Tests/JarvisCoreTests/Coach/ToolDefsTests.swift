@@ -2,6 +2,13 @@ import Testing
 @testable import JarvisCore
 
 @Suite struct ToolDefsTests {
+    @Test(arguments: [speakTool, systemDesignSpeakTool])
+    func speakSchemaLeavesHighlightLimitToLocalValidation(_ tool: ToolDef) {
+        #expect(!tool.parametersJSON.contains("\"maxItems\""))
+        #expect(CodeSnippet(language: "swift", placement: "Inside solve", code: "return result",
+                            highlightedLines: Array(repeating: 1, count: 13)) == nil)
+    }
+
     @Test func toolNames() {
         #expect(captureScreenTool.name == "capture_screen")
         #expect(speakTool.name == "speak")
@@ -138,7 +145,7 @@ import Testing
     @Test func parseMapsEachCoachTool() {
         if case .captureScreen? = ToolInvocation.parse(callId: "c", name: "capture_screen", argumentsJSON: "{}") {} else { Issue.record("capture_screen") }
         if case .staySilent? = ToolInvocation.parse(callId: "c", name: "stay_silent", argumentsJSON: "{}") {} else { Issue.record("stay_silent") }
-        guard case .speak(_, let lines, nil)? = ToolInvocation.parse(
+        guard case .speak(_, let lines, nil, nil, nil)? = ToolInvocation.parse(
             callId: "c", name: "speak", argumentsJSON: #"{"lines":["a","b"]}"#) else {
             Issue.record("speak"); return
         }
