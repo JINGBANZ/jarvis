@@ -126,7 +126,6 @@ final class CoachAttemptRunner: @unchecked Sendable {
         var screenObservation: [ChatMessage] = []
         /// Identity/text travel with the carried observation across provider failures.
         var screenMemoryID: Int?
-        var screenText: String?
         var prepNotesObservation: ChatMessage?
         /// Every carried observation, screen first, in the order the model should see them.
         var observations: [ChatMessage] {
@@ -252,7 +251,6 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 var observations: [ChatMessage] = [.userImage(shot.imageBase64)]
                 let observationID = recordScreen(shot)
                 work.screenMemoryID = observationID
-                work.screenText = shot.recognizedText
                 if let observationID { visibleScreenIDs.insert(observationID) }
                 if let text = shot.recognizedText {
                     jlog("🔤 read \(text.count(where: { $0 == "\n" }) + 1) lines of on-screen text")
@@ -266,7 +264,6 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 jlog("👁 screenshot failed")
                 activity?.record(.screenViewFailed)
                 work.screenMemoryID = nil
-                work.screenText = nil
                 work.screenObservation = [
                     .user(JarvisPrompts.Coach.manualHintCaptureFailed),
                 ]
@@ -277,7 +274,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
         }
 
         let historyBase: [ChatMessage] = [.system(systemPrompt)] + history.snapshot()
-            + (screenMemory.contextMessage(excludingText: work.screenText).map { [$0] } ?? [])
+            + (screenMemory.contextMessage(excludingID: work.screenMemoryID).map { [$0] } ?? [])
 
         let toolChoice: ToolChoice =
             reason.isManual ? .force(speakTool.name) : .required
@@ -409,7 +406,6 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         }
                         let observationID = recordScreen(shot)
                         work.screenMemoryID = observationID
-                        work.screenText = shot.recognizedText
                         if let observationID { visibleScreenIDs.insert(observationID) }
                         let observationLabel = observationID.map(JarvisPrompts.ScreenMemory.observation) ?? ""
                         work.screenObservation = [
@@ -428,7 +424,6 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         jlog("👁 screenshot failed")
                         activity?.record(.screenViewFailed)
                         work.screenMemoryID = nil
-                        work.screenText = nil
                         work.screenObservation = [
                             .user(JarvisPrompts.Coach.earlierCaptureFailed),
                         ]

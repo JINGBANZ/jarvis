@@ -24,6 +24,22 @@ import Testing
         #expect(request.compactMap(\.imageBase64JPEG) == ["THIRD"])
     }
 
+    @Test func equalTextInAnotherWindowRetainsHistoricalProvenance() async {
+        let brain = ScriptedBrain(script: [
+            .init(toolCalls: [.speak(callId: "first", lines: ["Continue."])]),
+            .init(toolCalls: [.speak(callId: "second", lines: ["Continue."])]),
+        ])
+        let driver = makeDriver(brain: brain, screen: SequenceScreen([
+            .init(imageBase64: "A", recognizedText: "return count", sourceID: "window:1"),
+            .init(imageBase64: "B", recognizedText: "return count", sourceID: "window:2"),
+        ]))
+        for _ in 0..<2 { #expect(await driver.handleTrigger(.manualHint) == .spoke) }
+        let text = brain.calls.last!.filter { $0.role != .system }.compactMap(\.text).joined(separator: "\n")
+        #expect(text.contains(#""sourceID":"window:1""#))
+        #expect(text.contains(#""id":1"#))
+        #expect(text.contains("Screen observation ID: 2"))
+    }
+
     @Test func explicitNewQuestionRetainsItsCaptureAfterProviderRecovery() async {
         let reset = BrainResponse(toolCalls: [.speak(callId: "reset", lines: ["New problem."])],
                                   rawToolCalls: [.init(id: "reset", name: "speak", argumentsJSON:
@@ -183,6 +199,8 @@ import Testing
 }
 
 /// The real capture edge is OS-bound. Only this boundary is substituted; the driver and history run normally.
+/// `@unchecked Sendable`: after initialization, every access to `shots` is protected by `lock`.
+/// Any future mutable state must follow the same synchronization invariant.
 private final class SequenceScreen: ScreenCapturing, @unchecked Sendable {
     private let lock = NSLock()
     private var shots: [ScreenSnapshot]

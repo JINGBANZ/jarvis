@@ -61,10 +61,10 @@ struct ScreenObservationMemory {
         observations.removeAll { obsolete.contains($0.id) }
     }
 
-    func contextMessage(excludingText currentText: String? = nil) -> ChatMessage? {
-        // An identical current observation already carries the entire text; omitting duplicate
-        // historical copies from this request does not infer that two windows are the same document.
-        let historical = observations.filter { $0.text != currentText }
+    func contextMessage(excludingID currentID: Int? = nil) -> ChatMessage? {
+        // Only this observation is already in the current screen slot. Equal text from another
+        // capture must retain its identity and provenance for interpretation and retirement.
+        let historical = observations.filter { $0.id != currentID }
         guard !historical.isEmpty || hasOmissions else { return nil }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
