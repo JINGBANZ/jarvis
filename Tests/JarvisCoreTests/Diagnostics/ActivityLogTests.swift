@@ -233,7 +233,7 @@ import Foundation
         let snapshot = log.attach { _ in }
 
         let row = try #require(snapshot.rows.first)
-        #expect(row.contains("Codex CLI couldn't finish the response"))
+        #expect(row.contains("Codex CLI is not responding"))
         #expect(row.contains("retrying"))
         #expect(row.contains("listening continues"))
         #expect(!row.contains("timed out"))

@@ -311,13 +311,15 @@ retry under a bounded schedule before capture is declared unavailable, and stale
 identity-guarded across Stop → Start. Each Activity row persists a stable event kind. The agentic
 session evaluator reads the complete Activity file, using those kinds and the full user-visible
 sequence rather than a preselected excerpt; dynamic provider and transport detail remains only in
-`JarvisLog`. Route changes and final exhaustion use fixed, provider-level Activity events; individual
-failed attempts that have not yet advanced the route use fixed provider-only Activity copy because
-the missed coaching turn is user-visible. Raw request errors, attempt scheduling, and failure counts
-remain diagnostic detail.
+`JarvisLog`. Route changes and final exhaustion use fixed, provider-level Activity events.
+Failure streaks use one fixed provider-only Activity notice because unavailable coaching is
+user-visible; repeated attempts do not add duplicate notices. Raw request errors, attempt scheduling,
+and failure counts remain diagnostic detail.
 
 Overall readiness is current UI state rather than an Activity event: `JarvisReadiness` drives the
 menu and the live Activity badge from the same effect, while an opened past session shows **Ended**.
+A temporary brain failure shows the provider as not responding until a complete terminal response
+restores readiness. Capture and transcription continue, and their failures keep their own precedence.
 Readiness transitions never append rows to `jarvis-activity.jsonl`; the persisted record continues
 to contain only user-facing coaching, fixed failures, and lifecycle outcomes.
 
@@ -372,8 +374,14 @@ pending work's reason; when another natural trigger arrives, its newer reason de
 snapshot.
 
 Temporary and unknown failures increment the active target's consecutive count; reaching the
-code-owned threshold exhausts that target (see
+code-owned threshold advances to a later usable fallback (see
 [`BrainRouteSession.failuresPerTarget`](../Sources/JarvisCore/Coach/BrainRouteSession.swift)).
+When no later target can be constructed, the active target remains usable for recovery: temporary
+failures never exhaust it or end the session. Its fresh attempts continue with capped exponential
+backoff while listening and finalized transcription remain live. After the threshold, speech and
+manual hints still coalesce into the latest conversation but cannot bypass the retry delay; this
+prevents a busy conversation from hammering an unavailable provider. Stop cancels that delay with
+the existing single-flight task. A successful response clears the outage status and failure count.
 A failure classified as permanent at the provider boundary (for example, proven authentication,
 billing, access, or model configuration failure) exhausts the target immediately. Either transition
 only changes the route cursor after the failed attempt ends: the next target starts in a separate
@@ -381,8 +389,9 @@ fresh attempt with rebuilt conversation context. A terminal success resets the a
 but never moves the cursor backward. A fallback that is already proven impossible to construct at
 activation time—for example, a missing executable, confirmed signed-out CLI, or invalid
 configuration—is skipped as unavailable rather than consuming synthetic attempts merely to reach
-that threshold. If no target remains, coaching stops, Activity records one fixed typed
-route-exhausted event, and raw errors stay in `jarvis-debug.log`.
+that threshold. Only permanent failures or preflight unavailability can exhaust the last usable
+target; that terminal case stops coaching and records one fixed typed route-exhausted event.
+Raw errors stay in `jarvis-debug.log`.
 
 ```mermaid
 flowchart TD
@@ -396,7 +405,9 @@ flowchart TD
     D -- No --> B{Consecutive failure<br/>budget reached?}
     B -- No --> W[Schedule a fresh attempt<br/>on the same target]
     D -- Yes --> N{Next configured<br/>target exists?}
-    B -- Yes --> N
+    B -- Yes --> H{Usable fallback<br/>remains?}
+    H -- Yes --> N
+    H -- No --> W
     N -- Yes --> F[Advance once<br/>schedule a new attempt]
     N -- No --> X[Stop coaching<br/>typed Activity event]
     W --> T
@@ -802,9 +813,10 @@ The always-on legs are built to survive transient failure rather than die on it:
   scheduler makes a new attempt after bounded backoff or an earlier coalesced natural trigger. That
   new attempt rebuilds its input from the latest committed history, the failed conversation, and
   every newer finalized transcript item; with no new speech, it simply re-attempts the pending work.
-  Reaching the [ordered route's](#ordered-provider-route) code-owned consecutive failure budget
-  exhausts the active target; a provider-boundary failure proven permanent exhausts it after one
-  attempt. In both cases, only the next fresh attempt runs the next target on the forward-only route.
+  The [ordered route](#ordered-provider-route) advances after its consecutive failure threshold
+  when a usable fallback remains, and keeps retrying the last usable target through temporary
+  outages. A provider-boundary failure proven permanent exhausts a target after one attempt.
+  Only the next fresh attempt runs another target on the forward-only route.
   A terminal success resets the active target's count and keeps that target installed. No provider
   is probed concurrently, and no automatic recovery returns to the primary. Cancellation remains
   quiet. A timed-out Codex inference first interrupts and drains only that turn, preserving the
@@ -852,7 +864,8 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
   saying — that restraint lives in the system prompt (see
   [`JarvisPrompts.Coach.system`](../Sources/JarvisCore/Prompts/JarvisPrompts+Coach.swift)).
   This keeps
-  conversation natural: a follow-up question is never stranded behind a timer. The hard control is
+  conversation natural during healthy operation. During a sustained provider outage, new speech
+  coalesces behind the capped retry delay instead of generating more failing requests. The hard control is
   the menu-bar **Start/Stop** — coaching never runs until explicitly started, and stopping tears the
   pipeline down entirely. Cost is accepted as tracking usage for now (a future improvement, not a
   v1 guardrail).

@@ -114,7 +114,7 @@ producer a generic path to author human-facing copy.
 |---|---|---|
 | Finalized utterance, manual hint, brain action, or fixed lifecycle/degradation notice | Friendly high-level row from the event's Activity presentation | Full typed event and attribution |
 | Provider timing, transport error, retry scheduling, lifecycle detail, or raw error | Nothing; the event has no Activity presentation | Full typed diagnostic detail |
-| Route advance or failed coaching attempt | Fixed, non-sensitive Activity summary | Same event's provider, attempt, timing, and failure detail |
+| Route advance or beginning of a coaching failure streak | Fixed, non-sensitive Activity summary | Same event's provider, attempt, timing, and failure detail |
 | Capture heartbeat or continuity anomaly | No raw counter stream; readiness remains current UI state | Optional content-free evidence copy |
 
 One occurrence produces one event. Producers do not mirror it through an `ActivityEventSink`, a
@@ -153,13 +153,15 @@ shares the evidence stack.
    replays a failed brain request or switches providers inside the attempt.
 3. Failure ends the attempt without committing a partial outcome. The conversation remains pending,
    and a new attempt can include newer finalized speech.
-4. A temporary or unknown failure exhausts the active target after three failed attempts. A proven
-   permanent provider-boundary failure may exhaust it immediately.
+4. Temporary or unknown failures advance after the threshold only when a usable fallback remains;
+   the last usable target keeps retrying with capped backoff while listening continues. A proven
+   permanent provider-boundary failure may exhaust it immediately. See the
+   [ordered route policy](./architecture.md#ordered-provider-route) for recovery and status behavior.
 5. Only a later fresh attempt advances to the next configured target. The route moves forward, never
    revisits an exhausted target, never races providers, and never rewrites saved preferences.
 
-This roadmap does not add evidence-write retries, provider probes, cooldown recovery, or same-attempt
-failover. Transcription transport reconnect remains its separate adapter-level recovery contract.
+This roadmap does not add evidence-write retries, provider probes, or same-attempt failover.
+Transcription transport reconnect remains its separate adapter-level recovery contract.
 
 ## A New Session After Stop → Start
 
@@ -732,10 +734,9 @@ contracts before implementation.
   flags, per-effort token budgets, workload deadlines, HTTP failure classification, and tagged
   brain-traffic recording.
 - [Fresh-attempt recovery and routing](#fresh-attempt-recovery-and-routing) is untouched: one
-  snapshotted target owns each attempt, no in-attempt replay or provider switch, a temporary or
-  unknown failure exhausts a target only after three failed attempts, only a proven permanent
-  provider-boundary failure exhausts immediately, and the route advances forward-only without
-  rewriting saved preferences. The parity harness's route-transition snapshot is the proof.
+  snapshotted target owns each attempt, no in-attempt replay or provider switch, and route policy
+  stays in Core. The route advances forward-only without rewriting saved preferences. The parity
+  harness's route-transition snapshot is the proof.
 
 ### Failure and accepted degradation
 
@@ -799,9 +800,7 @@ all. It is a pure move: no behavior, invocation, parsing, timing, or classificat
 
 - CLI detection and its unavailability reporting, runtime lifetime and teardown, app-server versus
   exec runtime selection, reply parsing, and phase timings behave exactly as today.
-- Failure classification and its consequences are unchanged: a proven permanent provider-boundary
-  failure (a missing CLI, for instance) still exhausts its target immediately, and a temporary or
-  unknown failure still takes three failed attempts. See
+- Failure classification remains at the provider boundary; routing and recovery remain in Core. See
   [Fresh-attempt recovery and routing](#fresh-attempt-recovery-and-routing).
 
 ### Failure and accepted degradation
@@ -923,9 +922,9 @@ storage.
   continues, and a credential refresh still gates stale attempts without superseding committed route
   health.
 - [Fresh-attempt recovery and routing](#fresh-attempt-recovery-and-routing) is untouched: one
-  snapshotted target per attempt, no in-attempt replay or provider switch, three failed attempts to
-  exhaust a temporary or unknown failure, immediate exhaustion only for a proven permanent
-  provider-boundary failure, forward-only advance, and no rewriting of saved preferences.
+  snapshotted target per attempt, no in-attempt replay or provider switch, forward-only advance,
+  and no rewriting of saved preferences. Failure thresholds and last-target recovery follow the
+  linked route policy.
 - Runtime health never installs a plan revision. Only an explicit user edit does.
 - **Timing changed, deliberately.** A screen-capture setting used to apply to the very next
   screenshot, which could be the second capture inside a turn already in progress. It now applies to
@@ -1035,7 +1034,8 @@ would only have moved the tangle.
 
 `BrainCompositionHost` is the whole interface between composition and the runtime: four read-only
 accessors for the live session (`liveCoachDriver`, `liveSessionDirectory`, `liveSessionEvidence`,
-`isTranscriptionLive`) and two presentation forwards (`reportBrainError`, `brainTargetDidChange`).
+`isTranscriptionLive`) and presentation forwards for errors, active target, and brain recovery status
+(`reportBrainError`, `brainTargetDidChange`, `brainRecoveryDidChange`).
 Composition never starts, stops, or tears anything down, and the runtime never builds a brain client.
 
 ### Expected behavior

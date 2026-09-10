@@ -172,6 +172,8 @@ private extension JarvisReadiness.Status {
             "Jarvis is starting — \(requirement.menuDescription)"
         case .blocked(let blocker):
             "Jarvis is blocked — \(blocker.menuDescription)"
+        case .recovering(.brainResponse(let provider), _):
+            "\(provider.displayName) is not responding — listening continues; retrying automatically"
         case .recovering(let requirement, let attempt):
             if let attempt {
                 "Jarvis is recovering — \(requirement.menuDescription), attempt \(attempt)"
@@ -194,6 +196,7 @@ private extension JarvisReadiness.Requirement {
         case .permissions: "checking permissions"
         case .credentials: "checking credentials"
         case .brainPreparation: "preparing the brain provider"
+        case .brainResponse(let provider): "waiting for \(provider.displayName)"
         case .transcriptionPreparation: "preparing transcription"
         case .transcriptionEndpoints: "connecting transcription"
         case .capture: "verifying audio capture"

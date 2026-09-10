@@ -928,6 +928,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         errorReporter.reportImmediately(error, context: context)
     }
 
+    func brainRecoveryDidChange(_ provider: BrainProvider?) {
+        guard let readinessSession else { return }
+        observeReadiness(.brainRecovery(provider), for: readinessSession)
+    }
+
     func brainTargetDidChange(_ target: BrainTarget?) {
         brainSection.setActiveTarget(target)
     }

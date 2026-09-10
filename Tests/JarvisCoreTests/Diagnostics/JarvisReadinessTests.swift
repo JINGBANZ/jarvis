@@ -130,6 +130,36 @@ import Testing
         #expect(readiness.status == .ready(.full))
     }
 
+    @Test func brainOutageRecoversWithoutResettingCaptureOrSession() {
+        let (readiness, session) = fullReadyReadiness()
+        _ = readiness.observe(.brainRecovery(.openAI), for: session)
+        #expect(readiness.status == .recovering(.brainResponse(.openAI), attempt: nil))
+        #expect(readiness.observe(.brainRecovery(.openAI), for: session).isEmpty)
+        _ = readiness.observe(.capture(.microphoneOnly), for: session)
+        #expect(readiness.status == .recovering(.brainResponse(.openAI), attempt: nil))
+        _ = readiness.observe(.brainRecovery(nil), for: session)
+        #expect(readiness.status == .ready(.microphoneOnly))
+    }
+
+    @Test func staleBrainRecoveryCannotChangeStoppedOrReplacementSession() {
+        let (readiness, session) = fullReadyReadiness()
+        _ = readiness.observe(.brainRecovery(.openAI), for: session)
+        _ = readiness.stop(session: session)
+        #expect(readiness.observe(.brainRecovery(nil), for: session).isEmpty)
+        _ = readiness.begin(configuration: .init())
+        #expect(readiness.observe(.brainRecovery(.openAI), for: session).isEmpty)
+        #expect(readiness.status == .checking(.permissions))
+    }
+
+    @Test func brainRecoveryDoesNotMaskCaptureFailure() {
+        let (readiness, session) = fullReadyReadiness()
+        _ = readiness.observe(.brainRecovery(.openAI), for: session)
+        _ = readiness.observe(.capture(.stopped), for: session)
+        #expect(readiness.status == .blocked(.capture(.microphone)))
+        _ = readiness.observe(.brainRecovery(nil), for: session)
+        #expect(readiness.status == .blocked(.capture(.microphone)))
+    }
+
     @Test func systemRecoveryCanDegradeAtomicallyToMicrophoneOnly() {
         let (readiness, session) = fullReadyReadiness()
         _ = readiness.observe(

@@ -38,6 +38,7 @@ public final class JarvisReadiness {
         case permissions
         case credentials
         case brainPreparation
+        case brainResponse(BrainProvider)
         case transcriptionPreparation
         case transcriptionEndpoints
         case capture
@@ -101,6 +102,7 @@ public final class JarvisReadiness {
         )
         case capture(CaptureReadinessMonitor.Readiness)
         case captureRecovery(inProgress: Bool)
+        case brainRecovery(BrainProvider?)
     }
 
     /// Effects are deliberately presentation- and lifecycle-free. The app renders `statusChanged`
@@ -152,6 +154,7 @@ public final class JarvisReadiness {
     private var endpointStates: [CaptureReadinessMonitor.Stream: TranscriptionConnectionState] = [:]
     private var captureState: CaptureReadinessMonitor.Readiness?
     private var captureRecoveryInProgress = false
+    private var recoveringBrain: BrainProvider?
 
     public init() {}
 
@@ -170,6 +173,7 @@ public final class JarvisReadiness {
         endpointStates = [:]
         captureState = nil
         captureRecoveryInProgress = false
+        recoveringBrain = nil
         return (session, transition(to: reducedStatus()))
     }
 
@@ -236,6 +240,9 @@ public final class JarvisReadiness {
 
         case .captureRecovery(let inProgress):
             captureRecoveryInProgress = inProgress
+
+        case .brainRecovery(let provider):
+            recoveringBrain = provider
         }
     }
 
@@ -283,6 +290,10 @@ public final class JarvisReadiness {
         if configuration.requiresSystemAudio, captureState != .microphoneOnly,
            endpointStates[.system] != .ready {
             return .checking(.transcriptionEndpoints)
+        }
+
+        if let recoveringBrain {
+            return .recovering(.brainResponse(recoveringBrain), attempt: nil)
         }
 
         switch captureState {

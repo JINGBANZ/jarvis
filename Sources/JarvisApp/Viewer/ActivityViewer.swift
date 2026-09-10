@@ -501,6 +501,8 @@ private extension JarvisReadiness.Status {
             ("Starting", "starting")
         case .blocked:
             ("Blocked", "blocked")
+        case .recovering(.brainResponse(let provider), _):
+            ("\(provider.displayName) is not responding", "recovering")
         case .recovering:
             ("Recovering", "recovering")
         case .ready(.full):

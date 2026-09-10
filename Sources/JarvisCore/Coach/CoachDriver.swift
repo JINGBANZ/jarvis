@@ -187,7 +187,7 @@ public final class CoachDriver: @unchecked Sendable {
     }
 
     private static let defaultAutomaticAttemptDelay: AutomaticAttemptDelay = { sequence in
-        let seconds = min(0.5 * pow(2, Double(max(0, sequence - 1))), 4)
+        let seconds = min(0.5 * pow(2, Double(max(0, sequence - 1))), 30)
         try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
     }
 
@@ -270,6 +270,7 @@ public final class CoachDriver: @unchecked Sendable {
             onSelected: route.onSelected,
             onAdvanced: route.onAdvanced,
             onSkipped: route.onSkipped,
+            onRecoveryChanged: route.onRecoveryChanged,
             onExhausted: route.onExhausted)
         let activeReplacement = refreshesActiveTarget && !routeIsExhausted
             ? configuredRoute.targets[routeSession.activeIndex]
@@ -309,6 +310,7 @@ public final class CoachDriver: @unchecked Sendable {
             onSelected: route.onSelected,
             onAdvanced: route.onAdvanced,
             onSkipped: route.onSkipped,
+            onRecoveryChanged: route.onRecoveryChanged,
             onExhausted: route.onExhausted)
         let activeReplacement = routeIsExhausted
             ? nil
@@ -656,7 +658,11 @@ public final class CoachDriver: @unchecked Sendable {
             return (.staleRevision, nil, nil)
         }
 
-        switch routeSession.recordFailure(failure.disposition) {
+        // Never abandon a recoverable target for a tail that preflight already proved unusable.
+        let hasAvailableFallback = configuredRoute.targets.dropFirst(attempt.routeIndex + 1)
+            .contains { $0.brain != nil }
+        switch routeSession.recordFailure(
+            failure.disposition, hasAvailableFallback: hasAvailableFallback) {
         case .stay(let count):
             return (.retry(failureCount: count, advanced: false), nil, nil)
         case .advanced:
@@ -691,6 +697,24 @@ public final class CoachDriver: @unchecked Sendable {
             routeSession.recordSuccess()
         }
         stateLock.unlock()
+    }
+
+    /// Recovery follows route health: success survives a credential refresh on the same target,
+    /// while a failure from superseded credentials is stale. Neither crosses a topology edit.
+    private func reportBrainRecovery(_ provider: BrainProvider?, on attempt: AttemptBrain) async {
+        await MainActor.run {
+            let callback = stateLock.withLock {
+                let revisionIsCurrent = provider == nil
+                    ? routeTopologyRevision == attempt.routeTopologyRevision
+                    : routeRevision == attempt.routeRevision
+                guard !Task.isCancelled, revisionIsCurrent,
+                      routeSession.activeIndex == attempt.routeIndex else {
+                    return Optional<(@MainActor @Sendable (BrainProvider?) -> Void)>.none
+                }
+                return configuredRoute.onRecoveryChanged
+            }
+            callback?(provider)
+        }
     }
 
     /// Deliver one committed terminal transition exactly once.
@@ -810,6 +834,7 @@ public final class CoachDriver: @unchecked Sendable {
             case .completed(let outcome):
                 latestOutcome = outcome
                 recordAttemptSuccess(on: attempt)
+                await reportBrainRecovery(nil, on: attempt)
                 if let id = execution.id {
                     let terminal: CoachingAttemptAuditEvent.TerminalAction = outcome == .spoke
                         ? .speak
@@ -859,22 +884,28 @@ public final class CoachDriver: @unchecked Sendable {
                         outcome: outcome)
                 }
                 let routeChanged: Bool
+                let sustainedOutage: Bool
                 switch action {
                 case .exhausted:
                     releaseHandlingSlot()
                     return .brainError
                 case .staleRevision:
+                    sustainedOutage = false
                     routeChanged = true
                     jlog("Jarvis coach: preserving pending work from superseded route revision")
                 case .retry(let failureCount, let advanced):
                     routeChanged = false
-                    if !advanced {
+                    sustainedOutage = !advanced && failureCount >= BrainRouteSession.failuresPerTarget
+                    if !advanced && failureCount == 1 {
                         activity?.record(
                             .coachingTurnFailed(provider: attempt.target.provider))
                     }
+                    if !advanced {
+                        await reportBrainRecovery(attempt.target.provider, on: attempt)
+                    }
                     let policy = failure.disposition == .permanent
                         ? "permanent failure"
-                        : "temporary/unknown failure \(failureCount)/\(BrainRouteSession.failuresPerTarget)"
+                        : "temporary/unknown failure \(failureCount)"
                     let routeAction = advanced ? "; next fresh attempt advances the route" : ""
                     jlog("Jarvis coach: \(attempt.target.provider.displayName) \(policy)\(routeAction)")
                 }
@@ -890,7 +921,11 @@ public final class CoachDriver: @unchecked Sendable {
 
                 // A natural trigger and the automatic wake are the same pending attempt. Without a
                 // natural wake, use a bounded delay so a quiet provider outage cannot spin.
-                if wake.trigger == nil && !routeChanged {
+                if sustainedOutage {
+                    // Speech still coalesces, but cannot bypass backoff during a sustained outage.
+                    // This wait belongs to the existing single-flight task, so Stop cancels it.
+                    try? await automaticAttemptDelay(automaticSequence)
+                } else if wake.trigger == nil && !routeChanged {
                     await waitForAutomaticWakeOrDelay(
                         sequence: automaticSequence,
                         after: wake.generation)
