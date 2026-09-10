@@ -211,7 +211,9 @@ Explanation text follows the existing coaching history and Activity paths. It op
 never activates Jarvis, and respects the box's enabled/session visibility. Disabling the box leaves
 only the brief caption if that surface is enabled; it does not force a hidden surface on.
 
-**Show code with hints** enables matching snippets in Coding or general sessions, defaulting off.
+**Show code with hints** enables matching snippets only in explicit Coding mode, defaulting off.
+None, General Technical, Behavioral, and System Design have no code dock or usable code shortcut;
+changing modes preserves the saved code preference.
 `SessionPlan.codeEnabled` is frozen at Start and preserved across screen revisions. The app resolves
 the session format at Start, so non-coding sessions cannot reserve an empty code area. Only enabled
 sessions receive the shortened code guidance in their fixed system prompt. The Show code shortcut
@@ -539,6 +541,10 @@ rather than a per-turn screenshot.
   enum case and display name as well as a resource; user-supplied skill files are not supported.
   Nil resolves directly to an empty string, preserving the default rather than composing skills.
 
+  The header and Settings mode pickers use one explicit replacement path: a different selection
+  saves the preference and starts a fresh session, clearing conversation and overlay content once
+  preflight succeeds. Failure leaves the current session intact; a newer selection invalidates
+  older pending startup work. The in-panel dropdown stays inside the capture-excluded overlay.
   The selected text is frozen at Start (`BrainComposition.interviewFormatAddendum`) and reused during
   provider reapply. Both OpenAI and CLI construction use
   `JarvisPrompts.Coach.system(prepMaterial:formatAddendum:)`; passing resolved text keeps resource I/O

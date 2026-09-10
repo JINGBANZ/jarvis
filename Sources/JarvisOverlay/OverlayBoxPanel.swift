@@ -33,6 +33,9 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         code: "guard !items.isEmpty else { return nil }\nlet first = items[0]")
     /// The chrome strip across the top: collapse, the name, clear.
     private let header: OverlayBoxHeaderView
+    private let formatPicker = OverlayFormatPickerView(frame: .zero)
+    private var interviewFormat: InterviewFormat?
+    public var onInterviewFormatSelected: ((InterviewFormat?) -> Void)?
     /// The scrolling log under the header. Held so the header's height can be taken off it on every
     /// resize, and so collapsing can put it away.
     private let scroll: NSScrollView
@@ -197,6 +200,15 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         box.onFrameSizeChanged = { [weak self] in self?.layoutContent() }
         // The affordance drives edge drags itself, so AppKit's live-resize hook never fires for them.
         affordance.onResizeFinished = { [weak self] in self?.reportContentSize() }
+        box.addSubview(formatPicker)
+        header.formatButton.target = self
+        header.formatButton.action = #selector(toggleFormatPicker)
+        formatPicker.onDismiss = { [weak self] in self?.formatPicker.isHidden = true }
+        formatPicker.onSelect = { [weak self] format in
+            guard let self else { return }
+            self.formatPicker.isHidden = true
+            self.onInterviewFormatSelected?(format)
+        }
         layoutContent()
         // Centered on screen initially; the user can drag it anywhere from there (the frame persists
         // across menu toggles, since hide() only orders it out).
@@ -216,13 +228,28 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         scroll.frame = NSRect(x: 0, y: 0,
                               width: bounds.width, height: max(0, bounds.height - chrome.height))
         resizeAffordance.frame = bounds
+        formatPicker.frame = NSRect(x: 0, y: 0, width: bounds.width,
+                                    height: max(0, bounds.height - chrome.height))
         // After the scroll view has its new width, so a diagram hint is rasterized to fit it.
         renderDisplay()
     }
 
     // MARK: - Header actions
 
-    @objc private func toggleCollapsed() { setCollapsed(!isCollapsed) }
+    @objc private func toggleFormatPicker() {
+        if !formatPicker.isHidden {
+            formatPicker.isHidden = true
+            return
+        }
+        setCollapsed(false)
+        reassertCaptureExclusion()
+        formatPicker.show(selected: interviewFormat)
+    }
+
+    @objc private func toggleCollapsed() {
+        formatPicker.isHidden = true
+        setCollapsed(!isCollapsed)
+    }
 
     /// `clear()` is the model operation Start uses, and it wipes the log whatever is on screen. This
     /// is the user's gesture, so it declines while the display is not the log: the button is hidden
@@ -428,6 +455,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
 
     /// The app supplies the same Start-time selection used by the coaching prompt.
     public func setInterviewFormat(_ format: InterviewFormat?) {
+        interviewFormat = format
         header.setInterviewFormat(format)
     }
 
@@ -436,7 +464,10 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     /// user collapsed it during, not to the next one.
     public func setSessionLive(_ live: Bool) {
         isSessionLive = live
-        if !live { header.setInterviewFormat(nil) }
+        if !live {
+            formatPicker.isHidden = true
+            setInterviewFormat(nil)
+        }
         if !live { codeSnippet = nil }
         // Start takes the sample down and Stop can put it back, both without Settings saying anything:
         // whether the preview stands in is derived, not commanded.
@@ -476,6 +507,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
 
     /// Switch the box on or off, live. It reaches the screen only while a session is also running.
     public func setEnabled(_ enabled: Bool) {
+        if !enabled { formatPicker.isHidden = true }
         isEnabled = enabled
         applyVisibility()
     }
@@ -492,6 +524,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     /// This records the request rather than acting on it, so a request made during a session is still
     /// standing when the session stops.
     public func showAppearancePreview(_ on: Bool) {
+        if !on { formatPicker.isHidden = true }
         isPreviewRequested = on
         applyDisplay()
     }
@@ -588,6 +621,10 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     var isClearButtonVisible: Bool { !header.clearButton.isHidden }
 
     /// Drive the header's own controls, so tests take the path the user takes.
+    var isFormatPickerVisible: Bool { !formatPicker.isHidden }
+    func clickFormatButton() { header.formatButton.performClick(nil) }
+    func chooseInterviewFormat(_ format: InterviewFormat?) { formatPicker.choose(format) }
+
     func clickCollapseButton() { header.collapseButton.performClick(nil) }
     func clickClearButton() { header.clearButton.performClick(nil) }
 
