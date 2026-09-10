@@ -190,7 +190,9 @@ import Testing
         #expect(dock.codeText.string == snippet.code)
         #expect(dock.layer?.backgroundColor?.alpha == 1)
         let font = try #require(dock.codeText.attribute(.font, at: 0, effectiveRange: nil) as? NSFont)
-        #expect(font.pointSize == 24)
+        // Code now uses a compact, fit-to-section size instead of mirroring the history font.
+        #expect(font.pointSize >= 12)
+        #expect(font.pointSize <= 18)
         #expect(font.isFixedPitch)
         #expect(dock.codeText.attribute(.backgroundColor, at: 18, effectiveRange: nil) != nil)
         var dismissed = false

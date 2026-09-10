@@ -309,10 +309,12 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     private func layoutCode() {
         let available = max(0, box.bounds.height - chrome.height)
         let preferred = min(box.bounds.height * 0.45,
-            76 + CGFloat(codeView.snippet?.code.components(separatedBy: "\n").count ?? 0) * (fontSize + 4))
+            codeView.preferredHeight(viewportWidth: box.bounds.width))
         // Preserve the header and one history line even at the minimum expanded size.
         let height = codeView.isHidden ? 0 : min(max(0, available - 44), max(96, preferred))
         codeView.frame = NSRect(x: 0, y: 0, width: box.bounds.width, height: height)
+        codeView.needsLayout = true
+        codeView.layoutSubtreeIfNeeded()
         scroll.frame = NSRect(x: 0, y: height, width: box.bounds.width, height: max(0, available - height))
     }
 
