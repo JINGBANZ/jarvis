@@ -68,7 +68,7 @@ public enum ToolInvocation: Sendable, Equatable {
     /// The overlay lines to show, already split by the model (the `speak` tool's `lines` array) and
     /// rendered one at a time — so the client never splits a free-form string on punctuation.
     /// Optional Mermaid is rendered only in an explicitly selected System Design session.
-    case speak(callId: String, lines: [String], mermaid: String? = nil)
+    case speak(callId: String, lines: [String], mermaid: String? = nil, explanation: String? = nil)
     /// The model's explicit "nothing useful to add" decision. Silence is a tool call (not the absence
     /// of one) so that `tool_choice: required` can forbid plain-text output entirely — free text from
     /// a stay-quiet turn used to be stored in the server-side conversation, where the model imitated

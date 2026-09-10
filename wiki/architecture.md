@@ -78,7 +78,7 @@ moments the model judges worthwhile.
    progress is consumed from the module stream.
    Natural triggers coalesce while waiting. Each finalized turn carries its transcript boundary, so
    a delayed transcript-batch callback arriving after another attempt committed that same line is
-   consumed instead of buying a duplicate request. The explicit manual-hint hotkey bypasses this wait.
+   consumed instead of buying a duplicate request. Either explicit coaching shortcut bypasses this wait.
    The CoachDriver then calls the brain on every trigger that carries **substance** — there is no
    cooldown, rate cap, or wake-word gate. Whether to speak (and whether the user just addressed
    Jarvis) is the model's call, governed by the system prompt; the only hard gates are the user's
@@ -88,7 +88,7 @@ moments the model judges worthwhile.
    keeps the complete finalized transcription. Context-dependent short replies such as "Yes", "No",
    "Okay", "对", and "可以" fail open for either speaker, as do unknown short fragments. Interviewer
    questions remain first-class and may draw a proactive tip. Consumed noise never rides into a
-   later request; silence checks and the hint hotkey always go through. The gate is a small explicit
+   later request; silence checks and both coaching shortcuts always go through. The gate is a small explicit
    class on purpose: a classifier model would add latency and cost for it, and asking the
    transcription model to drop filler is not a deterministic boundary and would silently alter the
    audit record.
@@ -171,26 +171,51 @@ Invalid or unsupported graph syntax degrades to the same text hint, with diagnos
 path, and rendered images are never archived. A graph is a suggested sketch accompanying one hint,
 not a continuously synchronized model of the discussion.
 
-### On-demand hint (⌥⌘J)
+### On-demand coaching shortcuts
 
-Proactive coaching is the default, but the user can also **pull** a hint on demand. Pressing the
-global hotkey **⌥⌘J** while a session is running fires a `manualHint` trigger that does in **one**
-brain round-trip what the proactive screen path needs two for: the harness captures the screenshot
-*itself* and injects it — plus a synthetic "give me a hint now" user message — into the *first*
-request, and forces the `speak` tool, so a screen-aware hint always comes straight back. (The
-proactive path, by contrast, must first let the model decide to call `capture_screen`, then reason
-over the returned image on a second trip — the latency this hotkey exists to skip.) It reuses the
-live session's brain, conversation, and transcript, so the hint has full context, and it routes
-through the same single-in-flight turn box as audio triggers (a press coalesces, never stacks). It is
-inert — a beep — when no session is running, since there is no live conversation to hint from. The
-trigger and its pre-filled message are recorded to the [activity viewer](./build-and-run.md), so you
-can see exactly what the shortcut sent to the brain.
+Hints and explanations are proactive. The shared coach prompt distinguishes needing a next step
+from not understanding the question, earlier guidance, or the overall approach using the available
+session history, newest speech, and current screen. Clear confusion warrants an explanation; silence
+or unchanged code alone does not. Repeated confusion calls for simpler framing or a smaller example,
+while productive progress calls for silence. This policy applies across interview formats without a
+separate classifier, timer, or model request.
 
-The hotkey is registered with **Carbon `RegisterEventHotKey`**, the one global-shortcut API Apple
-never modernized, which needs no Accessibility/TCC permission. We deliberately did **not** take the
-`KeyboardShortcuts` package: every modern release uses SwiftUI macros (`@Entry`/`#Preview`) whose
-plugins ship only with full Xcode, and Jarvis builds **CLT-only** (see
-[build-and-run.md](./build-and-run.md)). The binding is fixed for now; a rebinding UI is a later nicety.
+Two configurable global shortcuts are fallbacks for a missed need: **Give me a hint** (default
+**⌥⌘J**) requests the next useful hint; **Explain more** (default **⌥⌘E**) explicitly requests
+clarification of the relevant gap, which may span several earlier hints. Both snapshot a fresh screen,
+include the available conversation, and force `speak` in one brain round trip. If capture fails, the
+request identifies the missing screen and uses available context without inventing visible details.
+They share the ordinary single-flight coach loop and provider route. Natural wakes preserve pending
+manual intent; the latest explicit shortcut chooses its kind. A fresh manual press may bypass unsettled
+transcription, while an automatic retry waits for settlement. Stop cancels either request; while stopped,
+an explicit shortcut only beeps. Activity records which shortcut was pressed.
+
+The `speak` action keeps short `lines` for captions and an optional plain-text `explanation` for fuller
+clarification in the persistent box. The prompt targets roughly 60–120 words in short paragraphs,
+with a simple rationale, a concrete example when useful, and one starting action. The box scrolls to
+the beginning of that entry and preserves its paragraphs. Hints use semibold text; fuller detail uses
+regular text at the same configured size under an **Explanation** label, separated by whitespace.
+Captions retain only the standalone summary.
+[Enable explanations](./settings-window.md#shortcuts) controls both automatic detail and the manual
+fallback. `SessionPlan.explanationsEnabled` is fixed at Start and preserved across screen-plan
+revisions. Only enabled sessions receive explanation guidance in the system prompt; saved edits take
+effect on the next Start, keeping CLI instructions stable. The nullable tool field remains until
+[#273](https://github.com/JINGBANZ/jarvis/issues/273) establishes session-composed tools.
+At delivery, the runner checks whether the persistent box can show detail. Hidden explanations are
+omitted from both Activity and committed tool-call history. This live visibility check also covers a
+box hidden while the request was running. Disabling the box turns off the saved explanation setting
+and releases its shortcut; enabling the box does not implicitly enable explanations.
+
+Explanation text follows the existing coaching history and Activity paths. It opens no extra window,
+never activates Jarvis, and respects the box's enabled/session visibility. Disabling the box leaves
+only the brief caption if that surface is enabled; it does not force a hidden surface on.
+
+Shortcuts use **Carbon `RegisterEventHotKey`**, which needs no Accessibility/TCC permission.
+[`CoachingShortcut`](../Sources/JarvisCore/Config/CoachingShortcut.swift) provides stable event identities;
+`HotkeyController` dispatches only matching Jarvis events. Each binding persists independently through
+`HotkeyPreferences`. Registering a replacement happens before releasing the old binding, so a
+collision—including the other Jarvis shortcut—keeps the prior working binding. See
+[Settings → Shortcuts](./settings-window.md#shortcuts).
 
 ## 3. Components
 
@@ -209,7 +234,7 @@ plugins ship only with full Xcode, and Jarvis builds **CLT-only** (see
 | **Overlay Caption** | Render `speak` output: up to ~3 short lines (model-split), shown one at a time and queued so a newer tip never cuts off the current one; non-activating, always-on-top, excluded from capture. Switchable from Settings — **off by default**; when off, tips are suppressed. | AppKit NSPanel; `OverlayCaptionPanel`. |
 | **Overlay Box** | A persistent window logging every `speak` tip in full, timestamped — the scrollable history of what the caption flashed one line at a time. Movable, resizable, translucent, also excluded from capture; switched on/off from Settings (**on by default**). Its own header carries the box's controls: **collapse** on the left, which rolls the panel down to the header strip and back without losing the size the user dragged to, the name in the middle, and **clear** on the right, which appears only when there is something to erase. The header's proportions are derived from the box's height (`OverlayBoxChrome`) rather than fixed, so the strip stays aimable at the floor of `Defaults.Overlay.Box.heightRange` and stays chrome on a box dragged to fill a display. A borderless window advertises no resize affordance, and macOS refuses to let an inactive app set the cursor, so the box draws its own (`OverlayBoxResizeAffordanceView`): the edge or corner under the pointer lights up, on an `.activeAlways` tracking area, which is what reaches a background app. That view also owns the drag, so the region that lights is the region that resizes. Its thin edge grips are the only thing that refuses a window drag, because AppKit applies `mouseDownCanMoveWindow == false` to a view's whole frame: a full-size view refusing it freezes the box in place. It follows the session: shown on Start (cleared and rolled open, for the new conversation) and hidden on Stop. Its size persists across launches; its position does not, so it opens centered. Fed by the same `speak` call as the caption via **`BroadcastOverlay`**, which fans one `OverlayRendering.render` out to both sinks (so `CoachDriver` is unchanged). System-design visual hints are image attachments beside their text in this same box; the caption remains text-only. See [Private architecture hints](#private-architecture-hints). | AppKit NSPanel; `OverlayBoxPanel`. |
 | **MenuBar** | Manual **Start/Stop** of the pipeline (no auto-start), the same authoritative readiness status shown by Activity, and one-time API-key entry when OpenAI is in use. Stopped and active use a boxless monochrome eye: closed on the Listening Lens's diagonal axis while stopped and open while active, with the active icon following the system menu-bar foreground instead of a brand color. The attention states retain the lit Listening Lens tile — amber while checking or recovering and red when a Start is blocked before any session begins — and the menu and tooltip name the requirement behind those attention states; stopped is simply labeled `Jarvis is stopped`. A failed system stream may degrade to microphone-only, while a failed microphone stream stops the session. The two overlay surfaces are switched from Settings, and the Overlay Box is cleared from its own header, not from the menu. A centered, disabled caption at the bottom of the menu names the running build, so a user can report it without opening Settings: a release shows a muted `v<version>` from `CFBundleShortVersionString`, and a local build shows a red `Dev`, keyed off the development marker `scripts/build-app.sh` stamps into the assembled bundle (see `MenuBarController.buildCaptionItem()`). | AppKit menu-bar item; owner-only file for the key. |
-| **HotkeyController** | Register the global **⌥⌘J** hint hotkey and route a press to a one-trip `manualHint` turn while a session runs (beep otherwise). See [§2 On-demand hint](#on-demand-hint-j). | Carbon HIToolbox (`RegisterEventHotKey`, no TCC). |
+| **HotkeyController** | Register the independent hint and explanation shortcuts and route each press to its manual coaching request while a session runs (beep otherwise). See [§2 On-demand coaching shortcuts](#on-demand-coaching-shortcuts). | Carbon HIToolbox (`RegisterEventHotKey`, no TCC). |
 | **PermissionGate** | Gather every TCC grant at launch instead of mid-session, and keep Jarvis closed until it holds all three: one button walks Microphone, System Audio Recording, and Screen Recording one dialog at a time, and closing the window quits. `SystemAudioPermissionProbe` proves the silently-enforced system-audio grant by playing a muted tone into a tap of Jarvis's own process and listening for it. See [§3 Permissions](#permissions). | AVFoundation, `CGRequestScreenCaptureAccess`, Core Audio process taps. |
 
 Each component has one job and a narrow interface. The CoachDriver is the only place the
@@ -369,14 +394,14 @@ identifiers, and call/result pairing never cross an attempt or provider boundary
 
 Failed conversation work remains pending within the request's retry budget and schedules another
 coaching attempt after a short fixed delay. This internal wake-up does not depend on a new natural trigger. If a turn-end, silence, or
-manual-hint trigger arrives first, it coalesces with the pending wake-up; the next attempt contains the
+manual coaching trigger arrives first, it coalesces with the pending wake-up; the next attempt contains the
 failed conversation plus every newer finalized transcript item. If nothing new arrives, the new
 attempt uses the same pending conversation. Every automatic attempt waits while either transcription
 stream owns unfinished work so it does not cross an earlier utterance that is about to finalize. An
-explicit manual hint interrupts that postponement even after the wait begins and upgrades the same
+explicit coaching shortcut interrupts that postponement even after the wait begins and upgrades the same
 pending-work attempt to a forced hint; ordinary natural triggers remain parked until transcription
 settles. `TriggerReason` remains the model-facing
-reason that made coaching useful (`turnEnd`, `silence`, or `manualHint`); pending work is scheduler
+reason that made coaching useful (`turnEnd`, `silence`, `manualHint`, or `manualExplanation`); pending work is scheduler
 state, not a fourth instruction to the model. An automatic attempt with no newer trigger reuses the
 pending work's reason; when another natural trigger arrives, its newer reason describes the fresh
 snapshot.
@@ -390,7 +415,7 @@ A successful response clears the target's failure count and preserves successful
 
 Exhausting the whole route ends only that request. Jarvis records one fixed Activity notice and shows
 a red error on its existing enabled overlays, while capture and transcription remain active. It does
-not keep automatically retrying the failed conversation. A later explicit manual hint or new finalized
+not keep automatically retrying the failed conversation. A later explicit coaching shortcut or new finalized
 speech starts a fresh request at the primary with a new budget; silence with no new transcript does
 not. Failed transcript stays available as context. Provider clients remain owned until replacement or
 session teardown so a new request can reuse them. Stop still cancels pending/in-flight work. Raw
@@ -398,7 +423,7 @@ errors stay in `jarvis-debug.log`; fixed UI copy does not claim that every failu
 
 ```mermaid
 flowchart TD
-    T[Turn end, silence, manual hint,<br/>or pending-work wake] --> S{Either transcription<br/>stream unsettled?}
+    T[Turn end, silence, manual shortcut,<br/>or pending-work wake] --> S{Either transcription<br/>stream unsettled?}
     S -- Yes, automatic attempt --> P[Keep work pending<br/>and postpone]
     S -- No --> A[Snapshot active target +<br/>latest finalized conversation]
     A --> R[Run one coaching attempt<br/>on one target]
@@ -877,7 +902,7 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
 - Continuous OCR or recording the screen/audio to disk ("recall").
 - A dedicated wake-word engine. Direct address is just the word "Jarvis" (or a question) appearing
   in the transcript, which the brain reads and answers — there is no wake-word detector. (A global
-  **⌥⌘J** hotkey for an on-demand screen hint *does* exist — see [§2](#on-demand-hint-j) — but it
+  **⌥⌘J** hotkey for an on-demand screen hint *does* exist — see [§2](#on-demand-coaching-shortcuts) — but it
   complements the proactive default; it is not a trigger-to-listen wake key.)
 - Productization: hosted auth, billing, onboarding, or arbitrary provider chains.
 - Windows / cross-platform.

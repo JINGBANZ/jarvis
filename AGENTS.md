@@ -97,7 +97,7 @@ Foundation-only logic in `JarvisCore`; keep AppKit, audio, capture, and other OS
 - Preserve one brain target for an entire coaching attempt: no in-attempt provider retry or switch.
   Temporary or unknown failures exhaust a target after three failed attempts; proven permanent
   provider-boundary failures may exhaust it immediately. Retries use a short fixed delay. Exhausting
-  the route ends only the request: show a fixed error and keep listening. A later explicit hint or new
+  the route ends only the request: show a fixed error and keep listening. A later explicit coaching shortcut or new
   finalized speech gets a fresh route budget. Successful fallback selection stays active. Never
   rewrite saved preferences or switch targets inside an attempt.
 - Keep route and scheduling policy as Foundation-only state machines; the app supplies clients,

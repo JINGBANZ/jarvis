@@ -73,15 +73,16 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     /// Reports the box's new content size once a resize drag finishes.
     public var onSizeChanged: ((Double, Double) -> Void)?
     /// Stand-in responses shown during the Settings preview.
-    private static let sampleEntries: [(stamp: String, text: String, diagram: DiagramHint?, isError: Bool)] = [
-        ("10:30:00", "Ask about the time complexity of that loop.", nil, false),
-        ("10:30:08", "Mention the edge case when the list is empty.", nil, false),
+    private static let sampleEntries: [(stamp: String, text: String, explanation: String?, diagram: DiagramHint?, isError: Bool)] = [
+        ("10:30:00", "Ask about the time complexity of that loop.", nil, nil, false),
+        ("10:30:08", "Check the empty list before reading its first item.",
+         "An empty list has no first item. Handle that case before indexing into it, then continue with the normal path.", nil, false),
     ]
     /// Each spoken tip with the time it arrived, newest last. Held as structured entries (not the
     /// rendered string) so `clear()` and the test hooks don't have to parse the text back out.
     private var diagramsEnabled = Defaults.Overlay.Box.diagramsEnabled
     private var latestEntryStart = 0
-    private var entries: [(stamp: String, text: String, diagram: DiagramHint?, isError: Bool)] = []
+    private var entries: [(stamp: String, text: String, explanation: String?, diagram: DiagramHint?, isError: Bool)] = []
     /// Test hook (internal): counts how many times the panel has re-asserted capture exclusion.
     private(set) var captureExclusionReassertCount = 0
 
@@ -258,28 +259,45 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     }
 
     public nonisolated func render(_ lines: [String], perLineSeconds: [TimeInterval], diagram: DiagramHint?) {
-        let text = lines
+        render(lines, perLineSeconds: perLineSeconds, diagram: diagram, explanation: nil)
+    }
+
+    public nonisolated func render(_ lines: [String], perLineSeconds: [TimeInterval], diagram: DiagramHint?, explanation: String?) {
+        let summary = lines
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
             .joined(separator: " ")
-        guard !text.isEmpty else { return }
-        Task { @MainActor in self.append(text, diagram: diagram) }
+        guard !summary.isEmpty else { return }
+        let detail = explanation?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        Task { @MainActor in
+            self.append(summary, explanation: detail.isEmpty ? nil : detail, diagram: diagram)
+        }
     }
 
     /// Fixed error copy stays in the existing nonactivating, capture-excluded history panel.
     public func showError(_ message: String) {
-        append(message, diagram: nil, isError: true)
+        append(message, explanation: nil, diagram: nil, isError: true)
     }
 
-    private func append(_ text: String, diagram: DiagramHint?, isError: Bool = false) {
-        entries.append((stamp: timeFormatter.string(from: Date()), text: text, diagram: diagram, isError: isError))
+    public func deliver(_ lines: [String], perLineSeconds: [TimeInterval],
+                        diagram: DiagramHint?, explanation: String?) -> String? {
+        let summary = lines.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }.joined(separator: " ")
+        guard !summary.isEmpty else { return nil }
+        let detail = acceptsDetail ? explanation : nil
+        append(summary, explanation: detail, diagram: diagram)
+        return detail
+    }
+
+    private func append(_ text: String, explanation: String?, diagram: DiagramHint?, isError: Bool = false) {
+        entries.append((stamp: timeFormatter.string(from: Date()), text: text, explanation: explanation, diagram: diagram, isError: isError))
         // No preview can be running: one only opens while stopped, and Start ends it.
         // Re-assert capture exclusion on every render that reaches the screen — same defense-in-depth as
         // OverlayCaptionPanel.show, since this box can be visible (full of responses) while Settings flips the
         // activation policy and WindowServer drops `sharingType` on vulnerable macOS builds.
         if panel.isVisible { reassertCaptureExclusion() }
         renderDisplay()
-        if diagram != nil && diagramsEnabled {
+        if explanation != nil || (diagram != nil && diagramsEnabled) {
             // A tall diagram may exceed the viewport. Start at its hint, not its last row.
             if let layout = textView.layoutManager, let container = textView.textContainer {
                 layout.ensureLayout(for: container)
@@ -293,9 +311,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         }
     }
 
-    /// The one place the display is built, so anything derived from what is on screen is derived here
-    /// and cannot forget which source is showing. A dimmed monospaced timestamp in front of each
-    /// response, blank line between, and the diagram hint under it when one came with the tip.
+    /// Build the current display, including labeled explanations and optional diagrams.
     private func renderDisplay() {
         let items = display == .sample ? Self.sampleEntries : entries
         let result = NSMutableAttributedString()
@@ -307,13 +323,25 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
             .foregroundColor: NSColor.white,
             .font: NSFont.systemFont(ofSize: fontSize),
         ]
+        let hintAttrs: [NSAttributedString.Key: Any] = [
+            .foregroundColor: NSColor.white,
+            .font: NSFont.systemFont(ofSize: fontSize, weight: .semibold),
+        ]
+        let explanationLabelAttrs: [NSAttributedString.Key: Any] = [
+            .foregroundColor: NSColor(white: 1, alpha: 0.75),
+            .font: NSFont.systemFont(ofSize: max(8, fontSize - 2), weight: .medium),
+        ]
         for (i, entry) in items.enumerated() {
             if i > 0 { result.append(NSAttributedString(string: "\n\n")) }
             latestEntryStart = result.length
             result.append(NSAttributedString(string: "\(entry.stamp)  ", attributes: stampAttrs))
-            var entryAttrs = textAttrs
+            var entryAttrs = hintAttrs
             if entry.isError { entryAttrs[.foregroundColor] = NSColor.systemRed }
             result.append(NSAttributedString(string: entry.text, attributes: entryAttrs))
+            if let explanation = entry.explanation {
+                result.append(NSAttributedString(string: "\n\nExplanation\n", attributes: explanationLabelAttrs))
+                result.append(NSAttributedString(string: explanation, attributes: textAttrs))
+            }
             if diagramsEnabled, let diagram = entry.diagram {
                 result.append(NSAttributedString(string: "\n"))
                 let attachment = NSTextAttachment()
@@ -343,6 +371,8 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     /// Whether the box belongs on screen: switched on *and* a session running. Kept distinct from
     /// `panel.isVisible` because the Settings preview can show the box without either being true; the
     /// preview restores to this on close, so the box can never disagree with the setting or outlive Stop.
+    public var acceptsDetail: Bool { shouldBeVisible && !isCollapsed }
+
     private var shouldBeVisible: Bool { isEnabled && isSessionLive }
 
     /// Bring the panel to whatever `shouldBeVisible` now says. One place owns the rule, so the Start/Stop

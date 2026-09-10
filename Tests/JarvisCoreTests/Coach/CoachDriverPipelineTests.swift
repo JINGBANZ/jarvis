@@ -1980,7 +1980,8 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         })
     }
 
-    @Test func manualHintWakesFailedAttemptEvenWhileSpeechIsUnsettled() async {
+    @Test(arguments: [TriggerReason.manualHint, .manualExplanation])
+    func manualHintWakesFailedAttemptEvenWhileSpeechIsUnsettled(_ reason: TriggerReason) async {
         let gate = AsyncGate()
         let brain = GatedFailureThenSpeakingBrain(gate: gate)
         let (driver, transcript) = makeDriver(
@@ -1991,7 +1992,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         async let outcome = driver.handleTrigger(.turnEnd)
         await gate.waitUntilEntered()
         driver.updateTranscriptionWork(true, for: .them)
-        #expect(await driver.handleTrigger(.manualHint) == .busy)
+        #expect(await driver.handleTrigger(reason) == .busy)
         await gate.release()
 
         #expect(await outcome == .spoke)
@@ -1999,7 +2000,8 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         driver.updateTranscriptionWork(false, for: .them)
     }
 
-    @Test func automaticRetryOfFailedManualHintWaitsForUnsettledSpeech() async {
+    @Test(arguments: [TriggerReason.manualHint, .manualExplanation])
+    func automaticRetryOfFailedManualHintWaitsForUnsettledSpeech(_ reason: TriggerReason) async {
         let gate = AsyncGate()
         let delayGate = AsyncGate()
         let brain = GatedFailureThenSpeakingBrain(gate: gate)
@@ -2011,7 +2013,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
         let outcome = Task {
             await turnOutcomeBeforeTimeout {
-                await driver.handleTrigger(.manualHint)
+                await driver.handleTrigger(reason)
             }
         }
         defer {
@@ -2503,8 +2505,8 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(recorder.failures.count == 1)
     }
 
-    @Test(arguments: [false, true], [false, true])
-    func newInputDuringFinalAttemptGetsItsOwnRequestBudget(unavailableTail: Bool, manual: Bool) async {
+    @Test(arguments: [false, true], [TriggerReason.turnEnd, .manualHint, .manualExplanation])
+    func newInputDuringFinalAttemptGetsItsOwnRequestBudget(unavailableTail: Bool, reason: TriggerReason) async {
         let gate = AsyncGate()
         let brain = TwoFailuresThenGatedFailureBrain(gate: gate)
         let recorder = BrainFailureRecorder()
@@ -2519,8 +2521,8 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         transcript.append(.init(speaker: .them, text: "first question", at: 0))
         let request = Task { await driver.handleTrigger(.turnEnd) }
         #expect(await waitUntilAsync { await gate.hasEntered })
-        if !manual { transcript.append(.init(speaker: .them, text: "a genuinely new question", at: 1)) }
-        #expect(await driver.handleTrigger(manual ? .manualHint : .turnEnd) == .busy)
+        if !reason.isManual { transcript.append(.init(speaker: .them, text: "a genuinely new question", at: 1)) }
+        #expect(await driver.handleTrigger(reason) == .busy)
         await gate.release()
         #expect(await request.value == .brainError)
         #expect(brain.callCount == 6)
@@ -2529,13 +2531,14 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(brain.callCount == 6)
     }
 
-    @Test func manualHintCanRetryFailedRequestWithoutNewSpeech() async {
+    @Test(arguments: [TriggerReason.manualHint, .manualExplanation])
+    func manualHintCanRetryFailedRequestWithoutNewSpeech(reason: TriggerReason) async {
         let brain = ScriptedThrowBrain(script: [nil, nil, nil,
             .init(toolCalls: [.staySilent(callId: "later")])])
         let (driver, transcript) = makeDriver(brain: brain, clock: ManualClock())
         transcript.append(.init(speaker: .them, text: "a question", at: 0))
         #expect(await driver.handleTrigger(.turnEnd) == .brainError)
-        #expect(await driver.handleTrigger(.manualHint) == .silentByModel)
+        #expect(await driver.handleTrigger(reason) == .silentByModel)
         #expect(brain.calls.count == 4)
     }
 

@@ -199,7 +199,8 @@ public final class CoachDriver: @unchecked Sendable {
     /// user edit does, and it never rewrites the persisted preference either.
     public func updatePlan(_ plan: SessionPlan) {
         stateLock.lock()
-        self.plan = plan
+        self.plan = SessionPlan(revision: plan.revision, screen: plan.screen,
+                                explanationsEnabled: self.plan.explanationsEnabled)
         stateLock.unlock()
     }
 
@@ -351,7 +352,7 @@ public final class CoachDriver: @unchecked Sendable {
         if let pending = wake.trigger?.reason {
             receivedTrigger = true
             settledWork.reason = Self.coalescing(settledWork.reason, with: pending)
-            settledWork.bypassesTranscriptionSettlement = pending == .manualHint
+            settledWork.bypassesTranscriptionSettlement = pending.isManual
         }
         guard !settledWork.bypassesTranscriptionSettlement else {
             settledWork.wake = .trigger
@@ -364,7 +365,7 @@ public final class CoachDriver: @unchecked Sendable {
         if let pending = wake.trigger?.reason {
             receivedTrigger = true
             settledWork.reason = Self.coalescing(settledWork.reason, with: pending)
-            settledWork.bypassesTranscriptionSettlement = pending == .manualHint
+            settledWork.bypassesTranscriptionSettlement = pending.isManual
         }
         if receivedTrigger {
             settledWork.wake = .trigger
@@ -383,7 +384,7 @@ public final class CoachDriver: @unchecked Sendable {
         let waiters: [CheckedContinuation<Void, Never>]
         stateLock.lock()
         if routeIsExhausted && !isHandling &&
-            trigger.reason != .manualHint && transcript.count <= (failedTranscriptBoundary ?? transcript.count) {
+            !trigger.reason.isManual && transcript.count <= (failedTranscriptBoundary ?? transcript.count) {
             stateLock.unlock()
             return .exhausted
         }
@@ -398,7 +399,7 @@ public final class CoachDriver: @unchecked Sendable {
             pendingTriggerWaiters.removeAll()
             stateLock.unlock()
             waiters.forEach { $0.resume() }
-            if trigger.reason == .manualHint {
+            if trigger.reason.isManual {
                 // A hint arriving after an automatic attempt has parked on unsettled speech must
                 // wake that exact pending attempt. The trigger stays queued until the fresh-attempt
                 // boundary consumes it together with the newest transcript.
@@ -427,9 +428,9 @@ public final class CoachDriver: @unchecked Sendable {
         _ existing: TriggerReason?,
         with incoming: TriggerReason
     ) -> TriggerReason {
-        if existing == .manualHint || incoming == .manualHint {
-            return .manualHint
-        }
+        // Manual intent survives natural wakes; the latest explicit request chooses the help kind.
+        if incoming.isManual { return incoming }
+        if let existing, existing.isManual { return existing }
         // For natural wakes, the latest reason best describes the transcript snapshot the next
         // attempt will actually see (for example, turn-end supersedes an older silence wake).
         return incoming
@@ -530,19 +531,20 @@ public final class CoachDriver: @unchecked Sendable {
     }
 
     /// Only input not included in the final failed attempt can start another request immediately.
-    private func finishFailedRequest(unattemptedManualHint: Bool = false) -> TriggerReason? {
+    private func finishFailedRequest(unattemptedManualReason: TriggerReason? = nil) -> TriggerReason? {
         stateLock.lock()
         defer { stateLock.unlock() }
         let next = pendingTrigger
         pendingTrigger = nil
-        if !Task.isCancelled && (unattemptedManualHint || next?.reason == .manualHint ||
+        if !Task.isCancelled && (unattemptedManualReason != nil || next?.reason.isManual == true ||
             transcript.count > (failedTranscriptBoundary ?? transcript.count)) {
             routeSession = BrainRouteSession(targetCount: configuredRoute.targets.count)
             routeIsExhausted = false
             pendingTransitionOrigin = nil
             pendingExhaustionDeliveryGeneration = nil
             failedTranscriptBoundary = nil
-            return unattemptedManualHint ? .manualHint : (next?.reason ?? .turnEnd)
+            if let next { return Self.coalescing(unattemptedManualReason, with: next.reason) }
+            return unattemptedManualReason ?? .turnEnd
         }
         isHandling = false
         return nil
@@ -846,8 +848,8 @@ public final class CoachDriver: @unchecked Sendable {
 
         var work = CoachAttemptRunner.PendingCoachingWork(reason: reason)
         var automaticSequence = 0
-        // A queued hint may be consumed before selection discovers an unavailable route tail.
-        var unattemptedManualHint = false
+        // A queued shortcut may be consumed before selection discovers an unavailable route tail.
+        var unattemptedManualReason: TriggerReason?
         var latestOutcome: TurnOutcome = .silentByModel
 
         while !Task.isCancelled {
@@ -857,8 +859,8 @@ public final class CoachDriver: @unchecked Sendable {
                 return .cancelled
             }
             guard let attempt = await selectBrainForAttempt() else {
-                if let next = finishFailedRequest(unattemptedManualHint: unattemptedManualHint) {
-                    unattemptedManualHint = false
+                if let next = finishFailedRequest(unattemptedManualReason: unattemptedManualReason) {
+                    unattemptedManualReason = nil
                     work = CoachAttemptRunner.PendingCoachingWork(reason: next)
                     automaticSequence = 0
                     continue
@@ -867,7 +869,7 @@ public final class CoachDriver: @unchecked Sendable {
             }
 
             if automaticSequence == 0 { await reportBrainRecovery(nil, on: attempt) }
-            unattemptedManualHint = false
+            unattemptedManualReason = nil
             let execution = await runner.runAttempt(work, using: attempt)
             switch execution.result {
             case .completed(let outcome):
@@ -949,7 +951,7 @@ public final class CoachDriver: @unchecked Sendable {
 
                 var wake = takePendingTriggerSnapshot()
                 var receivedTrigger = wake.trigger != nil
-                var explicitManualWake = wake.trigger?.reason == .manualHint
+                var explicitManualWake = wake.trigger?.reason.isManual == true
                 if let reason = wake.trigger?.reason {
                     failedWork.reason = Self.coalescing(failedWork.reason, with: reason)
                 }
@@ -973,11 +975,11 @@ public final class CoachDriver: @unchecked Sendable {
                 wake = takePendingTriggerSnapshot()
                 if let reason = wake.trigger?.reason {
                     receivedTrigger = true
-                    explicitManualWake = explicitManualWake || reason == .manualHint
+                    explicitManualWake = explicitManualWake || reason.isManual
                     work.reason = Self.coalescing(work.reason, with: reason)
                 }
                 work.bypassesTranscriptionSettlement = explicitManualWake
-                unattemptedManualHint = explicitManualWake
+                unattemptedManualReason = explicitManualWake ? work.reason : nil
                 work.wake = receivedTrigger ? .trigger : .pendingWork
             }
         }
