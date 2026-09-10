@@ -35,12 +35,14 @@ import Testing
         box.setSessionLive(false)
     }
 
-    @MainActor @Test func codeDockCollapsesWithHeaderAndRestoresWithoutLosingSnippet() async throws {
+    @MainActor @Test func codeDockCollapsesWithHeaderAndRestoresWithoutLosingSnippet() throws {
         let box = OverlayBoxPanel()
+        box.setEnabled(true)
+        box.setSessionLive(true)
+        defer { box.setSessionLive(false) }
         box.setCodeEnabled(true)
         let code = try #require(CodeSnippet(language: "Python", placement: "Start", code: "seen = {}"))
-        box.showCodeSnippet(code)
-        for _ in 0..<100 where box.currentCodeSnippet != code { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(box.deliverCodeSnippet(code) == code)
         box.clickCollapseButton()
         #expect(box.isCollapsed)
         #expect(box.currentCodeHeight == 0)
@@ -50,82 +52,89 @@ import Testing
         #expect(box.currentCodeSnippet == code)
     }
 
-    @MainActor @Test func codeSettingControlsEmptyDockAndRejectsLateOutput() async throws {
+    @MainActor @Test func codeSettingControlsEmptyDockAndRejectsLateOutput() throws {
         let box = OverlayBoxPanel()
+        box.setEnabled(true)
+        box.setSessionLive(true)
+        defer { box.setSessionLive(false) }
         #expect(box.currentCodeHeight == 0)
         box.setCodeEnabled(true)
         #expect(box.currentCodeHeight > 0)
         #expect(box.currentCodeSnippet == nil)
         let code = try #require(CodeSnippet(language: "Python", placement: "Start", code: "seen = {}"))
-        box.showCodeSnippet(code)
+        #expect(box.deliverCodeSnippet(code) == code)
+        // Settings turns off the live code dock together with the master box.
+        box.setEnabled(false)
         box.setCodeEnabled(false)
-        try await Task.sleep(for: .milliseconds(30))
+        box.setEnabled(true)
+        #expect(box.deliverCodeSnippet(code) == nil)
         #expect(box.currentCodeHeight == 0)
         #expect(box.currentCodeSnippet == nil)
-        box.showAppearancePreview(true)
-        #expect(box.currentCodeHeight == 0)
-        box.showAppearancePreview(false)
         box.setCodeEnabled(true)
         #expect(box.currentCodeSnippet == nil)
         #expect(box.currentCodeHeight > 0)
     }
 
-    @MainActor @Test func hintsDoNotReplaceCodeAndPreviewRestoresUntilClearOrStop() async throws {
+    @MainActor @Test func hintsPreserveCodeAndPreviewCannotReplaceLiveDelivery() throws {
         let box = OverlayBoxPanel()
+        box.setEnabled(true)
         box.setCodeEnabled(true)
         let snippet = try #require(CodeSnippet(language: "swift", placement: "Inside solve", code: "  return value"))
-        BroadcastOverlay([box]).showCodeSnippet(snippet)
-        for _ in 0..<100 where box.currentCodeSnippet != snippet { try await Task.sleep(for: .milliseconds(10)) }
-        #expect(box.currentCodeSnippet == snippet)
-        box.render(["Another hint"], perLineSeconds: [1])
-        for _ in 0..<100 where box.entryCount == 0 { try await Task.sleep(for: .milliseconds(10)) }
+        // Preview is only available while stopped; live delivery begins after it closes.
+        box.showAppearancePreview(true)
+        #expect(box.currentCodeSnippet != nil)
+        box.showAppearancePreview(false)
+        #expect(box.currentCodeSnippet == nil)
+        box.setSessionLive(true)
+        defer { box.setSessionLive(false) }
+        #expect(BroadcastOverlay([box]).deliverCodeSnippet(snippet) == snippet)
+        _ = box.deliver(["Another hint"], perLineSeconds: [1], diagram: nil, explanation: nil)
         #expect(box.currentCodeSnippet == snippet)
         box.showAppearancePreview(true)
-        #expect(box.currentCodeSnippet != snippet)
+        #expect(box.currentCodeSnippet == snippet)
         box.showAppearancePreview(false)
         #expect(box.currentCodeSnippet == snippet)
-        box.showCodeSnippet(nil)
-        for _ in 0..<100 where box.currentCodeSnippet != nil { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(box.deliverCodeSnippet(nil) == nil)
         #expect(box.currentCodeSnippet == nil)
-        box.showCodeSnippet(snippet)
-        for _ in 0..<100 where box.currentCodeSnippet == nil { try await Task.sleep(for: .milliseconds(10)) }
-        box.showAppearancePreview(true)
+        #expect(box.deliverCodeSnippet(snippet) == snippet)
         box.setSessionLive(false)
-        box.showAppearancePreview(false)
         #expect(box.currentCodeSnippet == nil)
-        box.showCodeSnippet(snippet)
-        for _ in 0..<100 where box.currentCodeSnippet == nil { try await Task.sleep(for: .milliseconds(10)) }
+        box.setSessionLive(true)
+        #expect(box.deliverCodeSnippet(snippet) == snippet)
         box.clear()
         #expect(box.currentCodeSnippet == nil)
     }
 
-    @MainActor @Test func dockHeightIsBoundedAndDisabledBoxStaysHidden() async throws {
+    @MainActor @Test func dockHeightIsBoundedAndDisabledBoxStaysHidden() throws {
         let box = OverlayBoxPanel(contentSize: NSSize(width: 320, height: 240))
         box.setCodeEnabled(true)
         box.setFontSize(32)
         let snippet = try #require(CodeSnippet(language: "python", placement: "Inside solve",
             code: "for item in items:\n    if item:\n        result.append(item)\nreturn result"))
-        box.showCodeSnippet(snippet)
-        for _ in 0..<100 where box.currentCodeSnippet == nil { try await Task.sleep(for: .milliseconds(10)) }
-        #expect(box.currentCodeHeight > 0)
-        #expect(box.currentCodeHeight <= 108)
+        #expect(box.deliverCodeSnippet(snippet) == nil)
         #expect(!box.isPanelVisible)
         box.setSessionLive(true)
+        defer { box.setSessionLive(false) }
+        #expect(box.deliverCodeSnippet(snippet) == nil)
         #expect(!box.isPanelVisible)
         box.setEnabled(true)
         #expect(box.isPanelVisible)
+        #expect(box.deliverCodeSnippet(snippet) == snippet)
+        #expect(box.currentCodeHeight > 0)
+        #expect(box.currentCodeHeight <= 108)
         box.setEnabled(false)
         #expect(!box.isPanelVisible)
-        box.setSessionLive(false)
     }
 
-    @MainActor @Test func minimumBoxKeepsCodeReadableAndPlacementScrollableWithoutTooltips() async throws {
+    @MainActor @Test func minimumBoxKeepsCodeReadableAndPlacementScrollableWithoutTooltips() throws {
         let box = OverlayBoxPanel(contentSize: NSSize(width: 240, height: 140))
+        box.setEnabled(true)
+        box.setSessionLive(true)
+        defer { box.setSessionLive(false) }
         box.setCodeEnabled(true)
         let snippet = try #require(CodeSnippet(language: "swift",
             placement: "Inside solve, after collecting the current window and before updating the result with the next candidate", code: "return result"))
-        box.showCodeSnippet(snippet)
-        for _ in 0..<100 where box.currentCodeSnippet == nil { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(box.deliverCodeSnippet(snippet) == snippet)
         #expect(box.currentCodeHeight >= 70)
         #expect(box.currentContentSize.height - box.currentCodeHeight - box.currentHeaderHeight >= 44)
         let dock = CodeSnippetView(frame: NSRect(x: 0, y: 0, width: 240, height: 96))
@@ -141,14 +150,16 @@ import Testing
         #expect(document.frame.height > scroll.contentSize.height)
     }
 
-    @MainActor @Test func normalDockShowsThreeLinesWithoutScrollingAndDismissHasContrast() async throws {
+    @MainActor @Test func normalDockShowsThreeLinesWithoutScrollingAndDismissHasContrast() throws {
         let snippet = try #require(CodeSnippet(language: "swift", placement: "Inside solve",
             code: "let next = value + 1\nresult.append(next)\nreturn result"))
         let box = OverlayBoxPanel(contentSize: NSSize(width: 580, height: 420))
+        box.setEnabled(true)
+        box.setSessionLive(true)
+        defer { box.setSessionLive(false) }
         box.setCodeEnabled(true)
         box.setFontSize(18)
-        box.showCodeSnippet(snippet)
-        for _ in 0..<100 where box.currentCodeSnippet == nil { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(box.deliverCodeSnippet(snippet) == snippet)
         let dock = CodeSnippetView(frame: NSRect(x: 0, y: 0, width: 580, height: box.currentCodeHeight))
         dock.show(snippet, fontSize: 18)
         dock.layoutSubtreeIfNeeded()

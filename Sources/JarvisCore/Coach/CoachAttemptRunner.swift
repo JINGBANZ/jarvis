@@ -161,13 +161,6 @@ final class CoachAttemptRunner: @unchecked Sendable {
             return AttemptExecution(id: nil, result: .cancelled)
         }
 
-        if pendingWork.reason == .manualCode, let interviewFormat, interviewFormat != .coding, interviewFormat != .generalTechnical {
-            let lines = ["Show code is available in Coding and General Technical sessions."]
-            overlay.showCodeSnippet(nil)
-            overlay.render(lines, perLineSeconds: lines.map { OverlayTiming.displaySeconds(for: $0, config: config) })
-            return AttemptExecution(id: nil, result: .skipped(.spoke))
-        }
-
         var work = pendingWork
         let reason = work.reason
         if case .silence(let seconds) = reason {
@@ -454,10 +447,8 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     ]
                     let data = try! JSONSerialization.data(withJSONObject: arguments, options: [.sortedKeys])
                     let deliveredCalls = response.rawToolCalls.filter { $0.id == callID }.map { call in
-                        call.id == callID
-                            ? RawToolCall(id: call.id, name: call.name,
-                                          argumentsJSON: String(decoding: data, as: UTF8.self))
-                            : call
+                        RawToolCall(id: call.id, name: call.name,
+                                    argumentsJSON: String(decoding: data, as: UTF8.self))
                     }
                     turnMessages.append(.assistantToolCalls(deliveredCalls))
                     turnMessages.append(.init(

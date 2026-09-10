@@ -2,6 +2,13 @@ import Testing
 @testable import JarvisCore
 
 @Suite struct ToolDefsTests {
+    @Test(arguments: [speakTool, systemDesignSpeakTool])
+    func speakSchemaLeavesHighlightLimitToLocalValidation(_ tool: ToolDef) {
+        #expect(!tool.parametersJSON.contains("\"maxItems\""))
+        #expect(CodeSnippet(language: "swift", placement: "Inside solve", code: "return result",
+                            highlightedLines: Array(repeating: 1, count: 13)) == nil)
+    }
+
     @Test func toolNames() {
         #expect(captureScreenTool.name == "capture_screen")
         #expect(speakTool.name == "speak")

@@ -287,15 +287,6 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         }
     }
 
-    public nonisolated func showCodeSnippet(_ snippet: CodeSnippet?) {
-        Task { @MainActor in
-            guard self.codeEnabled else { return }
-            self.codeSnippet = snippet
-            self.refreshCode()
-            if self.panel.isVisible { self.reassertCaptureExclusion() }
-        }
-    }
-
     public func deliverCodeSnippet(_ snippet: CodeSnippet?) -> CodeSnippet? {
         codeSnippet = acceptsDetail && codeEnabled ? snippet : nil
         refreshCode()

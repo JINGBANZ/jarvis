@@ -2,8 +2,7 @@ import Foundation
 
 /// What the overlay needs to do; the real NSPanel impl lives in JarvisOverlay.
 public protocol OverlayRendering: AnyObject {
-    /// Replace the independent code area; nil clears it. Text-only sinks ignore this.
-    func showCodeSnippet(_ snippet: CodeSnippet?)
+    /// Deliver or clear the independent code area and report accepted visible content.
     @MainActor func deliverCodeSnippet(_ snippet: CodeSnippet?) -> CodeSnippet?
     /// Sampled at delivery, since the user can hide the persistent surface during a request.
     @MainActor var acceptsDetail: Bool { get }
@@ -20,7 +19,6 @@ public protocol OverlayRendering: AnyObject {
 }
 
 extension OverlayRendering {
-    public func showCodeSnippet(_ snippet: CodeSnippet?) {}
     @MainActor public func deliverCodeSnippet(_ snippet: CodeSnippet?) -> CodeSnippet? { nil }
     @MainActor public var acceptsDetail: Bool { false }
 

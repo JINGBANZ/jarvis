@@ -173,19 +173,6 @@ import Testing
         #expect(explain.combination == Defaults.Hotkey.explanationCombination)
     }
 
-    @Test(arguments: [InterviewFormat.behavioral, .systemDesign])
-    func nonCodingSessionsExplainUnavailabilityWithoutModelWork(_ format: InterviewFormat) async {
-        let brain = ScriptedBrain(script: [])
-        let sink = CodeRequestSink()
-        let screen = FakeScreen()
-        let driver = makeDriver(brain, RollingTranscript(), sink, screen: screen, format: format,
-                                activity: UnexpectedCodeActivity())
-        #expect(await driver.handleTrigger(.manualCode) == .spoke)
-        #expect(brain.calls.isEmpty)
-        #expect(screen.captureCount == 0)
-        #expect(sink.lines.first?.contains("Coding") == true)
-    }
-
     @Test func validCodeParsingPreservesIndentationAndRejectsOversizedComponent() throws {
         let snippet: [String: Any] = ["language": "Python", "placement": "Inside your loop",
             "code": "    if ch in seen:\n        left = max(left, seen[ch] + 1)", "highlightedLines": [2]]
@@ -240,16 +227,9 @@ private final class CodeRequestSink: OverlayRendering {
     var codeUpdates: [CodeSnippet?] = []
     var lines: [String] = []
     func render(_ lines: [String], perLineSeconds: [TimeInterval]) { self.lines = lines }
-    func showCodeSnippet(_ snippet: CodeSnippet?) { codeUpdates.append(snippet) }
 }
 
 private final class MissingCodeScreen: ScreenCapturing, Sendable {
     func capture(_ selection: ScreenCaptureSelection) -> ScreenSnapshot? { nil }
     func cancelCapture() {}
-}
-
-private struct UnexpectedCodeActivity: ActivityEventRecording {
-    func record(_ event: ActivityEvent, at date: Date) {
-        Issue.record("Unavailable shortcut feedback must not create an orphan Activity row")
-    }
 }

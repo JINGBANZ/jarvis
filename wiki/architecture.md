@@ -236,7 +236,8 @@ includes code only when enabled and restores the real snippet on close. The capt
 only the short hint; Activity includes the accepted placement and code. Explanation preferences do
 not govern code. Box visibility and code acceptance are checked together on the main actor at delivery;
 a hidden snippet is also removed from committed tool history and Activity. Disabling the master box
-releases the shortcut and disables the saved code setting for the next Start.
+releases the shortcut, disables the saved code setting, and clears/disables the current code dock.
+Re-enabling the box alone does not restore the dock; code must be enabled before a new Start.
 
 Shortcuts use **Carbon `RegisterEventHotKey`**, which needs no Accessibility/TCC permission.
 [`CoachingShortcut`](../Sources/JarvisCore/Config/CoachingShortcut.swift) provides stable event identities;

@@ -85,8 +85,7 @@ import Testing
         let transcript = RollingTranscript()
         transcript.append(.init(speaker: .me, text: "Let's work through this problem", at: 0))
         let screen = FakeScreen()
-        let driver = makeDriver(brain: brain, transcript: transcript, screen: screen, overlay: FakeOverlay())
-        driver.updatePlan(SessionPlan(revision: 1, screen: SessionPlan.default.screen, codeEnabled: true))
+        let driver = makeDriver(brain: brain, transcript: transcript, screen: screen, overlay: FakeOverlay(), codeEnabled: true)
         let task = Task { await driver.handleTrigger(.turnEnd) }
         await gate.waitUntilEntered()
         let first: TriggerReason = latest == .manualHint ? .manualExplanation : .manualHint
@@ -96,6 +95,7 @@ import Testing
         await gate.release()
         #expect(await task.value == .spoke)
         try #require(brain.calls.count == 2)
+        #expect(brain.calls.last?.first?.text?.contains("# Code accompanies") == true)
         let userText = brain.calls[1].filter { $0.role == .user }.compactMap(\.text).joined(separator: " ")
         let expected = latest == .manualCode ? "Show code" : (latest == .manualHint ? "hint shortcut" : "Explain more")
         #expect(userText.contains(expected))
@@ -200,12 +200,12 @@ import Testing
     }
 
     private func makeDriver(brain: BrainClient, transcript: RollingTranscript,
-                            screen: ScreenCapturing, overlay: OverlayRendering, explanationsEnabled: Bool = true) -> CoachDriver {
+                            screen: ScreenCapturing, overlay: OverlayRendering, explanationsEnabled: Bool = true, codeEnabled: Bool = false) -> CoachDriver {
         let target = BrainTarget(provider: .openAI, modelID: BrainModelCatalog.defaultModel(for: .openAI).id)
         return CoachDriver(config: .default, transcript: transcript,
             route: ConfiguredBrainRoute(targets: [.init(target: target, brain: brain)]),
             screen: screen, overlay: overlay, clock: ManualClock(now: 100),
-            plan: SessionPlan(revision: 0, screen: SessionPlan.default.screen, explanationsEnabled: explanationsEnabled))
+            plan: SessionPlan(revision: 0, screen: SessionPlan.default.screen, explanationsEnabled: explanationsEnabled, codeEnabled: codeEnabled))
     }
 }
 

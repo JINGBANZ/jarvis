@@ -201,8 +201,9 @@ alongside hints. Saved changes affect the next Start; they do not alter the acti
 The hotkey requests the next snippet only for a session that started with code enabled. Turning the
 setting off hides its recorder and releases the binding; enabling or rebinding during a disabled
 session leaves the shortcut deferred until Start. Code remains independent of **Enable explanations**.
-Both features require Overlay Box; switching the box off also disables their saved settings and
-releases their shortcuts. The rows show the dependency. No shortcut enables the master box.
+Both features require Overlay Box; switching the box off also disables their saved settings,
+releases their shortcuts, and clears/disables the live code dock. Re-enabling the box alone does not
+restore code; enable code before the next Start. The rows show the dependency. No shortcut enables the master box.
 
 ## Brain
 

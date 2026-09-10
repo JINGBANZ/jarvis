@@ -248,6 +248,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                     guard let self, !enabled else { return }
                     self.explanationPreferences.isEnabled = false
                     self.codePreferences.isEnabled = false
+                    self.overlayBox.setCodeEnabled(false)
                     self.hotkeys?.unregister(.explainMore)
                     self.hotkeys?.unregister(.showCode)
                 }),
@@ -278,14 +279,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                 return
             }
             guard self.sessionAllows(shortcut) else { return }
-            if shortcut == .showCode && !self.appearance.boxEnabled {
-                if self.appearance.captionEnabled {
-                    self.overlayCaption.render(["Turn on Overlay Box in Settings to show code."], perLineSeconds: [5]) // ghost-mode-allowed: explicit user shortcut in the capture-excluded caption
-                } else {
-                    NSSound.beep() // ghost-mode-allowed: explicit code hotkey with both overlay surfaces disabled
-                }
-                return
-            }
             fire(shortcut)
         }
 
