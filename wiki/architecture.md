@@ -308,7 +308,12 @@ Activity renders one fixed clause per category and quotes the identity and redac
 it, the way a `heard` row quotes speech: `⏹ session ended by error — OpenAI denied access (HTTP 403,
 unsupported_country_region_territory: Country, region, or territory not supported); check your
 region, VPN, or API project`. The fixed frames stay verbatim because row styling and the legacy
-human-facing filter key on them. Quoting the provider is deliberate and is what changed: a user
+human-facing filter key on them. A frame that also says what Jarvis is doing about the failure
+(retrying, skipping the target, continuing on the microphone) takes the sentence without its advice
+clause and appends the advice after its own tail, so the row never reads as two instructions on
+either side of the frame. The identity renders each code with the numbering it belongs to (`network`
+for URL loading, `errno`, `exit`, or a plain `code`), because a bare number labelled "network" sent a
+person to check their Wi-Fi over a CLI that had exited badly. Quoting the provider is deliberate and is what changed: a user
 reports a failure with a screenshot of Activity and nothing else, so a row that named only the
 category left every unclassified cause undiagnosable. Redaction, not omission, is what keeps a
 credential out of a row: the record redacts in its initializer, so no adapter can carry raw text

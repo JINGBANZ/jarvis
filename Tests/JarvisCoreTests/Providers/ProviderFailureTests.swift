@@ -3,6 +3,19 @@ import Testing
 @testable import JarvisCore
 
 @Suite struct ProviderFailureTests {
+    /// A bare number is unreadable without its scale. Only URL loading codes are "network"; an
+    /// errno and an adapter's own code are different numberings, and labelling all three the same
+    /// sent a person to check their Wi-Fi over a CLI that had exited badly.
+    @Test func identityNamesTheScaleACodeBelongsTo() {
+        #expect(ProviderFailure.Identity(transportDomain: NSURLErrorDomain, transportCode: -1009)
+                .summary == "network -1009")
+        #expect(ProviderFailure.Identity(transportDomain: NSPOSIXErrorDomain, transportCode: 84)
+                .summary == "errno 84")
+        #expect(ProviderFailure.Identity(transportDomain: "CLIBrainClient", transportCode: 500)
+                .summary == "code 500")
+        #expect(ProviderFailure.Identity(transportCode: 7).summary == "code 7")
+    }
+
     private func failure(
         stage: ProviderFailure.Stage,
         category: ProviderFailure.Category,

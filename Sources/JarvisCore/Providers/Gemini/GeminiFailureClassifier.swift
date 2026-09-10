@@ -12,7 +12,11 @@ public enum GeminiFailureClassifier {
         let status = error?["status"] as? String
         let reason = (error?["details"] as? [[String: Any]])?
             .compactMap { $0["reason"] as? String }.first
-        let message = error?["message"] as? String ?? ""
+        // A body that is not Google's error JSON (an edge's HTML page, a proxy's plain text) is
+        // still the only thing the server said, so it is quoted rather than dropped.
+        let message = error?["message"] as? String
+            ?? body.flatMap { String(data: $0, encoding: .utf8) }
+            ?? ""
         let (category, disposition) = categorize(
             httpStatus: httpStatus, status: status?.uppercased(), reason: reason?.uppercased(),
             message: message.lowercased(), stage: stage)

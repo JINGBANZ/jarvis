@@ -44,6 +44,33 @@ import Testing
                 == "OpenAI API rejected the API key; check Settings → Connections")
     }
 
+    /// The four clauses no exact-string test pinned. A clause is copy: it changes only on purpose.
+    @Test func theRemainingClausesReadAsWritten() {
+        #expect(make(source: .brain(.openAI), category: .quota).activitySentence
+                == "OpenAI API reported an exhausted quota; check billing")
+        #expect(make(source: .brain(.openAI), category: .configuration).activitySentence
+                == "OpenAI API rejected the coaching configuration; check Settings \u{2192} Brain")
+        #expect(make(category: .unavailable, identity: .init(httpStatus: 503)).activitySentence
+                == "OpenAI is unavailable (HTTP 503)")
+        #expect(make(source: .brain(.openAI), category: .response).activitySentence
+                == "OpenAI API couldn't finish the response")
+    }
+
+    /// A frame that says what Jarvis is doing puts the advice last, so the row does not read as two
+    /// instructions on either side of the frame's dash.
+    @Test func adviceCanBeMovedBehindAFrame() {
+        let failure = make(
+            category: .unreachable,
+            identity: .init(transportDomain: "NSURLErrorDomain", transportCode: -1009),
+            message: "the internet connection appears to be offline")
+        #expect(failure.activitySentenceWithoutAdvice
+                == "OpenAI couldn't be reached for transcription (network -1009: the internet connection appears to be offline)")
+        #expect(failure.activityAdvice == "; check your network or VPN")
+        #expect(failure.activitySentenceWithoutAdvice + failure.activityAdvice
+                == failure.activitySentence)
+        #expect(make(category: .unknown).activityAdvice == "")
+    }
+
     @Test func captureUsesItsOwnNoun() {
         #expect(make(source: .capture, category: .unavailable, message: "no input device").activitySentence
                 == "audio capture became unavailable (no input device)")

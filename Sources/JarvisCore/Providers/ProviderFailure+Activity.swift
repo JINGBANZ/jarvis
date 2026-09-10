@@ -7,6 +7,23 @@ extension ProviderFailure {
     /// The clause is fixed so the row stays readable; the parenthetical is what makes an
     /// unclassified failure diagnosable from a screenshot.
     public var activitySentence: String {
+        activitySentenceWithoutAdvice + activityAdvice
+    }
+
+    /// The sentence without its advice clause, for a frame that appends what Jarvis is doing about
+    /// the failure. Leaving the advice in front of such a frame put two different instructions on
+    /// either side of its dash, one telling the reader to act and one telling them Jarvis already
+    /// is; the advice reads better as the row's last word.
+    public var activitySentenceWithoutAdvice: String {
+        clauseAndAdvice.clause + activityDetail
+    }
+
+    /// The advice clause with its leading separator, or "" when the category has no next step.
+    public var activityAdvice: String {
+        clauseAndAdvice.advice.map { "; \($0)" } ?? ""
+    }
+
+    private var clauseAndAdvice: (clause: String, advice: String?) {
         let name = source.displayName
         let surface = source.surfaceNoun
         let clause: String
@@ -46,8 +63,7 @@ extension ProviderFailure {
             clause = "\(name) failed"
         }
 
-        let tail = advice.map { "; \($0)" } ?? ""
-        return clause + activityDetail + tail
+        return (clause, advice)
     }
 
     /// The quoted evidence alone, with a leading space, or "" when nothing is known. Frames that

@@ -117,15 +117,27 @@ public struct ProviderFailure: Error, LocalizedError, Sendable, Equatable {
         }
 
         /// "HTTP 403, unsupported_country_region_territory", "close 3000, insufficient_permissions",
-        /// "network -1004", "exit 1", or "" when nothing structured is known.
+        /// "network -1004", "errno 32", "code 500", "exit 1", or "" when nothing structured is known.
         public var summary: String {
             var parts: [String] = []
             if let httpStatus { parts.append("HTTP \(httpStatus)") }
             if let closeCode { parts.append("close \(closeCode)") }
-            if let transportCode { parts.append("network \(transportCode)") }
+            if let transportCode { parts.append("\(Self.scale(of: transportDomain)) \(transportCode)") }
             if let exitStatus { parts.append("exit \(exitStatus)") }
             if let errorCode { parts.append(errorCode) } else if let errorType { parts.append(errorType) }
             return parts.joined(separator: ", ")
+        }
+
+        /// A number means nothing without saying which numbering it belongs to. Only URL loading
+        /// codes are "network"; an errno and an adapter's own code are different scales entirely,
+        /// and calling all three "network" sent a person to check their Wi-Fi over a CLI that
+        /// exited badly.
+        private static func scale(of domain: String?) -> String {
+            switch domain {
+            case NSURLErrorDomain: return "network"
+            case NSPOSIXErrorDomain: return "errno"
+            default: return "code"
+            }
         }
     }
 

@@ -256,6 +256,38 @@ import Foundation
         ))
     }
 
+    /// A frame that says what Jarvis is doing about the failure puts the advice after it, so the
+    /// row does not read as two instructions on either side of the dash. New rows carry a kind, so
+    /// the legacy suffix filter (which the advice now follows) never has to judge one.
+    @Test func adviceFollowsTheFrameRatherThanSplittingIt() async throws {
+        let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
+        let (_, evidence) = ActivityLog.recordingSession(in: dir)
+        evidence.record(.coachingTurnFailed(failure: ProviderFailure(
+            source: .brain(.openAI), stage: .connect, category: .unreachable,
+            disposition: .temporary,
+            identity: .init(transportDomain: NSURLErrorDomain, transportCode: -1009),
+            message: "the internet connection appears to be offline")))
+        evidence.record(.brainRouteTargetSkipped(failure: ProviderFailure(
+            source: .brain(.claudeCode), stage: .process, category: .authentication,
+            disposition: .permanent, identity: .init(), message: "")))
+        _ = await evidence.close()
+
+        let persisted = try Self.persistedRows(in: dir)
+        #expect(persisted.count == 2)
+        #expect(persisted[0].message
+            == "\u{26A0}\u{FE0F} OpenAI API couldn't be reached for coaching "
+            + "(network -1009: the internet connection appears to be offline) "
+            + "\u{2014} retrying while listening continues; check your network or VPN")
+        #expect(persisted[1].message
+            == "\u{26A0}\u{FE0F} Claude Code isn't signed in \u{2014} skipping it; "
+            + "sign in to the CLI and press Start again")
+        for row in persisted {
+            #expect(ActivityLog.isHumanFacing(
+                message: row.message, imageFile: nil,
+                kind: ActivityEvent.Kind(rawValue: row.kind ?? "")))
+        }
+    }
+
     @Test func brainChangeAppliedNamesProvidersWithoutDiagnosticDetail() async throws {
         let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         let (log, evidence) = ActivityLog.recordingSession(in: dir)

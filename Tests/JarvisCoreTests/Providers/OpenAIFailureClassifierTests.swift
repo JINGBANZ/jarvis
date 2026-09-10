@@ -3,6 +3,35 @@ import Testing
 @testable import JarvisCore
 
 @Suite struct OpenAIFailureClassifierTests {
+    /// `<type>.<code>` is the documented shape, but a reason arriving as a bare code still names a
+    /// rejection. Reading it as a transport close spent the whole retry budget on a refused key.
+    @Test func aDotlessCloseReasonIsStillAnErrorCode() {
+        let failure = OpenAIFailureClassifier.classify(
+            closeCode: 3000, reason: "invalid_api_key", source: .transcription(.openAI))
+        #expect(failure.category == .authentication)
+        #expect(failure.disposition == .permanent)
+        #expect(failure.identity.errorCode == "invalid_api_key")
+        #expect(failure.identity.errorType == nil)
+    }
+
+    /// An unrecognized dotless reason is still the server refusing, so the row quotes what it said
+    /// rather than claiming the connection was merely lost. It stays temporary either way.
+    @Test func anUnrecognizedDotlessCloseReasonIsQuotedAsARejection() {
+        let failure = OpenAIFailureClassifier.classify(
+            closeCode: 3000, reason: "session ended by policy", source: .transcription(.openAI))
+        #expect(failure.category == .rejected)
+        #expect(failure.disposition == .temporary)
+        #expect(failure.message == "session ended by policy")
+    }
+
+    /// An empty reason has nothing to read, so 3000 falls through to the transport path.
+    @Test func anEmptyCloseReasonStaysTransport() {
+        let failure = OpenAIFailureClassifier.classify(
+            closeCode: 3000, reason: "  ", source: .transcription(.openAI))
+        #expect(failure.category == .disconnected)
+        #expect(failure.message == "closed with code 3000")
+    }
+
     private let brain = ProviderFailure.Source.brain(.openAI)
     private let transcription = ProviderFailure.Source.transcription(.openAI)
 

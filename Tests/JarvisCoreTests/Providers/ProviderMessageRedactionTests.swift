@@ -2,6 +2,40 @@ import Testing
 @testable import JarvisCore
 
 @Suite struct ProviderMessageRedactionTests {
+    /// A CLI prints credentials in prose, not in a URL, so the query-parameter rule never sees them.
+    @Test func maskesACredentialAssignedInProse() {
+        #expect(ProviderMessageRedaction.redact("refresh failed: token=9f3ab27c5d1e4a80")
+                == "refresh failed: token=\u{2026}")
+        #expect(ProviderMessageRedaction.redact("{\"api_key\": \"9f3ab27c5d1e4a80\"}")
+                .contains("9f3ab27c5d1e4a80") == false)
+        #expect(ProviderMessageRedaction.redact("secret: aG93LWxvbmcvaXMvdGhpcw==")
+                == "secret: \u{2026}")
+    }
+
+    /// The commonest shapes a CLI actually prints all carry an underscore in front of the name.
+    @Test func maskesTheUnderscoredNamesACLIActuallyPrints() {
+        #expect(ProviderMessageRedaction.redact("refresh_token=9f3ab27c5d1e4a80 expired")
+                == "refresh_token=\u{2026} expired")
+        #expect(ProviderMessageRedaction.redact("client_secret=9f3ab27c5d1e4a80")
+                == "client_secret=\u{2026}")
+        #expect(ProviderMessageRedaction.redact("OPENAI_API_KEY=9f3ab27c5d1e4a80")
+                == "OPENAI_API_KEY=\u{2026}")
+    }
+
+    /// A short value after one of those names is a setting, not a credential, and losing it would
+    /// make the evidence worse.
+    @Test func keepsAShortValueThatCannotBeACredential() {
+        #expect(ProviderMessageRedaction.redact("token=3") == "token=3")
+        #expect(ProviderMessageRedaction.redact("retries=8675309") == "retries=8675309")
+    }
+
+    @Test func maskesARawJWTAnywhereItAppears() {
+        let jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"
+        let redacted = ProviderMessageRedaction.redact("Codex CLI: expired \(jwt) for this account")
+        #expect(!redacted.contains("dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"))
+        #expect(redacted == "Codex CLI: expired eyJ\u{2026} for this account")
+    }
+
     /// The exact wording OpenAI returned for a bad key on 2026-09-08 (captured with a throwaway key).
     @Test func masksOpenAIKeyFragments() {
         let raw = "Incorrect API key provided: sk-inval***********-000. You can find your API key at https://platform.openai.com/account/api-keys."

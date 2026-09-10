@@ -3,6 +3,21 @@ import Testing
 @testable import JarvisCore
 
 @Suite struct LocalAgentFailureClassifierTests {
+    /// The runtime's stdout-overflow error is an errno, not an exit status. Under the runtime's own
+    /// domain a non-negative code means an exit status, so this used to tell a person the CLI had
+    /// exited 84 when it had not exited at all.
+    @Test func aRuntimeErrnoReadsAsAnErrnoRatherThanAnExitStatus() {
+        let failure = LocalAgentFailureClassifier.classify(
+            error: NSError(
+                domain: NSPOSIXErrorDomain, code: Int(EOVERFLOW),
+                userInfo: [NSLocalizedDescriptionKey: "local agent runtime stdout exceeded its buffer limit"]),
+            provider: .codexCLI)
+        #expect(failure.category == .unavailable)
+        #expect(failure.disposition == .temporary)
+        #expect(failure.identity.summary == "errno 84")
+        #expect(failure.identity.exitStatus == nil)
+    }
+
     /// The runtime encodes the exit status as the NSError code and appends the stderr tail to the
     /// description; both survive, the tail redacted and capped.
     @Test func runtimeExitKeepsStatusAndStderrTail() {

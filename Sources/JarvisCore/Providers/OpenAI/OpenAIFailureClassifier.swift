@@ -47,9 +47,13 @@ public enum OpenAIFailureClassifier {
     /// `<type>.<code>`; every other close is transport-level and stays temporary.
     public static func classify(closeCode: Int, reason: String?, source: ProviderFailure.Source) -> ProviderFailure {
         let trimmed = reason?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if closeCode == 3000, let separator = trimmed.firstIndex(of: ".") {
-            let type = String(trimmed[..<separator])
-            let code = String(trimmed[trimmed.index(after: separator)...])
+        if closeCode == 3000, !trimmed.isEmpty {
+            // `<type>.<code>` is the documented shape, but a reason arriving as a bare code still
+            // names a rejection. Reading it as a transport close instead would spend the whole
+            // retry budget on a key the server has already refused.
+            let separator = trimmed.firstIndex(of: ".")
+            let type = separator.map { String(trimmed[..<$0]) }
+            let code = separator.map { String(trimmed[trimmed.index(after: $0)...]) } ?? trimmed
             let (category, disposition) = categorize(status: nil, code: code, type: type, param: nil, stage: .close)
             return ProviderFailure(
                 source: source, stage: .close,

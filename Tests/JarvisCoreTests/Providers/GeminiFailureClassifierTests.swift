@@ -3,6 +3,18 @@ import Testing
 @testable import JarvisCore
 
 @Suite struct GeminiFailureClassifierTests {
+    /// A body that is not Google's error JSON, an edge's HTML page or a proxy's plain text, is
+    /// still the only thing the server said. Dropping it left the row with a status and nothing else.
+    @Test func quotesABodyThatIsNotGoogleErrorJSON() {
+        let failure = GeminiFailureClassifier.classify(
+            httpStatus: 502,
+            body: Data("upstream connect error or disconnect".utf8),
+            source: .transcription(.gemini),
+            stage: .handshake)
+        #expect(failure.message == "upstream connect error or disconnect")
+        #expect(failure.identity.httpStatus == 502)
+    }
+
     private let source = ProviderFailure.Source.transcription(.gemini)
 
     private func body(status: String, message: String, reason: String? = nil) -> Data {

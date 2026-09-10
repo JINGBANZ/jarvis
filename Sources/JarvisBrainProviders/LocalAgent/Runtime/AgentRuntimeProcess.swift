@@ -827,9 +827,12 @@ final class AgentRuntimeProcess: @unchecked Sendable {
     }
     #endif
 
+    /// `NSPOSIXErrorDomain`, not this runtime's own domain: the code is an errno, and under the
+    /// runtime's domain a non-negative code means an exit status, so `EOVERFLOW` would have been
+    /// reported to the user as "exit 84" from a CLI that never exited.
     private func stdoutOverflowErrorLocked() -> NSError {
         NSError(
-            domain: Self.errorDomain,
+            domain: NSPOSIXErrorDomain,
             code: Int(EOVERFLOW),
             userInfo: [
                 NSLocalizedDescriptionKey:

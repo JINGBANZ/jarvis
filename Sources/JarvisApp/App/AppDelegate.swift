@@ -1095,8 +1095,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                 systemConnectionState = .failed
                 observeEndpointAndCaptureReadiness(
                     stream: .system, state: .failed, for: readinessSession)
-                artifacts.sessionAudit?.record(.systemAudioStopped(failure: Self.captureFailure(
-                    "system audio capture unhealthy (\(cause.rawValue))")))
+                artifacts.sessionAudit?.record(
+                    .systemAudioStopped(failure: Self.captureFailure(cause.summary)))
                 errorReporter.reportImmediately(.systemAudioStopped, context: .runtime)
             }
         }

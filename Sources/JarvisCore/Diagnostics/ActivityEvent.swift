@@ -96,13 +96,15 @@ public enum ActivityEvent: Sendable {
         case .coachingTurnFailed(let failure):
             return (
                 .coachingTurnFailed,
-                "⚠️ \(failure.activitySentence) — retrying while listening continues",
+                "⚠️ \(failure.activitySentenceWithoutAdvice) — retrying while listening continues"
+                    + failure.activityAdvice,
                 nil
             )
         case .systemAudioStopped(let failure):
             return (
                 .systemAudioStopped,
-                "⚠️ system audio stopped — \(failure.activitySentence); microphone coaching continues",
+                "⚠️ system audio stopped — \(failure.activitySentenceWithoutAdvice)"
+                    + "; microphone coaching continues\(failure.activityAdvice)",
                 nil
             )
         case .settingsChangeNotApplied:
@@ -131,7 +133,7 @@ public enum ActivityEvent: Sendable {
         case .brainRouteTargetSkipped(let failure):
             return (
                 .brainRouteTargetSkipped,
-                "⚠️ \(failure.activitySentence) — skipping it",
+                "⚠️ \(failure.activitySentenceWithoutAdvice) — skipping it\(failure.activityAdvice)",
                 nil
             )
         case .prepNotesSearched(let query, let matchCount):

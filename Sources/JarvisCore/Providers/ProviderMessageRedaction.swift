@@ -19,6 +19,15 @@ public enum ProviderMessageRedaction {
         (regex(#"(?i)bearer\s+[A-Za-z0-9._\-]{8,}"#), "Bearer …"),
         (regex(#"(?i)([?&](?:key|api_key|apikey|token|access_token)=)[^&\s"']+"#), "$1…"),
         (regex(#"(?i)(x-goog-api-key:\s*)[^\s"']+"#), "$1…"),
+        // A CLI's stderr is not a URL. It prints `token=abc…` or `"api_key": "abc…"` in prose, which
+        // the query pattern above misses because there is no `?` or `&` in front. This one keys on
+        // the name and an assignment instead, and still demands a long value so `retries=3` and
+        // `exit=1` survive intact.
+        // The lookbehind excludes letters and digits but NOT `_`, so `refresh_token=`,
+        // `client_secret=`, and `OPENAI_API_KEY=` all match on their tail while `mytoken=` does not.
+        (regex(#"(?i)(?<![A-Za-z0-9])((?:api[_-]?key|access[_-]?token|auth[_-]?token|token|secret)"?\s*[=:]\s*"?)[A-Za-z0-9._\-+/=]{8,}"#), "$1…"),
+        // A JWT is a credential wherever it turns up, and nothing else is shaped like one.
+        (regex(#"(?<![A-Za-z0-9])eyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}(?:\.[A-Za-z0-9_\-]+)?"#), "eyJ…"),
     ]
 
     public static func redact(_ text: String) -> String {

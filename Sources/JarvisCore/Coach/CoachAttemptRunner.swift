@@ -150,7 +150,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
 
     /// The kernel's own verdict that a provider answered but the answer cannot be used. The provider
     /// reported nothing, so there is no identity to carry: the stage and the message say what was
-    /// wrong. Always temporary — the next attempt asks the same target again.
+    /// wrong. Always temporary: the next attempt asks the same target again.
     private static func unusableResponse(
         _ message: String, from target: BrainTarget
     ) -> ProviderFailure {
