@@ -307,8 +307,8 @@ import Foundation
         ])
     }
 
-    /// Failure notices keep their fixed frames — row styling and the legacy human-facing filter key
-    /// on them — and quote the provider's identity and redacted message after the frame, so a
+    /// Failure notices keep their fixed frames, which row styling and the legacy human-facing filter
+    /// key on, and quote the provider's identity and redacted message after the frame, so a
     /// screenshot of Activity is enough to diagnose a failure nobody has classified yet.
     @Test func runtimeFailureNoticesKeepTheirFramesAndQuoteTheProvider() {
         let leaky = ProviderFailure(

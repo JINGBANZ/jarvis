@@ -70,7 +70,13 @@ final class ScriptedThrowBrain: BrainClient, @unchecked Sendable {
     var calls: [[ChatMessage]] { lock.withLock { _calls } }
     var requestContexts: [CoachingRequestContext?] { lock.withLock { _requestContexts } }
     let script: [BrainResponse?]
-    init(script: [BrainResponse?]) { self.script = script }
+    /// What a scripted throw raises. Defaulted, because most callers only care that the turn failed;
+    /// a caller that asserts on the row Activity renders supplies an error carrying the text it wants.
+    let error: any Error
+    init(script: [BrainResponse?], error: any Error = NSError(domain: "test", code: 500)) {
+        self.script = script
+        self.error = error
+    }
     func respond(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice) async throws -> BrainResponse {
         let r = lock.withLock { () -> BrainResponse? in
             _calls.append(messages)
@@ -78,7 +84,7 @@ final class ScriptedThrowBrain: BrainClient, @unchecked Sendable {
             let reply = script[min(idx, script.count - 1)]; idx += 1
             return reply
         }
-        guard let r else { throw NSError(domain: "test", code: 500) }
+        guard let r else { throw error }
         return r
     }
 }
@@ -487,6 +493,9 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         }
     }
 
+    /// Every temporary attempt failure lands in Activity inside the fixed retry frame, quoting what
+    /// the provider said so the turn is diagnosable from a screenshot, and the quoted text is
+    /// redacted, so a credential in a provider message never reaches a row.
     @Test func nonExhaustingAttemptFailuresLandInActivityBeforeRecovery() async throws {
         let dir = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent(
@@ -495,11 +504,15 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let (activityLog, evidence) = ActivityLog.recordingSession(in: dir)
         defer { activityLog.disable(); try? FileManager.default.removeItem(at: dir) }
 
-        let brain = ScriptedThrowBrain(script: [
-            nil,
-            nil,
-            .init(toolCalls: [.speak(callId: "recovered", lines: ["recovered coaching"])]),
-        ])
+        let brain = ScriptedThrowBrain(
+            script: [
+                nil,
+                nil,
+                .init(toolCalls: [.speak(callId: "recovered", lines: ["recovered coaching"])]),
+            ],
+            error: NSError(domain: "test", code: 500, userInfo: [
+                NSLocalizedDescriptionKey: "app-server refused: Authorization: Bearer abc123token",
+            ]))
         let (driver, transcript) = makeDriver(
             activity: evidence, brain: brain, clock: ManualClock(now: 0))
         transcript.append(.init(speaker: .me, text: "keep listening after failures", at: 0))
@@ -512,18 +525,23 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         // ordering around the recovery rather than the log's total length.
         let recoveryIndex = try #require(
             snapshot.rows.firstIndex { $0.contains("recovered coaching") })
+        // The retry frame is the fixed part of the row; the cause in front of it is the failure's
+        // own sentence, which varies with what the provider said.
         let failureRows = snapshot.rows[..<recoveryIndex].filter {
-            $0.contains("couldn't finish the response")
+            $0.contains("retrying while listening continues")
         }
         #expect(failureRows.count >= 2)
         let relevantFailures = failureRows.suffix(2)
         for row in relevantFailures {
-            #expect(row.contains("retrying"))
-            #expect(row.contains("listening continues"))
+            #expect(row.contains("OpenAI API failed ("))
+            #expect(row.contains("app-server refused"))
         }
         let recovery = snapshot.rows[recoveryIndex]
         #expect(recovery.contains("recovered coaching"))
-        #expect(!(relevantFailures + [recovery]).joined().contains("test"))
+        // Provider text is quoted only after redaction, so the token in the error above is masked.
+        let inspected = (relevantFailures + [recovery]).joined()
+        #expect(!inspected.contains("abc123token"))
+        #expect(inspected.contains("Authorization: Bearer …"))
     }
 
     /// Stop cancelling a turn while the screenshot is being captured must cancel the capture edge,
