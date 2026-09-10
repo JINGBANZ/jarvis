@@ -287,13 +287,9 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     }
 
     private func waitUntilRouteReportsExhaustion(_ driver: CoachDriver) async -> Bool {
-        for _ in 0..<1_000 {
-            if driver.takeBrainSelectionStep().alreadyExhausted {
-                return true
-            }
-            await Task.yield()
-        }
-        return false
+        // Yield counts are not a deadline: CI can finish the loop before the provider resumes.
+        // Wait for the committed state without admitting another coaching trigger.
+        await waitUntilAsync { driver.takeBrainSelectionStep().alreadyExhausted }
     }
 
     @Test func captureThenSpeakPipeline() async {
