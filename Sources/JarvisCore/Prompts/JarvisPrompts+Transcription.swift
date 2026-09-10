@@ -2,6 +2,7 @@ import Foundation
 
 extension JarvisPrompts {
     public enum Transcription {
+        /// Describe the capture source and discourage invented non-speech transcripts without restricting languages.
         public static func context(for speaker: Speaker) -> String {
             let context: String = switch speaker {
             case .me:

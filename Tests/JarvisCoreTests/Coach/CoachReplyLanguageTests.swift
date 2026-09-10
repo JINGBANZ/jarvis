@@ -3,6 +3,7 @@ import Testing
 @testable import JarvisCore
 
 @Suite struct CoachReplyLanguageTests {
+    /// Keep provider language selections identical so each assertion isolates the provider's resolution policy.
     private func configuration(
         languages: [TranscriptionLanguage] = [],
         provider: TranscriptionProvider = .openAI,
@@ -13,6 +14,7 @@ import Testing
               geminiExpectedLanguages: languages)
     }
 
+    /// Automatic and bilingual selections must preserve conversational choice; Apple uses its explicit locale.
     @Test func onlyOneSelectionOverridesConversationalReplyLanguage() {
         #expect(configuration().coachingReplyLanguage == nil)
         #expect(configuration(languages: [.english, .mandarinChinese]).coachingReplyLanguage == nil)
@@ -25,6 +27,7 @@ import Testing
         #expect(configuration(provider: .appleSpeech, locale: "fr_FR").coachingReplyLanguage == "French")
     }
 
+    /// Reply guidance belongs only in the prompt: bilingual input and even a differing model reply remain intact.
     @Test func selectedReplyLanguageReachesTheBrainWithoutDroppingBilingualContextOrOutput() async {
         let lines = ["我们用 Kafka 做 message queue"]
         let brain = ScriptedBrain(script: [
@@ -55,6 +58,7 @@ import Testing
         })
     }
 
+    /// Inspect the provider payload for both capture sources to guard against accidentally adding a language filter.
     @Test(arguments: [Speaker.me, .them])
     func bothRecordingContextsDiscourageNonSpeechHallucinations(speaker: Speaker) throws {
         let payload = RealtimeSession.sessionUpdate(model: .gptLiveTranscribe, speaker: speaker)
