@@ -32,6 +32,11 @@ public protocol TranscriptionSession: AnyObject, Sendable {
         _ event: LocalSpeechEvent,
         throughSequenceNumber: UInt64
     )
+    /// A credential saved in Settings while this session is running. A session ignores a credential
+    /// it does not authenticate with, so a caller never has to know which provider is running.
+    /// Adopting one must not disturb a healthy connection: the replacement is picked up if this side
+    /// later reconnects.
+    func updateAPIKey(_ apiKey: String, for credential: Credential)
 }
 
 public extension TranscriptionSession {
@@ -40,4 +45,7 @@ public extension TranscriptionSession {
         _ event: LocalSpeechEvent,
         throughSequenceNumber: UInt64
     ) {}
+
+    /// On-device providers hold no credential to replace.
+    func updateAPIKey(_ apiKey: String, for credential: Credential) {}
 }

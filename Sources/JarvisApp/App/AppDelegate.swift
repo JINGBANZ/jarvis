@@ -276,18 +276,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     /// probing or replacing CLI clients, changing route policy, or restarting transcription.
     ///
     /// Guarded by credential: a saved OpenAI key must never reach a Gemini-backed session (or vice
-    /// versa), so each branch only casts the transcriber to the adapter type that credential feeds.
+    /// versa). Each session applies only the credential it authenticates with and ignores the rest,
+    /// so this passes the credential along rather than deciding on their behalf.
     private func applySavedAPIKeyToRunningSession(credential: Credential, key: String) {
         guard let transcriber else { return }
-        switch credential {
-        case .openAIAPIKey:
-            (transcriber as? RealtimeTranscriber)?.updateAPIKey(key)
-            (themTranscriber as? RealtimeTranscriber)?.updateAPIKey(key)
-            brain.applySavedAPIKey(key)
-        case .geminiAPIKey:
-            (transcriber as? GeminiLiveTranscriber)?.updateAPIKey(key)
-            (themTranscriber as? GeminiLiveTranscriber)?.updateAPIKey(key)
-        }
+        transcriber.updateAPIKey(key, for: credential)
+        themTranscriber?.updateAPIKey(key, for: credential)
+        if credential == .openAIAPIKey { brain.applySavedAPIKey(key) }
     }
 
     /// Validate a Start immediately, then prove system audio and prepare any local-CLI targets and

@@ -1,25 +1,28 @@
 import Foundation
 import JarvisCore
 
-/// Live transcription over the Gemini Live socket. Mirrors `RealtimeTranscriber`'s lifecycle —
-/// setup-acknowledged readiness, backoff reconnect, ping/pong liveness, bounded offline buffering —
-/// but carries no ledger or commit path: Gemini finalizes each utterance server-side, so there are
-/// no out-of-order items to reconcile and no client-managed turn boundaries to track.
+/// Live transcription over the Gemini Live socket. The socket itself belongs to
+/// `WebSocketConnection`, which both socket transcribers share; this type is its Gemini adapter,
+/// supplying the setup frame, the frame reader, the two classifiers, and the drain a `goAway`
+/// needs. It carries no ledger or commit path: Gemini finalizes each utterance server-side, so
+/// there are no out-of-order items to reconcile and no client-managed turn boundaries to track.
 ///
 /// SECURITY: Gemini authenticates with a query parameter (`GeminiLiveSession.connectURL(apiKey:)`),
-/// so the API key lives in the connect URL. Nothing in this file may log, interpolate, or stringify
-/// that URL or a `URLRequest` built from it; every diagnostic that names the endpoint uses
+/// so the API key lives in the connect URL. Nothing may log, interpolate, or stringify that URL or
+/// a `URLRequest` built from it. `makeRequest` hands the request straight to the connection, which
+/// never logs it, and every diagnostic that names the endpoint uses
 /// `GeminiLiveSession.redactedEndpoint`. Transport errors are safe to pass along because they go
 /// through `TransportFailureClassifier`, whose messages come from a fixed table keyed on the error
 /// code and never from the error's own description, and server close reasons reach Activity only
 /// through `ProviderMessageRedaction`.
 ///
-/// `@unchecked Sendable`: most mutable fields are guarded by `lock`. `readyTimer`/`pingTimer`/
-/// `pongTimer`/`drainTimer` are the exception — they are created, read, invalidated, and nilled only
-/// from main-queue blocks (including inside `stop()`, which hops to main rather than touching them
-/// under `lock`), so main-queue confinement is what makes them safe. `coachingCoordinator` and
-/// `continuityReporter` guard their own state and are themselves Sendable.
-final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWebSocketDelegate,
+/// `@unchecked Sendable`: mutable stream state is guarded by `lock`. `drainTimer` is the exception:
+/// it is created, read, invalidated, and nilled only from main-queue blocks (including inside
+/// `stop()`, which hops to main rather than touching it under `lock`), so main-queue confinement is
+/// what makes it safe. `coachingCoordinator` and `continuityReporter` guard their own state and are
+/// themselves Sendable. See `WebSocketConnection`'s header for the order between this lock and the
+/// connection's.
+final class GeminiLiveTranscriber: TranscriptionSession, WebSocketConnectionAdapter,
     @unchecked Sendable {
     var onTurnEnd: (@Sendable (_ transcriptBoundary: Int) -> Void)?
     var onSilence: (@Sendable (TimeInterval) -> Void)?
@@ -28,13 +31,6 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
     var onTerminalFailure: (@Sendable (ProviderFailure) -> Void)?
     var onCaptureHeartbeat: (@Sendable (CaptureHeartbeat) -> Void)?
 
-    private let reconnectSchedule = RetrySchedule(
-        maximumRetries: 6, initialDelay: 1, maximumDelay: 30)
-    /// A socket that has never been ready has nothing to preserve, and every attempt costs the user
-    /// silence with no explanation. Three attempts is enough to ride out a transient refusal; past
-    /// that the cause is the key, the region, or the network, and the session should say so.
-    private let initialConnectSchedule = RetrySchedule(
-        maximumRetries: 2, initialDelay: 1, maximumDelay: 30)
     private let model: GeminiTranscriptionModel
     private let expectedLanguages: [TranscriptionLanguage]
     private let vocabularyKeywords: [String]
@@ -45,27 +41,19 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
     private let clock: Clock
     private let sessionStart: TimeInterval
     private let maxBufferedAudioSeconds: TimeInterval
-    private let readyTimeout: TimeInterval
-    private let pingInterval: TimeInterval
-    private let pongTimeout: TimeInterval
     /// Bound on the drain-then-rotate grace period `beginDrain` arms after a `goAway` — see that
     /// method's doc comment. Capped independently of `readyTimeout`/`pongTimeout`: those bound how
     /// long a *new* socket may take to become usable, while this bounds how long an *expiring* one may
     /// keep an in-flight utterance's final transcript waiting before Jarvis rotates out from under it.
     private let goAwayGraceTimeout: TimeInterval
-    private let networkStatus: @Sendable () -> String
     /// `nil` for every normal coaching session. Optional chaining then skips event construction.
     private let benchmark: TranscriptionBenchmarkInstrumentation?
     private var coachingCoordinator: TranscriptionCoachingCoordinator!
     private let continuityReporter: RealtimeContinuityReporter
+    /// The socket. Built in `init` because it takes this transcriber as its adapter.
+    private var connection: WebSocketConnection!
 
     private let lock = NSLock()
-    private var apiKey: String            // guarded by lock; used on the NEXT connect only
-    private var session: URLSession?      // retained so stop() can invalidate it (URLSession holds its delegate)
-    private var task: URLSessionWebSocketTask?
-    private var pingTimer: Timer?
-    private var readyTimer: Timer?
-    private var pongTimer: Timer?
     /// Bounds the drain-then-rotate grace period; see `beginDrain`/`armDrainDeadline`.
     private var drainTimer: Timer?
     /// Audio captured while disconnected, or not yet accepted by the live socket. Plain byte-capped
@@ -101,25 +89,16 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
     /// by adding an `ACTIVITY_END` clear.
     ///
     /// Bounded against a lost final (so it can never wedge true for the rest of the session): cleared
-    /// unconditionally in `openSocket`, `failConnection`, and `stop`.
+    /// unconditionally in `connectionWillOpen`, `connectionWillRetry`, `connectionDidTerminate`,
+    /// and `stop`.
     private var recognitionInFlight = false
     private var isSending = false         // one in-flight audio send at a time, preserves order
-    private var reconnectAttempt = 0
-    private var isReconnecting = false
-    /// `true` from a `goAway` frame until the replacement socket is opened (see `openSocket`, which
-    /// clears it for the fresh socket). Gates `pumpIfPossible` so no NEW audio is sent to a socket
-    /// Google already warned is closing, and short-circuits `failConnection` straight to `rotate`
-    /// instead of the backoff path — see both call sites' doc comments for why.
-    private var rotating = false
+    /// `true` from a `goAway` frame until the replacement socket opens (see `connectionWillOpen`,
+    /// which clears it for the fresh socket). Gates `pumpIfPossible` so no NEW audio is sent to a
+    /// socket Google already warned is closing. The connection notes the same warning separately,
+    /// which is what makes it read the close that follows as the rotation rather than a fault.
+    private var draining = false
     private var stopped = true
-    private var connected = false         // true only once the server acknowledges setup
-    private var everConnected = false     // distinguishes the first connect from a reconnect
-    private var terminalFailureReported = false
-    /// The most recent classified reason a socket went down, so the row shown when the retry budget
-    /// runs out names the cause rather than "the connection was lost".
-    private var lastConnectionFailure: ProviderFailure?
-    private var generation = 0            // rejects late callbacks from a replaced socket
-    private var pendingPingGeneration: Int?
 
     init(
         apiKey: String,
@@ -145,7 +124,6 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
         activity: (any ActivityEventRecording)? = nil,
         benchmark: TranscriptionBenchmarkInstrumentation? = nil
     ) {
-        self.apiKey = apiKey
         self.model = model
         self.expectedLanguages = TranscriptionLanguage.canonicalizing(expectedLanguages)
         self.vocabularyKeywords = vocabularyKeywords
@@ -155,11 +133,7 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
         self.clock = clock
         self.sessionStart = sessionStart
         self.maxBufferedAudioSeconds = maxBufferedAudioSeconds
-        self.readyTimeout = readyTimeout
-        self.pingInterval = pingInterval
-        self.pongTimeout = pongTimeout
         self.goAwayGraceTimeout = goAwayGraceTimeout
-        self.networkStatus = networkStatus
         self.benchmark = benchmark
         self.continuityReporter = RealtimeContinuityReporter(
             speaker: speaker,
@@ -170,7 +144,30 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
             // Without this false, the witness would flag every normal utterance as "no provider speech event."
             // Consuming these frames is a possible future improvement for more reliable mid-utterance coaching.
             expectsServerSpeechEvents: false)
-        super.init()
+        self.connection = WebSocketConnection(
+            adapter: self,
+            logPrefix: "Jarvis Gemini [\(speaker.rawValue)]",
+            source: .transcription(.gemini),
+            openDetail: "endpoint=\(GeminiLiveSession.redactedEndpoint) model=\(model.rawValue) "
+                + "expected-languages="
+                + (self.expectedLanguages.isEmpty
+                    ? "automatic"
+                    : self.expectedLanguages.map(\.rawValue).joined(separator: ",")),
+            apiKey: apiKey,
+            policy: SocketLifecyclePolicy(
+                source: .transcription(.gemini),
+                // A socket that has never been ready has nothing to preserve, and every attempt
+                // costs the user silence with no explanation. Three attempts is enough to ride out
+                // a transient refusal; past that the cause is the key, the region, or the network,
+                // and the session should say so.
+                firstConnect: RetrySchedule(maximumRetries: 2, initialDelay: 1, maximumDelay: 30),
+                reconnect: RetrySchedule(maximumRetries: 6, initialDelay: 1, maximumDelay: 30)),
+            readyTimeout: readyTimeout,
+            pingInterval: pingInterval,
+            pongTimeout: pongTimeout,
+            networkStatus: networkStatus,
+            transportControl: benchmark?.transportControl,
+            onStateChange: { [weak self] state in self?.onConnectionStateChange?(state) })
         continuityReporter.onCaptureHeartbeat = { [weak self] signal in
             self?.onCaptureHeartbeat?(signal)
         }
@@ -194,127 +191,150 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
 
     func connect() {
         lock.lock()
-        stopped = false; reconnectAttempt = 0; isReconnecting = false; rotating = false
-        terminalFailureReported = false
-        // Readiness selects the retry budget and how an exhausted budget is categorized, so a fresh
-        // session must start as never-ready even if this instance ran one before.
-        everConnected = false; lastConnectionFailure = nil
+        stopped = false; draining = false; isSending = false; recognitionInFlight = false
         lock.unlock()
         coachingCoordinator.start()
-        emitState(.connecting)
-        openSocket()
+        connection.connect()
         continuityReporter.start()
     }
 
     /// Keep a healthy socket in place; the replacement credential is picked up if this side later
     /// reconnects. This avoids destroying live transcript state merely because Settings saved a key.
-    func updateAPIKey(_ apiKey: String) {
-        lock.lock()
-        self.apiKey = apiKey
-        lock.unlock()
+    func updateAPIKey(_ apiKey: String, for credential: Credential) {
+        guard credential == .geminiAPIKey else { return }
+        connection.updateAPIKey(apiKey)
     }
 
     func stop() {
+        // The connection first: its `stopped` is what makes every timer and socket callback already
+        // in flight a no-op, and it gives `connectionWillClose` the last chance to say goodbye.
+        connection.stop()
         lock.lock()
-        stopped = true; connected = false
-        let t = task; task = nil
-        let s = session; session = nil
-        pendingPingGeneration = nil
+        stopped = true
+        draining = false
         isSending = false
         recognitionInFlight = false     // bound: a final lost to teardown must not wedge coaching gated
-        generation += 1                 // invalidate every callback retained by the old task
         bufferedAudio.removeAll(keepingCapacity: false)
         bufferedByteCount = 0
         lock.unlock()
-        // Timers must be read, invalidated, AND nilled on the thread that scheduled them (main) —
-        // one queue owning the field end to end, not just the invalidate call. `pingTimer`/
-        // `readyTimer`/`pongTimer` are assigned from main-queue blocks without `lock` (see the type's
-        // header comment), so reading them under `lock` here and only hopping to main for the
-        // `invalidate()` call would race an off-main Stop against a main-queue writer assigning a
-        // replacement timer. `stopped` is already set above, and every timer body guards on
-        // `!stopped`, so a timer firing in the gap before this hop runs does nothing.
+        // The drain timer must be read, invalidated, AND nilled on the thread that scheduled it
+        // (main): one queue owning the field end to end, not just the invalidate call. It is
+        // assigned from main-queue blocks without `lock` (see the type's header comment), so reading
+        // it under `lock` here and only hopping to main for the `invalidate()` call would race an
+        // off-main Stop against a main-queue writer assigning a replacement. `stopped` is already
+        // set above and the timer body guards on it, so a fire in the gap does nothing.
         DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.pingTimer?.invalidate(); self.pingTimer = nil
-            self.readyTimer?.invalidate(); self.readyTimer = nil
-            self.pongTimer?.invalidate(); self.pongTimer = nil
-            self.drainTimer?.invalidate(); self.drainTimer = nil
+            self?.drainTimer?.invalidate(); self?.drainTimer = nil
         }
         continuityReporter.stop()
         coachingCoordinator.stop()
-        if let t {
-            // Best-effort: tell Gemini no more audio is coming so it can finalize the last utterance.
-            // Fire-and-forget — Stop must not block on network I/O, and the socket is cancelled
-            // immediately after regardless of whether this frame lands.
-            if let data = try? JSONSerialization.data(withJSONObject: GeminiLiveSession.audioStreamEnd()),
-               let text = String(data: data, encoding: .utf8) {
-                t.send(.string(text)) { _ in }
-            }
-            t.cancel(with: .normalClosure, reason: nil)
-        }
-        s?.invalidateAndCancel()
-        emitState(.stopped)
     }
 
     // MARK: - Socket lifecycle
 
-    private func openSocket() {
-        lock.lock(); let currentKey = apiKey; lock.unlock()
-        // NEVER log `request`, its `.url`, or anything derived from `connectURL` — the key travels in
-        // the query string. `GeminiLiveSession.redactedEndpoint` is the only safe diagnostic form.
-        let request = URLRequest(url: GeminiLiveSession.connectURL(apiKey: currentKey))
-        let session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
-        let task = session.webSocketTask(with: request)
-        lock.lock()
-        let previousSession = self.session
-        generation += 1
-        let socketGeneration = generation
-        self.session = session
-        self.task = task
-        isReconnecting = false; connected = false; isSending = false; pendingPingGeneration = nil
-        // A fresh socket starts with no recognition in flight — bounds a final lost to whatever
-        // socket this one is replacing (see the field's doc comment).
-        recognitionInFlight = false
-        // A fresh socket is not draining anything, whether this is the very first connect, a normal
-        // backoff-driven reconnect, or the replacement `rotate` just opened. Clearing it here (rather
-        // than waiting for `markReady`) is what keeps a genuine failure of THIS new socket (e.g. its
-        // own setup send failing) on the normal budget-consuming backoff path instead of being
-        // mistaken for still-expected goAway churn — see `failConnection`'s `rotating` check.
-        rotating = false
-        lock.unlock()
-        previousSession?.invalidateAndCancel()   // release the previous session's delegate retain
-        invalidateConnectionTimers()
-        jlog(
-            "Jarvis Gemini [\(speaker.rawValue)]: opening socket #\(socketGeneration) "
-                + "endpoint=\(GeminiLiveSession.redactedEndpoint) model=\(model.rawValue) "
-                + "expected-languages="
-                + (expectedLanguages.isEmpty
-                    ? "automatic"
-                    : expectedLanguages.map(\.rawValue).joined(separator: ",")))
-        task.resume()
-        sendSetupMessage(task: task, socketGeneration: socketGeneration)
-        receiveLoop(task: task, generation: socketGeneration)
-        armReadyTimeout(task: task, generation: socketGeneration)
+    func makeRequest(apiKey: String) -> URLRequest {
+        // NEVER log this request, its `.url`, or anything derived from `connectURL`: the key travels
+        // in the query string. `GeminiLiveSession.redactedEndpoint` is the only safe diagnostic form,
+        // and the connection is built with it as its `openDetail`.
+        URLRequest(url: GeminiLiveSession.connectURL(apiKey: apiKey))
     }
 
-    private func sendSetupMessage(task: URLSessionWebSocketTask, socketGeneration: Int) {
+    func configureSession(on lease: WebSocketConnection.Lease) {
         let setup = GeminiLiveSession.setupMessage(
             model: model, languages: expectedLanguages, vocabulary: vocabularyKeywords, mode: mode)
         guard let data = try? JSONSerialization.data(withJSONObject: setup),
               let text = String(data: data, encoding: .utf8) else {
-            failConnection(task: task, generation: socketGeneration,
-                           cause: ProviderFailure(
-                            source: source, stage: .transport, category: .unknown,
-                            disposition: .temporary, identity: .init(),
-                            message: "could not encode Gemini setup message"))
+            connection.fail(lease, cause: ProviderFailure(
+                source: source, stage: .transport, category: .unknown,
+                disposition: .temporary, identity: .init(),
+                message: "could not encode Gemini setup message"))
             return
         }
-        task.send(.string(text)) { [weak self, weak task] error in
-            guard let self, let task else { return }
-            guard let error else { return }
-            self.failConnection(task: task, generation: socketGeneration,
-                                cause: self.transportFailure(error))
-        }
+        connection.send(.string(text), on: lease) { _ in }
+    }
+
+    func classifyHandshake(status: Int) -> ProviderFailure {
+        GeminiFailureClassifier.classify(
+            httpStatus: status, body: nil, source: source, stage: .handshake)
+    }
+
+    /// A rejected API key, a retired model id, and an unsupported request all surface ONLY as close
+    /// code 1008. See `GeminiFailureClassifier.classify(closeCode:reason:source:)` for the
+    /// empirically-established wire behavior and how the `reason` text tells them apart.
+    func classifyClose(code: Int, reason: String?) -> ProviderFailure {
+        GeminiFailureClassifier.classify(closeCode: code, reason: reason, source: source)
+    }
+
+    /// Gemini warns with a `goAway` frame rather than a close code, so a bare 1001 here is a fault
+    /// like any other and takes the normal backoff path.
+    func isExpectedRotation(closeCode: Int) -> Bool { false }
+
+    func connectionWillOpen(_ lease: WebSocketConnection.Lease) {
+        lock.lock()
+        guard !stopped else { lock.unlock(); return }
+        isSending = false
+        // A fresh socket starts with no recognition in flight: bounds a final lost to whatever
+        // socket this one is replacing (see the field's doc comment).
+        recognitionInFlight = false
+        // A fresh socket is not draining anything, whether this is the very first connect, a normal
+        // backoff-driven reconnect, or the replacement a rotation just opened. Clearing it here
+        // (rather than waiting for readiness) is what keeps a genuine failure of THIS new socket,
+        // its own setup send failing for instance, on the normal budget-consuming backoff path
+        // instead of being mistaken for still-expected goAway churn.
+        draining = false
+        lock.unlock()
+    }
+
+    /// Gemini keeps no ledger, so a replacement socket has nothing to reconcile: `replacement` only
+    /// distinguishes a first connect from a later one, which nothing here needs.
+    func connectionDidBecomeReady(_ lease: WebSocketConnection.Lease, replacement: Bool) {
+        lock.lock(); let isStopped = stopped; lock.unlock()
+        guard !isStopped else { return }
+        jlog("Jarvis Gemini [\(speaker.rawValue)]: transcription session ready "
+             + "(socket #\(lease.generation))")
+        benchmark?.observer.record(.init(
+            kind: .ready,
+            provider: TranscriptionProvider.gemini.rawValue,
+            model: model.rawValue,
+            speaker: speaker.rawValue,
+            generation: lease.generation,
+            observedAt: clock.now()))
+        updateWorkFlag()
+        pumpIfPossible()
+    }
+
+    func connectionWillRetry(_ lease: WebSocketConnection.Lease, attempt: Int) {
+        lock.lock()
+        guard !stopped else { lock.unlock(); return }
+        isSending = false
+        // Bound: whatever this socket was recognizing is now unknowable, and a final for it may
+        // never arrive. Clearing here rather than only on the replacement closes the gap during the
+        // backoff window itself, when there is no socket to have recognized anything.
+        recognitionInFlight = false
+        lock.unlock()
+        updateWorkFlag()   // any still-buffered audio is now definitely unsent work
+    }
+
+    /// Guarded on `stopped`: a terminal failure already in flight when the user pressed Stop must
+    /// not report one, or Activity shows a session ended by error for a session the user ended.
+    func connectionDidTerminate(_ failure: ProviderFailure) {
+        lock.lock()
+        guard !stopped else { lock.unlock(); return }
+        isSending = false
+        recognitionInFlight = false
+        lock.unlock()
+        updateWorkFlag()
+        onTerminalFailure?(failure)
+    }
+
+    func connectionWillClose(_ task: URLSessionWebSocketTask) {
+        // Best-effort: tell Gemini no more audio is coming so it can finalize the last utterance.
+        // Fire-and-forget, because Stop must not block on network I/O and the socket is cancelled
+        // immediately after regardless of whether this frame lands.
+        guard let data = try? JSONSerialization.data(
+                withJSONObject: GeminiLiveSession.audioStreamEnd()),
+              let text = String(data: data, encoding: .utf8) else { return }
+        task.send(.string(text)) { _ in }
     }
 
     // MARK: - Audio
@@ -356,27 +376,25 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
     private func pumpIfPossible() {
         var frame: Data?
         var frameToken: UInt64?
-        var activeTask: URLSessionWebSocketTask?
-        var socketGeneration = 0
+        var socketLease: WebSocketConnection.Lease?
         lock.lock()
-        // `!rotating`: a `goAway` was seen and this socket is being drained — new audio stays queued
-        // in `bufferedAudio` (already true regardless of connection state; see that field's doc
-        // comment) rather than being sent to a socket Google already warned is about to close. It
-        // drains into the replacement once `rotate` opens one and `markReady` flips `connected`.
-        if let task, connected, !stopped, !isReconnecting, !rotating, !isSending,
-           let first = bufferedAudio.first {
+        // `!draining`: a `goAway` was seen and this socket is being drained, so new audio stays
+        // queued in `bufferedAudio` (already true regardless of connection state; see that field's
+        // doc comment) rather than being sent to a socket Google already warned is about to close.
+        // It drains into the replacement once the rotation opens one and it reports ready.
+        if !stopped, !draining, !isSending, let first = bufferedAudio.first,
+           let lease = connection.readyLease {
             frame = first.data
             frameToken = first.token
-            activeTask = task
-            socketGeneration = generation
+            socketLease = lease
             isSending = true
         }
         lock.unlock()
-        guard let frame, let frameToken, let activeTask else { return }
-        sendFrame(frame, token: frameToken, task: activeTask, socketGeneration: socketGeneration)
+        guard let frame, let frameToken, let socketLease else { return }
+        sendFrame(frame, token: frameToken, on: socketLease)
     }
 
-    private func sendFrame(_ pcm: Data, token: UInt64, task: URLSessionWebSocketTask, socketGeneration: Int) {
+    private func sendFrame(_ pcm: Data, token: UInt64, on lease: WebSocketConnection.Lease) {
         let frame = GeminiLiveSession.audioFrame(
             base64PCM: pcm.base64EncodedString(), sampleRate: audioFormat.sampleRate)
         guard let data = try? JSONSerialization.data(withJSONObject: frame),
@@ -388,13 +406,12 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
             //
             // Guard on `isCurrentLease` BEFORE touching `isSending` or pumping, same as the send
             // completion below: this runs synchronously off the lock (JSON/base64 encoding), and a
-            // concurrent `stop()` or `failConnection` on another thread can retire this lease in that
+            // concurrent `stop()` or socket retirement on another thread can retire this lease in that
             // window. `isSending`/the queue at that point belong to whatever replaced this lease (or
             // to nothing, if the session stopped) — a stale write here would stomp that state exactly
             // like the send-completion bug this mirrors.
             lock.lock()
-            let isCurrentLease = self.task === task && generation == socketGeneration
-                && connected && !stopped && !isReconnecting
+            let isCurrentLease = !stopped && connection.isReady(lease)
             guard isCurrentLease else { lock.unlock(); return }
             if let first = bufferedAudio.first, first.token == token {
                 bufferedByteCount -= bufferedAudio.removeFirst().data.count
@@ -405,27 +422,23 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
             pumpIfPossible()
             return
         }
-        task.send(.string(text)) { [weak self, weak task] error in
-            guard let self, let task else { return }
-            if let error {
+        connection.send(.string(text), on: lease) { [weak self] delivered in
+            guard let self else { return }
+            guard delivered else {
                 self.lock.lock()
-                let isCurrentLease = self.task === task && self.generation == socketGeneration
-                // Only a completion for the CURRENT lease may clear `isSending` — a stale completion
+                // Only a completion for the CURRENT lease may clear `isSending`. A stale completion
                 // from a socket that has already been replaced would otherwise clear the replacement
-                // socket's in-flight-send flag and let a duplicate send through. `failConnection`
-                // itself carries its own generation guard (see its top), so calling it unconditionally
-                // below is a safe no-op for a stale lease — that guard is what keeps this failure
-                // report from disrupting a healthy replacement, not this early return.
-                if isCurrentLease { self.isSending = false }
+                // socket's in-flight-send flag and let a duplicate send through. The connection
+                // carries its own lease guard, so the retirement it runs next is a safe no-op for a
+                // stale lease; that guard is what keeps this failure from disrupting a healthy
+                // replacement, not this check.
+                if self.connection.isCurrent(lease) { self.isSending = false }
                 self.lock.unlock()
-                self.failConnection(task: task, generation: socketGeneration,
-                                    cause: self.transportFailure(error))
                 return
             }
             self.lock.lock()
-            let isCurrentLease = self.task === task && self.generation == socketGeneration
-                && self.connected && !self.stopped && !self.isReconnecting
-            // A stale completion (this lease was replaced while `task.send` was in flight) must not
+            let isCurrentLease = !self.stopped && self.connection.isReady(lease)
+            // A stale completion (this lease was replaced while the send was in flight) must not
             // touch `isSending` or pump: `isSending` now legitimately belongs to whatever replaced it,
             // and clearing it here would let that replacement's still-outstanding send race a second,
             // duplicate send off the queue. Return before any mutation rather than gating each one
@@ -433,7 +446,7 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
             guard isCurrentLease else { self.lock.unlock(); return }
             // Match by `token`, not `Data` equality: silent (all-zero) PCM at a fixed callback length
             // is routine, so byte-identical chunks are common, and equality could evict a same-bytes
-            // chunk that replaced the one actually sent while `lock` was released for `task.send`. If
+            // chunk that replaced the one actually sent while `lock` was released for the send. If
             // the token no longer matches the head, that chunk was evicted — do nothing to the queue.
             if let first = self.bufferedAudio.first, first.token == token {
                 self.bufferedByteCount -= self.bufferedAudio.removeFirst().data.count
@@ -463,41 +476,6 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
 
     // MARK: - Receive
 
-    private func receiveLoop(task: URLSessionWebSocketTask, generation socketGeneration: Int) {
-        task.receive { [weak self, weak task] result in
-            guard let self, let task else { return }
-            guard self.isCurrent(task: task, generation: socketGeneration) else { return }
-            switch result {
-            case .failure(let err):
-                // A failed pending receive is the EXPECTED artifact of an intentional Stop (cancel).
-                self.lock.lock()
-                let isStopped = self.stopped
-                let everReady = self.everConnected
-                self.lock.unlock()
-                if isStopped { return }
-                // A refused upgrade (non-101) surfaces here as a transport error; the HTTP status is
-                // on the task. Gemini accepts the upgrade even for a bad key and rejects in the close
-                // instead, so a refused handshake here is the edge itself refusing.
-                let cause: ProviderFailure
-                if let status = (task.response as? HTTPURLResponse)?.statusCode, status != 101 {
-                    cause = GeminiFailureClassifier.classify(
-                        httpStatus: status, body: nil, source: self.source, stage: .handshake)
-                } else {
-                    cause = TransportFailureClassifier.classify(
-                        error: err, source: self.source, everReady: everReady)
-                }
-                if cause.disposition == .permanent {
-                    self.reportTerminalFailureOnce(cause)
-                    return
-                }
-                self.failConnection(task: task, generation: socketGeneration, cause: cause)
-            case .success(let message):
-                self.decodeAndHandle(message, task: task, generation: socketGeneration)
-                self.receiveLoop(task: task, generation: socketGeneration)
-            }
-        }
-    }
-
     /// Normalizes a received frame to the JSON object `handle` expects, regardless of which
     /// `URLSessionWebSocketTask.Message` case carried it, so there is exactly one parse-and-dispatch
     /// path for the two frame kinds.
@@ -507,8 +485,7 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
     /// as a BINARY frame, not TEXT. That was verified against the live server with an independent
     /// client; dropping the `.data` branch silently discards every frame again and readiness never
     /// fires. A `.data` frame carries the same UTF-8 JSON text a `.string` frame would.
-    private func decodeAndHandle(_ message: URLSessionWebSocketTask.Message,
-                                 task: URLSessionWebSocketTask, generation socketGeneration: Int) {
+    func handle(_ message: URLSessionWebSocketTask.Message, on lease: WebSocketConnection.Lease) {
         let text: String
         let kind: String
         switch message {
@@ -535,7 +512,7 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
                  + "(\(text.utf8.count) bytes)")
             return
         }
-        handle(obj, task: task, generation: socketGeneration)
+        handleFrame(obj, on: lease)
     }
 
     /// One received frame. Order matters: a setup acknowledgement must be seen before any transcript
@@ -545,22 +522,21 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
     /// is the only terminal-failure signal Gemini sends. `goAway` is the one other server-initiated
     /// lifecycle frame besides `setupComplete` — advance warning of an approaching close, not a
     /// failure; see `beginDrain`.
-    private func handle(_ message: [String: Any], task: URLSessionWebSocketTask,
-                        generation socketGeneration: Int) {
-        // Re-validate the lease even though `receiveLoop` already did: `decodeAndHandle`'s UTF-8 and
-        // JSON parsing sits between that check and this one, and the socket can be replaced during it
-        // (a failure path bumps `generation` and opens a new task). Acting on a stale frame here is
-        // not cosmetic — a stale frame could mutate `recognitionInFlight` or admit pre-reconnect
+    private func handleFrame(_ message: [String: Any], on lease: WebSocketConnection.Lease) {
+        // Re-validate the lease even though the connection already did: the UTF-8 and JSON parsing
+        // above sits between that check and this one, and the socket can be replaced during it (a
+        // failure path bumps the generation and opens a new task). Acting on a stale frame here is
+        // not cosmetic: a stale frame could mutate `recognitionInFlight` or admit pre-reconnect
         // transcript text. `isCurrent` subsumes a plain `stopped` check by also requiring task
-        // identity, generation, and not-reconnecting — do not "simplify" it back to a `stopped` test.
-        guard isCurrent(task: task, generation: socketGeneration) else { return }
+        // identity and generation; do not "simplify" it back to a `stopped` test.
+        lock.lock(); let isStopped = stopped; lock.unlock()
+        guard !isStopped, connection.isCurrent(lease) else { return }
         if GeminiLiveSession.isSetupComplete(message) {
-            markReady(task: task, generation: socketGeneration)
+            connection.acknowledgeReady(lease)
             return
         }
         if GeminiLiveSession.isGoAway(message) {
-            beginDrain(task: task, generation: socketGeneration,
-                      timeLeft: GeminiLiveSession.goAwayTimeLeft(message))
+            beginDrain(lease, timeLeft: GeminiLiveSession.goAwayTimeLeft(message))
             return
         }
         if GeminiLiveSession.hasFinalizedTranscription(message) {
@@ -571,11 +547,11 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
             // `hallucinationDenylist` exists for). Clearing only inside the filtered branch left
             // `recognitionInFlight` wedged true after a rejected final, gating automatic coaching on
             // a signal that had already resolved. A filtered final still means the server is done.
-            lock.lock(); recognitionInFlight = false; let isDraining = rotating; lock.unlock()
+            lock.lock(); recognitionInFlight = false; let isDraining = draining; lock.unlock()
             if let text = GeminiLiveSession.finalTranscript(from: message, speaker: speaker) {
                 continuityReporter.recordServerSpeech(
                     .transcriptionCompleted, audioTimeMilliseconds: nil,
-                    socketGeneration: socketGeneration)
+                    socketGeneration: lease.generation)
                 // Gemini reports no per-utterance start time, so `spokenAt: nil` lets the coordinator
                 // date the line from the session clock. `source` is debug-only detail, never Activity.
                 let accepted = coachingCoordinator.recordFinalizedTranscript(
@@ -585,7 +561,7 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
                     provider: TranscriptionProvider.gemini.rawValue,
                     model: model.rawValue,
                     speaker: speaker.rawValue,
-                    generation: socketGeneration,
+                    generation: lease.generation,
                     text: text,
                     observedAt: clock.now(),
                     transcriptUnavailable: !accepted))
@@ -596,7 +572,7 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
             if isDraining {
                 // The utterance the grace period existed for just finished — no reason to wait out
                 // the rest of it. Rotate now instead of on `armDrainDeadline`'s timer.
-                rotate(fromTask: task, generation: socketGeneration, reason: "utterance finalized during drain")
+                rotateNow(lease, reason: "utterance finalized during drain")
             }
             return
         }
@@ -626,28 +602,6 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
              + "(\(message.keys.sorted().joined(separator: ",")))")
     }
 
-    private func markReady(task: URLSessionWebSocketTask, generation socketGeneration: Int) {
-        lock.lock()
-        guard let currentTask = self.task, currentTask === task, generation == socketGeneration,
-              !connected, !stopped, !isReconnecting else { lock.unlock(); return }
-        connected = true; everConnected = true; reconnectAttempt = 0
-        lock.unlock()
-        invalidateReadyTimer(task: task, generation: socketGeneration)
-        jlog("Jarvis Gemini [\(speaker.rawValue)]: transcription session ready "
-             + "(socket #\(socketGeneration))")
-        benchmark?.observer.record(.init(
-            kind: .ready,
-            provider: TranscriptionProvider.gemini.rawValue,
-            model: model.rawValue,
-            speaker: speaker.rawValue,
-            generation: socketGeneration,
-            observedAt: clock.now()))
-        updateWorkFlag()
-        pumpIfPossible()
-        emitState(.ready)
-        startPing(task: task, generation: socketGeneration)
-    }
-
     // MARK: - Drain / rotate (goAway)
 
     /// Google caps a Live API connection at roughly 10 minutes and sends `goAway` shortly before
@@ -657,16 +611,18 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
     /// be lost, and its buffered audio would replay from the middle on the replacement — a garbled
     /// line roughly every 10 minutes.
     ///
-    /// This starts the drain: mark `rotating` so `pumpIfPossible` stops sending NEW audio to this
-    /// socket (it keeps accumulating in the existing bounded `bufferedAudio` FIFO — no second buffer),
-    /// then arm a bounded grace period for the utterance already in flight to produce its final on
-    /// this still-open socket before `rotate` replaces it. `!rotating` in the guard makes this
-    /// idempotent against a resent `goAway` for the same socket.
-    private func beginDrain(task: URLSessionWebSocketTask, generation socketGeneration: Int,
-                            timeLeft: TimeInterval?) {
+    /// This starts the drain: mark `draining` so `pumpIfPossible` stops sending NEW audio to this
+    /// socket (it keeps accumulating in the existing bounded `bufferedAudio` FIFO, with no second
+    /// buffer), tell the connection to expect the rotation so the close it produces is read as that
+    /// rather than a fault, then arm a bounded grace period for the utterance already in flight to
+    /// produce its final on this still-open socket before the replacement takes over. `!draining` in
+    /// the guard makes this idempotent against a resent `goAway` for the same socket.
+    private func beginDrain(_ lease: WebSocketConnection.Lease, timeLeft: TimeInterval?) {
         lock.lock()
-        let leaseIsCurrent = self.task === task && self.generation == socketGeneration
-            && !stopped && !isReconnecting && !rotating
+        // `isReady`, not `isCurrent`: a `goAway` before `setupComplete` describes a socket that
+        // never worked, and the connection refuses to rotate one of those for free. Draining it
+        // would only stall audio until the readiness deadline retired it anyway.
+        let leaseIsCurrent = !stopped && !draining && connection.isReady(lease)
         // Only wait if there is actually an utterance to wait FOR. A drain armed with nothing in
         // flight stalls new audio for the whole grace period to protect a final that is never
         // coming: measured over a 62-minute live session, all six rotations took exactly the full
@@ -674,17 +630,18 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
         // goAway. That is up to 5s of buffered-instead-of-streamed audio every ~9 minutes on both
         // sockets, delaying the transcript and the coaching gated on it, for no benefit.
         let hasUtteranceToDrain = leaseIsCurrent && recognitionInFlight
-        if leaseIsCurrent { rotating = true }
+        if leaseIsCurrent { draining = true }
         lock.unlock()
         guard leaseIsCurrent else { return }
+        connection.noteExpectedRotation(
+            lease,
+            reason: hasUtteranceToDrain ? "goAway, draining before rotation"
+                                        : "goAway, nothing in flight")
         guard hasUtteranceToDrain else {
-            // `rotate` logs this with its own reason; no second line for one event.
-            rotate(fromTask: task, generation: socketGeneration, reason: "goAway, nothing in flight")
+            rotateNow(lease, reason: "goAway, nothing in flight")
             return
         }
-        jlog("Jarvis Gemini [\(speaker.rawValue)]: goAway received (socket #\(socketGeneration)) "
-             + "— draining before rotation")
-        armDrainDeadline(task: task, generation: socketGeneration, timeLeft: timeLeft)
+        armDrainDeadline(lease, timeLeft: timeLeft)
     }
 
     /// Bounds the drain with the same main-queue-confined, double-checked timer discipline as
@@ -698,324 +655,50 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
     /// mandatory backstop: if the final never arrives (a lost frame, or the server closing early),
     /// rotation proceeds anyway. An unbounded drain would hang the stream — strictly worse than the
     /// garbled line being fixed.
-    private func armDrainDeadline(task: URLSessionWebSocketTask, generation socketGeneration: Int,
-                                  timeLeft: TimeInterval?) {
+    private func armDrainDeadline(_ lease: WebSocketConnection.Lease, timeLeft: TimeInterval?) {
         let bound: TimeInterval
         if let timeLeft, timeLeft > 0 {
             bound = min(goAwayGraceTimeout, timeLeft)
         } else {
             bound = goAwayGraceTimeout
         }
-        DispatchQueue.main.async { [weak self, weak task] in
-            guard let self, let task else { return }
-            self.lock.lock()
-            let isPending = self.task === task && self.generation == socketGeneration
-                && self.rotating && !self.stopped
-            self.lock.unlock()
-            guard isPending else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.isDraining(lease) else { return }
             self.drainTimer?.invalidate()
             self.drainTimer = Timer.scheduledTimer(withTimeInterval: bound, repeats: false) {
-                [weak self, weak task] _ in
-                guard let self, let task else { return }
-                self.lock.lock()
-                let isStillPending = self.task === task && self.generation == socketGeneration
-                    && self.rotating && !self.stopped
-                self.lock.unlock()
-                guard isStillPending else { return }
-                self.rotate(fromTask: task, generation: socketGeneration, reason: "grace period elapsed")
+                [weak self] _ in
+                guard let self, self.isDraining(lease) else { return }
+                self.rotateNow(lease, reason: "grace period elapsed")
             }
         }
     }
 
-    /// Deliberately replace a socket Google already warned is closing, ahead of the actual close —
-    /// not a reactive reconnect. Three callers converge here: the drain deadline elapsing, the
-    /// in-flight utterance's final arriving early, and `failConnection` short-circuiting here for any
-    /// transport failure that lands on a still-draining socket instead of running its backoff path.
+    /// Whether `lease` is still the socket this transcriber is draining. Both the outer main-queue
+    /// hop and the timer body re-check it, so a lease that changed in between (an early rotation from
+    /// the final arriving, or a Stop) leaves the deadline a no-op.
+    private func isDraining(_ lease: WebSocketConnection.Lease) -> Bool {
+        lock.lock(); let isDraining = draining && !stopped; lock.unlock()
+        return isDraining && connection.isCurrent(lease)
+    }
+
+    /// Deliberately replace a socket Google already warned is closing, ahead of the actual close,
+    /// rather than reconnecting reactively. Two callers converge here: the drain deadline elapsing
+    /// and the in-flight utterance's final arriving early. A transport failure that lands on a
+    /// still-draining socket takes the same route, through the connection's own check that the
+    /// rotation was already expected.
     ///
-    /// None of them touch `reconnectAttempt` or `reconnectSchedule` — a rotation Google told us about
-    /// in advance is expected transport churn, not a fault, so it must not spend the budget a genuine
-    /// failure needs, and must never report `.failed`. `openSocket` does the actual replacement: it
-    /// already bumps `generation` (so a late callback from the old socket is rejected the same way a
-    /// normal reconnect-open rejects one) and clears `recognitionInFlight` — correct here too, since
-    /// whatever the expiring socket was still recognizing when this fires is unknowable, exactly the
-    /// same bound `openSocket`/`failConnection`/`stop` already apply. `openSocket` also clears
-    /// `rotating` itself, so a failure of the fresh replacement socket is never mistaken for
-    /// still-expected drain churn (see its comment).
-    private func rotate(fromTask task: URLSessionWebSocketTask, generation socketGeneration: Int,
-                        reason: String) {
-        lock.lock()
-        let isPending = self.task === task && self.generation == socketGeneration
-            && rotating && !stopped
-        lock.unlock()
-        guard isPending else { return }
-        jlog("Jarvis Gemini [\(speaker.rawValue)]: rotating socket #\(socketGeneration) "
-             + "ahead of goAway close (\(reason))")
-        emitState(.reconnecting(attempt: 1))
-        openSocket()
+    /// None of them spend retry budget: a rotation Google told us about in advance is expected
+    /// transport churn, not a fault, so it must not consume what a genuine failure needs and must
+    /// never report `.failed`. The connection bumps the generation for the replacement (so a late
+    /// callback from the old socket is rejected exactly as a normal reconnect rejects one) and calls
+    /// `connectionWillOpen`, which clears `recognitionInFlight` (correct here too, since whatever
+    /// the expiring socket was still recognizing is unknowable) and `draining`, so a failure of the
+    /// fresh socket is never mistaken for still-expected drain churn.
+    private func rotateNow(_ lease: WebSocketConnection.Lease, reason: String) {
+        guard isDraining(lease) else { return }
+        connection.requestRotation(lease, reason: reason)
     }
 
     /// This transcriber's identity in every failure it classifies.
     private var source: ProviderFailure.Source { .transcription(.gemini) }
-
-    /// Classify a transport error against this socket's readiness, which decides whether it reads as
-    /// a connection that never came up or one lost after it was working.
-    private func transportFailure(_ error: any Error) -> ProviderFailure {
-        lock.lock(); let everReady = everConnected; lock.unlock()
-        return TransportFailureClassifier.classify(error: error, source: source, everReady: everReady)
-    }
-
-    /// End a green-but-unusable transcription session immediately for permanent provider failures.
-    private func reportTerminalFailureOnce(_ failure: ProviderFailure) {
-        lock.lock()
-        guard !stopped, !terminalFailureReported else { lock.unlock(); return }
-        terminalFailureReported = true
-        connected = false
-        lock.unlock()
-        invalidateConnectionTimers()
-        emitState(.failed)
-        jlog("Jarvis Gemini [\(speaker.rawValue)]: unrecoverable transcription failure "
-             + "(\(failure.errorDescription ?? "")) — stopping")
-        onTerminalFailure?(failure)
-    }
-
-    // MARK: - Reconnect / keepalive
-
-    func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask,
-                    didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
-        lock.lock()
-        guard let currentTask = task, currentTask === webSocketTask else { lock.unlock(); return }
-        let socketGeneration = generation
-        let isStopped = stopped
-        lock.unlock()
-        if isStopped { return } // An intentional Stop closes the socket on purpose.
-        // A rejected API key, a retired model id, and an unsupported request all surface ONLY as
-        // close code 1008 — see `GeminiFailureClassifier.classify(closeCode:reason:source:)` for the
-        // empirically-established wire behavior and how the `reason` text tells them apart. A
-        // permanent close goes straight to the terminal path instead of `failConnection`'s
-        // six-attempt, ~61s backoff: it is a provider-boundary failure a retry cannot fix, and this
-        // is the one case AGENTS.md permits exhausting a target immediately.
-        //
-        // `reason` is server-supplied content. It reaches Activity only through the failure record,
-        // which redacts it; it is still never logged verbatim (see the security note atop this file).
-        let reasonText = reason.flatMap { String(data: $0, encoding: .utf8) }
-        let cause = GeminiFailureClassifier.classify(
-            closeCode: closeCode.rawValue, reason: reasonText, source: source)
-        if cause.disposition == .permanent {
-            reportTerminalFailureOnce(cause)
-            return
-        }
-        failConnection(task: webSocketTask, generation: socketGeneration, cause: cause)
-    }
-
-    /// Move the current socket into reconnect exactly once. Every failure source (receive, close,
-    /// send, readiness deadline, and pong deadline) funnels through here; `generation` prevents a late
-    /// callback from an old socket from disrupting its healthy replacement.
-    private func failConnection(task failedTask: URLSessionWebSocketTask, generation failedGeneration: Int,
-                                cause: ProviderFailure?) {
-        lock.lock()
-        guard let currentTask = task else { lock.unlock(); return }
-        if stopped || terminalFailureReported || isReconnecting
-            || generation != failedGeneration || currentTask !== failedTask {
-            lock.unlock(); return
-        }
-        if rotating {
-            // `goAway` already told us this socket was going away — any failure it produces while
-            // draining (a close arriving before the grace deadline, a receive failure, ...) is
-            // expected transport churn, not a fault. Skip the backoff path entirely and rotate now
-            // instead of spending a retry attempt or remembering a cause for something already
-            // anticipated. `rotate` re-validates the lease itself, so it is safe to call unlocked.
-            lock.unlock()
-            rotate(fromTask: failedTask, generation: failedGeneration,
-                   reason: cause?.errorDescription ?? "socket failure")
-            return
-        }
-        if let cause { lastConnectionFailure = cause }
-        connected = false; isSending = false
-        // Bound: whatever this socket was recognizing is now unknowable — a final for it may never
-        // arrive. Clearing here (not just in `openSocket` on the replacement) closes the gap during
-        // the reconnect backoff window itself, when there is no socket to have recognized anything.
-        recognitionInFlight = false
-        pendingPingGeneration = nil
-        let failedSession = session
-        task = nil
-        session = nil
-        // A socket that never reached ready spends the short budget: nothing is preserved by waiting,
-        // and the user is sitting in silence while it retries.
-        let schedule = everConnected ? reconnectSchedule : initialConnectSchedule
-        guard let retryDelay = schedule.delay(forRetry: reconnectAttempt) else {
-            let last = lastConnectionFailure
-            let wasEverConnected = everConnected
-            isReconnecting = true
-            terminalFailureReported = true
-            lock.unlock()
-            if let cause { logTransportFailure(cause, generation: failedGeneration) }
-            invalidateConnectionTimers()
-            failedTask.cancel(with: .goingAway, reason: nil)
-            failedSession?.invalidateAndCancel()
-            emitState(.failed)
-            jlog("Jarvis Gemini [\(speaker.rawValue)]: giving up after "
-                 + "\(schedule.maximumRetries) reconnect attempts — stopping")
-            onTerminalFailure?(.exhausted(
-                last: last, source: source, everReady: wasEverConnected))
-            return
-        }
-        isReconnecting = true
-        let attempt = reconnectAttempt
-        reconnectAttempt = attempt + 1
-        lock.unlock()
-
-        if let cause { logTransportFailure(cause, generation: failedGeneration) }
-        invalidateConnectionTimers()
-        failedTask.cancel(with: .goingAway, reason: nil)
-        failedSession?.invalidateAndCancel()
-        emitState(.reconnecting(attempt: attempt + 1))
-        updateWorkFlag() // any still-buffered audio is now definitely unsent work
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + retryDelay) { [weak self] in
-            guard let self else { return }
-            self.lock.lock()
-            let shouldReconnect = !self.stopped && self.generation == failedGeneration
-                && self.task == nil && self.isReconnecting
-            self.lock.unlock()
-            guard shouldReconnect else { return }
-            jlog("Jarvis Gemini [\(self.speaker.rawValue)]: reconnecting (attempt \(attempt + 1))")
-            self.openSocket()
-        }
-    }
-
-    // DIVERGENCE HAZARD: The ready-timeout, ping-pong, timer invalidation, and generation-guard logic
-    // below is mirrored in RealtimeTranscriber.swift. A fix made here almost certainly belongs there too.
-    // Extracting a shared lifecycle helper is a separate, focused change; do not refactor here.
-    private func armReadyTimeout(task: URLSessionWebSocketTask, generation socketGeneration: Int) {
-        DispatchQueue.main.async { [weak self, weak task] in
-            guard let self, let task else { return }
-            self.lock.lock()
-            let isPending = self.task === task && self.generation == socketGeneration
-                && !self.connected && !self.isReconnecting && !self.stopped
-            self.lock.unlock()
-            guard isPending else { return }
-            self.readyTimer?.invalidate()
-            self.readyTimer = Timer.scheduledTimer(withTimeInterval: self.readyTimeout, repeats: false) {
-                [weak self, weak task] _ in
-                guard let self, let task else { return }
-                self.lock.lock()
-                let isStillPending = self.task === task && self.generation == socketGeneration
-                    && !self.connected && !self.isReconnecting && !self.stopped
-                self.lock.unlock()
-                guard isStillPending else { return }
-                self.lock.lock(); let everReady = self.everConnected; self.lock.unlock()
-                self.failConnection(task: task, generation: socketGeneration,
-                                    cause: TransportFailureClassifier.readinessTimeout(
-                                        seconds: self.readyTimeout, source: self.source,
-                                        everReady: everReady))
-            }
-        }
-    }
-
-    private func startPing(task: URLSessionWebSocketTask, generation socketGeneration: Int) {
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.lock.lock()
-            let isReady = self.task === task && self.generation == socketGeneration
-                && self.connected && !self.isReconnecting && !self.stopped
-            self.lock.unlock()
-            guard isReady else { return }
-            self.pingTimer?.invalidate()
-            self.pingTimer = Timer.scheduledTimer(withTimeInterval: self.pingInterval, repeats: true) {
-                [weak self, weak task] _ in
-                guard let self, let task else { return }
-                self.sendHealthPing(task: task, generation: socketGeneration)
-            }
-        }
-    }
-
-    private func sendHealthPing(task: URLSessionWebSocketTask, generation socketGeneration: Int) {
-        lock.lock()
-        guard let currentTask = self.task, currentTask === task,
-              generation == socketGeneration, connected,
-              pendingPingGeneration == nil else { lock.unlock(); return }
-        pendingPingGeneration = socketGeneration
-        lock.unlock()
-
-        DispatchQueue.main.async { [weak self, weak task] in
-            guard let self, let task else { return }
-            self.pongTimer?.invalidate()
-            self.pongTimer = Timer.scheduledTimer(withTimeInterval: self.pongTimeout, repeats: false) {
-                [weak self, weak task] _ in
-                guard let self, let task else { return }
-                self.lock.lock()
-                let isStillPending = self.task === task && self.generation == socketGeneration
-                    && self.pendingPingGeneration == socketGeneration && self.connected
-                    && !self.isReconnecting && !self.stopped
-                self.lock.unlock()
-                guard isStillPending else { return }
-                self.failConnection(task: task, generation: socketGeneration,
-                                    cause: TransportFailureClassifier.livenessTimeout(
-                                        seconds: self.pongTimeout, source: self.source))
-            }
-        }
-
-        task.sendPing { [weak self, weak task] error in
-            guard let self, let task else { return }
-            if let error {
-                self.failConnection(task: task, generation: socketGeneration,
-                                    cause: self.transportFailure(error))
-                return
-            }
-            self.lock.lock()
-            guard let currentTask = self.task, currentTask === task,
-                  self.generation == socketGeneration else {
-                self.lock.unlock(); return
-            }
-            self.pendingPingGeneration = nil
-            self.lock.unlock()
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                self.lock.lock()
-                let isSameSocket = self.task === task && self.generation == socketGeneration
-                self.lock.unlock()
-                guard isSameSocket else { return }
-                self.pongTimer?.invalidate()
-                self.pongTimer = nil
-            }
-        }
-    }
-
-    private func isCurrent(task candidate: URLSessionWebSocketTask, generation candidateGeneration: Int) -> Bool {
-        lock.lock(); defer { lock.unlock() }
-        guard let currentTask = task else { return false }
-        return !stopped && !isReconnecting
-            && currentTask === candidate && generation == candidateGeneration
-    }
-
-    private func invalidateReadyTimer(task: URLSessionWebSocketTask, generation socketGeneration: Int) {
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.lock.lock()
-            let isSameSocket = self.task === task && self.generation == socketGeneration
-            self.lock.unlock()
-            guard isSameSocket else { return }
-            self.readyTimer?.invalidate()
-            self.readyTimer = nil
-        }
-    }
-
-    private func invalidateConnectionTimers() {
-        DispatchQueue.main.async { [weak self] in
-            self?.readyTimer?.invalidate(); self?.readyTimer = nil
-            self?.pingTimer?.invalidate(); self?.pingTimer = nil
-            self?.pongTimer?.invalidate(); self?.pongTimer = nil
-            self?.drainTimer?.invalidate(); self?.drainTimer = nil
-        }
-    }
-
-    private func logTransportFailure(_ cause: ProviderFailure, generation socketGeneration: Int) {
-        jlog("Jarvis Gemini [\(speaker.rawValue)] socket #\(socketGeneration) "
-             + "\(cause.stage.rawValue) failed: \(cause.errorDescription ?? "") "
-             + "(network: \(networkStatus()))")
-    }
-
-    private func emitState(_ state: TranscriptionConnectionState) {
-        onConnectionStateChange?(state)
-    }
 }

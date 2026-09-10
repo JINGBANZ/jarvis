@@ -242,9 +242,14 @@ final class WebSocketConnection: NSObject, URLSessionWebSocketDelegate, @uncheck
 
     /// The server warned that this socket is going away. Announce it once, then let the close or
     /// receive failure it produces next be read as the rotation it is.
+    ///
+    /// Only a socket that reached ready can be replaced for free. A warning that arrives before the
+    /// acknowledgement describes a socket that never worked, and treating that as a rotation would
+    /// reopen with no delay and no budget spent, forever, against a server that closes every
+    /// handshake. Those take the ordinary failure path instead.
     func noteExpectedRotation(_ lease: Lease, reason: String) {
         lock.lock()
-        guard isCurrentLocked(lease), !rotationExpected else { lock.unlock(); return }
+        guard isCurrentLocked(lease), connected, !rotationExpected else { lock.unlock(); return }
         rotationExpected = true
         lock.unlock()
         jlog("\(logPrefix): socket #\(lease.generation) rotating (\(reason))")
@@ -303,6 +308,14 @@ final class WebSocketConnection: NSObject, URLSessionWebSocketDelegate, @uncheck
         let session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
         let task = session.webSocketTask(with: request)
         lock.lock()
+        // A stop can land between the retry timer's guard and here, and the adapter does real work
+        // in `connectionWillRetry` in that window. Installing this socket then would leave one live
+        // that nothing cancels, held alive by its own `URLSession`.
+        guard !stopped else {
+            lock.unlock()
+            session.invalidateAndCancel()
+            return
+        }
         let previousSession = self.session
         generation += 1
         let lease = Lease(task: task, generation: generation)
@@ -414,6 +427,14 @@ final class WebSocketConnection: NSObject, URLSessionWebSocketDelegate, @uncheck
         // new fault, so it must not spend the budget a genuine failure will need.
         if case .failure(let cause) = retirement, rotationExpected {
             retirement = .expectedRotation(reason: cause.errorDescription ?? "socket failure")
+        }
+        // A socket that was never acknowledged cannot be rotated: see `noteExpectedRotation`. Leave
+        // it installed and let the readiness deadline retire it on the budget instead.
+        if case .expectedRotation(let reason) = retirement, !connected {
+            lock.unlock()
+            jlog("\(logPrefix): socket #\(lease.generation) reported \(reason) before it was "
+                 + "ready; waiting for the readiness deadline")
+            return
         }
         let action: SocketLifecyclePolicy.Action
         switch retirement {

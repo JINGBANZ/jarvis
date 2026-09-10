@@ -575,11 +575,11 @@ rather than a per-turn screenshot.
   needs neither `RealtimeTranscriber`'s per-item ledger nor its client-commit path (turn detection is
   entirely server-owned), so restructuring the OpenAI adapter — whose live socket cannot be
   unit-tested — to serve a provider that needs neither would risk the primary transcription path for
-  speculative reuse. The two adapters' socket lifecycle (ready-timeout, ping/pong, timer invalidation,
-  generation guards) still duplicates roughly 130 lines as a result, tracked in each file's
-  `DIVERGENCE HAZARD` comment (`RealtimeTranscriber.swift`, `GeminiLiveTranscriber.swift`) so a fix to
-  one is not missed in the other; extracting a shared lifecycle helper stays a deliberately deferred,
-  separate change until a third streaming provider makes the reuse concrete instead of speculative.
+  speculative reuse. What the two genuinely share is the socket lifecycle (ready-timeout, ping/pong,
+  timer invalidation, generation guards), and once both were live the two hand-maintained copies had
+  already drifted apart in four places, so that part is now one driver rather than two copies: see
+  [Resilience](#resilience). The per-item ledger, the commit path, and turn detection stay separate,
+  which is what the original split was actually about.
 - **The wire sample rate is a per-provider requirement, not a quality knob
   (`TranscriptionProvider.audioFormat`, `TranscriptionAudioFormat`).** OpenAI Realtime and Apple
   Speech take 24 kHz PCM16 mono; Gemini Live requires 16 kHz PCM16 mono
@@ -798,6 +798,29 @@ The always-on legs are built to survive transient failure rather than die on it:
   their retained PCM is transcribed by the replacement session instead of first emitting a partial
   or gap that the replay would duplicate. Stale speech state therefore cannot suppress silence
   coaching after reconnect. Reconnect uses capped exponential backoff.
+- **Both socket providers run that lifecycle from one driver
+  (`SocketLifecyclePolicy`, `WebSocketConnection`).** The decisions are Foundation-only and
+  unit-tested in Core: when to open, what counts as ready, which failures terminate now, and how much
+  retry budget is left. The App-side driver owns the `URLSession`, the task, the generation counter,
+  the three timers, and the receive and close paths, and asks the policy for each of those decisions.
+  Each transcriber is that driver's adapter and supplies only what its vendor does differently: the
+  request, the configuration frame, the frame reader, the two failure classifiers, and the stream
+  bookkeeping a socket handoff needs.
+
+  The split costs two locks, and the rule between them is load-bearing. The driver's lock guards
+  socket state and is a leaf: the driver never calls an adapter while holding it. Each adapter guards
+  its own audio and replay state, mirrors the driver's readiness under that lock, and has its
+  producers read only the mirror. Every driver state change is immediately followed by an adapter
+  callback that flips the mirror, so a producer sees either the whole pre-change picture or the whole
+  post-change one, never a half-applied handoff. Having producers ask the driver directly would
+  reopen the race the replay barrier exists to close: a producer that saw "not ready" before the
+  handoff had begun would publish a barrier into the lifecycle ahead of the snapshot it belongs to.
+
+  A rotation the server announced (OpenAI's `session_expired` or a 1001 close, Gemini's `goAway`)
+  spends no retry budget and waits out no backoff delay, because it is expected churn rather than a
+  fault. That freedom belongs only to a socket that reached ready. A warning on a socket that never
+  worked describes a connection that is failing, and reading it as a rotation would reopen forever
+  against a server that refuses every handshake, so those take the ordinary budgeted path.
 - **A Gemini Live socket is capped at roughly 10 minutes, but Google gives advance warning:** a
   `goAway` frame (with a `timeLeft` countdown) arrives before the close, instead of the close simply
   happening as OpenAI's does. `GeminiLiveTranscriber` uses that warning to drain rather than just

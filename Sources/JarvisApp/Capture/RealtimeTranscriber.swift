@@ -12,14 +12,22 @@ import JarvisCore
 /// audio chunk. Provisional deltas remain lifecycle-only; finalized text is still the sole input to
 /// Activity and the coaching model.
 ///
-/// Robustness: waits for the server's configuration acknowledgement before reporting ready, probes
+/// Robustness: the socket itself belongs to `WebSocketConnection`, which both socket transcribers
+/// share. It waits for the server's configuration acknowledgement before reporting ready, probes
 /// ready sockets with ping/pong, and reconnects with capped exponential backoff on every detected
-/// send, receive, close, startup-timeout, or liveness failure.
-final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSocketDelegate,
+/// send, receive, close, startup-timeout, or liveness failure. This type is its OpenAI adapter,
+/// supplying the request, the `session.update` payload, the event reader, the two classifiers, and
+/// the replay bookkeeping each socket handoff needs.
+///
+/// `streamReady`/`everStreamReady` mirror the connection's readiness under this type's own `lock`,
+/// and every producer reads the mirror rather than asking the connection. That is what keeps a
+/// producer's decision atomic with the replay bookkeeping it drives; see `WebSocketConnection`'s
+/// header for the lock order and why the mirror exists.
+final class RealtimeTranscriber: TranscriptionSession, WebSocketConnectionAdapter,
     @unchecked Sendable {
     private enum OutboundAction {
-        case audio(PCMBuffer.Claim, URLSessionWebSocketTask, Int)
-        case commit(RealtimeJarvisManagedTurnCoordinator.Turn, URLSessionWebSocketTask, Int)
+        case audio(PCMBuffer.Claim, WebSocketConnection.Lease)
+        case commit(RealtimeJarvisManagedTurnCoordinator.Turn, WebSocketConnection.Lease)
     }
 
     var onTurnEnd: (@Sendable (_ transcriptBoundary: Int) -> Void)?
@@ -31,14 +39,6 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
     var onTerminalFailure: (@Sendable (ProviderFailure) -> Void)?
     var onCaptureHeartbeat: (@Sendable (CaptureHeartbeat) -> Void)?
 
-    private let reconnectSchedule = RetrySchedule(
-        maximumRetries: 6, initialDelay: 1, maximumDelay: 30)
-    /// A socket that has never been ready has nothing to preserve, and every attempt costs the user
-    /// silence with no explanation. Three attempts is enough to ride out a transient refusal; past
-    /// that the cause is the key, the region, or the network, and the session should say so.
-    private let initialConnectSchedule = RetrySchedule(
-        maximumRetries: 2, initialDelay: 1, maximumDelay: 30)
-    private var apiKey: String
     private let model: OpenAITranscriptionModel
     private let expectedLanguages: [TranscriptionLanguage]
     private let vocabularyKeywords: [String]
@@ -49,19 +49,12 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
     private let sessionStart: TimeInterval
     private let silenceDurationMs: Int
     private let noiseReduction: NoiseReductionMode
-    private let readyTimeout: TimeInterval
-    private let pingInterval: TimeInterval
-    private let pongTimeout: TimeInterval
-    private let networkStatus: @Sendable () -> String
     /// `nil` for every normal coaching session. Optional chaining then skips event construction.
     private let benchmark: TranscriptionBenchmarkInstrumentation?
+    /// The socket. Built in `init` because it takes this transcriber as its adapter.
+    private var connection: WebSocketConnection!
 
     private let lock = NSLock()
-    private var session: URLSession?     // retained so stop() can invalidate it (URLSession holds its delegate)
-    private var task: URLSessionWebSocketTask?
-    private var pingTimer: Timer?
-    private var readyTimer: Timer?
-    private var pongTimer: Timer?
     private var coachingCoordinator: TranscriptionCoachingCoordinator!
     private var transcriptionLifecycle: RealtimeTranscriptionLifecycle!
     private let continuityReporter: RealtimeContinuityReporter
@@ -72,11 +65,12 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
     /// Jarvis-managed models keep only a short local pre-roll while idle. Active speech and endpoint
     /// trailing silence then enter `audioBuffer`; server-VAD models bypass this gate.
     private var jarvisManagedSpeechBuffer: SpeechGatedAudioBuffer?
-    private var reconnectAttempt = 0
-    private var isReconnecting = false
     private var stopped = false
-    private var connected = false        // true only between "session ready" and the next drop/close
-    private var everConnected = false    // distinguishes the first connect from a reconnect
+    /// This stream's own view of readiness, flipped only inside the connection's lifecycle
+    /// callbacks. Producers read this, never the connection, so their decisions stay atomic with the
+    /// replay bookkeeping below; see the type's header comment.
+    private var streamReady = false
+    private var everStreamReady = false  // distinguishes the first connect from a reconnect
     /// Closes the short handoff between snapshotting old item state and accepting new outage audio.
     /// Producers set the companion bit instead of calling into the lifecycle until initialization
     /// completes, avoiding both a missed barrier and an inverse lock order.
@@ -86,13 +80,9 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
     /// accepts outage audio, readiness wins before its lifecycle callback, and the gate otherwise
     /// sees no untracked replay work.
     private var hasUntrackedBufferedReplayAudio = false
-    private var rotating = false         // an EXPECTED server rotation is mid-flight; quiet the noise it makes
-    private var terminalFailureReported = false
-    /// The most recent classified reason a socket went down, so the row shown when the retry budget
-    /// runs out names the cause rather than "the connection was lost".
-    private var lastConnectionFailure: ProviderFailure?
-    private var generation = 0           // rejects late callbacks from a replaced socket
-    private var pendingPingGeneration: Int?
+    /// The session id from the acknowledgement frame, handed to `connectionDidBecomeReady` so the
+    /// ready line can name it. The connection has no way to know it.
+    private var pendingSessionID: String?
     /// Realtime's `audio_start_ms` is relative to audio written on one socket. These origins map it
     /// back onto Jarvis's overall session clock, including audio buffered during reconnect backoff.
     private var pendingAudioTimelineOrigin: TimeInterval = 0
@@ -124,7 +114,6 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         activity: (any ActivityEventRecording)? = nil,
         benchmark: TranscriptionBenchmarkInstrumentation? = nil
     ) {
-        self.apiKey = apiKey
         self.model = model
         self.expectedLanguages = TranscriptionLanguage.canonicalizing(expectedLanguages)
         self.vocabularyKeywords = vocabularyKeywords
@@ -133,10 +122,6 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         self.sessionStart = sessionStart
         self.silenceDurationMs = silenceDurationMs
         self.noiseReduction = noiseReduction
-        self.readyTimeout = readyTimeout
-        self.pingInterval = pingInterval
-        self.pongTimeout = pongTimeout
-        self.networkStatus = networkStatus
         self.benchmark = benchmark
         self.audioBuffer = PCMBuffer(maxBytes: TranscriptionAudioFormat.pcm16Mono24k.byteCount(
             forDuration: maxBufferedAudioSeconds))
@@ -152,7 +137,29 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
             // Client-commit models run with `turn_detection: null`, so the server never reports
             // speech boundaries and the local-vs-server comparison would flag every real utterance.
             expectsServerSpeechEvents: model.turnDetectionStrategy != .clientCommit)
-        super.init()
+        self.connection = WebSocketConnection(
+            adapter: self,
+            logPrefix: "Jarvis realtime [\(speaker.rawValue)]",
+            source: .transcription(.openAI),
+            openDetail: "model=\(model.rawValue) expected-languages="
+                + (self.expectedLanguages.isEmpty
+                    ? "automatic"
+                    : self.expectedLanguages.map(\.rawValue).joined(separator: ",")),
+            apiKey: apiKey,
+            policy: SocketLifecyclePolicy(
+                source: .transcription(.openAI),
+                // A socket that has never been ready has nothing to preserve, and every attempt
+                // costs the user silence with no explanation. Three attempts is enough to ride out
+                // a transient refusal; past that the cause is the key, the region, or the network,
+                // and the session should say so.
+                firstConnect: RetrySchedule(maximumRetries: 2, initialDelay: 1, maximumDelay: 30),
+                reconnect: RetrySchedule(maximumRetries: 6, initialDelay: 1, maximumDelay: 30)),
+            readyTimeout: readyTimeout,
+            pingInterval: pingInterval,
+            pongTimeout: pongTimeout,
+            networkStatus: networkStatus,
+            transportControl: benchmark?.transportControl,
+            onStateChange: { [weak self] state in self?.onConnectionStateChange?(state) })
         continuityReporter.onCaptureHeartbeat = { [weak self] signal in
             self?.onCaptureHeartbeat?(signal)
         }
@@ -183,7 +190,7 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
                     provider: TranscriptionProvider.openAI.rawValue,
                     model: self.model.rawValue,
                     speaker: self.speaker.rawValue,
-                    generation: self.currentGeneration,
+                    generation: self.connection.currentGeneration,
                     itemID: item.itemID,
                     text: item.text,
                     spokenAt: item.spokenAt.map { self.sessionStart + $0 },
@@ -198,10 +205,14 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
             coachingCoordinator: coachingCoordinator,
             terminalTimeout: transcriptionTerminalTimeout,
             activeTimeout: transcriptionActiveTimeout,
+            // These ask the connection rather than the mirror above: the lifecycle holds its own
+            // lock while it calls them, and the connection's lock is the leaf both may take.
             isCurrentGeneration: { [weak self] generation in
-                self?.isLive(socketGeneration: generation) == true
+                self?.connection.isLive(generation: generation) == true
             },
-            isReady: { [weak self] generation in self?.isReady(socketGeneration: generation) == true },
+            isReady: { [weak self] generation in
+                self?.connection.isReady(generation: generation) == true
+            },
             discardConfirmedAudio: { [weak self] boundary in
                 _ = self?.audioBuffer.discardSent(through: boundary)
             },
@@ -209,114 +220,78 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
     }
 
     func connect() {
-        benchmark?.transportControl?.installInterruption { [weak self] in
-            self?.interruptTransportForBenchmark() ?? false
-        }
-        // Start clean: clear the stopped flag AND any stale backoff state from a prior session.
+        // Start clean: clear the stopped flag AND any stale recovery state from a prior session.
         lock.lock()
-        stopped = false; reconnectAttempt = 0; isReconnecting = false; rotating = false
-        terminalFailureReported = false
+        stopped = false
+        streamReady = false
         // Readiness selects the retry budget and how an exhausted budget is categorized, so a fresh
         // session must start as never-ready even if this instance ran one before.
-        everConnected = false; lastConnectionFailure = nil
+        everStreamReady = false
         reconnectRecoveryIsInitializing = false
         bufferedAudioDuringRecoveryInitialization = false
         hasUntrackedBufferedReplayAudio = false
+        pendingSessionID = nil
         pendingAudioTimelineOrigin = 0; activeAudioTimelineOrigin = 0
         jarvisManagedTurnCoordinator?.clear()
         jarvisManagedSpeechBuffer?.clear()
         lock.unlock()
         transcriptionLifecycle.start()
-        emitState(.connecting)
-        openSocket()
+        connection.connect()
         continuityReporter.start()
     }
 
     /// Keep a healthy socket in place; the replacement credential is picked up if this side later
     /// reconnects. This avoids destroying live transcript state merely because Settings saved a key.
-    func updateAPIKey(_ apiKey: String) {
-        lock.lock()
-        self.apiKey = apiKey
-        lock.unlock()
-    }
-
-    private func openSocket() {
-        var req = URLRequest(url: RealtimeSession.connectURL())
-        lock.lock()
-        let apiKey = self.apiKey
-        lock.unlock()
-        req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        let session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
-        let task = session.webSocketTask(with: req)
-        lock.lock()
-        let previousSession = self.session
-        generation += 1
-        let socketGeneration = generation
-        self.session = session
-        self.task = task; isReconnecting = false; connected = false; pendingPingGeneration = nil
-        lock.unlock()
-        previousSession?.invalidateAndCancel()   // release the previous session's delegate retain
-        invalidateConnectionTimers()
-        jlog(
-            "Jarvis realtime [\(speaker.rawValue)]: opening socket #\(socketGeneration) "
-                + "model=\(model.rawValue) expected-languages="
-                + (expectedLanguages.isEmpty
-                    ? "automatic"
-                    : expectedLanguages.map(\.rawValue).joined(separator: ",")))
-        task.resume()
-        configureSession()
-        receiveLoop(task: task, generation: socketGeneration)
-        armReadyTimeout(task: task, generation: socketGeneration)
+    func updateAPIKey(_ apiKey: String, for credential: Credential) {
+        guard credential == .openAIAPIKey else { return }
+        connection.updateAPIKey(apiKey)
     }
 
     func stop() {
+        // The connection first: its `stopped` is what makes every timer and socket callback already
+        // in flight a no-op, including one racing this Stop from off the main queue.
+        connection.stop()
         lock.lock()
-        stopped = true; connected = false
-        let t = task; task = nil
-        let s = session; session = nil
-        pendingPingGeneration = nil
+        stopped = true
+        streamReady = false
         reconnectRecoveryIsInitializing = false
         bufferedAudioDuringRecoveryInitialization = false
         hasUntrackedBufferedReplayAudio = false
-        generation += 1                 // invalidate every callback retained by the old task
+        pendingSessionID = nil
         audioBuffer.clear()             // atomic with `stopped`: no producer can append after this
         jarvisManagedTurnCoordinator?.clear()
         jarvisManagedSpeechBuffer?.clear()
         lock.unlock()
-        benchmark?.transportControl?.uninstallInterruption()
-        // Timers must be read, invalidated, AND nilled on the thread that scheduled them (main) —
-        // one queue owning the field end to end, not just the invalidate call. `pingTimer`/
-        // `readyTimer`/`pongTimer` are assigned from main-queue blocks without `lock` (mirrors
-        // GeminiLiveTranscriber — see its header comment), so reading them under `lock` here and only
-        // hopping to main for the `invalidate()` call would race an off-main Stop (e.g. the
-        // onTerminalFailure Task) against a main-queue writer assigning a replacement timer. `stopped`
-        // is already set above, and every timer body guards on `!stopped`, so a timer firing in the
-        // gap before this hop runs does nothing.
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.pingTimer?.invalidate(); self.pingTimer = nil
-            self.readyTimer?.invalidate(); self.readyTimer = nil
-            self.pongTimer?.invalidate(); self.pongTimer = nil
-        }
         continuityReporter.stop()
         transcriptionLifecycle.stop()
-        // A user-initiated Stop is a normal closure (1000), not "going away" (1001).
-        t?.cancel(with: .normalClosure, reason: nil)
-        s?.invalidateAndCancel()             // breaks the URLSession→delegate(self)→closures→driver retain chain
-        emitState(.stopped)
     }
 
-    private func configureSession() {
+    func makeRequest(apiKey: String) -> URLRequest {
+        var request = URLRequest(url: RealtimeSession.connectURL())
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        return request
+    }
+
+    func configureSession(on lease: WebSocketConnection.Lease) {
         // Resolve .auto against the live default-input device each session, so a reconnect after a
         // device swap (e.g. plugging in AirPods) picks the right profile.
         let profile = NoiseReduction.profile(mode: noiseReduction, micProximity: InputDeviceProximity.current())
-        send(json: RealtimeSession.sessionUpdate(
+        let update = RealtimeSession.sessionUpdate(
             model: model,
             speaker: speaker,
             expectedLanguages: expectedLanguages,
             keywords: vocabularyKeywords,
             silenceDurationMs: silenceDurationMs,
-            noiseReduction: profile))
+            noiseReduction: profile)
+        guard let data = try? JSONSerialization.data(withJSONObject: update),
+              let text = String(data: data, encoding: .utf8) else {
+            connection.fail(lease, cause: ProviderFailure(
+                source: source, stage: .transport, category: .unknown,
+                disposition: .temporary, identity: .init(),
+                message: "could not encode the transcription session configuration"))
+            return
+        }
+        connection.send(.string(text), on: lease) { _ in }
     }
 
     /// Records the first content-free checkpoint on the delivery queue using the timestamp assigned
@@ -343,8 +318,8 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
             duration: TranscriptionAudioFormat.pcm16Mono24k.duration(forByteCount: pcm.count))
         lock.lock()
         guard !stopped else { lock.unlock(); return }
-        let connectionUnavailable = !connected
-        let bufferingForReconnect = everConnected && !connected
+        let connectionUnavailable = !streamReady
+        let bufferingForReconnect = everStreamReady && !streamReady
         let readyChunks = jarvisManagedSpeechBuffer?.append(chunk) ?? [chunk]
         let evicted = appendToAudioBuffer(readyChunks)
         let publishReplayBarrier = bufferingForReconnect && !readyChunks.isEmpty
@@ -375,8 +350,8 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
             transcriptionLifecycle.recordLocalSpeechStarted()
             lock.lock()
             guard !stopped else { lock.unlock(); return }
-            let connectionUnavailable = !connected
-            let bufferingForReconnect = everConnected && !connected
+            let connectionUnavailable = !streamReady
+            let bufferingForReconnect = everStreamReady && !streamReady
             let readyChunks = jarvisManagedSpeechBuffer?.speechStarted() ?? []
             let evicted = appendToAudioBuffer(readyChunks)
             let publishReplayBarrier = bufferingForReconnect && !readyChunks.isEmpty
@@ -431,7 +406,7 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
             provider: TranscriptionProvider.openAI.rawValue,
             model: model.rawValue,
             speaker: speaker.rawValue,
-            generation: currentGeneration,
+            generation: connection.currentGeneration,
             observedAt: clock.now(),
             evictedChunks: evicted.count,
             oldestReplaySequence: evicted.compactMap(\.sequenceNumber).min()))
@@ -445,33 +420,36 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         var action: OutboundAction?
         var droppedTurns: [RealtimeJarvisManagedTurnCoordinator.Turn] = []
         lock.lock()
-        guard let task, connected, !stopped, !isReconnecting else {
+        // Both halves are required. `streamReady` says this stream's own replay bookkeeping has
+        // settled for the current socket; the lease says which socket to address. Asking only the
+        // connection could send audio into a socket that is ready but whose replacement handoff has
+        // not run yet.
+        guard !stopped, streamReady, let lease = connection.readyLease else {
             lock.unlock(); return
         }
-        let socketGeneration = generation
         if jarvisManagedTurnCoordinator != nil {
             if let retainedSequence = audioBuffer.oldestRetainedSequenceNumber {
                 droppedTurns = jarvisManagedTurnCoordinator?.discardPendingTurns(
                     before: retainedSequence) ?? []
             }
             if let turn = jarvisManagedTurnCoordinator?.takeReadyCommit() {
-                action = .commit(turn, task, socketGeneration)
+                action = .commit(turn, lease)
             } else if let nextSequence = audioBuffer.nextQueuedSequenceNumber,
                       jarvisManagedTurnCoordinator?.allowsSendingAudio(
                         sequenceNumber: nextSequence) == true,
                       let claim = audioBuffer.claimNext() {
-                action = .audio(claim, task, socketGeneration)
+                action = .audio(claim, lease)
             }
         } else if let claim = audioBuffer.claimNext() {
-            action = .audio(claim, task, socketGeneration)
+            action = .audio(claim, lease)
         }
         lock.unlock()
         reportDroppedJarvisManagedTurns(droppedTurns)
         switch action {
-        case .audio(let claim, let task, let generation):
-            sendAudioClaim(claim, task: task, socketGeneration: generation)
-        case .commit(let turn, let task, let generation):
-            sendJarvisManagedCommit(turn, task: task, socketGeneration: generation)
+        case .audio(let claim, let lease):
+            sendAudioClaim(claim, on: lease)
+        case .commit(let turn, let lease):
+            sendJarvisManagedCommit(turn, on: lease)
         case nil:
             break
         }
@@ -488,23 +466,8 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
              + "boundary/boundaries outside retained replay audio")
     }
 
-    @discardableResult
-    private func send(json: [String: Any]) -> Bool {
-        guard let data = try? JSONSerialization.data(withJSONObject: json),
-              let str = String(data: data, encoding: .utf8) else { return false }
-        lock.lock(); let t = task; let socketGeneration = generation; lock.unlock()
-        guard let t else { return false }
-        t.send(.string(str)) { [weak self, weak t] error in
-            guard let self, let t else { return }
-            guard let error else { return }
-            self.failConnection(task: t, generation: socketGeneration,
-                                cause: self.transportFailure(error))
-        }
-        return true
-    }
-
-    private func sendAudioClaim(_ claim: PCMBuffer.Claim, task: URLSessionWebSocketTask,
-                                socketGeneration: Int) {
+    private func sendAudioClaim(_ claim: PCMBuffer.Claim, on lease: WebSocketConnection.Lease) {
+        let socketGeneration = lease.generation
         guard let sequence = claim.chunk.sequenceNumber,
               let data = try? JSONSerialization.data(withJSONObject: RealtimeSession.appendAudio(
                 base64PCM: claim.chunk.data.base64EncodedString())),
@@ -514,23 +477,22 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         }
         continuityReporter.recordSendAttempt(
             sequence: sequence, socketGeneration: socketGeneration)
-        task.send(.string(text)) { [weak self, weak task] error in
-            guard let self, let task else { return }
-            if let error {
+        connection.send(.string(text), on: lease) { [weak self] delivered in
+            guard let self else { return }
+            guard delivered else {
+                // The connection retires the socket for us. Its state transition releases the
+                // current FIFO claim while no producer can select this failed socket; retrying
+                // before that transition would let a racing producer send the same head on the
+                // dead task.
                 self.continuityReporter.recordSendFailure(
                     sequence: sequence, socketGeneration: socketGeneration)
-                // Disconnect first. Its state transition releases the current FIFO claim while no
-                // producer can select this failed socket; retrying before that transition would let
-                // a racing producer send the same head on the dead task.
-                self.failConnection(task: task, generation: socketGeneration,
-                                    cause: self.transportFailure(error))
                 return
             }
             self.continuityReporter.recordSendSuccess(
                 sequence: sequence, socketGeneration: socketGeneration)
             self.lock.lock()
-            let isCurrentLease = self.task === task && self.generation == socketGeneration
-                && self.connected && !self.stopped && !self.isReconnecting
+            let isCurrentLease = !self.stopped && self.streamReady
+                && self.connection.isReady(lease)
             let completion = isCurrentLease ? self.audioBuffer.completeSend(claim) : nil
             if completion != nil {
                 self.jarvisManagedTurnCoordinator?.recordAudioSent(sequenceNumber: sequence)
@@ -545,30 +507,24 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
 
     private func sendJarvisManagedCommit(
         _ turn: RealtimeJarvisManagedTurnCoordinator.Turn,
-        task: URLSessionWebSocketTask,
-        socketGeneration: Int
+        on lease: WebSocketConnection.Lease
     ) {
+        let socketGeneration = lease.generation
         let eventID = "jarvis-commit-\(socketGeneration)-\(turn.id)"
         guard let data = try? JSONSerialization.data(
             withJSONObject: RealtimeSession.commitAudio(eventID: eventID)),
               let text = String(data: data, encoding: .utf8) else {
-            failConnection(task: task, generation: socketGeneration,
-                           cause: ProviderFailure(
-                            source: source, stage: .transport, category: .unknown,
-                            disposition: .temporary, identity: .init(),
-                            message: "could not encode Jarvis-managed turn commit"))
+            connection.fail(lease, cause: ProviderFailure(
+                source: source, stage: .transport, category: .unknown,
+                disposition: .temporary, identity: .init(),
+                message: "could not encode Jarvis-managed turn commit"))
             return
         }
-        task.send(.string(text)) { [weak self, weak task] error in
-            guard let self, let task else { return }
-            if let error {
-                self.failConnection(task: task, generation: socketGeneration,
-                                    cause: self.transportFailure(error))
-                return
-            }
+        connection.send(.string(text), on: lease) { [weak self] delivered in
+            guard let self, delivered else { return }
             self.lock.lock()
-            let isCurrentLease = self.task === task && self.generation == socketGeneration
-                && self.connected && !self.stopped && !self.isReconnecting
+            let isCurrentLease = !self.stopped && self.streamReady
+                && self.connection.isReady(lease)
             if isCurrentLease {
                 self.jarvisManagedTurnCoordinator?.recordCommitSendCompleted(turnID: turn.id)
             }
@@ -590,51 +546,33 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         }
     }
 
-    private func receiveLoop(task: URLSessionWebSocketTask, generation socketGeneration: Int) {
-        task.receive { [weak self, weak task] result in
-            guard let task else { return }
-            guard let self else { return }
-            guard self.isCurrent(task: task, generation: socketGeneration) else { return }
-            switch result {
-            case .failure(let err):
-                // A failed pending receive is the EXPECTED artifact of an intentional Stop
-                // (cancel → ENOTCONN/POSIX 57). Suppress it then; only a live failure reconnects.
-                self.lock.lock()
-                let isStopped = self.stopped
-                let quiet = self.rotating
-                let everReady = self.everConnected
-                self.lock.unlock()
-                if isStopped { return }
-                // A refused upgrade (non-101) surfaces here as a transport error; the HTTP status is
-                // on the task. OpenAI rejects a bad key in-band after a successful upgrade, so a
-                // refused handshake is the edge itself refusing: region, VPN exit, wrong URL. A
-                // permanent one ends the session now instead of after the whole retry budget.
-                let cause: ProviderFailure
-                if let status = (task.response as? HTTPURLResponse)?.statusCode, status != 101 {
-                    cause = OpenAIFailureClassifier.classify(
-                        httpStatus: status, body: nil, source: self.source, stage: .handshake)
-                } else {
-                    cause = TransportFailureClassifier.classify(
-                        error: err, source: self.source, everReady: everReady)
-                }
-                if cause.disposition == .permanent {
-                    self.reportTerminalFailure(cause)
-                    return
-                }
-                // During an expected rotation the failing receive is just the old socket going away.
-                // The rotation line already covers it, so don't surface a transport error on top.
-                self.failConnection(task: task, generation: socketGeneration,
-                                    cause: quiet ? nil : cause)
-            case .success(let message):
-                if case .string(let text) = message {
-                    self.handle(text, task: task, generation: socketGeneration)
-                }
-                self.receiveLoop(task: task, generation: socketGeneration)
-            }
-        }
+    /// OpenAI sends every server event as a text frame, so a binary one is not ours to read.
+    func handle(_ message: URLSessionWebSocketTask.Message, on lease: WebSocketConnection.Lease) {
+        guard case .string(let text) = message else { return }
+        handleEvent(text, on: lease)
     }
 
-    private func handle(_ text: String, task: URLSessionWebSocketTask, generation socketGeneration: Int) {
+    func classifyHandshake(status: Int) -> ProviderFailure {
+        // OpenAI rejects a bad key in-band after a successful upgrade, so a refused handshake is the
+        // edge itself refusing: region, VPN exit, wrong URL.
+        OpenAIFailureClassifier.classify(
+            httpStatus: status, body: nil, source: source, stage: .handshake)
+    }
+
+    /// OpenAI closes a rejected session with 3000 and `<type>.<code>` after the in-band error event.
+    /// Classifying the close as well covers the case where the event was not recognized.
+    func classifyClose(code: Int, reason: String?) -> ProviderFailure {
+        OpenAIFailureClassifier.classify(closeCode: code, reason: reason, source: source)
+    }
+
+    /// A server "going away" (1001) is a routine rotation or restart we just reconnect through, even
+    /// when no `session_expired` error preceded it: the two can arrive in either order.
+    func isExpectedRotation(closeCode: Int) -> Bool {
+        closeCode == URLSessionWebSocketTask.CloseCode.goingAway.rawValue
+    }
+
+    private func handleEvent(_ text: String, on lease: WebSocketConnection.Lease) {
+        let socketGeneration = lease.generation
         // A buffered message can still arrive after an intentional Stop; don't mutate the transcript
         // or log on a torn-down pipeline (mirrors the failure/close-path gates).
         lock.lock(); let isStopped = stopped; lock.unlock()
@@ -644,8 +582,10 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
               let type = obj["type"] as? String else { return }
 
         if RealtimeSession.isConfiguredSessionEventType(type) {
-            let sessionID = (obj["session"] as? [String: Any])?["id"] as? String
-            markReady(task: task, generation: socketGeneration, sessionID: sessionID)
+            lock.lock()
+            pendingSessionID = (obj["session"] as? [String: Any])?["id"] as? String
+            lock.unlock()
+            connection.acknowledgeReady(lease)
             return
         }
 
@@ -787,7 +727,7 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
                                    socketGeneration: socketGeneration)
             transcriptionLifecycle.recordFailed(
                 itemID: itemID, error: error, socketGeneration: socketGeneration)
-            if let terminalFailure { reportTerminalFailure(terminalFailure) }
+            if let terminalFailure { connection.reportTerminalFailure(terminalFailure) }
         case RealtimeSession.speechStoppedType:
             guard let itemID = obj["item_id"] as? String else {
                 jlog("Jarvis realtime [\(speaker.rawValue)]: speech_stopped missing item_id")
@@ -833,18 +773,19 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
             // been acknowledged. Stay in `connecting` and keep buffering until the updated event.
             break
         case "error":
-            // A session_expired error is the server telling us this session hit its lifetime cap. That's
-            // an expected rotation, not a fault: announce it once, calmly, and mark `rotating` so the
-            // close / receive-failure it triggers next don't pile on scary lines. The reconnect itself is
-            // driven by those paths as usual. Any OTHER error is a real fault — log it verbatim.
+            // A session_expired error is the server telling us this session hit its lifetime cap.
+            // That is an expected rotation, not a fault: tell the connection to expect it, so the
+            // close and receive failure it triggers next do not pile on scary lines or spend retry
+            // budget, then replace the socket at once rather than waiting out a backoff delay for
+            // churn the server announced. Any OTHER error is a real fault, logged verbatim.
             if RealtimeSession.isSessionExpired(obj) {
-                noteRotation("reached its time limit")
-                failConnection(task: task, generation: socketGeneration, cause: nil)
+                connection.noteExpectedRotation(lease, reason: "reached its time limit")
+                connection.requestRotation(lease, reason: "reached its time limit")
             } else {
                 jlog("Jarvis realtime [\(speaker.rawValue)] error event: \(text)")
                 if let failure = OpenAIFailureClassifier.classify(event: obj, source: source),
                    failure.disposition == .permanent {
-                    reportTerminalFailure(failure)
+                    connection.reportTerminalFailure(failure)
                 }
             }
         default:
@@ -852,15 +793,21 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         }
     }
 
-    private func markReady(task: URLSessionWebSocketTask, generation socketGeneration: Int,
-                           sessionID: String?) {
+    // MARK: - Socket lifecycle
+
+    func connectionWillOpen(_ lease: WebSocketConnection.Lease) {
+        // Idempotent: the mirror is already false after a retirement and after `connect`. Setting it
+        // here keeps the rule that only these callbacks ever move it.
         lock.lock()
-        guard let currentTask = self.task, currentTask === task,
-              generation == socketGeneration, !connected, !stopped, !isReconnecting else {
-            lock.unlock(); return
-        }
-        let wasReconnect = everConnected
-        everConnected = true; rotating = false; reconnectAttempt = 0
+        if !stopped { streamReady = false }
+        lock.unlock()
+    }
+
+    func connectionDidBecomeReady(_ lease: WebSocketConnection.Lease, replacement: Bool) {
+        lock.lock()
+        guard !stopped else { lock.unlock(); return }
+        let sessionID = pendingSessionID
+        pendingSessionID = nil
         activeAudioTimelineOrigin = audioBuffer.oldestQueuedCaptureTime
             ?? pendingAudioTimelineOrigin
         let bufferedChunks = audioBuffer.queuedChunkCount
@@ -869,17 +816,21 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         // Keep old-socket deltas throughout reconnect attempts so terminal failure can still salvage
         // them. Once a replacement is ready, its replayed PCM becomes authoritative and old item IDs
         // must leave before the replacement emits its own lifecycle events.
-        connected = true
+        //
+        // Flipping the mirror in the same critical section as that snapshot is what makes a
+        // producer see either the whole outage picture or the whole live one.
+        streamReady = true
+        everStreamReady = true
         lock.unlock()
-        let recovery = wasReconnect
+        let recovery = replacement
             ? transcriptionLifecycle.markReplacementReady(
-                socketGeneration: socketGeneration,
+                socketGeneration: lease.generation,
                 hasUntrackedReplayAudio: hasUntrackedReplayAudio)
             : nil
-        invalidateReadyTimer(task: task, generation: socketGeneration)
         let id = sessionID.map { ", session \($0)" } ?? ""
-        jlog("Jarvis realtime [\(speaker.rawValue)]: transcription session ready (socket #\(socketGeneration)\(id))")
-        if wasReconnect && bufferedChunks > 0 {
+        jlog("Jarvis realtime [\(speaker.rawValue)]: transcription session ready "
+             + "(socket #\(lease.generation)\(id))")
+        if replacement && bufferedChunks > 0 {
             jlog("⏩ realtime [\(speaker.rawValue)] replaying \(bufferedChunks) buffered audio chunks after reconnect")
         }
         if let recovery, recovery.unresolvedItems > 0 {
@@ -896,163 +847,26 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
             provider: TranscriptionProvider.openAI.rawValue,
             model: model.rawValue,
             speaker: speaker.rawValue,
-            generation: socketGeneration,
+            generation: lease.generation,
             observedAt: clock.now(),
-            replayedChunks: wasReconnect ? bufferedChunks : nil))
+            replayedChunks: replacement ? bufferedChunks : nil))
         // Producers always append to the same claimed FIFO. Making readiness visible before this
         // pump is safe: a racing producer may claim the oldest chunk itself, but cannot bypass it or
         // strand the chunk it just appended.
         pumpAudioIfReady()
-        emitState(.ready)
-        startPing(task: task, generation: socketGeneration)
     }
 
-    private func isReady(socketGeneration: Int) -> Bool {
-        lock.lock(); defer { lock.unlock() }
-        return generation == socketGeneration && connected && !isReconnecting && !stopped
-    }
-
-    private func isLive(socketGeneration: Int) -> Bool {
-        lock.lock(); defer { lock.unlock() }
-        return generation == socketGeneration && task != nil && !isReconnecting && !stopped
-    }
-
-    private static func transcriptionErrorDescription(from event: [String: Any]) -> String {
-        guard let error = event["error"] as? [String: Any] else { return "unknown error" }
-        let code = error["code"] as? String
-        let message = error["message"] as? String
-        let description = [code, message].compactMap { $0 }.joined(separator: ": ")
-        return description.isEmpty ? "unknown error" : description
-    }
-
-    /// This transcriber's identity in every failure it classifies.
-    private var source: ProviderFailure.Source { .transcription(.openAI) }
-
-    /// Classify a transport error against this socket's readiness, which decides whether it reads as
-    /// a connection that never came up or one lost after it was working.
-    private func transportFailure(_ error: any Error) -> ProviderFailure {
-        lock.lock(); let everReady = everConnected; lock.unlock()
-        return TransportFailureClassifier.classify(error: error, source: source, everReady: everReady)
-    }
-
-    /// End a green-but-unusable transcription session immediately for permanent provider failures.
-    private func reportTerminalFailure(_ failure: ProviderFailure) {
-        lock.lock()
-        guard !stopped, !terminalFailureReported else { lock.unlock(); return }
-        terminalFailureReported = true
-        connected = false
-        lock.unlock()
-        invalidateConnectionTimers()
-        emitState(.failed)
-        jlog("Jarvis realtime [\(speaker.rawValue)]: unrecoverable transcription failure "
-             + "(\(failure.errorDescription ?? "")) — stopping")
-        onTerminalFailure?(failure)
-    }
-
-    // MARK: - Reconnect / keepalive
-
-    /// Supplies the optional benchmark controller with the narrow fault operation. The controller,
-    /// rather than normal capture state, owns whether a replacement connection is held.
-    private func interruptTransportForBenchmark() -> Bool {
-        lock.lock()
-        guard let currentTask = task, connected, !stopped, !isReconnecting else {
-            lock.unlock()
-            return false
-        }
-        let socketGeneration = generation
-        lock.unlock()
-
-        failConnection(
-            task: currentTask,
-            generation: socketGeneration,
-            cause: ProviderFailure(
-                source: source, stage: .transport, category: .disconnected,
-                disposition: .temporary, identity: .init(),
-                message: "benchmark interrupted this transcription transport"))
-        return true
-    }
-
-    func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask,
-                    didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
-        lock.lock()
-        guard let currentTask = task, currentTask === webSocketTask else { lock.unlock(); return }
-        let socketGeneration = generation
-        let isStopped = stopped
-        let quiet = rotating
-        lock.unlock()
-        if isStopped { return } // An intentional Stop closes the socket on purpose.
-        // A server "going away" (1001) is a routine rotation/restart we just reconnect through. Treat it
-        // as expected even if no session_expired error preceded it (the two can arrive in either order);
-        // any other close code is unexpected and stays visible.
-        if closeCode == .goingAway { noteRotation("server going away") }
-        // OpenAI closes a rejected session with 3000 and "<type>.<code>" after the in-band error
-        // event. Classifying the close as well covers the case where the event was not recognized.
-        let reasonText = reason.flatMap { String(data: $0, encoding: .utf8) }
-        let cause = OpenAIFailureClassifier.classify(
-            closeCode: closeCode.rawValue, reason: reasonText, source: source)
-        if cause.disposition == .permanent {
-            reportTerminalFailure(cause)
-            return
-        }
-        failConnection(task: webSocketTask, generation: socketGeneration, cause: quiet ? nil : cause)
-    }
-
-    /// Announce an expected server-initiated rotation exactly once, then mark `rotating` so the close /
-    /// receive-failure it produces stay quiet until the replacement session is ready (which clears it).
-    private func noteRotation(_ reason: String) {
-        lock.lock(); let already = rotating; rotating = true; lock.unlock()
-        if !already {
-            jlog("Jarvis realtime [\(speaker.rawValue)]: session rotating (\(reason)) — reconnecting")
-        }
-    }
-
-    /// Move the current socket into reconnect exactly once. Every failure source (receive, close,
-    /// send, readiness deadline, and pong deadline) funnels through here; `generation` prevents a late
-    /// callback from an old socket from disrupting its healthy replacement.
-    private func failConnection(task failedTask: URLSessionWebSocketTask, generation failedGeneration: Int,
-                                cause: ProviderFailure?) {
+    /// The socket carrying this stream is gone and another will follow, either after a backoff delay
+    /// or at once for an expected rotation. Requeue everything the server never acknowledged, then
+    /// hand the interrupted items to the recovery gate so the replacement can replay into them.
+    func connectionWillRetry(_ lease: WebSocketConnection.Lease, attempt: Int) {
         let failureAt = clock.now() - sessionStart
         lock.lock()
-        guard let currentTask = task else { lock.unlock(); return }
-        if stopped || terminalFailureReported || isReconnecting
-            || generation != failedGeneration || currentTask !== failedTask {
-            lock.unlock(); return
-        }
-        if let cause { lastConnectionFailure = cause }
-        connected = false
-        pendingPingGeneration = nil
-        let failedSession = session
-        // Remove the failed task immediately. A receive callback can pass `isCurrent` just before
-        // this failure wins the lock; `markReady` checks the installed task again, so clearing it
-        // prevents a late session acknowledgement from resetting backoff or draining buffered audio
-        // into the canceled socket during the reconnect delay.
-        task = nil
-        session = nil
-        // A socket that never reached ready spends the short budget: nothing is preserved by waiting,
-        // and the user is sitting in silence while it retries.
-        let schedule = everConnected ? reconnectSchedule : initialConnectSchedule
-        guard let retryDelay = schedule.delay(forRetry: reconnectAttempt) else {
-            let last = lastConnectionFailure
-            let wasEverConnected = everConnected
-            isReconnecting = true
-            terminalFailureReported = true
-            lock.unlock()
-            audioBuffer.retryInFlight()
-            transcriptionLifecycle.finalizeInterrupted(reason: "socket failure")
-            if let cause { logTransportFailure(cause, generation: failedGeneration) }
-            invalidateConnectionTimers()
-            failedTask.cancel(with: .goingAway, reason: nil)
-            failedSession?.invalidateAndCancel()
-            emitState(.failed)
-            jlog("Jarvis realtime [\(speaker.rawValue)]: giving up after "
-                 + "\(schedule.maximumRetries) reconnect attempts — stopping")
-            onTerminalFailure?(.exhausted(
-                last: last, source: source, everReady: wasEverConnected))
-            return
-        }
-        isReconnecting = true
-        let attempt = reconnectAttempt
-        reconnectAttempt = attempt + 1
+        guard !stopped else { lock.unlock(); return }
+        // The mirror, the requeue, and the initializing flag move together. A producer must never
+        // see this stream as neither ready nor initializing: it would publish a replay barrier into
+        // the lifecycle before `beginReconnectRecovery` below had snapshotted the old item state.
+        streamReady = false
         // Local WebSocket send completions are not server acknowledgements. Requeue the entire
         // unconfirmed tail now, while producers are excluded by this lock, so audio sent during a
         // half-open interval precedes audio captured during reconnect backoff.
@@ -1070,9 +884,9 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
             provider: TranscriptionProvider.openAI.rawValue,
             model: model.rawValue,
             speaker: speaker.rawValue,
-            generation: failedGeneration,
+            generation: lease.generation,
             observedAt: clock.now(),
-            reconnectAttempt: attempt + 1,
+            reconnectAttempt: attempt,
             replayedChunks: replay.replayedChunks,
             evictedChunks: replay.evicted.count,
             oldestReplaySequence: replay.oldestSequenceNumber))
@@ -1092,7 +906,7 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         // Old-socket deltas are now held by the reconnect recovery gate. They remain a fallback if
         // every handshake fails or bounded replay loses coverage, without keeping stale item IDs in
         // the replacement ledger or releasing a partial coaching turn early.
-        if interruptedItems > 0 && attempt == 0 {
+        if interruptedItems > 0 && attempt == 1 {
             jlog("Jarvis realtime [\(speaker.rawValue)] retaining \(interruptedItems) interrupted "
                  + "transcription item(s) until replacement replay is ready")
         }
@@ -1100,180 +914,38 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
             jlog("Jarvis realtime [\(speaker.rawValue)] retained \(replay.replayedChunks) "
                  + "locally-sent audio chunks for end-to-end reconnect replay")
         }
-        if let cause { logTransportFailure(cause, generation: failedGeneration) }
-        invalidateConnectionTimers()
-        failedTask.cancel(with: .goingAway, reason: nil)
-        failedSession?.invalidateAndCancel()
-        emitState(.reconnecting(attempt: attempt + 1))
-
-        if let transportControl = benchmark?.transportControl {
-            DispatchQueue.main.asyncAfter(deadline: .now() + retryDelay) {
-                transportControl.runReconnectWhenReleased { [weak self] in
-                    guard let self else { return }
-                    self.lock.lock()
-                    let shouldReconnect = !self.stopped
-                        && self.generation == failedGeneration
-                        && self.task == nil
-                        && self.isReconnecting
-                    self.lock.unlock()
-                    guard shouldReconnect else { return }
-                    jlog("Jarvis realtime [\(self.speaker.rawValue)]: reconnecting "
-                         + "(attempt \(attempt + 1))")
-                    self.openSocket()
-                }
-            }
-        } else {
-            // Keep the normal reconnect path identical when no explicit benchmark is active.
-            DispatchQueue.main.asyncAfter(deadline: .now() + retryDelay) { [weak self] in
-                guard let self else { return }
-                self.lock.lock()
-                let shouldReconnect = !self.stopped && self.generation == failedGeneration
-                self.lock.unlock()
-                guard shouldReconnect else { return }
-                jlog("Jarvis realtime [\(self.speaker.rawValue)]: reconnecting "
-                     + "(attempt \(attempt + 1))")
-                self.openSocket()
-            }
-        }
     }
 
-    // DIVERGENCE HAZARD: The ready-timeout, ping-pong, timer invalidation, and generation-guard logic
-    // below is mirrored in GeminiLiveTranscriber.swift. A fix made here almost certainly belongs there too.
-    // Extracting a shared lifecycle helper is a separate, focused change; do not refactor here.
-    private func armReadyTimeout(task: URLSessionWebSocketTask, generation socketGeneration: Int) {
-        DispatchQueue.main.async { [weak self, weak task] in
-            guard let self, let task else { return }
-            self.lock.lock()
-            let isPending = self.task === task && self.generation == socketGeneration
-                && !self.connected && !self.isReconnecting && !self.stopped
-            self.lock.unlock()
-            guard isPending else { return }
-            self.readyTimer?.invalidate()
-            self.readyTimer = Timer.scheduledTimer(withTimeInterval: self.readyTimeout, repeats: false) {
-                [weak self, weak task] _ in
-                guard let self, let task else { return }
-                self.lock.lock()
-                let isStillPending = self.task === task && self.generation == socketGeneration
-                    && !self.connected && !self.isReconnecting && !self.stopped
-                self.lock.unlock()
-                guard isStillPending else { return }
-                self.lock.lock(); let everReady = self.everConnected; self.lock.unlock()
-                self.failConnection(task: task, generation: socketGeneration,
-                                    cause: TransportFailureClassifier.readinessTimeout(
-                                        seconds: self.readyTimeout, source: self.source,
-                                        everReady: everReady))
-            }
-        }
-    }
-
-    private func startPing(task: URLSessionWebSocketTask, generation socketGeneration: Int) {
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.lock.lock()
-            let isReady = self.task === task && self.generation == socketGeneration
-                && self.connected && !self.isReconnecting && !self.stopped
-            self.lock.unlock()
-            guard isReady else { return }
-            self.pingTimer?.invalidate()
-            self.pingTimer = Timer.scheduledTimer(withTimeInterval: self.pingInterval, repeats: true) {
-                [weak self, weak task] _ in
-                guard let self, let task else { return }
-                self.sendHealthPing(task: task, generation: socketGeneration)
-            }
-        }
-    }
-
-    private func sendHealthPing(task: URLSessionWebSocketTask, generation socketGeneration: Int) {
+    /// Nothing follows this socket. Salvage what the stream still holds so an utterance interrupted
+    /// mid-flight is not simply lost, then report the failure.
+    ///
+    /// Both terminal paths arrive here, an exhausted retry budget and a permanent provider
+    /// rejection. The permanent one used to skip the salvage. Keeping an interrupted item is
+    /// strictly better for the transcript than dropping it, and the cost is at most one salvaged
+    /// fragment on a session whose key was just revoked.
+    /// Guarded on `stopped`: a terminal failure already in flight when the user pressed Stop must
+    /// not report one, or Activity shows a session ended by error for a session the user ended.
+    func connectionDidTerminate(_ failure: ProviderFailure) {
         lock.lock()
-        guard let currentTask = self.task, currentTask === task,
-              generation == socketGeneration, connected,
-              pendingPingGeneration == nil else { lock.unlock(); return }
-        pendingPingGeneration = socketGeneration
+        guard !stopped else { lock.unlock(); return }
+        streamReady = false
         lock.unlock()
-
-        DispatchQueue.main.async { [weak self, weak task] in
-            guard let self, let task else { return }
-            self.pongTimer?.invalidate()
-            self.pongTimer = Timer.scheduledTimer(withTimeInterval: self.pongTimeout, repeats: false) {
-                [weak self, weak task] _ in
-                guard let self, let task else { return }
-                self.lock.lock()
-                let isStillPending = self.task === task && self.generation == socketGeneration
-                    && self.pendingPingGeneration == socketGeneration && self.connected
-                    && !self.isReconnecting && !self.stopped
-                self.lock.unlock()
-                guard isStillPending else { return }
-                self.failConnection(task: task, generation: socketGeneration,
-                                    cause: TransportFailureClassifier.livenessTimeout(
-                                        seconds: self.pongTimeout, source: self.source))
-            }
-        }
-
-        task.sendPing { [weak self, weak task] error in
-            guard let self, let task else { return }
-            if let error {
-                self.failConnection(task: task, generation: socketGeneration,
-                                    cause: self.transportFailure(error))
-                return
-            }
-            self.lock.lock()
-            guard let currentTask = self.task, currentTask === task,
-                  self.generation == socketGeneration else {
-                self.lock.unlock(); return
-            }
-            self.pendingPingGeneration = nil
-            self.lock.unlock()
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                self.lock.lock()
-                let isSameSocket = self.task === task && self.generation == socketGeneration
-                self.lock.unlock()
-                guard isSameSocket else { return }
-                self.pongTimer?.invalidate()
-                self.pongTimer = nil
-            }
-        }
+        audioBuffer.retryInFlight()
+        transcriptionLifecycle.finalizeInterrupted(reason: "socket failure")
+        onTerminalFailure?(failure)
     }
 
-    private func isCurrent(task candidate: URLSessionWebSocketTask, generation candidateGeneration: Int) -> Bool {
-        lock.lock(); defer { lock.unlock() }
-        guard let currentTask = task else { return false }
-        return !stopped && !isReconnecting
-            && currentTask === candidate && generation == candidateGeneration
+    /// OpenAI needs no farewell frame: a normal close is enough for it to finalize.
+    func connectionWillClose(_ task: URLSessionWebSocketTask) {}
+
+    private static func transcriptionErrorDescription(from event: [String: Any]) -> String {
+        guard let error = event["error"] as? [String: Any] else { return "unknown error" }
+        let code = error["code"] as? String
+        let message = error["message"] as? String
+        let description = [code, message].compactMap { $0 }.joined(separator: ": ")
+        return description.isEmpty ? "unknown error" : description
     }
 
-    private var currentGeneration: Int {
-        lock.lock(); defer { lock.unlock() }
-        return generation
-    }
-
-    private func invalidateReadyTimer(task: URLSessionWebSocketTask, generation socketGeneration: Int) {
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.lock.lock()
-            let isSameSocket = self.task === task && self.generation == socketGeneration
-            self.lock.unlock()
-            guard isSameSocket else { return }
-            self.readyTimer?.invalidate()
-            self.readyTimer = nil
-        }
-    }
-
-    private func invalidateConnectionTimers() {
-        DispatchQueue.main.async { [weak self] in
-            self?.readyTimer?.invalidate(); self?.readyTimer = nil
-            self?.pingTimer?.invalidate(); self?.pingTimer = nil
-            self?.pongTimer?.invalidate(); self?.pongTimer = nil
-        }
-    }
-
-    private func logTransportFailure(_ cause: ProviderFailure, generation socketGeneration: Int) {
-        jlog("Jarvis realtime [\(speaker.rawValue)] socket #\(socketGeneration) "
-             + "\(cause.stage.rawValue) failed: \(cause.errorDescription ?? "") "
-             + "(network: \(networkStatus()))")
-    }
-
-    private func emitState(_ state: TranscriptionConnectionState) {
-        onConnectionStateChange?(state)
-    }
+    /// This transcriber's identity in every failure it classifies.
+    private var source: ProviderFailure.Source { .transcription(.openAI) }
 }
