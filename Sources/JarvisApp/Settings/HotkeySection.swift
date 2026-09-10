@@ -28,6 +28,8 @@ final class HotkeySection: NSObject, SettingsSection {
         }
     }
 
+    /// Builds the scrollable shortcut page with cards constrained to the viewport width.
+    /// Resizing the viewport or a binding card preserves the reading offset from the top.
     func makeView() -> NSView {
         let scroll = SettingsScrollView(frame: NSRect(x: 0, y: 0, width: 712, height: 432))
         scroll.autoresizingMask = [.width, .height]
