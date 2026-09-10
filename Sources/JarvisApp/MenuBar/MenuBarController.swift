@@ -22,10 +22,6 @@ final class MenuBarController: NSObject {
     var onStop: (() -> Void)?
     /// Fired when the user picks "Settings". Opens the unified Settings window.
     var onOpenSettings: (() -> Void)?
-    /// Fired when the user picks "Clear Overlay". Wipes the Overlay Box's logged history — the
-    /// persistent panel only clears itself on the next Start, so this is the only way to dismiss its
-    /// content without starting a new session.
-    var onClearOverlayBox: (() -> Void)?
     /// Fired when the user picks "Check for Updates". Answers whether Sparkle can start a check, so
     /// the item can render its own availability without this adapter importing Sparkle.
     /// Not private for the same reason as `updateItem`.
@@ -52,8 +48,6 @@ final class MenuBarController: NSObject {
             startStopItem,
             .standard("Settings", symbol: "gearshape",
                       action: #selector(openSettings), target: self, keyEquivalent: ","),
-            .standard("Clear Overlay", symbol: "eraser",
-                      action: #selector(clearOverlayBox), target: self),
         ]
         if let updateItem { menu.items.append(updateItem) }
         menu.items.append(contentsOf: [
@@ -125,8 +119,6 @@ final class MenuBarController: NSObject {
 
     @objc private func openSettings() { onOpenSettings?() }
 
-    @objc private func clearOverlayBox() { onClearOverlayBox?() }
-
     @objc private func checkForUpdates() { onCheckForUpdates?() }
 
     @objc private func toggleStartStop() {
@@ -167,8 +159,8 @@ private extension JarvisReadiness.Status {
     /// user Jarvis was off for the several seconds it takes to come up.
     var iconSignal: MenuBarIcon.Signal? {
         switch self {
-        case .checking, .recovering: .working
-        case .ready: .ready
+        case .checking, .recovering: .preflight
+        case .ready: .active
         case .blocked: .blocked
         case .stopped: nil
         }
@@ -187,9 +179,9 @@ private extension JarvisReadiness.Status {
                 "Jarvis is recovering — \(requirement.menuDescription)"
             }
         case .ready(.full):
-            "Jarvis is ready"
+            "Jarvis is active"
         case .ready(.microphoneOnly):
-            "Jarvis is ready — microphone only"
+            "Jarvis is active — microphone only"
         case .stopped:
             "Jarvis is stopped"
         }

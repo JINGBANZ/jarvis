@@ -9,16 +9,22 @@
 ## Current phase
 
 **General technical-interview coaching, audio reliability, and local CLI brain providers are
-implemented.** The coach covers behavioral, system-design, and coding questions. A direct request
+implemented.** Interview format defaults to **None**, preserving the base prompt. Coding,
+Behavioral, System Design, and General Technical are opt-in addenda; their policy and diagram
+boundaries are defined in [architecture.md → Models and APIs](./architecture.md#models-and-apis). A direct request
 whose specific answer depends on visible context missing from the conversation calls `capture_screen`
 before `speak`; a fresh screenshot/OCR satisfies that request, while a fully stated question can be
 answered without a reflexive capture. The independent Transcription setting keeps **OpenAI as the
 default**, keeps **GPT-4o Transcribe** as its default model, adds opt-in **GPT Transcribe** and
-**GPT Live Transcribe**, and adds opt-in, on-device **Apple Speech** on macOS 26 or later. OpenAI
+**GPT Live Transcribe**, adds opt-in, on-device **Apple Speech** on macOS 26 or later, and adds
+opt-in **Gemini** over the Gemini Live WebSocket — server-owned turn detection (no client commit, no
+ledger), its own model/expected-languages/vocabulary/mode Settings row set, and a 16 kHz wire format
+(a provider requirement, not a quality choice — see
+[architecture.md](./architecture.md#models-and-apis)). OpenAI
 language expectations default to Automatic rather than English; English and Mandarin are
 independent multi-select session-level hints rather than fixed combination profiles or per-turn
-language choices. One Start snapshots the provider, OpenAI model/expected-language list, or Apple
-locale for both `me` and `them`; there
+language choices. One Start snapshots the provider, OpenAI model/expected-language list, Gemini
+model/expected-language/vocabulary/mode, or Apple locale for both `me` and `them`; there
 is no automatic provider or model fallback. An initial same-input macOS 26 system-audio comparison
 keeps GPT-4o Transcribe as the default: among the tested GPT-4o, GPT Live, and Apple Speech arms, it
 alone preserved the English, Mandarin, and within-sentence language-switching inputs. This is
@@ -43,7 +49,8 @@ the selected supported locale before replacing a running pipeline, submits every
 `SpeechAnalyzer`, records only final results, and uses content-free local activity to request
 analyzer finalization; coaching stays gated until the analyzer completes and matching module-result
 progress is consumed, including setup and resumed-speech races. An OpenAI key is required only when OpenAI supplies
-transcription or appears in the brain route. The detailed model, language, turn-detection, context,
+transcription or appears in the brain route; a Gemini key is required only when Gemini supplies
+transcription — Gemini is not a brain provider. The detailed model, language, turn-detection, context,
 and completion contracts live in [architecture.md](./architecture.md#models-and-apis).
 The shared transcription path reconciles provider item lifecycles, preserves reconnectable audio
 boundaries, salvages partial text while keeping unavailable items diagnostic-only, preserves every
@@ -172,6 +179,21 @@ coaching kernel's dependency rules are enforced by `scripts/check-coaching-kerne
 
 ## Next action
 
+Run the signed-app Explain more smoke: with an interview session active, press both configured
+shortcuts from another app and verify distinct hint/explanation requests; rebind them independently
+and try a collision. Check automatic explanation after clear confusion, a simpler follow-up after
+another Explain more press, and silence during healthy progress. Confirm longer text stays in the
+capture-excluded box, caption summaries stay short, and Stop prevents late delivery. The offline
+Gate covers context delivery, caption/box separation, preferences, and manual retry/coalescing;
+real audio, capture, screen sharing, and shortcut use during a live interview still need this smoke.
+
+Run a live General Technical practice smoke with the OpenAI brain: request two hints on the same
+untouched coding prompt, then test demonstrated understanding, a local block, a visible bug,
+completion without tests, and valid progress. Move directly into a system-design question and back
+to coding without changing Settings. Confirm the overlay remains at most three short lines, the
+second hint advances rather than repeats, and healthy progress stays silent. This smoke verifies on-demand
+screen capture, live transcript, and overlay behavior together before release.
+
 Run the live permission-gate smoke, since the gate runs before anything the Gate can test. After resetting each service in turn (`tccutil reset Microphone com.jarvis.coach.dev`, then
 `ScreenCapture`, then `AudioCapture`) and clearing the one marker Jarvis persists (`defaults delete com.jarvis.coach.dev permissions.screenRecordingAsked`): the gate appears with no menu bar behind it; one walk collects all
 three dialogs in order; **Quit** exits; refusing system audio records a refusal rather than a grant
@@ -224,6 +246,14 @@ and confirm the current snapshot remains active until the next Start; force an A
 and confirm Jarvis never sends audio to OpenAI as an implicit fallback. Microphone benchmarking and
 Apple-specific finalization optimization are not required.
 
+The Gemini live smoke with a real Gemini key passed (session `2026-09-05_11-55-54_9295`): both
+sockets reached ready on the first attempt in ~310 ms, five utterances transcribed, and 134 interim
+frames were correctly discarded; `grep -rc "key=" .jarvis/*/jarvis-debug.log` returned 0 files across
+both a failing and a passing run, confirming the Gemini endpoint is logged without ever logging its
+`key=` query. Still outstanding from that checklist: confirm selecting Gemini and pressing Start with
+no Gemini key saved refuses the Start and names the missing credential, and confirm switching back to
+OpenAI and starting again leaves the primary path unregressed.
+
 Then run the live prompt smoke on a fresh session: show an interview question without speaking its
 details, ask “Jarvis, how can I solve this in one pass?”, and confirm the first action is
 exactly one `capture_screen` followed by a screen-specific reply. Then ask a fully stated behavioral
@@ -251,11 +281,40 @@ playback, remains in
 
 ## Built
 
+**Show code with hints** optionally supplies the next contextual coding component with each hint.
+Its capability is fixed at Start; the configurable fallback hotkey requests code for the current
+guidance only in enabled sessions. Settings changes take effect on the next Start.
+[`CodeSnippet`](../Sources/JarvisCore/Overlay/CodeSnippet.swift) validates bounded attachments;
+[`OverlayBoxPanel`](../Sources/JarvisOverlay/OverlayBoxPanel.swift) keeps them in a syntax-colored
+bottom dock while hints continue above. Disabling Overlay Box turns off the saved code setting,
+releases its shortcut, and clears/disables the live dock until code is enabled for a new Start.
+Runtime authorization suppresses code when the session capability is off;
+each new hint replaces or clears its matching snippet.
+See [architecture.md](./architecture.md#on-demand-coaching-shortcuts) for behavior and failure handling.
+Signed synthetic dock/shortcut checks and model scenarios cover the feature; real interview audio,
+capture, cross-app shortcuts, and screen-sharing exclusion still need live verification.
+
+Proactive clarification and a separate **Explain more** shortcut share the existing coach loop.
+[`JarvisPrompts.Coach`](../Sources/JarvisCore/Prompts/JarvisPrompts+Coach.swift) supplies the policy across
+formats; `speak.explanation` carries fuller plain-text detail into the persistent overlay box and
+Activity while captions stay short. Semibold hints and labeled, regular-weight explanation paragraphs
+remain visually distinct at the configured text size. Hint and explanation shortcuts are independently configurable in Settings; **Enable explanations** controls
+automatic detail and its shortcut for the next Start while retaining the saved binding.
+Disabling Overlay Box turns off the saved explanation setting and releases its shortcut.
+The persistent box gates detail delivery live; hidden detail is omitted from Activity and history;
+see [architecture.md → On-demand coaching shortcuts](./architecture.md#on-demand-coaching-shortcuts).
+
+System Design sessions support [private high-level architecture hints](./architecture.md#private-architecture-hints):
+[`DiagramHint`](../Sources/JarvisCore/Overlay/DiagramHint.swift) validates a small Mermaid subset, and
+[`DiagramHintImage`](../Sources/JarvisOverlay/DiagramHintImage.swift) renders boxes and arrows alongside
+the hint inside the capture-excluded overlay box. Graphs scale proportionally with the window;
+Settings → Overlay → Overlay Box offers **Show diagrams**, enabled by default. Diagrams are limited to System Design.
+
 Tested `JarvisCore` + `JarvisBrainProviders` + `JarvisEvaluation` + `JarvisOverlay` + `JarvisScreenCapture` harness is green
 (`./scripts/run-tests.sh`); `JarvisApp` is the thin OS shell, verified by the smoke run.
 
 - `Sources/JarvisCore/Audio/` — transactional PCM + utterance buffering, bounded speech pre-roll, adaptive content-free activity detection, stable frame-decision endpoints, non-destructive AEC reference alignment, and system-audio timeline preservation (`PCMBuffer`, `SpeechGatedAudioBuffer`, `UtteranceBuffer`, `PCM16Framer`, `SpeechEndpointDetector`, `AudioDownmix`, `AdaptiveAudioActivityDetector`, `PCM16SpeechActivityTracker`, `EchoReferenceAlignment`, `SystemAudioTimeline`).
-- `Sources/JarvisCore/Transcription/` — provider-neutral session/provider contracts and immutable Start configuration, selectable OpenAI model/expected-language values, the OpenAI Realtime wire contract, reconnect-safe Jarvis-managed turn coordinator and recovery state, per-item ledger, analyzer-finalization state, and the single spoken-time ordering policy used by the rolling transcript and Activity (`TranscriptionSession`, `TranscriptionProvider`, `TranscriptionConfiguration`, `OpenAITranscriptionModel`, `OpenAITranscriptionLanguage`, `RealtimeSession`, `RealtimeJarvisManagedTurnCoordinator`, `RealtimeReconnectTranscriptionRecovery`, `RealtimeTranscriptionLedger`, `TranscriptionFinalizationState`, `ConversationChronology`, `Transcript`, `NoiseReduction`).
+- `Sources/JarvisCore/Transcription/` — provider-neutral session/provider contracts and immutable Start configuration, selectable OpenAI model/expected-language values, the OpenAI Realtime wire contract, the Gemini Live wire contract with server-owned finalization, reconnect-safe Jarvis-managed turn coordinator and recovery state, per-item ledger, analyzer-finalization state, per-provider audio format, and the single spoken-time ordering policy used by the rolling transcript and Activity (`TranscriptionSession`, `TranscriptionProvider`, `TranscriptionConfiguration`, `TranscriptionAudioFormat`, `OpenAITranscriptionModel`, `TranscriptionLanguage`, `TranscriptFiltering`, `RealtimeSession`, `RealtimeJarvisManagedTurnCoordinator`, `RealtimeReconnectTranscriptionRecovery`, `RealtimeTranscriptionLedger`, `GeminiLiveSession`, `GeminiTranscriptionModel`, `GeminiTranscriptionMode`, `TranscriptionFinalizationState`, `ConversationChronology`, `Transcript`, `NoiseReduction`).
 - `Sources/JarvisCore/Benchmark/` + `Sources/JarvisApp/Benchmark/` — the Foundation-only fixed transcription matrix, optional absence-means-disabled instrumentation, scoring and deterministic summary contract, plus the hidden signed-app runner, process-scoped synthetic system-audio tap, and automated transcription-transport reconnect regression (`TranscriptionBenchmark`, `TranscriptionBenchmarkEvent`, `TranscriptionBenchmarkInstrumentation`, `TranscriptionBenchmarkRunner`, `SystemAudioBenchmarkCapture`; operating, isolation, and scoring contract in [transcription-benchmark.md](./transcription-benchmark.md)).
 - `Sources/JarvisCore/Brain/` — the provider-neutral brain domain, and nothing that runs one: the `BrainClient`/attempt-scoped `BrainConversation` contracts, provider-neutral failure classification (`BrainFailure`), immutable `BrainTarget`/`BrainRoute`, `BrainProvider`, `BrainModelCatalog` (first per-provider entry is the default), `ReasoningEffort`, and `BrainWorkloadTimeout`. The kernel dependency guard rejects `Process`, `FileManager`, `FileHandle`, and `URLSession` here.
 - `Sources/JarvisBrainProviders/` — every concrete brain adapter ([lean-coaching-core.md → Phase 4 contracts](./lean-coaching-core.md#phase-4-implementation-contract--openai-provider-extraction)): the OpenAI Responses transport with its HTTP permanence classification (`OpenAIBrainClient`, `BrainFailure+OpenAI`), and the local-agent CLI subtree — detection, `CLIBrainClient` with its reply parsing, the bounded shared process edge, runtime lifetime, and the Claude Code, Codex exec, and Codex app-server runtimes (`AgentCLIDetector`, `AgentCLIProcessRunner`, `CLIBrainRuntime`, `LocalAgentRuntimeSet`, `ClaudeCodeRuntime`, `CodexAppServerRuntime`, `CodexExecRuntime`), plus their model-facing prompt text. Depends inward on `JarvisCore`; composed by `JarvisApp` at Start, and reused by `JarvisEvaluation` to run the agentic evaluator's CLI.
@@ -264,18 +323,18 @@ Tested `JarvisCore` + `JarvisBrainProviders` + `JarvisEvaluation` + `JarvisOverl
 - `Sources/JarvisCore/Screen/` — the model-facing screen port and the pure, Foundation-only capture logic: the `ScreenCapturing` contract, the `ScreenSnapshot` model, front-window selection over window-server candidates, and reading-order OCR layout (`ScreenCapturing`, `ScreenSnapshot`, `FrontWindowSelector`, `WindowCandidate`, `TextFragment`, `RecognizedTextLayout`). No process or file I/O; the kernel dependency guard rejects `Process`/`FileManager` here.
 - `Sources/JarvisScreenCapture/` — the OS-bound screen-capture adapter behind that port ([lean-coaching-core.md → Phase 4 contract](./lean-coaching-core.md#phase-4-implementation-contract--screen-capture-adapter-move)): `ScreenCaptureRunner` owns each cancellable `screencapture` helper and the transient JPEG it writes into the owner-only session directory — it verifies that file is gone before returning, and a capture whose cleanup can't be proven latches the runner so no later capture (or display fallback) starts while a screen-derived file is unaccounted for — and `ScreenCaptureCLI` shoots the display frozen into the attempt's `SessionPlan` revision, or the main display. Depends inward on `JarvisCore`; composed by `WindowScopedScreenCapture` in `JarvisApp`; tested headlessly in `JarvisScreenCaptureTests`.
 - `Sources/JarvisCore/Overlay/` — the enabled output port: overlay text model, length-proportional timing, and fan-out (`OverlayRendering`, `OverlayTiming`, `BroadcastOverlay`).
-- `Sources/JarvisCore/Config/` — the control plane: config, owner-only secrets, transcription/brain/screen/overlay preferences, the immutable `SessionPlan` revision a coaching attempt runs against so no turn reads storage, and the Start-time interview-format skill picker with its bundled Markdown addendum (`Config`, `Secrets`, `TranscriptionPreferences`, `BrainPreferences`, `ScreenCapturePreferences`, `ScreenCaptureScope`, `OverlayAppearance`, `SessionPlan`, `InterviewFormat`; skill content in `Sources/JarvisCore/Resources/Skills/`). The kernel dependency guard rejects `UserDefaults`, every preference store, and `SecretStore` inside the kernel — `Config/` itself is excluded from that guard, which is why `InterviewFormat`'s file I/O lives here rather than in `Coach/`.
+- `Sources/JarvisCore/Config/` — the control plane: config, owner-only secrets, transcription/brain/screen/overlay preferences, the immutable `SessionPlan` revision a coaching attempt runs against so no turn reads storage, and the Start-time interview-format picker with default None and bundled Coding, Behavioral, System Design, and General Technical addenda (`Config`, `Secrets`, `Credential`, `TranscriptionPreferences`, `BrainPreferences`, `ScreenCapturePreferences`, `ScreenCaptureScope`, `OverlayAppearance`, `SessionPlan`, `InterviewFormat`; skill content in `Sources/JarvisCore/Resources/Skills/`, behavior in [architecture.md → Models and APIs](./architecture.md#models-and-apis)). The kernel dependency guard rejects `UserDefaults`, every preference store, and `SecretStore` inside the kernel — `Config/` itself is excluded from that guard, which is why `InterviewFormat`'s file I/O lives here rather than in `Coach/`.
 - `Sources/JarvisCore/Support/` — small shared runtime primitives (`Clock`, `TurnTaskBox`, `RetrySchedule`, `RetryIncident`).
 - `Sources/JarvisCore/Diagnostics/` — the one [session-evidence stack](./session-audit.md) and the capture-health policy beside it: the versioned `SessionEvent` envelope and its typed producer ports, one bounded worker and per-session handle, the Activity projection with its stable persisted event kinds, occurrence/record timing, fixed typed notices, and incomplete-record signal, `jlog`'s nonblocking admission, privacy-preserving audio continuity, the capture heartbeat and its critical health policy, authoritative session-readiness composition, chronology-aware session history, and user-facing errors (`SessionEvent`, `FileSessionAudit`, `SessionAuditWorker`, `ActivityLog`, `ActivityEvent`, `ActivityEventRecording`, `BrainTrafficAuditing`, `CoachingAttemptAuditing`, `JarvisLog`, `AudioContinuityWitness`, `CaptureHeartbeat`, `CaptureReadinessMonitor`, `JarvisReadiness`, `SessionStore`, `UserFacingError`).
 - `Sources/JarvisEvaluation/` — the sealed-session evaluation target ([lean-coaching-core.md → Phase 3 contract](./lean-coaching-core.md#phase-3-implementation-contract--evaluation-extraction)): loss-aware JSONL parsing, the neutral session evidence index and normalized provider telemetry, delta-aware transcript rendering, the read-only agentic audit over the complete session directory, and the HTML report page (`JSONLRecords`, `SessionAuditEvidence`, `SessionEvidenceIndex`, `SessionMetrics`, `EvaluationTranscript`, `AgenticEvaluation`, `AgenticEvaluator`, `EvalReportPage`). Depends inward on `JarvisCore` and on `JarvisBrainProviders` for the CLI plumbing its agentic evaluator runs; consumed by `JarvisApp` and `EvalPrep`.
 - `Sources/JarvisCore/Prompts/` — the single Foundation-only audit surface for predefined model-facing text across coaching, history compaction, and transcription context (`JarvisPrompts`); the local-agent protocol text and the session-evaluation prompt extend the same namespace from `Sources/JarvisBrainProviders/Prompts/` and `Sources/JarvisEvaluation/`.
-- `Sources/JarvisOverlay/` — the capture-invisible `NSPanel` surfaces: `OverlayCaptionPanel` (transient), `OverlayBoxPanel` (persistent, with a fixed session-format header), `NSPanel+CaptureExclusion`.
+- `Sources/JarvisOverlay/` — the capture-invisible `NSPanel` surfaces: `OverlayCaptionPanel` (transient), `OverlayBoxPanel` (persistent), `NSPanel+CaptureExclusion`; plus the box's own chrome — `OverlayBoxHeaderView` (with the session format beside Jarvis) and `OverlayBoxHeaderButton` (collapse, the name, clear), `OverlayBoxChrome` (header geometry derived from the box's height), and `OverlayBoxResizeAffordanceView` (the drawn edge affordance, which also owns the resize drag because macOS refuses an inactive app a resize cursor).
 - `Sources/JarvisApp/App/` + `MenuBar/` — entry point and three owners ([lean-coaching-core.md → Phase 5](./lean-coaching-core.md#phase-5-implementation-contract--appdelegate-split)): `AppDelegate` is the session runtime (Start/Stop/teardown, readiness rendering and effects, capture-heartbeat handling, Settings composition), `SessionArtifacts` owns the owner-only session directory, the evidence handle in it, retention pruning, and the close bookkeeping, and `BrainComposition` owns provider preflight, brain-client and route construction, and live reapply. Plus `ErrorReporter` (startup alerts and an unconditional no-presentation runtime policy).
 - `Sources/JarvisApp/Updates/UpdateController.swift` — the menu bar's Sparkle-backed **Check for Updates** item: user-initiated checks only, disabled while a session is live, and absent from development builds, which carry no feed ([build-and-run.md → In-app updates](./build-and-run.md#in-app-updates--sparkle-over-the-release-feed)).
-- `Sources/JarvisApp/Capture/` — one-clock aggregate mic + sample-preserving system-audio capture that starts without waiting for a system-audio writer, with AEC3 echo cancellation, Silero voice-activity detection, and resampling (`AggregateEchoCapture`, `WebRTCEchoCanceller`, `SileroVoiceActivityDetector`, `Resampler`); provider construction (`TranscriptionSessionFactory`); OpenAI Realtime item/readiness/liveness/transactional-reconnect handling (`RealtimeTranscriber`); macOS 26+ on-device final-result transcription and model preparation (`AppleSpeechTranscriber`, `AppleSpeechModelPreparation`); continuity/network diagnostics; permission reporting and requesting, including the self-tap tone probe that is the only way to ask for or prove the silently-enforced system-audio grant (`Permissions`, `SystemAudioPermissionProbe`); plus the window-scoped screenshot + OCR edge (`WindowScopedScreenCapture`, `ScreenTextRecognizer`).
+- `Sources/JarvisApp/Capture/` — one-clock aggregate mic + sample-preserving system-audio capture that starts without waiting for a system-audio writer, with AEC3 echo cancellation, Silero voice-activity detection, and resampling to whichever wire rate the selected provider requires (`AggregateEchoCapture`, `WebRTCEchoCanceller`, `SileroVoiceActivityDetector`, `Resampler`); provider construction (`TranscriptionSessionFactory`); OpenAI Realtime item/readiness/liveness/transactional-reconnect handling (`RealtimeTranscriber`); Gemini Live readiness/liveness/reconnect handling with server-owned finalization and no client-managed ledger (`GeminiLiveTranscriber`); macOS 26+ on-device final-result transcription and model preparation (`AppleSpeechTranscriber`, `AppleSpeechModelPreparation`); continuity/network diagnostics; permission reporting and requesting, including the self-tap tone probe that is the only way to ask for or prove the silently-enforced system-audio grant (`Permissions`, `SystemAudioPermissionProbe`); plus the window-scoped screenshot + OCR edge (`WindowScopedScreenCapture`, `ScreenTextRecognizer`).
 - `Sources/JarvisApp/Onboarding/` — the launch permission gate that gathers Microphone, System Audio Recording, and Screen Recording one dialog at a time and keeps Jarvis closed until it holds all three, so no TCC prompt appears mid-session (`PermissionGate`, `PermissionsChecklistView`) ([architecture.md → Permissions](./architecture.md#permissions)).
 - `Sources/JarvisApp/Settings/` — the unified Settings window (`SettingsWindow` hosting Brain behavior, shared Connections, Overlay, Screen, Prep material, and Activity sections), with shared page, rounded-card, responsive-row, and scroll primitives so every tab keeps one visual system without coupling section behavior.
-- `Sources/JarvisApp/Shortcuts/HotkeyController.swift` — the global Carbon ⌥⌘J on-demand-hint hotkey.
+- `Sources/JarvisApp/Shortcuts/HotkeyController.swift` — the global Carbon hint, Explain more, and Show code shortcuts, with independent persisted bindings.
 - `Sources/JarvisApp/Viewer/ActivityViewer.swift` — the in-app `WKWebView` activity viewer, with the current non-persisted readiness badge, an exact selectable/copyable session ID, and one-click **Evaluate** / **Open report** agentic audit flow.
 - `Sources/EvalPrep/main.swift` — the Foundation-only terminal entry point for the same `AgenticEvaluator` Activity invokes; `scripts/eval-session.sh` runs it over the repo + session dir.
 - `Sources/CJarvisAEC/lib/libjarvis-aec.a` — the prebuilt, zero-dylib WebRTC AEC3 native edge (the `CJarvisAEC` target; rebuilt by `scripts/build-aec.sh`).
@@ -290,3 +349,9 @@ Tested `JarvisCore` + `JarvisBrainProviders` + `JarvisEvaluation` + `JarvisOverl
 
 - **Universal binary** — `Sources/CJarvisAEC/lib/libjarvis-aec.a` is arm64-only; `lipo` in an x86_64 slice if Intel is ever needed.
 - **Neural double-talk canceller** (DTLN / Muesli-style on the same aligned streams) — the escalation if AEC3 over-attenuates the user under loud far audio in practice.
+- **Gemini Live session resumption** (`sessionResumptionUpdate`) — `GeminiLiveTranscriber` drains and
+  rotates ahead of the ~10-minute `goAway` close ([architecture.md → Resilience](./architecture.md#resilience)),
+  which recovers the common case, but a single utterance long enough to still be in progress exactly
+  when the bounded grace period elapses can still be split across the rotation. Google's own session
+  resumption is the complete fix; adopting it is deliberately left as a follow-up rather than bundled
+  into the drain.

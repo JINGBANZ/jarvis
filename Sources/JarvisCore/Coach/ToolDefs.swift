@@ -12,7 +12,7 @@ public let captureScreenTool = ToolDef(
 public let speakTool = ToolDef(
     name: "speak",
     description: JarvisPrompts.Coach.ToolDescription.speak,
-    parametersJSON: #"{"type":"object","properties":{"lines":{"type":"array","items":{"type":"string"}}},"required":["lines"],"additionalProperties":false}"#
+    parametersJSON: #"{"type":"object","properties":{"lines":{"type":"array","items":{"type":"string"}},"explanation":{"type":["string","null"]},"codeSnippet":{"type":["object","null"],"properties":{"language":{"type":"string"},"placement":{"type":"string"},"code":{"type":"string"},"highlightedLines":{"type":"array","items":{"type":"integer"}}},"required":["language","placement","code","highlightedLines"],"additionalProperties":false}},"required":["lines","explanation","codeSnippet"],"additionalProperties":false}"#
 )
 
 public let staySilentTool = ToolDef(
@@ -30,4 +30,12 @@ public let searchPrepNotesTool = ToolDef(
     name: "search_prep_notes",
     description: JarvisPrompts.Coach.ToolDescription.searchPrepNotes,
     parametersJSON: #"{"type":"object","properties":{"query":{"type":"string"}},"required":["query"],"additionalProperties":false}"#
+)
+
+/// System-design sessions can attach a visual hint without changing the terminal speak action
+/// (including force(speak) for the manual shortcut). Null means an ordinary text hint.
+public let systemDesignSpeakTool = ToolDef(
+    name: speakTool.name,
+    description: JarvisPrompts.Coach.ToolDescription.speak,
+    parametersJSON: #"{"type":"object","properties":{"lines":{"type":"array","items":{"type":"string"}},"explanation":{"type":["string","null"]},"mermaid":{"type":["string","null"]},"codeSnippet":{"type":["object","null"],"properties":{"language":{"type":"string"},"placement":{"type":"string"},"code":{"type":"string"},"highlightedLines":{"type":"array","items":{"type":"integer"}}},"required":["language","placement","code","highlightedLines"],"additionalProperties":false}},"required":["lines","mermaid","explanation","codeSnippet"],"additionalProperties":false}"#
 )

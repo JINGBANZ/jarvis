@@ -27,3 +27,6 @@ appcast.xml
 
 # Local-only upstream license copies written by scripts/build-aec.sh (authoritative texts are in THIRD_PARTY_NOTICES.md)
 Sources/CJarvisAEC/third_party/
+
+# Agent execution scratch (ledgers, task briefs, review packages) — git history is the record
+.superpowers/

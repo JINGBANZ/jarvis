@@ -1,179 +1,75 @@
 import AppKit
 import JarvisCore
 
-/// Settings panel for the global manual-hint hotkey: one "click to record" control, plus an inline
-/// callout when a user-chosen combination can't be registered (e.g. another app already owns it) —
-/// see #229. A rejected rebind always leaves the previous, still-working combination live, so that
-/// stays displayed and the failure is only flashed as immediate feedback on the attempt itself
-/// (`recorded(_:)`); it does not persist across a tab revisit, since the previous shortcut is still
-/// fine. The one case that *is* persistent — the shipped default itself colliding with another app at
-/// launch, so nothing is registered at all — keeps showing the callout on every revisit instead of
-/// going quiet on a stale success.
+/// Independent bindings share the same recorder and honest registration-failure behavior.
 @MainActor
 final class HotkeySection: NSObject, SettingsSection {
     let title = "Shortcuts"
     let fillsTab = true
+    private let bindings: [HotkeyBindingView]
 
-    private let preferences: HotkeyPreferences
-    /// Whether the controller currently has *any* combination registered. This is the only thing
-    /// that must persist across Settings visits: a rejected rebind always leaves the previous,
-    /// still-working combination live (see `HotkeyController.apply`), so the sole way this is false
-    /// is the shipped default itself colliding with another app at launch — nothing was ever
-    /// registered this run. Both branches of `renderOutcome` read this: it decides whether a
-    /// revisit shows the persistent-failure callout, and it picks that callout's wording.
-    private let hasActiveHotkey: () -> Bool
-    /// Attempts to register a candidate combination and reports whether it took. Persisting the
-    /// choice is this section's job, only after a `.registered` outcome — see `recorded(_:)`.
-    private let applyCombination: (HotkeyCombination) -> HotkeyRegistrationOutcome
-
-    private var recorder: HotkeyRecorderButton?
-    private var callout: NSBox?
-    private var calloutLabel: NSTextField?
-    private var calloutHeightConstraint: NSLayoutConstraint?
-
-    private static let calloutHeight: CGFloat = 60
-
-    init(
-        preferences: HotkeyPreferences,
-        hasActiveHotkey: @escaping () -> Bool,
-        applyCombination: @escaping (HotkeyCombination) -> HotkeyRegistrationOutcome
-    ) {
-        self.preferences = preferences
-        self.hasActiveHotkey = hasActiveHotkey
-        self.applyCombination = applyCombination
+    init(preferences: [HotkeyPreferences],
+         explanationPreferences: ExplanationPreferences,
+         codePreferences: CodePreferences,
+         onCodeChanged: @escaping () -> Void,
+         boxEnabled: @escaping () -> Bool = { true },
+         onExplanationsChanged: @escaping () -> Void,
+         hasActiveHotkey: @escaping (CoachingShortcut) -> Bool,
+         applyCombination: @escaping (CoachingShortcut, HotkeyCombination) -> HotkeyRegistrationOutcome) {
+        bindings = preferences.map { preference in
+            HotkeyBindingView(preferences: preference,
+                explanationPreferences: preference.shortcut == .explainMore ? explanationPreferences : nil,
+                codePreferences: preference.shortcut == .showCode ? codePreferences : nil,
+                onCodeChanged: onCodeChanged,
+                boxEnabled: boxEnabled,
+                onExplanationsChanged: onExplanationsChanged,
+                hasActiveHotkey: { hasActiveHotkey(preference.shortcut) },
+                applyCombination: { applyCombination(preference.shortcut, $0) })
+        }
     }
 
     func makeView() -> NSView {
-        let body = NSView(frame: NSRect(x: 0, y: 0, width: 712, height: 432))
-
-        let recorder = HotkeyRecorderButton(combination: preferences.combination)
-        recorder.onRecorded = { [weak self] combination in
-            self?.recorded(combination)
+        let scroll = SettingsScrollView(frame: NSRect(x: 0, y: 0, width: 712, height: 432))
+        scroll.autoresizingMask = [.width, .height]
+        let stack = NSStackView(frame: scroll.bounds)
+        stack.orientation = .vertical
+        stack.alignment = .width
+        stack.distribution = .fill
+        stack.spacing = SettingsStyle.sectionSpacing
+        stack.autoresizingMask = [.width]
+        for binding in bindings { stack.addArrangedSubview(binding.makeView()) }
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(.defaultLow, for: .vertical)
+        spacer.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+        spacer.heightAnchor.constraint(greaterThanOrEqualToConstant: 0).isActive = true
+        if let last = stack.arrangedSubviews.last { stack.setCustomSpacing(0, after: last) }
+        stack.addArrangedSubview(spacer)
+        scroll.documentView = stack
+        var previousViewportHeight = scroll.contentView.bounds.height
+        let relayout: () -> Void = { [weak self, weak scroll, weak stack] in
+            guard let self, let scroll, let stack else { return }
+            // The stack is non-flipped: retain the reading offset from its top as cards resize.
+            let distanceFromTop = max(0, stack.bounds.height
+                - scroll.contentView.bounds.origin.y - previousViewportHeight)
+            previousViewportHeight = scroll.contentView.bounds.height
+            let height = self.bindings.reduce(CGFloat(0)) { $0 + $1.preferredHeight }
+                + CGFloat(max(0, self.bindings.count - 1)) * SettingsStyle.sectionSpacing
+            stack.frame.size = NSSize(width: scroll.contentView.bounds.width,
+                                      height: max(height, scroll.contentView.bounds.height))
+            stack.layoutSubtreeIfNeeded()
+            let maximumY = max(0, stack.bounds.height - scroll.contentView.bounds.height)
+            scroll.contentView.scroll(to: NSPoint(x: 0,
+                y: min(maximumY, max(0, maximumY - distanceFromTop))))
+            scroll.reflectScrolledClipView(scroll.contentView)
         }
-        self.recorder = recorder
-
-        let cardHeight = SettingsStyle.cardHeaderHeight + SettingsStyle.rowHeight
-        let card = SettingsCardView(frame: NSRect(x: 0, y: 0, width: 712, height: cardHeight))
-        card.translatesAutoresizingMaskIntoConstraints = false
-        card.setHeader(title: "Manual hint", detail: "Works only while a session is running")
-        let row = SettingsRowView(
-            title: "Shortcut",
-            detail: "Requires ⌘ or ⌥",
-            controlView: recorder,
-            controlSize: NSSize(width: 170, height: 32),
-            preferredHeight: SettingsStyle.rowHeight,
-            showsSeparator: false)
-        card.contentView?.addSubview(row)
-        card.onLayout = { [weak card, weak row] in
-            guard let card, let row else { return }
-            row.frame = card.bodyFrame
-        }
-
-        let callout = makeCallout()
-        callout.translatesAutoresizingMaskIntoConstraints = false
-        self.callout = callout
-
-        body.addSubview(card)
-        body.addSubview(callout)
-        NSLayoutConstraint.activate([
-            card.topAnchor.constraint(equalTo: body.topAnchor),
-            card.leadingAnchor.constraint(equalTo: body.leadingAnchor),
-            card.trailingAnchor.constraint(equalTo: body.trailingAnchor),
-            card.heightAnchor.constraint(equalToConstant: cardHeight),
-            callout.topAnchor.constraint(equalTo: card.bottomAnchor, constant: SettingsStyle.sectionSpacing),
-            callout.leadingAnchor.constraint(equalTo: body.leadingAnchor),
-            callout.trailingAnchor.constraint(equalTo: body.trailingAnchor),
-        ])
-        let calloutHeight = callout.heightAnchor.constraint(equalToConstant: 0)
-        calloutHeight.isActive = true
-        calloutHeightConstraint = calloutHeight
-
-        renderOutcome()
-
-        return SettingsPageView(
-            title: "Shortcuts",
-            summary: "Rebind the global shortcut that forces an immediate hint.",
-            bodyView: body)
+        bindings.forEach { $0.onHeightChanged = relayout }
+        scroll.onViewportChanged = relayout
+        relayout()
+        return SettingsPageView(title: title,
+            summary: "Request a hint, an explanation, or the next code snippet.", bodyView: scroll)
     }
 
     func didBecomeActive() {
-        recorder?.setCombination(preferences.combination)
-        renderOutcome()
-    }
-
-    private func recorded(_ combination: HotkeyCombination) {
-        let outcome = applyCombination(combination)
-        switch outcome {
-        case .registered:
-            preferences.combination = combination
-            recorder?.setCombination(combination)
-        case .failed:
-            // The controller left the previous, still-working combination registered — reflect that,
-            // not the rejected candidate, and never persist a combination that isn't actually live.
-            recorder?.setCombination(preferences.combination)
-        }
-        renderOutcome(outcome)
-    }
-
-    /// `outcome` is the immediate result of one `recorded(_:)` attempt — pass it right after a
-    /// rebind to flash honest feedback about *that* attempt. Passing nothing (`makeView()` opening
-    /// the tab, `didBecomeActive()` revisiting it) must not replay that transient result: a rejected
-    /// rebind whose previous combination is still active is not an ongoing problem, so on a revisit
-    /// the callout shows only for the one state that *is* persistent — nothing registered at all.
-    private func renderOutcome(_ outcome: HotkeyRegistrationOutcome? = nil) {
-        let showsFailure: Bool
-        switch outcome {
-        case .registered: showsFailure = false
-        case .failed: showsFailure = true
-        case nil: showsFailure = !hasActiveHotkey()
-        }
-        guard showsFailure else {
-            calloutHeightConstraint?.constant = 0
-            callout?.isHidden = true
-            return
-        }
-        calloutLabel?.stringValue = hasActiveHotkey()
-            ? "That shortcut is already in use by another app. The previous shortcut stays active."
-            : "That shortcut is already in use by another app, and no manual-hint shortcut is "
-                + "currently active."
-        calloutHeightConstraint?.constant = Self.calloutHeight
-        callout?.isHidden = false
-    }
-
-    private func makeCallout() -> NSBox {
-        let callout = NSBox()
-        callout.boxType = .custom
-        callout.borderWidth = 1
-        callout.cornerRadius = 10
-        callout.borderColor = NSColor.systemOrange.withAlphaComponent(0.25)
-        callout.fillColor = NSColor.systemOrange.withAlphaComponent(0.08)
-        callout.contentViewMargins = .zero
-        callout.isHidden = true
-
-        guard let content = callout.contentView else { return callout }
-        let icon = NSImageView()
-        icon.translatesAutoresizingMaskIntoConstraints = false
-        icon.image = NSImage(
-            systemSymbolName: "exclamationmark.triangle.fill", accessibilityDescription: nil)
-        icon.contentTintColor = .systemOrange
-        content.addSubview(icon)
-
-        let label = NSTextField(wrappingLabelWithString: "")
-        label.translatesAutoresizingMaskIntoConstraints = false
-        label.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        label.textColor = .secondaryLabelColor
-        content.addSubview(label)
-        calloutLabel = label
-
-        NSLayoutConstraint.activate([
-            icon.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 14),
-            icon.topAnchor.constraint(equalTo: content.topAnchor, constant: 14),
-            icon.widthAnchor.constraint(equalToConstant: 22),
-            icon.heightAnchor.constraint(equalToConstant: 22),
-            label.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 10),
-            label.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -14),
-            label.centerYAnchor.constraint(equalTo: content.centerYAnchor),
-        ])
-        return callout
+        bindings.forEach { $0.didBecomeActive() }
     }
 }

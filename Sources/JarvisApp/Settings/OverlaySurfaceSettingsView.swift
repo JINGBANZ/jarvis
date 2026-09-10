@@ -54,9 +54,10 @@ final class OverlaySurfaceSettingsView: NSView {
     private let opacityControl: SliderControlView
     private let sizeRow: SettingsRowView
     private let opacityRow: SettingsRowView
+    private let diagramRow: SettingsRowView?
 
     var preferredHeight: CGFloat {
-        Self.headerHeight + (toggle.state == .on ? SettingsStyle.rowHeight * 2 : 0)
+        Self.headerHeight + (toggle.state == .on ? SettingsStyle.rowHeight * (diagramRow == nil ? 2 : 3) : 0)
     }
 
     init(
@@ -75,7 +76,8 @@ final class OverlaySurfaceSettingsView: NSView {
         opacityValue: Double,
         opacityRange: ClosedRange<Double>,
         opacityAction: Selector,
-        opacityAccessibilityLabel: String
+        opacityAccessibilityLabel: String,
+        diagramToggle: NSSwitch? = nil
     ) {
         sizeSlider = NSSlider(
             value: sizeValue,
@@ -100,6 +102,10 @@ final class OverlaySurfaceSettingsView: NSView {
             controlView: opacityControl,
             controlSize: NSSize(width: 310, height: 32))
 
+        diagramRow = diagramToggle.map {
+            SettingsRowView(title: "Show diagrams", detail: "Private system-design sketches",
+                            controlView: $0, controlSize: $0.frame.size)
+        }
         super.init(frame: NSRect(x: 0, y: 0, width: 712, height: 174))
         autoresizingMask = [.width]
 
@@ -134,6 +140,7 @@ final class OverlaySurfaceSettingsView: NSView {
         ] {
             content.addSubview(view)
         }
+        if let diagramRow { content.addSubview(diagramRow) }
         addSubview(card)
         card.onLayout = { [weak self] in self?.layoutContent() }
     }
@@ -148,6 +155,7 @@ final class OverlaySurfaceSettingsView: NSView {
         stateLabel.stringValue = enabled ? "On" : "Off"
         sizeRow.isHidden = !enabled
         opacityRow.isHidden = !enabled
+        diagramRow?.isHidden = !enabled
         needsLayout = true
     }
 
@@ -188,14 +196,16 @@ final class OverlaySurfaceSettingsView: NSView {
             height: 18)
 
         if toggle.state == .on {
+            let extraHeight = diagramRow == nil ? 0 : SettingsStyle.rowHeight
+            diagramRow?.frame = NSRect(x: 0, y: 0, width: content.bounds.width, height: extraHeight)
             opacityRow.frame = NSRect(
                 x: 0,
-                y: 0,
+                y: extraHeight,
                 width: content.bounds.width,
                 height: SettingsStyle.rowHeight)
             sizeRow.frame = NSRect(
                 x: 0,
-                y: SettingsStyle.rowHeight,
+                y: SettingsStyle.rowHeight + extraHeight,
                 width: content.bounds.width,
                 height: SettingsStyle.rowHeight)
         }

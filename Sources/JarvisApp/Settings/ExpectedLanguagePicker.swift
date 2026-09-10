@@ -4,8 +4,8 @@ import JarvisCore
 /// Compact multi-select control for the expected-language list in Transcription Settings.
 @MainActor
 final class ExpectedLanguagePicker: NSView {
-    private var selectedLanguages: [OpenAITranscriptionLanguage]
-    private let onChange: ([OpenAITranscriptionLanguage]) -> Void
+    private var selectedLanguages: [TranscriptionLanguage]
+    private let onChange: ([TranscriptionLanguage]) -> Void
     private let chipStack = NSStackView()
     private let editButton = NSButton()
     private let popover = NSPopover()
@@ -13,10 +13,10 @@ final class ExpectedLanguagePicker: NSView {
     private var usesCompactSummary = false
 
     init(
-        selectedLanguages: [OpenAITranscriptionLanguage],
-        onChange: @escaping ([OpenAITranscriptionLanguage]) -> Void
+        selectedLanguages: [TranscriptionLanguage],
+        onChange: @escaping ([TranscriptionLanguage]) -> Void
     ) {
-        self.selectedLanguages = OpenAITranscriptionLanguage.canonicalizing(selectedLanguages)
+        self.selectedLanguages = TranscriptionLanguage.canonicalizing(selectedLanguages)
         self.onChange = onChange
         super.init(frame: NSRect(x: 0, y: 0, width: 320, height: 32))
 
@@ -72,7 +72,7 @@ final class ExpectedLanguagePicker: NSView {
 
     private func buildPopover() {
         let rowHeight: CGFloat = 28
-        let height = 48 + CGFloat(OpenAITranscriptionLanguage.allCases.count) * rowHeight
+        let height = 48 + CGFloat(TranscriptionLanguage.allCases.count) * rowHeight
         let controller = NSViewController()
         controller.view = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: height))
 
@@ -82,7 +82,7 @@ final class ExpectedLanguagePicker: NSView {
         controller.view.addSubview(heading)
 
         var y = height - 62
-        for (index, language) in OpenAITranscriptionLanguage.allCases.enumerated() {
+        for (index, language) in TranscriptionLanguage.allCases.enumerated() {
             let option = NSButton(
                 checkboxWithTitle: language.displayName,
                 target: self,
@@ -120,7 +120,7 @@ final class ExpectedLanguagePicker: NSView {
             chipStack.addArrangedSubview(makeChip(label, isAutomatic: selectedLanguages.isEmpty))
         }
 
-        for (index, language) in OpenAITranscriptionLanguage.allCases.enumerated() {
+        for (index, language) in TranscriptionLanguage.allCases.enumerated() {
             optionButtons[index].state = selectedLanguages.contains(language) ? .on : .off
         }
         setAccessibilityValue(selectedLanguages.isEmpty
@@ -153,14 +153,14 @@ final class ExpectedLanguagePicker: NSView {
     }
 
     @objc private func languageToggled(_ sender: NSButton) {
-        guard OpenAITranscriptionLanguage.allCases.indices.contains(sender.tag) else { return }
-        let language = OpenAITranscriptionLanguage.allCases[sender.tag]
+        guard TranscriptionLanguage.allCases.indices.contains(sender.tag) else { return }
+        let language = TranscriptionLanguage.allCases[sender.tag]
         if sender.state == .on {
             selectedLanguages.append(language)
         } else {
             selectedLanguages.removeAll { $0 == language }
         }
-        selectedLanguages = OpenAITranscriptionLanguage.canonicalizing(selectedLanguages)
+        selectedLanguages = TranscriptionLanguage.canonicalizing(selectedLanguages)
         renderSelection()
         onChange(selectedLanguages)
     }

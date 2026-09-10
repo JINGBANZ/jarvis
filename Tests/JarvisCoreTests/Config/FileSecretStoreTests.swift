@@ -7,63 +7,60 @@ import Testing
 /// a write→read roundtrip, owner-only (0600) file + (0700) directory permissions, and the
 /// missing/empty cases that map to "no key yet".
 @Suite struct FileSecretStoreTests {
-    /// A throwaway file URL under a unique temp directory; the store creates the parent itself.
-    private func tempFileURL() -> URL {
+    /// A throwaway directory URL under a unique temp directory; the store creates it itself.
+    private func tempDirectoryURL() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("jarvis-secret-\(UUID().uuidString)", isDirectory: true)
-            .appendingPathComponent("openai-api-key")
     }
 
     @Test func writesThenReadsBack() {
-        let store = FileSecretStore(fileURL: tempFileURL())
-        #expect(store.setApiKey("sk-roundtrip"))
-        #expect(store.apiKey() == "sk-roundtrip")
+        let store = FileSecretStore(directoryURL: tempDirectoryURL())
+        #expect(store.setApiKey("sk-roundtrip", for: .openAIAPIKey))
+        #expect(store.apiKey(for: .openAIAPIKey) == "sk-roundtrip")
     }
 
     @Test func missingFileReadsAsNil() {
-        let store = FileSecretStore(fileURL: tempFileURL())
-        #expect(store.apiKey() == nil)
+        let store = FileSecretStore(directoryURL: tempDirectoryURL())
+        #expect(store.apiKey(for: .openAIAPIKey) == nil)
     }
 
     @Test func emptyOrWhitespaceReadsAsNil() {
-        let url = tempFileURL()
-        let store = FileSecretStore(fileURL: url)
-        #expect(store.setApiKey("   \n  "))
+        let store = FileSecretStore(directoryURL: tempDirectoryURL())
+        #expect(store.setApiKey("   \n  ", for: .openAIAPIKey))
         // A key that is only whitespace is "no key": the file store trims before checking (stricter
         // than EnvSecretStore, which doesn't trim and would return the raw whitespace).
-        #expect(store.apiKey() == nil)
+        #expect(store.apiKey(for: .openAIAPIKey) == nil)
     }
 
     @Test func surroundingWhitespaceIsTrimmed() {
-        let store = FileSecretStore(fileURL: tempFileURL())
-        #expect(store.setApiKey("  sk-padded\n"))
-        #expect(store.apiKey() == "sk-padded")
+        let store = FileSecretStore(directoryURL: tempDirectoryURL())
+        #expect(store.setApiKey("  sk-padded\n", for: .openAIAPIKey))
+        #expect(store.apiKey(for: .openAIAPIKey) == "sk-padded")
     }
 
     @Test func overwriteReplacesPreviousKey() {
-        let store = FileSecretStore(fileURL: tempFileURL())
-        #expect(store.setApiKey("sk-old"))
-        #expect(store.setApiKey("sk-new"))
-        #expect(store.apiKey() == "sk-new")
+        let store = FileSecretStore(directoryURL: tempDirectoryURL())
+        #expect(store.setApiKey("sk-old", for: .openAIAPIKey))
+        #expect(store.setApiKey("sk-new", for: .openAIAPIKey))
+        #expect(store.apiKey(for: .openAIAPIKey) == "sk-new")
     }
 
     /// The whole point of the file store is to hold a secret no other local user can read.
     @Test func fileIsOwnerOnly() throws {
-        let url = tempFileURL()
-        let store = FileSecretStore(fileURL: url)
-        #expect(store.setApiKey("sk-perms"))
-        let perms = try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? NSNumber
+        let store = FileSecretStore(directoryURL: tempDirectoryURL())
+        #expect(store.setApiKey("sk-perms", for: .openAIAPIKey))
+        let perms = try FileManager.default.attributesOfItem(
+            atPath: store.fileURL(for: .openAIAPIKey).path)[.posixPermissions] as? NSNumber
         #expect(perms?.int16Value == 0o600)
     }
 
     /// A 0755 parent would leak the credential file's existence/metadata to other local users, so the
     /// store must create its directory owner-only too (CWE-732).
     @Test func directoryIsOwnerOnly() throws {
-        let url = tempFileURL()
-        let store = FileSecretStore(fileURL: url)
-        #expect(store.setApiKey("sk-dir"))
-        let dir = url.deletingLastPathComponent().path
-        let perms = try FileManager.default.attributesOfItem(atPath: dir)[.posixPermissions] as? NSNumber
+        let dir = tempDirectoryURL()
+        let store = FileSecretStore(directoryURL: dir)
+        #expect(store.setApiKey("sk-dir", for: .openAIAPIKey))
+        let perms = try FileManager.default.attributesOfItem(atPath: dir.path)[.posixPermissions] as? NSNumber
         #expect(perms?.int16Value == 0o700)
     }
 
@@ -73,8 +70,8 @@ import Testing
         let fm = FileManager.default
         let dir = fm.temporaryDirectory.appendingPathComponent("jarvis-loose-\(UUID().uuidString)", isDirectory: true)
         try fm.createDirectory(at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o755])
-        let store = FileSecretStore(fileURL: dir.appendingPathComponent("openai-api-key"))
-        #expect(store.setApiKey("sk-tighten"))
+        let store = FileSecretStore(directoryURL: dir)
+        #expect(store.setApiKey("sk-tighten", for: .openAIAPIKey))
         let perms = try fm.attributesOfItem(atPath: dir.path)[.posixPermissions] as? NSNumber
         #expect(perms?.int16Value == 0o700)
     }
@@ -83,12 +80,12 @@ import Testing
     /// future switch to a perms-preserving write) would silently leave the secret world-readable.
     @Test func overwriteReassertsOwnerOnlyPermissions() throws {
         let fm = FileManager.default
-        let url = tempFileURL()
-        let store = FileSecretStore(fileURL: url)
-        #expect(store.setApiKey("sk-first"))
-        try fm.setAttributes([.posixPermissions: 0o644], ofItemAtPath: url.path)
-        #expect(store.setApiKey("sk-second"))
-        let perms = try fm.attributesOfItem(atPath: url.path)[.posixPermissions] as? NSNumber
+        let store = FileSecretStore(directoryURL: tempDirectoryURL())
+        #expect(store.setApiKey("sk-first", for: .openAIAPIKey))
+        try fm.setAttributes([.posixPermissions: 0o644], ofItemAtPath: store.fileURL(for: .openAIAPIKey).path)
+        #expect(store.setApiKey("sk-second", for: .openAIAPIKey))
+        let perms = try fm.attributesOfItem(
+            atPath: store.fileURL(for: .openAIAPIKey).path)[.posixPermissions] as? NSNumber
         #expect(perms?.int16Value == 0o600)
     }
 
@@ -99,13 +96,13 @@ import Testing
         let fm = FileManager.default
         let blocker = fm.temporaryDirectory.appendingPathComponent("jarvis-blocker-\(UUID().uuidString)")
         try Data("x".utf8).write(to: blocker)   // a file where the store wants a directory
-        let store = FileSecretStore(fileURL: blocker.appendingPathComponent("sub/openai-api-key"))
-        #expect(store.setApiKey("sk-nope") == false)
+        let store = FileSecretStore(directoryURL: blocker.appendingPathComponent("sub"))
+        #expect(store.setApiKey("sk-nope", for: .openAIAPIKey) == false)
     }
 
     @Test func defaultLocationIsUnderApplicationSupport() {
         // The no-arg init must land in the per-user Application Support tree, not /tmp or cwd.
         let store = FileSecretStore()
-        #expect(store.fileURL.path.contains("Application Support/Jarvis"))
+        #expect(store.directoryURL.path.contains("Application Support/Jarvis"))
     }
 }

@@ -5,13 +5,18 @@ import Foundation
 /// runtime severity may reveal UI. Dynamic copy composed at the failure site (e.g. a capture reason)
 /// is passed through. Call sites reference these so the policy is centralized and unit-testable.
 public extension UserFacingError {
-    /// No API key on Start when either transcription or one of the configured brain targets uses
-    /// OpenAI, so the requested route cannot be constructed.
-    static var noAPIKey: UserFacingError {
-        .init(title: "No OpenAI API key set",
-              message: "The selected transcription provider or brain route uses OpenAI. Open \u{201C}Settings\u{2026}\u{201D} \u{2192} Connections, paste your OpenAI API key, then press Start.",
-              severity: .fatal,
-              sessionEndReason: .openAIAPIKeyMissing)
+    /// No API key on Start for the selected transcription provider or a configured brain target.
+    /// Names each missing credential so a user with one valid key isn't left guessing which one is
+    /// absent — e.g. Gemini transcription plus an OpenAI brain route can legitimately miss both.
+    static func noAPIKey(missing: Set<Credential>) -> UserFacingError {
+        // Sorted by display name for a stable, deterministic message across attempts.
+        let named = missing.map(\.displayName).sorted()
+        return .init(
+            title: "Missing API key",
+            message: "An API key is missing for \(sentenceList(named)). Open \u{201C}Settings\u{2026}\u{201D} "
+                + "\u{2192} Connections, paste the missing key, then press Start.",
+            severity: .fatal,
+            sessionEndReason: .openAIAPIKeyMissing)
     }
 
     /// Apple Speech is selected on an unsupported OS/device, or its selected locale is unavailable.

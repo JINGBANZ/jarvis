@@ -77,6 +77,8 @@ final class BrainComposition {
     /// `JarvisPrompts.Coach.system(prepMaterial:formatAddendum:)` builder `CoachAttemptRunner`
     /// calls per turn.
     var interviewFormatAddendum = ""
+    var explanationsEnabled = true
+    var codeEnabled = false
 
     /// The two clients that move together with one provider/model route target.
     private struct BrainRuntime {
@@ -146,7 +148,8 @@ final class BrainComposition {
                                        // construction cannot describe it.
                                        systemPrompt: JarvisPrompts.Coach.system(
                                            prepMaterial: false,
-                                           formatAddendum: interviewFormatAddendum),
+                                           formatAddendum: interviewFormatAddendum,
+                                           explanationsEnabled: explanationsEnabled, codeEnabled: codeEnabled),
                                        tools: coachTools,
                                        toolChoice: .required,
                                        runtime: runtimes.coach,
@@ -290,7 +293,7 @@ final class BrainComposition {
               let sessionDirectory = host.liveSessionDirectory
         else { return }
         let route = preferences.route
-        let key = apiKeyOverride ?? secrets.apiKey() ?? ""
+        let key = apiKeyOverride ?? secrets.apiKey(for: .openAIAPIKey) ?? ""
         guard !route.targets.contains(where: { $0.provider == .openAI }) || !key.isEmpty else {
             jlog("Jarvis: can't apply brain settings — an OpenAI target has no API key.")
             host.liveSessionEvidence?.record(.settingsChangeNotApplied)
@@ -357,6 +360,6 @@ final class BrainComposition {
     /// Where a CLI brain materializes screenshots before a session exists. Only reached when no
     /// session is live, which cannot happen on the coaching path.
     private func sessionDirectoryFallback() -> URL {
-        FileSecretStore().fileURL.deletingLastPathComponent().appendingPathComponent("sessions")
+        FileSecretStore().directoryURL.appendingPathComponent("sessions")
     }
 }
