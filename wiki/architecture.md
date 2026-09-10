@@ -227,7 +227,11 @@ Without visible code, known problem context supports a first component without i
 
 [`OverlayBoxPanel`](../Sources/JarvisOverlay/OverlayBoxPanel.swift) pins the snippet in a separate
 bottom scroll area inside the existing capture-excluded panel. Its opaque dark background preserves
-syntax contrast regardless of history opacity; monospace text uses the configured size. Each new hint
+syntax contrast regardless of history opacity. Long code lines wrap within the dock without changing
+source text or correction highlights. The dock measures wrapped content to use available space;
+code uses a compact monospace size and shrinks only as needed to fit, down to a readable minimum
+(see `CodeSnippetView`). Very small panels retain vertical scrolling rather than clipping code or
+shrinking it indefinitely. Each new hint
 replaces its snippet, or clears the previous code when none is appropriate, so guidance and code agree.
 Dismiss and session clear remove the snippet. While enabled, an empty code area remains reserved;
 a session started with code off has no dock. The dock collapses

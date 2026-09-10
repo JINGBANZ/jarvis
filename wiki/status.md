@@ -286,7 +286,8 @@ Its capability is fixed at Start; the configurable fallback hotkey requests code
 guidance only in enabled sessions. Settings changes take effect on the next Start.
 [`CodeSnippet`](../Sources/JarvisCore/Overlay/CodeSnippet.swift) validates bounded attachments;
 [`OverlayBoxPanel`](../Sources/JarvisOverlay/OverlayBoxPanel.swift) keeps them in a syntax-colored
-bottom dock while hints continue above. Disabling Overlay Box turns off the saved code setting,
+bottom dock while hints continue above. Code wraps and uses a compact font sized to fit the available
+section; vertical scrolling remains a fallback at small panel sizes. Disabling Overlay Box turns off the saved code setting,
 releases its shortcut, and clears/disables the live dock until code is enabled for a new Start.
 Runtime authorization suppresses code when the session capability is off;
 each new hint replaces or clears its matching snippet.
