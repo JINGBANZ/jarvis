@@ -16,6 +16,7 @@ struct ScreenObservationMemory {
     private(set) var observations: [Observation] = []
     private(set) var latestID = 0
     private(set) var hasOmissions = false
+    private var lastEvictedID = 0
 
     init(byteLimit: Int = 32_768, observationLimit: Int = 32) {
         self.byteLimit = max(0, byteLimit)
@@ -41,7 +42,7 @@ struct ScreenObservationMemory {
         while observations.count > observationLimit
             || observations.reduce(0, { $0 + $1.text.utf8.count }) > byteLimit
             || observations.first?.text.isEmpty == true {
-            observations.removeFirst()
+            lastEvictedID = observations.removeFirst().id
             hasOmissions = true
         }
         return latestID
@@ -50,7 +51,11 @@ struct ScreenObservationMemory {
     mutating func apply(_ update: ScreenMemoryUpdate, after boundary: Int, visibleIDs: Set<Int>, keepingIDs: Set<Int> = []) {
         if update.newQuestion {
             observations.removeAll { $0.id <= boundary && !keepingIDs.contains($0.id) }
-            hasOmissions = observations.contains(where: \.truncated)
+            // Reset only omissions from the old question. A whole current fragment may have
+            // been evicted even when every surviving observation is individually untruncated.
+            hasOmissions = lastEvictedID > boundary
+                || keepingIDs.contains(where: { $0 <= lastEvictedID })
+                || observations.contains(where: \.truncated)
         }
         let obsolete = Set(update.obsoleteObservationIDs).intersection(visibleIDs)
         observations.removeAll { obsolete.contains($0.id) }

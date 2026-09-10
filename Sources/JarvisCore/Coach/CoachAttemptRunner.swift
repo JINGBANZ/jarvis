@@ -227,6 +227,9 @@ final class CoachAttemptRunner: @unchecked Sendable {
             explanationsEnabled: attempt.plan.explanationsEnabled, codeEnabled: codeAllowed)
         // Freeze once: persistent CLI conversations require a byte-identical prefix on continuations.
         let screenBoundary = screenMemory.latestID
+        // A later capture (including a failed one) replaces the pending screen slot. Preserve the
+        // retry's carried evidence as well as observations captured after this attempt's boundary.
+        let carriedScreenID = work.screenMemoryID
         var visibleScreenIDs = Set(screenMemory.observations.map(\.id))
         if reason.isManual && work.preparedManualReason != reason {
             if let prompt = context.promptLine {
@@ -480,7 +483,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         text: JarvisPrompts.Coach.tipShown,
                         toolCallId: callID))
                     applyScreenMaintenance(response, callID: callID, after: screenBoundary,
-                                           visibleIDs: visibleScreenIDs, keepingID: work.screenMemoryID,
+                                           visibleIDs: visibleScreenIDs, keepingID: carriedScreenID,
                                            turnMessages: &turnMessages)
                     history.commit(CoachHistory.omittingScreenText(turnMessages))
                     ledger.commit(through: delta.upTo)
@@ -494,7 +497,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     jlog("… nothing useful to add, staying silent")
                     activity?.record(.stayedSilent)
                     applyScreenMaintenance(response, callID: callID, after: screenBoundary,
-                                           visibleIDs: visibleScreenIDs, keepingID: work.screenMemoryID,
+                                           visibleIDs: visibleScreenIDs, keepingID: carriedScreenID,
                                            turnMessages: &turnMessages)
                     commitIfWorthKeeping(turnMessages, deltaText: substantiveDeltaText)
                     ledger.commit(through: delta.upTo)

@@ -43,6 +43,23 @@ import Testing
         #expect(ScreenObservationMemory().observations.isEmpty)
     }
 
+    @Test func resetDisclosesEvictedCurrentEvidenceButClearsOldQuestionOmissions() {
+        var memory = ScreenObservationMemory(byteLimit: 10)
+        memory.record(text: "firstpart", sourceID: nil, elapsedSeconds: 1)
+        memory.record(text: "secondpart", sourceID: nil, elapsedSeconds: 2)
+        memory.apply(.init(newQuestion: true, obsoleteObservationIDs: []), after: 0, visibleIDs: [1, 2])
+        #expect(memory.observations.map(\.text) == ["secondpart"])
+        #expect(memory.hasOmissions)
+        // A carried retry observation can have been evicted after the retry starts.
+        memory.apply(.init(newQuestion: true, obsoleteObservationIDs: []), after: 2,
+                     visibleIDs: [1, 2], keepingIDs: [1, 2])
+        #expect(memory.hasOmissions)
+        memory.record(text: "third", sourceID: nil, elapsedSeconds: 3)
+        memory.apply(.init(newQuestion: true, obsoleteObservationIDs: []), after: 2, visibleIDs: [3])
+        #expect(memory.observations.map(\.text) == ["third"])
+        #expect(!memory.hasOmissions)
+    }
+
     @Test func emptyOCRDoesNotClearEvidenceAndLossSurvivesEmptyContext() {
         var memory = ScreenObservationMemory(byteLimit: 0)
         memory.record(text: "", sourceID: nil, elapsedSeconds: 1)

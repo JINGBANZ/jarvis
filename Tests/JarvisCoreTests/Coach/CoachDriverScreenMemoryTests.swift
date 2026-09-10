@@ -46,6 +46,32 @@ import Testing
         #expect(text.contains("new problem example"))
     }
 
+    @Test(arguments: [true, false])
+    func newQuestionResetPreservesCarriedCaptureAfterAnotherCapture(succeeds: Bool) async {
+        let reset = BrainResponse(toolCalls: [.speak(callId: "reset", lines: ["New problem."])],
+                                  rawToolCalls: [.init(id: "reset", name: "speak", argumentsJSON:
+                                    #"{"lines":["New problem."],"screenMemory":{"newQuestion":true,"obsoleteObservationIDs":[]}}"#)])
+        let brain = ScriptedThrowBrain(script: [
+            .init(toolCalls: [.speak(callId: "old", lines: ["Continue."])]),
+            nil,
+            .init(toolCalls: [.captureScreen(callId: "scroll")],
+                  rawToolCalls: [.init(id: "scroll", name: "capture_screen", argumentsJSON: "{}")]),
+            reset,
+            .init(toolCalls: [.speak(callId: "last", lines: ["Continue."])]),
+        ])
+        var shots: [ScreenSnapshot] = [
+            .init(imageBase64: "A", recognizedText: "old problem constraint"),
+            .init(imageBase64: "B", recognizedText: "new problem constraint"),
+        ]
+        if succeeds { shots.append(.init(imageBase64: "C", recognizedText: "new problem example")) }
+        let driver = makeDriver(brain: brain, screen: SequenceScreen(shots))
+        for _ in 0..<3 { #expect(await driver.handleTrigger(.manualHint) == .spoke) }
+        let text = brain.calls.last!.filter { $0.role != .system }.compactMap(\.text).joined(separator: "\n")
+        #expect(!text.contains("old problem constraint"))
+        #expect(text.contains("new problem constraint"))
+        if succeeds { #expect(text.contains("new problem example")) }
+    }
+
     @Test func proactiveCaptureSurvivesSilenceAndLaterCaptureFailure() async {
         let brain = ScriptedBrain(script: [
             .init(toolCalls: [.captureScreen(callId: "capture")],
