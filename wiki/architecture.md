@@ -331,6 +331,13 @@ presentation matrix is unit-tested, and `scripts/check-ghost-mode.sh` rejects un
 API calls from the normal test gate. Realtime health remains visible through the menu and current
 Activity badge; `ErrorReporter` owns failure lifecycle and permitted startup surfacing.
 
+OpenAI request diagnostics in `OpenAINetworkDiagnostics` use per-task URLSession metrics while
+preserving the shared connection pool. Correlated debug-only entries record elapsed/configured
+timeout, HTTP status or allowlisted error domains and numeric codes, transaction counts, connection
+reuse/proxy flags, and DNS/connect/TLS/upload/response timings. Missing timing endpoints are
+unavailable rather than zero. These entries exclude URLs, headers, payloads, and arbitrary error text;
+transport failure alone does not establish a provider outage.
+
 ### Ordered provider route
 
 Settings persists one primary target followed by an ordered list of explicitly authorized fallback

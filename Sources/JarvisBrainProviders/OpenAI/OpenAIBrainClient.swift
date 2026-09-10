@@ -22,7 +22,7 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
     private let timeout: TimeInterval
     private let maxOutputTokens: Int
     private let promptCacheKey: String
-    private let send: Sender
+    private let send: Sender?
     /// When set, every round trip (request body, response body, status, latency — or the transport
     /// error) is recorded to the session's `brain-traffic.jsonl`, tagged with `trafficTag` so the
     /// coach and the summarizer are distinguishable. Nil (tests, the evaluator itself) records nothing.
@@ -52,10 +52,7 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
         self.promptCacheKey = promptCacheKey
         self.traffic = traffic
         self.trafficTag = trafficTag
-        self.send = send ?? { request in
-            let (data, response) = try await URLSession.shared.data(for: request)
-            return (data, response as? HTTPURLResponse)
-        }
+        self.send = send
     }
 
     public func respond(messages: [ChatMessage], tools: [ToolDef],
@@ -83,11 +80,19 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
         // This transport makes exactly one request. `CoachDriver` never replays it; a failure leaves
         // the conversation pending so a fresh attempt can include newer finalized transcript.
         let started = Date()
+        let diagnostics = OpenAINetworkDiagnostics(timeout: timeout)
         let data: Data
         let http: HTTPURLResponse?
         do {
-            (data, http) = try await send(request)
+            if let send {
+                (data, http) = try await send(request)
+            } else {
+                let result = try await URLSession.shared.data(for: request, delegate: diagnostics)
+                (data, http) = (result.0, result.1 as? HTTPURLResponse)
+            }
+            diagnostics.completed(status: http?.statusCode)
         } catch {
+            diagnostics.completed(error: error)
             // Record the failed round trip too — a transport error (timeout, dropped connection) is
             // exactly the kind of issue the session evaluation should see.
             traffic?.record(tag: trafficTag, request: body, response: nil, status: nil,
