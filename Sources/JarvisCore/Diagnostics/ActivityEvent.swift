@@ -2,10 +2,12 @@ import Foundation
 
 /// The closed set of human-visible occurrences in the coaching exchange.
 ///
-/// Keeping this set typed and closed is what stops transport, retry, timing, lifecycle, and raw
-/// error detail from reaching the Activity window through a generic logging call. Sharing one
-/// evidence stack (wiki/lean-coaching-core.md, "One Event, Two Projections") does not relax that:
-/// a producer chooses from these cases or it has no human-facing copy at all.
+/// Keeping this set typed and closed is what stops transport, retry, timing, and lifecycle detail
+/// from reaching the Activity window through a generic logging call. Sharing one evidence stack
+/// (wiki/lean-coaching-core.md, "One Event, Two Projections") does not relax that: a producer
+/// chooses from these cases or it has no human-facing copy at all. A failure case carries a
+/// `ProviderFailure`, whose message is redacted provider text, so what the provider said is quoted
+/// inside copy this file owns rather than authored by the producer.
 ///
 /// It lives apart from `ActivityLog` so the coaching kernel can name the human-safe vocabulary
 /// without holding the concrete persistence type behind it.
@@ -42,8 +44,9 @@ public enum ActivityEvent: Sendable {
     case tip(lines: [String])
     /// The brain explicitly chose `stay_silent` for this turn.
     case stayedSilent
-    /// The single terminal lifecycle event for a live coaching session. The reason is a closed,
-    /// sanitized set so raw errors cannot leak into Activity.
+    /// The single terminal lifecycle event for a live coaching session. The reason is a closed set,
+    /// so a producer cannot author copy; a provider-caused end carries the classified failure and
+    /// Activity renders its sentence.
     case sessionEnded(reason: SessionEndReason)
     /// One coaching response failed temporarily and a fresh attempt will retry while capture and
     /// transcription remain live. The failure carries its own sentence: the frame is fixed, and

@@ -191,11 +191,14 @@ omits the item rather than offering an action that a self-signed build could nev
 Settings → **Activity** opens an **in-app `WKWebView`** into which `ActivityLog` pushes the typed,
 human-facing coaching exchange: finalized interviewer/user speech, manual hint requests, and every
 brain action — a successful or failed `capture_screen`, a displayed `speak` tip, or a deliberate
-`stay_silent`. It also shows one fixed, non-sensitive reason whenever a live session ends — including
-user Stop, app quit, replacement by a new Start, and terminal runtime failures — plus fixed notices
-for failures that degrade coaching, a settings preflight that was not applied, and a failed live brain
-switch falling back to the previous provider. Provider names are allowed, while lifecycle sequencing,
-raw errors, authentication details, retries, and timing remain in `jarvis-debug.log`. Successful
+`stay_silent`. It also shows one reason whenever a live session ends — including user Stop, app quit,
+replacement by a new Start, and terminal runtime failures — plus notices for failures that degrade
+coaching, a settings preflight that was not applied, and a failed live brain switch falling back to
+the previous provider. A failure notice keeps a fixed frame and quotes what the provider actually
+said inside it: its status or close code, its error code, and its message after redaction, so a
+screenshot of Activity is enough to diagnose a cause nobody has classified yet (see
+[architecture.md → One failure record](./architecture.md#one-failure-record-one-table-per-vendor)).
+Lifecycle sequencing, retries, and timing remain in `jarvis-debug.log`. Successful
 screen-view events carry their thumbnails as in-memory `data:` URIs. Chosen over a local HTTP server +
 SSE: for an app that already holds the entries in memory, pushing into an embedded WebView is less
 code, has zero network surface, and is the most testable (the production runtime *is* the test
