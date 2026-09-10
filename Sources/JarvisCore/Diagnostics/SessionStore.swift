@@ -43,6 +43,7 @@ public struct SessionStore: Sendable {
     private struct Line: Decodable {
         let t: String
         let m: String
+        let response: ActivityResponse?
         let s: String?
         /// A raw value lets this build distinguish current typed events from unknown kinds; only
         /// current kinds bypass the human-copy classifier.
@@ -177,7 +178,7 @@ public struct SessionStore: Sendable {
                 message: line.m,
                 imageFile: shotName,
                 occurredAt: line.o,
-                insertionOrder: insertionOrder)
+                insertionOrder: insertionOrder, response: line.response)
             out.append(LoadedEntry(entry: entry, imageData: bytes, occurredAt: line.o))
         }
         let total = out.count
@@ -196,7 +197,7 @@ public struct SessionStore: Sendable {
                     ActivityLog.Entry(
                         time: entry.time,
                         message: entry.message,
-                        imageFile: entry.imageFile),
+                        imageFile: entry.imageFile, response: entry.response),
                     loaded.imageData)
             }
             return EntrySnapshot(entries: entries, total: total)
