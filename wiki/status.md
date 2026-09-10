@@ -297,7 +297,11 @@ capture, cross-app shortcuts, and screen-sharing exclusion still need live verif
 Proactive clarification and a separate **Explain more** shortcut share the existing coach loop.
 [`JarvisPrompts.Coach`](../Sources/JarvisCore/Prompts/JarvisPrompts+Coach.swift) supplies the policy across
 formats; `speak.explanation` carries fuller plain-text detail into the persistent overlay box and
-Activity while captions stay short. Semibold hints and labeled, regular-weight explanation paragraphs
+Activity while captions stay short. Ordinary next steps and local corrections default to no
+explanation; explicit requests and clear confusion can warrant one. Activity preserves labeled
+Hint, Explanation, and Code sections through live replay, saved sessions, and exports via
+[`ActivityResponse`](../Sources/JarvisCore/Diagnostics/ActivityResponse.swift); older flattened rows
+remain readable. Semibold hints and labeled, regular-weight explanation paragraphs
 remain visually distinct at the configured text size. Hint and explanation shortcuts are independently configurable in Settings; **Enable explanations** controls
 automatic detail and its shortcut for the next Start while retaining the saved binding.
 Disabling Overlay Box turns off the saved explanation setting and releases its shortcut.
