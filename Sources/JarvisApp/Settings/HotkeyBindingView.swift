@@ -13,6 +13,8 @@ import JarvisCore
 final class HotkeyBindingView: NSObject {
 
     private let preferences: HotkeyPreferences
+    private let codePreferences: CodePreferences?
+    private let onCodeChanged: () -> Void
     private let boxEnabled: () -> Bool
     private var explanationRow: SettingsRowView?
     private let explanationPreferences: ExplanationPreferences?
@@ -21,10 +23,10 @@ final class HotkeyBindingView: NSObject {
     private var shortcutRow: SettingsRowView?
     private var cardHeightConstraint: NSLayoutConstraint?
 
-    private var isEnabled: Bool { explanationPreferences?.isEnabled ?? true }
+    private var isEnabled: Bool { explanationPreferences?.isEnabled ?? codePreferences?.isEnabled ?? true }
     private var cardHeight: CGFloat {
         SettingsStyle.cardHeaderHeight
-            + (explanationPreferences == nil ? 0 : SettingsStyle.rowHeight)
+            + (explanationPreferences == nil && codePreferences == nil ? 0 : SettingsStyle.rowHeight)
             + (isEnabled ? SettingsStyle.rowHeight : 0)
     }
     /// Whether the controller currently has *any* combination registered. This is the only thing
@@ -53,11 +55,15 @@ final class HotkeyBindingView: NSObject {
     init(
         preferences: HotkeyPreferences,
         explanationPreferences: ExplanationPreferences? = nil,
+        codePreferences: CodePreferences? = nil,
+        onCodeChanged: @escaping () -> Void = {},
         boxEnabled: @escaping () -> Bool = { true },
         onExplanationsChanged: @escaping () -> Void = {},
         hasActiveHotkey: @escaping () -> Bool,
         applyCombination: @escaping (HotkeyCombination) -> HotkeyRegistrationOutcome
     ) {
+        self.codePreferences = codePreferences
+        self.onCodeChanged = onCodeChanged
         self.boxEnabled = boxEnabled
         self.preferences = preferences
         self.explanationPreferences = explanationPreferences
@@ -78,7 +84,8 @@ final class HotkeyBindingView: NSObject {
 
         let card = SettingsCardView(frame: NSRect(x: 0, y: 0, width: 712, height: cardHeight))
         card.translatesAutoresizingMaskIntoConstraints = false
-        card.setHeader(title: preferences.shortcut.title, detail: "Works only while a session is running")
+        card.setHeader(title: preferences.shortcut.title, detail: preferences.shortcut == .showCode
+            ? "Coding · snippets follow your hints" : "Works only while a session is running")
         let row = SettingsRowView(
             title: "Shortcut",
             detail: "Requires ⌘ or ⌥",
@@ -89,14 +96,14 @@ final class HotkeyBindingView: NSObject {
         shortcutRow = row
         card.contentView?.addSubview(row)
         var toggleRow: SettingsRowView?
-        if explanationPreferences != nil {
+        if explanationPreferences != nil || codePreferences != nil {
             let toggle = NSSwitch()
             toggle.target = self
             toggle.action = #selector(explanationsChanged)
-            toggle.setAccessibilityLabel("Enable explanations")
+            toggle.setAccessibilityLabel(codePreferences == nil ? "Enable explanations" : "Show code with hints")
             explanationSwitch = toggle
             let settingsRow = SettingsRowView(
-                title: "Enable explanations",
+                title: codePreferences == nil ? "Enable explanations" : "Show code with hints",
                 detail: "Takes effect the next time you start",
                 controlView: toggle,
                 controlSize: NSSize(width: 44, height: 26))
@@ -150,9 +157,14 @@ final class HotkeyBindingView: NSObject {
     }
 
     @objc private func explanationsChanged() {
-        guard let explanationPreferences, let explanationSwitch else { return }
-        explanationPreferences.isEnabled = explanationSwitch.state == .on
-        onExplanationsChanged()
+        guard let explanationSwitch else { return }
+        if let codePreferences {
+            codePreferences.isEnabled = explanationSwitch.state == .on
+            onCodeChanged()
+        } else if let explanationPreferences {
+            explanationPreferences.isEnabled = explanationSwitch.state == .on
+            onExplanationsChanged()
+        }
         recorder?.setCombination(preferences.combination)
         renderOutcome()
     }

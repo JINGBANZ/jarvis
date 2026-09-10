@@ -215,16 +215,20 @@ final class CoachAttemptRunner: @unchecked Sendable {
         // Describing search_prep_notes when it isn't actually offered invites the model to call a
         // tool it doesn't have — and that call is a hard attempt failure (below), so `prepMaterial`
         // must track the real tool set (`tools`, below) exactly, not just hint at it.
+        let codeAllowed = attempt.plan.codeEnabled && (interviewFormat == nil || interviewFormat == .coding || interviewFormat == .generalTechnical)
         let systemPrompt = JarvisPrompts.Coach.system(
             prepMaterial: attempt.prepMaterial != nil,
             formatAddendum: interviewFormatAddendum,
-            explanationsEnabled: attempt.plan.explanationsEnabled)
+            explanationsEnabled: attempt.plan.explanationsEnabled, codeEnabled: codeAllowed)
         let historyBase: [ChatMessage] = [.system(systemPrompt)] + history.snapshot()
         if reason.isManual && work.preparedManualReason != reason {
             if let prompt = context.promptLine {
                 jlog("⌨️ coaching shortcut — \(prompt)")
-                activity?.record(reason == .manualExplanation
-                    ? .manualExplanation(prompt: prompt) : .manualHint(prompt: prompt))
+                switch reason {
+                case .manualCode: activity?.record(.manualCode(prompt: prompt))
+                case .manualExplanation: activity?.record(.manualExplanation(prompt: prompt))
+                default: activity?.record(.manualHint(prompt: prompt))
+                }
             }
             let screen = self.screen
             let shot = await Self.captureScreen(using: screen, selecting: attempt.plan.screen)
@@ -406,7 +410,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
                             newPhase: .captureScreenContinuation)
                     }
 
-                case .speak(let callID, let lines, let mermaid, let requestedExplanation):
+                case .speak(let callID, let lines, let mermaid, let requestedExplanation, let requestedCode):
                     if Task.isCancelled {
                         jlog("… attempt cancelled (stopped) before speaking")
                         return .cancelled
@@ -416,31 +420,35 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     if mermaid != nil && diagram == nil {
                         jlog("Diagram hint omitted: unsupported graph or interview format")
                     }
-                    let delivery = await MainActor.run { () -> (accepted: Bool, explanation: String?) in
-                        guard !Task.isCancelled else { return (false, nil) }
+                    let delivery = await MainActor.run { () -> (accepted: Bool, explanation: String?, code: CodeSnippet?) in
+                        guard !Task.isCancelled else { return (false, nil, nil) }
+                        let code = self.overlay.deliverCodeSnippet(codeAllowed ? requestedCode : nil)
                         let detail = self.overlay.deliver(lines, perLineSeconds: lines.map {
                             OverlayTiming.displaySeconds(for: $0, config: self.config)
                         }, diagram: diagram, explanation: attempt.plan.explanationsEnabled ? requestedExplanation : nil)
-                        return (true, detail)
+                        return (true, detail, code)
                     }
                     guard delivery.accepted else { return .cancelled }
                     let explanation = delivery.explanation
-                    activity?.record(.tip(lines: lines + (explanation.map { [$0] } ?? [])))
+                    let code = delivery.code
+                    let codeText = code.map { "\($0.placement)\n\($0.code)" }
+                    activity?.record(.tip(lines: lines + (explanation.map { [$0] } ?? []) + (codeText.map { [$0] } ?? [])))
                     // Only the selected call executes; extra provider calls were never delivered.
-                    var deliveredCalls = response.rawToolCalls.filter { $0.id == callID }
-                    if explanation == nil {
-                        // History describes what was delivered, not optional text suppressed by Settings.
-                        // These parsed values contain only JSON strings, arrays, and null, so encoding cannot fail.
-                        let arguments: [String: Any] = [
-                            "lines": lines, "mermaid": mermaid as Any? ?? NSNull(), "explanation": NSNull(),
-                        ]
-                        let data = try! JSONSerialization.data(withJSONObject: arguments, options: [.sortedKeys])
-                        deliveredCalls = deliveredCalls.map { call in
-                            call.id == callID
-                                ? RawToolCall(id: call.id, name: call.name,
-                                              argumentsJSON: String(decoding: data, as: UTF8.self))
-                                : call
-                        }
+                    // History describes delivered optional content, including independently enabled code.
+                    // Parsed values contain only JSON primitives, so encoding cannot fail.
+                    let codeArguments: [String: Any]? = code.map {
+                        ["language": $0.language, "placement": $0.placement, "code": $0.code,
+                         "highlightedLines": $0.highlightedLines]
+                    }
+                    let arguments: [String: Any] = [
+                        "lines": lines, "mermaid": diagram == nil ? NSNull() : mermaid as Any,
+                        "explanation": explanation as Any? ?? NSNull(),
+                        "codeSnippet": codeArguments as Any? ?? NSNull(),
+                    ]
+                    let data = try! JSONSerialization.data(withJSONObject: arguments, options: [.sortedKeys])
+                    let deliveredCalls = response.rawToolCalls.filter { $0.id == callID }.map { call in
+                        RawToolCall(id: call.id, name: call.name,
+                                    argumentsJSON: String(decoding: data, as: UTF8.self))
                     }
                     turnMessages.append(.assistantToolCalls(deliveredCalls))
                     turnMessages.append(.init(

@@ -10,6 +10,8 @@ final class HotkeySection: NSObject, SettingsSection {
 
     init(preferences: [HotkeyPreferences],
          explanationPreferences: ExplanationPreferences,
+         codePreferences: CodePreferences,
+         onCodeChanged: @escaping () -> Void,
          boxEnabled: @escaping () -> Bool = { true },
          onExplanationsChanged: @escaping () -> Void,
          hasActiveHotkey: @escaping (CoachingShortcut) -> Bool,
@@ -17,6 +19,8 @@ final class HotkeySection: NSObject, SettingsSection {
         bindings = preferences.map { preference in
             HotkeyBindingView(preferences: preference,
                 explanationPreferences: preference.shortcut == .explainMore ? explanationPreferences : nil,
+                codePreferences: preference.shortcut == .showCode ? codePreferences : nil,
+                onCodeChanged: onCodeChanged,
                 boxEnabled: boxEnabled,
                 onExplanationsChanged: onExplanationsChanged,
                 hasActiveHotkey: { hasActiveHotkey(preference.shortcut) },
@@ -62,7 +66,7 @@ final class HotkeySection: NSObject, SettingsSection {
         scroll.onViewportChanged = relayout
         relayout()
         return SettingsPageView(title: title,
-            summary: "Request a next step or an explanation when you need more help.", bodyView: scroll)
+            summary: "Request a hint, an explanation, or the next code snippet.", bodyView: scroll)
     }
 
     func didBecomeActive() {

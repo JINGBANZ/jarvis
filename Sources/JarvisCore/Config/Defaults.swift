@@ -102,6 +102,11 @@ public enum Defaults {
     // MARK: - Hotkey
 
     /// Availability of fuller explanations and their manual fallback.
+    public enum Code {
+        public static let enabledKey = "coaching.codeEnabled"
+        public static let enabled = false
+    }
+
     public enum Explanations {
         public static let enabledKey = "coaching.explanationsEnabled"
         public static let enabled = true
@@ -109,6 +114,10 @@ public enum Defaults {
 
     /// Independent shortcuts for an immediate hint or explanation mid-session.
     public enum Hotkey {
+        public static let codeKeyCodeKey = "hotkey.code.keyCode"
+        public static let codeModifiersKey = "hotkey.code.modifiers"
+        /// kVK_ANSI_K. Code is requested only by this explicit shortcut.
+        public static let codeCombination = HotkeyCombination(keyCode: 40, modifiers: [.command, .option])
         public static let explanationKeyCodeKey = "hotkey.explanation.keyCode"
         public static let explanationModifiersKey = "hotkey.explanation.modifiers"
         /// kVK_ANSI_E, with the same modifiers as the hint shortcut.

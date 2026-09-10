@@ -6,7 +6,7 @@ import Testing
     @Test func parserKeepsExplanationAndIgnoresMalformedOptionalDetail() throws {
         let call = ToolInvocation.parse(callId: "s", name: "speak", argumentsJSON:
             #"{"lines":["Keep a moving range."],"explanation":"  Grow the right edge.\n\nMove the left edge past a repeat.  "}"#)
-        guard case .speak(_, let lines, _, let explanation) = call else {
+        guard case .speak(_, let lines, _, let explanation, _) = call else {
             Issue.record("Expected a speak call"); return
         }
         #expect(lines == ["Keep a moving range."])
@@ -14,7 +14,7 @@ import Testing
         for detail in ["null", "42", "\"   \""] {
             let call = ToolInvocation.parse(callId: "s", name: "speak", argumentsJSON:
                 "{\"lines\":[\"Still useful\"],\"explanation\":\(detail)}")
-            guard case .speak(_, let lines, _, let explanation) = call else {
+            guard case .speak(_, let lines, _, let explanation, _) = call else {
                 Issue.record("Optional detail must not discard a valid hint"); continue
             }
             #expect(lines == ["Still useful"])
@@ -78,14 +78,14 @@ import Testing
         #expect(brain.calls[0].contains { $0.text?.contains("capture") == true && $0.text?.contains("failed") == true })
     }
 
-    @Test(arguments: [TriggerReason.manualHint, .manualExplanation])
+    @Test(arguments: [TriggerReason.manualHint, .manualExplanation, .manualCode])
     func latestManualIntentSurvivesNaturalWakeWhileBusy(_ latest: TriggerReason) async throws {
         let gate = AsyncGate()
         let brain = GatedBrain(gate: gate, response: .init(toolCalls: [.speak(callId: "s", lines: ["Continue."])]))
         let transcript = RollingTranscript()
         transcript.append(.init(speaker: .me, text: "Let's work through this problem", at: 0))
         let screen = FakeScreen()
-        let driver = makeDriver(brain: brain, transcript: transcript, screen: screen, overlay: FakeOverlay())
+        let driver = makeDriver(brain: brain, transcript: transcript, screen: screen, overlay: FakeOverlay(), codeEnabled: true)
         let task = Task { await driver.handleTrigger(.turnEnd) }
         await gate.waitUntilEntered()
         let first: TriggerReason = latest == .manualHint ? .manualExplanation : .manualHint
@@ -95,8 +95,10 @@ import Testing
         await gate.release()
         #expect(await task.value == .spoke)
         try #require(brain.calls.count == 2)
+        #expect(brain.calls.last?.first?.text?.contains("# Code accompanies") == true)
         let userText = brain.calls[1].filter { $0.role == .user }.compactMap(\.text).joined(separator: " ")
-        #expect(userText.contains(latest == .manualHint ? "hint shortcut" : "Explain more"))
+        let expected = latest == .manualCode ? "Show code" : (latest == .manualHint ? "hint shortcut" : "Explain more")
+        #expect(userText.contains(expected))
         #expect(!userText.contains(latest == .manualHint ? "Explain more" : "hint shortcut"))
         #expect(screen.captureCount == 1)
     }
@@ -198,12 +200,12 @@ import Testing
     }
 
     private func makeDriver(brain: BrainClient, transcript: RollingTranscript,
-                            screen: ScreenCapturing, overlay: OverlayRendering, explanationsEnabled: Bool = true) -> CoachDriver {
+                            screen: ScreenCapturing, overlay: OverlayRendering, explanationsEnabled: Bool = true, codeEnabled: Bool = false) -> CoachDriver {
         let target = BrainTarget(provider: .openAI, modelID: BrainModelCatalog.defaultModel(for: .openAI).id)
         return CoachDriver(config: .default, transcript: transcript,
             route: ConfiguredBrainRoute(targets: [.init(target: target, brain: brain)]),
             screen: screen, overlay: overlay, clock: ManualClock(now: 100),
-            plan: SessionPlan(revision: 0, screen: SessionPlan.default.screen, explanationsEnabled: explanationsEnabled))
+            plan: SessionPlan(revision: 0, screen: SessionPlan.default.screen, explanationsEnabled: explanationsEnabled, codeEnabled: codeEnabled))
     }
 }
 
